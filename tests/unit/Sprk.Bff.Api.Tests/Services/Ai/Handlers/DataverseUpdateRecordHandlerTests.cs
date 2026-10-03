@@ -200,6 +200,75 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
             failMessage: "the user's client carries exactly the caller's own update — the re-stamp never runs through it");
     }
 
+    private static readonly Guid TodoUnderCommunication = Guid.Parse("15600000-0000-0000-0000-000000000142");
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 1): the AI update tool re-filing a communication filed under nothing (its own sprk_regardingmatter, A to B) carries B to the to-do under it IN THE SAME CALL, and leaves the communication's own root as the caller wrote it")]
+    public async Task ExecuteChatAsync_UpdateOfACommunicationsOwnRoot_CascadesTheNewRootToItsChildren_InTheSameCall()
+    {
+        // The AI tool's most common re-file: a communication filed under NOTHING (no pair, no source lookup), so its
+        // sprk_regardingmatter is its own direct root. Writing it moves no copy ON the communication; it moves the copies
+        // of everything filed under it. Only the after-write cascade (AfterWriteAsync) reaches those children — re-stamping
+        // the communication itself as a child would find nothing to change and stop there.
+        _world
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_todo", TodoUnderCommunication,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_communication')?$select=EntitySetName")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                """{ "EntitySetName": "sprk_communications", "PrimaryIdAttribute": "sprk_communicationid" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.Contains("ManyToOneRelationships")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "LogicalName": "sprk_communication",
+                  "ManyToOneRelationships": [
+                    { "ReferencingAttribute": "sprk_regardingmatter", "ReferencingEntityNavigationPropertyName": "sprk_RegardingMatter", "ReferencedEntity": "sprk_matter" }
+                  ]
+                }
+                """)));
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_matters" }""")));
+        int? restampPatchesWhenTheUserWrote = null;
+        _dataverse
+            .Setup(d => d.PatchAsync($"sprk_communications({Communication:D})", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((_, _, _) =>
+            {
+                // The caller's own PATCH (user-OBO), applied to the rows as Dataverse would apply it.
+                restampPatchesWhenTheUserWrote = _world.Patches.Count;
+                _world.OutOfBand("sprk_communication", Communication, "sprk_regardingmatter", "sprk_matter", MatterB);
+            })
+            .ReturnsAsync(DataverseUserResponse.Ok(204, body: null));
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: $$$$"""
+                {"tablename":"sprk_communication","recordId":"{{{{Communication:D}}}}","item":{"sprk_regardingmatter":{"relatedTable":"sprk_matter","recordId":"{{{{MatterB:D}}}}"}}}
+                """),
+            BuildUpdateTool(),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        restampPatchesWhenTheUserWrote.Should().Be(0, "the caller's own update runs first, and through the user's client");
+        _world.Lookup("sprk_todo", TodoUnderCommunication, "sprk_regardingmatter").Should().Be(MatterB,
+            "the to-do filed under the communication copies its root, and the re-file carries the new root to it in the same "
+            + "call (AC1) — not queued, not left for the reconciliation job");
+        _world.PatchesTo("sprk_todo", TodoUnderCommunication).Should().ContainSingle()
+            .Which.Fields.Keys.Should().BeEquivalentTo(["sprk_regardingmatter"], "the re-stamp writes ONLY stamp columns");
+        _world.Lookup("sprk_communication", Communication, "sprk_regardingmatter").Should().Be(MatterB,
+            "a communication filed under nothing owns its root: the caller's value stands");
+        _world.PatchesTo("sprk_communication", Communication).Should().BeEmpty(
+            "the app-only helper never rewrites the caller's own direct choice");
+        _dataverse.Verify(
+            d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            failMessage: "the user's client carries exactly the caller's own update — the re-stamp never runs through it");
+    }
+
     [Fact(DisplayName = "Task 156 (owner round 8 item 1): a child the inline re-stamp cannot write leaves the caller's update standing and the tool result a success; the reconciliation job repairs the child")]
     public async Task ExecuteChatAsync_RestampOfAChildFails_TheUsersUpdateStands()
     {

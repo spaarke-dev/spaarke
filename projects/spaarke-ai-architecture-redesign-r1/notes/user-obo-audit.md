@@ -36,10 +36,17 @@ All six inject **only** `IDataverseUserClient` + `ILogger` (no second Dataverse 
 | `dataverse.read_query` | `Handlers/DataverseReadQueryHandler.cs` | user-OBO | ctor `:44-46` → same | **PASS** |
 | `dataverse.search_data` | `Handlers/DataverseSearchDataHandler.cs` | user-OBO | ctor `:51-53` → same | **PASS** |
 | `dataverse.create_record` | `Handlers/DataverseCreateRecordHandler.cs` | user-OBO | ctor `:51-53` → same | **PASS** |
-| `dataverse.update_record` | `Handlers/DataverseUpdateRecordHandler.cs` | user-OBO | ctor `:51-53` → same (`If-Match: *` update-only, `DataverseUserClient.cs:207-211`) | **PASS** |
+| `dataverse.update_record` | `Handlers/DataverseUpdateRecordHandler.cs` | user-OBO (the caller's PATCH); one app-only step since 2026-10-03, see the amendment below | ctor `:51-53` → same (`If-Match: *` update-only, `DataverseUserClient.cs:207-211`) | **PASS** (amended 2026-10-03) |
 | `dataverse.delete_record` | `Handlers/DataverseDeleteRecordHandler.cs` | user-OBO | ctor `:49-51` → same | **PASS** |
 
 Helpers in `Handlers/Dataverse/` (`DataverseSqlQueryTranslator`, `DataverseWriteItemMapper`, `DataverseRecordCitations`, `DataverseToolNames`) hold no Dataverse client — pure translation/mapping. **No fallback path exists**: `DataverseUserClient` contains no `TokenCredential`, `DefaultAzureCredential`, or client-credentials flow (verified by read of the full file), and missing config/user context fails closed (`:100-106`, `:142-172`).
+
+> **Amended 2026-10-03 (spec "Amendment A-UAC156", CLAUDE.md §6.5 path B, unified-access-control-r2 owner decisions
+> round 8 item 1).** `dataverse.update_record` is no longer user-OBO end to end. Its PATCH still runs as the caller.
+> After that PATCH succeeds, `Services/Dataverse/CoreAncestorAfterWriteRestamp.cs` re-stamps APP-ONLY the core-ancestor
+> copies the write moved, in the same operation. It writes stamp columns only, with values derived from the data. So this
+> section's "inject only `IDataverseUserClient` + `ILogger`" no longer holds for this handler, by design. Record:
+> `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`, "Owner round 8".
 
 ### 3B. All other tool handlers in `Services/Ai/Handlers/**` (audit item 2)
 

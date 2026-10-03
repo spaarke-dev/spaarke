@@ -165,6 +165,93 @@ public class ServerWriterAncestorStampingTests
         recordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // The regarding NAME is for display only, so reading it must never cost the task (TaskActionCore.ReadRegardingNameAsync,
+    // owner round 8 item 2). Each of its three non-happy branches is pinned below.
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a regarding name longer than sprk_event.sprk_regardingrecordname (NVARCHAR 1000) is cut to 1000, so Dataverse does not refuse the whole task create")]
+    public async Task CreateTask_WhenTheRegardingNameIsLongerThanTheColumn_CapsItAndTheTaskIsStillCreated()
+    {
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        var longName = "Email: " + new string('x', 1200);
+        entityService
+            .Setup(s => s.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", CommunicationId) { ["sprk_name"] = longName });
+        // Dataverse's own answer to an over-long string: the WHOLE create is refused (verified live column length, read-only
+        // describe of sprk_event 2026-10-03: sprk_regardingrecordname NVARCHAR(1000)).
+        entityService
+            .Setup(s => s.CreateAsync(
+                It.Is<Entity>(e => (e.GetAttributeValue<string>("sprk_regardingrecordname") ?? string.Empty).Length > 1000),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "The length of the 'sprk_regardingrecordname' attribute of the 'sprk_event' entity exceeded the maximum allowed length of '1000'."));
+
+        var id = await TaskCore(entityService).CreateAsync(
+            new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
+            CancellationToken.None);
+
+        id.Should().NotBe(Guid.Empty, "a name the column cannot hold must not sink the task");
+        var task = created.Should().ContainSingle().Subject;
+        task.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be(longName[..1000],
+            "the name is cut to the column's length, keeping its start");
+        task["sprk_regardingrecordid"].Should().Be(CommunicationId.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a regarding name that cannot be read leaves the pair's name empty and the task is still created with the pair's id and url")]
+    public async Task CreateTask_WhenTheRegardingNameReadFails_WritesThePairWithAnEmptyNameAndStillCreatesTheTask()
+    {
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        entityService
+            .Setup(s => s.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("sprk_communication read timed out"));
+
+        var id = await TaskCore(entityService).CreateAsync(
+            new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
+            CancellationToken.None);
+
+        id.Should().NotBe(Guid.Empty, "the name is for display only; a failed read of it must not cost the task");
+        var task = created.Should().ContainSingle().Subject;
+        var cleanId = CommunicationId.ToString("D").ToLowerInvariant();
+        task["sprk_regardingrecordname"].Should().Be(string.Empty, "the builders' 'empty when unknown' convention");
+        task["sprk_regardingrecordid"].Should().Be(cleanId, "the pair's id, which F-051-6 detection uses, never depends on the name");
+        task["sprk_regardingrecordurl"].Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_communication&id={cleanId}");
+        task.GetAttributeValue<EntityReference>("sprk_regardingcommunication")!.Id.Should().Be(CommunicationId);
+        task.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId, "the stamp is unaffected");
+    }
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a regarding type with no known name column (a report card) gets the pair with an empty name; no column is guessed and the record is not read for it")]
+    public async Task CreateTask_WhenTheRegardingTypeHasNoNameColumn_WritesThePairWithAnEmptyNameAndReadsNothingForIt()
+    {
+        var reportCardId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+
+        var id = await TaskCore(entityService).CreateAsync(
+            new TaskActionInput("Review", null, null, reportCardId, "sprk_reportcard", null),
+            CancellationToken.None);
+
+        id.Should().NotBe(Guid.Empty);
+        var task = created.Should().ContainSingle().Subject;
+        var cleanId = reportCardId.ToString("D").ToLowerInvariant();
+        task["sprk_regardingrecordname"].Should().Be(string.Empty, "RegardingNameFields has no name column for a report card");
+        task["sprk_regardingrecordid"].Should().Be(cleanId);
+        task["sprk_regardingrecordurl"].Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_reportcard&id={cleanId}");
+        task.GetAttributeValue<EntityReference>("sprk_regardingreportcard")!.Id.Should().Be(reportCardId);
+        entityService.Verify(
+            s => s.RetrieveAsync("sprk_reportcard", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "with no known name column there is nothing to read — a guessed column would only fail at Dataverse");
+    }
+
+    /// <summary>The task create core over <paramref name="entityService"/>, a communication under <see cref="MatterId"/>, and no record-type rows.</summary>
+    private static TaskActionCore TaskCore(Mock<IGenericEntityService> entityService) => new(
+        entityService.Object,
+        CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+        Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+        Mock.Of<ICommunicationDataverseService>(),
+        NullLogger.Instance);
+
     [Fact]
     public async Task CreateTask_WhenAncestorDerivationFails_ReturnsEmptyAndNeverCreatesTheEvent()
     {

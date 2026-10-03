@@ -638,9 +638,12 @@ merged with no conflict. `baseSha` = `02b145cc4`.
   `IRecordOwnershipResolver.ReparentAsync` (146's §6.5 path A, task 146 note §12c). The two edits touch the same
   constructor, remarks and PATCH block, so they must be merged by hand. Keep 146's `RefileIfFiledAsync`, and call this
   helper after whichever path wrote the caller's update (`refile.Written` or the plain PATCH).
-- The rule's own text (`projects/spaarke-ai-architecture-redesign-r1/spec.md`, "MUST run user-OBO for all Dataverse tool
-  access", and `notes/user-obo-audit.md`) is **not** edited on this branch. 146 rewrites that same bullet and adds
-  "Amendment A-UAC146", so an edit here is a guaranteed conflict. At 146's merge, add to A-UAC146's "Not user-OBO" list:
+- *(Superseded by verifier round c1, below: the spec and the audit now carry "Amendment A-UAC156" on this branch, at
+  places 146 does not touch, and both files merge with 146's branch without a conflict.)* The rule's own text
+  (`projects/spaarke-ai-architecture-redesign-r1/spec.md`, "MUST run user-OBO for all Dataverse tool access", and
+  `notes/user-obo-audit.md`) was not edited in this round. 146 rewrites that same bullet and adds "Amendment A-UAC146",
+  so an edit of that bullet here would conflict. At 146's merge, the reviewer MAY fold A-UAC156 into A-UAC146's
+  "Not user-OBO" list (optional; both records are correct side by side):
   > **Not user-OBO, owner-approved (round 8 item 1, CLAUDE.md §6.5 path B) — the update tool's core-ancestor re-stamp**
   > (`dataverse.update_record`, `DataverseUpdateRecordHandler`; unified-access-control-r2 task 156). After the caller's
   > own PATCH succeeds, `CoreAncestorAfterWriteRestamp.AfterWriteAsync` re-stamps APP-ONLY the `sprk_regarding{core}`
@@ -743,6 +746,73 @@ Results:
   items, so it is not done here.
 - **#1098**, the events API. Not task 156's.
 
+## Verifier round c1 (2026-10-03, branch `task/uac-r2-156-c1-r1`)
+
+Branch created from `task/uac-r2-156-c1` at `65b702473` (baseSha). No merge was needed. No production code changed: two
+test files and three documents changed.
+
+**Items 1-6, 9-11, 13: verified by the verifier; nothing to change.** The observation in item 10 (a new
+`TaskActionCore` task now classifies like a to-do, so a form edit of its typed lookup that leaves the pair alone reads as
+`InconsistentPair`) matches owner round 8 item 2, "exactly as the other regarding builders do". Round 8 item 3 makes the
+RegardingResolver picker the only way to set a root (task 168). No change was requested.
+
+**Items 7 and 14 (AC7, seed N1 survived; two other `ReadRegardingNameAsync` branches untested): closed.** Three tests in
+`ServerWriterAncestorStampingTests`, next to the pair test. The name is display-only, so reading it must never cost the
+task:
+- **Over-long name.** The communication's name is 1207 characters, and the entity-service double refuses any create whose
+  `sprk_regardingrecordname` is longer than 1000, as Dataverse does. The column's length was confirmed live with a
+  read-only `describe` of `sprk_event` on 2026-10-03: NVARCHAR(1000). The test asserts the task is created and that the
+  name is the first 1000 characters.
+- **A failed name read.** The read of the communication throws. The test asserts the task is still created with the
+  pair's id and url, an empty name, its typed lookup and its stamp.
+- **A type with no name column** (a report card). The test asserts the pair's id and url, an empty name, and no read of
+  the report card.
+
+**Items 8 and 14 (seed Q1 survived): closed.** One test in `DataverseUpdateRecordHandlerTests` covers the AI tool's most
+common re-file: an `update_record` of a communication filed under nothing, writing its own `sprk_regardingmatter` A → B as
+a lookup object, with a to-do under it. The test asserts:
+- the caller's PATCH runs first, through the user's client, and nothing else does;
+- the to-do is re-stamped to B in the same call, writing only `sprk_regardingmatter`;
+- the communication keeps the caller's B, and the helper never PATCHes it.
+
+**Item 12 (the spec rule's own text was stale): closed.**
+- `projects/spaarke-ai-architecture-redesign-r1/spec.md` gains **"Amendment A-UAC156"**, a bullet directly under the MUST
+  rules. It names the amended MUST and FR-P0-10, the path (§6.5 B, owner round 8 item 1), the scope (the re-stamp only)
+  and the helper's narrowness.
+- `notes/user-obo-audit.md` marks the `dataverse.update_record` row as amended and adds a dated note under §3A.
+- Both edits avoid the lines task 146 changes (the MUST bullet, 146's ADR Tensions section, the audit's header). A
+  three-way `git merge-file` of each file against `task/uac-r2-146-b2-r2` (merge base `ea6484102`) gives **0 conflicts**,
+  and the merged text carries both amendments. So the spec is correct whichever task merges first. Folding A-UAC156 into
+  A-UAC146 at 146's merge is optional (the bullet above in "Owner round 8").
+
+**Item 15 (AC8): not closed.** The manual dev live gate belongs to the main session, after deploy (POML `manual-live-gate`).
+
+### Seeds (each restored byte-identical from a backup, then touched; SHA-256 re-verified; every seed compiled)
+
+Run against the affected filter (the handler, data-mutation stamping, `TaskActionCore`, `CoreAncestor*`, create-task
+executor and `ActionSeam` tests: 184 tests).
+
+| Seed | Mutation | Bit |
+|---|---|---|
+| Q1 | `CoreAncestorAfterWriteRestamp` calls `RestampChildAsync(entity, id, None)` instead of `AfterWriteAsync(…, writtenColumns, None)` | 1 red: `…_UpdateOfACommunicationsOwnRoot_CascadesTheNewRootToItsChildren_InTheSameCall` |
+| N1 | `TaskActionCore`'s cap removed (`… ? name[..1000] : name` → `name`) | 1 red: `CreateTask_WhenTheRegardingNameIsLongerThanTheColumn_CapsItAndTheTaskIsStillCreated` |
+| R1 | the failed-read catch narrowed to `when (ex is OperationCanceledException)`, so a read failure propagates | 1 red: `CreateTask_WhenTheRegardingNameReadFails_…` |
+| U2 | an unmapped type guesses a column (`PrimaryNameField(type) ?? "sprk_name"`) | 1 red: `CreateTask_WhenTheRegardingTypeHasNoNameColumn_…` |
+| U3 | an unmapped type yields a name (`return regardingType;`) | 1 red: the same test |
+
+### Tests this round
+
+New: 4 tests (handler 1, `TaskActionCore` name branches 3). Nothing else changed.
+- Affected (the filter above): **184 / 184**.
+- Full BFF unit suite, run once at the end: **Passed 14397 / Failed 0 / Skipped 54 (Total 14451)**. That is round 8's
+  14393 plus the 4 new tests. No failures, so nothing was re-run for contention.
+- NetArchTest: **Passed 346 / Failed 0 (Total 346)**.
+- `tests/integration/Sprk.Bff.Api.IntegrationTests`, in full: **Passed 104 / Failed 0 / Skipped 0 (Total 104)**.
+- `tests/integration/Spe.Integration.Tests`, in full: **Passed 403 / Failed 0 / Skipped 25 (Total 428)** (the suite's own
+  25 skips).
+- The pre-commit formatter (`dotnet format --include` on the two test files) was run before the suites and changed
+  nothing.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All five new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -792,6 +862,9 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
   tool 4 replacing 2; `TaskActionCore` pair 1; F-051-6 job 2), the job handler tests reshaped, 2 exact-field-set seam
   tests updated. Affected **517 / 517** and **511 / 0 / 1 skipped**. Full BFF unit **Passed 14393 / Failed 0 / Skipped 54 (Total 14447)**; NetArchTest
   **Passed 346 / Failed 0 (Total 346)**; integration **Passed 104 / Failed 0 / Skipped 0 (Total 104)**; SPE **Passed 403 / Failed 0 / Skipped 25 (Total 428)**. 7 seeds, each red (section "Owner round 8").
+- **Verifier round c1**: 4 new tests (the AI update tool's direct-root re-file; `TaskActionCore`'s over-long, unreadable
+  and unmapped regarding name). Affected **184 / 184**; 5 seeds (Q1, N1, R1, U2, U3), each red. Full suites: see the
+  verifier round c1 section.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,
