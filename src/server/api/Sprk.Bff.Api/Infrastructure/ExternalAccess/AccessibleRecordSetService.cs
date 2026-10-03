@@ -884,24 +884,35 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     /// <summary>
     /// The FR-23 deny veto for a SYSTEMUSER composition (task 143 · owner Q4, N2, N3): three subjects — the
-    /// systemuser itself (<c>sprk_subjectsystemuser</c>), its 141-linked contact, and that contact's organizations —
-    /// split by whether the record is secure.
+    /// systemuser itself (<c>sprk_subjectsystemuser</c>), the contacts that represent it, and those contacts'
+    /// organizations — split by whether the record is secure.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
-    /// <item><b>Secure record</b> (or flags unreadable — <see cref="RootRecordFlags.Unreadable"/> is secure): ANY
-    /// matching entry removes the record WHOLE, membership term included. Q4: the wall binds internal users on secure
-    /// records. Where Dataverse still admits the user through a team, a role or the business unit, this hides the
-    /// record on Teams/SPA while MDA admits it — the owner's N2 answer, recorded as a §6.5 path-A exception.</item>
-    /// <item><b>Non-secure record</b>: a systemuser-subject entry removes NOTHING (Q4 scope). A linked-contact or
-    /// organization entry removes only the contact-sourced contribution — the linked contact's grants — and the
-    /// systemuser keeps its own term (owner N3: plane parity with MDA). Before task 143 it removed the whole record.</item>
+    /// <item><b>Secure record</b> (or flags unreadable — an unreadable flag set counts as secure here whatever its other
+    /// bits say): ANY matching entry removes the record WHOLE, membership term included. Q4: the wall binds internal users
+    /// on secure records. Where Dataverse still admits the user through a team, a role or the business unit, this hides the
+    /// record on Teams/SPA while MDA admits it — the owner's N2 answer, recorded as a §6.5 path-A exception.
+    /// <para>The subjects for a secure record are the WRITE-TIME guard's own answer
+    /// (<see cref="SecureShareNoAccessGuard"/>'s static <c>ResolveSubjectsAsync</c>, task 143 r1): the systemuser, its
+    /// <c>sprk_primarycontact</c> link and every contact bound to its oid — each read STATUS-FIRST from
+    /// <see cref="IContactIdentityStore"/> — and their wall organizations, plus the principal's derived contact. A
+    /// faulted link, binding or membership read removes every secure candidate (ADR-003: "link unreadable → removed").
+    /// Before r1 this took the contact from <c>principal.ContactId</c> alone, which <c>IIdentityNormalizationService</c>
+    /// derives under a "never an exception" contract — a transient link-read fault read as "no contact", and a
+    /// contact- or organization-subject wall on a secure record was never consulted (a fail-OPEN).</para></item>
+    /// <item><b>Non-secure record</b>: a systemuser-subject entry removes NOTHING (Q4 scope). A derived-contact or
+    /// organization entry removes only the contact-sourced contribution — the derived contact's grants — and the
+    /// systemuser keeps its own term (owner N3: plane parity with MDA). The subjects are the derived contact and its
+    /// organizations only: that contact is the one whose grants were composed, and a contact the normalizer could not
+    /// derive contributed no grant to remove — so the normalizer's fault-swallowing cannot open anything here.</item>
     /// <item><b>Any fault removes the candidate whole</b> (ADR-003, criterion 11): an unreadable organization
-    /// membership, an unreadable record, a fail-closed reader answer, a denial with no provable subject kind, or a
-    /// throw. Never "not walled".</item>
+    /// membership (every candidate), an unreadable link (every secure candidate), an unreadable record, a fail-closed
+    /// reader answer, a denial with no provable subject kind, or a throw. Never "not walled".</item>
     /// </list>
-    /// <para>The systemuser subject is asked about only when a candidate is secure — on a non-secure record it can
-    /// remove nothing, so a composition with no secure candidate costs no extra query (NFR-02), exactly as before.</para>
+    /// <para>Cost (NFR-02): a composition with no secure candidate makes exactly the reads it made before task 143 r1. One
+    /// with a secure candidate adds the link reads (one systemuser read, plus one oid read when the user has an oid) and,
+    /// when it ALSO has non-secure candidates and a contact subject, a second deny-list query for the non-secure batch.</para>
     /// </remarks>
     private async Task<SystemUserDenyVeto> ResolveSystemUserDenyVetoAsync(
         string entityType,
@@ -944,7 +955,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
             var removeWhole = new HashSet<Guid>();
             var contactSourced = new HashSet<Guid>();
-            var batch = new List<NoAccessCandidateRecord>(candidateIds.Count);
+            var secureBatch = new List<NoAccessCandidateRecord>();
+            var openBatch = new List<NoAccessCandidateRecord>();
             foreach (var recordId in candidateIds)
             {
                 if (referencedOrgs.TryGetValue(recordId, out var refs) && refs.Unreadable)
@@ -956,49 +968,78 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 var orgIds = referencedOrgs.TryGetValue(recordId, out var resolved)
                     ? resolved.OrganizationIds
                     : Array.Empty<Guid>();
-                batch.Add(new NoAccessCandidateRecord(entityType, recordId, orgIds));
+                (IsSecure(recordId) ? secureBatch : openBatch).Add(new NoAccessCandidateRecord(entityType, recordId, orgIds));
             }
 
-            if (batch.Count == 0)
+            // ── Secure candidates: the write-time guard's subjects, read status-first (task 143 r1) ──
+            if (secureBatch.Count > 0)
             {
-                return new SystemUserDenyVeto(removeWhole, contactSourced);
+                var subjects = await SecureShareNoAccessGuard.ResolveSubjectsAsync(
+                        _identityStore, _participations, systemUserId,
+                        hasContact ? linkedContactId : null,
+                        hasContact ? linkedContactOrgs : null,
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (!subjects.Readable)
+                {
+                    _logger.LogError(
+                        "[WF-AUTHZ] Systemuser deny veto for {SystemUserId} on {EntityType}: the {Fault} needed to know which " +
+                        "contacts represent this user could not be read. Failing CLOSED — every SECURE candidate removed " +
+                        "({Count}); never 'no contact'.",
+                        systemUserId, entityType, subjects.Fault, secureBatch.Count);
+                    removeWhole.UnionWith(secureBatch.Select(c => c.RecordId));
+                }
+                else
+                {
+                    var secureResult = await _noAccessList
+                        .GetDeniedRecordsAsync(subjects.Subjects, secureBatch, ct).ConfigureAwait(false);
+                    if (secureResult is null || secureResult.FailedClosed)
+                    {
+                        // A null answer is not a "nothing denied" answer; the reader never returns one. Treated as a fault.
+                        removeWhole.UnionWith(secureBatch.Select(c => c.RecordId));
+                    }
+                    else
+                    {
+                        removeWhole.UnionWith(secureResult.DeniedRecordIds.Intersect(secureBatch.Select(c => c.RecordId)));
+                    }
+                }
             }
 
-            var subjects = new NoAccessSubjects(
-                hasContact ? new[] { linkedContactId!.Value } : Array.Empty<Guid>(),
-                linkedContactOrgs.WallSubjectOrganizationIds,
-                anySecure ? systemUserId : null);
-
-            var result = await _noAccessList.GetDeniedRecordsAsync(subjects, batch, ct).ConfigureAwait(false);
-            if (result is null || result.FailedClosed)
+            // ── Non-secure candidates: the derived contact's grant contribution only (owner N3) ──
+            if (openBatch.Count > 0 && (hasContact || linkedContactOrgs.WallSubjectOrganizationIds.Count > 0))
             {
-                // A null answer is not a "nothing denied" answer; the reader never returns one. Treated as a fault.
-                removeWhole.UnionWith(batch.Select(c => c.RecordId));
-                return new SystemUserDenyVeto(removeWhole, contactSourced);
+                var openSubjects = new NoAccessSubjects(
+                    hasContact ? new[] { linkedContactId!.Value } : Array.Empty<Guid>(),
+                    linkedContactOrgs.WallSubjectOrganizationIds,
+                    SystemUserId: null);
+
+                var openResult = await _noAccessList.GetDeniedRecordsAsync(openSubjects, openBatch, ct).ConfigureAwait(false);
+                if (openResult is null || openResult.FailedClosed)
+                {
+                    removeWhole.UnionWith(openBatch.Select(c => c.RecordId));
+                }
+                else
+                {
+                    foreach (var recordId in openResult.DeniedRecordIds)
+                    {
+                        var kinds = openResult.DenyingSubjectKinds.TryGetValue(recordId, out var k)
+                            ? k
+                            : NoAccessSubjectKinds.None;
+                        if ((kinds & (NoAccessSubjectKinds.Contact | NoAccessSubjectKinds.Organization)) != 0)
+                        {
+                            contactSourced.Add(recordId);
+                        }
+                        else
+                        {
+                            // Denied with no provable contact or organization subject — treat as the strictest case.
+                            removeWhole.Add(recordId);
+                        }
+                    }
+                }
             }
 
-            foreach (var recordId in result.DeniedRecordIds)
-            {
-                if (IsSecure(recordId))
-                {
-                    removeWhole.Add(recordId);
-                    continue;
-                }
-
-                var kinds = result.DenyingSubjectKinds.TryGetValue(recordId, out var k) ? k : NoAccessSubjectKinds.None;
-                if (kinds == NoAccessSubjectKinds.None)
-                {
-                    // Denied with no provable subject — treat as the strictest case.
-                    removeWhole.Add(recordId);
-                }
-                else if ((kinds & (NoAccessSubjectKinds.Contact | NoAccessSubjectKinds.Organization)) != 0)
-                {
-                    contactSourced.Add(recordId);
-                }
-
-                // SystemUser only, on a non-secure record: nothing (Q4).
-            }
-
+            contactSourced.ExceptWith(removeWhole);
             return new SystemUserDenyVeto(removeWhole, contactSourced);
         }
         catch (OperationCanceledException)
@@ -1047,24 +1088,36 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly ExternalParticipationService _participations;
     private readonly ISubjectStandingGrantReader _standingGrant;
     private readonly INoAccessListReader _noAccessList;
+    private readonly IContactIdentityStore _identityStore;
     private readonly ILogger<AccessibleRecordSetService> _logger;
 
+    /// <param name="membership">ADR-034 membership.</param>
+    /// <param name="participations">Grants, flags, organization reads.</param>
+    /// <param name="standingGrant">The standing-grant reader.</param>
+    /// <param name="noAccessList">The deny-list reader.</param>
+    /// <param name="identityStore">The status-bearing systemuser↔contact link reads (task 143 r1): the systemuser-plane
+    /// veto resolves a SECURE candidate's subjects through them, so a faulted link read removes the record instead of
+    /// reading as "no contact".</param>
+    /// <param name="logger">Logger.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
         ISubjectStandingGrantReader standingGrant,
         INoAccessListReader noAccessList,
+        IContactIdentityStore identityStore,
         ILogger<AccessibleRecordSetService> logger)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
         ArgumentNullException.ThrowIfNull(standingGrant);
         ArgumentNullException.ThrowIfNull(noAccessList);
+        ArgumentNullException.ThrowIfNull(identityStore);
         ArgumentNullException.ThrowIfNull(logger);
         _membership = membership;
         _participations = participations;
         _standingGrant = standingGrant;
         _noAccessList = noAccessList;
+        _identityStore = identityStore;
         _logger = logger;
     }
 

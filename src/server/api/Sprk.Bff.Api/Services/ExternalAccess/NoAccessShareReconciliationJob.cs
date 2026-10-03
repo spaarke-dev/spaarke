@@ -27,12 +27,16 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// own reads write — never <c>CacheTenantFor(null)</c> = "anonymous", which no read uses. Unconfigured, nothing is
 /// cleared and a stale set lapses within <see cref="ImpersonatedRootSetSource.CacheTtl"/>; the run says so.</para>
 ///
-/// <para><b>The ExternalAccessReconciliationJob A1 rules, applied.</b> A bounded scan (<see cref="MaxEntriesPerRun"/>,
-/// one more reports TRUNCATED rather than reconciling a silent prefix); a failed scan or any entry the enforcer could
-/// not complete records <c>Success=false</c> — never "nothing to reconcile"; a heartbeat line every attempt; and no
-/// throw from <see cref="ExecuteAsync"/> (ADR-036 A1 rule 4: idempotent by construction — a removed share is not
-/// there to remove next time — so the next tick picks up whatever this one could not). No chunk claims: every write
-/// is a revoke decided from a strict read and confirmed by a read-back, which a second instance repeats as a no-op.</para>
+/// <para><b>The ExternalAccessReconciliationJob A1 rules, applied.</b> A bounded run: every active entry id is read
+/// (paged, up to <see cref="MaxEntryIdsScanned"/>; one more reports TRUNCATED), and at most <see cref="MaxEntriesPerRun"/>
+/// are enforced per run — past that the window ROTATES from run to run, so no entry is starved (task 143 r1; before r1
+/// the newest 500 were enforced every run and the rest never). A failed scan or any entry the enforcer could not
+/// complete records <c>Success=false</c> — never "nothing to reconcile"; a heartbeat line every attempt; and no throw
+/// from <see cref="ExecuteAsync"/> (ADR-036 A1 rule 4: idempotent by construction — a removed share is not there to
+/// remove next time — so the next tick picks up whatever this one could not). No chunk claims or markers: every write
+/// is a revoke decided from a strict read and confirmed by a read-back, which a second run repeats as a no-op. What a
+/// claim would ALSO have to protect — owner S5's "someone else keeps access" cross-check — is serialized where it is
+/// decided, by the enforcer's per-record removal lease (task 143 r1), which the save-time endpoint takes too.</para>
 ///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): the BFF's in-process <c>Spaarke.Scheduling</c> host, registered
 /// with <c>AddScheduledJob</c> in <c>ExternalAccessModule</c> beside the identity-link job — BFF domain code (the
@@ -48,8 +52,15 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
     /// <summary>Every 5 minutes (owner round 3 R3/R4).</summary>
     internal const string DefaultCronSchedule = "*/5 * * * *";
 
-    /// <summary>The active entries one run enforces. One more reports TRUNCATED.</summary>
+    /// <summary>
+    /// The active entries one run ENFORCES. When more are active, each run enforces the next window after the last
+    /// entry the previous run reached, wrapping round (task 143 r1), so every entry is enforced within
+    /// ceil(active / 500) runs — never "the newest 500, forever". Such a run is reported ROTATING (not clean).
+    /// </summary>
     internal const int MaxEntriesPerRun = 500;
+
+    /// <summary>The active entry IDS one run reads (cheap: one id column, 500 per page). One more reports TRUNCATED.</summary>
+    internal const int MaxEntryIdsScanned = 50_000;
 
     internal const string StatusOk = "ok";
     internal const string StatusPartial = "partial";
@@ -104,6 +115,8 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
         var notEnforced = 0;
         var incompleteEntries = new List<Guid>();
         var truncated = false;
+        var rotating = false;
+        var activeEntries = 0;
 
         var tenant = ImpersonatedRootSetSource.DeploymentCacheTenant(_configuration);
         var cacheTenants = tenant is null ? Array.Empty<string>() : new[] { tenant };
@@ -122,18 +135,30 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
             var store = scope.ServiceProvider.GetRequiredService<NoAccessEnforcementStore>();
             var enforcer = scope.ServiceProvider.GetRequiredService<NoAccessShareEnforcer>();
 
-            var (ids, scanTruncated) = await store.ReadActiveEntryIdsAsync(MaxEntriesPerRun, cancellationToken)
+            var (ids, scanTruncated) = await store.ReadActiveEntryIdsAsync(MaxEntryIdsScanned, cancellationToken)
                 .ConfigureAwait(false);
             truncated = scanTruncated;
             if (scanTruncated)
             {
-                problems.Add($"TRUNCATED: more than {MaxEntriesPerRun} active entries; later entries were not enforced this run.");
+                problems.Add($"TRUNCATED: more than {MaxEntryIdsScanned} active entries; entries past that were not read.");
             }
 
-            foreach (var entryId in ids)
+            activeEntries = ids.Count;
+            var window = NextWindow(ids);
+            rotating = window.Count < ids.Count;
+            if (rotating)
+            {
+                problems.Add(
+                    $"ROTATING: {ids.Count} active entries exceed the {MaxEntriesPerRun} enforced per run; this run enforced " +
+                    $"the next {window.Count}, and every entry is enforced within " +
+                    $"{(ids.Count + MaxEntriesPerRun - 1) / MaxEntriesPerRun} runs.");
+            }
+
+            foreach (var entryId in window)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var report = await enforcer.EnforceEntryAsync(entryId, cacheTenants, cancellationToken).ConfigureAwait(false);
+                AdvanceCursor(entryId, rotating);
                 entries++;
                 removed += report.Removed.Count;
                 notEnforceable += report.NotEnforceable.Count;
@@ -171,7 +196,7 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
             problems.Add($"{incompleteEntries.Count} entr(y/ies) could not be fully enforced; see the per-entry errors.");
         }
 
-        if (status == StatusOk && (truncated || problems.Count > 0))
+        if (status == StatusOk && (truncated || rotating || problems.Count > 0))
         {
             status = StatusPartial;
         }
@@ -180,11 +205,12 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
 
         // THE HEARTBEAT (ADR-036 A1 rule 5): one line on every attempt, whatever happened.
         _logger.LogInformation(
-            "[NO-ACCESS-RECON] heartbeat status={Status} entries={Entries} removed={Removed} notEnforceable={NotEnforceable} " +
-            "notEnforced={NotEnforced} incomplete={Incomplete} truncated={Truncated} cacheTenantConfigured={CacheTenant} " +
-            "durationMs={DurationMs} attempt={Attempt} correlationId={CorrelationId}",
-            status, entries, removed, notEnforceable, notEnforced, incompleteEntries.Count, truncated, tenant is not null,
-            (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
+            "[NO-ACCESS-RECON] heartbeat status={Status} entries={Entries} activeEntries={ActiveEntries} rotating={Rotating} " +
+            "removed={Removed} notEnforceable={NotEnforceable} notEnforced={NotEnforced} incomplete={Incomplete} " +
+            "truncated={Truncated} cacheTenantConfigured={CacheTenant} durationMs={DurationMs} attempt={Attempt} " +
+            "correlationId={CorrelationId}",
+            status, entries, activeEntries, rotating, removed, notEnforceable, notEnforced, incompleteEntries.Count, truncated,
+            tenant is not null, (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
 
         return new JobRunResult(
             Success: status == StatusOk,
@@ -196,6 +222,8 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
                 {
                     status,
                     entries,
+                    activeEntries,
+                    rotating,
                     removed,
                     notEnforceable,
                     notEnforced,
@@ -207,4 +235,52 @@ public sealed class NoAccessShareReconciliationJob : IScheduledJob
                 },
                 ResultJsonOptions));
     }
+
+    /// <summary>
+    /// The entries this run enforces: all of them when they fit in <see cref="MaxEntriesPerRun"/>; otherwise the next
+    /// <see cref="MaxEntriesPerRun"/> after the last entry a previous run reached, in id order, wrapping round (task 143
+    /// r1). The cursor is an entry id, not a position, so entries added or deactivated between runs never make the window
+    /// skip one. It lives in this singleton (per instance): the scheduler lease runs one tick at a time, and an instance
+    /// that holds the lease less often still walks the whole ring on its own runs.
+    /// </summary>
+    private IReadOnlyList<Guid> NextWindow(IReadOnlyList<Guid> ids)
+    {
+        if (ids.Count <= MaxEntriesPerRun)
+        {
+            return ids;
+        }
+
+        var ordered = ids.Distinct().OrderBy(id => id).ToList();
+        Guid? cursor;
+        lock (_cursorGate)
+        {
+            cursor = _cursor;
+        }
+
+        var start = cursor is { } after ? ordered.FindIndex(id => id.CompareTo(after) > 0) : 0;
+        if (start < 0)
+        {
+            start = 0; // past the end: wrap
+        }
+
+        var window = new List<Guid>(MaxEntriesPerRun);
+        for (var i = 0; i < ordered.Count && window.Count < MaxEntriesPerRun; i++)
+        {
+            window.Add(ordered[(start + i) % ordered.Count]);
+        }
+
+        return window;
+    }
+
+    /// <summary>Records the last entry this run reached, so the next run starts after it (only while rotating).</summary>
+    private void AdvanceCursor(Guid entryId, bool rotating)
+    {
+        lock (_cursorGate)
+        {
+            _cursor = rotating ? entryId : null;
+        }
+    }
+
+    private readonly object _cursorGate = new();
+    private Guid? _cursor;
 }

@@ -75,7 +75,7 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         // Task 039: the deny-list reader is an external boundary this seam does not exercise — an
         // inert double keeps the seam's assertions about standing-grant union/revocation, not denial.
         var sut = new AccessibleRecordSetService(
-            membership.Object, participations, reader, NeverDeniesReader(),
+            membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();
@@ -150,7 +150,7 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         var reader = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
         var participations = new FakeParticipationService(new[] { GrantedProject });
         var sut = new AccessibleRecordSetService(
-            membership.Object, participations, reader, NeverDeniesReader(),
+            membership.Object, participations, reader, NeverDeniesReader(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var principal = ContactPrincipal();

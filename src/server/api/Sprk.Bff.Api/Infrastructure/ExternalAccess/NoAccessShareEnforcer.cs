@@ -1,4 +1,5 @@
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Access;
 
@@ -121,7 +122,9 @@ public sealed record NoAccessEnforcementReport(
 ///
 /// <para><b>Never the last person</b> (owner S5). A secure record keeps at least one enabled person with a share that can
 /// read it: a removal that would leave none is refused and reported
-/// (<see cref="NoAccessEnforcementReason.LastPersonOnSecureRecord"/>), naming the record.</para>
+/// (<see cref="NoAccessEnforcementReason.LastPersonOnSecureRecord"/>), naming the record. The read, the check and the
+/// revoke run under a per-record lease (task 143 r1), so concurrent enforcements cannot each remove "the other" last
+/// reader.</para>
 ///
 /// <para><b>Removal is not reversible by design.</b> Deactivating the entry lifts the veto but re-creates no share; access
 /// comes back only through a deliberate re-grant. A task-142 auto share removed here is task 142's to record as
@@ -148,14 +151,24 @@ public sealed class NoAccessShareEnforcer
     private readonly IContactIdentityStore _identityStore;
     private readonly IDataverseRecordShareService _recordShare;
     private readonly ITenantCache _cache;
+    private readonly IScheduledJobLease _recordLock;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
 
+    /// <param name="store">The enforcer's Dataverse reads.</param>
+    /// <param name="participations">Flags and organization reads.</param>
+    /// <param name="identityStore">The systemuser↔contact link reads.</param>
+    /// <param name="recordShare">The one POA share seam.</param>
+    /// <param name="cache">The tenant cache (root-set invalidation).</param>
+    /// <param name="recordLock">The atomic lease (task 143 r1) that serializes removals per record, so owner S5 holds
+    /// across concurrent enforcements. The scheduler's own lease store — reused, keyed per record.</param>
+    /// <param name="logger">Logger.</param>
     public NoAccessShareEnforcer(
         NoAccessEnforcementStore store,
         ExternalParticipationService participations,
         IContactIdentityStore identityStore,
         IDataverseRecordShareService recordShare,
         ITenantCache cache,
+        IScheduledJobLease recordLock,
         ILogger<NoAccessShareEnforcer> logger)
     {
         _store = store;
@@ -163,6 +176,7 @@ public sealed class NoAccessShareEnforcer
         _identityStore = identityStore;
         _recordShare = recordShare;
         _cache = cache;
+        _recordLock = recordLock;
         _logger = logger;
     }
 
@@ -601,7 +615,7 @@ public sealed class NoAccessShareEnforcer
 
         if (direct != 0)
         {
-            var removal = await RemoveDirectShareAsync(logicalName, entitySet, recordId, userId, direct, shares, cacheTenants, run, ct)
+            var removal = await RemoveUnderRecordLockAsync(logicalName, entitySet, recordId, userId, cacheTenants, run, ct)
                 .ConfigureAwait(false);
             if (removal is null)
             {
@@ -620,6 +634,97 @@ public sealed class NoAccessShareEnforcer
         await ReportResidualAccessAsync(logicalName, entitySet, recordId, userId, shares, owningTeam, owningTeamRead, run, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Owner S5 under concurrency (task 143 r1): the removal of a direct share on a secure record runs under a
+    /// per-RECORD lease, so two enforcements — the save-time endpoint, a concurrent endpoint call for another entry, and
+    /// the job — can never each see the other's user as "someone else keeps access" and both remove. Under the lease the
+    /// shares are READ AGAIN, and the S5 check, the revoke and the read-back are decided from that fresh read.
+    /// </summary>
+    /// <remarks>
+    /// The lease is the existing atomic primitive (<see cref="IScheduledJobLease"/>: Redis <c>SET NX PX</c> across every
+    /// instance and slot, or process-local when Redis is off), keyed per record. It fails CLOSED: a record whose lease is
+    /// held by another enforcement, or a lease store that cannot be reached, removes nothing and records a failure (the
+    /// caller is told to try again; the job retries within 5 minutes). It serializes the enforcer with itself only —
+    /// a user's own unshare (task 139) and the model-driven app's Share dialog do not take it.
+    /// </remarks>
+    private async Task<(bool Removed, IReadOnlyList<DataversePrincipalAccess> SharesAfter)?> RemoveUnderRecordLockAsync(
+        string logicalName,
+        string entitySet,
+        Guid recordId,
+        Guid userId,
+        IReadOnlyCollection<string> cacheTenants,
+        Run run,
+        CancellationToken ct)
+    {
+        var lockId = RecordLockId(logicalName, recordId);
+        ScheduledJobLeaseGrant grant;
+        try
+        {
+            grant = await _recordLock.TryAcquireAsync(lockId, occurrenceUtc: null, RecordLockDuration, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[NO-ACCESS-ENFORCE] The removal lock for {Type} {RecordId} could not be taken.",
+                logicalName, recordId);
+            run.Fail(logicalName, recordId, userId, "record-lock-unavailable",
+                $"User {userId}'s share was not removed: the lock that keeps a secure record from losing its last reader " +
+                "could not be taken. Try again.");
+            return null;
+        }
+
+        if (grant.Status != ScheduledJobLeaseStatus.Granted || grant.Token is null)
+        {
+            run.Fail(logicalName, recordId, userId, "record-busy",
+                $"User {userId}'s share was not removed: another No Access enforcement is changing this record's access " +
+                "right now. Try again in a moment; the 5-minute safety net retries too.");
+            return null;
+        }
+
+        try
+        {
+            IReadOnlyList<DataversePrincipalAccess> shares;
+            try
+            {
+                shares = await _recordShare.GetPrincipalAccessOrThrowAsync(logicalName, recordId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[NO-ACCESS-ENFORCE] Shares on {Type} {RecordId} unreadable under the lock.", logicalName, recordId);
+                run.Fail(logicalName, recordId, userId, "shares-unreadable",
+                    $"The shares on this record could not be read, so user {userId}'s access was not removed. Try again.");
+                return null;
+            }
+
+            var direct = MaskOf(shares, DataversePrincipalRef.User(userId));
+            if (direct == 0)
+            {
+                return (true, shares); // gone meanwhile (another enforcement or an unshare): nothing left to remove
+            }
+
+            return await RemoveDirectShareAsync(logicalName, entitySet, recordId, userId, direct, shares, cacheTenants, run, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await _recordLock.ReleaseAsync(lockId, grant.Token, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // The lease expires on its own (RecordLockDuration).
+                _logger.LogWarning(ex, "[NO-ACCESS-ENFORCE] The removal lock for {Type} {RecordId} could not be released.",
+                    logicalName, recordId);
+            }
+        }
+    }
+
+    /// <summary>The per-record removal lock id (task 143 r1, S5).</summary>
+    internal static string RecordLockId(string logicalName, Guid recordId) => $"no-access-enforce:{logicalName}:{recordId:D}";
+
+    /// <summary>How long a removal lock lives if its holder dies: longer than a read, a revoke and a read-back.</summary>
+    internal static readonly TimeSpan RecordLockDuration = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// S5 check, revoke, read-back, cache clear. <c>null</c> when a failure was recorded; otherwise whether the share was

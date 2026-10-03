@@ -117,6 +117,33 @@ public class ProvisionNoAccessTests : IClassFixture<ProvisionProjectTestFixture>
     }
 
     [Fact]
+    public async Task Provision_ANamedColleagueWhoseNoAccessCheckCannotBeRead_IsSkippedToo_AndTheOthersAreStillShared()
+    {
+        // Criterion 9, the fail-closed half (task 143 r1, seed S20): "could not tell" is never "not walled". The
+        // colleague's link read fails, so the guard answers Unverifiable — that colleague is skipped with its own reason
+        // code, while the creator and the other colleague are still shared.
+        var projectId = Guid.NewGuid();
+        var unverifiable = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.UnreadableLinkUsers.Add(unverifiable);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { unverifiable, colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == unverifiable, "an unverifiable colleague is never shared to");
+        _fixture.Grants.Should().Contain(g => g.Principal.Id == colleague);
+        _fixture.Grants.Should().Contain(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+
+        var skipped = (await BodyOf(response)).GetProperty("skippedPrincipals").EnumerateArray().ToList();
+        skipped.Should().ContainSingle();
+        skipped[0].GetProperty("systemUserId").GetGuid().Should().Be(unverifiable);
+        skipped[0].GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalNoAccessUnverifiable);
+    }
+
+    [Fact]
     public async Task Resume_WhenTheRecordsCreatorIsOnItsNoAccessList_SharesNothing_AndWritesNothing()
     {
         var projectId = Guid.NewGuid();

@@ -179,4 +179,63 @@ public class NoAccessShareReconciliationJobTests
         registration.CronSchedule.Should().Be("*/5 * * * *");
         registration.Enabled.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task MoreActiveEntriesThanOneRunEnforces_RotateFromRunToRun_SoEveryEntryIsEnforced()
+    {
+        // Verifier finding 7: one run enforces at most MaxEntriesPerRun. Before r1 that was the newest 500 every run, so
+        // an entry past them was never enforced by the job. Now each run continues after the last entry the previous run
+        // reached: two runs of the SAME job cover every one of 501 entries.
+        var total = NoAccessShareReconciliationJob.MaxEntriesPerRun + 1;
+        var ids = Enumerable.Range(0, total)
+            .Select(_ => _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author))
+            .ToList();
+        var job = NewJob();
+
+        var first = await RunAsync(job);
+        var afterFirst = _h.Store.EntryReads.ToList();
+        var second = await RunAsync(job);
+        var all = _h.Store.EntryReads.ToList();
+
+        afterFirst.Should().HaveCount(NoAccessShareReconciliationJob.MaxEntriesPerRun);
+        all.Distinct().Should().BeEquivalentTo(ids, "two runs reach every active entry");
+        first.Success.Should().BeFalse("a run that could not enforce every entry is not clean");
+        Result(first).GetProperty("rotating").GetBoolean().Should().BeTrue();
+        Result(first).GetProperty("activeEntries").GetInt32().Should().Be(total);
+        first.ErrorMessage.Should().Contain("ROTATING");
+        Result(second).GetProperty("rotating").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WhenEveryActiveEntryFitsInOneRun_ARunEnforcesThemAll_AndIsNotRotating()
+    {
+        var ids = Enumerable.Range(0, 3)
+            .Select(_ => _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author))
+            .ToList();
+
+        var result = await RunAsync();
+
+        _h.Store.EntryReads.Should().BeEquivalentTo(ids);
+        Result(result).GetProperty("rotating").GetBoolean().Should().BeFalse();
+    }
+
+    private NoAccessShareReconciliationJob NewJob(string? tenant = DeploymentTenant)
+    {
+        var settings = new Dictionary<string, string?>();
+        if (tenant is not null) settings["AzureAd:TenantId"] = tenant;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<NoAccessEnforcementStore>(_h.Store);
+        services.AddScoped(_ => _h.Enforcer);
+        var provider = services.BuildServiceProvider();
+
+        return new NoAccessShareReconciliationJob(
+            provider.GetRequiredService<IServiceScopeFactory>(), new FakeTimeProvider(), configuration,
+            NullLogger<NoAccessShareReconciliationJob>.Instance);
+    }
+
+    private static Task<JobRunResult> RunAsync(NoAccessShareReconciliationJob job) => job.ExecuteAsync(
+        new JobRunContext(Guid.NewGuid(), "corr-143-r1", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
+        CancellationToken.None);
 }

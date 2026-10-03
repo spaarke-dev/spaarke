@@ -194,6 +194,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     internal AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService NoAccessReads { get; private set; } =
         new(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
 
+    /// <summary>Task 143 r1: systemusers whose task-141 link read FAILS (the guard then cannot verify them).</summary>
+    internal HashSet<Guid> UnreadableLinkUsers { get; } = new();
+
     /// <summary>Business units' shared containers (<c>businessunit.sprk_containerid</c>), by business unit id (task 133 b2).</summary>
     public Dictionary<Guid, string> BusinessUnitContainers { get; } = new();
 
@@ -458,6 +461,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         NoAccessList = new AccessControl.GrantPolicyTestDoubles.SeamNoAccessListReader();
         NoAccessReads = new AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
             defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
+        UnreadableLinkUsers.Clear();
         Logs.Clear();
     }
 
@@ -547,8 +551,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // Every user is "read, linked to no contact": the systemuser subject is what these tests exercise.
             var links = new Mock<IContactIdentityStore>();
             links.Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid id, CancellationToken _) =>
-                    new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+                .ReturnsAsync((Guid id, CancellationToken _) => UnreadableLinkUsers.Contains(id)
+                    ? SystemUserLookup.Failed
+                    : new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
             services.RemoveAll<SecureShareNoAccessGuard>();
             services.AddScoped(_ => new SecureShareNoAccessGuard(
                 NoAccessReads, NoAccessList, links.Object, NullLogger<SecureShareNoAccessGuard>.Instance));

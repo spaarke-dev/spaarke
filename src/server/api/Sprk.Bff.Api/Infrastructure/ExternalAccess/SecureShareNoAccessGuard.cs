@@ -75,8 +75,18 @@ public sealed record SystemUserNoAccessSubjects(NoAccessSubjects Subjects, strin
 /// <para><b>Reuse, not a second rule</b> (CLAUDE.md §11). The matching is the one <see cref="INoAccessListReader"/>; the
 /// flag and organization reads are <see cref="ExternalParticipationService"/>'s; the link is
 /// <see cref="IContactIdentityStore"/>'s status-bearing read (not <c>IIdentityNormalizationService</c>, whose "never an
-/// exception" contract turns a faulted link read into "no contact" — a fail-OPEN for a wall). The enforcer
-/// (<see cref="NoAccessShareEnforcer"/>) and the systemuser-plane veto ask the same question through the same reads.</para>
+/// exception" contract turns a faulted link read into "no contact" — a fail-OPEN for a wall).</para>
+///
+/// <para><b>Who else asks, and how</b> (task 143 r1). "Which contacts represent systemuser U" has ONE answer —
+/// the static <c>ResolveSubjectsAsync</c>:
+/// the <c>sprk_primarycontact</c> link plus every contact bound to U's oid, each read status-first, and those contacts'
+/// wall organizations. This guard calls it; the systemuser-plane read-time veto
+/// (<see cref="AccessibleRecordSetService"/>) calls it for every SECURE candidate — adding the principal's derived contact,
+/// so the contact whose grants were composed is always among the subjects — and removes every secure candidate when it
+/// reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
+/// contact C represent") over the same two links. On a non-secure record the veto checks only the derived contact and its
+/// organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
+/// normalizer could not derive contributed no grant to remove.</para>
 /// </remarks>
 public sealed class SecureShareNoAccessGuard
 {
@@ -187,17 +197,48 @@ public sealed class SecureShareNoAccessGuard
     }
 
     /// <summary>
-    /// A systemuser's three subject kinds, each read status-first (task 143). Shared with the enforcer, so who is
-    /// "the same person" has one answer.
+    /// A systemuser's three subject kinds, each read status-first (task 143). The same answer the read-time veto uses on
+    /// secure records, so who is "the same person" has one answer.
     /// </summary>
-    public async Task<SystemUserNoAccessSubjects> ResolveSubjectsAsync(Guid systemUserId, CancellationToken ct)
+    public Task<SystemUserNoAccessSubjects> ResolveSubjectsAsync(Guid systemUserId, CancellationToken ct)
+        => ResolveSubjectsAsync(_identityStore, _participations, systemUserId, null, null, ct);
+
+    /// <summary>
+    /// The ONE answer to "what are systemuser U's No Access subjects" (task 143; shared with the read-time veto in task 143
+    /// r1): U itself, the contacts that represent U — the task-141 link and every contact bound to U's oid, each read
+    /// status-first — and those contacts' wall organizations. Never throws a read FAULT into "no contact": a link, binding or
+    /// membership read that fails is reported in <see cref="SystemUserNoAccessSubjects.Fault"/>, and every caller then
+    /// refuses (write time) or removes (read time).
+    /// </summary>
+    /// <param name="identityStore">The status-bearing identity reads.</param>
+    /// <param name="participations">The membership read.</param>
+    /// <param name="systemUserId">The user.</param>
+    /// <param name="alsoContactId">A contact the caller already knows represents the user (the read-time veto's derived
+    /// contact). Added to the subjects whatever the link reads say, so the subject set never lacks it.</param>
+    /// <param name="alsoContactMemberships">That contact's memberships, already read by the caller; reused instead of read
+    /// twice. Ignored without <paramref name="alsoContactId"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal static async Task<SystemUserNoAccessSubjects> ResolveSubjectsAsync(
+        IContactIdentityStore identityStore,
+        ExternalParticipationService participations,
+        Guid systemUserId,
+        Guid? alsoContactId,
+        ActiveOrgMemberships? alsoContactMemberships,
+        CancellationToken ct)
     {
-        var user = await _identityStore.GetSystemUserAsync(systemUserId, ct).ConfigureAwait(false);
+        var contacts = new HashSet<Guid>();
+        if (alsoContactId is { } known && known != Guid.Empty)
+        {
+            contacts.Add(known);
+        }
+
+        var user = await identityStore.GetSystemUserAsync(systemUserId, ct).ConfigureAwait(false);
         if (user.Status == LookupStatus.ColumnMissing)
         {
-            // The link columns (task 141) are not provisioned here, so no contact CAN represent this user: only the
-            // systemuser subject applies. A schema fact, not a fault.
-            return new SystemUserNoAccessSubjects(Only(systemUserId), Fault: null);
+            // The link columns (task 141) are not provisioned here, so no contact CAN be linked to this user: only the
+            // systemuser subject (and a contact the caller already knows) applies. A schema fact, not a fault.
+            return await WithOrganizationsAsync(participations, systemUserId, contacts, alsoContactId, alsoContactMemberships, ct)
+                .ConfigureAwait(false);
         }
 
         if (user.Status != LookupStatus.Read)
@@ -205,7 +246,6 @@ public sealed class SecureShareNoAccessGuard
             return new SystemUserNoAccessSubjects(Only(systemUserId), "link");
         }
 
-        var contacts = new HashSet<Guid>();
         if (user.Row?.PrimaryContactId is { } linked && linked != Guid.Empty)
         {
             contacts.Add(linked);
@@ -213,7 +253,7 @@ public sealed class SecureShareNoAccessGuard
 
         if (user.Row?.Oid is { } oid && oid != Guid.Empty)
         {
-            var bound = await _identityStore.FindContactsByOidAsync(oid, ct).ConfigureAwait(false);
+            var bound = await identityStore.FindContactsByOidAsync(oid, ct).ConfigureAwait(false);
             switch (bound.Status)
             {
                 case LookupStatus.Read:
@@ -234,11 +274,25 @@ public sealed class SecureShareNoAccessGuard
             }
         }
 
+        return await WithOrganizationsAsync(participations, systemUserId, contacts, alsoContactId, alsoContactMemberships, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The subjects with every contact's wall organizations; an unreadable membership is a fault.</summary>
+    private static async Task<SystemUserNoAccessSubjects> WithOrganizationsAsync(
+        ExternalParticipationService participations,
+        Guid systemUserId,
+        HashSet<Guid> contacts,
+        Guid? knownContactId,
+        ActiveOrgMemberships? knownMemberships,
+        CancellationToken ct)
+    {
         var organizations = new HashSet<Guid>();
         foreach (var contactId in contacts)
         {
-            var memberships = await _participations
-                .ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
+            var memberships = knownMemberships is { } already && knownContactId == contactId
+                ? already
+                : await participations.ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
             if (memberships.Unreadable)
             {
                 return new SystemUserNoAccessSubjects(Only(systemUserId), "organization-membership");

@@ -1482,7 +1482,8 @@ public sealed class UnifiedEvaluatorSeamTests
         Mock<IDataverseService> dataverse,
         IMembershipResolverService membership,
         ParticipationWorld participations,
-        NoAccessListReader? denyReader = null)
+        NoAccessListReader? denyReader = null,
+        IContactIdentityStore? identityStore = null)
     {
         var standing = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
         return new AccessibleRecordSetService(
@@ -1490,6 +1491,7 @@ public sealed class UnifiedEvaluatorSeamTests
             participations,
             standing,
             denyReader ?? new SeamNoAccessListReader(),
+            identityStore ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 

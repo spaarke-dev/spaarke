@@ -170,6 +170,20 @@ public class SecureShareNoAccessGuardTests
     }
 
     [Fact]
+    public async Task WhenTheRecordsOrganizationsComeBackUnresolved_Refuses()
+    {
+        // Task 143 r1: the PRODUCTION fault shape. The real read reports Unresolved for the record and never throws for
+        // it — read as "references nothing", a wall on an organization the record references would be skipped.
+        _reads.UnreadableReferencedOrganizations[Record] = true;
+        _list.DenySystemUserOnOrganization(User, ReferencedOrg);
+
+        var decision = await Check();
+
+        decision.Outcome.Should().Be(SecureShareWallOutcome.Unverifiable);
+        decision.Fault.Should().Be("referenced-organizations");
+    }
+
+    [Fact]
     public async Task WhenTheDenyListReadFails_Refuses()
     {
         _list.Faults = true;

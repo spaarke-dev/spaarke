@@ -66,6 +66,12 @@ internal static class GrantPolicyTestDoubles
         /// </summary>
         public Exception? ReferencedOrganizationsThrow { get; set; }
 
+        /// <summary>
+        /// Task 143 r1: records whose referenced-organization read comes back <see cref="ReferencedOrganizations.Unresolved"/>
+        /// — the PRODUCTION fault shape (the real read reports the fault per record and never throws for it).
+        /// </summary>
+        public ConcurrentDictionary<Guid, bool> UnreadableReferencedOrganizations { get; } = new();
+
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
         {
@@ -147,9 +153,11 @@ internal static class GrantPolicyTestDoubles
             return Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
                 recordIds.Distinct().ToDictionary(
                     id => id,
-                    id => RecordOrganizations.TryGetValue(id, out var orgs)
-                        ? new ReferencedOrganizations(orgs, Unreadable: false)
-                        : ReferencedOrganizations.None));
+                    id => UnreadableReferencedOrganizations.ContainsKey(id)
+                        ? ReferencedOrganizations.Unresolved
+                        : RecordOrganizations.TryGetValue(id, out var orgs)
+                            ? new ReferencedOrganizations(orgs, Unreadable: false)
+                            : ReferencedOrganizations.None));
         }
     }
 
@@ -270,6 +278,7 @@ internal static class GrantPolicyTestDoubles
             participations,
             Mock.Of<ISubjectStandingGrantReader>(),
             reader,
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>

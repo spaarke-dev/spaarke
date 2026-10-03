@@ -101,30 +101,113 @@ public class NoAccessEnforcementStore
         return null;
     }
 
-    /// <summary>Up to <paramref name="max"/> ACTIVE entry ids; one more reports <c>Truncated</c>.</summary>
+    /// <summary>Rows per page of the active-entry scan (<c>Prefer: odata.maxpagesize</c>).</summary>
+    internal const int ScanPageSize = 500;
+
+    /// <summary>
+    /// EVERY active entry id, up to <paramref name="max"/>; one more reports <c>Truncated</c> (task 143 r1). Follows
+    /// <c>@odata.nextLink</c> page by page — before r1 this read one page of the newest 500, so an entry past it was never
+    /// enforced by the job at all.
+    /// </summary>
     internal virtual async Task<(IReadOnlyList<Guid> Ids, bool Truncated)> ReadActiveEntryIdsAsync(int max, CancellationToken ct)
     {
-        using var doc = await GetAsync(
-            $"sprk_noaccessentries?$filter=statecode eq 0&$select=sprk_noaccessentryid&$orderby=modifiedon desc&$top={max + 1}", ct);
+        var ids = new List<Guid>();
+        string? next = ActiveEntryScanPath;
+        while (next is not null)
+        {
+            var (page, nextLink) = await ReadActiveEntryIdPageAsync(next, ct).ConfigureAwait(false);
+            ids.AddRange(page);
+            if (ids.Count > max)
+            {
+                return (ids.Take(max).ToList(), true);
+            }
+
+            next = nextLink;
+        }
+
+        return (ids, false);
+    }
+
+    /// <summary>The first page of the active-entry scan.</summary>
+    internal const string ActiveEntryScanPath =
+        "sprk_noaccessentries?$filter=statecode eq 0&$select=sprk_noaccessentryid&$orderby=sprk_noaccessentryid";
+
+    /// <summary>One page of the active-entry scan and its <c>@odata.nextLink</c> (the wire seam).</summary>
+    internal virtual async Task<(IReadOnlyList<Guid> Ids, string? NextLink)> ReadActiveEntryIdPageAsync(
+        string pathOrNextLink, CancellationToken ct)
+    {
+        using var doc = await GetAsync(pathOrNextLink, ct, prefer: $"odata.maxpagesize={ScanPageSize}").ConfigureAwait(false);
         var ids = Values(doc).Select(r => GuidOf(r, "sprk_noaccessentryid")).OfType<Guid>().ToList();
-        return ids.Count > max ? (ids.Take(max).ToList(), true) : (ids, false);
+        var next = doc.RootElement.TryGetProperty("@odata.nextLink", out var link) && link.ValueKind == JsonValueKind.String
+            ? link.GetString()
+            : null;
+        return (ids, next);
     }
 
     /// <summary>
     /// The ACTIVE entries whose object is this record or one of these organizations (task 143: re-apply No Access for
     /// ONE record — the task-142 "Update Access" command). One more than <paramref name="max"/> reports <c>Truncated</c>.
     /// </summary>
+    /// <remarks>
+    /// EVERY organization is asked about (task 143 r1): the organizations go out in OR-chunks of
+    /// <see cref="IdChunkSize"/>, the record clause rides in the first chunk, and the answers are unioned. Before r1 the
+    /// organization list was cut at the first <see cref="IdChunkSize"/> with no signal — an entry on a referenced
+    /// organization past the 50th was silently missed, against this module's "never a silent prefix" rule.
+    /// </remarks>
     internal virtual async Task<(IReadOnlyList<Guid> Ids, bool Truncated)> ReadActiveEntryIdsCoveringAsync(
         Guid recordId, IReadOnlyCollection<Guid> organizationIds, int max, CancellationToken ct)
     {
-        var objects = new List<string> { $"sprk_objectrecordid eq '{recordId}'" };
-        objects.AddRange(organizationIds.Where(o => o != Guid.Empty).Distinct().Take(IdChunkSize)
-            .Select(o => $"_sprk_objectorganization_value eq {o}"));
+        var found = new List<Guid>();
+        foreach (var objectFilter in CoveringObjectFilters(recordId, organizationIds))
+        {
+            foreach (var id in await QueryActiveEntryIdsAsync(objectFilter, max + 1, ct).ConfigureAwait(false))
+            {
+                if (!found.Contains(id))
+                {
+                    found.Add(id);
+                }
+            }
+
+            if (found.Count > max)
+            {
+                return (found.Take(max).ToList(), true);
+            }
+        }
+
+        return (found, false);
+    }
+
+    /// <summary>
+    /// The object filters one record-scoped re-apply sends: the record clause plus the FIRST organization chunk, then
+    /// one filter per further chunk of <see cref="IdChunkSize"/> organizations. Every distinct organization appears in
+    /// exactly one filter.
+    /// </summary>
+    internal static IReadOnlyList<string> CoveringObjectFilters(Guid recordId, IReadOnlyCollection<Guid> organizationIds)
+    {
+        var chunks = organizationIds.Where(o => o != Guid.Empty).Distinct().Chunk(IdChunkSize).ToList();
+        var filters = new List<string>();
+        var recordClause = $"sprk_objectrecordid eq '{recordId}'";
+        if (chunks.Count == 0)
+        {
+            filters.Add(recordClause);
+            return filters;
+        }
+
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var clauses = chunks[i].Select(o => $"_sprk_objectorganization_value eq {o}");
+            filters.Add(string.Join(" or ", i == 0 ? clauses.Prepend(recordClause) : clauses));
+        }
+
+        return filters;
+    }
+
+    /// <summary>One active-entry query: the ids whose object matches <paramref name="objectFilter"/> (the wire seam).</summary>
+    internal virtual async Task<IReadOnlyList<Guid>> QueryActiveEntryIdsAsync(string objectFilter, int top, CancellationToken ct)
+    {
         using var doc = await GetAsync(
-            $"sprk_noaccessentries?$filter=statecode eq 0 and ({string.Join(" or ", objects)})" +
-            $"&$select=sprk_noaccessentryid&$top={max + 1}", ct);
-        var ids = Values(doc).Select(r => GuidOf(r, "sprk_noaccessentryid")).OfType<Guid>().ToList();
-        return ids.Count > max ? (ids.Take(max).ToList(), true) : (ids, false);
+            $"sprk_noaccessentries?$filter=statecode eq 0 and ({objectFilter})&$select=sprk_noaccessentryid&$top={top}", ct);
+        return Values(doc).Select(r => GuidOf(r, "sprk_noaccessentryid")).OfType<Guid>().ToList();
     }
 
     /// <summary>The entity logical name a <c>sprk_recordtype_ref</c> row stands for, or <c>null</c> when it has none.</summary>
@@ -222,13 +305,38 @@ public class NoAccessEnforcementStore
 
     // ── Wire ──────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken ct)
+    /// <param name="relativeUrl">A path under the Web API root, or an <c>@odata.nextLink</c> the same root returned (an
+    /// absolute URL is followed ONLY when it is under that root — the app token is never sent anywhere else).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="prefer">An optional <c>Prefer</c> header (the scan's page size).</param>
+    private async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken ct, string? prefer = null)
     {
+        var apiUrl = GetDataverseApiUrl();
+        string url;
+        if (Uri.TryCreate(relativeUrl, UriKind.Absolute, out _))
+        {
+            if (!relativeUrl.StartsWith(apiUrl + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("A Dataverse next-page link pointed outside the Web API root; not followed.");
+            }
+
+            url = relativeUrl;
+        }
+        else
+        {
+            url = $"{apiUrl}/{relativeUrl}";
+        }
+
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{GetDataverseApiUrl()}/{relativeUrl}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("OData-MaxVersion", "4.0");
         request.Headers.Add("OData-Version", "4.0");
+        if (prefer is not null)
+        {
+            request.Headers.Add("Prefer", prefer);
+        }
+
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);

@@ -651,7 +651,9 @@ public class OrganizationMembershipReadTests
         // No walk produces records here — org baselines are NotHeld — so the resolver contributes nothing.
         var membership = new Mock<IMembershipResolverService>();
         return new AccessibleRecordSetService(
-            membership.Object, participations, standing, denyList, NullLogger<AccessibleRecordSetService>.Instance);
+            membership.Object, participations, standing, denyList,
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            NullLogger<AccessibleRecordSetService>.Instance);
     }
 
     private static Mock<ISubjectStandingGrantReader> StandingReader()

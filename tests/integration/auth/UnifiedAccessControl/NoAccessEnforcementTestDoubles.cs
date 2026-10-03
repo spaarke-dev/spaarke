@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
@@ -86,10 +87,19 @@ internal static class NoAccessEnforcementTestDoubles
         public void Person(Guid id, bool disabled = false, Guid? applicationId = null)
             => People[id] = new EnforcementSystemUser(id, disabled, applicationId);
 
+        /// <summary>Task 143 r1: every entry id the enforcer read, in order — which entries a run enforced.</summary>
+        public ConcurrentQueue<Guid> EntryReads { get; } = new();
+
+        /// <summary>Task 143 r1: the record-owner read throws (residual access through team ownership unverifiable).</summary>
+        public bool FailOwnerRead { get; set; }
+
         internal override Task<NoAccessEntrySnapshot?> ReadEntryAsync(Guid entryId, CancellationToken ct)
-            => FailEntryRead
+        {
+            EntryReads.Enqueue(entryId);
+            return FailEntryRead
                 ? throw new HttpRequestException("Simulated entry read failure.")
                 : Task.FromResult(Entries.TryGetValue(entryId, out var e) ? e : null);
+        }
 
         internal override Task<(IReadOnlyList<Guid> Ids, bool Truncated)> ReadActiveEntryIdsAsync(int max, CancellationToken ct)
         {
@@ -135,7 +145,9 @@ internal static class NoAccessEnforcementTestDoubles
                 .Where(teamIds.Contains).ToHashSet());
 
         internal override Task<Guid?> ReadOwningTeamAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
-            => Task.FromResult(OwningTeams.TryGetValue(recordId, out var t) ? t : (Guid?)null);
+            => FailOwnerRead
+                ? throw new HttpRequestException("Simulated owner read failure.")
+                : Task.FromResult(OwningTeams.TryGetValue(recordId, out var t) ? t : (Guid?)null);
 
         internal override Task<AccessRights> GetPrincipalRightsAsync(
             Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct)
@@ -181,7 +193,11 @@ internal static class NoAccessEnforcementTestDoubles
 
         public RecordingCache Cache { get; } = new();
 
+        /// <summary>The per-record removal lease (task 143 r1, S5). Shared by every enforcer this harness builds, as the
+        /// scheduler's singleton lease store is shared by every enforcement in a process.</summary>
+        public IScheduledJobLease Lease { get; set; } = new ProcessLocalScheduledJobLease();
+
         public NoAccessShareEnforcer Enforcer => new(
-            Store, Participations, Identities, Shares, Cache.Mock.Object, NullLogger<NoAccessShareEnforcer>.Instance);
+            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, NullLogger<NoAccessShareEnforcer>.Instance);
     }
 }

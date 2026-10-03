@@ -345,4 +345,154 @@ public class NoAccessShareEnforcerTests
         report.Failures.Should().ContainSingle(f => f.Kind == "author-rights-unreadable");
         _h.Shares.Writes.Should().BeEmpty();
     }
+
+    // ── Task 143 r1: the production fault shapes, and S5 under concurrency ─────────────────────────────────
+
+    [Fact]
+    public async Task EnforceForRecord_WhenTheRecordsOrganizationsComeBackUnresolved_FailsAndRemovesNothing()
+    {
+        // The PRODUCTION fault shape: the referenced-organization read reports Unresolved for the record and never
+        // throws for it. Treating that as "references nothing" would skip every entry on a referenced organization.
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        _h.Participations.UnreadableReferencedOrganizations[SecureProject] = true;
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(Project, SecureProject, new[] { Tenant }, CancellationToken.None);
+
+        var report = reports.Should().ContainSingle().Subject;
+        report.Outcome.Should().Be(NoAccessEnforcementOutcome.Failed);
+        report.Failures.Should().ContainSingle(f => f.Kind == "covering-entries-unreadable");
+        _h.Shares.Writes.Should().BeEmpty("nothing is enforced from a covering set that could not be read");
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheRecordsOwnerCannotBeRead_ResidualAccessIsAFailure_NeverReportedClean()
+    {
+        // Criterion 7: access through team OWNERSHIP cannot be judged without the owner. The direct share still goes
+        // (that removal does not depend on the owner); the residual check is a failure, never "nothing left".
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Store.FailOwnerRead = true;
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse();
+        report.Failures.Should().ContainSingle(f => f.Kind == "residual-access-unverifiable" && f.SystemUserId == Walled);
+        report.NotEnforceable.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Enforce_WhileAnotherEnforcementHoldsTheRecordsRemovalLock_RemovesNothing_AndSaysTryAgain()
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        var held = await _h.Lease.TryAcquireAsync(
+            NoAccessShareEnforcer.RecordLockId(Project, SecureProject), null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+
+        var busy = await Enforce(entry);
+
+        busy.Removed.Should().BeEmpty();
+        busy.Failures.Should().ContainSingle(f => f.Kind == "record-busy" && f.RecordId == SecureProject);
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
+
+        await _h.Lease.ReleaseAsync(NoAccessShareEnforcer.RecordLockId(Project, SecureProject), held.Token!, CancellationToken.None);
+        (await Enforce(entry)).Removed.Should().ContainSingle(r => r.SystemUserId == Walled, "once the lock is free it removes");
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheRemovalLockCannotBeTaken_RemovesNothing()
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Lease = new UnavailableLease();
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().ContainSingle(f => f.Kind == "record-lock-unavailable");
+        _h.Shares.Writes.Should().BeEmpty("no lock, no removal: S5 cannot be protected without it (fail closed)");
+    }
+
+    [Fact]
+    public async Task TwoConcurrentEnforcements_OnASecureRecordWhoseOnlyReadersAreBothWalled_NeverRemoveBoth()
+    {
+        // Owner S5 under concurrency (verifier finding 6): the save-time endpoint for one entry and the job (or a second
+        // endpoint call) for another, interleaved so the SECOND starts while the first is between its "someone else
+        // keeps access" check and its revoke. Without a per-record lock each sees the other user as the reader who
+        // remains, and both are removed — a secure record nobody can open.
+        var walledToo = Guid.NewGuid();
+        _h.Store.Person(walledToo);
+        _h.Shares.Reset(); // only the two walled users can read the record
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Shares.Seed(Project, SecureProject, User(walledToo), CollaborateMask);
+        var first = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        var second = _h.Store.AddEntry(subjectUser: walledToo, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        NoAccessEnforcementReport? secondReport = null;
+        var interleaved = new InterleavingShares(_h.Shares);
+        var other = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, _h.Shares, _h.Cache.Mock.Object,
+            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+        interleaved.BeforeFirstRevoke = async () =>
+            secondReport = await other.EnforceEntryAsync(second, new[] { Tenant }, CancellationToken.None);
+        var enforcer = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, interleaved, _h.Cache.Mock.Object,
+            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+
+        var firstReport = await enforcer.EnforceEntryAsync(first, new[] { Tenant }, CancellationToken.None);
+
+        secondReport.Should().NotBeNull("the second enforcement ran inside the first one's removal window");
+        var stillReading = new[] { Walled, walledToo }
+            .Where(u => _h.Shares.MaskOf(Project, SecureProject, User(u)) is { } m && (m & 1) != 0)
+            .ToList();
+        stillReading.Should().NotBeEmpty("a secure record always keeps at least one person who can open it (owner S5)");
+        firstReport.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+        secondReport!.Removed.Should().BeEmpty();
+        secondReport.Failures.Should().ContainSingle(f => f.Kind == "record-busy",
+            "the second enforcement waits its turn; the job retries it within 5 minutes");
+    }
+
+    /// <summary>A lease store that cannot be reached (Redis down).</summary>
+    private sealed class UnavailableLease : Spaarke.Scheduling.IScheduledJobLease
+    {
+        public bool IsDistributed => true;
+
+        public Task<Spaarke.Scheduling.ScheduledJobLeaseGrant> TryAcquireAsync(
+            string jobId, DateTimeOffset? occurrenceUtc, TimeSpan duration, CancellationToken cancellationToken)
+            => throw new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("Simulated: Redis is not connected.");
+
+        public Task<bool> RenewAsync(string jobId, string token, TimeSpan duration, CancellationToken cancellationToken)
+            => throw new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("Simulated.");
+
+        public Task ReleaseAsync(string jobId, string token, CancellationToken cancellationToken)
+            => throw new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("Simulated.");
+    }
+
+    /// <summary>The strict share table, with a hook that runs ONCE just before the first revoke reaches it.</summary>
+    private sealed class InterleavingShares(FakeRecordShareTable inner) : Sprk.Bff.Api.Services.Access.IDataverseRecordShareService
+    {
+        public Func<Task>? BeforeFirstRevoke { get; set; }
+
+        public Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
+            CancellationToken ct = default) => inner.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+
+        public Task ModifyAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
+            CancellationToken ct = default) => inner.ModifyAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+
+        public async Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal,
+            CancellationToken ct = default)
+        {
+            if (BeforeFirstRevoke is { } hook)
+            {
+                BeforeFirstRevoke = null;
+                await hook();
+            }
+
+            await inner.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+        }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId,
+            CancellationToken ct = default) => inner.GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName,
+            Guid recordId, CancellationToken ct = default) => inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+    }
 }
