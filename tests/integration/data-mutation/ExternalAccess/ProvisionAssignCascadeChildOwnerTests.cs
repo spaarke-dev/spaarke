@@ -167,15 +167,18 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
     }
 
     /// <summary>
-    /// The two restore outcomes that end in "unknown", not "refused" (owner round 10 item 4: "a child whose restore fails is
-    /// named"). <c>Unreadable</c>: the child's owner cannot be read before the restore, so nothing is written to it.
-    /// <c>Unverified</c>: its PATCH is sent but it cannot be read back. Each is a failure — never "already owned" or
-    /// "restored" — named with its own owner, its outcome and the call that puts it back, in the response and in a CRITICAL
-    /// line, with no "retry". The other child is still put back.
+    /// The restore outcomes besides <c>Refused</c> (owner round 10 item 4: "a child whose restore fails is named").
+    /// <c>Unreadable</c>: the child's owner cannot be read before the restore, so nothing is written to it.
+    /// <c>Unverified</c>: its PATCH is sent but it cannot be read back. <c>NotApplied</c> (task 133 c1-r2): its PATCH is
+    /// accepted but not applied — the read-back finds it still on the owner the undo's cascade left. Each is a failure —
+    /// never "already owned" or "restored" — named with its own owner, its outcome and the call that puts it back, in the
+    /// response and in a CRITICAL line, with no "retry" (another run would snapshot the owner it has now). The other child
+    /// is still put back.
     /// </summary>
     [Theory]
     [InlineData("Unreadable")]
     [InlineData("Unverified")]
+    [InlineData("NotApplied")]
     public async Task Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored(string outcome)
     {
         var projectId = Guid.NewGuid();
@@ -189,10 +192,12 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         _fixture.SeedCascadeChild(projectId, Location, otherLocation, otherOwner);
         _fixture.SharePointDocumentReadRefused = false;
         _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof fails → compensate
-        if (outcome == "Unreadable")
-            _fixture.FailChildOwnerReadFor = unknownLocation;              // its read BEFORE the restore throws
-        else
-            _fixture.FailChildOwnerReadBackAfterBindFor = unknownLocation; // its read-back AFTER the PATCH throws
+        switch (outcome)
+        {
+            case "Unreadable": _fixture.FailChildOwnerReadFor = unknownLocation; break;              // its read BEFORE the restore throws
+            case "Unverified": _fixture.FailChildOwnerReadBackAfterBindFor = unknownLocation; break; // its read-back AFTER the PATCH throws
+            default: _fixture.IgnoreChildOwnerBindFor = unknownLocation; break;                      // its PATCH is accepted, not applied
+        }
 
         var response = await ProvisionAsync(new { projectId });
 
@@ -233,20 +238,30 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         }
         else
         {
-            writesToUnknown.Should().ContainSingle("the PATCH was sent; only its read-back failed")
+            writesToUnknown.Should().ContainSingle("the PATCH was sent once; only its read-back failed, or it was not applied")
                 .Which.Payload["ownerid@odata.bind"].Should().Be($"/systemusers({unknownOwner.Id})");
+        }
+
+        if (outcome == "NotApplied")
+        {
+            _fixture.OwnerOfCascadeChild(unknownLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
+                "the PATCH was accepted and not applied: the child is still where the undo's cascade left it");
         }
     }
 
     /// <summary>
     /// The snapshot cannot be read completely: refused BEFORE any write (a move whose cascade could not be undone child by
-    /// child is not attempted). A transient failure is the same caller's retry; a 400 is Dataverse refusing the read —
-    /// deterministic, so the detail says calling again repeats it.
+    /// child is not attempted). A transient failure is the same caller's retry; a 400 is Dataverse refusing the read, and a
+    /// 401 / 403 is Dataverse refusing the service's sign-in or its Read privilege on the table (task 133 c1-r2 — e.g. a BFF
+    /// application user without Read on <c>sharepointdocumentlocation</c>) — each deterministic, so the detail says calling
+    /// again repeats it and names the privilege, and no retry is offered for a read that fails every time.
     /// </summary>
     [Theory]
     [InlineData(HttpStatusCode.ServiceUnavailable, "unreadable")]
     [InlineData(HttpStatusCode.TooManyRequests, "unreadable")]
     [InlineData(HttpStatusCode.BadRequest, "refused")]
+    [InlineData(HttpStatusCode.Unauthorized, "refused")]
+    [InlineData(HttpStatusCode.Forbidden, "refused")]
     public async Task Provisioning_WhenTheCascadedRowsCannotBeRead_RefusesBeforeAnyWrite(HttpStatusCode status, string state)
     {
         var projectId = Guid.NewGuid();
@@ -261,8 +276,12 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCascadeChildrenUnreadable);
         problem.GetProperty("childTable").GetString().Should().Be(Location);
         problem.GetProperty("cascadeChildState").GetString().Should().Be(state);
-        problem.GetProperty("detail").GetString().Should().Contain("BEFORE changing anything").And.Contain(
-            state == "refused" ? "Calling again repeats this refusal" : "The same caller may retry");
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("BEFORE changing anything");
+        if (state == "refused")
+            detail.Should().Contain("Calling again repeats this refusal").And.Contain("Read privilege").And.NotContain("retry");
+        else
+            detail.Should().Contain("The same caller may retry");
         _fixture.Updates.Should().BeEmpty("refused before any mutation");
         _fixture.Grants.Should().BeEmpty();
         _fixture.Modifies.Should().BeEmpty();
@@ -278,24 +297,33 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
     }
 
     /// <summary>
-    /// The snapshot reads ONE page: a full page may not be every row, and a row read without an owner cannot be put
-    /// back. Either is incomplete — refused before any write, deterministically (calling again reads the same).
+    /// The snapshot reads ONE page: a full page may not be every row, and a row read without an owner — or without its id
+    /// (task 133 c1-r2) — cannot be put back. Each is incomplete — refused before any write, deterministically (calling
+    /// again reads the same). An id-less row is never recorded under an empty id: the restore's by-id read of that would
+    /// find no row and report <c>Gone</c>, which counts as back.
     /// </summary>
     [Theory]
     [InlineData("full-page")]
     [InlineData("ownerless-row")]
+    [InlineData("idless-row")]
     public async Task Provisioning_WhenTheCascadedRowsAreReadIncompletely_RefusesBeforeAnyWrite(string shape)
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
-        if (shape == "full-page")
+        switch (shape)
         {
-            for (var i = 0; i < Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.PageLimit; i++)
-                _fixture.SeedCascadeChild(projectId, Location, Guid.NewGuid(), DataversePrincipalRef.User(Guid.NewGuid()));
-        }
-        else
-        {
-            _fixture.SeedCascadeChild(projectId, Location, Guid.NewGuid(), DataversePrincipalRef.User(Guid.Empty));
+            case "full-page":
+                for (var i = 0; i < Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.PageLimit; i++)
+                    _fixture.SeedCascadeChild(projectId, Location, Guid.NewGuid(), DataversePrincipalRef.User(Guid.NewGuid()));
+                break;
+            case "ownerless-row":
+                _fixture.SeedCascadeChild(projectId, Location, Guid.NewGuid(), DataversePrincipalRef.User(Guid.Empty));
+                break;
+            default:
+                var idless = Guid.NewGuid();
+                _fixture.SeedCascadeChild(projectId, Location, idless, DataversePrincipalRef.User(Guid.NewGuid()));
+                _fixture.ChildRowReadWithoutIdFor = idless;
+                break;
         }
         _fixture.SharePointDocumentReadRefused = false;
 
@@ -354,6 +382,39 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         _fixture.Queries.Should().Contain(q => q.EntitySet == "sharepointdocumentlocations"
                                                && q.Filter == $"_regardingobjectid_value eq {projectId}");
         _fixture.Queries.Should().NotContain(q => q.EntitySet == "sharepointdocuments");
+    }
+
+    /// <summary>
+    /// Where no owner move cascades, nothing is snapshotted (task 133 c1-r2, verifier item 3; note §16.3). A work
+    /// assignment IS moved, but its Assign cascades to no table (live metadata 2026-10-03), so no cascaded row is read. A
+    /// resume (the record is already owned by the team, with no container) makes no owner move at all.
+    /// </summary>
+    /// <remarks>Beyond the closed set: pins §16.3's "Resume; work assignment — no snapshot" row, which a seed that described
+    /// a work assignment as cascading (or snapshotted on resume) survived — refusing more, but adding reads the live
+    /// metadata says are needless.</remarks>
+    [Theory]
+    [InlineData("workassignment", false)]
+    [InlineData("project", true)]
+    [InlineData("matter", true)]
+    public async Task Provisioning_WhenNoOwnerMoveCascades_ReadsNoCascadedRows(string recordType, bool resume)
+    {
+        var recordId = Guid.NewGuid();
+        Guid? owningTeam = resume ? ProvisionProjectTestFixture.SecureOwnerTeamId : null;
+        switch (recordType)
+        {
+            case "workassignment": _fixture.SeedWorkAssignment(recordId, owningTeamId: owningTeam); break;
+            case "matter": _fixture.SeedMatter(recordId, owningTeamId: owningTeam); break;
+            default: _fixture.SeedProject(recordId, owningTeamId: owningTeam); break;
+        }
+
+        var response = await ProvisionAsync(new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().Be(resume);
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.Queries.Should().NotContain(q => q.EntitySet == "sharepointdocumentlocations" || q.EntitySet == "sharepointdocuments",
+            resume ? "a resume makes no owner move, so nothing cascades" : "a work assignment's Assign cascades to no table");
     }
 
     /// <summary>

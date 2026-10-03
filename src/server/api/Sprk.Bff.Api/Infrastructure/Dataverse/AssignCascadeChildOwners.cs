@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <para><b>Fail closed (ADR-003).</b> A snapshot either reads every owner-bearing child completely or fails, naming
 /// the table: an unreadable child set is never "no children". A caller that cannot snapshot must not make the Assign
 /// it would need to undo. A full page (<see cref="PageLimit"/> rows) counts as incomplete — <c>QueryAsync</c> reads one
-/// page. A child read without an owner cannot be put back, so it fails the snapshot too.</para>
+/// page. A child read without an id or an owner cannot be put back, so it fails the snapshot too.</para>
 ///
 /// <para><b>Restore is keyed on observed state.</b> <see cref="RestoreAsync"/> reads each snapshotted child: one that
 /// reads as its snapshotted owner is left alone; one that does not is assigned back — its own operation, never folded
@@ -251,12 +251,19 @@ public static class AssignCascadeChildOwners
     }
 
     /// <summary>
-    /// A 400 is Dataverse REFUSING the read — deterministic: the same query is refused again (for
-    /// <c>sharepointdocument</c>, the integration is off). Anything else may pass on the next call.
-    /// <c>DataverseWebApiClient</c> surfaces only the status (<c>EnsureSuccessStatusCode</c>).
+    /// Deterministic — the same query is refused again until an administrator acts: a 400 (Dataverse REFUSING the read;
+    /// for <c>sharepointdocument</c>, the integration is off), and a 401 or 403 (the service's own sign-in, or its Read
+    /// privilege on the table, refused — e.g. a BFF application user without Read on <c>sharepointdocumentlocation</c>;
+    /// <c>DataverseWebApiClient</c> renews its token five minutes before expiry, so a 401 is not a stale token). Anything
+    /// else (a 5xx, a 429, a timeout) may pass on the next call. <c>DataverseWebApiClient</c> surfaces only the status
+    /// (<c>EnsureSuccessStatusCode</c>). Task 133 c1-r2 (verifier item 4): a 401/403 had been <c>Unreadable</c>, so the
+    /// caller was told to retry a read that fails every time.
     /// </summary>
     private static CascadeReadFailure FailureOf(Exception ex) =>
-        ex is HttpRequestException { StatusCode: HttpStatusCode.BadRequest }
+        ex is HttpRequestException
+        {
+            StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+        }
             ? CascadeReadFailure.Refused
             : CascadeReadFailure.Unreadable;
 
@@ -328,12 +335,12 @@ public enum CascadeReadFailure
     /// <summary>The snapshot was read.</summary>
     None,
 
-    /// <summary>A read failed in a way the next call may not repeat (anything but a 400).</summary>
+    /// <summary>A read failed in a way the next call may not repeat (anything but a 400, 401 or 403).</summary>
     Unreadable,
 
     /// <summary>
-    /// Deterministic: Dataverse refused the read (400), a full page was returned, or a row came back without an id or an
-    /// owner. Calling again repeats it.
+    /// Deterministic: Dataverse refused the read (400), or refused the service's sign-in or Read privilege for it (401,
+    /// 403); a full page was returned; or a row came back without an id or an owner. Calling again repeats it.
     /// </summary>
     Refused
 }

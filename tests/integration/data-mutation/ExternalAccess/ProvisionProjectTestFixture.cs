@@ -366,6 +366,19 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public Guid? FailChildOwnerBindFor { get; set; }
 
     /// <summary>
+    /// An <c>ownerid</c> PATCH on THIS cascade child is ACCEPTED (recorded, no error) but NOT applied: the child keeps the
+    /// owner it had (task 133 c1-r2). The child-level twin of <see cref="OwnershipPatchIsApplied"/> — Dataverse's silent
+    /// <c>@odata.bind</c> failure — so the restore's read-back, not the PATCH's success, must decide.
+    /// </summary>
+    public Guid? IgnoreChildOwnerBindFor { get; set; }
+
+    /// <summary>
+    /// A read of THIS cascade child returns its row WITHOUT its id column (task 133 c1-r2): a row the snapshot could not
+    /// key a restore on, so the snapshot must refuse it — never record it under an empty id.
+    /// </summary>
+    public Guid? ChildRowReadWithoutIdFor { get; set; }
+
+    /// <summary>
     /// A by-id read of THIS cascade child throws 503, in the real client's shape (task 133 c1-r1): the restore's read of
     /// its current owner, BEFORE any PATCH — a child whose owner cannot be read, so nothing is written to it. The
     /// snapshot's by-regarding read is unaffected.
@@ -505,6 +518,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SharePointDocumentReadRefused = true;
         CascadeChildSnapshotReadFailsWith = null;
         FailChildOwnerBindFor = null;
+        IgnoreChildOwnerBindFor = null;
+        ChildRowReadWithoutIdFor = null;
         FailChildOwnerReadFor = null;
         FailChildOwnerReadBackAfterBindFor = null;
         _cascadeChildBindsApplied.Clear();
@@ -654,6 +669,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         {
             if (FailChildOwnerBindFor == id)
                 throw new InvalidOperationException("Dataverse 403: simulated refusal of a child row's ownership assignment.");
+
+            // Task 133 c1-r2: accepted, recorded above, and silently not applied.
+            if (IgnoreChildOwnerBindFor == id)
+                return Task.CompletedTask;
 
             if (ParseIdFromBind(childBind) is { } childOwnerId)
             {
@@ -986,10 +1005,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                                 && (regardingRoot is { } rootId
                                     ? c.RootId == rootId
                                     : filter is not null && filter.Contains(c.Id.ToString(), StringComparison.OrdinalIgnoreCase)))
-                    .Select(c => new Dictionary<string, object?>
+                    .Select(c =>
                     {
-                        [c.IdColumn] = c.Id,
-                        [c.Owner.Kind == DataversePrincipalKind.SystemUser ? "_owninguser_value" : "_owningteam_value"] = c.Owner.Id
+                        var row = new Dictionary<string, object?>
+                        {
+                            [c.Owner.Kind == DataversePrincipalKind.SystemUser ? "_owninguser_value" : "_owningteam_value"] = c.Owner.Id
+                        };
+                        if (ChildRowReadWithoutIdFor != c.Id) // task 133 c1-r2: a row read without its id column
+                            row[c.IdColumn] = c.Id;
+                        return row;
                     }));
                 break;
 

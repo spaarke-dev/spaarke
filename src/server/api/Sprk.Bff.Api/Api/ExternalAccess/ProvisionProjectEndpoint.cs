@@ -274,8 +274,9 @@ public static class ProvisionProjectEndpoint
     /// locations and documents) could not be read completely before any write, so the move could not be undone child by
     /// child if a later step failed — refused before any mutation (task 133, owner round 10 item 4). The
     /// <c>cascadeChildState</c> extension says which: <c>unreadable</c> (a read failed; the same caller may call again)
-    /// or <c>refused</c> (Dataverse refused the read, or it came back incomplete — deterministic: an administrator
-    /// looks at the <c>childTable</c> rows first). <c>childTable</c> names the table.
+    /// or <c>refused</c> (Dataverse refused the read — a 400, or a 401/403 refusing the service's sign-in or Read
+    /// privilege — or it came back incomplete; deterministic: an administrator looks at the <c>childTable</c> rows and the
+    /// service's Read privilege on that table first). <c>childTable</c> names the table.
     /// </summary>
     internal const string ReasonCascadeChildrenUnreadable = "sdap.provision.cascade_children_unreadable";
 
@@ -1498,9 +1499,10 @@ public static class ProvisionProjectEndpoint
             $"Moving the {root.DisplayLabel.ToLowerInvariant()} to the Secure Record owner team also moves the related " +
             $"{table} rows Dataverse re-owns with it, so provisioning records each one's own owner first, to put it back " +
             "if a later step fails. " + (deterministic
-                ? $"Dataverse refused the read of those rows (or answered it incompletely), so provisioning stopped " +
-                  "BEFORE changing anything: the record's ownership and shares are as they were. Calling again repeats " +
-                  $"this refusal: an administrator looks at the record's {table} rows first."
+                ? $"Dataverse refused the read of those rows, or the service's permission to read them (or answered " +
+                  "it incompletely), so provisioning stopped BEFORE changing anything: the record's ownership and shares " +
+                  "are as they were. Calling again repeats this refusal: an administrator looks at the record's " +
+                  $"{table} rows, and the service's Read privilege on that table, first."
                 : "Those rows could not be read, so provisioning stopped BEFORE changing anything: the record's ownership " +
                   "and shares are as they were. The same caller may retry once Dataverse is reachable."),
             traceId, (ReasonKey, ReasonCascadeChildrenUnreadable), ("childTable", table),

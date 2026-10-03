@@ -20,8 +20,10 @@
                                  compensation code (MoveWithCreatorShareAsync -> MoveOwnerAsync back +
                                  RestoreCreatorShareAsync), which no live state reaches without a fault. The code path is
                                  covered by the fixture tests; the replay proves the PLATFORM accepts the calls and
-                                 restores the pre-call state. Criterion (e) names "the compensation code path", so the
-                                 owner must accept replay as the recorded method, explicitly, when the gate is run.
+                                 restores the pre-call state. Criterion (e) names "the compensation code path"; replay
+                                 as the recorded method is ACCEPTED: owner round 13 item 2 (2026-10-03, BINDING) - (e)
+                                 on a throwaway TEST project is covered by round 11's approval of the batch-4 live
+                                 steps. It stays a main-session live step (task 133 note section 18).
     StrandForResume   (c)        -Apply. Takes -RecordId (a secure project the TEST USER created in the wizard, so its
                                  createdby is that user) into the stranded state by hand: owner -> named team, the test
                                  user's share revoked, sprk_containerid cleared. Then call provisioning as an
