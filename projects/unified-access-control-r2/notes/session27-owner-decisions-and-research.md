@@ -168,6 +168,66 @@ These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155,
    - **Contacts:** the external data plane scopes child rows through their root's accessible set. A contact's rights on a secure root, which come from direct named grants only (FR-22), extend to that root's children and no further. Task 136 makes the gate rights-based, and task 156 keeps the child→root link fresh.
    - Task 149 has not run yet; it is blocked on 146.
 
+## Owner answers, round 8 (2026-10-03). BINDING. Task 156's three open decisions; each "(Recommended)" option chosen.
+
+1. **The AI "update record" tool re-stamps INLINE (§6.5 path B), as round 7 item 3 did for the two AI create handlers.** `DataverseUpdateRecordHandler` calls a narrow, write-only re-stamp helper in the same operation, with no queued gap. This amends the tool's "User-OBO ONLY" spec rule for that one helper only; the user's own write stays OBO. Record the amendment in the handler's spec/notes and the POML. AC1 is then met with no exception.
+2. **F-051-6: `TaskActionCore` writes the standard ADR-024 regarding pair** (id, type when a ref exists, name, url), as every other regarding builder does. That makes new rows detectable by the stamp job. New rows only; nothing to backfill. The AI/communication "create task" follow-ups will show the regarding link in the UI.
+3. **A root column typed directly onto a row filed under another record: keep the rule AND lock the columns** (option 1 + 3). The pair decides, and the root columns on a filed row are a copy (option (b) stays whole in both directions). Make the four `sprk_regarding{core}` columns read-only on the to-do, event, communication and analysis forms, so the RegardingResolver picker is the only way to set a root. This is a form change; check first which forms expose the columns.
+
+Also from task 156's verifier, filed as work rather than decisions (the owner's no-deferral rule):
+- **#1098**: the events API (all 8 `/api/v1/events` routes) is sign-in-only over an app-only client, and `UpdateEventAsync` writes `sprk_regardingrecordtype` as an integer on a Lookup column.
+- **156 item 13a**: mirror `IntermediateRootColumns` in the TypeScript `PolymorphicResolverService.deriveCoreAncestorStamps`, with a C# lock-step test.
+
+## Owner answers, round 9 (2026-10-03). BINDING. The route authorization sweep (`notes/route-authorization-sweep-2026-10-02.md`); each "(Recommended)" option chosen.
+
+**The finding:** 82 of 419 BFF routes let ANY signed-in caller act on records it has no rights to. The route checks only sign-in, then reads or writes as the BFF's own identity on a record the caller chooses. That is 17 critical, 29 high, 30 medium and 6 low; the events API is #1098.
+
+1. **UAC-r2 fixes all 82**, including surfaces other projects own (Compose, communications, AI, SPE admin, Insights). One access-control pattern applies everywhere. File overlaps with active projects are coordinated through `/conflict-check` and GitHub issues, not handed off.
+2. **Timing: now, in parallel with batch 4.** The owner chose "critical + high now, medium/low right after". Nearly every surface has high findings, so each surface task covers all of that surface's findings, and all of them start now. Nothing waits on batch 4.
+3. **A build-time guard:** every BFF route must declare how it is authorized: a record-level check, an admin policy, or an explicit, reasoned waiver for a route that only touches the caller's own data. A new route with only a sign-in check fails the build. It extends task 074's `RouteAuthorizationGuardTests` to every route file. The 82 known findings start as Pending waivers owned by their fix tasks; the guard's stale-waiver rule then forces each fix to delete its waiver.
+
+**Fix pattern (from the existing decisions, not new):**
+- **Reads:** the caller's OWN Dataverse rights decide (D1, C9). Use OBO / the existing `DataverseImpersonation` helper, or a `CallerRecordAccessProbe` / `RetrievePrincipalAccess` pre-check on the exact record.
+- **Writes:** a rights pre-check as the user, then an app-only write only where a server invariant needs it (the 130/146 G5 pattern).
+- **Lists:** trimmed to what the caller can read.
+- **Failure:** fail closed (ADR-003). An unknown id and a denied id get the same answer.
+
+## Owner answers, round 10 (2026-10-03). BINDING. Each "(Recommended)" option chosen.
+
+**From the route-sweep task authoring (tasks 159-169):**
+1. **Routes with no caller: remove them if truly unused.** Delete a route when it has no caller in the repo AND is not in any published API description (e.g. the Copilot OpenAPI / plugin manifest); otherwise fix it. Candidates named: the internal Dataverse proxy (`/api/dataverse/fetch`, `/api/dataverse/record/...`), the AI prompt library (`/api/ai/prompts`), document `associate-record`, and the reporting module. Each removal is listed in its PR. Precedent: tasks 073/083.
+2. **Task 168, analysis form: add the RegardingResolver picker, then lock** its root columns, the same as the to-do, event and communication forms.
+
+**From batch 4 (all nine recommendations accepted):**
+3. **132:** during a RetrievePrincipalAccess outage, the degraded probe-derived answer stays UNCACHED (as built). Correctness first; the load stays at the no-cache baseline.
+4. **133, compensation's reverse Assign cascade:** coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned child's own owner (options (c) then (a)).
+5. **133, a kept-container record failing after its move:** as shipped. No automatic resume; the response names the Manage Access recovery.
+6. **143:** reusing `IScheduledJobLease` as the No Access enforcer's per-record mutex is ACCEPTED as a documented §6.5 path A exception to ADR-036 A1-7 / ADR-052 §5 (design.md §9 row). The PR cites it.
+7. **146:** moving a CHILD out of a secure root is an un-secure, so F3's limit applies: Full Access holders plus the creator.
+8. **146 E1:** unfiled communications (inbound, chat, outbound naming no record) keep their creator as owner. Filed ones are routed secure-if-any. MessagingIngestor's Pending waiver resolves on this.
+9. **150 F6 copy:** option A for rows 1, 3, 4, 5 and 6; the resume-neutral option D for row 2. Remove the DRAFT markers.
+10. **150 §11.6:** `/provision-project` may secure an UNFLAGGED record only for its creator (`createdby` / `sprk_createdbyperson`); already-flagged rows stay on the Write gate. "Secure an existing record" belongs to task 148's surface.
+11. **150 item 4:** invoices follow their matter. `sprk_invoice.sprk_issecure` is no longer a security input (remove it from the securable registry; the ancestor walk decides), and the column is locked like the roots.
+
+**Decided by the main session under existing decisions (reversible; recorded for the owner):**
+- **156:** the narrow write-only re-stamp helper ships as a sealed concrete class with one public member (`CoreAncestorAfterWriteRestamp`), which is ADR-010 compliant. It meets round 8 item 1's "narrow, write-only re-stamp helper".
+- **157 residual 4:** the shared DataGrid's external-host jest test becomes a blocking CI check (`sdap-ci.yml`); this project's hot-path declaration becomes ci-workflows = Y.
+- **133's interim app-only `sprk_createdbyperson` stamp** in `DataverseCreateRecordHandler`: superseded at integration by task 146's create-as-the-app (round 7 item 3), which writes the stamp in the create payload (133 note §13.8).
+
+## Owner answers, round 11 (2026-10-03). BINDING. Each "(Recommended)" option chosen.
+
+1. **142: ADR-034 Amendment A4 is ACCEPTED (§6.5 path B).** Assigned-To access for contacts is materialized as removable Collaborate grants (the substance is round 2 item 5 and Q5). The main session applies the concise `.claude/adr/ADR-034` edit with the 142 PR.
+2. **149, decision 3:** a window of **at most 2 minutes** is accepted for MDA Share/Unshare and for NEW or RE-FILED children to pick up the root's sharees. The scheduled reconcile is the mechanism, and it ships with writes on. Dataverse's table-wide Share/Unshare/Reparent cascade is NOT enabled.
+3. **149, decision 4:** ship gate. 146 and 149 may deploy, but no record is unsecured in a shared environment until task 148 (which re-owns the children, then calls `SyncRootAsync`) is deployed.
+4. **149:** a child under TWO secure roots gets the INTERSECTION of their sharee sets (fail closed), and ShareAccess is NOT mirrored onto children.
+
+**Live steps on dev for integrating batch 4: APPROVED, all of them,** each as dry run, then apply, then verify, recorded in the task's live-gate note:
+- schema and security: 133 `sprk_createdbyperson`; 142's assigned-access ledger table plus the "Update Access" ribbon; 143's No Access column plus O2 (only an access-administrator role reads No Access entries); 146's role extension 9→26 (round 7) plus Read on `sprk_emailreviewlog` for the BU default teams (G146-2); 150's null-flag repair plus the FLS lock on `sprk_issecure`, invoice included;
+- probes on TEST records only;
+- BFF and external SPA deploys.
+
+**Test user:** the main session creates ONE Entra test user plus its Dataverse user in "Spaarke Business Unit 1" (Spaarke Core User + Basic User, no shares on secure records). The credentials go to the owner, never into the repo.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
