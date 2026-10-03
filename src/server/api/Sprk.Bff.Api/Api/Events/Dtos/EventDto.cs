@@ -117,10 +117,9 @@ public record EventDto
 /// </summary>
 /// <remarks>
 /// unified-access-control-r2 task 159 (#1098): these used to be 1-7 (Draft/Planned/Open/OnHold/Completed/Cancelled/
-/// Deleted), values that do not exist on the table, so complete, cancel, delete and a PUT StatusCode wrote options
-/// Dataverse refuses. Read from live metadata (spaarkedev1, 2026-10-03; task note §0.2 (e)) and pinned by
-/// EventRegardingPayloadTests. There is no "Planned" and no "Deleted" status: a soft delete sets
-/// <see cref="Cancelled"/> and writes a <c>Deleted</c> event-log action.
+/// Deleted), values that do not exist on the table, so the create default, complete and the list's status filter
+/// wrote or matched options Dataverse does not have. Read from live metadata (spaarkedev1, 2026-10-03; task note
+/// §0.2 (e)) and pinned by EventRegardingPayloadTests. There is no "Planned" and no "Deleted" status.
 /// </remarks>
 public static class EventStatusCode
 {
@@ -133,13 +132,6 @@ public static class EventStatusCode
     public const int Transferred = 659490005;
     public const int OnHold = 659490006;
     public const int Reassigned = 659490007;
-
-    /// <summary>Every live statuscode, in display order — the set a PUT StatusCode is validated against.</summary>
-    public static IReadOnlyList<int> All { get; } =
-        [Draft, Open, OnHold, Reassigned, Completed, Closed, Cancelled, Transferred, NoFurtherAction];
-
-    /// <summary>True when <paramref name="statusCode"/> is a live <c>sprk_event</c> statuscode.</summary>
-    public static bool IsDefined(int statusCode) => All.Contains(statusCode);
 
     /// <summary>
     /// Converts status code to display name.

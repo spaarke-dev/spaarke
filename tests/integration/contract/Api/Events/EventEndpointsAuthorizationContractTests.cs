@@ -33,7 +33,7 @@ using EventStatusCode = Sprk.Bff.Api.Api.Events.Dtos.EventStatusCode;
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
 /// <summary>
-/// The per-record authorization of the eight <c>/api/v1/events</c> routes, exercised through the REAL
+/// The per-record authorization of the <c>/api/v1/events</c> routes, exercised through the REAL
 /// <c>MapEventEndpoints</c> (unified-access-control-r2 task 159, #1098).
 /// </summary>
 /// <remarks>
@@ -44,38 +44,31 @@ namespace Sprk.Bff.Api.Tests.Api.Events;
 /// test says so), and the Dataverse service seams the handlers sit on (<see cref="IEventDataverseService"/>,
 /// <see cref="ICallerSystemUserResolver"/>, <see cref="ICommunicationDataverseService"/>, <see cref="IGenericEntityService"/>
 /// and the resolver's column probe). No HTTP handler is mocked (ADR-038). Live behaviour is the main session's gate.</para>
-/// <para><b>Amendment applied.</b> A soft delete (DELETE /{id}) is a status update and costs WRITE on the event, not the
-/// Delete privilege (owner D1; the binding amendment overrides the POML's Delete requirement).</para>
+/// <para><b>Four routes are gone.</b> PUT /{id}, DELETE /{id}, POST /{id}/cancel and GET /{id}/logs had no caller and
+/// no published description, so task 159 deleted them (owner round 10 item 1);
+/// <see cref="DeletedRoutes_AreNotMapped_AndReachNothing"/> keeps them deleted.</para>
 /// </remarks>
 public class EventEndpointsAuthorizationContractTests
 {
     private const string EventsSet = "sprk_events";            // live EntityDefinitions, 2026-10-03
-    private const string ProjectsSet = "sprk_projects";        // live
     private const string MattersSet = "sprk_matters";          // live
     private const string AnalysesSet = "sprk_analysises";      // live — NOT "sprk_analysiss"
     private const string CreateEventPrivilege = "prvCreatesprk_Event"; // live privileges(name), 2026-10-03
 
     private static readonly Guid CallerSystemUserId = Guid.Parse("5ca11e40-0000-4000-8000-000000000159");
-    private static readonly Guid ProjectRecordTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+    private static readonly Guid ProjectRecordTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df"); // live row
 
     // =========================================================================================
     // Routes
     // =========================================================================================
 
-    /// <summary>The six /{id} routes and a body each accepts.</summary>
-    public static TheoryData<string> IdRoutes => new() { "get", "logs", "put", "delete", "complete", "cancel" };
+    /// <summary>The two /{id} routes left after the deletions.</summary>
+    public static TheoryData<string> IdRoutes => new() { "get", "complete" };
 
-    /// <summary>The routes whose required right is Write (Read alone is a 403).</summary>
-    public static TheoryData<string> WriteRoutes => new() { "put", "delete", "complete", "cancel" };
-
-    private static HttpRequestMessage IdRequest(string route, Guid id, object? body = null) => route switch
+    private static HttpRequestMessage IdRequest(string route, Guid id) => route switch
     {
         "get" => new HttpRequestMessage(HttpMethod.Get, $"/api/v1/events/{id}"),
-        "logs" => new HttpRequestMessage(HttpMethod.Get, $"/api/v1/events/{id}/logs"),
-        "put" => new HttpRequestMessage(HttpMethod.Put, $"/api/v1/events/{id}") { Content = JsonContent.Create(body ?? new { subject = "Renamed" }) },
-        "delete" => new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/events/{id}"),
         "complete" => new HttpRequestMessage(HttpMethod.Post, $"/api/v1/events/{id}/complete"),
-        "cancel" => new HttpRequestMessage(HttpMethod.Post, $"/api/v1/events/{id}/cancel"),
         _ => throw new ArgumentOutOfRangeException(nameof(route)),
     };
 
@@ -172,7 +165,7 @@ public class EventEndpointsAuthorizationContractTests
     }
 
     // =========================================================================================
-    // The six /{id} routes — no Read is the uniform 404; Read without the route's right is 403
+    // The /{id} routes — no Read is the uniform 404; Read without the route's right is 403
     // =========================================================================================
 
     [Theory]
@@ -193,7 +186,7 @@ public class EventEndpointsAuthorizationContractTests
     }
 
     [Theory]
-    [MemberData(nameof(WriteRoutes))]
+    [InlineData("complete")]
     public async Task WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(string route)
     {
         await using var host = await EventsAuthHost.StartAsync();
@@ -262,45 +255,9 @@ public class EventEndpointsAuthorizationContractTests
         (await response.Content.ReadFromJsonAsync<JsonObject>())!["id"]!.GetValue<Guid>().Should().Be(eventId);
     }
 
-    [Fact]
-    public async Task Logs_ReaderGets200WithTheLogs_AndTheLogQueryIsAskedForThatEvent()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read);
-        host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Events.Setup(e => e.QueryEventLogsAsync(eventId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new EventLogEntity { Id = Guid.NewGuid(), EventId = eventId, Action = EventLogAction.Created } });
-
-        var response = await host.SendAsync(IdRequest("logs", eventId));
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await response.Content.ReadFromJsonAsync<JsonObject>())!["totalCount"]!.GetValue<int>().Should().Be(1);
-    }
-
-    [Fact]
-    public async Task Delete_WriterGets204_StatusCancelledAndADeletedLogRow()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write); // no Delete: the amendment
-        host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Events.Setup(e => e.UpdateEventStatusAsync(eventId, EventStatusCode.Cancelled, null, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        host.Events.Setup(e => e.CreateEventLogAsync(eventId, EventLogAction.Deleted, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
-        var response = await host.SendAsync(IdRequest("delete", eventId));
-
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        host.Events.Verify(e => e.UpdateEventStatusAsync(eventId, EventStatusCode.Cancelled, null, It.IsAny<CancellationToken>()), Times.Once);
-        host.Events.Verify(e => e.CreateEventLogAsync(eventId, EventLogAction.Deleted, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
     [Theory]
     [InlineData("complete", EventStatusCode.Completed, EventLogAction.Completed)]
-    [InlineData("cancel", EventStatusCode.Cancelled, EventLogAction.Cancelled)]
-    public async Task CompleteAndCancel_WriterGets200_WithTheLiveStatusAndALogRow(string route, int newStatus, int logAction)
+    public async Task Complete_WriterGets200_WithTheLiveStatusAndALogRow(string route, int newStatus, int logAction)
     {
         await using var host = await EventsAuthHost.StartAsync();
         var eventId = Guid.NewGuid();
@@ -319,8 +276,7 @@ public class EventEndpointsAuthorizationContractTests
 
     [Theory]
     [InlineData("complete")]
-    [InlineData("cancel")]
-    public async Task CompleteAndCancel_InvalidTransitionIs400ForAWriter_ButTheUniform404ForACallerWithoutRead(string route)
+    public async Task Complete_InvalidTransitionIs400ForAWriter_ButTheUniform404ForACallerWithoutRead(string route)
     {
         await using var host = await EventsAuthHost.StartAsync();
         var writable = Guid.NewGuid();
@@ -336,116 +292,6 @@ public class EventEndpointsAuthorizationContractTests
         forStranger.StatusCode.Should().Be(HttpStatusCode.NotFound, "the transition check must not disclose the state of an event the caller cannot see");
         host.Events.Verify(e => e.GetEventAsync(unreadable, It.IsAny<CancellationToken>()), Times.Never);
         host.Events.Verify(e => e.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    // =========================================================================================
-    // PUT /api/v1/events/{id} — the re-parent
-    // =========================================================================================
-
-    [Fact]
-    public async Task Put_StatusUpdateNeedsOnlyWrite_TheSoftDeleteStatusIncluded()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write); // no Delete: the amendment
-        host.SetupEvent(eventId, EventStatusCode.Open);
-        var updates = host.CaptureUpdates(eventId);
-        host.Events.Setup(e => e.CreateEventLogAsync(eventId, EventLogAction.Updated, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
-        var response = await host.SendAsync(IdRequest("put", eventId, new { statusCode = EventStatusCode.Cancelled }));
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        updates.Should().ContainSingle().Which.StatusCode.Should().Be(EventStatusCode.Cancelled);
-    }
-
-    [Fact]
-    public async Task Put_Reparent_NeedsAppendOnTheEvent_AndAppendToOnTheNewRegarding()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        var project = Guid.NewGuid();
-        var body = new { regardingRecordType = 0, regardingRecordId = project, regardingRecordName = "P" };
-        host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_project", It.IsAny<CancellationToken>())).ReturnsAsync(ProjectsSet);
-
-        // Write without Append on the event: refused before the regarding is even looked at.
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write);
-        host.Probe.Grant(ProjectsSet, project, AccessRights.AppendTo);
-        var noAppend = await host.SendAsync(IdRequest("put", eventId, body));
-
-        // Append on the event, no AppendTo on the new regarding.
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
-        host.Probe.Grant(ProjectsSet, project, AccessRights.Read);
-        var noAppendTo = await host.SendAsync(IdRequest("put", eventId, body));
-
-        noAppend.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        noAppendTo.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        JsonNode.Parse(await noAppendTo.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>()
-            .Should().Be("sdap.access.deny.insufficient_rights");
-        host.Events.Verify(e => e.UpdateEventAsync(It.IsAny<Guid>(), It.IsAny<UpdateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Put_Reparent_UnknownAndDeniedNewRegarding_AreByteIdentical403s()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        var unknown = Guid.NewGuid();
-        var denied = Guid.NewGuid();
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
-        host.Probe.Grant(ProjectsSet, denied, AccessRights.Read);
-        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_project", It.IsAny<CancellationToken>())).ReturnsAsync(ProjectsSet);
-
-        var a = await host.SendAsync(IdRequest("put", eventId, new { regardingRecordType = 0, regardingRecordId = unknown }));
-        var b = await host.SendAsync(IdRequest("put", eventId, new { regardingRecordType = 0, regardingRecordId = denied }));
-
-        a.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        b.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        Normalize(await a.Content.ReadAsStringAsync()).Should().Be(Normalize(await b.Content.ReadAsStringAsync()));
-        host.Events.Verify(e => e.UpdateEventAsync(It.IsAny<Guid>(), It.IsAny<UpdateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Put_AuthorizedReparent_WritesTheNewTargetAndClearsTheOtherLookups()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-        var eventId = Guid.NewGuid();
-        var project = Guid.NewGuid();
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
-        host.Probe.Grant(ProjectsSet, project, AccessRights.AppendTo);
-        host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_project", It.IsAny<CancellationToken>())).ReturnsAsync(ProjectsSet);
-        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_project", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_recordtype_ref", ProjectRecordTypeRef));
-        var updates = host.CaptureUpdates(eventId);
-
-        var response = await host.SendAsync(IdRequest("put", eventId,
-            new { regardingRecordType = 0, regardingRecordId = project, regardingRecordName = "P" }));
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.Probe.RightsCalls.Should().Equal(
-            (EventsSet, eventId, true),   // "write" (the /{id} filter)
-            (EventsSet, eventId, true),   // "event.reparent" (Write | Append on the event)
-            (ProjectsSet, project, true)); // "event.attach_regarding" on the NEW regarding
-        var payload = DataverseWebApiService.BuildUpdateEventPayload(updates.Should().ContainSingle().Subject);
-        payload["sprk_RegardingProject@odata.bind"].Should().Be($"/{ProjectsSet}({project:D})");
-        payload["sprk_RegardingRecordType@odata.bind"].Should().Be($"/sprk_recordtype_refs({ProjectRecordTypeRef:D})");
-        payload.Should().ContainKey("sprk_RegardingMatter@odata.bind").WhoseValue.Should().BeNull("the previous parent is cleared in the same PATCH");
-    }
-
-    [Fact]
-    public async Task Put_ValidationRunsBeforeAuthorization()
-    {
-        await using var host = await EventsAuthHost.StartAsync();
-
-        var invalidStatus = await host.SendAsync(IdRequest("put", Guid.NewGuid(), new { statusCode = 99 }));
-        var halfRegarding = await host.SendAsync(IdRequest("put", Guid.NewGuid(), new { regardingRecordType = 1 }));
-
-        invalidStatus.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        halfRegarding.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        host.Probe.RightsCalls.Should().BeEmpty("a shape error discloses nothing about a record and asks nothing");
-        host.Events.VerifyNoOtherCalls();
     }
 
     // =========================================================================================
@@ -569,32 +415,23 @@ public class EventEndpointsAuthorizationContractTests
     }
 
     [Fact]
-    public async Task CreateAndReparent_CoreStampFailure_WritesNothing_And500sWithoutTheId()
+    public async Task Create_CoreStampFailure_WritesNothing_And500sWithoutTheId()
     {
         await using var host = await EventsAuthHost.StartAsync();
         var analysis = Guid.NewGuid();
-        var eventId = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
         host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
-        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
-        host.SetupEvent(eventId, EventStatusCode.Open);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
         host.ColumnProbe = (_, _) => throw new InvalidOperationException("metadata unavailable"); // the resolver fails closed (Error)
 
-        var create = await host.SendAsync(CreateRequest(new { subject = "Review", regardingRecordType = 3, regardingRecordId = analysis }));
-        var reparent = await host.SendAsync(IdRequest("put", eventId, new { regardingRecordType = 3, regardingRecordId = analysis }));
+        var response = await host.SendAsync(CreateRequest(new { subject = "Review", regardingRecordType = 3, regardingRecordId = analysis }));
 
-        foreach (var response in new[] { create, reparent })
-        {
-            response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-            var body = await response.Content.ReadAsStringAsync();
-            body.Should().NotContain(analysis.ToString()).And.NotContain(eventId.ToString());
-            JsonNode.Parse(body)!["errorCode"]!.GetValue<string>().Should().Be("events.regarding_stamp_failed");
-        }
-
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(analysis.ToString());
+        JsonNode.Parse(body)!["errorCode"]!.GetValue<string>().Should().Be("events.regarding_stamp_failed");
         host.Events.Verify(e => e.CreateEventAsync(It.IsAny<CreateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
-        host.Events.Verify(e => e.UpdateEventAsync(It.IsAny<Guid>(), It.IsAny<UpdateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         host.Events.Verify(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -604,11 +441,7 @@ public class EventEndpointsAuthorizationContractTests
 
     [Theory]
     [InlineData("get")]
-    [InlineData("logs")]
-    [InlineData("put")]
-    [InlineData("delete")]
     [InlineData("complete")]
-    [InlineData("cancel")]
     [InlineData("create")]
     public async Task FailClosed_NoBearerToken_TheRealProbeDenies_AndNoEventServiceIsCalled(string route)
     {
@@ -638,17 +471,13 @@ public class EventEndpointsAuthorizationContractTests
     [Theory]
     [InlineData("GET", "/api/v1/events")]
     [InlineData("GET", "/api/v1/events/{id}")]
-    [InlineData("GET", "/api/v1/events/{id}/logs")]
-    [InlineData("PUT", "/api/v1/events/{id}")]
-    [InlineData("DELETE", "/api/v1/events/{id}")]
     [InlineData("POST", "/api/v1/events/{id}/complete")]
-    [InlineData("POST", "/api/v1/events/{id}/cancel")]
     [InlineData("POST", "/api/v1/events")]
     public async Task Unauthenticated_EveryRouteIs401(string verb, string path)
     {
         await using var host = await EventsAuthHost.StartAsync();
         var request = new HttpRequestMessage(new HttpMethod(verb), path.Replace("{id}", Guid.NewGuid().ToString()));
-        if (verb is "PUT" or "POST")
+        if (verb is "POST")
         {
             request.Content = JsonContent.Create(new { subject = "x" });
         }
@@ -656,6 +485,34 @@ public class EventEndpointsAuthorizationContractTests
         var response = await host.SendAsync(request, authenticated: false);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.Events.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// The four routes task 159 deleted (owner round 10 item 1: no caller, not published) stay deleted: an authorized
+    /// caller reaches no handler, no filter and no Dataverse seam on any of them.
+    /// </summary>
+    [Theory]
+    [InlineData("PUT", "/api/v1/events/{id}")]
+    [InlineData("DELETE", "/api/v1/events/{id}")]
+    [InlineData("POST", "/api/v1/events/{id}/cancel")]
+    [InlineData("GET", "/api/v1/events/{id}/logs")]
+    public async Task DeletedRoutes_AreNotMapped_AndReachNothing(string verb, string path)
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var eventId = Guid.NewGuid();
+        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.Delete);
+        var request = new HttpRequestMessage(new HttpMethod(verb), path.Replace("{id}", eventId.ToString()));
+        if (verb is "PUT")
+        {
+            request.Content = JsonContent.Create(new { subject = "x" });
+        }
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+        (await response.Content.ReadAsStringAsync()).Should().BeEmpty("no handler or filter produced a body");
+        host.Probe.RightsCalls.Should().BeEmpty();
         host.Events.VerifyNoOtherCalls();
     }
 
@@ -842,15 +699,6 @@ public class EventEndpointsAuthorizationContractTests
                 .ReturnsAsync((createdId, DateTime.UtcNow));
             Events.Setup(e => e.CreateEventLogAsync(createdId, EventLogAction.Created, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
-            return captured;
-        }
-
-        public List<UpdateEventRequest> CaptureUpdates(Guid eventId)
-        {
-            var captured = new List<UpdateEventRequest>();
-            Events.Setup(e => e.UpdateEventAsync(eventId, It.IsAny<UpdateEventRequest>(), It.IsAny<CancellationToken>()))
-                .Callback<Guid, UpdateEventRequest, CancellationToken>((_, r, _) => captured.Add(r))
-                .Returns(Task.CompletedTask);
             return captured;
         }
 

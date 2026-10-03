@@ -981,61 +981,6 @@ public class CreateEventRequest
 }
 
 /// <summary>
-/// Request model for updating an Event
-/// </summary>
-public class UpdateEventRequest
-{
-    /// <summary>Event name</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Description</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Event Type ID</summary>
-    public Guid? EventTypeId { get; set; }
-
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
-
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
-
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
-    public int? Priority { get; set; }
-
-    /// <summary>Status code (a live <c>sprk_event.statuscode</c> value; the matching statecode is written with it).</summary>
-    public int? StatusCode { get; set; }
-
-    // ── A RE-PARENT (task 159, #1098): the same resolved regarding write set as CreateEventRequest. When
-    //    RegardingRecordType is set, DataverseWebApiService.BuildUpdateEventPayload binds the new target, its
-    //    record type, id/name/url/number and the core stamps, and CLEARS every other typed regarding lookup.
-
-    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>).</summary>
-    public int? RegardingRecordType { get; set; }
-
-    /// <summary>Regarding record ID.</summary>
-    public Guid? RegardingRecordId { get; set; }
-
-    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
-    public string? RegardingRecordName { get; set; }
-
-    /// <summary>The new regarding record's entity SET, from live metadata.</summary>
-    public string? RegardingEntitySetName { get; set; }
-
-    /// <summary>The <c>sprk_recordtype_ref</c> row for the new regarding type, or null when the environment has none.</summary>
-    public Guid? RegardingRecordTypeRefId { get; set; }
-
-    /// <summary><c>sprk_regardingrecordurl</c> for the new regarding record.</summary>
-    public string? RegardingRecordUrl { get; set; }
-
-    /// <summary><c>sprk_regardingrecordnumber</c> for the new regarding record, or null (written as null on a re-parent).</summary>
-    public string? RegardingRecordNumber { get; set; }
-
-    /// <summary>The FR-26 core-ancestor stamps of the new regarding record (lookup attribute, entity set, id).</summary>
-    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
-}
-
-/// <summary>
 /// Event Type entity model (sprk_eventtype)
 /// </summary>
 public class EventTypeEntity
@@ -1060,36 +1005,6 @@ public class EventTypeEntity
 
     /// <summary>Requires base date: No (0), Yes (1)</summary>
     public int? RequiresBaseDate { get; set; }
-}
-
-/// <summary>
-/// Event Log entity model (sprk_eventlog)
-/// </summary>
-public class EventLogEntity
-{
-    /// <summary>Event Log ID (sprk_eventlogid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Event lookup ID (_sprk_event_value)</summary>
-    public Guid EventId { get; set; }
-
-    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
-    public int Action { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Created date/time</summary>
-    public DateTime CreatedOn { get; set; }
-
-    /// <summary>Created by user ID</summary>
-    public Guid? CreatedById { get; set; }
-
-    /// <summary>Created by user name</summary>
-    public string? CreatedByName { get; set; }
 }
 
 /// <summary>
@@ -1295,29 +1210,9 @@ public static class RegardingRecordType
     public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
 
     /// <summary>
-    /// The full typed-regarding lookup FAMILY on <c>sprk_event</c> (14 lookups, live 2026-10-03), excluding
-    /// <c>sprk_regardingrecordtype</c>. A re-parent clears every member except the new target's lookup and the
-    /// core-ancestor stamps it writes (ADR-024: clear the previous lookup).
+    /// The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown. Covers
+    /// the full live typed-lookup family (14) plus <c>sprk_regardingrecordtype</c>.
     /// </summary>
-    public static IReadOnlyList<string> EventRegardingLookups { get; } =
-    [
-        "sprk_regardingaccount",
-        "sprk_regardingagreement",
-        "sprk_regardinganalysis",
-        "sprk_regardingbudget",
-        "sprk_regardingcommunication",
-        "sprk_regardingcontact",
-        "sprk_regardingevent",
-        "sprk_regardinginvoice",
-        "sprk_regardingmatter",
-        "sprk_regardingorganization",
-        "sprk_regardingproject",
-        "sprk_regardingreportcard",
-        "sprk_regardingservicerequest",
-        "sprk_regardingworkassignment",
-    ];
-
-    /// <summary>The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown.</summary>
     public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
     {
         "sprk_regardingaccount" => "sprk_RegardingAccount",

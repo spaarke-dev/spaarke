@@ -2167,22 +2167,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
-    {
-        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
-        throw new NotImplementedException("UpdateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
     public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
-    public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)

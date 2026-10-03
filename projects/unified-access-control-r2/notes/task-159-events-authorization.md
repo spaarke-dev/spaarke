@@ -1,7 +1,11 @@
 # Task 159 — Events API record authorization and the regarding shape (#1098)
 
 > Branch `task/uac-r2-159` from `work/unified-access-control-r2` @ `6b243f092`. Rigor FULL.
-> Status of this note: step 0 recorded; implementation sections follow.
+> **Two commits, on purpose.** Commit 1 (`65248b8c3`) fixes all eight routes. Commit 2 then **deletes four of them**
+> (PUT /{id}, DELETE /{id}, POST /{id}/cancel, GET /{id}/logs) under the binding owner round 10 item 1 amendment —
+> no caller in the repo and not in any published API description (§5). If the main session reads round 10
+> differently, dropping commit 2 restores the four routes already gated and tested. §1-§6.2 describe commit 1;
+> §5 (deletions), §6.3 and §7 onward describe the final state.
 
 ## 0. Step 0 — branch state and live metadata (read-only, spaarkedev1, 2026-10-03)
 
@@ -149,29 +153,47 @@ No entry was added to `EntityAccessFilter.EntitySetByType` or `SemanticSearchAut
 
 ## 5. Route authorization ledger input (for task 167's ledger — main session records it at integration)
 
-167 is not on this branch, so nothing was added to `RouteAuthorizationGuardTests` (no `GovernedFiles` entry, no waiver). **167 not on branch; main session reconciles the eight /api/v1/events waivers at integration.** Route keys are spelled as the guard spells them (its scanner keeps the `:guid` constraint). `C` = `Sprk.Bff.Api.Tests.Api.Events.EventEndpointsAuthorizationContractTests`.
+167 is not on this branch, so nothing was added to `RouteAuthorizationGuardTests` (no `GovernedFiles` entry, no waiver). **167 not on branch; main session reconciles the eight /api/v1/events waivers at integration.** Route keys are spelled as the guard spells them (its scanner keeps the `:guid` constraint). `C` = `Sprk.Bff.Api.Tests.Api.Events.EventEndpointsAuthorizationContractTests`. One row per route changed or deleted (final state, after commit 2):
 
 | Route key | Mechanism that now decides | Deny test |
 |---|---|---|
 | `GET /api/v1/events` | **handler decision: query runs as the caller** (impersonated `QueryEventsAsCallerAsync`; an unresolved caller is refused 403) | `C.List_UnresolvedCaller_Is403CallerUnresolved_AndNoEventQueryRuns`; `Sprk.Bff.Api.Tests.AccessControl.DataverseWebApiServiceImpersonationTests.QueryEventsAsCallerAsync_SendsExactlyOneMscrmCallerIdHeader_AndCountsTheTrimmedSet` |
 | `GET /api/v1/events/{id:guid}` | filter `AddRecordRouteAccessAuthorizationFilter("read", "sprk_events", "id")` (CallerRecordAccessProbe RPA over OBO) | `C.IdRoute_CallerWithoutRead_GetsTheUniform404_AndNoEventServiceIsCalled(route: "get")` |
-| `GET /api/v1/events/{id:guid}/logs` | filter `"read"` on `sprk_events({id})` | `C.IdRoute_CallerWithoutRead_GetsTheUniform404_AndNoEventServiceIsCalled(route: "logs")` |
-| `PUT /api/v1/events/{id:guid}` | filters `"write"` on the event; `"event.reparent"` on the event; `"event.attach_regarding"` on the new regarding | `C.WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(route: "put")`; `C.Put_Reparent_NeedsAppendOnTheEvent_AndAppendToOnTheNewRegarding` |
-| `DELETE /api/v1/events/{id:guid}` | filter `"write"` on the event | `C.WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(route: "delete")` |
-| `POST /api/v1/events/{id:guid}/complete` | filter `"write"` on the event | `C.WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(route: "complete")` |
-| `POST /api/v1/events/{id:guid}/cancel` | filter `"write"` on the event | `C.WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(route: "cancel")` |
+| `POST /api/v1/events/{id:guid}/complete` | filter `"write"` on `sprk_events({id})` | `C.WriteRoute_CallerWithReadOnly_Gets403InsufficientRights_AndNothingIsWritten(route: "complete")`; `C.IdRoute_CallerWithoutRead_GetsTheUniform404_AndNoEventServiceIsCalled(route: "complete")` |
 | `POST /api/v1/events` | filter `AddRecordRouteAccessAuthorizationFilter("event.attach_regarding", …, "prvCreatesprk_Event")` (Create privilege + AppendTo on the regarding) | `C.Create_WithoutTheCreatePrivilege_Is403InsufficientPrivilege_AndNothingIsWritten`; `C.Create_WithThePrivilegeButNoAppendToOnTheRegarding_Is403_AndNoEventOrLogRowIsWritten` |
+| `PUT /api/v1/events/{id:guid}` | **DELETED** (round 10 item 1) | `C.DeletedRoutes_AreNotMapped_AndReachNothing(verb: "PUT", …)` |
+| `DELETE /api/v1/events/{id:guid}` | **DELETED** (round 10 item 1) | `C.DeletedRoutes_AreNotMapped_AndReachNothing(verb: "DELETE", …)` |
+| `POST /api/v1/events/{id:guid}/cancel` | **DELETED** (round 10 item 1) | `C.DeletedRoutes_AreNotMapped_AndReachNothing(verb: "POST", path: ".../cancel")` |
+| `GET /api/v1/events/{id:guid}/logs` | **DELETED** (round 10 item 1) | `C.DeletedRoutes_AreNotMapped_AndReachNothing(verb: "GET", path: ".../logs")` |
 
-**Main-session edit to `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` at integration with 167** (exact text; proven green locally, §6.1) — add to `GovernedFiles` (unless 167 already did):
+**Main-session edit to `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` at integration with 167** (exact text; proven green locally against the final file, §6.3) — add to `GovernedFiles` (unless 167 already did):
 ```csharp
         new GovernedFile("Api/Events/EventEndpoints.cs", Scope.RouteLevelGate,
-            "/api/v1/events/* — the six /{id} routes carry RecordRouteAccessAuthorizationFilter on sprk_events({id}) "
-            + "(no Read → uniform 404; Read without the route's right → 403); POST / carries the same filter with the "
-            + "Create privilege and AppendTo on the regarding record; GET / runs its query as the caller (task 159, #1098)."),
+            "/api/v1/events/* — GET /{id} and POST /{id}/complete carry RecordRouteAccessAuthorizationFilter on "
+            + "sprk_events({id}) (no Read → uniform 404; Read without the route's right → 403); POST / carries the same "
+            + "filter with the Create privilege and AppendTo on the regarding record; GET / runs its query as the caller "
+            + "(task 159, #1098). PUT /{id}, DELETE /{id}, /{id}/cancel and /{id}/logs were deleted (round 10 item 1)."),
 ```
-Record `GET /api/v1/events` in 167's ledger as "handler decision: query runs as the caller" (the amendment: NOT a Permanent waiver), and delete 167's Pending waivers for all eight routes. Local proof used a temporary Permanent waiver for GET / only so Rule A could run before 167's ledger exists; it was not committed.
+Record `GET /api/v1/events` in 167's ledger as "handler decision: query runs as the caller" (the amendment: NOT a Permanent waiver), and delete 167's Pending waivers for all eight routes — including the four deleted ones (the stale-waiver rule reports a waiver for an absent route). The census count is unchanged: no endpoint FILE was deleted. Local proof used a temporary Permanent waiver for GET / only so Rule A could run before 167's ledger exists; it was not committed.
 
-**Routes deleted: none.** Round 10 item 1 deletes a route only when it has no caller in the repo AND is in no published API description. Searched (Glob `src/**/{*openapi*,ai-plugin*,declarativeAgent*,*plugin*.json}` → `CopilotAgent/declarativeAgent.json`, `CopilotAgent/spaarke-api-plugin.json`, `CopilotAgent/spaarke-bff-openapi.yaml`; Grep `v1/events` over `src`): the Copilot API plugin (`spaarke-api-plugin.json:16-84`, functions listEvents / getEvent / createEvent / completeEvent over `spaarke-bff-openapi.yaml:440-552`) publishes GET /, GET /{id}, POST / and POST /{id}/complete — those four must be fixed, not deleted. PUT, DELETE, cancel and logs have no caller in `src` and are not in that description. They were **kept and fixed rather than deleted** because (a) the POML's binding goal fixes all eight routes, (b) they are one resource's documented surface (`EventEndpoints.cs` route descriptions, and every one is exercised by `tests/integration/Spe.Integration.Tests/EventEndpointsTests.cs`), and (c) deleting four routes of a published resource would be a breaking API change outside the POML's scope. 🔔 For the main session: if round 10 item 1 is read strictly per route, those four (`PUT /{id}`, `DELETE /{id}`, `POST /{id}/cancel`, `GET /{id}/logs`) qualify for deletion — they now carry real filters, so keeping them is safe either way; this is recorded rather than decided silently.
+### 5.1 Routes deleted (owner round 10 item 1, binding amendment)
+
+**Rule:** delete a route when it has NO caller in the repo AND is NOT in any published API description; fix it otherwise.
+
+**Published descriptions searched:** Glob `src/**/{*openapi*,ai-plugin*,declarativeAgent*,*plugin*.json}` and `src/solutions/**/*manifest*.json` → `CopilotAgent/declarativeAgent.json`, `CopilotAgent/spaarke-api-plugin.json`, `CopilotAgent/spaarke-bff-openapi.yaml`, `CopilotAgent/appPackage/manifest.json`. The BFF serves no runtime OpenAPI document (no `AddOpenApi`/`MapOpenApi`/`UseSwagger` in `Sprk.Bff.Api`). The Copilot API plugin (`spaarke-api-plugin.json:16-84`, functions `listEvents`, `getEvent`, `createEvent`, `completeEvent`, over `spaarke-bff-openapi.yaml:440-552`) is the ONLY description naming `/api/v1/events`, and it names GET /, GET /{id}, POST / and POST /{id}/complete — those four are kept and fixed.
+
+**Callers searched:** Grep `v1/events` over `src` (all file types) → only the BFF's own files and the OpenAPI document; Grep `["'`/]events["'`/]|/events\$\{|events/\$\{` over `src/**/*.{ts,tsx,js,cs,json,yaml}` → no client builds a `/api/v1/events/...` path (`/api/workspace/events/{id}/scores` and `/api/v1/external/events/:id` are other routes); Grep `cancelEvent|deleteEvent|updateEvent|getEventLogs` outside `src/server`, `tests`, `projects` → `Spaarke.Events.Components/useEventsBulkActions.ts` cancels through **`Xrm.WebApi.updateRecord`**, not the BFF; docs mention `/api/v1/events/*` generically (not a published description).
+
+| Deleted route | No-caller evidence | Not-published evidence |
+|---|---|---|
+| `PUT /api/v1/events/{id:guid}` | no `src` hit outside the BFF; no client path builder | not in `spaarke-bff-openapi.yaml` / `spaarke-api-plugin.json` |
+| `DELETE /api/v1/events/{id:guid}` | same | same |
+| `POST /api/v1/events/{id:guid}/cancel` | same; the client's bulk cancel uses `Xrm.WebApi` | same |
+| `GET /api/v1/events/{id:guid}/logs` | same | same |
+
+**Deleted with them** (only those routes used them — the amendment's "delete the services, filters and options that only the deleted routes used"): the four handlers and their helpers (`UpdateEventInDataverseAsync`, `CreateUpdatedEventDto`, `SoftDeleteEventAsync`, `CanCancelEvent`, `GetValidStatusesForCancellation`, the log mapper), the PUT validation filter and its two authorization resolvers, the API DTOs `UpdateEventRequest`, `EventLogDto`, `EventLogListResponse`, `EventStatusCode.All`/`IsDefined`; in `Spaarke.Dataverse` the `IEventDataverseService.UpdateEventAsync` and `.QueryEventLogsAsync` members with their implementations, stubs and `MapToEventLogEntity`, the `UpdateEventRequest` and `EventLogEntity` models, `BuildUpdateEventPayload`, the re-parent clearing and `RegardingRecordType.EventRegardingLookups`; the `OperationAccessPolicy` key `event.reparent` (with its InlineData rows). Kept: `CreateEventLogAsync` (create and complete still write log rows) and `EventLogAction`.
+
+**Consequences for the POML:** the acceptance criteria for PUT, DELETE, cancel and logs, the `event.reparent` key, the re-parent payload, and live-gate item (e) are superseded by the deletion; their commit-1 proofs (§6.1-§6.2) remain in history. Re-adding any of these routes needs a caller, a gate, and a ledger row.
 
 ## 6. Guard seeding (each guard removed, its named test seen failing, then restored and touched)
 
@@ -214,3 +236,126 @@ The temporary entry and waiver were then removed: `RouteAuthorizationGuardTests.
 | the sibling-lookup clearing on update (`if (isReparent && regardingType < 0)`; the first attempt `if (false)` did not compile — CS0162 under warnings-as-errors) | `EventRegardingPayloadTests.UpdatePayload_Reparent…` (8) | **8 failed** | payload does not contain key `sprk_RegardingAccount@odata.bind` |
 | the core-stamp refusal (`return null` removed) | `C.CreateAndReparent_CoreStampFailure…` | **1 failed** | `NullReferenceException` (no `errorCode` — the write went ahead) |
 | the Delete check on PUT StatusCode Deleted | — | **N/A** | removed by the binding amendment (soft delete costs Write; §3.5) |
+
+### 6.3 After the deletions (commit 2)
+
+| Proof | Result |
+|---|---|
+| Rule A on the trimmed file (temporary `GovernedFiles` entry + GET / waiver, then removed again) | **15/15 pass** — the four kept routes need no waiver beyond GET /'s handler decision; nothing stale |
+| Seed: re-map `GET /api/v1/events/{id:guid}/logs` (`() => Results.Ok("seed")`) | `C.DeletedRoutes_AreNotMapped_AndReachNothing(GET, …/logs)` **failed** ("expected one of 404/405, found 200"); the other three cases passed; restored, hash-verified |
+| The commit-1 route seeds for GET /{id}, complete and POST / | unchanged code on the kept routes — §6.1/§6.2 results stand |
+
+## 7. Found, not fixed (reported to the main session)
+
+1. **`sprk_event.sprk_priority` is 100000000-based live** (Low 100000000 / Normal 100000001 / High 100000002 / Urgent 100000003) while the API validates and writes 0-3. A create carrying a priority writes an invalid option (the create fails), and the list's `priority` filter matches nothing. Fixing it changes the API's priority contract (and the Copilot description, which lists 100000000-based values with the wrong labels), so it is outside #1098 and not decided here. **Recommend a GitHub issue.**
+2. **The kept owner narrowing hides app-created events.** `POST /api/v1/events` creates app-only, so those events are owned by the BFF application user and never match `_ownerid_value eq caller`; the Copilot "my tasks" list will not show events the user created through the API. Unchanged by this task (constraint: keep the narrowing; escalation trigger 4 / owner round 3 D1 territory). Task 146 (owner on create) changes who owns new events.
+3. **`EventDetailSidePane` (client) maps Completed → statecode 1**, but live metadata puts Completed (659490002) in statecode 0 (7 live rows are Completed/Active). If the side pane writes that pair, Dataverse refuses it. Not this task's surface; recorded for the owner of `src/solutions/EventDetailSidePane`.
+4. **`TaskActionCore.RegardingFieldByEntity` lacks `sprk_regardingagreement`** (the live family has 14 lookups; that map has 13). Not this task's surface.
+5. **Performance note:** `DataverseServiceClientImpl.GetEntitySetNameAsync` is uncached, and a create with a regarding asks it 2-3 times (filter, handler, core-stamp set). Metadata calls are cheap but repeated; a per-process cache there would serve every caller.
+
+## 8. Integration-suite expectation changes (`tests/integration/Spe.Integration.Tests/EventEndpointsTests.cs`)
+
+All removals follow the route deletions (commit 2); commit 1 changed nothing in this file (its expectations — "not 404", "400 before auth", "401 unauthenticated" — all hold under the new filters).
+
+| Change | Reason |
+|---|---|
+| Deleted region `PUT /api/v1/events/{id}` (3 tests) | route deleted |
+| Deleted region `DELETE /api/v1/events/{id}` (3 tests) | route deleted |
+| Deleted region `POST /api/v1/events/{id}/cancel` (4 tests) | route deleted |
+| Deleted region `GET /api/v1/events/{id}/logs` (3 tests) | route deleted |
+| Deleted `UpdateEvent_HandlesInvalidStatusCode_WhenAuthenticated` | PUT deleted |
+| `EventEndpoints_ReturnProblemDetails_ForUnauthorized`: dropped `/{id}/logs` from its list | an unmapped path is 404, not 401 |
+| `PostEndpoints_ReturnProblemDetails_ForUnauthorized`: dropped `/{id}/cancel` | same |
+| `EventGroup_UsesCorrectApiVersion`: dropped `/{id}/logs` | an unmapped path's 404 has no body |
+| `EventEndpoints_RequireCorrectHttpMethod`: dropped `/{id}/cancel` | the route no longer exists to reject GET |
+| `EventEndpoints_RejectPostOnGetEndpoints`: `/{id}/logs` → `/{id}` | `/{id}` is GET-only now that PUT/DELETE are gone; the test keeps a real subject |
+| Class remarks list the remaining routes and the deletion | documentation |
+
+## 9. Quality gates (Step 9.5)
+
+### 9.1 code-review (coverage-first; severity / confidence)
+
+| # | Sev | Conf | Finding | Disposition |
+|---|---|---|---|---|
+| 1 | Warning | high | `EventEndpoints` (CRUD) injects `ICallerSystemUserResolver`, which lives in `Services/Ai/Context` — an AI-namespace type in CRUD code (refined ADR-013 spirit). | Pre-existing in this file (task 152, `CreateEventAsync`) and in the POML's mandated reference (`OfficeEndpoints` task 062); it is an identity resolver, not an AI capability, and `ADR013_AiBoundaryTests` does not list it. Recommend relocating the resolver out of `Services/Ai` in a follow-up; no change here. |
+| 2 | Warning | med | ADR-024 "do not duplicate resolver logic": `ResolveRegardingWriteAsync` + `AddRegardingWriteSet` is another per-writer copy of the resolver-field population (TodoRegardingBuilder, DataverseServiceClientImpl analysis stager, InvoiceReviewService). | The POML prescribes exactly this split (values resolved in the BFF handler, a static builder in `Spaarke.Dataverse` that only shapes); TodoRegardingBuilder writes an SDK `Entity` for `sprk_todo` only. Consolidation is a follow-up candidate. |
+| 3 | Warning | med | Deep pages cost more: no `$skip` in the Web API, so page N reads `N × pageSize` rows (≤ 5000, else 400). | Bounded and validated; the alternative (skiptoken paging) changes the API's page contract. |
+| 4 | Warning | high | Priority 0-3 vs live 100000000+ (§7.1). | Reported, not fixed (scope). |
+| 5 | Suggestion | high | `GetEventsAsync` is long (validation, caller resolution, record-type resolution, query, mapping). | Each block is a short, commented section; extraction would add indirection for one caller. |
+| 6 | Suggestion | med | `QueryEventsCoreAsync` keeps the pre-existing catch-log-rethrow. | Pre-existing pattern preserved verbatim. |
+| 7 | Suggestion | med | The live statecode mapping is held twice: `DataverseWebApiService.GetEventStateCode` (literals) and the API's `EventStatusCode` constants. | Both pinned by `EventRegardingPayloadTests.LiveNames_EventStatusCodes_…`; a single source would need a new shared constants class (out of the "nothing else new" constraint). |
+| 8 | Suggestion | low | `TodoGenerationService` (Services layer) now references the API DTO `EventStatusCode`. | Same assembly; the alternative was repeating the literals a third time. |
+| 9 | Info | high | `RecordRouteAccessAuthorizationFilter.cs` 233 → 485 lines (three target shapes on one cohesive filter); `EventEndpoints.cs` 1246 → ~1040 after the deletions. | Cohesive; task 170 renames the finance filter, not this one. |
+
+Security review: every route fails closed (no token / OBO failure / probe fault / resolver fault / set-lookup fault → 404 or 403, never app-only); no denial body carries an id; the GET / injection is closed (GUID-only, every `$filter` clause from a typed value); the server-side regarding name read happens only after AppendTo is proven and is never returned to the caller. No secrets, no new packages (§10: `dotnet list package --vulnerable --include-transitive` → no vulnerable packages). **No Critical findings.**
+
+### 9.2 adr-check
+
+| ADR | Result |
+|---|---|
+| ADR-001 Minimal API | ✅ routes stay in `MapEventEndpoints` |
+| ADR-002 no plugins / WP-1 | ✅ checks and writes in the BFF; the regarding set + FR-26 stamp have one server-side owner per write |
+| ADR-003 fail closed / deny codes | ✅ machine-readable `sdap.access.deny.*` codes; every error path denies |
+| ADR-007 Graph isolation | ✅ no Graph types touched |
+| ADR-008 endpoint filters | ✅ per-route filters, visible to Rule A; no middleware |
+| ADR-009 caching | ✅ no new cache (the probe stays uncached, as built) |
+| ADR-010 DI minimalism | ✅ no new interface, registration or service; one interface MEMBER added (and two removed) |
+| ADR-013 AI boundary | ⚠️ Warning — code-review #1 (pre-existing `ICallerSystemUserResolver` use) |
+| ADR-019 ProblemDetails | ✅ every failure is ProblemDetails with `reasonCode`/`errorCode` and a correlation id |
+| ADR-024 polymorphic resolver | ⚠️ Warning — "only ONE entity-specific lookup" vs the FR-26 core stamp (an event regarding an analysis also carries its matter stamp). This is the project's existing FR-26 reconciliation (TodoRegardingBuilder `:202-206`, TaskActionCore `:159-185`), not a new exception; plus code-review #2 (duplicated population logic). |
+| ADR-028 auth | ✅ OBO via `CallerRecordAccessProbe`; impersonation only through `DataverseWebApiService`'s existing `impersonateSystemUserId` (no `CallerId` assignment) |
+| ADR-038 testing | ✅ no `Mock<HttpMessageHandler>` (hand-written recording handler), no DI-registration or ctor-null tests; every new guard seeded |
+| ADR-052 workload placement | ✅ no background work added |
+
+**No violations**, so no §6.5 challenge path is required; the two ADR Warnings are pre-existing patterns the POML itself prescribes.
+
+## 10. Test runs (final tree, before commit 2)
+
+**Affected tests first** (each filtered run confirmed to select tests): commit-1 state 298/298 (events contract 62, payload 38, impersonation 8, membership-publishing 11, TodoGeneration, policy completeness/characterization, finance contract); upload overload + OBO upload tests 259 passed / 1 skipped (pre-existing skip) — **the existing upload overload's tests pass with no expectation change**. After the deletions: 275/275 on the same filter set.
+
+**Full suites, once, at the end** (the machine was running ~286 dotnet/testhost processes from concurrent agents):
+
+| Suite | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests` | 14275 passed, **13 failed**, 54 skipped (14342) in 39 m 28 s. All 13 failures were 1.7-18.8-minute `TaskCanceledException`/client-abort timeouts in unrelated areas (Compose save/refresh seams, AnalysisChatContext, ScopePersonas, HandlerEndpoints, DocumentProfile, ExternalProjectDocumentUpload, Insights ask/search, Office quick-create, WorkspaceLayout, the PredictMatterCost eval harness). **Re-run in isolation: 13/13 passed** (1 m 2 s) → contention, not a regression. None touches the events surface. |
+| `tests/Spaarke.ArchTests` (NetArchTest) | **346/346 passed** |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104/104 passed** |
+| `tests/integration/Spe.Integration.Tests` | **389 passed, 25 skipped, 0 failed** (414); its `EventEndpointsTests` ran (26/26, none skipped) |
+
+`dotnet list src/server/api/Sprk.Bff.Api package --vulnerable --include-transitive` → "no vulnerable packages"; no `.csproj` / package change in the diff. Publish size: skipped per the run instructions.
+
+**Tests beyond the acceptance criteria, each with its one-line reason:**
+* `C.DeletedRoutes_AreNotMapped_AndReachNothing` — the deny proof for the four deleted routes' ledger rows (seeded: re-mapping one fails it).
+* `EventRegardingPayloadTests.LiveNames_*` — the constraints require every live navigation property, set name, privilege and status value to be "pinned by a test".
+* `C.Unauthenticated_EveryRouteIs401` — the AC's 401 criterion; the Spe suite's 401 tests are `SkippableFact` and skip when their environment is absent.
+* `C.Complete_WriterGets200…` / `C.GetById_ReaderGets200…` — the ACs' positive "as today" halves.
+
+`scripts/check-task-status-drift.ps1` (task-execute Step 10) is expected to report 159 as drifted (POML `completed`, TASK-INDEX not yet updated): the run instructions reserve `TASK-INDEX.md` for the main session.
+
+## 11. Manual live gate (main session; dev; existing non-admin users in their current BU) — updated for the deletions
+
+Prerequisites: deploy the BFF; the BFF application user must hold `prvActOnBehalfOfAnotherUser` (System Administrator holds it per the 2026-09-30 live facts) or GET / errors (fail closed, never app-only). Read-only confirmation first (RetrievePrincipalAccess as each user): user A has NO Read on event E; user B has Read+Write on event E2 and AppendTo on matter M; B holds `prvCreatesprk_Event`.
+
+| Item | Request | Expect |
+|---|---|---|
+| (a) | `GET /api/v1/events` as A | E absent; TotalCount does not count it |
+| (a) | `GET /api/v1/events/{E}`, `POST /api/v1/events/{E}/complete` as A | the same 404 body as `GET /api/v1/events/{random GUID}`; E's `modifiedon`/`statuscode` unchanged; no new `sprk_eventlog` row |
+| (a′) | `PUT`/`DELETE /api/v1/events/{E}`, `POST …/{E}/cancel`, `GET …/{E}/logs` | 404/405 (routes deleted) |
+| (b) | `GET /api/v1/events/{E2}` as B; `POST …/{E2}/complete` as B (E2 in Draft/Open/On Hold) | 200; E2 becomes statuscode 659490002 with statecode **0** |
+| (c) | `POST /api/v1/events` as A regarding a matter A cannot append to | 403 `insufficient_rights` (or `insufficient_privilege` if A lacks Create); no `sprk_event` row |
+| (d) | `POST /api/v1/events` as B, `{subject, regardingRecordType: 1, regardingRecordId: M}` | 201; read-back: `_sprk_regardingmatter_value = M`, `_sprk_regardingrecordtype_value = e8547bb4-…` (the Matter row), `sprk_regardingrecordid`/`name`/`url`/`number` filled, statuscode 659490001 |
+| (e) | ~~PUT re-parent~~ | superseded — PUT deleted |
+| (f) | `GET /api/v1/events?regardingRecordId=x%27%20or%20sprk_regardingrecordid%20ne%20%27zz` | 400 |
+
+Exact read-back command for (d): `GET {org}/api/data/v9.2/sprk_events({id})?$select=_sprk_regardingmatter_value,_sprk_regardingrecordtype_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl,sprk_regardingrecordnumber,statuscode,statecode` (operator token, read-only). Record results (ids to their first 8 characters) in this note.
+
+## 12. Reconciliation notes
+
+* **Task 146** (owner on child create and re-parent): this task writes no owner logic. `CreateEventInDataverseAsync` now builds the request with the regarding write set; 146's owner assignment slots into the same request object. The PUT re-parent path 146's census lists **no longer exists** (deleted). Whichever lands second rebases.
+* **Task 156** (re-stamp an intermediate's children): the event re-parent path that would have needed 156's cascade is deleted, so there is nothing to hand to 156 from this API. The create path stamps the event itself (FR-26) and has no children at create time.
+* **Task 167**: §5 — add the `GovernedFiles` entry, record GET / as a handler decision, delete the eight Pending waivers (four for deleted routes).
+* **Task 170** (rename FinanceAuthorizationFilter): only forwarding members changed in that file; `CreateEventPrivilege` lives in `EventEndpoints`, not beside `CreateInvoicePrivilege`, because the amendment freezes FinanceAuthorizationFilter apart from the forwarding.
+
+## 13. `.claude/**` edits needed
+
+None.

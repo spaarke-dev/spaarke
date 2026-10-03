@@ -89,8 +89,7 @@ public class OperationPolicyCharacterizationTests
     ///   "finance.link_invoice"       → FinanceEndpoints.cs confirm resolver (body DocumentId — the
     ///                                  document HOLDS the invoice lookup; task 130, owner G5)
     ///   "entity.associate_document"  → EntityAccessFilter.cs:64 (OfficeEndpoints.cs:173)
-    ///   "event.attach_regarding"     → EventEndpoints.cs POST / and PUT /{id} (the regarding record; task 159)
-    ///   "event.reparent"             → EventEndpoints.cs PUT /{id} (the event being re-parented; task 159)
+    ///   "event.attach_regarding"     → EventEndpoints.cs POST / (the regarding record; task 159)
     ///
     /// Before task 003 none was a policy key, so each site returned 403 for every caller regardless
     /// of rights. They now resolve. The general forcing function preventing recurrence lives in
@@ -103,7 +102,6 @@ public class OperationPolicyCharacterizationTests
     [InlineData("finance.attach_invoice")]
     [InlineData("finance.link_invoice")]
     [InlineData("event.attach_regarding")] // task 159
-    [InlineData("event.reparent")] // task 159
     [InlineData("entity.associate_document")]
     public void LiveOperationString_ResolvesInPolicy(string operation)
     {
@@ -129,7 +127,6 @@ public class OperationPolicyCharacterizationTests
     [InlineData("finance.attach_invoice")]
     [InlineData("finance.link_invoice")]
     [InlineData("event.attach_regarding")] // task 159
-    [InlineData("event.reparent")] // task 159
     [InlineData("entity.associate_document")]
     public async Task LiveOperationString_WithFullRights_IsAllowed(string operation)
     {
@@ -162,7 +159,6 @@ public class OperationPolicyCharacterizationTests
     [InlineData("finance.attach_invoice")]     // requires AppendTo
     [InlineData("finance.link_invoice")]       // requires Write + Append
     [InlineData("event.attach_regarding")]     // requires AppendTo (task 159)
-    [InlineData("event.reparent")]             // requires Write + Append (task 159)
     public async Task MutatingOperation_WithReadOnlyRights_DeniedForInsufficientRights(string operation)
     {
         var result = await Rule().EvaluateAsync(Context(operation), Snapshot(AccessRights.Read));

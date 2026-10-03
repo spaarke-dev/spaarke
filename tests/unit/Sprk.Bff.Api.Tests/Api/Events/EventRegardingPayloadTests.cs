@@ -1,8 +1,8 @@
 // unified-access-control-r2 task 159 (#1098) — the sprk_event regarding WRITE and READ shape, asserted on the internal
 // static builders (no HTTP double, ADR-038), plus the live-metadata pins the shape rests on.
 //
-// sprk_event.sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref. Before this task the create and update
-// payloads wrote it as an integer, the create bound the typed lookup with its logical name as the navigation property
+// sprk_event.sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref. Before this task the create payload (and the
+// since-deleted update payload) wrote it as an integer, the create bound the typed lookup with its logical name as the navigation property
 // and a pluralized set name, and the list filtered / selected the lookup by its logical name. Every name pinned below
 // was read from live metadata (spaarkedev1, 2026-10-03; notes/task-159-events-authorization.md §0.2).
 
@@ -57,7 +57,6 @@ public class EventRegardingPayloadTests
             ["sprk_regardingworkassignment"] = "sprk_RegardingWorkAssignment",
         };
 
-        RegardingRecordType.EventRegardingLookups.Should().BeEquivalentTo(expected.Keys);
         foreach (var (lookup, navigation) in expected)
         {
             RegardingRecordType.GetEventNavigationProperty(lookup).Should().Be(navigation);
@@ -84,7 +83,6 @@ public class EventRegardingPayloadTests
         apiValue.Should().Be(liveValue);
         DataverseWebApiService.GetEventStateCode(liveValue).Should().Be(liveState,
             "Dataverse refuses a statuscode written with a statecode it does not belong to (Completed is ACTIVE live)");
-        ApiEventStatusCode.All.Should().HaveCount(9).And.Contain(liveValue);
     }
 
     // ── Write shape: create ──────────────────────────────────────────────────────────────────────────────────
@@ -150,45 +148,6 @@ public class EventRegardingPayloadTests
 
         payload["statuscode"].Should().Be(659490001);
         payload["statecode"].Should().Be(0);
-    }
-
-    // ── Write shape: re-parent ───────────────────────────────────────────────────────────────────────────────
-
-    [Theory]
-    [MemberData(nameof(RegardingTypes))]
-    public void UpdatePayload_Reparent_BindsTheNewTarget_AndClearsEveryOtherLookupOfTheFamily(
-        int type, string lookup, string navigation, string entitySet)
-    {
-        var request = UpdateRequest(type, entitySet, RecordTypeRef);
-        var stamped = type == 1 ? "sprk_regardingproject" : "sprk_regardingmatter";
-        var stampNavigation = RegardingRecordType.GetEventNavigationProperty(stamped)!;
-        request.RegardingCoreStamps = [(stamped, stamped == "sprk_regardingmatter" ? "sprk_matters" : "sprk_projects", MatterStamp)];
-
-        var payload = DataverseWebApiService.BuildUpdateEventPayload(request);
-
-        payload[$"{navigation}@odata.bind"].Should().Be($"/{entitySet}({TargetId:D})");
-        payload[$"{stampNavigation}@odata.bind"].Should().NotBeNull("a just-stamped core lookup is not cleared");
-        payload["sprk_RegardingRecordType@odata.bind"].Should().Be($"/sprk_recordtype_refs({RecordTypeRef:D})");
-        foreach (var other in RegardingRecordType.EventRegardingLookups.Where(l => l != lookup && l != stamped))
-        {
-            var key = $"{RegardingRecordType.GetEventNavigationProperty(other)}@odata.bind";
-            payload.Should().ContainKey(key).WhoseValue.Should().BeNull($"{other} must be cleared on a re-parent");
-        }
-
-        payload.Keys.Count(k => k.EndsWith("@odata.bind", StringComparison.Ordinal))
-            .Should().Be(RegardingRecordType.EventRegardingLookups.Count + 1, "the 14-lookup family plus the record type");
-        AssertNoNumericRecordTypeAndNoValueKeys(payload);
-    }
-
-    [Fact]
-    public void UpdatePayload_NoRegarding_TouchesNoLookup_AndAStatusCarriesItsStatecode()
-    {
-        var payload = DataverseWebApiService.BuildUpdateEventPayload(
-            new UpdateEventRequest { Name = "Renamed", StatusCode = 659490004 });
-
-        payload.Keys.Should().NotContain(k => k.Contains("regarding", StringComparison.OrdinalIgnoreCase));
-        payload["statuscode"].Should().Be(659490004);
-        payload["statecode"].Should().Be(1);
     }
 
     // ── Read shape: the shared URL builder ──────────────────────────────────────────────────────────────────
@@ -304,16 +263,6 @@ public class EventRegardingPayloadTests
     private static CreateEventRequest CreateRequest(int type, string? entitySet, Guid? recordTypeRef) => new()
     {
         Name = "Hearing",
-        RegardingRecordType = type,
-        RegardingRecordId = TargetId,
-        RegardingRecordName = "Target",
-        RegardingEntitySetName = entitySet,
-        RegardingRecordTypeRefId = recordTypeRef,
-        RegardingRecordUrl = "/main.aspx?pagetype=entityrecord&etn=x&id=y",
-    };
-
-    private static UpdateEventRequest UpdateRequest(int type, string entitySet, Guid? recordTypeRef) => new()
-    {
         RegardingRecordType = type,
         RegardingRecordId = TargetId,
         RegardingRecordName = "Target",
