@@ -77,6 +77,7 @@ public static class RevokeExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
         ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -198,6 +199,16 @@ public static class RevokeExternalAccessEndpoint
                 : Array.Empty<Guid>(),
             CancellationToken.None);
 
+        // ── Task 142: an operator removal of an Assigned-To auto grant STICKS (owner round 2 item 5) ──
+        // The subject's ledger rows on this record become Declined, so no trigger re-creates the grant while the
+        // assignment persists (a manual /grant afterwards still succeeds). Ledger-only and never thrown: the revoke above
+        // stands whatever happens here, and a lost marker is repaired by the next pass's out-of-band rule. For a CONTACT
+        // auto grant the response also names the read-time terms that still bring it to the record (owner A2: standing
+        // and organization access stay) — criterion 17: never "removed" while access silently remains.
+        var residualAccessTerms = await assignedAccess.MarkGrantRevokedAsync(
+            grantKey.RootType, grantKey.RootId, grantKey.ContactId,
+            grantKey.IsOrganizationGrant ? grantKey.OrganizationId : null, CancellationToken.None);
+
         // ── M2 (task 024 → task 065): align with /close-project for the identical failure shape ──
         //
         // ONLY Failed warrants a 500 — NotAttempted, PermissionRemoved and NoPermissionFound are all
@@ -217,7 +228,7 @@ public static class RevokeExternalAccessEndpoint
                 "grantee may RETAIN file access. Reporting 500 (M2) rather than 200.",
                 request.AccessRecordId, deactivatedCount);
 
-            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup);
+            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms);
         }
 
         // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
@@ -227,7 +238,8 @@ public static class RevokeExternalAccessEndpoint
             SpeContainerMembershipRevoked: speOutcome == SpeContainerRevokeOutcome.PermissionRemoved,
             SpeContainerOutcome: speOutcome,
             DeactivatedCount: deactivatedCount,
-            SpeOrgMemberCleanup: orgCleanup));
+            SpeOrgMemberCleanup: orgCleanup,
+            ResidualAccessTerms: residualAccessTerms.Count > 0 ? residualAccessTerms : null));
     }
 
     /// <summary>
@@ -254,7 +266,8 @@ public static class RevokeExternalAccessEndpoint
         HttpContext httpContext,
         int deactivatedCount,
         SpeContainerRevokeOutcome speOutcome,
-        SpeOrgMemberCleanupSummary? orgCleanup)
+        SpeOrgMemberCleanupSummary? orgCleanup,
+        IReadOnlyList<string>? residualAccessTerms = null)
     {
         var detail = deactivatedCount > 0
             ? $"Deactivated {deactivatedCount} Dataverse access grant(s), but the SPE container " +
@@ -274,6 +287,7 @@ public static class RevokeExternalAccessEndpoint
                 ["deactivatedCount"] = deactivatedCount,
                 ["speContainerOutcome"] = speOutcome,
                 ["speOrgMemberCleanup"] = orgCleanup,
+                ["residualAccessTerms"] = residualAccessTerms is { Count: > 0 } ? residualAccessTerms : null,
                 ["traceId"] = httpContext.TraceIdentifier
             });
     }

@@ -437,6 +437,7 @@ public static class FieldMappingEndpoints
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
         [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        IServiceScopeFactory scopes,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -560,7 +561,8 @@ public static class FieldMappingEndpoints
                 request.TargetEntity,
                 childRecords.RecordIds,
                 logger,
-                ct);
+                ct,
+                scopes);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -682,7 +684,9 @@ public static class FieldMappingEndpoints
     /// <summary>
     /// Applies mapping rules to each child record and updates them.
     /// </summary>
-    /// <remarks>Internal (not private) so the test assembly can drive it directly (task 156: the re-file cascade).</remarks>
+    /// <remarks>Internal (not private) so the test assembly can drive it directly: task 156 (the re-file cascade), and
+    /// task 142's writer test, which asserts the inline Assigned-To trigger after a push that wrote a root's "Assigned *"
+    /// column (InternalsVisibleTo).</remarks>
     internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
         IFieldMappingDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
@@ -691,7 +695,8 @@ public static class FieldMappingEndpoints
         string targetEntity,
         Guid[] childRecordIds,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        IServiceScopeFactory? scopes = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -724,6 +729,12 @@ public static class FieldMappingEndpoints
                     // the same operation. A write that cannot move a stamp reads nothing; a child that fails is logged
                     // and repaired by the reconciliation job, and never fails this push.
                     await restamper.AfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, CancellationToken.None);
+
+                    // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
+                    // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry
+                    // column is a no-op; after the update committed; never throws, never fails this push.
+                    await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                        scopes, targetEntity, childRecordId, updatePayload.Keys, grantorOid: null, logger, ct);
                 }
                 else
                 {

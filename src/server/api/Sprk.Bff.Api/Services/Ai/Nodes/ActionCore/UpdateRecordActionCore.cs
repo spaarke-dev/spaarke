@@ -142,6 +142,12 @@ internal sealed class UpdateRecordActionCore
 
         await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
 
+        // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
+        // materializes the Assigned-To access now. After the PATCH committed; never throws and never fails this update.
+        await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopeFactory, input.EntityLogicalName, input.RecordId, updatePayload.Keys, grantorOid: null, _logger,
+            cancellationToken).ConfigureAwait(false);
+
         return updatePayload.Keys.ToArray();
     }
 

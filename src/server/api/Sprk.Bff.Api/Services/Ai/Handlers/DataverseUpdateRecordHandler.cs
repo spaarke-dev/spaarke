@@ -65,17 +65,22 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly IDataverseUserClient _dataverse;
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp _restamp;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
+    /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
-        ILogger<DataverseUpdateRecordHandler> logger)
+        ILogger<DataverseUpdateRecordHandler> logger,
+        IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
         // AddToolFramework also calls), so this handler's registration gains no asymmetric dependency (§10 F.1).
         _restamp = restamp ?? throw new ArgumentNullException(nameof(restamp));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _scopes = scopes;
     }
 
     /// <inheritdoc />
@@ -209,6 +214,13 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
                     tablename, recordId, restamp.Failures.Count, restamp.Truncated);
             }
+
+            // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and
+            // removes the previous one's unmodified auto access now. After the PATCH committed; never throws, never fails
+            // this update (a non-root or a non-registry column is a no-op).
+            await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, tablename, recordId, mapped.Item!.Columns, grantorOid: null, _logger, cancellationToken)
+                .ConfigureAwait(false);
 
             var result = ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,

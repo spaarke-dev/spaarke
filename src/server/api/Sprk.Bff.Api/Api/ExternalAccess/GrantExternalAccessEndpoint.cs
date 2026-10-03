@@ -77,6 +77,7 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         CallerRecordAccessProbe callerAccessProbe,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -176,6 +177,14 @@ public static class GrantExternalAccessEndpoint
                     ["accessRecordId"] = outcome.AccessRecordId,
                 });
         }
+
+        // Task 142: a MANUAL grant onto a subject the Assigned-To ledger holds (an auto grant, a suggestion on a secure
+        // record — "Grant" in Manage Access — or a declined entry) is now the operator's: ADOPTED, never revoked by the
+        // rule afterwards. Keyed on the grant key the core wrote. Ledger-only; never thrown.
+        var grantedKey = ResolveGrantKey(request, root.Type, root.Id);
+        await assignedAccess.MarkGrantAdoptedAsync(
+            root.Type, root.Id, grantedKey.ContactId, grantedKey.IsOrganizationGrant ? grantedKey.OrganizationId : null,
+            outcome.AccessRecordId, CancellationToken.None);
 
         // Broker-only: no synthetic SPE container membership is granted on the external path. Task 139: the level
         // actually written, and whether the grantor's ceiling narrowed the request.
@@ -598,7 +607,10 @@ public static class GrantExternalAccessEndpoint
             logger.LogError(ex,
                 "[EXT-GRANT] The No Access check for {RootType} {RootId} threw; refusing (fail closed).",
                 rootType, rootId);
-            denied = true;
+
+            // Task 142 r3: a FAULT, not an entry — the same wire answer as GranteeDenied, flagged so an in-process caller
+            // (the Assigned-To materializer) reports it instead of waiting on it as the record's policy.
+            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
         }
 
         if (denied)

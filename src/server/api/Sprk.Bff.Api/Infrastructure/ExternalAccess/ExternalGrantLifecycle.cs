@@ -634,6 +634,26 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         "This contact or organization cannot be given access to this record: it is on the record's No Access list, " +
         "or that list could not be checked. Nothing was granted.");
 
+    /// <summary>
+    /// Task 142 r3: the No Access check THREW (e.g. an HttpClient timeout, which the deny-veto code rethrows), so the grant
+    /// core refused, fail closed. On the wire it IS <see cref="GranteeDenied"/> — the same reason code, 422 and detail
+    /// ("… or that list could not be checked"), so task 139's route contract is unchanged — but
+    /// <see cref="IsDenyListReadFault"/> lets an in-process caller tell a FAULT from an entry: the Assigned-To
+    /// materializer waits on an entry (a policy hold) and must REPORT a fault, never hold on it.
+    /// </summary>
+    /// <remarks>
+    /// Faults the deny-veto code absorbs itself (an unreadable membership read, a deny-list reader fault it turns into a
+    /// deny) arrive through <c>IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync</c>'s <c>bool</c> as "denied" and
+    /// cannot be told apart here; that code logs each one (<c>[WF-AUTHZ] Deny-veto resolution …</c>).
+    /// </remarks>
+    public static GrantPolicyDecision GranteeDenyListUnreadable { get; } = GranteeDenied with { IsDenyListReadFault = true };
+
+    /// <summary>
+    /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process
+    /// only: never part of a response (<c>PolicyRefusalProblem</c> maps the code, status and detail explicitly).
+    /// </summary>
+    public bool IsDenyListReadFault { get; init; }
+
     /// <summary>The level's name as the Manage Access dialog shows it.</summary>
     internal static string DisplayName(ExternalAccessLevel level) => level switch
     {
@@ -681,6 +701,21 @@ internal sealed class GrantCeiling
     /// </summary>
     public static GrantCeiling FromGrantorRights(AccessRights grantorRights)
         => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
+
+    /// <summary>
+    /// The ceiling of an Assigned-To auto-grant (unified-access-control-r2 task 142): exactly Collaborate, with NO
+    /// grantor-level cap. Owner round 3 A1 and round 3b: "Assigned-To auto-grants follow rule 5: always Collaborate,
+    /// uncapped" — the grantor is the owner's rule, not a person, so there is no person's level to cap at (the cap stays
+    /// for MANUAL Grant Access). Used ONLY by <c>AssignedAccessMaterializer</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never-lower is the materializer's</b> (this type's remarks): a request for exactly Collaborate is not
+    /// narrowed, so the core's never-lower rule would not fire. The materializer therefore reads the key's active rows
+    /// first and writes nothing over a row at Collaborate or above (CoveredByExisting); it calls the core only to create,
+    /// to raise a lower row, to renew its OWN unmodified row, or to put a raised row back to its prior level.</para>
+    /// </remarks>
+    public static GrantCeiling AssignedToRule { get; } =
+        new(ExternalAccessLevel.Collaborate, "owner rule 5 (task 142): Assigned-To auto-grant, uncapped Collaborate");
 
     public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
 }
