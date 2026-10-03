@@ -11,9 +11,10 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **SPEC COMPLETE.** `design.md` **rev 11** · [`spec.md`](spec.md) written 2026-10-03 — 44 FRs, 9 NFRs, 11 criteria |
-| **Dataverse** | ✅ **All five tables CREATED in `spaarkedev1`** · security roles created, assigned, **verified by query** · auditing on all five **and at org level** · ⬜ **two columns still missing** (spec FR-01/FR-02) |
-| **NEXT ACTION** | **Run `/project-pipeline`** on `projects/spaarke-ontology-platform-r1` (it consumes `spec.md`). Optionally `/adr-check` against the spec first — the skill's own failure-mode table names a spec-vs-ADR conflict as the documented trap |
+| **Phase** | **PIPELINE COMPLETE — ready to implement.** `design.md` rev 11 · `spec.md` (44 FRs) · `plan.md` (10 phases) · **42 task POMLs**, all passing `Validate-TaskPoml.ps1` with 0 errors / 0 warnings |
+| **Active task** | **none** — nothing started yet |
+| **Dataverse** | ✅ Five tables CREATED in `spaarkedev1` · roles assigned and **verified by query** · auditing on all five **and at org level** · ⬜ **four columns still missing → task 001** |
+| **NEXT ACTION** | **`task-execute` on [`tasks/001-schema-complete-missing-columns.poml`](tasks/001-schema-complete-missing-columns.poml)** — or just say **"continue"**, which reads `tasks/TASK-INDEX.md` and picks the first 🔲. **Task 003 (the ADR-040 amendment) can start in parallel** and is main-session-only |
 | **Branch** | `docs/ontology-platform-design` — ⚠️ **NOT** `docs/ontology-platform-phase0` (squash-merged, dead) |
 | **Git** | 4 ahead / **44 behind** `origin/master`. Clean, all pushed. **Merge master before any deploy** |
 | **PR #1032** | ✅ **MERGED** to master as `93634db58` |
@@ -81,8 +82,29 @@ business unit, which is normal). Auditing enabled on the two ledger tables. Matr
 
 ## The next action, concretely
 
-**`/project-pipeline`** on `projects/spaarke-ontology-platform-r1` → `task-execute`. It consumes
-[`spec.md`](spec.md), not `design.md`.
+**`task-execute` on task 001**, or say **"continue"**. The pipeline is done; what remains is execution.
+
+### Where to start, and why that order
+
+**001 (schema) first** — four columns are missing and two of them block a path outright: without
+`sprk_decisionrecord.sprk_action` the deny path cannot save, and without the three `sprk_servicerequest`
+columns success criterion 10 cannot be measured. Exact settings are in the POML.
+
+**003 (ADR-040 amendment) in parallel** — it touches `.claude/` so it is **main-session only** (sub-agents
+cannot write there; that boundary is working correctly, not a bug). It must merge **before or alongside task
+031**, so starting it early removes it from the critical path.
+
+**Then wave A** (010, 011, 012) — the three cleanup items that gate the worklist row.
+
+### The two tasks that carry the project's risk
+
+| Task | Why |
+|---|---|
+| **021** — the predicate compiler | 🔴 `notExists` has **no prior art anywhere in the repo**. A broken anti-join fails by returning *every* row or *no* row, and **both read as a working predicate** — which is why its acceptance criteria include an empty-source-table test. Serial, opus, xhigh |
+| **074** — the recall measurement | 🔴 **It can fail the project.** At 70% recall the differentiated claim misses 30% of real cases **while every other criterion passes green**. Floor is ≥80% on ≥50 labelled items |
+
+And the one most easily lost into implementation: **030 includes FR-14**, setting the Signal's owner from its
+grouping matter. One line now; a re-own of every row later; invisible until then because nothing errors.
 
 ### What `/design-to-spec` produced and decided (2026-10-03)
 

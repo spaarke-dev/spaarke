@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Disposition accrual per matter and per outside firm</title>
+    <phase>7 Inquiry and the classifier</phase>
+    <gate>070 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Produces the compounding asset the product claim rests on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Query and aggregation over columns created in task 001.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>070</deps>
+    <tags>bff-api,dataverse,reporting</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve an Inquiry with a disposition and make it queryable per matter and per outside firm.</prompt>
+  <role>SPAARKE backend developer.</role>
+  <goal>The reply resolves the Inquiry with a typed disposition that accrues per matter and per outside firm.</goal>
+
+  <context>
+    <background>The association ladder links the reply to the Inquiry. sprk_disposition (write-off, budget revised, scope approved, no action) is what accrues for the Report Card. This is the fourth row of the section 0 table and the thing that COMPOUNDS.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordMatching</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: sprk_disposition answers how the Inquiry turned out. It is DISTINCT from sprk_decisionrecord.sprk_decisionoutcome, which answers what the human decided at the gate. One word per concept; do not merge them.</constraint>
+    <constraint source="project">Scope: accrual is queryable per matter AND per outside firm. Per-firm is the half that makes it a negotiating asset rather than a log.</constraint>
+    <constraint source="project">Scope: the standing metric is action rate per policy equals acted divided by surfaced, a zero-code Dataverse rollup. For DO rules it MUST be computed from sprk_signal.sprk_resolutiontype, not from Decision Records.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Disposition accrual and the Report Card</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Wire the inbound reply to resolve the Inquiry, using the existing association ladder to link it.</step>
+    <step order="2">Set sprk_disposition on resolution.</step>
+    <step order="3">Build the per-matter and per-outside-firm accrual queries.</step>
+    <step order="4">Implement action rate per policy as a rollup, reading sprk_resolutiontype for Do rules.</step>
+    <step order="5">Add tests for each accrual dimension and for the Do-rule action-rate source.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If per-outside-firm accrual cannot be derived from existing relationships, STOP and escalate rather than adding a denormalized firm column on the service request. That is a schema decision, not an implementation detail.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a reply to an Inquiry, when it arrives, then the Inquiry resolves and sprk_disposition is set.</criterion>
+    <criterion testable="true">Given several resolved Inquiries on one matter, when queried per matter, then all their dispositions return.</criterion>
+    <criterion testable="true">Given resolved Inquiries across firms, when queried per outside firm, then dispositions group by firm.</criterion>
+    <criterion testable="true">Given a Do-lane policy, when action rate is computed, then it reads sprk_signal.sprk_resolutiontype and NOT Decision Records.</criterion>
+    <criterion testable="true">Negative: sprk_disposition and sprk_decisionoutcome remain distinct columns with distinct meanings.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-37 and success criterion 10. Computing Do-rule action rate from Decision Records would report about 0 percent on every Do rule, making a noisy policy and a perfect one look identical.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

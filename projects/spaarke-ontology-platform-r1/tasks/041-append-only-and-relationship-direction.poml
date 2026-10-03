@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Verify append-only by privilege and the 1-to-N relationship direction</title>
+    <phase>4 The Decision Record</phase>
+    <gate>040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Verifies the security property the defensibility story rests on, and a relationship easy to build backwards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification plus a relationship check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>dataverse,security,verification</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove append-only holds against a real non-admin user, and confirm the Decision Record to Signal relationship is 1-to-N with the foreign key on the Signal.</prompt>
+  <role>SPAARKE platform developer. Prove it, do not assume it.</role>
+  <goal>A recorded demonstration that a non-admin cannot update or delete a Decision Record, and that the relationship renders from the Signal side.</goal>
+
+  <context>
+    <background>Append-only is enforced by PRIVILEGE (ADR-002 forbids plugins). A consequence worth knowing: rows then cannot be deactivated either. The relationship direction is easy to get backwards because one decision can resolve SEVERAL Signals (prototype finding 4).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the relationship is Decision Record 1 to N Signals, so the foreign key lives on sprk_signal.sprk_decisionrecord and there is NO signal lookup on sprk_decisionrecord. A subgrid of Signals closed by this decision renders from the Signal side.</constraint>
+    <constraint source="project">Scope: test as an ACTUAL non-admin user holding only the Spaarke roles. A System Administrator always holds every privilege, so testing as one proves nothing.</constraint>
+    <constraint source="ADR-002">Scope: no plugins. If privileges cannot deliver the guarantee, record it as an honest limit with auditing as detection rather than adding a plugin.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Append-only enforcement</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">As a non-admin user holding only the Spaarke roles, attempt to update a sprk_decisionrecord row. Confirm refusal and capture the error.</step>
+    <step order="2">Attempt to delete one. Confirm refusal.</step>
+    <step order="3">Attempt to deactivate one, and record that this is also refused as a known consequence of the no-Write privilege model.</step>
+    <step order="4">Confirm sprk_decisionrecord has no signal lookup and that one decision can reference several Signals from the Signal side.</step>
+    <step order="5">Append the demonstration, with the captured errors, to notes/security-roles.md.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a non-admin CAN update a Decision Record, STOP and escalate immediately. That is the guarantee failing, and no amount of application code compensates for it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a non-admin user with only the Spaarke roles, when updating a Decision Record, then Dataverse refuses and the error is captured.</criterion>
+    <criterion testable="true">Given the same user, when deleting a Decision Record, then Dataverse refuses.</criterion>
+    <criterion testable="true">Given one decision resolving three Signals, when the subgrid renders, then all three appear, read from the Signal side.</criterion>
+    <criterion testable="true">Negative: sprk_decisionrecord carries no lookup to sprk_signal.</criterion>
+    <criterion testable="true">The deactivation consequence is recorded as a known limit.</criterion>
+    <criterion testable="true">notes/security-roles.md carries the dated demonstration.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-21, FR-22 and NFR-04. Append-only is a property of the UNION of a user roles, which is why task 002 ran the union check.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The single re-evaluating scheduled job</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>030 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Background workload placement decision plus the mechanism that prevents the worklist rotting.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows ADR-036 with six live reference implementations.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 032, 033 and 034 all attach to this job.</parallel-reason>
+    <deps>030,003</deps>
+    <tags>bff-api,scheduled-job,signals</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build ONE re-evaluating scheduled job that upserts Signals whose predicate now holds and closes those whose predicate no longer holds, in one pass.</prompt>
+  <role>SPAARKE backend developer. One component deciding both directions.</role>
+  <goal>A nightly ADR-036 IScheduledJob that re-evaluates every enabled policy and both creates and closes Signals, stamping sprk_lastevaluated on everything it touches.</goal>
+
+  <context>
+    <background>Path B window is relative to now, so the predicate truth value changes even when nobody writes anything. Of four state transitions, TWO have no event to hook: death by time (the communication ages out) and birth by time (an old budget revision ages out, re-truthing the notExists half). So the nightly pass cannot be closure-only, and event-driven evaluation alone would never fire ConditionCleared.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/SecureRecordIsolationCensusJob.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-036">Scope: implement IScheduledJob. NO new hand-rolled timer BackgroundService.</constraint>
+    <constraint source="ADR-052">Scope: this workload runs in the BFF. Tie-breaker is fewer moving parts; the workload is hundreds of rows, not a scale problem. State the placement decision in the PR.</constraint>
+    <constraint source="project">Scope: ONE component that both creates and closes. Do NOT build an evaluator plus a separate sweep: two components can disagree about the same Signal, which miscounts suppression in both directions.</constraint>
+    <constraint source="project">Scope: cadence derives from the EXISTING sprk_lane column. Decide-lane policies run here AND on the event triggers; Do-lane policies run here ONLY. Do not add a per-policy trigger column.</constraint>
+    <constraint source="project">Scope: stamp sprk_lastevaluated on every Signal the pass touches, so a stale Signal is distinguishable from an unevaluated one.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Scheduled background jobs</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scheduled census job" location="src/server/api/Sprk.Bff.Api/Services/Jobs/SecureRecordIsolationCensusJob.cs">The nearest shape in the repo: a scheduled pass over many rows producing a reconciliation outcome. Copy its registration and lease handling.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read SecureRecordIsolationCensusJob and one other IScheduledJob to establish the registration, lease and logging conventions.</step>
+    <step order="2">Implement the job: for each enabled policy, compile its body (task 021), run it, and upsert a Signal per hit via the writer (task 030).</step>
+    <step order="3">In the SAME pass, for each still-open Signal of that policy, re-evaluate its predicate and close it if it no longer holds (task 033 supplies the closure semantics).</step>
+    <step order="4">Stamp sprk_lastevaluated on every Signal touched, created or not.</step>
+    <step order="5">Derive cadence from sprk_lane: process both lanes here.</step>
+    <step order="6">Register the job and confirm it appears in the admin jobs endpoint.</step>
+    <step order="7">Add tests: a policy that now holds creates a Signal; a Signal whose predicate stopped holding is closed; a Signal still holding is left open with a refreshed sprk_lastevaluated.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a full nightly re-evaluation proves too expensive at realistic data volumes, STOP and escalate to agree a scoping strategy rather than silently narrowing the pass to recently-changed rows. Narrowing it reintroduces the birth-by-time blind spot that this design exists to close.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Six IScheduledJob implementations exist, but none evaluates policies or manages Signal lifecycle.</existing>
+    <extension>No. The existing jobs are domain-specific reconciliations; this is a new workload. The ADR-036 seam itself IS being reused rather than a new scheduling mechanism built.</extension>
+    <cost-of-doing-nothing>Nothing closes a Signal when its condition clears on its own, so the worklist fills with stale items, users mute it, and suppression miscounts because an auto-cleared Signal is indistinguishable from a human dismissal.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/SignalReevaluationJobTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an enabled policy whose predicate now holds for a matter, when the job runs, then a Signal exists for it.</criterion>
+    <criterion testable="true">Given an open Signal whose predicate no longer holds, when the job runs, then it is closed with a resolution type and no Decision Record.</criterion>
+    <criterion testable="true">Given an open Signal whose predicate still holds, when the job runs, then it stays open and sprk_lastevaluated is refreshed.</criterion>
+    <criterion testable="true">Given a Do-lane policy, when the job runs, then it is evaluated (both lanes run nightly).</criterion>
+    <criterion testable="true">Negative: a disabled policy is not evaluated at all.</criterion>
+    <criterion testable="true">Negative: the job is an IScheduledJob and no new timer BackgroundService was added.</criterion>
+    <criterion testable="true">The job is registered and visible via the admin jobs endpoint.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-11, FR-12 and FR-15. design.md section 8.3 carries the reasoning, including the four-transition table. The ADR-040 amendment (task 003) must be merged before or alongside this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

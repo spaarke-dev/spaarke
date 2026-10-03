@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Converge the duplicated utilities</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Mechanical convergence of duplicated helpers; no behavior change intended.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deduplication with known counts.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>cleanup,technical-debt</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Converge the duplicated utilities the audit found, and resolve the Spaarke.Events.Components dead surface.</prompt>
+  <role>SPAARKE full-stack developer.</role>
+  <goal>One implementation each for the GUID cleaner and the Xrm frame-walk, and the Events package dependency declaration matching reality.</goal>
+
+  <context>
+    <background>cleanGuid is reimplemented about 50 times with TWO DIVERGENT REGEXES, despite a comment calling itself the ONE place. The Xrm frame-walk is implemented SEVEN times, twice under the same exported name in one package. EventsPage was rewritten onto the shared UI components and now imports NOTHING from it while still declaring the dependency.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared</file>
+      <file role="modify">src/solutions</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: converge on ONE cleanGuid. The two divergent regexes are the hazard: ids stored inconsistently break the denormalized subject trio lookups. Canonical form is LOWERCASE with braces stripped.</constraint>
+    <constraint source="project">Scope: converge the Xrm frame-walk on one implementation. Two sharing an exported name in one package is an ambiguity a bundler resolves arbitrarily.</constraint>
+    <constraint source="project">Scope: for Spaarke.Events.Components, either restore real usage or drop the dependency declaration. A declared dependency that is never imported misleads every reader about the coupling.</constraint>
+    <constraint source="project">Scope: this is CONVERGENCE, not refactoring. Do not change behavior; if two implementations differ, pick the correct one and say why.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Utility deduplication</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Enumerate every cleanGuid implementation and classify each by which regex it uses.</step>
+    <step order="2">Choose the correct canonical behavior (lowercase, braces stripped) and converge every call site on one exported helper.</step>
+    <step order="3">Enumerate the seven Xrm frame-walk implementations, including the two sharing a name, and converge them.</step>
+    <step order="4">Resolve the Events package dependency declaration.</step>
+    <step order="5">Add tests for the canonical GUID form including the brace and uppercase cases.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the two cleanGuid regexes turn out to be intentionally different in some call sites, STOP and escalate. Converging genuinely different semantics under one name would be a behavior change disguised as cleanup.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared</output>
+    <output type="code">src/solutions</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a repo-wide grep for GUID-cleaning logic, when reviewed, then exactly one implementation exists and every call site uses it.</criterion>
+    <criterion testable="true">Given a GUID with braces and uppercase, when cleaned, then the output is lowercase with braces stripped.</criterion>
+    <criterion testable="true">Given a grep for the Xrm frame-walk, when reviewed, then one implementation exists and no two share an exported name.</criterion>
+    <criterion testable="true">Given the Events package, when its dependency declaration is compared with its imports, then they agree.</criterion>
+    <criterion testable="true">Negative: no behavior changed at any call site; existing tests pass unmodified.</criterion>
+    <criterion testable="true">All affected packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-42 remainder. The canonical GUID form matters directly to this project: task 030 stores subject ids and the denormalized trio depends on a consistent form.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

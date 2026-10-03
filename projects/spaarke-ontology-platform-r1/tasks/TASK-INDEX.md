@@ -1,0 +1,173 @@
+# TASK-INDEX — Spaarke Ontology Platform R1
+
+> **Generated**: 2026-10-03 by `/project-pipeline` · **42 tasks** across 10 phases
+> **Source**: [`../spec.md`](../spec.md) (44 FRs) · WBS in [`../plan.md`](../plan.md)
+> **Validation**: all 42 POMLs pass `scripts/Validate-TaskPoml.ps1` — 0 errors, 0 warnings
+>
+> 🚨 **Every task runs via `task-execute`.** Never read a `.poml` and implement manually (project CLAUDE.md §4).
+> When you complete a task, update **both** the marker here **and** the POML `<status>` — or
+> `scripts/check-task-status-drift.ps1` fails the next push.
+
+**Legend**: 🔲 not started · 🔄 in progress / needs retry · ✅ complete · ⛔ blocked
+
+---
+
+## Registry
+
+### Phase 0 — Foundations
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [001 Schema: the four missing columns](001-schema-complete-missing-columns.poml) | FULL | sonnet/high | — | — | **Unblocks everything.** Two columns block a path outright |
+| 🔲 | [002 Privilege re-verify](002-privilege-reverify-after-column-adds.poml) | STANDARD | sonnet/medium | 001 | — | Union check; append-only is a property of the union |
+| 🔲 | [003 ADR-040 amendment + ADR-039 exception](003-adr-040-amendment-and-039-exception.poml) | FULL | **opus/xhigh** | — | — | ⚠️ `.claude/` → **main session only**. Must merge before/alongside 031 |
+| 🔲 | [004 Seed Policy + taxonomy rows](004-seed-policy-and-taxonomy-rows.poml) | STANDARD | sonnet/medium | 001 | — | Policy stays `enabled = No` until reviewed |
+| 🔲 | [005 Seed dev data + 2 negative controls](005-seed-dev-data-and-negative-controls.poml) | STANDARD | sonnet/medium | 004 | — | Criterion 2 needs the controls, not just the triple |
+
+### Phase 1 — Cleanup that gates the row
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [010 C-1 dead briefing hooks + 2 stale comments](010-c1-remove-dead-briefing-hooks.poml) | FULL | sonnet/high | — | **A** | The misdirection hazard. Gates the row |
+| 🔲 | [011 C-3 disambiguate MetricCard](011-c3-disambiguate-metriccard.poml) | STANDARD | sonnet/medium | — | **A** | Two unrelated components share the name |
+| 🔲 | [012 C-4 generic status badge](012-c4-generic-status-badge.poml) | FULL | sonnet/high | — | **A** | The one legitimately-new UI primitive |
+
+### Phase 2 — Policy and rule bodies
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [020 `Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
+| 🔲 | [021 **The predicate compiler**](021-predicate-compiler-exists-notexists.poml) | FULL | **opus/xhigh** | 020, 005 | — | 🔴 **THE RISK ITEM.** Serial. `notExists` has no in-repo template |
+| 🔲 | [022 Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | Immutability makes this the only control point |
+| 🔲 | [023 Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
+
+### Phase 3 — The evaluator and Signal lifecycle
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [030 Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021 | — | 🔴 FR-14 owner-from-matter. One line now, a migration later |
+| 🔲 | [031 Nightly re-evaluating `IScheduledJob`](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/high | 030, 003 | — | ONE evaluator, not evaluator + sweep |
+| 🔲 | [032 Two event triggers](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish |
+| 🔲 | [033 Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | **C** | Aged-out maps to `ConditionCleared` |
+| 🔲 | [034 Suppression per (policy, matter), 30d](034-suppression-policy-matter-30-days.poml) | FULL | sonnet/high | 031 | **C** | D-11 grain; auto-close never counts |
+| 🔲 | [035 **Deploy** BFF](035-deploy-bff-evaluator.poml) | FULL | sonnet/high | 034 | — | Merge master first; hash-verify |
+
+### Phase 4 — The Decision Record
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [040 Decision Record writer + record class](040-decision-record-writer.poml) | FULL | sonnet/high | 001, 030 | — | BR-1 **as reversed**: every human resolution writes one |
+| 🔲 | [041 Append-only + relationship direction](041-append-only-and-relationship-direction.poml) | FULL | sonnet/high | 040 | **D** | Test as a real non-admin; 1 → N, FK on the Signal |
+| 🔲 | [042 Wire writer into the consumer](042-wire-writer-into-rulegated-consumer.poml) | FULL | sonnet/high | 040 | **D** | One line before the branch. **Do not touch the gate** |
+
+### Phase 5 — The worklist surface
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [050 Worklist grid configuration row](050-worklist-gridconfiguration-row.poml) | STANDARD | sonnet/medium | 034 | — | Membership by rule evaluation, never a user filter |
+| 🔲 | [051 **The one row component**](051-worklist-row-component.poml) | FULL | **sonnet/xhigh** | 050, 012 | — | 🔴 All five row-contract requirements. A second row component is a design failure |
+| 🔲 | [052 Extend MetricCard / RowMenu / OutcomeCard](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | **E** | Reuse is binding (§1.3) |
+| 🔲 | [053 Gate host + acting](053-gate-host-and-acting.poml) | FULL | sonnet/high | 051 | **E** | Dismissal requires a reason |
+| 🔲 | [054 Reconciliation tab + aggregate item](054-reconciliation-tab-and-aggregate-item.poml) | STANDARD | sonnet/medium | 051 | **E** | ONE registration; the surface already exists |
+| 🔲 | [055 **Deploy** Console + shared components](055-deploy-console-and-shared-components.poml) | FULL | sonnet/high | 054 | — | **Real Dataverse** verification, not a mock |
+
+### Phase 6 — Do lane and Briefing fold-in
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [060 ISS-003 stranded Draft events](060-iss003-stranded-draft-events.poml) | FULL | sonnet/high | — | — | **Blocks the Do lane** or it under-reports |
+| 🔲 | [061 Do lane: three temporal policies](061-do-lane-temporal-policies.poml) | FULL | sonnet/high | 060, 034 | — | A **predicate migration**, not a collector rewrite |
+| 🔲 | [062 Know → narrative; retire Critical Today; remove LLM Top action](062-know-narrative-and-retire-critical-today.poml) | FULL | sonnet/high | 061 | **F** | Rank is deterministic or it is not explainable |
+| 🔲 | [063 First Know-promotion rule](063-first-know-promotion-rule.poml) | STANDARD | sonnet/medium | 061 | **F** | News vs work — the difference *is* the ontology |
+| 🔲 | [064 Replace the Briefing tab](064-replace-briefing-tab-with-worklist.poml) | FULL | sonnet/high | 062, 063, 055 | — | Only once BOTH lanes exist |
+
+### Phase 7 — Inquiry and the classifier
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [070 The Inquiry: Action + Binding + SLA](070-inquiry-action-and-binding.poml) | FULL | sonnet/high | 001, 053 | — | The Action **row**, not the Action **Engine** |
+| 🔲 | [071 Disposition accrual](071-disposition-accrual.poml) | FULL | sonnet/high | 070 | **G** | Do-rule action rate reads `sprk_resolutiontype` |
+| 🔲 | [072 Guidance injection](072-classifier-guidance-injection.poml) | FULL | sonnet/high | 004 | **G** | Prompt changes; the schema `enum` does NOT |
+| 🔲 | [073 `sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072 | **G** | The consumer diff must be **empty** |
+| 🔲 | [074 **Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items |
+
+### Phase 8 — Remaining cleanup and repairs
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [080 The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | C-10 is a **live bug**; C-5 already lost data |
+| 🔲 | [081 Duplication cleanup](081-duplication-cleanup.poml) | STANDARD | sonnet/medium | — | **H** | `cleanGuid` ×~50, frame-walk ×7 |
+| 🔲 | [082 Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
+| 🔲 | [083 Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
+
+### Phase 9 — Wrap-up
+
+| | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 | [090 Project wrap-up](090-project-wrap-up.poml) | STANDARD | sonnet/medium | all | — | `/test-diet` is a **binding gate** (CLAUDE.md §7) |
+
+---
+
+## Parallel execution waves
+
+Max concurrency is **6 agents per wave** (hard limit). After each wave the main session **must verify the
+build** before dispatching the next — `dotnet build src/server/api/Sprk.Bff.Api/` for `.cs` changes,
+`npm run build:prod` for PCF packages.
+
+| Wave | Tasks | Prerequisite | `goal-eligible` | Why |
+|---|---|---|---|---|
+| **A** | 010, 011, 012 | 001 | ✅ yes | Three independent cleanup items, different files, machine-verifiable end states |
+| **B** | 020, 023 | 003 | ✅ yes | Both well-specified, low ambiguity, separate code paths |
+| **C** | 033, 034 | 031 | ✅ yes | Lifecycle semantics in separate paths |
+| **D** | 041, 042 | 040 | ❌ no | 041 is a security verification needing human judgement on the union result |
+| **E** | 052, 053, 054 | 051 | ❌ no | 053 touches the gate boundary; UI judgement throughout |
+| **F** | 062, 063 | 061 | ✅ yes | Configuration plus one policy row |
+| **G** | 071, 072, 073 | 070 | ✅ yes | Three independent surfaces |
+| **H** | 080, 081, 082, 083 | none | ❌ no | 080 carries six separate hazards needing per-item judgement |
+
+**Never parallel** — `parallel-safe: false`: **003** (`.claude/` paths, main session only) · **021** (the risk
+item, serial by choice) · **030**, **031**, **032**, **051**, **064**, **070**, **074**, **090** (each is a
+prerequisite others attach to) · **035**, **055** (deploys to a shared environment).
+
+> **On `/goal` waves**: the Haiku evaluator is a **stopping-condition check, not a quality gate**. A met
+> condition means the wave is done being *iterated*, not that the work is *good*. Step 9.5 gates and
+> orchestrator authority are unchanged, and tasks are never auto-completed on goal achievement.
+
+---
+
+## Critical path
+
+```
+001 → 003 → 020 → 021 → 030 → 031 → 040 → 042 → 050 → 051 → 070 → 074 → 090
+      ADR    type  PREDICATE writer  job  record  wire  config  ROW  inquiry RECALL
+```
+
+**021 is the longest single pole** and the only task whose value is unproven. **074 can fail the project** —
+it is a measurement, not an implementation.
+
+Phase 8 (wave H) sits **off** the critical path entirely and can absorb slack at any point.
+
+---
+
+## High-risk items
+
+| Task | Risk | Why it is ranked here |
+|---|---|---|
+| **021** | 🔴 **High** | `notExists` has **no prior art anywhere in the repo**. A broken anti-join fails by returning every row or no row, and **both read as a working predicate**. Its acceptance criteria include an empty-source-table test for exactly that reason |
+| **074** | 🔴 **High** | A measurement that gates project exit. At 70% recall the differentiated claim misses 30% of real cases **while every other criterion passes green** |
+| **030** | 🔴 **High** | FR-14 ownership. A service-owned Signal at depth-4 read can expose a matter the reader cannot open — lookup blank, sentence telling them anyway. Live across 6 business units, and **invisible because nothing errors** |
+| **003** | 🟡 Medium | ADR amendment with repo-wide blast radius; must stay narrow and must merge before 031 |
+| **051** | 🟡 Medium | New UI surface carrying the whole row contract. A second row component would be a design failure |
+| **060** | 🟡 Medium | Data remediation in another domain. A blanket update would make 48 tasks appear in users' briefings at once |
+| **064** | 🟡 Medium | Replaces a shipped user surface. Premature replacement removes working awareness |
+
+---
+
+## Standing obligations on every task
+
+- **`/conflict-check` before every BFF PR** — 56 of 62 active projects declare a hot path
+- **Publish size** measured against a **fresh master build**, short path, file counts both sides (NFR-01)
+- **§0.3** — a capability must TEST what its message CLAIMS (NFR-02)
+- **Merge master before any deploy** — it moved 66 commits in a day during this project
+- Anything deferred gets a **GitHub Issue URL** in `../notes/defer-issues.md`; `push-to-github` Step 1.6
+  refuses a push without one

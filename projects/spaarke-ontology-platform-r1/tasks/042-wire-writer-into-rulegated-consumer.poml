@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Wire the Decision Record writer into the consumer on both paths</title>
+    <phase>4 The Decision Record</phase>
+    <gate>040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped consumer; missing the deny path loses half the record and the gate must not be touched.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One insertion point, already located.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>bff-api,decision-record</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Insert the Decision Record write into RuleGatedAssessedConsumer so every authorize AND every deny persists, without touching the gate.</prompt>
+  <role>SPAARKE backend developer. One line before the branch.</role>
+  <goal>Both the authorize and the deny path write a Decision Record, and the deny path is queryable per matter.</goal>
+
+  <context>
+    <background>CommunicationRuleDecision already carries the full decision on BOTH paths and is currently written to ILogger and lost. The consumer already holds the object, so the write is a line before the branch. The gate itself is not modified.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: DO NOT modify the gate (ConfirmationPolicyEngine or the rule gate itself). The gate is the audit boundary; this task persists a value it already produces.</constraint>
+    <constraint source="project">Scope: the DENY path must write too. Criterion 3 requires the deny path to be queryable per matter, and there is no answer to why did nothing happen without it.</constraint>
+    <constraint source="project">Scope: a failure to write the record must not silently drop it. If the write throws, emit to App Insights rather than swallowing.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Gate decision persistence</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Locate the branch in RuleGatedAssessedConsumer where the authorize and deny paths diverge.</step>
+    <step order="2">Insert the Decision Record write BEFORE the branch, so both paths are covered by one call site.</step>
+    <step order="3">Map the gate outcome to sprk_decisionoutcome, and set sprk_gatesessionid to link the ADR-040 SessionGate entry.</step>
+    <step order="4">Add App Insights emission if the write throws.</step>
+    <step order="5">Add tests: authorize writes; deny writes; the deny record is queryable per matter; a write failure is observable.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the authorize and deny paths cannot share one call site without changing the gate, STOP and escalate. Modifying the gate is out of scope for this task and the gate is the audit boundary.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communications</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authorize outcome, when the consumer runs, then a Decision Record exists.</criterion>
+    <criterion testable="true">Given a deny outcome, when the consumer runs, then a Decision Record exists with outcome Denied.</criterion>
+    <criterion testable="true">Given a matter with both outcomes, when queried, then both records return.</criterion>
+    <criterion testable="true">Given a record, when read, then sprk_gatesessionid links the SessionGate entry.</criterion>
+    <criterion testable="true">Negative: the gate code is unchanged (diff shows no modification to ConfirmationPolicyEngine or the rule gate).</criterion>
+    <criterion testable="true">Negative: a write failure is observable in App Insights rather than silently swallowed.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-23 and success criterion 3.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
