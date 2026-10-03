@@ -563,7 +563,7 @@ public class AnalysisEndpointsAuthorizationContractTests
                 break;
         }
 
-        var denied = await host.SendAsync(Execute(new[] { writable, readOnly }, playbookId, multiDocument: true));
+        var denied = await host.SendAsync(Execute(new[] { writable, readOnly }, playbookId));
         await AssertForbiddenAsync(denied, "sdap.access.deny.insufficient_rights");
         host.VerifyEngineRan(Times.Never());
 
@@ -675,7 +675,7 @@ public class AnalysisEndpointsAuthorizationContractTests
     private static HttpRequestMessage Execute(Guid documentId, Guid? playbookId) =>
         Execute(new[] { documentId }, playbookId);
 
-    private static HttpRequestMessage Execute(Guid[] documentIds, Guid? playbookId, bool multiDocument = false) =>
+    private static HttpRequestMessage Execute(Guid[] documentIds, Guid? playbookId) =>
         Json(HttpMethod.Post, "/api/ai/analysis/execute", new { documentIds, playbookId });
 
     private static HttpRequestMessage Json(HttpMethod method, string path, object body) => Request(method, path, body, withToken: true);
@@ -870,9 +870,20 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             entity[column] = new EntityReference(target, id);
         }
         extra?.Invoke(entity);
+
+        // Like Dataverse, answer ONLY the columns the caller selected — so a filter that stops selecting an anchor
+        // column stops seeing that anchor, exactly as it would live.
         EntityService
             .Setup(e => e.RetrieveAsync("sprk_analysis", analysisId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(entity);
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                var selected = new Entity("sprk_analysis", analysisId);
+                foreach (var column in columns.Where(entity.Attributes.ContainsKey))
+                {
+                    selected[column] = entity[column];
+                }
+                return selected;
+            });
     }
 
     public Task<ChatSession> SeedOwnSessionAsync(Guid? documentId) =>
