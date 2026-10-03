@@ -24,8 +24,8 @@ assertion (with a read-only live census) carry the platform configuration. Nothi
 | **F3** — removing Secure: Full Access holders + the creator; securing stays open to Write holders | round 3b | `UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync`: creator (`createdby` / `sprk_createdbyperson`) first, then Dataverse's own rights on the record must include Write AND Delete (Full Access = Collaborate + Delete; an administrator qualifies by role). 403 `sdap.unsecure.not_permitted` otherwise |
 | **F4** — System Administrator stays a residual writer (platform, not narrowable) | consolidated questions (accepted as recommended, round 3) | Documented (guide §7c, schema doc); the lock script and the standing assertion LIST every holder; nobody's role is touched |
 | **F5** superseded → a ribbon button in task 142's shared Access group | round 3b + UX amendment | **STOPPED** — 142 has not merged (§9) |
-| **F6** — the agent drafts copy options, the owner picks before merge | consolidated questions; **picked in round 10 item 9** (2026-10-03) | **Closed (c1, §15):** option A for rows 1, 3, 4, 5, 6 and the resume-neutral option D for row 2; every DRAFT marker removed, each string pinned verbatim by a test |
-| **Round 10 item 10** — `/provision-project` secures an UNFLAGGED record only for its creator | round 10 (answers §11.6, recommended (b)) | **Closed (c1, §15)** — 403 `sdap.provision.not_record_creator` before any write |
+| **F6** — the agent drafts copy options, the owner picks before merge | consolidated questions; **rows 1-6 picked in round 10 item 9** (2026-10-03) | **Rows 1-6 closed (c1, §15):** option A for rows 1, 3, 4, 5, 6 and the resume-neutral option D for row 2; their DRAFT markers removed, each string pinned verbatim by a test. **Rows 7-11 OPEN (c1-r1, §16):** the copy c1 wrote for the two new reason codes was never offered to the owner; it is now marked DRAFT with options in §6 — an owner pick before merge (escalation trigger 5) |
+| **Round 10 item 10** — `/provision-project` secures an UNFLAGGED record only for its creator | round 10 (answers §11.6, recommended (b)) | **Closed (c1 §15 forward path; c1-r1 §16 resume)** — 403 `sdap.provision.not_record_creator` before any write, on a forward run AND on a resume of an unflagged record; flagged rows stay on the Write gate |
 | **Round 10 item 11** — invoices follow their matter | round 10 (answers §11.4) | **Closed (c1, §15)** — `sprk_invoice` out of the securable registry; its column locked by the same script |
 | **F7** — "secure an existing record" ships with 148 | consolidated questions | No surface added; Make Secure is not in any ribbon (§9). See §11.3 for the API |
 | **ABSENT branch** — backfill NULL → No, then absent fails closed | `droppedAsAnswered` in `raw/session27-owner-questions.json` (the standing fail-closed directive, ADR-003) | §5.3; backfill script §7.1 |
@@ -44,6 +44,7 @@ assertion (with a read-only live census) carry the platform configuration. Nothi
 | `fieldpermission` rows | `attributelogicalname eq 'sprk_issecure'` | **0** |
 | Profiles | `fieldsecurityprofiles` | task 133's `Spaarke BFF-Managed Field Readers/Writers` **do not exist yet** (133's schema gate has not run); task 141's `Spaarke Identity Link Readers` is on **6 of 6** default teams — the reader-on-every-default-team mechanism works live |
 | Forms | every `systemform` of the three tables, `formxml` scanned client-side (positive control: 7 forms match `sprk_accesspermission`) | **0** reference `sprk_issecure` (confirms the UX amendment's premise correction) |
+| Forms, views, bound workflows and plugin steps of **`sprk_invoice`** (c1-r1, 2026-10-03 — the table joined the lock in c1, round 10 item 11) | `systemforms?$filter=objecttypecode eq 'sprk_invoice'` with `formxml` scanned client-side; `savedqueries` (`returnedtypecode eq 'sprk_invoice'`, fetch + layout); `workflows` (`primaryentity eq 'sprk_invoice'`); `sdkmessageprocessingsteps` under its 29 `sdkmessagefilter` rows | **0 of 5 forms** ("Invoice main form" type 2, "Invoice quick create form" type 7, and three "Information" forms of types 2, 6 and 11; all active) and **0 of 11 views** reference `sprk_issecure`; **0** workflows or business rules are bound to the table; steps are the platform's "ObjectModel Implementation" / "External plug-in implementation" only, none filtering on the column. Positive control: the main form binds 14 `sprk_` columns (incl. `sprk_containerid`, `sprk_name`, `sprk_invoicenumber`). The column-wide rows below (26 workflows; three configured-writer channels) already covered the invoice. **Disposition: no writer to remove; the lock may include the invoice** |
 | Views | every `savedquery` of the three tables (25), fetch + layout scanned | **0** |
 | Business rules / classic workflows / cloud flows / actions | every `workflow` definition of category 0/1/2/5 (26), body fetched and scanned | **0** reference `sprk_issecure`; none is bound to the three tables |
 | Plugin steps | `sdkmessagefilter` on the three tables | platform "ObjectModel / External plug-in implementation" steps only (no Spaarke plugin — ADR-002) |
@@ -125,7 +126,7 @@ under `src/client` writes it** (`projectService.test.ts` pins the payload).
   (refused earlier, by F3); `WorkAssignment_NullFlag…ResolvesItsBusinessUnit` → `…FlaggedNo…` + a new `AbsentFlag_IsRefused`;
   two fixtures now seed an explicit `false` on a work-assignment row (post-backfill reality).
 
-## 6. Client changes, and the F6 copy options (owner picks before merge)
+## 6. Client changes, and the F6 copy options (rows 1-6 picked, round 10 item 9; rows 7-11 DRAFT, owner picks before merge)
 
 Code: `projectService.ts` (flag never written), `CreateProjectWizard.tsx` (provisioning first; `secureBlocked` gates
 work assignment, event, upload + document records, email; one held-back warning), `provisioningService.ts` (new code,
@@ -138,10 +139,10 @@ Tests: `projectService.test.ts` (+2), `provisioningService.test.ts` (+2, code co
 to "you, or someone with Full Access" belongs with the Remove Secure command (task 142 / this task's ribbon part).
 
 **Owner pick (round 10 item 9, 2026-10-03): option A for rows 1, 3, 4, 5 and 6; option D (below) for row 2.** Implemented
-in round c1 (§15); no DRAFT marker remains, and each picked string is pinned verbatim by a test. The table is kept as
-the record of what was offered:
+in round c1 (§15); no DRAFT marker remains on rows 1-6, and each picked string is pinned verbatim by a test (rows 7-11,
+below the table, are new and still DRAFT). The table is kept as the record of what was offered:
 
-| # | Where | A (implemented) | B | C |
+| # | Where | A (implemented for rows 1, 3, 4, 5, 6; row 2 ships D, below) | B | C |
 |---|---|---|---|---|
 | 1 | Held back (wizard) | "Because securing the project did not finish, these were not added to it, so nothing reached shared storage: {list}. Add them once the project is secured." | "Securing the project did not finish, so nothing else was added to it — {list}. Add them after it is secured, so they are stored securely." | "{List} {was/were} not added: the project is not secured yet, and anything added now would be stored where other people can reach it. Add them once it is secured." |
 | 2 | Environment refusal (`secure_bu_not_found` …) | "… The project was created but not secured, and nothing about it changed; an administrator can secure it once the setup is fixed." | "… The project was created as an ordinary project for now; an administrator can secure it once the setup is fixed." | "… The project was created, but it could not be secured, and nothing about it changed. An administrator needs to fix the setup and then secure it." |
@@ -157,8 +158,26 @@ an older client flagged, the project is already flagged, and on a resume it is a
 secured / nothing about it changed" then overstates it, and the refusal does not say which case applies. A
 resume-neutral option **D**: "Secure projects cannot be set up in this environment right now — its Secure Record business
 unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could
-not be finished; an administrator can finish securing it once the setup is fixed." Option A stays implemented (DRAFT)
-until the owner picks; the code comment now states the resume case.
+not be finished; an administrator can finish securing it once the setup is fixed." **The owner picked D for row 2
+(round 10 item 9); it is implemented since c1** and pinned verbatim by `provisioningService.test.ts`.
+
+**Rows 7-11 — DRAFT, owner picks before merge (c1-r1, verifier c1 item 5).** Round c1 added two reason codes for
+round 10 item 10 (`sdap.provision.not_record_creator`, `sdap.provision.record_creator_unverifiable`) and wrote their
+client `errorMessage` and server ProblemDetails `detail` itself; c1-r1 adds one more server `detail` (row 11: the
+unflagged RESUME whose caller cannot be identified, reason `creator_unresolved`, whose client copy is the existing
+authored one). None was offered to the owner, which F6 and escalation trigger 5 require. Option A is what ships, each
+marked DRAFT in the code (`provisioningService.ts` rows 7-8; `ProvisionProjectEndpoint.NotRecordCreator`,
+`RecordCreatorUnverifiable` and `RefuseUnflaggedResumeUnlessCreatorAsync` rows 9-11). The wizards secure only a record
+their own user just created, so they do not reach these in normal use; a ribbon "Make Secure" (148) would show the server
+`detail` (as row 6's ribbon does).
+
+| # | Where | A (implemented, DRAFT) | B | C |
+|---|---|---|---|---|
+| 7 | Client, `not_record_creator` | "Securing the project did not start: a project that is not secure yet can be secured this way only by the person who created it. Nothing about the project changed." | "Only the person who created this project can secure it this way. Nothing about the project changed." | "This project was not secured: only the person who created it can secure it here. Nothing about it changed." |
+| 8 | Client, `record_creator_unverifiable` | "Securing the project did not start, because who created it could not be checked. Nothing about the project changed." | "Who created this project could not be checked, so it was not secured. Nothing about the project changed." | "Securing the project did not start: its creator could not be confirmed. Nothing about the project changed." |
+| 9 | Server `detail`, `not_record_creator` | "This {record} is not marked secure yet, and a record is secured this way only by the person who created it. You did not create it, so nothing was changed. Securing an existing record someone else created is a separate action, which also moves the content already filed under it." | "Only the person who created this {record} can secure it this way, and you did not create it. Nothing was changed." | "You did not create this {record}, so you cannot secure it here. Nothing was changed. Securing someone else's existing record is a separate action that also moves what is filed under it." |
+| 10 | Server `detail`, `record_creator_unverifiable` | "Whether you created this {record} could not be checked, because the person who created it could not be looked up — and a record that is not marked secure yet is secured this way only by its creator. Nothing was changed; the same caller may call again." | "Who created this {record} could not be looked up, so whether you may secure it could not be checked. Nothing was changed; you may try again." | "This {record} could not be secured: its creator could not be confirmed. Nothing was changed; you may try again." |
+| 11 | Server `detail`, unflagged resume, caller unidentified (`creator_unresolved`) | "{Record} {id} is not marked secure yet, and a record is secured this way only by the person who created it. The calling user's Dataverse identity could not be established, so that could not be checked. Nothing was changed; the same caller may retry." | "Your account could not be confirmed, so whether you created this {record} could not be checked. Nothing was changed; you may try again." | "This {record} could not be secured: your account could not be confirmed. Nothing was changed; you may try again." |
 
 The wizard's existing no-BFF copy ("… created as a normal project; an administrator can secure it.") was inaccurate
 before (the client had flagged it) and is accurate now; it is unchanged.
@@ -237,12 +256,17 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
 
-**Merge gates (all three hold before task 150 reaches master):**
-1. ~~**F6:** the owner picks the copy options in §6~~ — **closed** by owner round 10 item 9, implemented in c1 (§15).
+**Merge gates (all hold before task 150 reaches master):**
+1. **F6:** rows 1-6 **closed** by owner round 10 item 9, implemented in c1 (§15). **Rows 7-11 REOPENED (c1-r1, §16):**
+   the owner picks the copy for the two new reason codes (and the unflagged-resume `creator_unresolved` detail) in §6;
+   then the DRAFT markers in `provisioningService.ts` and `ProvisionProjectEndpoint.cs` are removed and the picks pinned.
 2. **G-0 in dev first** (r1 item 11): `Repair-SecureFlagNulls.ps1 -Apply` then `-Verify` exits 0 in spaarkedev1.
 3. **Task 133 merges first, or together** (r1 item 12): `task/uac-r2-150` is stacked on `task/uac-r2-133-b2-r2`, which
    is not in `work/unified-access-control-r2`. F3 trusts `sprk_createdbyperson`, which is safe only under 133's FLS
    lock on that column, so 150 must never land without 133 (and 133's own live gate G-3 precedes 150's G-4 anyway).
+
+Escalation trigger 2's precondition for G-4 — the live writer inventory of every table the lock covers — now includes
+`sprk_invoice` (c1-r1, §3.1: 0 of 5 forms, 0 of 11 views, no bound workflow or business rule, platform plugin steps only).
 
 ## 10. Placement and justification (CLAUDE.md §10 / §11)
 
@@ -273,7 +297,8 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
 4. **ANSWERED — round 10 item 11, closed in c1 (§15).** *As raised:* **`sprk_invoice.sprk_issecure` exists and is NOT locked** (default No, not field-secured; the owner's lock covers the three roots). Under the ABSENT refusal its NULLs must be backfilled (the script does); a Write holder can still change it. Setting it true only makes uploads to that invoice fail closed; clearing it leaves the ancestor walk to decide. Whether invoices should carry the flag at all — or be locked too — is an owner question.
 5. The client `RecordContainerResolver.ts` and the PCF still treat empty as not secure — covered by the reader profile on
    every default team (G-7/G-8 prove it live).
-6. **ANSWERED — round 10 item 10 chose (b); closed in c1 (§15).** *As raised:* **OWNER QUESTION (r1 item 13, F7 residual; not answered by rounds 1–9).** After the lock, `/provision-project` is
+6. **ANSWERED — round 10 item 10 chose (b); closed in c1 (§15) on the forward path and in c1-r1 (§16) on a resume of an
+   unflagged record.** *As raised:* **OWNER QUESTION (r1 item 13, F7 residual; not answered by rounds 1–9).** After the lock, `/provision-project` is
    the single-call way to secure ANY unflagged, unprovisioned record the caller can Write, including a colleague's
    ordinary record reached through BU-depth Write, without task 148's transition (which carries the children). Before
    the lock the same took a flag write plus the call, so the capability is not new, and the POML's rollout constraint
@@ -362,3 +387,146 @@ team either way). Master `5e39f2bea` in dev does not carry task 150, so G-0's or
 **Tests (r2).** Affected BFF classes (SecureFlag*, ProvisionRecordedContainer, UnsecureProject, RecordContainerResolver):
 139/139. Full BFF unit suite: 14392 passed, 0 failed, 54 skipped (14446 = r1 + 9 new). `Spaarke.ArchTests`: 346/346.
 Lock script: parse 0 errors; offline harness 4 scenarios; dry run against spaarkedev1 read-only, zero writes. No live write.
+
+## 15. Fix round c1 (2026-10-03, branch `task/uac-r2-150-c1`) — owner rounds 10 and 11
+
+Branched from `task/uac-r2-150-r2`, merged `work/unified-access-control-r2` (owner rounds 10-11; no conflict) at
+`a0f941dec`. Every item below is an owner decision from round 10 (2026-10-03); round 11 approved the live steps for the
+main session at integration. Nothing was written live in this round. **The c1 work was never committed on
+`task/uac-r2-150-c1`** (it stayed at `a0f941dec`); c1-r1 committed the verified snapshot unchanged as `6f7eb27f4` (§16).
+
+| Item | Decision | What changed |
+|---|---|---|
+| 1. F6 copy | round 10 item 9: A for rows 1, 3, 4, 5, 6; resume-neutral D for row 2 | Rows 1, 3, 4, 5, 6 were already option A and are unchanged. Row 2 (`classifyProvisioningFailure`, every environment refusal) is now option D: "… The project was created, but securing it could not be finished; an administrator can finish securing it once the setup is fixed." Every DRAFT marker on rows 1-6 removed from code and tests (`provisioningService.ts` ×3, `SummarizeFilesDialog.tsx` ×2, the `describeHeldBackForSecure` test's describe title); each comment now cites the pick. Copy tests: each picked string pinned VERBATIM — row 1 singular + plural (`CreateProjectWizard.secureHoldBack.test.tsx`), row 2 and row 3 (`provisioningService.test.ts`; row 2 also asserts it claims neither "not secured" nor "nothing about it changed"), rows 4 and 5 (`SummarizeFilesDialog.provisioningHost.test.tsx`, new — row 5 overrides `provisionSecureProject` once to throw), row 6 (`SecureFlagEndpointWriteTests`, the ProblemDetails `detail` for all three root types) |
+| 2. §11.6 | round 10 item 10: (b) creator-only for an UNFLAGGED record | `ProvisionProjectEndpoint.MoveWithCreatorShareAsync` (forward path), right after WhoAmI and before any write: when the record does not read `sprk_issecure = true`, `RefuseUnlessRecordCreatorAsync` admits only its creator — the caller is `createdby` (no read needed); else `createdby` is read and, when it is a PERSON (enabled or disabled), that person is the creator; when it is an application user or absent, the BFF-stamped `sprk_createdbyperson` decides. 403 `sdap.provision.not_record_creator` (extension `creatorColumn`) otherwise; a failed read is 500 `sdap.provision.record_creator_unverifiable` (retryable); a missing `sprk_createdbyperson` column (400) records nobody → `not_record_creator`. An already-flagged row stays on the Write gate. Client: both codes mapped (`not-started`; retryable false / true); `EMITTED` 27 → 29. **Extended to the resume in c1-r1 (§16)** |
+| 3. §11.4 | round 10 item 11: invoices follow their matter | `SecurableEntityRegistry.FlagIsNotASecurityInput = { "sprk_invoice" }`, applied to the live metadata answer (`BuildCatalog`) AND to a cached value (`TryParseCacheEntry`, so a catalog cached by an older build — 6h TTL — is not read with the invoice securable). The invoice stays KNOWN (`NotSecurable`), so `RecordContainerResolver` reads its row for its typed matter / project / agreement links only — never its flag or a container of its own — and the ancestor walk decides. Readers grepped (every `sprk_issecure` / `SecureFlagAttribute` / `ISecurableEntityRegistry` use in `src/server`): the invoice flag reached security only through the registry (`RecordContainerResolver.ResolveCoreAsync`, its ancestor hops and `ResolveOwningRecordAsync`; `CommunicationContainerResolver`); every other reader (`ExternalParticipationService`, `ExternalDataService`, `ExternalGrantLifecycle`, `InternalShareEndpoints`, `ExternalCallerContext`, the two endpoints) reads the three ROOT tables only; nothing outside `Sprk.Bff.Api` reads the column. Lock: `scripts/Set-SecureFlagFieldSecurity.ps1` `$Tables` gains `sprk_invoice` (same profiles, preconditions, revert/resume, dry run / `-Apply` / `-Verify`; NOT run with `-Apply`); `scripts/Repair-SecureFlagNulls.ps1` lists it statically (it was discovered before); the standing assertion's `Tables` gains it. The shared test double `TestEntityCatalog` mirrors the rule, as its contract requires. **The invoice's live form inventory was missing; done in c1-r1 (§3.1, §16)** |
+| 4. Ribbon | — | Unchanged: Make Secure / Remove Secure stay **STOPPED** on tasks 142 (the Access group) and 148 (Make Secure's transition). These are dependencies, not owner questions (§9) |
+
+**Interpretation recorded in c1 — SUPERSEDED by c1-r1 (§16, verifier c1 item 4).** c1 bound the creator rule to the
+FORWARD path only and left a RESUME of an unflagged record on its Write gate, "so an administrator's documented recovery
+still works". The verifier showed every documented resume meets a FLAGGED row, so the exemption admitted only anomalous
+states; c1-r1 applies the literal rule to unflagged resumes too.
+
+**Tests (c1)** — added by the c1 implementer; the counts below are the **c1 verifier's**, run on the uncommitted snapshot
+(diff sha256 `BD52084C…`), because c1 recorded none:
+- Server, new: `SecureFlagEndpointWriteTests` +15 — not-creator refused ×3 root types, creator provisioned ×3,
+  app-created for the recorded person, app-created for someone else, disabled-person `createdby` vs recorded person,
+  unreadable `createdby`, unreadable recorded person, missing column, flagged row on the Write gate ×3; row 6 verbatim
+  (existing theory tightened). `SecurableEntityRegistryTests` +5 (invoice not securable but known; cached pre-rule
+  value; invoice flagged true under an ordinary matter → fallback, flag never selected; invoice under a secure matter
+  → the matter's container, flag false and true). `SecureFlagFieldSecurityAssertionTests` +3 (invoice not locked fails;
+  invoice-lock ⇔ registry exclusion; parser drift for the invoice).
+- Server, converted (premise changed by the owner): `ChildRecordContainerResolutionTests.SecurableChild_ItselfSecure_KeepsItsOwnContainer`
+  → `AnInvoiceFlaggedSecure_FollowsItsMatter` (secure / ordinary matter); `ChildRecordRead_RequestsEveryLinkAndIntermediateColumn`
+  (the invoice row no longer selects `sprk_issecure` / `sprk_containerid`); `RecordContainerResolverTests.BareInvoice_…`
+  (the alias reading now follows the invoice's matter link, not the invoice's own flag); the lock-script agreement
+  (`lockScript.Tables` = the profile script's three roots + the invoice).
+- Affected BFF classes: 356/356. Full BFF unit suite: 14415 passed, 1 failed, 54 skipped (14470) — the one failure,
+  `ComposeUploadProjectionSeamTests.Upload_RealDocx`, timed out after 3m4s under machine load ("client aborted the
+  request") and passes on an isolated re-run; unrelated to this task. `Spaarke.ArchTests`: 346/346.
+  `Sprk.Bff.Api.IntegrationTests`: 104/104. `Spe.Integration.Tests`: 403 passed, 25 skipped, 0 failed (428).
+- Client: jest `CreateProjectWizard` + `SummarizeFilesWizard`, 9 suites, 123/123 (r1 117 + 6 new/tightened);
+  `@spaarke/ui-components` `tsc --noEmit` exit 0. Scripts: parse 0 errors (both).
+
+**Seeded-violation proofs (c1; each restored from a copy and touched).** S16 creator gate disabled → 8 fail · S17 gate
+applied to flagged rows too → 3 fail · S18 a disabled-person `createdby` deferred to the recorded person → 1 fail ·
+S19 an unreadable creator folded into "not the creator" → 2 fail · S20 the live-answer exclusion removed → 3 fail ·
+S21 the cached-value exclusion removed → 1 fail · S22 the exclusion set emptied (registry + shared double) → 8 fail ·
+S23 the invoice dropped from the lock script → 1 fail · C4 row 2 back to option A → 1 fail · C5 the
+`not_record_creator` mapping dropped → 2 fail · C6 rows 4 and 5 reworded → 2 fail. The c1 verifier re-ran its own
+(creator gate off 8; BuildCatalog exclusion off 3; gate always on 3; cache `ExceptWith` off 1; disabled-person
+fall-through + both unverifiable catches returning null 3; client row 2 to A + rows 4, 5 altered 3).
+
+**Placement (CLAUDE.md §10 / §11).** No new endpoint, service, DI registration, option, job, package or column. New
+surface, each extending an existing contract:
+
+| New item | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| Reason codes `sdap.provision.not_record_creator`, `sdap.provision.record_creator_unverifiable` | the endpoint's `reasonCode` contract (grep `ReasonResumeColleaguesNotPermitted`: the nearest, resume-only) | added to it; client `REASON_STATES` gains both | the owner's refusal "with a stable reason code" has no code; a failed creator read would be indistinguishable from "not the creator" |
+| `RefuseUnlessRecordCreatorAsync` (private) | `ResolveResumeCreatorAsync` (same column order, resume-only, decides whom to SHARE to) and the unsecure endpoint's F3 creator check | reuses `UnusablePersonStateAsync`, `ReadCreatorPersonAsync`, `IsColumnMissing`; a separate method because its answer differs (admit/refuse the caller, never a person to share to) | any Write holder can secure a colleague's ordinary record ahead of task 148, leaving its children and files behind |
+| `SecurableEntityRegistry.FlagIsNotASecurityInput` | the metadata-derived securable set (no exclusion mechanism exists — grep `Securable` in `Infrastructure/Dataverse`) | one owner-ruled exclusion inside the same registry, applied in its two catalog paths | an invoice flagged true under an ordinary matter refuses every upload, and the invoice's own flag is read before its matter — the opposite of the owner's rule |
+| `sprk_invoice` in the lock script, the backfill script and the standing assertion | the same three artefacts for the roots | one table added to each | a user-writable flag that looks meaningful and that the old BFF still reads |
+
+ADR-002: no plugin. ADR-003: every unknown refuses (creator unreadable → 500; column missing admits nobody; the invoice
+exclusion narrows only what the owner ruled). No `.claude/**` edit is needed.
+
+**Residuals (c1).**
+1. The client `RecordContainerResolver.ts` derives securability from metadata, so it still treats `sprk_invoice` as
+   securable: an invoice flagged true with no container refuses a client-side upload (fail closed), and an invoice under
+   a secure matter is not resolved through the matter on that path (the client has no ancestor walk — a pre-existing
+   gap, task 155's scope). After G-4 nobody but the BFF and System Administrators can set the invoice's flag, and
+   nothing does. Recorded for the owner / a follow-up.
+2. ~~The two new reason codes carry client copy written in this round … not an F6 merge gate~~ — **withdrawn in c1-r1
+   (§16, verifier c1 item 5):** that ruling was the agent's, not the owner's; the copy is DRAFT, rows 7-11 of §6.
+
+**Pending live gates (unchanged order, §9).** G-0 now also repairs the 4 NULL invoices (the script already did); G-4
+locks four tables. Approved for the main session at integration by round 11; run nothing here.
+
+## 16. Fix round c1-r1 (2026-10-03, branch `task/uac-r2-150-c1-r1`) — the c1 verifier's 16 items
+
+Branched from `task/uac-r2-150-c1` (`a0f941dec`). First commit `6f7eb27f4`: the c1 snapshot the verifier checked, applied
+from its saved diff (sha256 `BD52084C47567184ED99CB672417CA174AA67E2D3AE5888D07BCE36218DC0CCC`, 22 files), compared
+file-by-file against the c1 worktree (identical), committed through the hooks (lint-staged ran prettier and
+`dotnet format`; neither changed a byte). Second commit: the items below. No live write; the only live calls were the
+read-only GETs in item 6.
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | Nothing committed | **Closed.** `6f7eb27f4` = the verified snapshot; the hooks re-ran on it |
+| 2 | §15 cited but absent; POML `<tests>` dangling | **Closed.** §15 appended (the c1 draft, its placeholders filled with the c1 verifier's measured counts, attributed as such); the POML's c1 `<tests>` now carries the counts |
+| 3 | §6 stale ("Option A stays implemented (DRAFT)", "A (implemented)", heading "(owner picks before merge)") | **Closed.** §6 heading, table header and the row-2 paragraph now state the picks (A for 1, 3-6; D for 2, implemented since c1) |
+| 4 | Unflagged RESUME exempt from the creator rule | **Closed — literal rule applied.** The verifier's analysis holds from the code: since task 150 the flag is the forward path's first write and compensation never clears it; before task 150 provisioning required it; `UnsecureProjectEndpoint` moves the owner (Step 3) before clearing the flag (Step 5). So every documented resume meets a FLAGGED row, and the c1 exemption admitted only anomalous rows. The resume branch now calls `RefuseUnflaggedResumeUnlessCreatorAsync` FIRST when the row is not flagged: WhoAmI (unresolved → 403 `creator_unresolved`), then the same `RefuseUnlessRecordCreatorAsync` as the forward path — all before any write. A flagged resume stays on the Write gate. A System Administrator who must finish an anomalous unflagged row sets the flag first (F4), which puts it on the Write gate. Guide §7c says the same |
+| 5 | New copy for `not_record_creator` / `record_creator_unverifiable` not owner-picked | **STOPPED — owner pick required (escalation trigger 5; not answered by rounds 1-11).** The c1 ruling "not an F6 merge gate" is withdrawn. Every such string is marked DRAFT in code and offered as options A/B/C in §6 rows 7-11 (client rows 7-8, server rows 9-10, and row 11 — the new unflagged-resume `creator_unresolved` detail). Option A ships until the owner picks; F6 is a merge gate again for rows 7-11 (§9) |
+| 6 | No form inventory for `sprk_invoice` | **Closed (read-only, spaarkedev1).** §3.1 row: 0 of 5 forms and 0 of 11 views reference `sprk_issecure`; no workflow or business rule is bound to the table; plugin steps are the platform's only. Positive control: the main form binds 14 `sprk_` columns. Disposition: no writer; the invoice may be locked at G-4 |
+| 7 | A DISABLED application user in `createdby` read as a disabled person | **Closed.** `UnusablePersonStateAsync` checks `applicationid` before `isdisabled`: an application user is `application-user` whether enabled or not. Effect: the forward/unflagged-resume creator rule defers to `sprk_createdbyperson` for it (as for an enabled one); a resume's refusal names it `application-user` rather than `disabled` (so it no longer suggests re-enabling an app). New test pins it |
+| 8 | Verifications | Nothing to change |
+| 9 | Verifier's seeds | Nothing to change; recorded in §15 |
+| 10 | Verifier's suite counts on the snapshot | Recorded in §15 |
+| 11 | Round-11 item 1 / DRAFT markers on rows 1-6 met only in the working tree | **Closed** by item 1 (committed). The new-copy part is item 5 (STOPPED) |
+| 12 | Round-10 item 10 met on the forward path only | **Closed** by item 4 |
+| 13 | Round-10 item 11 not committed; invoice inventory missing | **Closed** by items 1 and 6 |
+| 14 | Suites green but counts unrecorded; publish size + CVE not done | Counts: §15 (c1) and below (c1-r1). **CVE: done** — `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: "no vulnerable packages given the current sources" (no package change in this task). **Publish size: not measured** — skipped per this round's instruction; the main session measures it against a fresh master build (CLAUDE.md §10) |
+| 15 | §15 absent; §6 stale | **Closed** by items 2 and 3 |
+| 16 | Live gates G-0, G-3/G-4, G-5, G-6, G-7, G-10; 133 first or together | **Open — main session at integration** (round 11 approval; read-only here). Unchanged order, §9 |
+
+**Tests (c1-r1).**
+- Server, new in `SecureFlagEndpointWriteTests` (+9 cases): `Provision_ResumingAnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_IsRefusedBeforeAnyWrite`
+  ×3 root types (403 `not_record_creator`; no update, grant, modify or container; flag still false; owner still the
+  team; no container recorded); `…_WhenTheCallerCannotBeIdentified_IsRefusedBeforeAnyWrite` (403 `creator_unresolved`);
+  `Provision_ResumingAnUnflaggedAppCreatedRecord_ByThePersonRecordedAsItsCreator_Resumes`;
+  `Provision_ResumingAFlaggedRecord_ByAWriteHolderWhoDidNotCreateIt_StaysOnTheWriteGate` ×3 (200; the share goes to the
+  creator, not the caller; no flag write); `Provision_AnUnflaggedRecord_CreatedByADisabledApplicationUser_IsSecuredForThePersonRecordedAsItsCreator`.
+  `Provision_ResumingAnUnflaggedRecord_SetsTheFlagBeforeTheShare` unchanged (its caller is the creator); summary reworded.
+- Affected BFF classes (SecureFlag*, ProvisionProject*, ProvisionRecordedContainer, UnsecureProject,
+  RecordContainerResolver, ChildRecordContainerResolution, SecurableEntityRegistry, SecureProjectShare,
+  RecordKeyedUploadAuthorization, CommunicationContainerResolver): 442/442. `SecureFlagEndpointWriteTests`: 55/55.
+- Full BFF unit suite, run ONCE at the end under heavy machine contention (9 concurrent test hosts from other agents):
+  14347 passed, **78 failed**, 54 skipped (14479 = c1 14470 + the 9 new). Every failure is a 2m17s–5m+ request timeout
+  ("TaskCanceledException … The client aborted the request") across 51 classes unrelated to this task (Office, Insights,
+  Memory, SpeAdmin, Compose seams, Documents, Workspace, Eval, …), plus one task-133 resume test
+  (`ProvisionResumeCreatorPersonTests.Resume_WhenCreatedByCannotBeRead_DoesNotFallThroughToTheColumn`, same timeout).
+  Isolated re-run of those 51 classes: 707 passed, 16 failed (same timeouts, load still present), 9 skipped — the
+  `ProvisionResumeCreatorPersonTests` case passed; re-run of the 15 remaining tests alone: **20/20 passed** (theory
+  cases included). So: contention, not regressions; nothing fails on its own.
+- `Spaarke.ArchTests`: 346/346. `Sprk.Bff.Api.IntegrationTests`: 104/104. `Spe.Integration.Tests`: 403 passed, 25
+  skipped, 0 failed (428). CVE: `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api): none.
+- Client (comments only changed): jest `CreateProjectWizard` + `SummarizeFilesWizard` 9 suites, 123/123;
+  `@spaarke/ui-components` `npm run build` (tsc) exit 0 (after `npm install --legacy-peer-deps` and building the local
+  `Spaarke.Auth` / `Spaarke.SdapClient` packages, which a fresh worktree lacks).
+
+**Seeded-violation proofs (c1-r1; each restored from a copy and touched).** S24 unflagged-resume gate disabled → 4
+fail (the three non-creator resumes + the unidentified caller) · S25 the gate applied to FLAGGED resumes too → 14 fail
+(the three flagged-resume theories + 11 existing task-133 resume tests in `ProvisionProjectIdempotencyTests`, flagged
+rows whose callers are not, or cannot be shown to be, the creator) · S26 `isdisabled` checked before `applicationid` again → 1 fail (the disabled-application
+-user test).
+
+**Placement (CLAUDE.md §10 / §11).** No new endpoint, service, DI registration, option, job, package, column or reason
+code. One new private method, `RefuseUnflaggedResumeUnlessCreatorAsync`: (1) Existing — `RefuseUnlessRecordCreatorAsync`
+(the creator decision) and `RefuseResumeColleaguesUnlessCreatorAsync` (the resume's WhoAmI precedent); (2) Extension — it
+IS a thin wrapper: WhoAmI, then the existing creator decision; it exists only because the resume path has no caller id
+(the forward path resolves it inside `MoveWithCreatorShareAsync`); (3) Cost of doing nothing — a non-creator Write holder
+secures an unflagged, team-owned, container-less record, contrary to round 10 item 10. ADR-002: no plugin. ADR-003: an
+unresolved caller refuses, never "the creator". No `.claude/**` edit needed.
+
+**Owner questions raised by this round.** Only F6 rows 7-11 (§6). The verifier's item 4 named the c1 interpretation as
+owner-reversible; c1-r1 resolves it by applying round 10 item 10 as written, which needs no new decision.

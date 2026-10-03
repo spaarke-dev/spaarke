@@ -232,7 +232,10 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         FlagWrites(projectId).Should().OnlyContain(u => u.Payload["sprk_issecure"] == bool.TrueString);
     }
 
-    /// <summary>A RESUME (owned by the team, no container) of a record whose flag is not set sets it before any share.</summary>
+    /// <summary>
+    /// A RESUME (owned by the team, no container) of a record whose flag is not set — by its creator, the only caller
+    /// the round-10 rule admits for an unflagged record — sets it before any share.
+    /// </summary>
     [Fact]
     public async Task Provision_ResumingAnUnflaggedRecord_SetsTheFlagBeforeTheShare()
     {
@@ -496,6 +499,115 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
         _fixture.DelegationProbes.Should().NotBeEmpty("the route's Write gate is still what admits the caller");
+    }
+
+    /// <summary>
+    /// Verifier c1 item 7 — "createdby when human": an application user in <c>createdby</c> is not a person even when it is
+    /// DISABLED, so the BFF-stamped <c>sprk_createdbyperson</c> decides (here: the caller).
+    /// </summary>
+    [Fact]
+    public async Task Provision_AnUnflaggedRecord_CreatedByADisabledApplicationUser_IsSecuredForThePersonRecordedAsItsCreator()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: BffApplicationUser,
+            createdByPerson: ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SystemUsers[BffApplicationUser] = (true, true);   // a disabled APPLICATION user
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Verifier c1 item 4: the round-10 rule names an UNFLAGGED record, and a RESUME would mark one secure too (it writes
+    // the flag before its share). So an unflagged resume admits only the creator, before any write; a flagged resume —
+    // every documented recovery meets one — stays on the Write gate.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Nothing at all was written by a refused resume: no flag, no share, no container, owner unchanged.</summary>
+    private void AssertResumeWroteNothing(Guid recordId)
+    {
+        _fixture.Updates.Should().BeEmpty("the refusal comes before any write — the flag included");
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.IsSecureOf(recordId).Should().BeFalse();
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId, "never moved");
+        _fixture.ContainerIdOf(recordId).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_ResumingAnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_IsRefusedBeforeAnyWrite(
+        string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);   // a person created it
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertResumeWroteNothing(recordId);
+    }
+
+    [Fact]
+    public async Task Provision_ResumingAnUnflaggedRecord_WhenTheCallerCannotBeIdentified_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.CallerSystemUserIdResolves = false;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorUnresolved,
+            "an unidentified caller is never read as the creator");
+        AssertResumeWroteNothing(recordId);
+    }
+
+    [Fact]
+    public async Task Provision_ResumingAnUnflaggedAppCreatedRecord_ByThePersonRecordedAsItsCreator_Resumes()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("workassignment", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: BffApplicationUser, createdByPerson: ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "workassignment", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+        _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// A FLAGGED resume (the shape every documented recovery meets) by a Write holder who did not create it stays on the
+    /// Write gate, and the share still goes to the creator — never the caller (F8).
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_ResumingAFlaggedRecord_ByAWriteHolderWhoDidNotCreateIt_StaysOnTheWriteGate(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+        FlagWrites(recordId).Should().BeEmpty("a record that already reads true is not written again");
     }
 
     // ═════════════════════════════════════════════════════════════════════════

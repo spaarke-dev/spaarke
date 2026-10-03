@@ -76,7 +76,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <c>sprk_createdbyperson</c> is a usable person — absent, disabled, an application user or unreadable — the resume
 /// is REFUSED with its own reason code, zero grants and zero containers (the closed acceptance criterion; verifier
 /// round 2 withdrew a round-1 path that completed when another person already held a share, because it changed that
-/// owner-decided contract without the owner).</para>
+/// owner-decided contract without the owner). A resume of a record NOT flagged secure is held to the same creator rule
+/// as the forward path (owner round 10 item 10; task 150 verifier c1 item 4) — before any write; a flagged one stays on
+/// the Write gate.</para>
 ///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
 /// restores the access state every earlier refusal already leaves (the creator's own). Step 4.2 is not: a shared
@@ -658,6 +660,23 @@ public static class ProvisionProjectEndpoint
         Guid creatorId;
         if (resume)
         {
+            // ── RESUME of an UNFLAGGED record: only its creator (owner round 10 item 10; task 150 verifier c1 item 4) ──
+            //
+            // The round-10 rule names an unflagged record, not the forward path: a resume would mark it secure too (the
+            // flag write below). Every documented resume meets a FLAGGED row — since task 150 the flag is the forward
+            // path's first write and nothing clears it on failure; before task 150 provisioning required it; and the
+            // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
+            // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
+            // on the route's Write gate.
+            if (!alreadyFlagged)
+            {
+                var unflaggedResumeRefusal = await RefuseUnflaggedResumeUnlessCreatorAsync(
+                    dataverseClient, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId, logger, traceId, ct);
+
+                if (unflaggedResumeRefusal != null)
+                    return unflaggedResumeRefusal;
+            }
+
             // ── RESUME: the person a resume shares to — createdby when a person, else sprk_createdbyperson ──
             var person = await ResolveResumeCreatorAsync(
                 dataverseClient, root, recordId, row, ownerTeamId, logger, traceId, ct);
@@ -1477,9 +1496,10 @@ public static class ProvisionProjectEndpoint
         : "An administrator must call provisioning again to resume.";
 
     /// <summary>
-    /// FORWARD, on a record NOT yet flagged secure (owner round 10 item 10, 2026-10-03; task 150 note §11.6): refuses —
-    /// read-only, before any write — unless the caller is the person who created the record. Returns the refusal to send,
-    /// or <c>null</c> when the caller is that person.
+    /// On a record NOT yet flagged secure (owner round 10 item 10, 2026-10-03; task 150 note §11.6) — the forward path, and
+    /// a resume (<see cref="RefuseUnflaggedResumeUnlessCreatorAsync"/>, verifier c1 item 4): refuses — read-only, before
+    /// any write — unless the caller is the person who created the record. Returns the refusal to send, or <c>null</c>
+    /// when the caller is that person.
     /// </summary>
     /// <remarks>
     /// <para><b>Why.</b> After the <c>sprk_issecure</c> lock this call is the one way to mark a record secure, and the route
@@ -1491,8 +1511,8 @@ public static class ProvisionProjectEndpoint
     /// order the resume uses): the caller is admitted when they are <c>createdby</c> (they made the create — a delegated
     /// caller is a person, so no read is needed); otherwise <c>createdby</c> is read, and when it is a PERSON (enabled or
     /// not) that person is the creator and the caller is refused; when it is an application user (an app-only create, e.g.
-    /// Office quick-create) or absent, the BFF-stamped <c>sprk_createdbyperson</c> (field-secured, written only by the BFF —
-    /// task 133) names the creator.</para>
+    /// Office quick-create — enabled or not: an application user is never a person, verifier c1 item 7) or absent, the
+    /// BFF-stamped <c>sprk_createdbyperson</c> (field-secured, written only by the BFF — task 133) names the creator.</para>
     ///
     /// <para><b>Fail closed.</b> A read that fails refuses with <see cref="ReasonRecordCreatorUnverifiable"/> (500, the same
     /// caller may retry) — never folded into "the caller is the creator". A <c>sprk_createdbyperson</c> column this
@@ -1569,6 +1589,8 @@ public static class ProvisionProjectEndpoint
             : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
     }
 
+    // DRAFT copy (F6 process, task 150 verifier c1 item 5): this `detail` was written by the agent, not picked by the
+    // owner — options in notes/task-150-issecure-lock.md §6, row 9; the owner picks before merge.
     private static IResult NotRecordCreator(
         SecureRecordRoot root, Guid recordId, Guid callerId, string decidingColumn, ILogger logger, string traceId)
     {
@@ -1585,12 +1607,60 @@ public static class ProvisionProjectEndpoint
             traceId, (ReasonKey, ReasonNotRecordCreator), ("creatorColumn", decidingColumn));
     }
 
+    // DRAFT copy (F6 process, task 150 verifier c1 item 5): this `detail` was written by the agent, not picked by the
+    // owner — options in notes/task-150-issecure-lock.md §6, row 10; the owner picks before merge.
     private static IResult RecordCreatorUnverifiable(SecureRecordRoot root, string traceId) =>
         Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
             $"Whether you created this {root.DisplayLabel.ToLowerInvariant()} could not be checked, because the person who " +
             "created it could not be looked up — and a record that is not marked secure yet is secured this way only by " +
             "its creator. Nothing was changed; the same caller may call again.",
             traceId, (ReasonKey, ReasonRecordCreatorUnverifiable));
+
+    /// <summary>
+    /// RESUME of a record NOT flagged secure (owned by the Secure Record owner team, no container recorded): the same
+    /// creator rule as the forward path (owner round 10 item 10 — "may secure an UNFLAGGED record only for its creator";
+    /// task 150 verifier c1 item 4). Read-only, before any write. Returns the refusal to send, or <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// The caller is identified by WhoAmI, as on the forward path; an unresolved caller is refused
+    /// <see cref="ReasonCreatorUnresolved"/> (never read as "the creator"). Then
+    /// <see cref="RefuseUnlessRecordCreatorAsync"/> decides, with the same columns and the same fail-closed reads. A
+    /// System Administrator who is not the creator and needs to finish such a row sets the flag first (F4: the platform
+    /// lets that role write it) — the row is then on the Write gate like every documented resume.
+    /// </remarks>
+    private static async Task<IResult?> RefuseUnflaggedResumeUnlessCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        Guid ownerTeamId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var caller = await callerAccessProbe.GetCallerSystemUserIdAsync(
+            TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+
+        if (caller is not { } callerId || callerId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[PROVISION] Resume of unflagged {RecordType} {RecordId} refused: the caller's Dataverse identity could not " +
+                "be established, so it could not be shown to be the record's creator. Nothing was changed. TraceId={TraceId}",
+                root.WireToken, recordId, traceId);
+
+            // DRAFT copy (F6 process, verifier c1 item 5) — options in notes/task-150-issecure-lock.md §6, row 11.
+            return Problem(
+                StatusCodes.Status403Forbidden, "Forbidden",
+                $"{root.DisplayLabel} {recordId} is not marked secure yet, and a record is secured this way only by the " +
+                "person who created it. The calling user's Dataverse identity could not be established, so that could not " +
+                "be checked. Nothing was changed; the same caller may retry.",
+                traceId, (ReasonKey, ReasonCreatorUnresolved), ("ownerTeamId", ownerTeamId));
+        }
+
+        return await RefuseUnlessRecordCreatorAsync(dataverseClient, root, recordId, row, callerId, logger, traceId, ct);
+    }
 
     /// <summary>
     /// On RESUME, refuses a request that names colleagues unless its caller IS the record's creator — before any write
@@ -1970,8 +2040,10 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// Why <paramref name="systemUserId"/> cannot be the person a secure record is kept open for — <c>absent</c>,
     /// <c>disabled</c> or <c>application-user</c> — or <c>null</c> when it can. Throws when the user cannot be read:
-    /// an unreadable user is never "usable". A row whose <c>isdisabled</c> is not read as <c>false</c> (including
-    /// null) is treated as disabled — only a proven-enabled user counts.
+    /// an unreadable user is never "usable". An application user is <c>application-user</c> whether enabled or not — it
+    /// is never a person, so a DISABLED application user is not read as a disabled person (task 150 verifier c1 item 7:
+    /// "createdby when human"). Otherwise a row whose <c>isdisabled</c> is not read as <c>false</c> (including null) is
+    /// treated as disabled — only a proven-enabled user counts.
     /// </summary>
     private static async Task<string?> UnusablePersonStateAsync(
         DataverseWebApiClient dataverseClient, Guid systemUserId, CancellationToken ct)
@@ -1986,10 +2058,10 @@ public static class ProvisionProjectEndpoint
         var user = users.FirstOrDefault();
         if (user is null)
             return UnusableAbsent;
-        if (user.isdisabled != false)
-            return UnusableDisabled;
         if (user.applicationid is { } app && app != Guid.Empty)
             return UnusableApplicationUser;
+        if (user.isdisabled != false)
+            return UnusableDisabled;
         return null;
     }
 

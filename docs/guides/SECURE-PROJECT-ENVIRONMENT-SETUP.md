@@ -632,8 +632,12 @@ or **the record's creator** (`createdby`, or `sprk_createdbyperson` for an app-c
 403 `sdap.unsecure.not_permitted`. Securing stays open to Write holders — for a record already marked secure (an older
 client, a pre-task-150 row). A record NOT yet marked secure is secured through `/provision-project` only by **its
 creator** (owner round 10 item 10: `createdby` when a person, else `sprk_createdbyperson`); anyone else gets 403
-`sdap.provision.not_record_creator` before any write. Securing an existing record someone else created belongs to task
-148's transition. `sprk_accesspermission` is NOT field-secured (owner-accepted).
+`sdap.provision.not_record_creator` before any write. That holds on a resume too (a record the Secure Record owner team
+already owns with no container, but whose flag is not set): only its creator may finish it. Every documented recovery
+meets a FLAGGED row, which stays on the Write gate; a System Administrator who must finish an unflagged one (an anomaly,
+e.g. a manual Assign to the owner team) sets the flag first (F4), then calls provisioning.
+Securing an existing record someone else created belongs to task 148's transition. `sprk_accesspermission` is NOT
+field-secured (owner-accepted).
 
 **`sprk_invoice` carries the column too, and is locked the same way** (owner round 10 item 11: invoices follow their
 matter). Its value is **not a security input** anywhere in the BFF: the securable-entity registry leaves the invoice out

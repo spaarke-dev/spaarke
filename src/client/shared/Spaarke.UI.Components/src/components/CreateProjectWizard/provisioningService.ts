@@ -303,7 +303,10 @@ const REASON_STATES: Readonly<
   },
   // Task 150 (owner round 10 item 10): a record NOT yet marked secure is secured through this call only by the person
   // who created it, and the caller is not that person. Refused before any change; deterministic for that caller. The
-  // two wizards secure only a record their user has just created, so neither reaches this in normal use.
+  // two wizards secure only a record their user has just created, so neither reaches this in normal use. A RESUME of an
+  // unflagged record is held to the same rule (verifier c1 item 4).
+  // DRAFT copy (F6 process, verifier c1 item 5): written by the agent, not picked by the owner — options in
+  // notes/task-150-issecure-lock.md §6, row 7; the owner picks before merge.
   'sdap.provision.not_record_creator': {
     failureKind: 'not-started',
     errorMessage:
@@ -312,6 +315,8 @@ const REASON_STATES: Readonly<
   },
   // Task 150 (owner round 10 item 10): whether the caller created the record could not be checked (a read failed).
   // Refused before any change; the server tells the same caller they may call again.
+  // DRAFT copy (F6 process, verifier c1 item 5): written by the agent, not picked by the owner — options in
+  // notes/task-150-issecure-lock.md §6, row 8; the owner picks before merge.
   'sdap.provision.record_creator_unverifiable': {
     failureKind: 'not-started',
     errorMessage:
