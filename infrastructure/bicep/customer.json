@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1416685255353016258"
+      "templateHash": "7505094810364368307"
     }
   },
   "parameters": {
@@ -2096,7 +2096,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13199676677394953369"
+              "templateHash": "11530843244190946280"
             }
           },
           "parameters": {
@@ -2190,10 +2190,6 @@
             "docIntelligenceEndpoint": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('docIntelligenceName')), '2023-10-01-preview').endpoint]"
-            },
-            "docIntelligenceKey": {
-              "type": "string",
-              "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('docIntelligenceName')), '2023-10-01-preview').key1]"
             }
           }
         }
@@ -3630,7 +3626,6 @@
               "AppInsights-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
               "AzureOpenAI-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
               "Communication-WebhookUrl": "[format('{0}/api/communications/incoming-webhook', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceUrl.value)]",
-              "DocumentIntelligence-ApiKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceKey.value]",
               "DocumentIntelligence-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
               "Redis-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value]"
             }
@@ -3643,7 +3638,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7393164696199473406"
+              "templateHash": "9335211202069528091"
             }
           },
           "parameters": {
@@ -3903,26 +3898,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['DocumentIntelligence-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-bicep-output"
-              },
-              "tags": {
-                "canonicalName": "DocumentIntelligence-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4101,7 +4076,6 @@
                 "Compose-Webhook-SigningKey",
                 "ContentSafety-ApiKey",
                 "Dataverse-ClientSecret",
-                "DocumentIntelligence-ApiKey",
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
                 "Email-WebhookSigningKey",

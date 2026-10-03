@@ -35,7 +35,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `Compose-Webhook-SigningKey` | compose | 90-days-or-on-incident | - | generated |
 | `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
-| `DocumentIntelligence-ApiKey` | ai | 90-days | - | from-bicep-output |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
@@ -255,22 +254,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: Dataverse:ClientSecret
   - L2 control-plane: dataverseClientSecretName (controlplane-app-service.bicep)
 
-### `DocumentIntelligence-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: ai, key
-- **Consumers**:
-  - BFF: DocumentIntelligence:DocIntelKey
-- **App-setting keys**:
-  - `DocumentIntelligence__DocIntelKey`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `ai-docintel-key`
-  - `docintel-key`
-
 ### `DocumentIntelligence-Endpoint`
 
 - **Category**: ai
@@ -398,11 +381,9 @@ The following drift spellings are documented as aliases on canonical entries. Ta
 | Alias (drift) | Canonical | Notes |
 |---|---|---|
 | `ai-docintel-endpoint` | `DocumentIntelligence-Endpoint` | ai |
-| `ai-docintel-key` | `DocumentIntelligence-ApiKey` | ai |
 | `ai-openai-endpoint` | `AzureOpenAI-Endpoint` | ai |
 | `ai-search-endpoint` | `AiSearch-Endpoint` | ai |
 | `communication-webhook-secret` | `Communication-WebhookClientState` | communication |
 | `compose-webhook-clientstate` | `Compose-Webhook-ClientState` | compose |
 | `compose-webhook-signingkey` | `Compose-Webhook-SigningKey` | compose |
-| `docintel-key` | `DocumentIntelligence-ApiKey` | ai |
 | `redis-connection-string` | `Redis-ConnectionString` | data-services |

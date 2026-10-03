@@ -7,6 +7,19 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — provisioning: Document Intelligence via managed identity; stamps run the AI platform (T243, D22)
+
+`customer-provisioning-orchestration-r1` T243 (owner D13, G17, G29).
+
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: the `from-bicep-output` example no longer
+  lists `DocumentIntelligence-ApiKey` (retired by T243).
+- The mechanism: the BFF's `TextExtractorService` accepts the API key OR the injected managed identity ("key if
+  configured, else MI") and reports a rejected credential plainly; the catalog stops issuing the Document
+  Intelligence key and gains the per-env literal `DocumentIntelligence__Enabled=true` — no stamp had ever set the
+  BFF's AI master switch, so stamps ran with `NullTextExtractor` and analysis off. Owner D22: T244 + T246 are hard
+  prerequisites of T186.
+
+---
 ###### 2026-10-02 — provisioning: one customer-stamp template (T249, D19)
 
 `customer-provisioning-orchestration-r1` T249 (owner decision D19).

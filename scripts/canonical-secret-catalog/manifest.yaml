@@ -366,27 +366,10 @@ secrets:
       - 'DocumentIntelligence__DocIntelEndpoint'
     tags: ['ai', 'endpoint']
 
-  - canonical_name: 'DocumentIntelligence-ApiKey'
-    category: 'ai'
-    purpose: >-
-      Azure Document Intelligence API key, from the customer's OWN Document
-      Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text
-      extraction only runs when DocIntelKey is set, so the key stays until the
-      BFF managed-identity path lands (plan §7 T243), which removes this entry.
-    consumers:
-      - 'BFF: DocumentIntelligence:DocIntelKey'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: ''
-    aliases:
-      - 'ai-docintel-key'
-      - 'docintel-key'
-    # T226 (2026-09-30): written by customer.bicep's kvSecrets module from the
-    # customer's own Document Intelligence (listKeys); never a shared service.
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'DocumentIntelligence__DocIntelKey'
-    tags: ['ai', 'key']
+  # T243 (owner D13, 2026-10-02): 'DocumentIntelligence-ApiKey' REMOVED — the BFF extracts through the stamp
+  # UAMI when no key is set (TextExtractorService "key if configured, else MI"; the stamp's Document
+  # Intelligence account has a custom subdomain + Cognitive Services User for the UAMI). Existing vault
+  # copies (dev/demo 'ai-docintel-key') are left alone; new stamps are never given one.
 
   - canonical_name: 'AiSearch-Endpoint'
     category: 'ai'
@@ -882,6 +865,17 @@ per_env_settings:
     notes: >-
       Auth-v4 §10.2 entry 6. Shares the service_bus_fqns source with entries
       4 and 5.
+
+  - key: 'DocumentIntelligence__Enabled'
+    per_env_source: 'literal'
+    literal_value: 'true'
+    iOptionsModule: 'AnalysisServicesModule'
+    required: true
+    notes: >-
+      T243 (2026-10-02). The BFF's AI master switch: without it AnalysisServicesModule registers
+      NullTextExtractor and skips analysis, playbooks and search (the 2026-08-22 Model 1 stand-up
+      logged exactly that). No stamp source set it before. Global literal -- every customer stamp
+      runs the AI platform.
 
   - key: 'AiSearch__ManagedIdentity__Enabled'
     per_env_source: 'literal'

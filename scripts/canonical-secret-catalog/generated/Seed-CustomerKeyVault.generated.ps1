@@ -234,15 +234,6 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
     Set-VaultSecret -Name 'Dataverse-ClientSecret' -Value 'placeholder-value-source-is-existing-kv' -Description 'OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track). [BINDING never-delete: skip in seed]' -Category 'auth'
 }
 
-# ---- DocumentIntelligence-ApiKey (ai) ----
-# Purpose: Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'DocumentIntelligence-ApiKey' -Value 'placeholder-from-bicep-output' -Description 'Azure Document Intelligence API key, from the customer''s OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF''s text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- DocumentIntelligence-Endpoint (ai) ----
 # Purpose: Azure Document Intelligence endpoint.
 # Value source: from-bicep-output

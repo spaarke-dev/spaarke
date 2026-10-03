@@ -87,7 +87,7 @@ var fileStream = await _speFileStore.DownloadFileAsUserAsync(
 | `MaxOutputTokens` | int | `1000` | Max tokens in summary (100-4000) |
 | `Temperature` | float | `0.3` | Generation temperature (0.0-1.0) |
 | `DocIntelEndpoint` | string? | null | Document Intelligence endpoint |
-| `DocIntelKey` | string? | null | Document Intelligence key |
+| `DocIntelKey` | string? | null | Document Intelligence key — optional; when null the BFF authenticates with its managed identity (needs a custom subdomain on the account) |
 | `MaxFileSizeBytes` | int | `10MB` | Max file size |
 | `MaxInputTokens` | int | `100000` | Max input tokens |
 | `MaxConcurrentStreams` | int | `3` | Max concurrent SSE per user |

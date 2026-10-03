@@ -166,7 +166,7 @@ Options class: `DocumentIntelligenceOptions` (`Configuration/DocumentIntelligenc
 
 | Setting | Default | Range | Location | Description |
 |---------|---------|-------|----------|-------------|
-| `DocumentIntelligence:Enabled` | `true` | bool | Env Var | Master switch for AI summarization |
+| `DocumentIntelligence:Enabled` | `false` when unset (the DI gates read `GetValue<bool>`; the options class's own `true` default does not apply to them) | bool | Env Var | Master switch for the AI platform (text extraction, analysis, playbooks, search). Customer stamps get `true` from H4b (catalog per-env literal, task 243) |
 | `DocumentIntelligence:StreamingEnabled` | `true` | bool | appsettings | Enable SSE streaming responses |
 | `DocumentIntelligence:OpenAiEndpoint` | -- | URL | Key Vault | Azure OpenAI endpoint |
 | `DocumentIntelligence:OpenAiKey` | -- | -- | Key Vault | Azure OpenAI API key |
@@ -176,7 +176,7 @@ Options class: `DocumentIntelligenceOptions` (`Configuration/DocumentIntelligenc
 | `DocumentIntelligence:MaxOutputTokens` | `500` | 100-4000 | appsettings | Max summary tokens |
 | `DocumentIntelligence:Temperature` | `0.3` | 0.0-1.0 | appsettings | Generation temperature |
 | `DocumentIntelligence:DocIntelEndpoint` | -- | URL | Key Vault | Document Intelligence endpoint |
-| `DocumentIntelligence:DocIntelKey` | -- | -- | Key Vault | Document Intelligence API key |
+| `DocumentIntelligence:DocIntelKey` | -- | -- | Key Vault | Document Intelligence API key — optional: when unset the BFF uses its managed identity (customer stamps carry no key since task 243; the account needs a custom subdomain) |
 | `DocumentIntelligence:DocIntelTimeoutSeconds` | `30` | 5-300 | appsettings | Doc Intel request timeout |
 | `DocumentIntelligence:DocIntelCircuitBreakerThreshold` | `3` | 1-20 | appsettings | CB failure threshold |
 | `DocumentIntelligence:DocIntelCircuitBreakerBreakSeconds` | `60` | 10-600 | appsettings | CB open duration |

@@ -126,8 +126,6 @@ public sealed class FileKvSecretManifestTests
     [InlineData("Redis-ConnectionString", KvSecretValueSource.FromBicepOutput)]
     // T226: task 214's from-topology-constants — the reader rejected it before T226.
     [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromTopologyConstants)]
-    // T226 / owner D13: interim key from the customer's own Document Intelligence (T243 removes it).
-    [InlineData("DocumentIntelligence-ApiKey", KvSecretValueSource.FromBicepOutput)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
@@ -161,6 +159,7 @@ public sealed class FileKvSecretManifestTests
     // an unresolvable reference reaches the BFF as a literal "key".
     // Task 225b (owner D18, 2026-10-02): the Spaarke-shared vendor keys left every stamp —
     // Bing Search v7 was retired by Microsoft 2025-08-11; LlamaParse has no production caller.
+    // T243 (owner D13, 2026-10-02): the BFF reaches Document Intelligence with the stamp UAMI.
     [Theory]
     [InlineData("AiSearch--AdminKey")]
     [InlineData("ServiceBus-ConnectionString")]
@@ -170,6 +169,7 @@ public sealed class FileKvSecretManifestTests
     [InlineData("PromptFlow-Key")]
     [InlineData("BingSearch-ApiKey")]
     [InlineData("LlamaParse-ApiKey")]
+    [InlineData("DocumentIntelligence-ApiKey")]
     public async Task ReadAsync_RealEmbeddedManifest_DoesNotServeKeyRemovedFromTheProcess(string canonicalName)
     {
         // Legacy client-secret path = the widest served set; absent there means absent everywhere.

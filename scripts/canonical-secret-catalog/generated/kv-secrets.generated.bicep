@@ -295,26 +295,6 @@ resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
 // (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
 // of this module can therefore NEVER touch the live value.
 
-// DocumentIntelligence-ApiKey — Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
-resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-ApiKey')) {
-  parent: keyVault
-  name: 'DocumentIntelligence-ApiKey'
-  properties: {
-    value: secretValues['DocumentIntelligence-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-bicep-output'
-  }
-  tags: {
-    canonicalName: 'DocumentIntelligence-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // DocumentIntelligence-Endpoint — Azure Document Intelligence endpoint.
 resource kv_documentIntelligence_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-Endpoint')) {
   parent: keyVault
@@ -494,7 +474,6 @@ output canonicalSecretNames array = [
   'Compose-Webhook-SigningKey'
   'ContentSafety-ApiKey'
   'Dataverse-ClientSecret'
-  'DocumentIntelligence-ApiKey'
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'

@@ -236,7 +236,7 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
-    public async Task ReadAsync_RealEmbeddedManifest_AiSearchAndAiSafetyMiFlags_AreTrueLiterals()
+    public async Task ReadAsync_RealEmbeddedManifest_AiFlags_AreTrueLiterals()
     {
         var manifest = NewManifest();
         var result = await manifest.ReadAsync(CancellationToken.None);
@@ -244,6 +244,10 @@ public sealed class FilePerEnvSettingsManifestTests
 
         var aiSearch = entries.Single(e => e.Key == "AiSearch__ManagedIdentity__Enabled");
         var aiSafety = entries.Single(e => e.Key == "AiSafety__ContentSafety__ManagedIdentity__Enabled");
+        // T243: the BFF's AI master switch — absent, a stamp registers NullTextExtractor and runs with AI off.
+        var aiPlatform = entries.Single(e => e.Key == "DocumentIntelligence__Enabled");
+        aiPlatform.PerEnvSource.Should().Be(PerEnvSettingSource.Literal);
+        aiPlatform.LiteralValue.Should().Be("true");
 
         aiSearch.PerEnvSource.Should().Be(PerEnvSettingSource.Literal);
         aiSearch.LiteralValue.Should().Be("true");

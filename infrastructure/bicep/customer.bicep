@@ -431,7 +431,7 @@ module aiSearch 'modules/ai-search.bicep' = {
 // the module's existing `userAssignedIdentityPrincipalId` param, same pattern
 // task 128 wired for openai.bicep/ai-search.bicep. `docIntelligenceEndpoint`
 // output name is LOAD-BEARING -- ArmDeploymentRunner.MapOutputs (task 123)
-// reads it exactly. Raw `docIntelligenceKey` is intentionally NOT echoed here.
+// reads it exactly. The module has no key output (T243: the BFF uses the stamp UAMI).
 // ============================================================================
 
 module docIntelligence 'modules/doc-intelligence.bicep' = {
@@ -607,10 +607,11 @@ module bffApi 'modules/app-service.bicep' = {
     //     by any BFF code and is not emitted. KNOWN GAP (plan G16): modules/ai-search.bicep
     //     still creates the service keys-only, so its MI calls 403 until T244 enables
     //     Entra auth on it.
-    //   - Document Intelligence still uses its key (owner D13 interim): the BFF only
-    //     extracts text when DocumentIntelligence__DocIntelKey is set, so H4b emits that
-    //     setting from the manifest and kvSecrets below writes the customer's own key.
-    //     T243 adds the BFF managed-identity path and removes the key.
+    //   - Document Intelligence is reached with the stamp UAMI too (T243, owner D13): the
+    //     BFF uses managed identity when no DocumentIntelligence__DocIntelKey is set, and no
+    //     stamp is given one. The module sets a custom subdomain (Entra needs it) and grants
+    //     the UAMI Cognitive Services User. H4b emits DocumentIntelligence__Enabled=true
+    //     (the BFF's AI master switch) and the endpoint.
     //   - KV references resolve only after H4 PATCHes keyVaultReferenceIdentity
     //     to the UAMI on both slots (ArmAppServiceIdentityPatcher, task 125) and
     //     the kvSecrets module has written real values. No ARM dependsOn needed:
@@ -738,18 +739,15 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 // therefore the actual value-writer H4 depends on to no-op/succeed on these
 // entries instead of failing QuarantineRequired on a fresh customer.
 //
-// Resolvable (7) -- direct sibling-module output references:
+// Resolvable (6) -- direct sibling-module output references:
 //   AiSearch-Endpoint, AppInsights-ConnectionString, AzureOpenAI-Endpoint,
-//   Communication-WebhookUrl, DocumentIntelligence-ApiKey,
-//   DocumentIntelligence-Endpoint, Redis-ConnectionString
+//   Communication-WebhookUrl, DocumentIntelligence-Endpoint, Redis-ConnectionString
 //
 // REMOVED FROM THE PROCESS (T226, owner 2026-09-30) -- the BFF reaches these services
 // with the stamp UAMI, so no key is written to the vault for them:
 //   AiSearch--AdminKey, ServiceBus-ConnectionString, AzureOpenAI-ApiKey;
-//   Storage-ConnectionString (no BFF reader at all).
+//   Storage-ConnectionString (no BFF reader at all); DocumentIntelligence-ApiKey (T243).
 // Keys that stay for now (owner D13 keyless stamps, implemented incrementally):
-//   DocumentIntelligence-ApiKey -- the BFF's text extraction requires the key until
-//     T243 adds its managed-identity path.
 //   Redis-ConnectionString -- the BFF has no Entra path for Redis today; the Azure
 //     Managed Redis + Entra-only move is plan task T242.
 //
@@ -779,7 +777,6 @@ var kvSecretValues = {
   'AppInsights-ConnectionString': monitoring.outputs.connectionString
   'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
   'Communication-WebhookUrl': '${bffApi.outputs.appServiceUrl}/api/communications/incoming-webhook'
-  'DocumentIntelligence-ApiKey': docIntelligence.outputs.docIntelligenceKey
   'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
   'Redis-ConnectionString': redisCache.outputs.redisConnectionString
 }
@@ -843,9 +840,8 @@ output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 
 // --- Document Intelligence (task 128b / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.DocIntelligenceEndpoint. Raw `docIntelligenceKey` is
-// intentionally NOT echoed here — flows through a future kv-secrets wiring
-// task instead (task 129 territory). ---
+// BicepDeployOutputs.DocIntelligenceEndpoint. There is no key output: the stamp BFF
+// reaches Document Intelligence with its UAMI (T243). ---
 output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
 output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
 
