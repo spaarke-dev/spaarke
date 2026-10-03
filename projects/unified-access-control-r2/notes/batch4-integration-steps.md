@@ -23,10 +23,13 @@ This is the running list of obligations the main session takes on while integrat
 ## Live steps on dev (owner round 11: approved; run each as dry run, then apply, then verify, and record it in the task's live-gate note)
 
 **Before deploying the integrated BFF:**
-- [ ] **133:** `scripts/Set-RecordCreatorPersonSchema.ps1` (dry run, then `-Apply`, then `-Verify`).
-- [ ] **143:** G-1 (No Access column) and O2 (only an access-administrator role reads `sprk_noaccessentry`).
-- [ ] **150:** G-0 `Repair-SecureFlagNulls.ps1`, then the FLS lock on `sprk_issecure` (invoice included, round 10 item 11).
-- [ ] **146:** G146-1 (Secure Record Owner role, 9 → 26 tables) and G146-2 (Read on `sprk_emailreviewlog` for the BU default teams).
+- [x] **133:** `scripts/Set-RecordCreatorPersonSchema.ps1` APPLIED 2026-10-03 (`92d5f3cc1`). `-Verify` must be re-run to PASS after the schema-script verify fix above.
+- [x] **143 G-1:** APPLIED 2026-10-03 (`92d5f3cc1`). Re-run `-Verify` after the script fix.
+- [ ] **143 O2** (only an access-administrator role reads `sprk_noaccessentry`): WITH the deploy, because it changes current behaviour.
+- [x] **150 G-0:** null repair PASS 2026-10-03 (42 rows). Fix the after-check counting slip at integration.
+- [ ] **150 FLS lock** on `sprk_issecure` (invoice included, round 10 item 11): WITH the 150 client and BFF deploy.
+- [x] **146 G146-1** (9 → 26, the §5.4 strip, negative and positive probes) and **G146-2**: DONE 2026-10-03.
+- [ ] **Copy G146-1's verbatim refusals** from `notes/batch4-live-gates-2026-10-03.md` into the 17 `evidence` fields of `config/secure-record-owner-role.json` on the integration branch, replacing "VERBATIM REFUSAL PENDING".
 - [ ] **142:** the ledger schema (`sprk_assignedaccess`) and the "Update Access" ribbon.
 
 **Then:**
