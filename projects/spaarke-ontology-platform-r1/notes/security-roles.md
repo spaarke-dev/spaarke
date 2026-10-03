@@ -179,7 +179,9 @@ cross-BU customer it is not.
 
 1. Create the three roles in the **root business unit** (Dataverse replicates one copy per BU automatically).
 2. Apply the matrices in §3 — **Custom Entities** tab.
-3. Enable **auditing** on `sprk_decisionrecord` and `sprk_policyversion` (Update + Delete) per §1's note.
+3. Enable **auditing** on **all five** tables (Update + Delete) per §1's note.
+   *(Corrected 2026-10-03: this step originally named only `sprk_decisionrecord` and `sprk_policyversion`.
+   That was too narrow — see §7.2 for why `sprk_budgetrevision` in particular needs it.)*
 4. Assign **`Spaarke Ontology Service`** to the BFF's Dataverse Application User.
 5. Assign **`Spaarke Console User`** to yourself plus any test users, *alongside* their existing roles.
 6. **Verify the append-only guarantee holds** rather than assuming it: as a non-admin test user, try to update a
@@ -227,3 +229,112 @@ platform-level, unavoidable, and not a path a person or the application can take
 
 **Net**: append-only holds against **every human user and against Spaarke's own application identity**, which is
 the bar §1 set. The check was worth running; the finding is "documented, no action."
+
+---
+
+## 7. Second verification pass — 2026-10-03
+
+Ran after the owner asked whether anything else was outstanding. Five things were checked that §6 had not
+covered. **Nothing blocks `/design-to-spec`.** One gap was found and fixed; two items are open choices.
+
+### 7.1 🟢 Org-level auditing is ON — checked because table auditing is inert without it
+
+`organization.isauditenabled = True` on `spaarkedev1`. Worth stating explicitly because it is a classic silent
+failure: per-table `IsAuditEnabled` can read `true` on every table and **still record nothing** when the
+org-level flag is off. The §6 claim "auditing enabled" was only half-verified; it now rests on both halves.
+(`auditretentionperiodv2` is null = platform default retention.)
+
+### 7.2 🟡 FIXED — `sprk_budgetrevision` auditing was OFF; now ON
+
+State before: `sprk_signal` / `sprk_decisionrecord` / `sprk_policy` / `sprk_policyversion` = **on**,
+`sprk_budgetrevision` = **off**. That exactly matched §5 step 3, which named only two tables — so this was a
+**gap in the instruction, not in the owner's execution**, who in fact enabled four. Step 3 is corrected above.
+
+**Why this table specifically needs auditing — the reason is not symmetry.** The other four record *what we
+did*. `sprk_budgetrevision` is the only one carrying a fact whose **absence** a Signal asserts: Path B's second
+conjunct is a **NOT-EXISTS** — *no budget revision in this window*.
+
+Absence is the one claim that cannot be re-verified later from current data:
+
+- a revision **added** after the fact makes a **correct** Signal look wrong;
+- a revision **deleted** after the fact makes an **incorrect** Signal look right.
+
+Because `design.md` §8.2 deliberately **ruled out bitemporality**, there is no as-of reconstruction to fall
+back on. The audit log on this one table is the only remaining way to establish what was true when the evaluator
+ran — i.e. it is the cheap partial mitigation of the exact cost §8.2 accepted. Applied by
+retrieve-modify-update `PUT EntityDefinitions(LogicalName='sprk_budgetrevision')` → HTTP 204; all five then
+verified `audit=True`.
+
+### 7.3 🟢 Per-BU role copies: privileges live ONLY on the root-BU record — normal, do not "fix"
+
+Querying all six BU copies of each role shows privileges on the **root `Spaarke` BU copy only** (Console User
+14, Ontology Administrator 25, Ontology Service 15) and **zero** on the copies in `Spaarke Dev 1`,
+`Spaarke Test 1`, `Spaarke Demo`, `Spaarke Business Unit 1` and `Secure Record`.
+
+**This looks alarming and is not.** The control settles it: **`Spaarke Core User`** — long-established and
+demonstrably working in production — has the identical shape, **744 privileges on the root copy and 0 on all
+five child copies**. Child-BU records are inherited shells; `roleprivileges_association` reports the root record.
+
+All four holders sit in the root `Spaarke` BU (Chelsea Friez, Lori Witkin, Ralph Schroeder, and the
+`SDAP-BFF-SPE-API` application user), so each holds the copy that carries the privileges. **No action.**
+
+> **Method note worth keeping**: a `$top=1` read of `roles?$filter=name eq '...'` returns an *arbitrary* one of
+> the six copies and will report `(none)`. Any future privilege audit must enumerate **all** copies, and should
+> re-run the `Spaarke Core User` control before concluding that a zero is a defect.
+
+### 7.4 🟢 The presence half of the privilege check — §6 had verified only absence
+
+§6 confirmed the four guarantee-bearing privileges are **absent** from Console User. It never confirmed that
+the privileges which make the system **work** are present. They are:
+
+| Role | Signal | Decision Record | Policy | Policy Version | Budget Revision |
+|---|---|---|---|---|---|
+| **Ontology Service** (BFF) | **C** R W Ap ApTo **Asg** | **C** R Ap ApTo | R ApTo | R ApTo | R |
+| **Ontology Administrator** | R W D Ap ApTo Asg | **C** R Ap ApTo | C R W D ApTo | C R D ApTo | C R W D Ap ApTo |
+
+Three things this confirms:
+
+1. **`prvCreatesprk_Signal` IS on Ontology Service.** Nothing works without it — no role could create a Signal.
+2. **Neither role holds Write on `sprk_decisionrecord`.** Append-only holds on the *administrator* role too,
+   which is the case that actually matters — an admin is the plausible accidental editor, not a service.
+3. **Ontology Service holds `Assign` on `sprk_signal`.** This is what makes the carried-forward
+   **Signal-ownership fix** (§4 — set the owner from the grouping matter at creation) executable **without a
+   privilege change**. Worth knowing before the spec treats it as a prerequisite.
+
+### 7.5 🟢 No column-level security on any of the 130 columns — and it must stay that way
+
+The environment has six field security profiles (`Local Identity Credentials`, `Spaarke Identity Link
+Readers`/`Writers`, `System Administrator`, `Integrated Search Provider Profile`,
+`Standing Grant Administrators`). **None touches any column on the five tables** — zero attributes have
+`IsSecured = true`.
+
+That is the correct state, and it is a **constraint rather than only an observation**. Column-level security on
+`sprk_sentence`, or on the denormalized `sprk_regarding*` trio, would make the trio diverge from the typed
+lookup **per user** — precisely the inconsistency the trio exists to prevent. If column security is ever
+proposed on these tables, resolve it against the resolver design first.
+
+### 7.6 🟡 OPEN — none of the five tables is in any app module
+
+`appmodulecomponents` holds **no `componenttype = 1` (entity) row** for any of the five, in any app. There is
+therefore no sitemap entry and no way to open a Policy, Signal or Decision Record form by hand.
+
+- **Not a blocker for the Console**, which reads through the BFF and never uses a sitemap.
+- **It does bite §8.1 dev-data seeding and debugging** — authoring a `sprk_policy` row by hand, or opening a
+  Signal to see why a predicate fired, currently has no UI at all.
+- Mitigating: `IsValidForAdvancedFind = true` on all five, so rows are already reachable via Advanced Find.
+
+**Recommendation: add all five to `Spaarke Platform`.** It holds **90 entities (87 `sprk_`)** — it is the
+configuration/admin app. `Matter Management` and `Spaarke AI Setup` carry **0** entity components, so config
+tables are not what those are for. Do **not** add these to an end-user app.
+
+### 7.7 🟡 OPEN — `Spaarke Ontology Administrator` is assigned to nobody
+
+Zero users and zero teams hold it. Leaving it empty is defensible, but the consequence is specific: Policy
+authoring then happens as **System Administrator**, so **the role's 25 privileges stay unexercised** until a
+customer environment hits them — the worst possible place to discover a missing `prvAppendTo`. Assigning it to
+one person means the first Policy authored exercises the real role.
+
+### 7.8 🟢 Other table settings, confirmed
+
+All five are **`UserOwned`**, so the depth-4 scoping in §3 is meaningful — an organization-owned table would
+make it inert. All five have **`IsValidForAdvancedFind = true`**. Both alternate keys remain **Active**.

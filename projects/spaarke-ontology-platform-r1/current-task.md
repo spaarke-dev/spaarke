@@ -100,6 +100,25 @@ business unit, which is normal). Auditing enabled on the two ledger tables. Matr
 **Parallel, blocking nothing**: prototype round-2 review (agree the component kit as the Console's UI contract);
 §8.1 dev-data seeding (the exit triple criterion 2 needs).
 
+### Two Dataverse settings still open (owner's call — neither blocks the spec)
+
+A second verification pass on 2026-10-03 ([`notes/security-roles.md`](notes/security-roles.md) **§7**) closed
+everything except two choices. It also **fixed** one gap: `sprk_budgetrevision` auditing was off and is now on
+(§7.2 — it is the only table whose *absence* a Signal asserts, and §8.2 ruled out bitemporality, so its audit
+log is the only way to reconstruct what was true when the evaluator ran).
+
+1. **Add the five tables to the `Spaarke Platform` app** (§7.6). None of them is in **any** app module, so no
+   Policy / Signal / Decision Record form can be opened by hand. Harmless for the Console (BFF-read, no
+   sitemap) but it bites **§8.1 seeding and debugging**. `Spaarke Platform` is the config app — 90 entities, 87
+   `sprk_`; `Matter Management` and `Spaarke AI Setup` hold 0 entity components.
+2. **Assign `Spaarke Ontology Administrator` to someone** (§7.7). Nobody holds it, so Policy authoring happens
+   as System Administrator and the role's 25 privileges stay **unexercised** until a customer environment hits
+   them.
+
+> **Do not re-raise** as defects, both verified normal in §7.3/§7.5: per-BU role copies carry privileges only
+> on the **root-BU record** (`Spaarke Core User` shows the same 744-vs-0 shape), and **no** field security
+> profile touches the 130 columns — which must stay true, or the `sprk_regarding*` trio diverges per user.
+
 ---
 
 ## Operational traps — each cost real time
