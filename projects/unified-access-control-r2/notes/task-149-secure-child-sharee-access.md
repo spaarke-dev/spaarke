@@ -1,7 +1,9 @@
 # Task 149 — people shared on a secure record see exactly its children (C10 part 2, sharees; #1071)
 
 > Branch `task/uac-r2-149` (base `task/uac-r2-146-b2-r2` + `work/unified-access-control-r2` merged at `874bb1c2f`);
-> fix round r1 on `task/uac-r2-149-r1` (§11 — the adversarial verifier's findings, item by item).
+> fix round r1 on `task/uac-r2-149-r1` (§11 — the adversarial verifier's findings, item by item);
+> fix round r2 on `task/uac-r2-149-r2` (§12 — the second verifier's findings: five fail-closed guards pinned, the
+> unsecure gap made a ship gate, the 143 coordination made an orchestrator obligation).
 > Status: **code complete, not deployed.** Ships together with task 146. Live steps are manual gates (§8).
 > Owner decisions that bind this task: round 7 item 5 ("each child's principals and rights equal the root's POA share
 > set ... never wider"), round 5 (production topology), round 6 (secured child roots stay secure; task 158), round 3
@@ -233,7 +235,9 @@ round 4 item 1; no relocation):
 
 1. **Create / re-file mirror is the two-minute reconcile, not an inline call at each writer** (§3, §5 decision 3).
 2. **No fan-out on unsecure** (`UnsecureProjectEndpoint` comment): from that point the record is not secure, and
-   revoking the children's shares before task 148 re-owns them would leave them readable by nobody.
+   revoking the children's shares before task 148 re-owns them would leave them readable by nobody. **r2: this departs
+   from owner round 7 item 5 ("kept in sync on ... secure/unsecure") and step 5, so it is now a SHIP GATE and owner
+   decision 4 (§12 item 7), not only a deviation.**
 3. **The reconcile job is built here**, not in 148 (the deployment-gate constraint allows "an interim schedule of the
    same job"); 147/148 call the synchronizer, they do not add a second job.
 4. **Shared-lib client change** (`AccessGrantModal`) needs the hosts that bundle it (TrackingFieldTrio PCF, SpaarkeAi)
@@ -316,3 +320,85 @@ passed, 54 skipped (pre-existing), 0 failed; ArchTests 372/372 (incl. `PoaShareC
 the same 9 pre-existing errors in unchanged files (unbuilt sibling packages `@spaarke/auth` / `@spaarke/sdap-client`),
 none in a changed file; eslint on the changed client files: 0 errors (one pre-existing warning). Publish size: main
 session.
+
+## 12. Fix round r2 (2026-10-03) — the second verifier's findings, item by item
+
+Branch `task/uac-r2-149-r2` from `task/uac-r2-149-r1` (`1a72f97d1`). **No production code changed.** The round adds
+eight test cases that pin five fail-closed guards the verifier could remove with every test still green, one test-world
+fault (`SecureChildShareWorld.EndlessPagesOf`), the guide's ship gate for unsecure, and the records below.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Reproduced: build clean, 283/283, ArchTests 372/372, empty remerge-diff, control seed bit | Confirmed; nothing to change. |
+| 2 | **V6**: the fresh re-read failing (first root read OK) untested | **Closed.** `WhenTheFreshReReadOfTheRootFails_NothingIsGrantedOrWidened_ButRevokesAndNarrowingsStand`. A test double (`RootReadRace`) answers the root's FIRST strict read and throws on every later one. Children of R need grants (A, B), a widening (A on the event, View → Collaborate), a narrowing (B on the document, Full → View) and a revoke (C). Asserts: no GrantAccess, the widening is not written, the narrowing and the revoke ARE written, all 6 children "not updated", status Incomplete, and the root was read more than once. Seeds V6a (`grants.Clear()` removed: stale grants kept) and V6b (`modifies.RemoveAll(...)` removed: stale widenings kept): **1 failure each**. |
+| 3 | **V1**: a widening ModifyAccess racing a root narrowing/unshare untested | **Closed.** `ARootChangeThatLandsMidRun_IsNotUndoneByAStaleWidening` (theory: `narrowed`, `unshared`). Every child of R already carries A at View and R gives A Collaborate, so the run plans ONLY widenings (no grant). `RootReadRace` narrows R's A to View, or revokes it, right after the run's first read of R. Asserts every child ends at View, or with no share, and no child write carries WriteAccess. Seed V1 (the verifier's: the re-check condition reduced to `grants.Count > 0`): **2 failures** (both cases). |
+| 4 | **V2/V3/V4**: three "held" reasons untested | **Closed.** V2 `AChildWhoseRootIsMissing_IsHeld_AndEveryShareOnItIsRevoked`: a document whose only root does not exist keeps a former sharee's share. It is revoked, nobody is granted, `held = 1` and `outsideSecureRoots` stays 1. V3 `AChildWithAMissingIntermediateParent_IsHeld_OnlyNarrowedNeverWidened`: an attachment filed under a missing communication AND R's document. A is not granted, B is narrowed to View, C is revoked. V4 `AChildFiledDeeperThanTheWalkFollows_IsHeld_AndItsStaleShareIsRevoked`: a chain of `MaxLineageDepth + 1` events ending at R, built from the constant. The deepest event's stale share is revoked and nobody is granted; the event one level shallower IS mirrored, which pins the edge on both sides. Seeds V2, V3 and V4 (each "undetermined" assignment removed): **1 failure each**. |
+| 5 | **V11**: the "unchanged" /share-user path's fan-out untested, though the 500 text says "or you can try again" | **Closed.** `ShareUser_RepeatedAfterAnIncompleteFanOut_CompletesTheChildren_ThroughTheUnchangedPath`. The first share fails on one child: 500, and the detail contains "try again". Repeating the SAME share, after the fault is cleared, answers 200 `outcome = unchanged` and every child, the failed one included, carries the share. Seed V11 (the verifier's: the unchanged path returns a plain 200): **1 failure**. |
+| 6 | **V5**: the MaxPages ceiling untested | **Closed.** `AChildTableLargerThanThePageCeiling_FailsTheRun_AndNothingIsWritten`. The new world fault `EndlessPagesOf("sprk_todo")` reports more rows on every page. Asserts status Failed, nothing written, and exactly `MaxPages` page queries of that table. Seed V5 (the verifier's: return the rows read so far): **1 failure**. |
+| 7 | **Unsecure transition gap**: owner round 7 item 5 (BINDING) says "kept in sync on ... secure/unsecure"; step 5 says wire "unsecure"; this task deliberately does not | **Not closable in code without an owner decision; now an explicit SHIP GATE plus a 🔔 owner decision (decision 4 below).** It is no longer only a deviation line. The guide §7a carries it as a 🔴 rule. |
+| 8 | **Coordination with task 143** (complete on `task/uac-r2-143-r1` `d248dff11`, NOT merged into `work/unified-access-control-r2`; verified with `merge-base --is-ancestor`) | **An orchestrator obligation, recorded below** ("Merge-order obligation"). Nothing to wire on this branch: 143's guard type (`SecureShareNoAccessGuard`) and enforcer (`NoAccessShareEnforcer`) do not exist here. |
+| 9 | Scale/budget of the reconcile (≈1,400 requests per tick at 10k children) | Already recorded (§11 item 11) and tied to owner decision 3. Restated in decision 3 below; no change (the cadence is code-fixed). |
+| 10 | Verified correct | Confirmed; nothing to change. |
+| 11 | Jest and the full suite not re-run by the verifier | Re-run this round: see "r2 test results". No client file changed in r2, so jest is r1's 80/80, not re-run. |
+| 12 | AC1: the probe rows | **Pending live gate G149-1** (§8). No live writes from this session. |
+| 13 | AC5: a share surviving an Assign | **Pending G149-1 step 4.** |
+| 14 | AC4: owner acceptance of the 2-minute window and of the job shipping with writes on | **Pending owner decision 3.** |
+| 15 | AC6: met only by its fallback clause | **Pending the merge-order obligation below.** 143 is complete but unmerged. |
+| 16 | AC9 / ADR-003 fail-closed claims partly proven | **Closed** by items 2-6: V6, V1, V2, V3, V4 and V5 each now fail a test when removed. |
+| 17 | AC3: "repeat the request completes it" | **Closed** by item 5 (V11). |
+| 18 | The Goal's "after provisioning/unsecure" and owner R7-5 | **Ship gate + decision 4** (item 7). |
+| 19 | AC12 | **Pending G149-2** (after G146-1 and the joint 146+149 deploy). |
+| 20 | AC13: publish size | **Main session** (this round's instructions). No package added; no production code changed in r2. |
+
+### Decision 4 for the owner: the unsecure transition (🔔 Human Input Required)
+
+- **Situation.** `/unsecure-project` moves the root out of the Secure team and revokes every share on it. The root's
+  Secure-team-owned children are then "outside secure roots": the synchronizer leaves them untouched, so they keep their
+  FORMER sharees. They stay that way until task 148 re-owns them into the record's business unit. With no 148, the
+  window is unbounded.
+- **Why not "keep in sync" literally.** After the unsecure the root's share set is EMPTY. Mirroring it would revoke every
+  child share, and a memberless-team-owned child would then be readable by NOBODY: an under-share of the whole record's
+  content, including for the people who just unsecured it.
+- **Practical exposure.** In the production topology (round 5), former sharees in the customer BU can read the
+  now-ordinary root by role depth anyway. The over-share is limited to former sharees OUTSIDE that BU (another BU's
+  user, or a shared team). Meanwhile the BU's other users cannot read the children: an under-share.
+- **Options.**
+  - **(a) Ship gate (recommended).** 146+149 may deploy, but no record is unsecured in a shared environment until 148 is
+    deployed (148 re-owns, then calls `SyncRootAsync`, and the children follow the ordinary root's BU).
+  - **(b) Owner accepts the window in writing** for dev only (no production customer is affected before 148).
+  - **(c) Pull 148's re-own into this task.** Rejected here: it is 148's scope (its probe (g) is unanswered) and the
+    constraint "do not change anything else" binds this round.
+
+### Merge-order obligation (for the orchestrator; AC6)
+
+Task 143 (`task/uac-r2-143-r1`, `d248dff11`) is complete and unmerged. Its POML (:246, :268) says "149 must call this
+task's guard ... and extend the enforcer to child shares, if 149 lands after this task". §5 of this note says "142 and
+143 do". Each assumes the other lands second. **Whichever of 143 and 149 merges into `work/unified-access-control-r2`
+SECOND must, in that merge's branch:**
+
+1. Before any child GRANT or WIDENING in `SecureChildShareSynchronizer.MirrorAsync` (at the fresh re-check), drop every
+   principal that `SecureShareNoAccessGuard` refuses for the ROOT.
+2. Make `NoAccessShareEnforcer`, after it removes a root share, call `SyncRootAsync(root)` so the walled user leaves
+   every child at once, rather than at the next tick.
+3. Add a negative test: a walled user whose ROOT share has not yet been removed by the enforcer is never granted a
+   child share.
+
+Both branches also edit `InternalShareEndpoints.cs` and `RecordShareLevels.cs` (a textual conflict is expected). Until
+this is done, a walled user's child shares follow their ROOT share: they are removed one tick after 143's enforcer
+removes the root share, and never granted while 143 refuses the root share. The only gap is the interval before the
+enforcer acts.
+
+### Decision 3, restated (unchanged; the verifier asked that it stay owner-visible)
+
+- **The window.** ≤ 2 minutes for MDA Share/Unshare and for new or re-filed children.
+- **The job posture.** It ships with writes on.
+- **The cost.** ≈ 1,400 requests per tick at 10,000 secure children under 500 roots, ≈ 3,500 per 5 minutes. That is
+  against the app user's ~6,000-per-5-minutes service-protection budget, which the rest of the BFF shares.
+- **What must be accepted together.** The cadence is fixed in code, and a longer cadence widens the MDA-unshare window,
+  so the owner accepts all three together or chooses an alternative (§5 trigger 4).
+
+**r2 test results (2026-10-03):** affected suites (`SecureChildShare*`) 63/63 (55 + 8 new cases). Seed-and-bite: V6a 1,
+V6b 1, V1 2, V2 1, V3 1, V4 1, V5 1, V11 1 failures, each passing again after restore (file touched; `git status`
+clean on `src/`). A first V2 seed did not compile (CS0642, empty statement) and was redone as an empty block. Full
+BFF unit suite 14,510: 14,456 passed, 54 skipped (pre-existing), 0 failed. That is r1's 14,502 plus the 8 new cases.
+ArchTests 372/372, including `PoaShareClientSingletonGuardTests`. No client file changed in r2.

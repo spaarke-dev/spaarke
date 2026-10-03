@@ -623,6 +623,29 @@ public class SecureChildShareMirrorTests
         _shares.MaskOf("sprk_event", EventR, User(UserB)).Should().Be(ViewOnly);
     }
 
+    /// <summary>
+    /// V11: the 500's "or you can try again" is true — repeating the SAME share (the root already right, so the "unchanged"
+    /// path) still fans out and completes the children the first attempt could not update, without waiting for the schedule.
+    /// </summary>
+    [Fact]
+    public async Task ShareUser_RepeatedAfterAnIncompleteFanOut_CompletesTheChildren_ThroughTheUnchangedPath()
+    {
+        var world = World();
+        _shares.FailWritesOnRecord = ("sprk_events", EventR);
+        var first = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+        first.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail.Should().Contain("try again");
+        _shares.MaskOf("sprk_event", EventR, User(UserB)).Should().BeNull();
+        _shares.FailWritesOnRecord = null;
+
+        var again = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+
+        again.Should().BeOfType<Ok<ShareRecordWithUserResponse>>()
+            .Which.Value!.Outcome.Should().Be(InternalShareEndpoints.OutcomeUnchanged, "the root already held the share");
+        _shares.MaskOf("sprk_event", EventR, User(UserB)).Should().Be(ViewOnly, "the repeat completed the fan-out");
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.MaskOf(table, id, User(UserB)).Should().Be(ViewOnly);
+    }
+
     [Fact]
     public async Task UnshareUser_WhenAChildCannotBeWritten_Is500_AndTheRootUnshareIsNotRolledBack()
     {
@@ -971,6 +994,204 @@ public class SecureChildShareMirrorTests
         write.Principal.Should().Be(User(UserA));
         write.Rights.Should().Be(ViewCsv);
         _shares.MaskOf("sprk_document", DocR, User(UserC)).Should().Be(0, "an inherited-only row is not revoked");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 149 r2 — the fail-closed guards the verifier could remove with every test still green
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// V6: the run read the root, but the FRESH re-read right before a grant fails. Nothing that adds a right is written —
+    /// no grant, no widening — while what only removes access (a revoke, a narrowing) still is; every such child is "not
+    /// updated", so the next run retries.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheFreshReReadOfTheRootFails_NothingIsGrantedOrWidened_ButRevokesAndNarrowingsStand()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), ViewOnly);
+        _shares.Seed("sprk_event", EventR, User(UserA), ViewOnly);           // needs a WIDENING to 23
+        _shares.Seed("sprk_document", DocR, User(UserB), FullAccessOnChild); // needs a NARROWING to View
+        _shares.Seed("sprk_document", DocR, User(UserC), ViewOnly);          // needs a REVOKE
+        var race = new RootReadRace(_shares, "sprk_project", ProjectR, afterFirstRead: null, failLaterReads: true);
+
+        var world = World();
+        var result = await SecureChildShareWorld.SynchronizerOver(() => world, race).ReconcileAllAsync(CancellationToken.None);
+
+        race.RootReads.Should().BeGreaterThan(1, "the grants reached the fresh re-read, which failed");
+        _shares.WriteLog.Should().NotContain(w => w.Action == "GrantAccess", "a grant decided from a stale read is never written");
+        _shares.MaskOf("sprk_event", EventR, User(UserA)).Should().Be(ViewOnly, "a widening is not written either");
+        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(ViewOnly, "a narrowing only removes access");
+        _shares.MaskOf("sprk_document", DocR, User(UserC)).Should().BeNull("a revoke only removes access");
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete);
+        result.ChildrenNotUpdated.Should().Be(ChildrenOfR.Length);
+    }
+
+    /// <summary>
+    /// V1: a WIDENING (ModifyAccess on an existing child share) is re-checked against the roots read fresh too — not only a
+    /// grant. Every child of R already carries A at View, so the run plans widenings only; the root's A is narrowed or
+    /// removed right after the run read it. No child may end up wider than the root as it now stands.
+    /// </summary>
+    [Theory]
+    [InlineData("narrowed")]
+    [InlineData("unshared")]
+    public async Task ARootChangeThatLandsMidRun_IsNotUndoneByAStaleWidening(string change)
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.Seed(table, id, User(UserA), ViewOnly);
+        var race = new RootReadRace(_shares, "sprk_project", ProjectR,
+            afterFirstRead: change == "narrowed"
+                ? () => _shares.ModifyAccessAsync("sprk_projects", ProjectR, User(UserA), ViewCsv)
+                : () => _shares.RevokeAccessAsync("sprk_projects", ProjectR, User(UserA)),
+            failLaterReads: false);
+
+        var world = World();
+        await SecureChildShareWorld.SynchronizerOver(() => world, race).ReconcileAllAsync(CancellationToken.None);
+
+        foreach (var (table, id) in ChildrenOfR)
+        {
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(change == "narrowed" ? ViewOnly : null,
+                $"{table} {id} must follow R as it stands after the change, not the run's earlier read");
+        }
+
+        _shares.WriteLog.Where(w => w.RecordId != ProjectR)
+            .Should().NotContain(w => w.Rights != null && w.Rights.Contains("WriteAccess"));
+    }
+
+    /// <summary>
+    /// The FIRST strict share read of one root answers as the share table stood, then <c>afterFirstRead</c> runs (a change
+    /// landing right after the run read the root); with <c>failLaterReads</c> every later strict read of that root throws
+    /// (the fresh re-read failing). Every other call passes through.
+    /// </summary>
+    private sealed class RootReadRace(
+        FakeRecordShareTable inner, string rootTable, Guid rootId, Func<Task>? afterFirstRead, bool failLaterReads)
+        : IDataverseRecordShareService
+    {
+        public int RootReads { get; private set; }
+
+        public async Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
+            string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            if (entityLogicalName != rootTable || recordId != rootId)
+                return await inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+
+            RootReads++;
+            if (RootReads > 1 && failLaterReads)
+                throw new InvalidOperationException("Test: the fresh re-read of the root failed.");
+
+            var answer = await inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+            if (RootReads == 1 && afterFirstRead is not null)
+                await afterFirstRead();
+            return answer;
+        }
+
+        public Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef p, string rights, CancellationToken ct = default)
+            => inner.GrantAccessAsync(entitySetName, recordId, p, rights, ct);
+
+        public Task ModifyAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef p, string rights, CancellationToken ct = default)
+            => inner.ModifyAccessAsync(entitySetName, recordId, p, rights, ct);
+
+        public Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef p, CancellationToken ct = default)
+            => inner.RevokeAccessAsync(entitySetName, recordId, p, ct);
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default)
+            => inner.GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+
+        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+            string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => inner.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
+    }
+
+    /// <summary>
+    /// V2: a child whose ONLY root does not exist (deleted, or a dangling lookup) is HELD, not "outside secure roots": with
+    /// no known root nothing is shared, so every share on it — an ex-sharee's included — is revoked, and nobody is added.
+    /// </summary>
+    [Fact]
+    public async Task AChildWhoseRootIsMissing_IsHeld_AndEveryShareOnItIsRevoked()
+    {
+        var missingProject = Guid.Parse("a1000000-0000-4000-8000-0000000000ee");
+        var orphan = Guid.Parse("d0c00000-0000-4000-8000-0000000000c1");
+        var world = World().SecureChild("sprk_document", orphan, ("sprk_project", "sprk_project", missingProject));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        _shares.Seed("sprk_document", orphan, User(UserC), FullAccessOnChild); // an ex-sharee's stale share
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", orphan, User(UserC)).Should().BeNull("with no known root, nobody keeps a share");
+        _shares.MaskOf("sprk_document", orphan, User(UserA)).Should().BeNull("a held child is never granted to");
+        result.ChildrenHeld.Should().Be(1);
+        result.ChildrenOutsideSecureRoots.Should().Be(1, "only the Secure-team-owned document under the ORDINARY project");
+        result.IsComplete.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// V3: a child filed under R through one lookup and under a MISSING intermediate record through another is held: its
+    /// shares are only narrowed to what R allows — never granted or widened — because the missing record's root is unknown.
+    /// </summary>
+    [Fact]
+    public async Task AChildWithAMissingIntermediateParent_IsHeld_OnlyNarrowedNeverWidened()
+    {
+        var missingCommunication = Guid.Parse("c0c00000-0000-4000-8000-0000000000ee");
+        var attachment = Guid.Parse("a7a00000-0000-4000-8000-0000000000c1");
+        var world = World().SecureChild("sprk_communicationattachment", attachment,
+            ("sprk_communication", "sprk_communication", missingCommunication), ("sprk_document", "sprk_document", DocR));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), ViewOnly);
+        _shares.Seed("sprk_communicationattachment", attachment, User(UserB), FullAccessOnChild); // wider than R allows
+        _shares.Seed("sprk_communicationattachment", attachment, User(UserC), ViewOnly);          // not on R at all
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_communicationattachment", attachment, User(UserA)).Should().BeNull("a held child is never granted to");
+        _shares.MaskOf("sprk_communicationattachment", attachment, User(UserB)).Should().Be(ViewOnly, "narrowed to what R allows");
+        _shares.MaskOf("sprk_communicationattachment", attachment, User(UserC)).Should().BeNull("revoked: not shared on R");
+        result.ChildrenHeld.Should().Be(1);
+    }
+
+    /// <summary>
+    /// V4: a child filed through a chain deeper than the walk follows is held, not "outside secure roots" — otherwise it
+    /// would be left untouched and keep a stale share (an ex-sharee's) indefinitely. With no root reached, every share is
+    /// revoked and nobody is added. One level shallower, the root is reached and the child is mirrored normally.
+    /// </summary>
+    [Fact]
+    public async Task AChildFiledDeeperThanTheWalkFollows_IsHeld_AndItsStaleShareIsRevoked()
+    {
+        // events[0] → events[1] → … → events[^1] → R: events[0] is MaxLineageDepth + 1 lookups from R, events[1] one fewer.
+        var events = Enumerable.Range(0, SecureChildShareSynchronizer.MaxLineageDepth + 1)
+            .Select(i => Guid.Parse($"e0e00000-0000-4000-8000-0000000001{i:D2}"))
+            .ToArray();
+        var world = World();
+        for (var i = 0; i < events.Length - 1; i++)
+            world.SecureChild("sprk_event", events[i], ("sprk_regardingevent", "sprk_event", events[i + 1]));
+        world.SecureChild("sprk_event", events[^1], ("sprk_regardingproject", "sprk_project", ProjectR));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        _shares.Seed("sprk_event", events[0], User(UserC), ViewOnly); // an ex-sharee's stale share
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", events[0], User(UserC)).Should().BeNull("a too-deep child is held, and held keeps nobody unknown");
+        _shares.MaskOf("sprk_event", events[0], User(UserA)).Should().BeNull("a held child is never granted to");
+        _shares.MaskOf("sprk_event", events[1], User(UserA)).Should().Be(ViewOnly, "one level shallower R is reached");
+        result.ChildrenHeld.Should().Be(1);
+        result.ChildrenOutsideSecureRoots.Should().Be(1, "only the Secure-team-owned document under the ORDINARY project");
+    }
+
+    /// <summary>
+    /// V5: a child table with more rows than the page ceiling is not mirrored in part — the run fails and writes nothing.
+    /// </summary>
+    [Fact]
+    public async Task AChildTableLargerThanThePageCeiling_FailsTheRun_AndNothingIsWritten()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        var world = World().EndlessPagesOf("sprk_todo");
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Failed);
+        _shares.WriteLog.Should().BeEmpty();
+        world.QueriedTables.Count(t => t == "sprk_todo").Should().Be(SecureChildShareSynchronizer.MaxPages,
+            "it stops at the ceiling rather than reading forever");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

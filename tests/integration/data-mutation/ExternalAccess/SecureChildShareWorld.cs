@@ -43,6 +43,7 @@ internal sealed class SecureChildShareWorld
     private readonly Dictionary<(string Table, Guid Id), Entity> _rows = new();
     private readonly HashSet<string> _failingTables = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(string Table, Guid Id)> _failingRowReads = new();
+    private readonly HashSet<string> _endlessTables = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
@@ -121,6 +122,16 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>
+    /// Makes every PAGED query of one table report more rows to come, however many pages have been read (task 149 r2: a
+    /// table larger than the synchronizer's page ceiling, without seeding a hundred thousand rows).
+    /// </summary>
+    public SecureChildShareWorld EndlessPagesOf(string table)
+    {
+        _endlessTables.Add(table);
+        return this;
+    }
+
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
@@ -185,7 +196,7 @@ internal sealed class SecureChildShareWorld
         if (query.PageInfo is { Count: > 0 } page)
         {
             var skip = (Math.Max(page.PageNumber, 1) - 1) * page.Count;
-            more = matched.Count > skip + page.Count;
+            more = matched.Count > skip + page.Count || _endlessTables.Contains(query.EntityName);
             matched = matched.Skip(skip).Take(page.Count).ToList();
         }
 

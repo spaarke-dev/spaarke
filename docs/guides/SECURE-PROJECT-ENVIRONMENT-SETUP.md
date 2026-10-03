@@ -524,12 +524,18 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   own dialog on a secure record.
 - **Held children.** A child whose secure roots cannot be determined from the data (a missing parent, a root marked
   secure whose provisioning did not complete, a filing chain deeper than six levels) is only ever narrowed — nobody is
-  added to it — and is reported as `held` until the data is fixed.
+  added to it — and is reported as `held` until the data is fixed. When none of its secure records can be found at all,
+  every share on it is removed, so a stale share (a former sharee's) never survives on such a child.
 - **Messages on a secure record.** A conversation message filed under a secure record is a child like any other: its
   readers are the record's sharees. Thread participants who are not shared on the record are NOT granted it (the
   messaging grant skips Secure-team-owned messages); share the record to give someone its conversation.
 - **Not this mechanism.** Contacts (SPA/Teams) reach children through the external data plane's root scoping, not POA
-  shares. A record that has been made ordinary again keeps its children's shares until task 148 moves the children.
+  shares.
+- **🔴 Unsecure is not yet followed by the children (ship gate, task 149 r2).** A record that has been made ordinary
+  again keeps its children owned by `Secure Record Owners` and shared with its FORMER sharees, untouched, until task 148
+  moves the children into the record's business unit; there is no other repair. Removing those shares first would leave
+  the children readable by nobody. Until task 148 is deployed, either do not unsecure records in a shared environment,
+  or the owner accepts this window in writing (`notes/task-149-secure-child-sharee-access.md` §12, decision 4).
 
 ### ⚠️ Privilege caching will lie to you
 
