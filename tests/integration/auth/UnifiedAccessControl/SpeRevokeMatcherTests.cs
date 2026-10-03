@@ -229,11 +229,13 @@ public class SpeRevokeMatcherTests
         Mock<DataverseWebApiClient> dataverse,
         Mock<SpeContainerMembershipService> spe,
         Guid? contactId = null,
-        Guid? containerId = null) =>
+        Guid? containerId = null,
+        ExternalParticipationService? participations = null) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(
                 AccessRecordId, contactId ?? ContactId, ProjectId, containerId ?? ContainerId),
-            dataverse.Object, spe.Object, Mock.Of<ITenantCache>(),
+            dataverse.Object, spe.Object,
+            participations ?? new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse Body(IResult result) =>
@@ -367,6 +369,52 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
+    /// Task 137 criterion 10, second clause (verifier r3 finding 3): a FAILED revoke whose grant-cache invalidation
+    /// ALSO fails still returns its own ProblemDetails — the same status, reason code, title, detail and extensions as
+    /// the same failed revoke over a healthy cache. Both runs go through the PRODUCTION invalidation routine
+    /// (<see cref="GrantPolicyTestDoubles.RealInvalidationOver"/>); only the cache differs, and in the faulted run
+    /// every removal throws.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenGraphFails_AndEveryCacheRemovalThrows_StillReturnsTheSameProblem()
+    {
+        var healthyCache = new TenantCache(
+            new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                Microsoft.Extensions.Options.Options.Create(
+                    new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+            NullLogger<TenantCache>.Instance);
+        var healthy = ProblemBody(await Revoke(
+            DataverseFor(ContactId, ContactEmail), new SpeServiceStub().Build(GraphError),
+            participations: GrantPolicyTestDoubles.RealInvalidationOver(healthyCache, AuthenticatedContext())));
+
+        var throwingCache = new Mock<ITenantCache>();
+        throwingCache
+            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated Redis timeout"));
+
+        var faulted = ProblemBody(await Revoke(
+            DataverseFor(ContactId, ContactEmail), new SpeServiceStub().Build(GraphError),
+            participations: GrantPolicyTestDoubles.RealInvalidationOver(throwingCache.Object, AuthenticatedContext())));
+
+        throwingCache.Invocations.Should().NotBeEmpty("precondition: the removals were attempted, and threw");
+        faulted.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        faulted.ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason,
+                "the failed revoke's own message survives a failed invalidation — never a bare 500");
+        faulted.StatusCode.Should().Be(healthy.StatusCode);
+        faulted.ProblemDetails.Title.Should().Be(healthy.ProblemDetails.Title);
+        faulted.ProblemDetails.Detail.Should().Be(healthy.ProblemDetails.Detail);
+        // traceId is per request by design (ADR-019), so it is the one extension that legitimately differs.
+        static Dictionary<string, object?> WithoutTraceId(IDictionary<string, object?> extensions) =>
+            extensions.Where(kv => kv.Key != "traceId").ToDictionary(kv => kv.Key, kv => kv.Value);
+        faulted.ProblemDetails.Extensions.Should().ContainKey("traceId");
+        WithoutTraceId(faulted.ProblemDetails.Extensions).Should().BeEquivalentTo(
+            WithoutTraceId(healthy.ProblemDetails.Extensions),
+            "an invalidation failure is non-fatal: the failed revoke's problem is unchanged");
+    }
+
+    /// <summary>
     /// Without the email there is no way to identify the contact's ACL entry, so any permission that DOES
     /// exist is unfindable. That is an unknown state, not an absence.
     /// </summary>
@@ -421,7 +469,7 @@ public class SpeRevokeMatcherTests
 
         var result = await RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(AccessRecordId, ContactId, ProjectId, ContainerId: null),
-            DataverseFor(ContactId, ContactEmail).Object, spe.Object, Mock.Of<ITenantCache>(),
+            DataverseFor(ContactId, ContactEmail).Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted);
@@ -670,7 +718,7 @@ public class SpeRevokeMatcherTests
         public Task<IResult> Revoke(Mock<SpeContainerMembershipService> spe) =>
             RevokeExternalAccessEndpoint.RevokeAccessAsync(
                 new RevokeAccessRequest(AccessRecordId, Guid.Empty, ProjectId, ContainerId),
-                Dataverse.Object, spe.Object, Mock.Of<ITenantCache>(),
+                Dataverse.Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
                 AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 

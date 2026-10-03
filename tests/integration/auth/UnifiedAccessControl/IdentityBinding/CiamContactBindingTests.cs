@@ -128,6 +128,26 @@ public class CiamContactBindingTests
         result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
     }
 
+    /// <summary>
+    /// Task 137 (C5) verifies task 141's sign-in rule on the CIAM plane, at its hardest: an oid bound to an INACTIVE
+    /// contact denies with the inactive code even when an ACTIVE, unbound contact carries the caller's email — no email
+    /// lookup, no oid bind, no contact creation. Falling through to the email path here would re-bind the caller onto
+    /// the other contact.
+    /// </summary>
+    [Fact]
+    public async Task AnOidBoundToAnInactiveContact_Denies_EvenWhenAnActiveContactSharesTheEmail_NoEmailReadNoBindNoCreate()
+    {
+        _store.AddContact(ContactA, email: Email, oid: CiamOid.ToString("D"), plane: IdentityPlaneMarker.External, stateCode: 1);
+        _store.AddContact(ContactB, email: Email);
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
+        _store.Reads.Should().NotContain("email", "an oid match on an inactive contact never falls through to the email path");
+        _store.Writes.Should().BeEmpty("no bind, no create, no flag");
+        _store.Contacts[ContactB].Oid.Should().BeNull("the active contact sharing the email is never bound");
+    }
+
     [Fact]
     public async Task AFailedBindWrite_IsNotResolvedAnyway()
     {

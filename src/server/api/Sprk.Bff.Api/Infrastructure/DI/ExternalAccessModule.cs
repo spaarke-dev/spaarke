@@ -484,19 +484,22 @@ public static class ExternalAccessModule
         // is inactive, deactivate a membership whose end date has passed). Same host, same registration seam as
         // the reminder job above (ADR-036 A1 rule 6); ADR-052 places it in the BFF.
         //
-        // ⚠️ enabled: false IS THE SHIPPING STATE, not an oversight. Rules R2 and R3 REMOVE access that exists
-        // today, and R1 turns a row that (since task 107) confers nothing into one that confers access for 90
-        // more days. Enabling it is an owner action. It is belt AND braces: even a manual admin trigger of the
-        // disabled job writes nothing, because writes are separately gated on
-        // ExternalAccessReconciliationJob.WritesEnabledConfigKey, which defaults to report-only.
+        // POSTURE — owner decision, task 137 / owner round 7 item 1 (2026-10-02): "Enable the schedule in
+        // report-only mode now. Enable writes only after the owner has reviewed one report. Inactive contacts and
+        // inactive roots stay READ guards only, so reactivating one restores access with no data repair."
+        // So the SCHEDULE is ENABLED (the daily DefaultCronSchedule) and every tick is REPORT-ONLY: rules R2 and
+        // R3 REMOVE access that exists today, and R1 turns a row that (since task 107) confers nothing into one
+        // that confers access for 90 more days, so writes stay gated on
+        // ExternalAccessReconciliationJob.WritesEnabledConfigKey — absent, empty or unparseable = report-only.
+        // Turning writes on is the owner's next action, after one report is reviewed (DEPLOY-CHECKLIST §4.1). No
+        // writer rule exists, or is to be added, for an inactive contact or an inactive root.
         //
         // UNCONDITIONAL registration (ADR-032): every dependency — IServiceScopeFactory, TimeProvider,
         // IConfiguration, IGenericEntityService, IIdempotencyService — is itself registered unconditionally, so
-        // there is no feature flag around this line and no Null-Object is needed. The job's OWN disabled state
-        // is carried by the scheduler's registration data, not by an `if` around the registration, which is
-        // exactly what § F.1's asymmetric-registration anti-pattern asks for.
-        services.AddScheduledJob<ExternalAccessReconciliationJob>(
-            ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
+        // there is no feature flag around this line and no Null-Object is needed. The job's write switch is
+        // carried by configuration read per run, not by an `if` around the registration, which is exactly what
+        // § F.1's asymmetric-registration anti-pattern asks for.
+        services.AddScheduledJob<ExternalAccessReconciliationJob>(ExternalAccessReconciliationJob.DefaultCronSchedule);
 
         // Task 141 — the identity-link reconciliation (every licensed systemuser linked to its contact, or
         // flagged). Systemusers are created outside the product (Entra / PPAC sync), so this is the safety net

@@ -585,9 +585,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // representation of no access: a None value would still be a key in the map, would still appear in
         // the derived RecordIds set, and would still read as "in the accessible set" to any consumer that
         // checks membership rather than rights.
+        //
+        // Task 137 · defect C5: an INACTIVE root shares this slot. A deactivated project, matter or work assignment
+        // confers nothing contact-sourced, with exactly Restricted's survivor rule — the systemuser's own membership
+        // stays — and, being read-time, reactivating the record restores access with no data change. An unreadable
+        // root is both Restricted and inactive (RootRecordFlags.Unreadable), so it lands here either way.
         foreach (var recordId in composed.Keys.ToList())
         {
-            if (!flags.TryGetValue(recordId, out var f) || !f.IsRestricted)
+            if (!flags.TryGetValue(recordId, out var f) || !f.RemovesContactSourcedAccess)
             {
                 continue;
             }
@@ -1490,6 +1495,24 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             {
                 grants = await _participations.GetGrantSetAsync(resolved, ct).ConfigureAwait(false);
                 contactGrantsApplied = true;
+
+                // Task 137 · defect C5: the linked contact's grants confer nothing while that contact is not
+                // Active — read LIVE, and only when the grants could contribute anything (NFR-02). The contact stays
+                // the deny-veto subject below (a wall naming it keeps binding), and the systemuser's own membership
+                // term is untouched: internal access is Dataverse's answer, not the contact's.
+                if (GrantedIdsFor(grants, entityType).Any())
+                {
+                    var linkedState = await _participations.ReadContactStateAsync(resolved, ct).ConfigureAwait(false);
+                    if (linkedState != ContactRecordState.Active)
+                    {
+                        _logger.LogWarning(
+                            "[WF-AUTHZ] Systemuser {SystemUserId}'s linked contact {ContactId} is {State}: its grants on " +
+                            "{EntityType} confer nothing; the systemuser's own membership is unaffected (task 137).",
+                            systemUserId, resolved, linkedState, entityType);
+                        grants = null;
+                        contactGrantsApplied = false;
+                    }
+                }
             }
         }
 
@@ -1610,6 +1633,32 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         Guid contactId, string entityType, bool includeDerivedMemberTerms, CancellationToken ct)
     {
         var composed = new Dictionary<Guid, AccessRights>();
+
+        // ── Task 137 · defect C5: an INACTIVE contact confers nothing — read LIVE, first ───────────
+        // Every term on this plane is contact-sourced (grants, standing membership, organization expansion), so a
+        // contact that is not Active composes to the EMPTY set, on both sign-ins. The state is read live on every
+        // composition — not from the 60-second grant cache nor the 10-minute identity cache — so a contact
+        // deactivated after sign-in loses access on its next request. Unreadable or missing is not Active (fail
+        // closed, ADR-003). Read before anything else so a deactivated contact costs no grant read, no membership
+        // walk and no flag read.
+        var contactState = await _participations.ReadContactStateAsync(contactId, ct).ConfigureAwait(false);
+        if (contactState != ContactRecordState.Active)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Contact {ContactId} is {State}: its {Plane} contact-plane composition on {EntityType} is " +
+                "EMPTY — an inactive or unreadable contact confers nothing (task 137).",
+                contactId, contactState, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType);
+
+            return new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entityType,
+                Rights = composed,
+                Capped = false,
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: false, ContactGrants: false, StandingGrantMembership: false),
+            };
+        }
 
         // Read grants + standing membership + org expansion FIRST so the candidate id set is complete
         // before the single batched flag read (NFR-02).

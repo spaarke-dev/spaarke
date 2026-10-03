@@ -27,18 +27,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Follows ADR-001: Minimal API — no controllers.
 /// Follows ADR-008: Authorization applied at route group level in ExternalAccessEndpoints.
-/// Follows ADR-009: Redis cache invalidated for each affected Contact.
+/// Follows ADR-009: Redis cache invalidated for each affected Contact and organization member (task 137).
 /// </summary>
 public static class ProjectClosureEndpoint
 {
     private const string ExternalAccessEntitySet = "sprk_externalrecordaccesses";
-    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
-    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
-    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so the
-    // cascade-revoke invalidation on project closure relied on the 60s TTL. Per-Contact participation
-    // cache — not an authz decision (ADR-009); tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
-    private const int CacheVersion = ExternalParticipationService.CacheVersion;
+    // Cache invalidation (task 137): ExternalParticipationService.InvalidateGrantSetsAsync — the ONE routine,
+    // which owns the key, every tenant it can be cached under, and the organization → members expansion.
 
     /// <summary>
     /// Registers the close-project endpoint on the external-access management group.
@@ -67,7 +62,8 @@ public static class ProjectClosureEndpoint
     /// <param name="request">The close project request containing ProjectId and optional ContainerId.</param>
     /// <param name="dataverseClient">Dataverse Web API client for querying and updating records.</param>
     /// <param name="speContainerMembership">SPE container membership service for removing external members.</param>
-    /// <param name="cache">Distributed Redis cache for invalidating Contact participation entries.</param>
+    /// <param name="participations">The grant-data service whose single invalidation routine clears every affected
+    /// contact's cached grant set — organization members included (task 137).</param>
     /// <param name="httpContext">The current HTTP context for trace ID logging.</param>
     /// <param name="logger">Logger for operation tracing.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -80,7 +76,7 @@ public static class ProjectClosureEndpoint
         CloseProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
-        ITenantCache cache,
+        ExternalParticipationService participations,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -137,8 +133,8 @@ public static class ProjectClosureEndpoint
                 AffectedContactIds: []));
         }
 
-        // Organization grants carry no contact, so they contribute nothing to the per-contact cache
-        // invalidation below — see InvalidateContactCachesAsync for why that gap is bounded.
+        // Organization grants carry no contact; their organizations are expanded to every ACTIVE member by the
+        // cache invalidation in Step 4 (task 137). AffectedContactIds in the response stays the grants' own contacts.
         var affectedContactIds = activeRecords
             .Where(r => r.ContactId.HasValue)
             .Select(r => r.ContactId!.Value)
@@ -205,10 +201,16 @@ public static class ProjectClosureEndpoint
             }
         }
 
-        // Step 4: Invalidate Redis cache for all affected Contacts. Runs unconditionally — it only ever
-        // removes access, so it is worth doing even when an earlier step failed.
-        var tenantId = ExtractTenantId(httpContext);
-        await InvalidateContactCachesAsync(cache, tenantId, affectedContactIds, logger, ct);
+        // Step 4: Invalidate the grant cache of every affected contact — the ONE routine (task 137). Runs
+        // unconditionally — it only ever removes access, so it is worth doing even when an earlier step failed.
+        // Organization grants expand to every ACTIVE member (they used to wait out the 60-second TTL), and every
+        // tenant a grant set can be cached under is cleared, the CIAM one included. Never throws.
+        var closedOrganizationIds = activeRecords
+            .Where(r => r.IsOrganizationGrant && r.OrganizationId.HasValue)
+            .Select(r => r.OrganizationId!.Value)
+            .Distinct()
+            .ToList();
+        await participations.InvalidateGrantSetsAsync(affectedContactIds, closedOrganizationIds, CancellationToken.None);
 
         // A row we could not deactivate is a participant who still has access. Reporting 200 here would
         // tell the operator the project is closed while it is not — the same false-success shape the
@@ -445,66 +447,6 @@ public static class ProjectClosureEndpoint
 
         return (revokedCount, failedCount);
     }
-
-    /// <summary>
-    /// Invalidates Redis participation cache entries for all affected Contacts.
-    /// Uses fire-and-forget per contact to avoid blocking the response on cache errors.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Organization grants are not eagerly invalidated.</b> The participation cache is keyed per
-    /// contact, and an organization grant names no contact — invalidating its members would require an
-    /// organization → members expansion that does not exist on this path today. Members therefore fall
-    /// back to the ADR-009 TTL (60s, <c>ExternalParticipationService.CacheTtl</c>) instead of clearing
-    /// immediately.</para>
-    ///
-    /// <para>That is a bounded, self-healing staleness window on a cache — not retained authorization: the
-    /// grant row itself is already inactive, so nothing re-populates the entry. Building the expansion
-    /// here would add a new query surface for a ≤60s window (CLAUDE.md §11), and closure is an
-    /// administrative action, not a hot path. Worth revisiting only if the TTL is ever raised.</para>
-    /// </remarks>
-    private static async Task InvalidateContactCachesAsync(
-        ITenantCache cache,
-        string? tenantId,
-        IReadOnlyList<Guid> contactIds,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            logger.LogWarning(
-                "[CLOSE-PROJECT] No tenant claim found — skipping cache invalidation for {Count} Contacts",
-                contactIds.Count);
-            return;
-        }
-
-        foreach (var contactId in contactIds)
-        {
-            try
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, contactId.ToString(), CacheVersion,
-                    ct: ct);
-                logger.LogDebug(
-                    "[CLOSE-PROJECT] Invalidated Redis cache for Contact {ContactId}", contactId);
-            }
-            catch (Exception ex)
-            {
-                // Non-critical — stale cache will expire within 60s per ADR-009 TTL
-                logger.LogWarning(ex,
-                    "[CLOSE-PROJECT] Failed to invalidate Redis cache for Contact {ContactId}. " +
-                    "Cache will expire naturally (ADR-009 TTL: 60s).",
-                    contactId);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     // =========================================================================
     // Types
