@@ -22,6 +22,8 @@
       (p5) -ClientNoLongerWritesFlag is passed: the client that stops writing sprk_issecure on create is deployed and
            no cached older bundle is served. Securing the column before that refuses EVERY secure project create made
            by a user (the old payload names a column the user may not create).
+      (p6) no sprk_fieldmappingrule, sprk_aitopicregistry or sprk_emailupdatefield row targets sprk_issecure: each is
+           maker-authored configuration that writes a column outside the endpoints (task 150 r2, verifier F5).
 
     STEPS (-Apply), per table, in this order:
       (a) secure the column (IsSecured = true);
@@ -29,6 +31,12 @@
           The Web API cannot create a field permission on a column that is not yet secured (0x8004f508), so there is a
           window between (a) and (b) in which non-administrators read the column EMPTY. It is measured and printed per
           table; with the BFF deployed (task 150) the BFF refuses — never mis-routes — during it.
+          IF A GRANT FAILS after (a) (12 retries on 0x8004f508 exhausted, or any other error), that table would be
+          left secured with no reader permission — the FAIL-OPEN state: non-administrators read the column EMPTY and
+          the client readers treat a secure record as an ordinary one. The script then REVERTS IsSecured on that
+          table (and publishes it) before stopping; if the revert fails too it prints "RECOVERY REQUIRED NOW" with
+          the two remedies. Re-running -Apply is the resume path: on a column already secured it grants only the
+          missing permissions (task 150 r2, verifier F3).
       (c) report any OTHER profile that can create or update the column (FAIL). The platform's own System
           Administrator profile gets full access automatically and cannot be narrowed — owner decision F4 accepts it;
           every holder of the System Administrator role is LISTED (informational).
@@ -202,6 +210,19 @@ foreach ($t in $Tables) {
 }
 if ($nullRows -eq 0) { Report 'OK' "(p4) no NULL $Column on any table" }
 
+# (p6) task 150 r2 (verifier F5): no maker-authored configuration row writes the flag. Once the column is locked, a Field
+# Mapping Framework Copy rule onto it (or an AI topic-registry / email update-field target) fails every write it drives.
+# Same three channels as the standing assertion's clause 5 (SecureFlagFieldSecurityAssertion.ConfiguredWriterChannels).
+$configuredWriters = 0
+foreach ($ch in @(@{ T = 'sprk_fieldmappingrule'; C = 'sprk_targetfield' }, @{ T = 'sprk_aitopicregistry'; C = 'sprk_targetfield' }, @{ T = 'sprk_emailupdatefield'; C = 'sprk_targetfieldlogicalname' })) {
+    $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$($ch.T)')?`$select=EntitySetName").EntitySetName
+    foreach ($row in @((Invoke-DvGet "$set`?`$select=$($ch.T)id&`$filter=$($ch.C) eq '$Column'").value)) {
+        $configuredWriters++
+        Report 'FAIL' "(p6) $($ch.T) row $($row."$($ch.T)id") targets $Column — remove or retarget it; only the BFF endpoints write the flag"
+    }
+}
+if ($configuredWriters -eq 0) { Report 'OK' "(p6) no field-mapping rule, AI topic-registry row or email update field targets $Column" }
+
 if ($ClientNoLongerWritesFlag) { Report 'OK' '(p5) operator confirms the client no longer writes the flag and no old bundle is served' }
 elseif ($Apply) { Report 'FAIL' '(p5) -ClientNoLongerWritesFlag not passed: securing the column before that client is live refuses every secure project create' }
 else { Report 'INFO' '(p5) -ClientNoLongerWritesFlag is required for -Apply' }
@@ -235,33 +256,79 @@ function Grant-Permission([string]$ProfileId, [string]$Table, [int]$Create) {
         }
     }
 }
+function Set-ColumnSecured([string]$Table, [bool]$Value) {
+    $attrPath = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')"
+    $typed = Invoke-DvGet $attrPath
+    $typed.IsSecured = $Value
+    try {
+        Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+    } catch {
+        # The GET-then-PUT shape is proven live on string and lookup columns only (tasks 141/133). A Boolean column's
+        # definition carries its OptionSet as a navigation property the plain GET omits, and the PUT may need it.
+        # Retry ONCE with the Boolean cast and the OptionSet expanded; any other type, or a second refusal, throws.
+        # Either way the failed PUT left IsSecured unchanged on this table, so nothing is masked (task 150 r1).
+        if ($typed.'@odata.type' -ne '#Microsoft.Dynamics.CRM.BooleanAttributeMetadata') { throw }
+        Write-Host "    PUT of $Table.$Column refused without its OptionSet ($($_.ErrorDetails.Message)); retrying once with the Boolean cast and `$expand=OptionSet..."
+        $typed = Invoke-DvGet "$attrPath/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$expand=OptionSet"
+        $typed.IsSecured = $Value
+        Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+    }
+}
+function Grant-MissingPermissions([string]$Table, $Specs) {
+    foreach ($s in $Specs) {
+        if (-not (Get-Permission $s.P.fieldsecurityprofileid $Table)) { Grant-Permission $s.P.fieldsecurityprofileid $Table $s.Create }
+    }
+}
+# A secured column with no reader permission is the FAIL-OPEN state: every non-administrator reads it EMPTY, and the
+# client readers (RecordContainerResolver.ts, TrackingFieldTrio, AccessGrantModal) treat empty as "not secure". The BFF
+# is unaffected (System Administrator + writer profile) and refuses. Printed whenever this script may have left it.
+function Write-MaskedRecovery([string]$Table, [string]$Cause) {
+    Write-Host ''
+    Write-Host "  !!! RECOVERY REQUIRED NOW — $Table.$Column may be field-secured WITHOUT its reader permission !!!" -ForegroundColor Red
+    Write-Host "  Every non-administrator then reads $Column EMPTY and the client treats SECURE records as ordinary ones." -ForegroundColor Red
+    Write-Host "  Cause: $Cause" -ForegroundColor Red
+    Write-Host '  Do ONE of these, now:' -ForegroundColor Red
+    Write-Host "    (1) fix the cause and re-run this script with -Apply: on an already-secured column it grants only the missing" -ForegroundColor Red
+    Write-Host '        profile permissions (it never re-secures), then run -Verify;' -ForegroundColor Red
+    Write-Host "    (2) or un-secure the column: make.powerapps.com > Tables > $Table > Columns > $Column > Advanced options >" -ForegroundColor Red
+    Write-Host "        clear 'Enable column security', save, publish $Table — then -Verify reports it NOT secured (expected)." -ForegroundColor Red
+}
 foreach ($t in $Tables) {
     $attr = Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')?`$select=IsSecured"
     $specs = @(@{ P = $reader; Name = $ReaderProfileName; Create = 0 }, @{ P = $writer; Name = $WriterProfileName; Create = 4 })
 
-    if ($attr.IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
+    if ($attr.IsSecured -eq $Secured) {
+        Report 'OK' "$t.$Column is field-secured"
+        if ($Apply) {
+            # The resume path after an interrupted run: grant whatever is missing on a column already secured.
+            try { Grant-MissingPermissions $t $specs }
+            catch { Write-MaskedRecovery $t "granting a missing profile permission on the already-secured column failed: $($_.Exception.Message)"; throw }
+        }
+    }
     elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write can change it" }
     elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column ($(if ($attr.'@odata.type') { $attr.'@odata.type' } else { 'type not annotated' })), then at once grant the reader (read) and writer (read/create/update) profiles" }
     else {
         $clock = [System.Diagnostics.Stopwatch]::StartNew()
-        $attrPath = "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')"
-        $typed = Invoke-DvGet $attrPath
-        $typed.IsSecured = $Secured
+        Set-ColumnSecured $t $Secured
         try {
-            Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+            Grant-MissingPermissions $t $specs
         } catch {
-            # The GET-then-PUT shape is proven live on string and lookup columns only (tasks 141/133). A Boolean column's
-            # definition carries its OptionSet as a navigation property the plain GET omits, and the PUT may need it.
-            # Retry ONCE with the Boolean cast and the OptionSet expanded; any other type, or a second refusal, throws.
-            # Either way the failed PUT left IsSecured unchanged on this table, so nothing is masked (task 150 r1).
-            if ($typed.'@odata.type' -ne '#Microsoft.Dynamics.CRM.BooleanAttributeMetadata') { throw }
-            Write-Host "    PUT of $t.$Column refused without its OptionSet ($($_.ErrorDetails.Message)); retrying once with the Boolean cast and `$expand=OptionSet..."
-            $typed = Invoke-DvGet "$attrPath/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$expand=OptionSet"
-            $typed.IsSecured = $Secured
-            Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
-        }
-        foreach ($s in $specs) {
-            if (-not (Get-Permission $s.P.fieldsecurityprofileid $t)) { Grant-Permission $s.P.fieldsecurityprofileid $t $s.Create }
+            # Task 150 r2 (verifier F3): the column is now secured and a grant failed (12 retries on 0x8004f508 exhausted,
+            # or any other error). Left as is, that table is in the fail-open state above. Undo THIS run's securing, so the
+            # table is back where -Apply found it; if the undo fails too, say so loudly. Either way the run stops here.
+            $grantError = $_
+            Write-Host "  FAIL     granting the profiles on $t.$Column failed after it was secured: $($grantError.Exception.Message)" -ForegroundColor Red
+            Write-Host "           reverting $t.$Column to NOT field-secured, so no reader is left masked..." -ForegroundColor Yellow
+            try {
+                Set-ColumnSecured $t (-not $Secured)
+                Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities><entity>$t</entity></entities></importexportxml>" } | Out-Null
+                $back = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')?`$select=IsSecured").IsSecured
+                if ($back -eq $Secured) { throw "the revert was accepted but $t.$Column still reads IsSecured=true" }
+                Write-Host "  REVERTED $t.$Column is NOT field-secured again (as -Apply found it; any grant already made is inert). Fix the cause, then re-run -Apply." -ForegroundColor Yellow
+            } catch {
+                Write-MaskedRecovery $t "the grant failed ($($grantError.Exception.Message)) AND the revert failed ($($_.Exception.Message))"
+            }
+            throw $grantError
         }
         $clock.Stop()
         Report 'DONE' ("secured $t.$Column and granted both profiles — masked window {0:N1}s (secure → reader grant)" -f $clock.Elapsed.TotalSeconds)
@@ -275,6 +342,7 @@ foreach ($t in $Tables) {
             else { Report 'FAIL' "$($s.Name) on $t.$Column is read=$($perm.canread) create=$($perm.cancreate) update=$($perm.canupdate); expected read=4 create=$($s.Create) update=$($s.Create)" }
         } elseif ($Verify) { Report 'MISSING' "$($s.Name) on $t.$Column" }
         elseif ($IsDryRun) { Report 'WOULD' "grant $($s.Name) on $t.$Column" }
+        else { Report 'FAIL' "$($s.Name) on $t.$Column is still missing after -Apply granted it" }
     }
 
     # (c) every OTHER writer

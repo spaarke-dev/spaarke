@@ -47,6 +47,7 @@ assertion (with a read-only live census) carry the platform configuration. Nothi
 | Plugin steps | `sdkmessagefilter` on the three tables | platform "ObjectModel / External plug-in implementation" steps only (no Spaarke plugin — ADR-002) |
 | Values | `sprk_issecure eq null / true / false` | project 9 / 1 / 9 · matter 18 / 0 / 42 · work assignment 11 / 0 / 11 · **sprk_invoice 4 NULL of 10** (a FOURTH carrier — found by this task's code review; the metadata-driven registry treats it as securable). **Every NULL row predates the column** (newest NULL 2026-03-15; column created 2026-03-17; oldest non-NULL after it) |
 | Business units | `businessunits` + default teams + enabled users | 6 BUs, 6 default teams; enabled users: root `Spaarke` 169, `Spaarke Business Unit 1` 1, others 0 |
+| Configured writers (r2, verifier F5; re-run 2026-10-03) | rows naming `sprk_issecure` as their WRITE target: `sprk_fieldmappingrule.sprk_targetfield` (Field Mapping Framework — the client wizards' payload engine and `/field-mappings/push`), `sprk_aitopicregistry.sprk_targetfield` (`WorkProductRecordPersister`), `sprk_emailupdatefield.sprk_targetfieldlogicalname` (communication propose) | **0** on all three (positive control: 25 field-mapping rules in total; source-field matches also 0). Now a standing check: the lock script's precondition **(p6)** and the standing assertion's **clause 5** |
 | System Administrator holders | role associations | users: 2 humans (`Ralph Schroeder`, `Delegated Admin`) + application users incl. `# mi-bff-api-dev`, `SDAP-BFF-SPE-API`; TEAM `Spaarke Demo` (every member) |
 
 Escalation trigger 2 ("a flow/workflow/business rule writes it as a user") **did not fire**. The schema doc's "Lock Secure
@@ -109,7 +110,7 @@ under `src/client` writes it** (`projectService.test.ts` pins the payload).
   types only; the root's id goes to the log.
 
 ### 5.4 Tests (all in KEEP paths)
-- `tests/integration/data-mutation/ExternalAccess/SecureFlagEndpointWriteTests.cs` (26): first-write ordering on all
+- `tests/integration/data-mutation/ExternalAccess/SecureFlagEndpointWriteTests.cs` (26; 31 after r2, §14): first-write ordering on all
   three roots; already-flagged ≡ unflagged; 409 unchanged; refused write / not-applied write / empty read-back stop
   with nothing else written; pre-mutation refusal leaves it unflagged; compensation keeps the flag; resume sets it before
   the share; F3 positive (creator, recorded creator person, Full Access) and negative (Collaborate-level colleague ×3
@@ -174,6 +175,17 @@ Boolean (the dry run now prints the type: `#Microsoft.Dynamics.CRM.BooleanAttrib
 2026-10-03). If the plain PUT is refused, the script retries ONCE with the Boolean cast and `$expand=OptionSet`; any
 other type, or a second refusal, throws. A refused PUT leaves `IsSecured` unchanged on that table (tables are secured
 and granted one at a time), so nothing is masked. Still unproven live: watch the first table at G-4.
+**r2 (verifier F3):** a GRANT failing after the PUT landed (12 retries on 0x8004f508 exhausted, or any other error) used
+to stop the script with that table secured and no reader permission — the fail-open state. It now REVERTS `IsSecured`
+on that table (and publishes it, and reads it back) before rethrowing; if the revert fails too it prints
+`!!! RECOVERY REQUIRED NOW` with two remedies (re-run `-Apply`, or clear "Enable column security" in the maker portal).
+Re-running `-Apply` is a real resume path now: on a column already secured it grants only the missing permissions (it
+used to skip a secured table entirely). **r2 (verifier F5):** precondition **(p6)** fails when any field-mapping rule, AI
+topic-registry row or email update field targets `sprk_issecure`. All four paths exercised OFFLINE by a scratchpad
+harness that shadows `az` / `Invoke-RestMethod` (grant fails → reverted, IsSecured back to false; grant + revert fail →
+recovery banner, IsSecured stays true; resume on a secured table → both grants made; configured writer → `-Apply`
+REFUSED, nothing written). The r1 script under the same harness leaves the table secured and ungranted (F3 bites) and
+does not grant on resume.
 
 ### 7.3 Standing assertion (the sibling of `SecureBuRoleDepthAssertion`)
 `tests/integration/auth/UnifiedAccessControl/SecureFlagFieldSecurityAssertion.cs` + `…AssertionTests.cs`: clauses
@@ -181,7 +193,10 @@ and granted one at a time), so nothing is masked. Still unproven live: watch the
 and members exactly the BFF app users, (4) no other writer except System Administrator; holders listed (F4). 14
 perturbations (both directions, incl. the AC's "census lacking the BFF read" and "an extra writer"), an opt-in live census
 (`SPAARKE_NFR05_DATAVERSE_URL` + `SPAARKE_BFF_APPLICATION_IDS`), and `SecureFlagFieldSecurityScriptAgreementTests`
-(both scripts and task 133's agree on column, tables and profile names; 5 seeded drifts).
+(both scripts and task 133's agree on column, tables and profile names; 5 seeded drifts). **r2 (verifier F5):** clause
+(5) no configuration row (field-mapping rule, AI topic registry, email update field) names the column as its target —
+census field `ConfiguredWriters`, channels pinned in `ConfiguredWriterChannels`, entity sets resolved live (never guessed);
++4 tests (one per channel, plus the channel list).
 
 ## 8. Live runs performed (read-only only)
 
@@ -190,6 +205,8 @@ perturbations (both directions, incl. the AC's "census lacking the BFF read" and
 | `Repair-SecureFlagNulls.ps1` dry run | default No ×3; WOULD set 9 / 18 / 11 NULL rows (ids in the report); zero writes |
 | `Set-SecureFlagFieldSecurity.ps1` dry run | FAIL p1 ×2 (task 133's profiles not created), FAIL p4 ×3 (NULLs); WOULD secure ×3; SysAdmin holders listed; zero writes |
 | Standing assertion, live census | **FAIL (5)** — NOT LOCKED ×3, READER PROFILE 0, WRITER PROFILE 0 — the correct pre-lock verdict; residual writers listed |
+| r2, 2026-10-03: `Set-SecureFlagFieldSecurity.ps1` dry run (with p6) | as before (p1 ×2, p4 ×3) plus **OK (p6)** — the new live queries resolve all three entity sets; zero writes |
+| r2, 2026-10-03: Dataverse MCP `read_query` | 0 rows targeting / sourcing `issecure` in `sprk_fieldmappingrule` (of 25), `sprk_aitopicregistry`, `sprk_emailupdatefield` |
 
 ## 9. Stops and pending manual gates
 
@@ -284,6 +301,9 @@ read as not secure (1) · S5 Full Access = Write only (4) · S6 forward flag wri
 owner move (6) · S8 resolver ABSENT on the record read as not secure (4) · S9 ABSENT on an ancestor (1) · S10–S12 the
 assertion's default-team / BFF-membership / extra-writer clauses disabled (1 each). Client: C1 the client writes the flag
 again (1) · C2 the hold-back removed (5) · C3 provisioning skipped/after the children (5).
+**r2:** S13 the flag written AFTER the Step 4.2 shared-container unlink (the verifier's own F1 seed: all four new
+shared-container tests fail, both kinds × both directions) · S14 the F6 catch disabled (1) · S15 the assertion's clause
+5 disabled (3) · script: the r1 lock script under the offline harness (F3 revert and resume both absent).
 
 ## 13. Verifier round 1 (2026-10-03, branch `task/uac-r2-150-r1`)
 
@@ -312,3 +332,29 @@ passed, 0 failed, 54 skipped (14437). `Spaarke.ArchTests`: 346/346. Jest (Create
 9 suites, 117/117 (after building the local `Spaarke.SdapClient` and `Spaarke.Auth` packages, which a fresh worktree
 lacks). `@spaarke/ui-components` `tsc` build: exit 0. `Set-SecureFlagFieldSecurity.ps1`: parse 0 errors; dry run
 against spaarkedev1 read-only, zero writes. No live write.
+
+## 14. Verifier round 2 (2026-10-03, branch `task/uac-r2-150-r2`)
+
+| Item | Disposition |
+|---|---|
+| F1 (MEDIUM) | **Fixed.** `SecureFlagEndpointWriteTests`: `Provision_ARecordCarryingASharedContainer_SetsTheFlagBeforeUnlinkingIt` (business-unit and configured shared container: the `sprk_issecure` write's `Sequence` precedes the `sprk_containerid = null` write) and `…_WhenTheFlagWriteIsRefused_NeverUnlinksIt` (`SecureFlagWriteFails`: no unlink attempted, the record keeps its link, owner unchanged, no grant, no container). Seed S13 (the verifier's reorder) fails all 4. The first-write criterion is now pinned against the unlink |
+| F2 (LOW) | **Fixed.** `RecordContainerResolver.cs` co-mingle query comment and the not-found predicate's remarks now name the `secure_flag_unreadable` refusal (task 150), not the retired absent-flag warning |
+| F3 (LOW) | **Fixed** (§7.2): revert-on-grant-failure, loud recovery banner, and a real `-Apply` resume path. Header STEPS (b) says so. Exercised offline only; G-4 is the live proof |
+| F4 (LOW) | **Fixed.** `secure-project-fields-schema.md`: the column row, the Field Security row, the correction paragraph and the form note now state the FLS configuration as the TARGET, pending G-3/G-4 (live 2026-10-03: `IsSecured=false`, 0 `fieldpermission` rows) |
+| F5 (INFO) | **Adopted** (§3.1 row; lock script (p6); standing assertion clause 5). Widened beyond field-mapping rules to the two other maker-authored write-target tables found by grep (`sprk_aitopicregistry`, `sprk_emailupdatefield`); all three are 0 live |
+| F6 (INFO) | **Fixed.** The Full Access probe is wrapped: a throw (other than this request's own cancellation) refuses 500 `sdap.unsecure.permission_unverifiable`, before any write. Fixture switch `FullAccessProbeThrows` (throws on a record's SECOND probe: the first is the route's Write gate); test `Unsecure_WhenTheFullAccessCheckThrows_RefusesWithAReasonBeforeAnyWrite`; seed S14 fails it |
+| 7 | Verifications; nothing to change |
+| 8 | **Closed** by F1 |
+| 9–12 | Open — live gates G-3/G-4/G-8, G-6 (a user outside "Spaarke Demo"), G-7, G-5 (§9). Read-only only in this round |
+| 13 | Open — STOPPED on task 142 (and 148 + owner copy for Make Secure) |
+| 14 | Open — main session: publish size against a fresh master build, and the CVE check (no package change) |
+| 15 | Open — merge gates: F6 copy pick, G-0 in dev before any build carrying 150 is deployed to dev or merged, 133 first or together |
+| 16 | Open — owner question §11.6 (recommended (b)) |
+
+**#1081 (relayed again 2026-10-03, owner-decided 2026-10-02).** Already recorded (§11.8): root-team Basic User is a dev
+artifact, nothing is codified, and the FLS design does not depend on roles (the reader profile sits on every default
+team either way). Master `5e39f2bea` in dev does not carry task 150, so G-0's ordering is unchanged.
+
+**Tests (r2).** Affected BFF classes (SecureFlag*, ProvisionRecordedContainer, UnsecureProject, RecordContainerResolver):
+139/139. Full BFF unit suite: 14392 passed, 0 failed, 54 skipped (14446 = r1 + 9 new). `Spaarke.ArchTests`: 346/346.
+Lock script: parse 0 errors; offline harness 4 scenarios; dry run against spaarkedev1 read-only, zero writes. No live write.

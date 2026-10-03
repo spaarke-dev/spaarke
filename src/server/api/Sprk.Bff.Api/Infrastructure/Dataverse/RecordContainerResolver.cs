@@ -1876,7 +1876,7 @@ public sealed class RecordContainerResolver
                         // is NULL is EXCLUDED by it. Those rows are legitimate and expected — Dataverse does
                         // not back-fill a Two Options column on existing rows, and field-level security
                         // returns the row with the attribute masked rather than erroring (the same fact the
-                        // absent-flag warning in ResolveForRecordAsync exists to surface). Excluding them
+                        // secure_flag_unreadable refusal in ResolveForRecordAsync fails closed on, task 150). Excluding them
                         // makes a NULL-flagged non-secure claimant invisible, so co-mingling goes undetected
                         // and the secure record is reported as sole owner of a shared container.
                         new FilterExpression(LogicalOperator.Or)
@@ -1963,7 +1963,8 @@ public sealed class RecordContainerResolver
     /// classification silently stops working and the raw fault escapes — which is the very condition the
     /// normalization exists to prevent. And it is over-broad: <i>"Attribute sprk_issecure was not found"</i>
     /// is a schema or field-level-security error, and reporting it to an operator as "the record does not
-    /// exist" misdiagnoses precisely the masked-attribute case the absent-flag warning exists to surface.
+    /// exist" misdiagnoses precisely the masked-attribute case the secure_flag_unreadable refusal (task 150)
+    /// fails closed on.
     /// The error code is stable and locale-independent.</para>
     ///
     /// <para><c>internal</c>, not private: the document-identity resolver (spaarkeai-word-add-in-r1 task 012)

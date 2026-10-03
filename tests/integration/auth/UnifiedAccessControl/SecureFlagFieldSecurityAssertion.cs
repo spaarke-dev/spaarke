@@ -28,6 +28,12 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///   column. The System Administrator profile's full permission is created by the platform and cannot be narrowed;
 ///   owner decision F4 accepts it as the administrator boundary, so it is not a finding — and every holder of the
 ///   System Administrator role is LISTED in the summary, so the residual writer set stays visible.</item>
+///   <item>No CONFIGURATION row names the column as a write target (<see cref="ConfiguredWriterChannels"/>): a Field
+///   Mapping Framework rule, an AI topic-registry row or an email update-field row. Each is maker-authored data through
+///   which a client or BFF path writes a column outside the secure/unsecure endpoints. Once the column is locked, such a
+///   row makes every write it drives fail (a Copy rule onto a child record would refuse every secure create); before it
+///   is locked, it writes the flag behind the endpoints' back (task 150 r2, verifier F5 — live 2026-10-03: 0 rows on
+///   all three channels).</item>
 /// </list></para>
 ///
 /// <para><b>Names.</b> The two profiles are the ones task 133 created for the class of column only the BFF writes
@@ -51,6 +57,17 @@ public static class SecureFlagFieldSecurityAssertion
 
     /// <summary>The platform's own profile, whose full permission on every secured column is created automatically.</summary>
     public const string SystemAdministratorProfileName = "System Administrator";
+
+    /// <summary>
+    /// The configuration tables whose rows name a column the platform then WRITES, as (table logical name, the column
+    /// holding the target column's logical name). Clause 5.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string TargetColumn)> ConfiguredWriterChannels = new[]
+    {
+        ("sprk_fieldmappingrule", "sprk_targetfield"),
+        ("sprk_aitopicregistry", "sprk_targetfield"),
+        ("sprk_emailupdatefield", "sprk_targetfieldlogicalname")
+    };
 
     /// <summary>Dataverse's "allowed" value for <c>canread</c> / <c>cancreate</c> / <c>canupdate</c>.</summary>
     public const int Allowed = 4;
@@ -160,6 +177,15 @@ public static class SecureFlagFieldSecurityAssertion
                 $"{(permission.CanUpdate == Allowed ? "update" : "")} {permission.Table}.{Column} — only the BFF may.");
         }
 
+        // ── Clause 5 — no configuration row writes it ─────────────────────────────
+        foreach (var row in census.ConfiguredWriters)
+        {
+            findings.Add(
+                $"CONFIGURED WRITER: {row.Table} row {row.RowId} names {Column} as its target, so the path it drives " +
+                "writes the flag outside the secure/unsecure endpoints — and, once the column is locked, fails every time " +
+                "it runs for a user. Remove the row (or retarget it); only the BFF endpoints set or clear the flag.");
+        }
+
         return new SecureFlagFieldSecurityOutcome(findings, census.SystemAdministratorHolders);
     }
 
@@ -205,6 +231,10 @@ public static class SecureFlagFieldSecurityAssertion
 /// Every principal holding the System Administrator role (users, and teams by name) — the residual writer set owner
 /// decision F4 accepted; listed, never graded.
 /// </param>
+/// <param name="ConfiguredWriters">
+/// Every row of a <see cref="SecureFlagFieldSecurityAssertion.ConfiguredWriterChannels"/> table whose target column is
+/// the flag (clause 5). Empty is the pass.
+/// </param>
 public sealed record SecureFlagFieldSecurityCensus(
     IReadOnlySet<string> SecuredTables,
     IReadOnlyList<CensusFieldSecurityProfile> Profiles,
@@ -212,7 +242,11 @@ public sealed record SecureFlagFieldSecurityCensus(
     IReadOnlyList<CensusDefaultTeam> DefaultTeams,
     IReadOnlyList<CensusPrincipal> BffApplicationUsers,
     IReadOnlyList<string> UnresolvedBffApplicationIds,
-    IReadOnlyList<string> SystemAdministratorHolders);
+    IReadOnlyList<string> SystemAdministratorHolders,
+    IReadOnlyList<CensusConfiguredWriter> ConfiguredWriters);
+
+/// <summary>A configuration row (clause 5) naming the flag as the column it writes.</summary>
+public sealed record CensusConfiguredWriter(string Table, Guid RowId);
 
 /// <summary>One field security profile and its members.</summary>
 public sealed record CensusFieldSecurityProfile(

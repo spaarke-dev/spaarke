@@ -247,6 +247,72 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         _fixture.Grants.Concat(_fixture.Modifies).Should().OnlyContain(s => s.Sequence > flagWrite.Sequence);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 150 r2 (verifier finding F1): the flag comes before the Step 4.2 shared-container UNLINK too. The first-write
+    // test above seeds no container, so no unlink happens there; a reorder that moved the flag after the unlink passed
+    // every test. If it regressed, a record whose shared container was unlinked and whose flag write then failed would be
+    // left unflagged and containerless, under a response that says nothing changed.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string BusinessUnitSharedContainer = "b!business-unit-shared";
+
+    /// <summary>Seeds an unflagged project recording a SHARED container: a business unit's, or one this BFF is configured with.</summary>
+    private string SeedRecordingASharedContainer(Guid projectId, string sharedKind)
+    {
+        var shared = sharedKind == "businessUnit"
+            ? BusinessUnitSharedContainer
+            : ProvisionProjectTestFixture.ConfiguredArchiveContainerId;
+        if (sharedKind == "businessUnit")
+            _fixture.BusinessUnitContainers[Guid.NewGuid()] = shared;
+        _fixture.SeedProject(projectId, containerId: shared, isSecure: false);
+        return shared;
+    }
+
+    private IEnumerable<ProvisionProjectTestFixture.RecordedUpdate> ContainerUnlinks(Guid recordId)
+        => _fixture.Updates.Where(u => u.RecordId == recordId
+                                       && u.Payload.TryGetValue("sprk_containerid", out var value)
+                                       && value is null);
+
+    [Theory]
+    [InlineData("businessUnit")]
+    [InlineData("configured")]
+    public async Task Provision_ARecordCarryingASharedContainer_SetsTheFlagBeforeUnlinkingIt(string sharedKind)
+    {
+        var projectId = Guid.NewGuid();
+        SeedRecordingASharedContainer(projectId, sharedKind);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId = projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var flagWrite = FlagWrites(projectId).Should().ContainSingle().Subject;
+        var unlink = ContainerUnlinks(projectId).Should().ContainSingle("the shared container is unlinked once").Subject;
+        unlink.Sequence.Should().BeGreaterThan(flagWrite.Sequence,
+            "the flag is the FIRST write: the unlink comes after it, so a failed flag write leaves the shared link in place");
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    [Theory]
+    [InlineData("businessUnit")]
+    [InlineData("configured")]
+    public async Task Provision_ARecordCarryingASharedContainer_WhenTheFlagWriteIsRefused_NeverUnlinksIt(string sharedKind)
+    {
+        var projectId = Guid.NewGuid();
+        var shared = SeedRecordingASharedContainer(projectId, sharedKind);
+        _fixture.SecureFlagWriteFails = true;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId = projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonSecureFlagNotSet);
+        ContainerUnlinks(projectId).Should().BeEmpty("the unlink comes after the flag, and the flag write failed");
+        _fixture.Updates.Should().ContainSingle("the flag write was the only write attempted")
+            .Which.Payload.Should().ContainKey("sprk_issecure");
+        _fixture.ContainerIdOf(projectId).Should().Be(shared, "the record keeps the link it arrived with");
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("project")]
     [InlineData("workassignment")]
@@ -372,6 +438,26 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonNotPermitted);
+        AssertStillSecure(recordId);
+    }
+
+    /// <summary>
+    /// Task 150 r2 (verifier F6): the Full Access probe THROWING (rather than answering None) is refused with a reason
+    /// code, before any write — not an unhandled 500.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_WhenTheFullAccessCheckThrows_RefusesWithAReasonBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.FullAccessProbeThrows = true;
+
+        var response = await PostAsync(UnsecureRoute, new { recordType = "matter", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonPermissionUnverifiable);
+        _fixture.DelegationProbes.Should().HaveCount(2, "the route's Write gate, then the Full Access check that threw");
         AssertStillSecure(recordId);
     }
 

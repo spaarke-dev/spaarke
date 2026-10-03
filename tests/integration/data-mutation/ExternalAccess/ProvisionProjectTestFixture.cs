@@ -234,6 +234,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool CallerHoldsDelete { get; set; }
 
     /// <summary>
+    /// Task 150 r2 (verifier F6): the SECOND rights probe of a record THROWS. The first is the route's Write gate; the
+    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3).
+    /// </summary>
+    public bool FullAccessProbeThrows { get; set; }
+
+    /// <summary>
     /// Task 150: every root read returns <c>sprk_issecure</c> EMPTY (JSON null) — what Dataverse answers for a
     /// field-secured column the reading identity has no Read on.
     /// </summary>
@@ -458,6 +464,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
         CallerHoldsDelete = false;
+        FullAccessProbeThrows = false;
         SecureFlagReadsEmpty = false;
         SecureFlagWriteFails = false;
         SecureFlagWriteNotApplied = false;
@@ -1079,7 +1086,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
+            var earlierProbes = _fixture.DelegationProbes.Count(p => p.EntitySet == entitySet && p.RecordId == recordId);
             _fixture.DelegationProbes.Add((entitySet, recordId));
+            if (_fixture.FullAccessProbeThrows && earlierProbes >= 1)
+                throw new HttpRequestException("Dataverse 503: simulated failure of RetrievePrincipalAccess.");
+
             var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
                 : AccessRights.Read;

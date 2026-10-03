@@ -49,7 +49,8 @@ public class SecureFlagFieldSecurityAssertionTests
         IReadOnlyList<CensusFieldPermission>? permissions = null,
         IReadOnlyList<CensusDefaultTeam>? defaultTeams = null,
         IReadOnlyList<CensusPrincipal>? bffUsers = null,
-        IReadOnlyList<string>? unresolved = null)
+        IReadOnlyList<string>? unresolved = null,
+        IReadOnlyList<CensusConfiguredWriter>? configuredWriters = null)
     {
         var teams = defaultTeams ?? new[] { RootTeam, ChildTeam, SecureBuTeam };
         return new SecureFlagFieldSecurityCensus(
@@ -72,7 +73,8 @@ public class SecureFlagFieldSecurityAssertionTests
             teams,
             bffUsers ?? new[] { Bff },
             unresolved ?? Array.Empty<string>(),
-            new[] { "user 'Ralph Schroeder'", "TEAM 'Spaarke Demo'" });
+            new[] { "user 'Ralph Schroeder'", "TEAM 'Spaarke Demo'" },
+            configuredWriters ?? Array.Empty<CensusConfiguredWriter>());
     }
 
     private static IReadOnlyList<CensusFieldPermission> PermissionsWithout(Func<CensusFieldPermission, bool> drop)
@@ -232,6 +234,33 @@ public class SecureFlagFieldSecurityAssertionTests
         outcome.Message.Should().Contain("READER PROFILE");
     }
 
+    /// <summary>
+    /// Clause 5 (task 150 r2, verifier F5): a maker-authored configuration row that writes the flag — a Field Mapping
+    /// Framework Copy rule onto a child record, an AI topic-registry target, an email update field — is a writer outside
+    /// the endpoints, and once the column is locked it fails every write it drives.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_fieldmappingrule")]
+    [InlineData("sprk_aitopicregistry")]
+    [InlineData("sprk_emailupdatefield")]
+    public void Evaluate_WhenAConfigurationRowTargetsTheFlag_Fails(string table)
+    {
+        var row = new CensusConfiguredWriter(table, Guid.Parse("f150f150-0000-0000-0000-0000000000d1"));
+
+        var outcome = SecureFlagFieldSecurityAssertion.Evaluate(Passing(configuredWriters: new[] { row }));
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Message.Should().Contain("CONFIGURED WRITER").And.Contain(table).And.Contain(row.RowId.ToString());
+    }
+
+    [Fact]
+    public void ConfiguredWriterChannels_CoverTheThreeMakerAuthoredWriteTargets()
+    {
+        SecureFlagFieldSecurityAssertion.ConfiguredWriterChannels.Select(c => c.Table).Should().BeEquivalentTo(
+            new[] { "sprk_fieldmappingrule", "sprk_aitopicregistry", "sprk_emailupdatefield" },
+            "the live census queries exactly these; dropping one silently stops checking it");
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════════════════════
     // Layer 2 — LIVE (opt-in): the manual gate of task 150 step 6
     // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -344,8 +373,20 @@ public class SecureFlagFieldSecurityAssertionTests
                 .Select(t => $"TEAM '{t.GetProperty("name").GetString()}'"));
         }
 
+        // Clause 5: configuration rows whose target column is the flag. The entity set is resolved, never guessed.
+        var configuredWriters = new List<CensusConfiguredWriter>();
+        foreach (var (table, targetColumn) in SecureFlagFieldSecurityAssertion.ConfiguredWriterChannels)
+        {
+            var entitySet = (await GetAsync(http, $"EntityDefinitions(LogicalName='{table}')?$select=EntitySetName"))
+                .GetProperty("EntitySetName").GetString();
+            var rows = await GetAllAsync(http,
+                $"{entitySet}?$select={table}id&$filter={targetColumn} eq '{SecureFlagFieldSecurityAssertion.Column}'");
+            configuredWriters.AddRange(rows.Select(r => new CensusConfiguredWriter(table, Guid.Parse(r.GetProperty($"{table}id").GetString()!))));
+        }
+
         return new SecureFlagFieldSecurityCensus(
-            secured, profiles, permissions, defaultTeams, bffUsers, unresolved, holders.Distinct().ToArray());
+            secured, profiles, permissions, defaultTeams, bffUsers, unresolved, holders.Distinct().ToArray(),
+            configuredWriters);
     }
 
     private static async Task<JsonElement> GetAsync(HttpClient http, string query)

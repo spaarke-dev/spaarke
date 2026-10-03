@@ -447,7 +447,25 @@ public static class UnsecureProjectEndpoint
                 traceId, (ReasonKey, ReasonPermissionUnverifiable)), caller);
         }
 
-        var rights = await callerAccessProbe.GetCallerRightsAsync(callerToken, root.EntitySet, recordId, ct);
+        // The probe normally answers None on failure (refused below as 403). Anything it THROWS is refused here with a
+        // reason code rather than escaping as a bare 500 (task 150 r2, verifier F6). Nothing has been written yet.
+        AccessRights rights;
+        try
+        {
+            rights = await callerAccessProbe.GetCallerRightsAsync(callerToken, root.EntitySet, recordId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[UNSECURE] The caller's access to {RecordType} {RecordId} could not be read; refusing before any " +
+                "change. TraceId={TraceId}", root.WireToken, recordId, traceId);
+
+            return (Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"Whether you may remove the secure designation from this {root.DisplayLabel.ToLowerInvariant()} could " +
+                "not be checked, because your access to it could not be read. Nothing was changed.",
+                traceId, (ReasonKey, ReasonPermissionUnverifiable)), caller);
+        }
+
         const AccessRights fullAccess = AccessRights.Write | AccessRights.Delete;
         if ((rights & fullAccess) == fullAccess)
         {
