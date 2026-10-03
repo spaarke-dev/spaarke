@@ -7,22 +7,13 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
-###### 2026-10-03 — root `CLAUDE.md` Calendar row corrected; ADR-012 stale example removed (spaarke-ontology-platform-r1 task 080 / C-23, C-19)
-
-Root `CLAUDE.md`'s "Calendar shared components" row named `CalendarSection` and `CalendarFilterPane` as two
-intentional variants, but did not say that the side-pane consumer (`src/solutions/CalendarSidePane/src/App.tsx`)
-actually renders **`CalendarSection` + `CalendarFilterOutput`** — not `CalendarFilterPane`. That migration was never
-finished. Two other live files in the same solution (`utils/parseParams.ts`, `utils/postMessage.ts`) imported the
-type `CalendarFilterPaneOutput` from the bare `@spaarke/events-components` specifier, which neither the root nor the
-`./components` barrel exported: **an unresolvable type import in two shipped files.** Fixed: the
-`Spaarke.Events.Components` components barrel now re-exports `CalendarFilterPane` and its types; `IEventDateInfo` is
-deliberately excluded because `CalendarSection` already exports a different type under that name from the same
-barrel. The row now states the real consumer. Verified against `App.tsx` before writing.
+###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (spaarke-ontology-platform-r1 task 080 / C-19)
 
 `.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
 service. Task 080 deleted it (zero consumers, along with `EntityConfigurationService`, `CustomCommandFactory` and
 `Toolbar/CommandToolbar`), so the example is removed. The full ADR's mention is left alone: it is past tense, and
 accurate as history. Evidence: `projects/spaarke-ontology-platform-r1/notes/task-080-six-hazards-deviations.md`.
+(The task's C-23 Calendar fix was split out to its own PR, #1114, as unrelated to ontology work.)
 
 ###### 2026-10-03 — ADR-040 amended: a durable decision ledger is a SIBLING of `SessionGate` (spaarke-ontology-platform-r1 task 003)
 

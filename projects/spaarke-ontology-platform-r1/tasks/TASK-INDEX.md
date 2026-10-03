@@ -95,7 +95,7 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| ⚠️ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | 5 of 6 fixed. **C-21 escalated** (privacy shim → [#1112](https://github.com/spaarke-dev/spaarke/issues/1112)); C-19 residual → [#1113](https://github.com/spaarke-dev/spaarke/issues/1113) |
+| ⚠️ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | 5 of 6 fixed. **C-21 escalated** (privacy shim → [#1112](https://github.com/spaarke-dev/spaarke/issues/1112)); C-19 residual → [#1113](https://github.com/spaarke-dev/spaarke/issues/1113). C-23 moved to its own PR [#1114](https://github.com/spaarke-dev/spaarke/pull/1114) |
 | 🔲 081 | [Duplication cleanup](081-duplication-cleanup.poml) | STANDARD | sonnet/medium | — | **H** | `cleanGuid` ×~50, frame-walk ×7 |
 | ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
