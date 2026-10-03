@@ -174,12 +174,25 @@ interface IProvisioningItem {
  * What provisioning does, in the order the server does it.
  *
  * Each entry maps to a step of `ProvisionProjectEndpoint.ProvisionProjectAsync`
- * (task 061). Nothing forward-looking belongs here — if the server does not do
- * it today, it must not be described here (CLAUDE.md §2, code wins).
+ * (task 061; reordered by task 133, which shares to the creator BEFORE the owner
+ * move). Nothing forward-looking belongs here — if the server does not do it
+ * today, it must not be described here (CLAUDE.md §2, code wins).
  */
 const PROVISIONING_ITEMS: IProvisioningItem[] = [
   {
-    // Endpoint steps 2, 3 and 5: resolve the ONE canonical `Secure Record`
+    // Endpoint steps 4.5 and 5.5 (MoveWithCreatorShareAsync, task 133): the creator
+    // is identified from their own token via WhoAmI and shared to with
+    // Read/Write/Append/Append To/Share BEFORE the owner move where the platform
+    // allows it, then proven on the moved record. If it cannot be proven the move is
+    // undone — an unshared secure project is a record nobody can open. Listed first
+    // because it now happens first.
+    icon: <PeopleTeamRegular fontSize={16} />,
+    title: 'Shared with you, and only with people you add',
+    description:
+      'You are given access to the project explicitly, including the right to bring colleagues in. Everyone else — internal or external — needs an explicit grant before they can see it.',
+  },
+  {
+    // Endpoint steps 2, 3 and 5 (after the share-first step 4.5, task 133): resolve the ONE canonical `Secure Record`
     // business unit BY NAME from configuration, resolve its NAMED owner team
     // (task 144 — never the BU's default team), assign the project to that team,
     // and verify the assignment took effect. Nothing is created — no business unit
@@ -195,16 +208,6 @@ const PROVISIONING_ITEMS: IProvisioningItem[] = [
     title: 'Moved into the Secure Record business unit',
     description:
       'The project is reassigned to the Secure Record business unit’s owner team, which by design has no people in it. Ownership therefore grants nobody access to the project.',
-  },
-  {
-    // Endpoint step 5.5 (ShareToCreatorAndPrincipalsAsync): the creator is
-    // identified from their own token via WhoAmI and always shared to with
-    // Read/Write/Append/Append To/Share. Provisioning FAILS rather than finish
-    // without it — an unshared secure project is a record nobody can open.
-    icon: <PeopleTeamRegular fontSize={16} />,
-    title: 'Shared with you, and only with people you add',
-    description:
-      'You are given access to the project explicitly, including the right to bring colleagues in. Everyone else — internal or external — needs an explicit grant before they can see it.',
   },
   {
     // Endpoint steps 6 and 7: create the project's own SPE container and record

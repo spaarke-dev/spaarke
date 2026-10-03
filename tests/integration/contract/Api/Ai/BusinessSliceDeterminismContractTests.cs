@@ -152,9 +152,11 @@ public class BusinessSliceDeterminismContractTests
     {
         var handoffUrlBuilder = new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com");
         var handler1 = new DataverseCreateRecordHandler(
-            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder);
+            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder,
+            new Mock<Spaarke.Dataverse.IGenericEntityService>().Object);
         var handler2 = new DataverseCreateRecordHandler(
-            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder);
+            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder,
+            new Mock<Spaarke.Dataverse.IGenericEntityService>().Object);
 
         var description1 = handler1.Metadata.Description;
         var description2 = handler2.Metadata.Description;

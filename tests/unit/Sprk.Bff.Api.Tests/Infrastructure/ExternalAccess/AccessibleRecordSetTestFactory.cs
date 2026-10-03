@@ -50,6 +50,22 @@ internal static class AccessibleRecordSetTestFactory
     public static IReadOnlyList<ExternalRootGrant> NoRootGrants { get; } = Array.Empty<ExternalRootGrant>();
 
     /// <summary>
+    /// An <see cref="IContactIdentityStore"/> that reads every systemuser as linked to NO contact and bound to no oid
+    /// (task 143 r1) — the honest default for tests authored before the systemuser-plane veto resolved a secure record's
+    /// subjects through the link reads. The veto still adds the principal's derived contact, so those tests keep the
+    /// subjects they had. Tests of the link reads use <c>InMemoryContactIdentityStore</c> instead.
+    /// </summary>
+    public static IContactIdentityStore UnlinkedIdentityStore()
+    {
+        var store = new Mock<IContactIdentityStore>(MockBehavior.Strict);
+        store
+            .Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+        return store.Object;
+    }
+
+    /// <summary>
     /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
     /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
     /// setup per test file) so the three call sites that directly construct
@@ -63,6 +79,13 @@ internal static class AccessibleRecordSetTestFactory
             .Setup(r => r.GetDeniedRecordsAsync(
                 It.IsAny<Guid?>(),
                 It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
+        // Task 143: the three-subject overload the systemuser plane calls — inert too.
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<NoAccessSubjects>(),
                 It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(NoAccessListResult.Empty);

@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.Agent;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -33,7 +35,26 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// user lacks privileges for fails with the user's own access error (403 →
 /// <see cref="DataverseUserClientErrorCodes.AccessDenied"/>); a table invisible to the user
 /// 404s at metadata resolution BEFORE any write is attempted. No app-only client is reachable
-/// from this class (task-012 audit).
+/// from this class (task-012 audit) — with ONE exception, below.
+/// </para>
+/// <para>
+/// <b>The creator stamp (unified-access-control-r2 task 133; owner round 7 item 2).</b> A row of
+/// <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c> records the PERSON who created it in the
+/// server-stamped, field-secured <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>). Only the BFF
+/// application user(s) may write that column, so after a successful run-as-user create of one of those tables this
+/// handler stamps it APP-ONLY with the row's own <c>createdby</c> — the calling user, as Dataverse recorded them. That
+/// write sets one column to a value the user-scoped create already established; it never creates, never reads a record
+/// the user could not, and a failure of it is logged, not surfaced (the row's <c>createdby</c> is that same person, and
+/// a resume reads <c>createdby</c> first). An item that names the column is refused before any Dataverse call: a caller
+/// never chooses who created a record.
+/// </para>
+/// <para>
+/// <b>Authority for this app-only write — a CLAUDE.md §6.5 path-B exception to the spec's "User-OBO ONLY" rule, cited
+/// as such in the PR.</b> Owner round 7 item 2 (2026-10-02) makes the column written ONLY by the BFF, so a user-OBO
+/// client cannot write it; item 3 supersedes "User-OBO ONLY" for this handler (the G5 pattern, task 146). Neither item
+/// names THIS interim shape — a user-OBO create followed by one app-only column update — explicitly: it is the executor's
+/// reading of the two together (task 133 r1, verifier round 4 finding 9), limited to one column, the row's own
+/// <c>createdby</c>, non-fatal, and replaced by task 146, which creates as the app and stamps the column in that payload.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, column COUNT, outcome,
@@ -97,18 +118,32 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
     private static partial Regex LogicalNameRegex();
 
+    /// <summary>
+    /// The refusal for an item naming the server-stamped creator column (task 133). Model-facing and user-safe: it
+    /// names the column and that dropping it makes the create valid.
+    /// </summary>
+    internal const string CreatorPersonColumnRefusal =
+        "The column 'sprk_createdbyperson' records who created the record and is set by the server only, so this " +
+        "create was REJECTED and nothing was written. Omit that column and create the record again: it is filled in " +
+        "with the calling user automatically.";
+
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
     private readonly HandoffUrlBuilder _handoffUrlBuilder;
+    private readonly IGenericEntityService _appOnly;
 
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
-        HandoffUrlBuilder handoffUrlBuilder)
+        HandoffUrlBuilder handoffUrlBuilder,
+        IGenericEntityService appOnly)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
+        // Task 133: the app-only creator stamp. IGenericEntityService is registered unconditionally (GraphModule), so
+        // this handler's tool-framework registration gains no asymmetric dependency (CLAUDE.md §10 F.1).
+        _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
     }
 
     /// <inheritdoc />
@@ -167,8 +202,13 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var item, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 133: the creator column is server-stamped — refused pre-suspend, so no confirm dialog is shown for a
+        // create that can never run.
+        if (RecordCreatorPerson.IsNamedIn(item))
+            return ToolValidationResult.Failure(CreatorPersonColumnRefusal);
 
         // R5-E HARD RULE: sprk_document creates never execute. This ValidateChat now runs at
         // TWO points on the gated path, so the rejection fires before any Dataverse wire call on
@@ -197,6 +237,13 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var item, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // Task 133 (defense in depth — ValidateChat already rejects): the creator column is server-stamped.
+        if (RecordCreatorPerson.IsNamedIn(item))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, CreatorPersonColumnRefusal, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
         }
 
         // R5-E HARD RULE (defense in depth — ValidateChat already rejects): sprk_document
@@ -269,6 +316,12 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                              "Use dataverse.search_data or dataverse.read_query to locate the new record.");
             }
 
+            // Task 133: the person who created a secure-root row, stamped app-only (see the class remarks).
+            if (createdId is { } stampedId && RecordCreatorPerson.IsStamped(tablename))
+            {
+                await StampCreatorPersonAsync(tablename, stampedId, response.Body, cancellationToken).ConfigureAwait(false);
+            }
+
             var citationPath = createdId.HasValue
                 ? DataverseRecordCitations.RecordPath(tablename, createdId.Value)
                 : null;
@@ -324,6 +377,48 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Stamps <c>sprk_createdbyperson</c> on a row this handler just created as the user (task 133): the value is the
+    /// row's own <c>createdby</c> from the create's representation — the calling user, as Dataverse recorded them, never
+    /// a value from the item. Non-fatal: a failure is logged, and the row still records that person in <c>createdby</c>.
+    /// </summary>
+    private async Task StampCreatorPersonAsync(
+        string tablename, Guid recordId, JsonElement? createdRow, CancellationToken ct)
+    {
+        Guid? createdBy = createdRow is { ValueKind: JsonValueKind.Object } row
+                          && row.TryGetProperty("_createdby_value", out var createdByProp)
+                          && createdByProp.ValueKind == JsonValueKind.String
+                          && Guid.TryParse(createdByProp.GetString(), out var parsed)
+                          && parsed != Guid.Empty
+            ? parsed
+            : null;
+
+        if (createdBy is not { } person)
+        {
+            _logger.LogWarning(
+                "[dataverse.create_record] {Entity} {RecordId}: the create did not echo createdby, so its creator " +
+                "person (sprk_createdbyperson) was not stamped; createdby still records the calling user.",
+                tablename, recordId);
+            return;
+        }
+
+        try
+        {
+            await _appOnly.UpdateAsync(tablename, recordId, RecordCreatorPerson.UpdateFields(person), ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[dataverse.create_record] {Entity} {RecordId}: its creator person (sprk_createdbyperson) could not be " +
+                "stamped; createdby still records the calling user.", tablename, recordId);
+        }
+    }
 
     private ToolResult LogOutcome(ChatInvocationContext context, string tablename, ToolResult result, Stopwatch stopwatch)
     {

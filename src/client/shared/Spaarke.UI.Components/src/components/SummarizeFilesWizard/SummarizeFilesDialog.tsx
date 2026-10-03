@@ -46,7 +46,8 @@ import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
-import { provisionSecureProject } from '../CreateProjectWizard/provisioningService';
+import { provisionSecureProject, type IProvisionProjectResult } from '../CreateProjectWizard/provisioningService';
+import { SecureProvisioningOutcome } from '../CreateProjectWizard/SecureProvisioningOutcome';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -472,6 +473,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     const warnings: string[] = [];
     let createdProjectId: string | undefined;
     let createdProjectName: string | undefined;
+    // Task 133: a provisioning failure the same caller can finish is shown with its "Try securing again" action.
+    let retryableProvisioning: IProvisionProjectResult | undefined;
 
     // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
     // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
@@ -517,13 +520,12 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         // authenticatedFetch + bffBaseUrl are REQUIRED here, not optional conveniences.
         //
         // This step renders the same `CreateProjectStep` the real wizard does, Secure toggle
-        // included. `projectService` writes `sprk_issecure = true` unconditionally and then
-        // cascades `sprk_containerid` from the acting user's business unit — but the thing that
-        // gives a secure project its OWN container, `provisionSecureProject`, lives in
+        // included. `projectService` writes `sprk_issecure = true` — but the thing that gives a
+        // secure project its OWN container, `provisionSecureProject`, lives in
         // `CreateProjectWizard`'s onFinish, which THIS path does not go through.
         //
         // So before this fix a user could tick "Secure" here and get a project flagged secure
-        // whose documents land in the SHARED business-unit container, with no warning — the
+        // whose documents (then) landed in the SHARED business-unit container, with no warning — the
         // wizard's provisioning-failure message lives on a path this dialog bypasses. It looked
         // secure in Dataverse and to anything reading the flag. That is the exact isolation gap
         // unified-access-control-r2 exists to close.
@@ -548,25 +550,28 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                   bffBaseUrl
                 );
                 if (!provisionResult.success) {
-                  warnings.push(
-                    `Secure Project provisioning failed: ${provisionResult.errorMessage} — ` +
-                      'the project was created but its dedicated document container was not ' +
-                      'provisioned, so its documents would go to the shared container. It needs ' +
-                      'to be provisioned before documents are added.'
-                  );
+                  // Since task 076 a secure project without its own container REFUSES uploads (it never
+                  // falls back to the shared container), and since task 133 the classified message says
+                  // what state the project was left in — so it is shown as is.
+                  if (provisionResult.retryable) {
+                    retryableProvisioning = provisionResult;
+                  } else {
+                    warnings.push(`Securing the project did not finish: ${provisionResult.errorMessage}`);
+                  }
                 }
               } catch (err) {
                 warnings.push(
-                  `Secure Project provisioning failed: ${err instanceof Error ? err.message : 'Unknown error'} — ` +
-                    'the project was created but is NOT yet isolated.'
+                  `Securing the project did not finish (${err instanceof Error ? err.message : 'Unknown error'}). ` +
+                    'It was created and marked secure, but is not yet isolated; documents cannot be added to it ' +
+                    'until an administrator finishes securing it.'
                 );
               }
             } else {
               // Fail LOUDLY rather than silently creating a secure-in-name-only project.
               warnings.push(
-                'Project was marked Secure but could not be provisioned from this dialog ' +
-                  '(no authenticated BFF connection). Its documents would go to the shared ' +
-                  'container — provision it before adding documents.'
+                'Project was marked Secure but could not be secured from this dialog ' +
+                  '(no authenticated BFF connection). Documents cannot be added to it until an ' +
+                  'administrator secures it.'
               );
             }
           }
@@ -598,9 +603,20 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: warnings.length > 0 ? 'Summary Complete (with warnings)' : 'Summary Complete',
       body: (
-        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Your file summary is ready. {actionSummary}.
-        </Text>
+        <>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            Your file summary is ready. {actionSummary}.
+          </Text>
+          {retryableProvisioning && createdProjectId && authenticatedFetch && bffBaseUrl && (
+            <SecureProvisioningOutcome
+              projectId={createdProjectId}
+              projectRef={createdProjectName}
+              initialResult={retryableProvisioning}
+              authenticatedFetch={authenticatedFetch}
+              bffBaseUrl={bffBaseUrl}
+            />
+          )}
+        </>
       ),
       actions: (
         <>

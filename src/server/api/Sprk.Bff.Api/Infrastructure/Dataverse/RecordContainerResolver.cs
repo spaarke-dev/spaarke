@@ -407,7 +407,7 @@ public sealed class RecordContainerResolver
                 + "sprk_issecure is true but sprk_containerid is not set. A non-secure fallback was "
                 + "{FallbackState} and was deliberately NOT used — SPE permissions are additive-only, so "
                 + "content written to a shared container cannot be retracted. Provision the record's own "
-                + "container (POST /api/external/projects/provision) before uploading to it.",
+                + "container (POST /api/v1/external-access/provision-project) before uploading to it.",
                 normalizedEntity,
                 recordId,
                 string.IsNullOrWhiteSpace(nonSecureFallbackContainerId) ? "absent" : "AVAILABLE");

@@ -56,8 +56,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// own rights, re-probed as the caller (owner 2026-09-16; Dataverse's own rule, which an app-only POA write cannot apply
 /// for us). It is narrowed, never refused, unless nothing grantable remains (403 <c>caller_cannot_grant</c>). A narrowed
 /// request never LOWERS an existing share that holds more (409 <c>sdap.access.grant.would_lower_existing</c>, task 139);
-/// an explicit request for a lower level is a deliberate downgrade and is applied. The No Access list for internal users
-/// is task 143's (owner Q4), not checked here.</para>
+/// an explicit request for a lower level is a deliberate downgrade and is applied.</para>
+///
+/// <para><b>The No Access list binds internal users on secure records</b> (task 143, owner Q4). Before any share read
+/// or write, <see cref="SecureShareNoAccessGuard"/> answers whether the user is walled off the record; a walled user is
+/// refused (403 <c>subject_no_access</c>, a message that names no entry or reason), and an unanswerable check refuses
+/// too (500 <c>no_access_unverifiable</c>). On a non-secure record the list does not bind internal users.</para>
 ///
 /// <para><b>A secure record always keeps someone who can see it</b> (owner round 3, S5; task 139 amendment R3):
 /// <c>/unshare-user</c> refuses to remove the last enabled user whose share can read a secure record (409
@@ -109,6 +113,18 @@ public static class InternalShareEndpoints
     /// amendment R3), so nothing was removed. 409.
     /// </summary>
     internal const string LastReaderOnSecureRecordReasonCode = "sdap.access.user_share.last_reader_on_secure_record";
+
+    /// <summary>
+    /// The user is on the record's No Access list (task 143, owner Q4: the list applies to internal users on secure
+    /// records), so nothing was shared. 403. The message never names the entry or its reason.
+    /// </summary>
+    internal const string SubjectNoAccessReasonCode = "sdap.access.user_share.subject_no_access";
+
+    /// <summary>
+    /// Whether the user is on the secure record's No Access list could not be checked (a deny-list, flag, link or
+    /// membership read failed), so nothing was shared (ADR-003). 500 — the same caller may try again.
+    /// </summary>
+    internal const string NoAccessUnverifiableReasonCode = "sdap.access.user_share.no_access_unverifiable";
 
     // ── Share outcomes ──────────────────────────────────────────────────────
 
@@ -230,6 +246,7 @@ public static class InternalShareEndpoints
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
         CallerRecordAccessProbe callerAccessProbe,
+        SecureShareNoAccessGuard noAccessGuard,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -282,6 +299,35 @@ public static class InternalShareEndpoints
                 root.Type, root.Id, systemUserId, user.IsDisabled, user.AccessMode, user.ApplicationId is not null,
                 user.IsExternal, callerOid);
             return ineligible;
+        }
+
+        // ── The No Access list for internal users on secure records (task 143, owner Q4) ──
+        //
+        // Before any share read or write. On a secure record a walled person is refused — through any of the three
+        // subject forms (the user, a contact that represents them, an organization that contact belongs to) and any
+        // object form (this record, or an organization it references). An unanswerable check refuses too (ADR-003).
+        // A non-secure record is not the wall's (Q4): the check answers NotSecure and the share proceeds as before.
+        var wall = await noAccessGuard.CheckAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, ct);
+        if (wall.Outcome == SecureShareWallOutcome.Walled)
+        {
+            logger.LogWarning(
+                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on its No Access list " +
+                "(entries {EntryIds}) (caller {CallerOid}).",
+                root.Type, root.Id, systemUserId, string.Join(",", wall.EntryIds), callerOid);
+            return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, SubjectNoAccessReasonCode,
+                "This person is on the No Access list for this record, so it was not shared with them.");
+        }
+
+        if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
+        {
+            logger.LogError(
+                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: the No Access check could " +
+                "not read its {Fault} (caller {CallerOid}). Nothing was shared.",
+                root.Type, root.Id, systemUserId, wall.Fault, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
+                NoAccessUnverifiableReasonCode,
+                "Whether this person is on the No Access list for this record could not be checked, so it was not " +
+                "shared with them. Try again.");
         }
 
         // ── You may grant only what you hold (owner decision 2026-09-16) ──────

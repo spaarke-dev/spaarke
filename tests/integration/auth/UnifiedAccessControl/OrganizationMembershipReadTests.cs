@@ -651,7 +651,9 @@ public class OrganizationMembershipReadTests
         // No walk produces records here — org baselines are NotHeld — so the resolver contributes nothing.
         var membership = new Mock<IMembershipResolverService>();
         return new AccessibleRecordSetService(
-            membership.Object, participations, standing, denyList, NullLogger<AccessibleRecordSetService>.Instance);
+            membership.Object, participations, standing, denyList,
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            NullLogger<AccessibleRecordSetService>.Instance);
     }
 
     private static Mock<ISubjectStandingGrantReader> StandingReader()
@@ -733,6 +735,23 @@ public class OrganizationMembershipReadTests
                 DeniedRecordIds = denied,
                 DenyingEntryIds = denied.ToDictionary(id => id, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
             });
+        }
+
+        /// <summary>
+        /// Task 143: the three-subject overload the systemuser plane calls. The entries here are organization-subject,
+        /// so a denial is reported with that subject kind — what the systemuser plane splits on (owner N3).
+        /// </summary>
+        public async Task<NoAccessListResult> GetDeniedRecordsAsync(
+            NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ct = default)
+        {
+            var result = await GetDeniedRecordsAsync(
+                subjects.ContactIds.FirstOrDefault(), subjects.OrganizationIds, candidates, ct);
+            return new NoAccessListResult
+            {
+                DeniedRecordIds = result.DeniedRecordIds,
+                DenyingEntryIds = result.DenyingEntryIds,
+                DenyingSubjectKinds = result.DeniedRecordIds.ToDictionary(id => id, _ => NoAccessSubjectKinds.Organization),
+            };
         }
     }
 

@@ -72,8 +72,16 @@ public class InternalUserShareTests
     private readonly Mock<ITenantCache> _cache = new();
     private readonly List<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
 
+    // Task 143 — the No Access check /share-user asks before any share write. The REAL guard over the real deny-list
+    // reader (wire seam only) and a row store for the user↔contact link; the record's flags come from _flags.
+    private readonly GrantPolicyTestDoubles.SeamNoAccessListReader _denyList = new();
+    private readonly IdentityBinding.InMemoryContactIdentityStore _identity = new();
+    private readonly SecureShareNoAccessGuard _guard;
+
     public InternalUserShareTests()
     {
+        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, NullLogger<SecureShareNoAccessGuard>.Instance);
+
         _users.SeedPerson(UserId, "Ada Lovelace");
         _users.SeedPerson(OtherUserId, "Brook Okafor");
 
@@ -87,6 +95,118 @@ public class InternalUserShareTests
     }
 
     private static DataversePrincipalRef User(Guid id) => DataversePrincipalRef.User(id);
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 143 — the No Access list binds internal users on SECURE records (owner Q4)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid UserOid = Guid.Parse("14314314-0000-0000-0000-0000000000b2");
+    private static readonly Guid LinkedContactId = Guid.Parse("14314314-0000-0000-0000-0000000000c1");
+    private static readonly Guid FirmId = Guid.Parse("14314314-0000-0000-0000-0000000000d1");
+    private static readonly Guid ReferencedOrgId = Guid.Parse("14314314-0000-0000-0000-0000000000d2");
+
+    /// <summary>The matter is SECURE, and the user's task-141 link is readable (linked to a contact).</summary>
+    private void SecureMatterWithLinkedUser()
+    {
+        _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _identity.AddContact(LinkedContactId);
+        _identity.AddSystemUser(UserId, UserOid, "ada@customer.example", primaryContactId: LinkedContactId);
+    }
+
+    /// <summary>Criterion 2: a systemuser-subject entry refuses the share — 403, the new code, a message, no write.</summary>
+    [Fact]
+    public async Task Share_AUserOnTheSecureRecordsNoAccessList_Is403SubjectNoAccess_AndWritesNothing()
+    {
+        SecureMatterWithLinkedUser();
+        _denyList.DenySystemUserOnRecord(UserId, MatterId);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((403, InternalShareEndpoints.SubjectNoAccessReasonCode));
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail
+            .Should().Be("This person is on the No Access list for this record, so it was not shared with them.");
+        _shares.Writes.Should().BeEmpty("the refusal comes before any Dataverse share write");
+        _shares.StrictReads.Should().Be(0, "and before the share table is even read");
+    }
+
+    /// <summary>Criterion 3: the same refusal through the linked contact, its organization, and an organization object.</summary>
+    [Theory]
+    [InlineData("linked contact")]
+    [InlineData("organization of the linked contact")]
+    [InlineData("organization the record references")]
+    public async Task Share_AUserWalledThroughAnyOtherSubjectOrObjectForm_IsRefusedToo(string form)
+    {
+        SecureMatterWithLinkedUser();
+        switch (form)
+        {
+            case "linked contact":
+                _denyList.DenyContactOnRecord(LinkedContactId, MatterId);
+                break;
+            case "organization of the linked contact":
+                _flags.ContactOrganizations[LinkedContactId] = new[] { FirmId };
+                _denyList.DenyOrganizationOnRecord(FirmId, MatterId);
+                break;
+            default:
+                _flags.RecordOrganizations[MatterId] = new[] { ReferencedOrgId };
+                _denyList.DenySystemUserOnOrganization(UserId, ReferencedOrgId);
+                break;
+        }
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((403, InternalShareEndpoints.SubjectNoAccessReasonCode), "walled through the {0}", form);
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Criterion 4: on a NON-secure record the same entry does not block the share (Q4 scope).</summary>
+    [Fact]
+    public async Task Share_OnANonSecureRecord_TheSameEntryDoesNotBlock()
+    {
+        _identity.AddSystemUser(UserId, UserOid, "ada@customer.example");
+        _denyList.DenySystemUserOnRecord(UserId, MatterId); // _flags answers Standard, not secure, by default
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        _denyList.Queries.Should().Be(0, "the internal wall is not consulted on a non-secure record");
+    }
+
+    /// <summary>Criterion 5: an unreadable deny list, flag set, link or membership refuses with a message and writes nothing.</summary>
+    [Theory]
+    [InlineData("deny list")]
+    [InlineData("flags")]
+    [InlineData("link")]
+    [InlineData("memberships")]
+    public async Task Share_WhenAnyInputOfTheNoAccessCheckCannotBeRead_RefusesWithAMessage_AndWritesNothing(string fault)
+    {
+        SecureMatterWithLinkedUser();
+        switch (fault)
+        {
+            case "deny list": _denyList.Faults = true; break;
+            case "flags": _flags.Flags[MatterId] = RootRecordFlags.Unreadable; break;
+            case "link": _identity.SystemUsers.Remove(UserId); break;
+            default: _flags.MembershipsUnreadable = true; break;
+        }
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((500, InternalShareEndpoints.NoAccessUnverifiableReasonCode), "the {0} could not be read", fault);
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail.Should().NotBeNullOrWhiteSpace();
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The control for criteria 2–5: a secure record, a readable list that names someone else — shared.</summary>
+    [Fact]
+    public async Task Share_OnASecureRecordWhoseListNamesSomeoneElse_IsShared()
+    {
+        SecureMatterWithLinkedUser();
+        _denyList.DenySystemUserOnRecord(OtherUserId, MatterId);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        _denyList.Queries.Should().BeGreaterThan(0, "the list WAS consulted, and named nobody here");
+    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Acceptance criterion 1 — share, list, unshare
@@ -373,7 +493,7 @@ public class InternalUserShareTests
     {
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
-            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(),
+            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _guard,
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
@@ -1027,7 +1147,7 @@ public class InternalUserShareTests
         Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter", AccessRights? callerRights = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
-            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
+            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights), _guard,
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>
