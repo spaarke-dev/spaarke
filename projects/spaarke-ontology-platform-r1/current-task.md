@@ -11,9 +11,9 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **Design COMPLETE.** `design.md` **rev 10** · every open decision settled · §8.0a "Still open" is **empty** |
-| **Dataverse** | ✅ **All five tables CREATED in `spaarkedev1`** · security roles created · privileges **verified by query** · auditing on |
-| **NEXT ACTION** | **Run `/design-to-spec`** on `projects/spaarke-ontology-platform-r1/design.md` |
+| **Phase** | **SPEC COMPLETE.** `design.md` **rev 11** · [`spec.md`](spec.md) written 2026-10-03 — 44 FRs, 9 NFRs, 11 criteria |
+| **Dataverse** | ✅ **All five tables CREATED in `spaarkedev1`** · security roles created, assigned, **verified by query** · auditing on all five **and at org level** · ⬜ **two columns still missing** (spec FR-01/FR-02) |
+| **NEXT ACTION** | **Run `/project-pipeline`** on `projects/spaarke-ontology-platform-r1` (it consumes `spec.md`). Optionally `/adr-check` against the spec first — the skill's own failure-mode table names a spec-vs-ADR conflict as the documented trap |
 | **Branch** | `docs/ontology-platform-design` — ⚠️ **NOT** `docs/ontology-platform-phase0` (squash-merged, dead) |
 | **Git** | 4 ahead / **44 behind** `origin/master`. Clean, all pushed. **Merge master before any deploy** |
 | **PR #1032** | ✅ **MERGED** to master as `93634db58` |
@@ -81,8 +81,35 @@ business unit, which is normal). Auditing enabled on the two ledger tables. Matr
 
 ## The next action, concretely
 
-**`/design-to-spec`** on `design.md` (rev 10, six owner feedback rounds absorbed, no open decisions). Then
-`/project-pipeline` → `task-execute`.
+**`/project-pipeline`** on `projects/spaarke-ontology-platform-r1` → `task-execute`. It consumes
+[`spec.md`](spec.md), not `design.md`.
+
+### What `/design-to-spec` produced and decided (2026-10-03)
+
+[`spec.md`](spec.md) — 44 FRs in ten groups (A schema · B policy · C evaluator+lifecycle · D Decision Record ·
+E worklist · F Do lane · G Inquiry · H classifier · I cleanup · J repairs), 9 NFRs, 11 success criteria, the
+§11 three-question table for six new components, and a non-empty **ADR Tensions** section.
+
+**Four new decisions — `design.md` §8.0c, spec §9.** None is a re-litigation:
+
+| ID | Decision |
+|---|---|
+| **D-9** | **ADR-039 → path A** (exception: Policy decides what is *true*, Binding what *executes*) · **ADR-040 → path B** (amendment: `SessionGate` and Decision Record are **siblings**). ⚠️ **The ADR-040 amendment must merge before or alongside the evaluator** |
+| **D-10** | Classifier recall floor **≥ 80% on ≥ 50 labelled items** — makes criterion 11 a real gate |
+| **D-11** | Suppression counts per **(policy, matter)**, expires **30 days** — resolves the dedupe-grain conflict |
+| **D-12** | **One evaluator, cadence by lane, two event hooks.** Reasoning is load-bearing and now in `design.md` **§8.3** |
+
+🔴 **Three schema deltas found by querying the built tables against the draft** — the five tables exist, but:
+
+1. **`sprk_decisionrecord.sprk_action` was never created** → spec **FR-01**. One of D-2's four binding
+   constraints ("a deny path has no action"), so the deny path currently cannot save.
+2. **`sprk_servicerequest` lacks both** the `Inbound`/`Outbound` discriminator **and** `sprk_disposition` →
+   spec **FR-02**. CM-5 and **success criterion 10** both depend on them.
+3. `sprk_signal` has **no `sprk_subjecttype`** (only `sprk_policy` does), so `sprk_dedupekey` composes from
+   `sprk_regardingrecordtype` + `sprk_regardingrecordid` → spec **FR-03**. No decision needed.
+
+All five tables are at **0 rows** — §8.1 seeding is still outstanding, and spec assumption **A-3** adds the
+**two negative controls** criterion 2 needs and the checklist omits.
 
 **Two things to carry into the spec that are easy to lose:**
 
@@ -159,7 +186,8 @@ Calendar statement. Full list: [`notes/reuse-verification-2026-10-02.md`](notes/
 
 | File | Role |
 |---|---|
-| [`design.md`](design.md) | **rev 10 — the decisions.** §10 = 29 settled · §8 = none open |
+| [`spec.md`](spec.md) | **The specification — what `/project-pipeline` consumes.** 44 FRs · 9 NFRs · ADR Tensions resolved · §9 = D-9..D-12 · §10 assumptions · §11 three unresolved questions |
+| [`design.md`](design.md) | **rev 11 — the decisions.** §10 = 29 settled · §8.0c = D-9..D-12 · **§8.3 = why evaluation is scheduled *and* event-driven** |
 | [`notes/schema-draft.md`](notes/schema-draft.md) | The five tables field by field + the creation recipe and its traps |
 | [`notes/security-roles.md`](notes/security-roles.md) | Privilege matrix, scopes, the Signal-ownership question |
 | [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) | Evidence base. **§10.7 = authoritative live row counts** |

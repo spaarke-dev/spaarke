@@ -1,6 +1,6 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 10**, 2026-10-02. **All open decisions are now settled**; schema draft at [`notes/schema-draft.md`](notes/schema-draft.md). Not yet through `/design-to-spec`.
+> **Status**: **rev 11**, 2026-10-03. **All open decisions settled**; schema draft at [`notes/schema-draft.md`](notes/schema-draft.md). ✅ **Through `/design-to-spec`** — the specification is [`spec.md`](spec.md), which is what `/project-pipeline` consumes. Rev 11 adds **§8.0c (D-9..D-12)** and **§8.3** (why evaluation is scheduled *and* event-driven), both resolved at spec time.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
@@ -605,8 +605,62 @@ re-thresholding (review §4.4).
 
 ### 8.0a Still open
 
-**None.** Every item is resolved above or in §8.0b. *(D-2 was the last, resolved 2026-10-02 — its field list is
-drafted in [`notes/schema-draft.md`](notes/schema-draft.md) §2 with all four of its constraints honoured.)*
+**None.** Every item is resolved above, in §8.0b, or in §8.0c. *(D-2 was the last design-time item, resolved
+2026-10-02 — its field list is drafted in [`notes/schema-draft.md`](notes/schema-draft.md) §2 with all four of
+its constraints honoured. **D-9..D-12 were added at `/design-to-spec` time**, 2026-10-03 — see §8.0c.)*
+
+### 8.0c Resolved at `/design-to-spec` time (owner decisions 2026-10-03) `[rev 11]`
+
+These four are **not** re-litigations. Three are numbers or hosts this document never stated, and one is a
+path CLAUDE.md §6.5 forbids an agent choosing silently. Full requirement-level detail in
+[`spec.md`](spec.md) §9.
+
+| ID | Was | Resolution |
+|---|---|---|
+| **D-9** | §6's **ADR-039 and ADR-040** tensions were *"SURFACED — path deferred"* pending the owner's condition: *"evaluate/define/revise this ADR once we get the solution actually decided."* | **RESOLVED — the condition is met** (design complete, D-2 settled, the table built). **ADR-039 → path A** (project-scoped exception): *Policy decides whether a claim is **true**; Binding decides what **executes*** — different axes, and `CommunicationRuleGate` set this precedent in 2026-07. **ADR-040 → path B** (amendment): name `SessionGate` and the Decision Record as **siblings**, linked by `sprk_decisionrecord.sprk_gatesessionid`. ⚠️ **The ADR-040 amendment must merge before or alongside the evaluator** |
+| **D-10** | Criterion 11 made classifier recall a **gate** but stated **no floor** — and a gate without a number cannot gate | **RESOLVED — ≥ 80% recall on a ≥ 50-item labelled set.** Deliberately above the 70% §1.2 uses as its cautionary example; ≥ 50 items means one miss moves the number ~2% rather than ~10%. Below the floor, R1 does **not** exit until recall improves or the §0 claim is re-scoped |
+| **D-11** | Criterion 4 says *"dismissed three times on the same **matter**"* but `sprk_dedupekey` is per **subject** — two different grains; and `sprk_suppresseduntil` is a date with **no stated duration** | **RESOLVED — count per (policy, matter), expire after 30 days.** Matter grain matches what the user actually dismissed and the fact that worklist rows **are** matters; per-subject grain would never suppress three dismissals of three *different* communications on one matter, which is the fatigue case criterion 4 exists to prevent. The expiry stops a still-true — and by then more serious — condition being muted forever, since a permanent mute is indistinguishable from a broken rule |
+| **D-12** | **ADR-052 requires naming the host**, and this document never said where the evaluator or the closure pass run, or how often. The owner asked for the technical and user/functional implications first, because this drives the entire Console work-item surfacing process | **RESOLVED — one evaluator, cadence by lane, two event hooks.** A **single** re-evaluating ADR-036 `IScheduledJob` runs nightly, upserts on `sprk_dedupekey` and closes what no longer holds; **plus** ADR-004 `IJobHandler` triggers on **(a)** communication classification and **(b)** `sprk_budgetrevision` create. **Do lane nightly only**, cadence derived from the existing **`sprk_lane`** — no new schema. See §8.3 for the reasoning, which is load-bearing |
+
+### 8.3 Why evaluation is scheduled **and** event-driven `[new rev 11 — D-12's reasoning]`
+
+Path B's window is relative to *now*, so **the predicate's truth value changes even when nobody writes
+anything.** That breaks the usual "re-evaluate on write" instinct, and it is the whole reason the host choice
+is not a free preference:
+
+| Transition | Example | Event to hook? |
+|---|---|---|
+| **Birth by data** | an email is classified `Fee / rate change` at 09:14 | ✅ `RuleGatedAssessedConsumer` already holds the object |
+| **Death by data** | someone records a budget revision at 14:00 | ✅ `sprk_budgetrevision` create |
+| **Death by time** | the email passes day 31 and leaves the window | ❌ **none** — nothing happens; the fact simply ages |
+| **Birth by time** | an old budget revision leaves the window, re-truthing the NOT-EXISTS half | ❌ **none** |
+
+**Two of the four have no event at all.** So event-driven evaluation alone is not merely slower — it is
+**wrong**: `ConditionCleared` would never fire, which is §9's *"signals never auto-resolve, so the worklist
+rots"* risk verbatim, together with its suppression-miscounting consequence.
+
+**Three things follow, and each is a requirement rather than a preference:**
+
+1. **The nightly pass cannot be closure-only.** Because *birth by time* exists, it must be a **full
+   re-evaluation** that upserts and closes in one pass — so there is **one evaluator with two triggers**, not
+   an evaluator plus a separate "sweep". One component deciding both directions is also the only way the two
+   cannot disagree about the same Signal. (This supersedes the "sweep" framing used in §9 and in
+   `notes/schema-draft.md` §1, which described it as a second thing.)
+2. **The `sprk_budgetrevision` hook is not an optimization.** Without it, a Work Item keeps asserting
+   *"no budget revision was recorded"* for up to 24 hours **after one was** — a sentence that is no longer
+   true, in the one surface the product's credibility rests on. That is **§0.3 in a new costume**, and it is
+   prototype finding 3's *"an absence clause is only as true as its source is fresh"* arriving from the
+   inside rather than from a stale mirror.
+3. **The two lanes have different natural cadences, and the column that distinguishes them already exists.**
+   The Decide lane is cross-source and event-bearing — someone sent an email, and you want it today. The Do
+   lane is `Temporal` over Spaarke-held data, where *"overdue"* is a date comparison that changes at midnight,
+   so nightly is **correct rather than a compromise**. Deriving cadence from `sprk_lane` therefore needs **no
+   new column**; a per-policy trigger field would be new surface with no cost-of-doing-nothing to cite
+   (CLAUDE.md §11). Add it only if a third cadence ever appears.
+
+⚠️ **One consequence for the vocabulary**: a Signal whose communication has simply **aged out of the window**
+closes as **`ConditionCleared`** — the condition genuinely no longer holds. There is no separate "expired"
+resolution type, and adding one would split a closed set over an axis nothing reads.
 
 
 
