@@ -408,7 +408,7 @@ public static class ProvisionProjectEndpoint
             "Ref={Ref}, TraceId={TraceId}",
             root.WireToken, recordId, request.ProjectRef, traceId);
 
-        // ── Step 1: Confirm the record exists and is secure ──────────────────
+        // ── Step 1: Confirm the record exists (task 150: the flag is set later, not required here) ──
         RootRow? row;
         try
         {

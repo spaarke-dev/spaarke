@@ -634,7 +634,11 @@ or **the record's creator** (`createdby`, or `sprk_createdbyperson` for an app-c
 **Order — every step dry-run first, then `-Apply`, then `-Verify` (each must exit 0):**
 
 ```powershell
-# 0. One-time NULL cleanup (owner decision Q1). BEFORE the BFF: task 150's BFF refuses an EMPTY flag.
+# 0. One-time NULL cleanup (owner decision Q1). BEFORE the environment receives ANY BFF build containing task 150
+#    (it refuses an EMPTY flag: 503 on uploads to every NULL-flag row and its children). Where an environment is fed
+#    from master (dev: peers deploy master), that means BEFORE task 150 merges to master. Harmless to the older BFF,
+#    which already routes NULL and false the same. Nothing in Deploy-BffApi.ps1 or the release flow checks this:
+#    -Verify (exit 0) is the gate, run by hand.
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com                # dry run: ids + counts
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply         # writes a JSON report
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify

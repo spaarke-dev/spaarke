@@ -368,8 +368,10 @@ public static class UnsecureProjectEndpoint
     /// user-free business unit, so Delete on it comes from a Full Access share — or from an administrator's
     /// role, which is the "an administrator can remove the secure designation" the wizard promises.</para>
     ///
-    /// <para><b>Fail closed.</b> An identity that cannot be established, or a recorded creator person that cannot be
-    /// read, refuses (500, retryable) rather than guessing either way. A column this environment lacks
+    /// <para><b>Fail closed.</b> Neither failure guesses either way. A caller identity that cannot be established
+    /// refuses with 403 (<c>sdap.unsecure.permission_unverifiable</c>): without it the caller cannot be matched to the
+    /// creator, so nobody is admitted. A recorded creator person that cannot be read refuses with 500 (same reason key,
+    /// retryable). A column this environment lacks
     /// (<c>sprk_createdbyperson</c> before its schema script ran — Dataverse answers 400) records nobody, so it simply
     /// does not admit anyone. The refusal message is shown to the user as is (the ribbon command renders the endpoint's
     /// ProblemDetails), so it names who CAN do it.</para>

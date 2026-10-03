@@ -145,6 +145,16 @@ Each string below is **implemented as option A** and marked DRAFT in code:
 | 5 | Summarize Files, unexpected error | "Securing the project did not finish ({error}). The project was created; an administrator can check how far securing it got and finish it." | "The project was created, but securing it did not finish ({error}). An administrator can check it and finish securing it." | "Securing the project did not finish ({error}); an administrator needs to check it." |
 | 6 | Unsecure F3 refusal (server ProblemDetails, shown by the ribbon) | "Only someone with Full Access to this {record}, or the person who created it, can remove its secure designation. It is still secure, and nothing was changed." | "You can't remove the secure designation: that needs Full Access to this {record}, or being the person who created it. Nothing was changed." | "Removing the secure designation needs Full Access or being the creator. The {record} is still secure." |
 
+**Row 2 on a RESUME (verifier r1, item 10; an input to the F6 pick).** Options A, B and C for row 2 are accurate on a
+FIRST call only: every environment refusal comes before the flag write, so the project is unflagged and unchanged. On a
+resume (a retry after a partial run: the wizard's or Summarize Files' retry host after a retryable failure), or for a row
+an older client flagged, the project is already flagged, and on a resume it is already owned by the secure team. "Not
+secured / nothing about it changed" then overstates it, and the refusal does not say which case applies. A
+resume-neutral option **D**: "Secure projects cannot be set up in this environment right now — its Secure Record business
+unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could
+not be finished; an administrator can finish securing it once the setup is fixed." Option A stays implemented (DRAFT)
+until the owner picks; the code comment now states the resume case.
+
 The wizard's existing no-BFF copy ("… created as a normal project; an administrator can secure it.") was inaccurate
 before (the client had flagged it) and is accurate now; it is unchanged.
 
@@ -159,6 +169,11 @@ Reuses task 133's profiles (never creates them, never edits membership). Precond
 reader on every default team; writer = exactly the BFF app users; no NULL rows; `-ClientNoLongerWritesFlag`) — `-Apply`
 refuses unless all pass. Then per table: secure → reader grant → writer grant (window measured), other-writer FAIL,
 System Administrator holders listed, publish. `pwsh -File` comma-list fixed (found on the first dry run).
+**r1 (item 15):** the GET-then-PUT of the attribute is proven live only on string/lookup columns; `sprk_issecure` is a
+Boolean (the dry run now prints the type: `#Microsoft.Dynamics.CRM.BooleanAttributeMetadata` on all three tables,
+2026-10-03). If the plain PUT is refused, the script retries ONCE with the Boolean cast and `$expand=OptionSet`; any
+other type, or a second refusal, throws. A refused PUT leaves `IsSecured` unchanged on that table (tables are secured
+and granted one at a time), so nothing is masked. Still unproven live: watch the first table at G-4.
 
 ### 7.3 Standing assertion (the sibling of `SecureBuRoleDepthAssertion`)
 `tests/integration/auth/UnifiedAccessControl/SecureFlagFieldSecurityAssertion.cs` + `…AssertionTests.cs`: clauses
@@ -189,19 +204,24 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 
 | Gate | Command | Notes |
 |---|---|---|
-| G-0 | `.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply` then `-Verify` | **Before G-1** — the task 150 BFF refuses uploads to the 42 NULL rows (38 on the roots + 4 invoices; the script discovers every carrier of the column) and their children |
+| G-0 | `.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply` then `-Verify` | **Before G-1, and in dev before task 150 merges to master** (peers deploy master to dev: #1081 report, `5e39f2bea`); in every other environment before it receives a BFF carrying task 150. The task 150 BFF refuses uploads (503) to the 42 NULL rows (38 on the roots + 4 invoices; the script discovers every carrier of the column) and their children. Harmless to the old BFF (NULL and false already route the same). No deploy script enforces it (r1 item 11) |
 | G-1 | Deploy the BFF carrying task 150 | after task 133's own ordering (its schema gate first) |
 | G-2 | Deploy the client (`@spaarke/ui-components` consumers: Create Project wizard, Summarize Files) and confirm no cached old bundle is served | the old client's create payload names `sprk_issecure` |
 | G-3 | `.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl … -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then `-Verify` | task 133's gate — creates both profiles and their members |
 | G-4 | `.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl … -BffApplicationIds … -ClientNoLongerWritesFlag -Apply` then `-Verify` | record the masked window per table |
 | G-5 | standing assertion live: `$env:SPAARKE_NFR05_DATAVERSE_URL=…; $env:SPAARKE_BFF_APPLICATION_IDS=…; $env:AZURE_TOKEN_CREDENTIALS='AzureCliCredential'; dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"` | must PASS |
-| G-6 | NEGATIVE: as an existing non-admin test user with Write, `PATCH sprk_projects(<id>) {"sprk_issecure":false}` (and on a matter / work assignment), and a create naming it | refused, or unchanged on read-back |
+| G-6 | NEGATIVE: as an existing non-admin test user with Write, `PATCH sprk_projects(<id>) {"sprk_issecure":false}` (and on a matter / work assignment), and a create naming it | refused, or unchanged on read-back. The user must hold no System Administrator, directly or through a team: **not a member of the "Spaarke Demo" team** (it holds System Administrator — #1081 peer report; the lock script's dry run lists it, 2026-10-03). If no such user with Write exists, ask the owner to create one (round 4 item 1) |
 | G-7 | NO MASKING: the same user's `GET …?$select=sprk_issecure` on the secure project returns `true` (present); the client `RecordContainerResolver.ts` resolves it to its own container; the BFF logs no `secure_flag_unreadable` | |
 | G-8 | a user in each populated BU (root `Spaarke`, `Spaarke Business Unit 1`) reads the true value | escalation trigger 1's live check |
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
 
-**Merge gate (F6):** the owner picks the copy options in §6.
+**Merge gates (all three hold before task 150 reaches master):**
+1. **F6:** the owner picks the copy options in §6 (row 2 now has a resume-neutral option D).
+2. **G-0 in dev first** (r1 item 11): `Repair-SecureFlagNulls.ps1 -Apply` then `-Verify` exits 0 in spaarkedev1.
+3. **Task 133 merges first, or together** (r1 item 12): `task/uac-r2-150` is stacked on `task/uac-r2-133-b2-r2`, which
+   is not in `work/unified-access-control-r2`. F3 trusts `sprk_createdbyperson`, which is safe only under 133's FLS
+   lock on that column, so 150 must never land without 133 (and 133's own live gate G-3 precedes 150's G-4 anyway).
 
 ## 10. Placement and justification (CLAUDE.md §10 / §11)
 
@@ -232,6 +252,30 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
 4. **`sprk_invoice.sprk_issecure` exists and is NOT locked** (default No, not field-secured; the owner's lock covers the three roots). Under the ABSENT refusal its NULLs must be backfilled (the script does); a Write holder can still change it. Setting it true only makes uploads to that invoice fail closed; clearing it leaves the ancestor walk to decide. Whether invoices should carry the flag at all — or be locked too — is an owner question.
 5. The client `RecordContainerResolver.ts` and the PCF still treat empty as not secure — covered by the reader profile on
    every default team (G-7/G-8 prove it live).
+6. **OWNER QUESTION (r1 item 13, F7 residual; not answered by rounds 1–9).** After the lock, `/provision-project` is
+   the single-call way to secure ANY unflagged, unprovisioned record the caller can Write, including a colleague's
+   ordinary record reached through BU-depth Write, without task 148's transition (which carries the children). Before
+   the lock the same took a flag write plus the call, so the capability is not new, and the POML's rollout constraint
+   requires accepting unflagged records. Round 3b ("securing stays open to Write-holders") covers WHO may secure, not
+   whether the API may secure an EXISTING record ahead of 148. Route-sweep "other observations" row
+   (`provision-project`, `ShareToCreatorAndPrincipalsAsync`) flags the same Write-only gate. Options: (a) acknowledge
+   it as accepted until 148; (b) restrict an UNFLAGGED record to its creator (`createdby` / `sprk_createdbyperson`),
+   leaving already-flagged rows on the Write gate; (c) restrict to records created in the last N minutes. **Not
+   implemented** (a behaviour change awaiting the owner); recommended (b), which matches the wizard's only use and
+   leaves "secure an existing record" to 148's surface.
+7. **Handoff to task 146 and the route-sweep fix (r1 item 14).** FLS gives the BFF application identity Update on
+   `sprk_issecure` everywhere, so "only the two endpoints write it" holds only while every OTHER app-only generic writer
+   that takes maker- or user-supplied column names refuses the column: `POST /api/v1/field-mappings/push` (route sweep
+   row 67: admin-configured mapping rules write child columns app-only) and task 146's planned app-identity AI creates
+   (`DataverseCreateRecordHandler`, `EmailDraftToolHandler`, round 7 item 3). Each must deny `sprk_issecure` (and
+   `sprk_createdbyperson`) as a target column. Setting it true only fails closed (uploads refuse until provisioned);
+   clearing it on a secure record is the defect this task closes. Recorded here and in the POML; 146 and the row 67 fix
+   own it.
+8. **#1081 peer report (relayed 2026-10-02).** The root team "Spaarke" now holds Spaarke Basic User (whole-org read for
+   every root-team member, Secure Record included) and the "Spaarke Demo" team holds System Administrator. Both are dev
+   artifacts under round 5; nothing is coded. For this task: System Administrator holders write `sprk_issecure` by
+   platform rule (F4), and the lock script's dry run (2026-10-03, read-only) LISTS the "Spaarke Demo" team among them;
+   G-6 must use a user outside that team.
 
 ## 12. Seeded-violation proofs (each restored and touched afterwards)
 
@@ -240,3 +284,31 @@ read as not secure (1) · S5 Full Access = Write only (4) · S6 forward flag wri
 owner move (6) · S8 resolver ABSENT on the record read as not secure (4) · S9 ABSENT on an ancestor (1) · S10–S12 the
 assertion's default-team / BFF-membership / extra-writer clauses disabled (1 each). Client: C1 the client writes the flag
 again (1) · C2 the hold-back removed (5) · C3 provisioning skipped/after the children (5).
+
+## 13. Verifier round 1 (2026-10-03, branch `task/uac-r2-150-r1`)
+
+| Item | Disposition |
+|---|---|
+| 1–7 | Verifications of the shipped code, tests and merge; nothing to change |
+| 8 | **Fixed.** `UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync` remarks: an unestablished caller identity → 403 `sdap.unsecure.permission_unverifiable`; an unreadable creator person → 500 (same reason key, retryable) |
+| 9 | **Fixed.** `ProvisionProjectEndpoint` Step 1 heading: confirms only that the record exists |
+| 10 | **Recorded for F6** (§6, option D, resume-neutral) and the client comment now states the resume case. Copy unchanged |
+| 11 | **Merge gate** (§9): G-0 in dev before master; guide §7c step 0 and handoff S13 say the same. Not enforced by any deploy script |
+| 12 | **Merge gate** (§9): 133 first, or together |
+| 13 | **Owner question** (§11.6), recommended (b). Not implemented |
+| 14 | **Handoff** (§11.7) to task 146 and the route-sweep row 67 fix |
+| 15 | **Hardened** (§7.2): Boolean cast + `$expand=OptionSet` retry once; dry run confirms the type. Still watch G-4 |
+| 16 | Open — main session: publish size against a fresh master, and the CVE check (no package change in this task) |
+| 17–20 | Open — live gates G-3/G-4/G-8, G-6, G-7, G-5 (§9) |
+| 21–22 | Open — STOPPED on task 142 (and 148 + owner copy for Make Secure) |
+| 23 | Open — F6 merge gate |
+| 24 | Open — publish size/CVE (main session); UI jest failures in untouched suites pre-exist on the work branch |
+| 25 | **Fixed** by 8 and 9 |
+| #1081 | G-6 user must be outside the "Spaarke Demo" team (§9, §11.8) |
+
+**Tests (r1).** Affected BFF classes (SecureFlag, SecureProjectShare, ProvisionProject, RecordContainerResolver,
+ChildRecordContainerResolution, RecordKeyedUploadAuthorization, UnsecureProject): 358/358. Full BFF unit suite: 14383
+passed, 0 failed, 54 skipped (14437). `Spaarke.ArchTests`: 346/346. Jest (CreateProjectWizard + SummarizeFilesWizard):
+9 suites, 117/117 (after building the local `Spaarke.SdapClient` and `Spaarke.Auth` packages, which a fresh worktree
+lacks). `@spaarke/ui-components` `tsc` build: exit 0. `Set-SecureFlagFieldSecurity.ps1`: parse 0 errors; dry run
+against spaarkedev1 read-only, zero writes. No live write.

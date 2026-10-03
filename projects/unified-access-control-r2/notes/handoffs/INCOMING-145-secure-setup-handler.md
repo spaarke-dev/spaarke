@@ -131,7 +131,10 @@ narrowing roles is an owner decision.
 
    **Order constraint, binding**: S14 runs only after the BFF and the client that no longer write `sprk_issecure` are
    deployed to the environment (in a NEW environment there is no older client, so this is automatic; on an upgrade it
-   is task 150 step 6). S11/S12 before S14, always: securing first masks the column for every reader.
+   is task 150 step 6). S11/S12 before S14, always: securing first masks the column for every reader. S13 runs
+   BEFORE the environment receives any BFF build containing task 150 (that BFF refuses an EMPTY flag), so on an upgrade
+   the handler — or the operator, until it exists — runs S13 ahead of the BFF deploy, not with the lock; no deploy
+   script checks it (task 150 r1, verifier item 11).
    Reference implementation: `scripts/Set-RecordCreatorPersonSchema.ps1` (S10–S12) + `scripts/Set-SecureFlagFieldSecurity.ps1`
    (S14, preconditions = S10–S13) + `scripts/Repair-SecureFlagNulls.ps1` (S13).
 3. The dev environment itself is not yet in the target shape (see `../task-145-secure-owner-role-privileges.md` §2):

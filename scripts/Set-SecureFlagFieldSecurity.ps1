@@ -241,12 +241,25 @@ foreach ($t in $Tables) {
 
     if ($attr.IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
     elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write can change it" }
-    elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column, then at once grant the reader (read) and writer (read/create/update) profiles" }
+    elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column ($(if ($attr.'@odata.type') { $attr.'@odata.type' } else { 'type not annotated' })), then at once grant the reader (read) and writer (read/create/update) profiles" }
     else {
         $clock = [System.Diagnostics.Stopwatch]::StartNew()
-        $typed = Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')"
+        $attrPath = "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')"
+        $typed = Invoke-DvGet $attrPath
         $typed.IsSecured = $Secured
-        Invoke-DvWrite PUT "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')" $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+        try {
+            Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+        } catch {
+            # The GET-then-PUT shape is proven live on string and lookup columns only (tasks 141/133). A Boolean column's
+            # definition carries its OptionSet as a navigation property the plain GET omits, and the PUT may need it.
+            # Retry ONCE with the Boolean cast and the OptionSet expanded; any other type, or a second refusal, throws.
+            # Either way the failed PUT left IsSecured unchanged on this table, so nothing is masked (task 150 r1).
+            if ($typed.'@odata.type' -ne '#Microsoft.Dynamics.CRM.BooleanAttributeMetadata') { throw }
+            Write-Host "    PUT of $t.$Column refused without its OptionSet ($($_.ErrorDetails.Message)); retrying once with the Boolean cast and `$expand=OptionSet..."
+            $typed = Invoke-DvGet "$attrPath/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$expand=OptionSet"
+            $typed.IsSecured = $Secured
+            Invoke-DvWrite PUT $attrPath $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+        }
         foreach ($s in $specs) {
             if (-not (Get-Permission $s.P.fieldsecurityprofileid $t)) { Grant-Permission $s.P.fieldsecurityprofileid $t $s.Create }
         }

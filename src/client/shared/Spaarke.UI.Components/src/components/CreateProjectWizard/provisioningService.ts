@@ -438,9 +438,11 @@ export function classifyProvisioningFailure(
   retryable: boolean;
 } {
   if (reasonCode != null && ENVIRONMENT_REASON_CODES.has(reasonCode)) {
-    // Task 150: every environment refusal comes BEFORE the server marks the project secure, so the project is no
-    // longer "created and marked secure" — it was created and is not secured, and nothing about it changed. DRAFT copy —
-    // owner decision F6 (options in notes/task-150-issecure-lock.md §6).
+    // Task 150: on a FIRST call every environment refusal comes before the server marks the project secure, so it was
+    // created, is not secured, and nothing about it changed. On a RESUME (a retry after a partial run), or for a row an
+    // older client flagged, the project is already flagged — and on a resume already owned by the secure team — so this
+    // copy overstates "not secured". The response does not say which case applies. DRAFT copy — owner decision F6
+    // (options, including a resume-neutral one, in notes/task-150-issecure-lock.md §6).
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
