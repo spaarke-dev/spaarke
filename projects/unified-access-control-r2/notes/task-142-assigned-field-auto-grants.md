@@ -1,11 +1,13 @@
 # Task 142 — Assigned-To auto-grants (#1065)
 
 > Branch `task/uac-r2-142` (from `task/uac-r2-143-r2` + `task/uac-r2-137-b2` + `work/unified-access-control-r2`, base
-> `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11), **`task/uac-r2-142-r2`** (§12) and
-> **`task/uac-r2-142-r3`** (§13). Server, client, web resources, ribbon source and schema script complete. **Live writes:
-> none** — every live step is a pending manual gate (§7). The ADR-034 amendment A4 was **ACCEPTED by the owner in round 11
-> (2026-10-03)** (§8); the main session applies the concise `.claude/adr` edit (exact text: §13.4) with the PR, and the
-> code merges only after the dependency merges in §7 G-0.
+> `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11), **`task/uac-r2-142-r2`** (§12),
+> **`task/uac-r2-142-r3`** (§13) and the owner-round-13 fix round **`task/uac-r2-142-r4`** (§14). Server, client, web
+> resources, ribbon source and schema script complete. **Live writes: none** — every live step is a pending manual gate
+> (§7). The ADR-034 amendment A4 was **ACCEPTED by the owner in round 11 (2026-10-03)** (§8); the main session applies the
+> concise `.claude/adr` edit (exact text: §13.4) with the PR, and the code merges only after the dependency merges in §7
+> G-0. The write-path invariant row is **I-12** in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (master took I-11 for record
+> numbering; renumbered at integration).
 
 ## 1. Owner answers applied (no escalation fired as a stop)
 
@@ -367,7 +369,10 @@ text. Paste into the PR:
   (`deny-list-unreadable`, `Success=false`), never a hold; faults the deny-veto code absorbs itself are R-13. An
   unreadable POLICY (`policy_unreadable`) is still a failure (pinned by the unreadable-policy twin, seed S11). The form
   shows nothing for a hold (no message names it).
-- **R-13** (r3) Only a No Access check that THROWS is distinguishable as a fault. The deny-veto code
+- **R-13 — CLOSED in r4 (§14.1; owner round 13 item 4: "fix now").** The deny-veto check now answers a tri-state
+  (`NoAccessCheckAnswer` Allowed / Denied / Unverifiable); every fault below is Unverifiable and reported as a
+  `deny-list-unreadable` failure (job red), and the grant routes answer it 503 `no_access_unverifiable`. The r3 text,
+  kept for the record: (r3) Only a No Access check that THROWS is distinguishable as a fault. The deny-veto code
   (`AccessibleRecordSetService.ResolveDenyVetoAsync` / `IsGranteeDeniedOnRecordAsync`) ABSORBS other read faults — the
   contact's memberships unreadable, a referenced-organization read unreadable, the deny-list reader's own `null`, any
   non-cancellation exception — into "denied" (fail closed) and returns a plain `bool`, so they still reach the
@@ -652,3 +657,174 @@ the end, sequentially: BFF build 0 warnings / 0 errors; full BFF unit suite **14
 `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **403 passed, 0 failed, 25 skipped (428)**. No
 timing failure, so no isolated re-run was needed. No client file changed (no client build/test). Publish size: skipped
 (harness) — main session; no package added.
+
+## 14. Round r4 — owner round 13 items 4 and 5 (2026-10-03, branch `task/uac-r2-142-r4`)
+
+Base: `task/uac-r2-142-r3` (`d48f5191e`). Binding input: owner rounds 1–13 and the "Peer report: #1081" section, read
+from `work/unified-access-control-r2` (`d7d1af61b`). Round 13 answers this round: **item 4** — "142 R-13: fix now. The
+deny-veto check gets a tri-state answer (allowed / denied / unverifiable) … It stays fail closed. The
+`AccessibleRecordSetService` interface change is accepted (139 and 140 consume it)"; **item 5** — "a 143 wall-guard
+Unverifiable answer on the internal-user share path fails the run, exactly like the deny-list fault". No escalation
+trigger fired. Live writes: none.
+
+### 14.1 Item 1 (owner round 13 item 4) — the deny-veto check answers a tri-state; R-13 closed
+
+**The interface change.** `IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` (`Task<bool>`) is replaced by
+`CheckGranteeNoAccessAsync` → `Task<NoAccessCheckAnswer>` (new enum beside it: `Allowed`, `Denied`, `Unverifiable`). The old
+`bool` method is REMOVED, not kept beside the new one: a `bool` that absorbs faults is the defect, and a removed member
+makes any caller on another branch fail to compile at integration rather than keep absorbing silently.
+
+**Where the faults go** (`AccessibleRecordSetService`):
+- `ResolveDenyVetoAsync` now returns a private `DenyVetoResult(Denied, Unverifiable)` — a provable entry in `Denied`, and
+  in `Unverifiable` every fault it meets: the subject's memberships unreadable (`ActiveOrgMemberships.Failed`), a record's
+  referenced organizations unreadable, a fail-closed deny-list answer (`NoAccessListResult.FailedClosed`), a reader that
+  returns no answer (`null` — before r4 a `NullReferenceException` caught by the catch-all), and any non-cancellation
+  exception. Cancellation still propagates (unchanged).
+- **The read path is unchanged**: the composition removes `DenyVetoResult.Removed` = `Denied ∪ Unverifiable`, exactly the
+  set the veto removed before (fail closed). Seed R5 proves the existing read-path tests guard it.
+- `CheckGranteeNoAccessAsync` answers `Denied` for a provable entry, `Unverifiable` for a fault, a call without a record
+  (a caller bug — never an entry), and any exception other than the caller's own cancellation (an HttpClient timeout,
+  which the veto code rethrows, included). It never throws except for the caller's cancellation. Each `Unverifiable` is
+  logged at ERROR (`[WF-AUTHZ] … UNVERIFIABLE`).
+
+**Every consumer updated** (fail closed everywhere — only `Allowed` grants or suggests):
+- **The grant core** (`GrantExternalAccessEndpoint.CheckGrantAsync`, task 139's): `Denied` →
+  `GrantPolicyDecision.GranteeDenied` (422 `sdap.access.grant.grantee_denied`); `Unverifiable` (or an unknown value) →
+  `GrantPolicyDecision.GranteeDenyListUnreadable`, logged `[EXT-GRANT] DENY-LIST-UNREADABLE`; a throw anyway → the same.
+- **Task 139's route callers** (`/grant`, `/invite-and-grant` — the only `CheckGrantAsync`/`CreateGrantAsync` callers on
+  the work branch besides the materializer): the fault is now REPORTED as one on the wire. `GranteeDenyListUnreadable`
+  is its own decision — **503 `sdap.access.grant.no_access_unverifiable`**, retryable ("…could not be checked, so nothing
+  was granted. Try again in a moment."), `IsDenyListReadFault = true` — the grant routes' sibling of `/share-user`'s
+  existing `sdap.access.user_share.no_access_unverifiable`. Before r4 it was `GranteeDenied` with an in-process flag, so
+  the routes answered an outage as 422 "on the No Access list, or that list could not be checked", and the absorbed faults
+  as a plain entry: an outage looked like the record's policy to the operator, and a 422 is not counted as a server
+  failure. `grantee_denied`'s detail now names an entry only. **This changes task 139's tested route contract** for the
+  fault case only, as round 13 accepted ("139 and 140 consume it"); its tests were rewritten accordingly (§14.3). Client:
+  the Manage Access modal treats an unknown reason code as a retryable failure ("…N failed. Please try again.") — the
+  right advice for a fault — so no client change was needed; adding the code to `GRANT_POLICY_REASON_CODES` to show the
+  server's sentence verbatim is optional polish (it would mean a TrackingFieldTrio rebuild) and was left out under "do not
+  change anything else".
+- **Task 140's callers**: **none exist on the work branch** — proven: `git grep` on `work/unified-access-control-r2` finds
+  `CheckGrantAsync` called only by `GrantExternalAccessEndpoint` and `InviteAndGrantExternalUserEndpoint` (task 139's), the
+  140 POML is `<status>pending</status>` and TASK-INDEX row 140 is 🔲 open; its spec puts every grant through the same core,
+  so it inherits the tri-state and the 503 when it is built (`GranteeNoAccessUnverifiableReasonCode`'s doc says "Task 140
+  reuses it verbatim").
+- **The materializer**: its own call (the secure suggestion) switches on the answer — `Denied` → `Skipped(no-access)`,
+  anything else not `Allowed` → `DenyListFault` + `Skipped(no-access-unverifiable)`, never suggested. Its three grant-core
+  paths (fresh grant, renewal, restore) already branch on `IsDenyListReadFault` (r3), which now carries every fault; a
+  restore is never a green `restore-pending` for a fault.
+- **The job**: counts every `deny-list-unreadable` failure (unchanged mechanism), so the absorbed faults now turn it red;
+  its problem line names "shared" too (item 2).
+- Docs following the code: `docs/architecture/uac-access-control.md` (the write-time No Access bullet) and
+  `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` (a new 503 row in the grant-route outcome table; the 422 row now says
+  "a matching entry").
+
+### 14.2 Item 2 (owner round 13 item 5) — a wall-guard Unverifiable on the share path fails the run
+
+`AssignedAccessMaterializer`:
+- `ContinueOursAsync` (r3 `:731-736`): an auto share gone from a SECURE record whose task-143 wall check answers
+  `Unverifiable` still decides nothing this pass (never Declined on a guess), and now calls
+  `DenyListFault(run, subject, "the reason its share was removed", detail: wall.Fault)`.
+- `FreshShareAsync` (r3 `:999-1003`): a fresh or restoring share on a secure record whose wall check answers
+  `Unverifiable` still writes nothing (no share, no suggestion; the ledger keeps `removed-by-no-access` so a restore is
+  still owed), and now calls `DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault)`.
+- Both are the SAME failure kind as the deny-list fault (`deny-list-unreadable`): an ERROR line tagged
+  `DENY-LIST-UNREADABLE` naming the guard's fault (`flags`, `link`, `binding`, `memberships`, `referenced-organizations`,
+  `deny-list`, `exception`), `Complete = false` (the sync answers 500 `sync_incomplete`), and the job counts it
+  (`denyListUnreadable`, `Success=false`). `DenyListFault` gained an optional `detail` argument for that name.
+
+### 14.3 Tests
+
+New file **`tests/integration/auth/UnifiedAccessControl/GranteeNoAccessCheckTests.cs`** (16) — the production
+`AccessibleRecordSetService` and `NoAccessListReader` behind their seams: Allowed (twin), Denied for four entry shapes,
+nothing-to-check = Allowed, Unverifiable for seven faults (memberships unreadable, referenced organizations unreadable,
+reader fail-closed, reader 5xx-shaped throw, referenced-organization throw, both timeouts), a reader that returns no
+answer, a call without a record; the caller's own cancellation propagates (the timeout rows' twin).
+
+`GrantorCeilingTests` (task 139's; 43 → 48): the fault theory rewritten — `/grant` answers **503
+`no_access_unverifiable`** for six faults (was 422 `grantee_denied` for two absorbed faults and two timeouts),
+`/invite-and-grant` 503 before onboarding for three; `CreateGrantAsync` called directly reports a fault as
+`IsDenyListReadFault` + its own code and an entry as `grantee_denied`; the entry test now also asserts its detail never
+says "could not be checked".
+
+`AssignedAccessMaterializerTests` (+20): per consumer path, each over the three formerly-absorbed faults — restore (a
+fault, never a hold; restored once the inputs read), fresh grant (`no-access-unverifiable`, never `no-access`), secure
+suggestion (not suggested) plus its twin (an entry: `no-access`, a clean run), renewal (not renewed, kept); item 2 —
+a gone auto share on a secure record (three wall faults: decided nothing, Shared kept, then Declined once readable), a
+fresh share on a secure record (three wall faults: neither shared nor suggested, then suggested), a share the enforcer
+removed whose lifted wall is unreadable (not restored, still owed, then restored).
+
+`AssignedAccessReconciliationJobTests` (+3): an Unverifiable answer fails the run, counted as a deny-list fault, for
+memberships unreadable, a fail-closed deny list and a wall Unverifiable on a secure share. `GrantPolicyTestDoubles.
+DenyListAnswering` now answers the tri-state.
+
+**Bite proof** — each seed applied ALONE by exact string replacement (a scratch script), build + the 553-test set
+(AssignedAccess, GrantorCeiling, GranteeNoAccessCheck, AccessibleRecordSet, UnifiedEvaluator, GrantLifecycle, NoAccess),
+restored byte-for-byte (MD5 re-checked) and touched:
+
+| Seed | Consumer | Failed |
+|---|---|---|
+| R1 an Unverifiable veto answer returned as Denied (the pre-r4 absorb) | the check | 27 |
+| R2 a fail-closed / absent reader answer counted as a provable denial | the veto | 10 |
+| R3 unreadable memberships counted as provable denials | the veto | 9 |
+| R4 the veto's per-record unverifiable set returned as denials | the veto | 16 |
+| R5 the read path stops removing unverifiable candidates (fail OPEN) | the read path (unchanged behaviour) | 8 — existing `AccessibleRecordSetServiceTests` / `UnifiedEvaluatorSeamTests` |
+| R6 a timeout (not the caller's) rethrown instead of answered | the check | 2 |
+| C1 the grant core maps Unverifiable to GranteeDenied | the grant core | 25 |
+| C2 the grant core treats Unverifiable as Allowed (fail OPEN) | the grant core | 26 |
+| D1 the fault answered with the r3 wire (422 `grantee_denied`) | task 139's routes | 10 |
+| M1 the materializer's suggestion does not report an Unverifiable answer | materializer | 4 |
+| M2 … reads it as an entry (`no-access`, clean) | materializer | 4 |
+| M3 … suggests on it (fail OPEN) | materializer | 4 |
+| W1 item 2: `ContinueOursAsync` wall Unverifiable not reported | materializer | 3 |
+| W2 item 2: `FreshShareAsync` wall Unverifiable not reported | materializer + job | 5 |
+| J1 the job does not count deny-list faults | job | 4 |
+
+(Two first-pass seeds did not run as intended and were re-run: R4's first form did not compile — replaced by the form
+above; C2's first build died on an MSBuild worker-node crash, an environment fault — re-run after
+`dotnet build-server shutdown`.)
+
+### 14.4 Item 3 — the write-path invariant row is I-12
+
+`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: the Assigned-To row renumbered **I-11 → I-12** (as the main
+session did at integration — master took I-11 for record numbering), and "Code on branch `task/uac-r2-142` (2026-10-03)."
+dropped from its status cell. The POML's r0 outcome now says I-12 too; nothing else on this branch named I-11.
+
+### 14.5 Surface (CLAUDE.md §10/§11), ADRs, self-review
+
+**Placement**: unchanged — BFF, beside the external-access writers. No new service, DI registration, endpoint, option,
+job, column or package; no plugin (ADR-002). New members, each with the three-question test:
+
+| New | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `NoAccessCheckAnswer` (enum) + `IAccessibleRecordSetService.CheckGranteeNoAccessAsync` (replaces `IsGranteeDeniedOnRecordAsync`) | `IsGranteeDeniedOnRecordAsync` (`bool`); `SecureShareWallOutcome` (task 143's guard — a different question: a systemuser on a secure record, four states incl. `NotSecure`) | The existing member CHANGED shape (owner-accepted interface change); reusing `SecureShareWallOutcome` would import `NotSecure`, meaningless for a contact grant | Owner round 13 item 4 unmet: a read fault reads as an entry — a restore holds green, a fresh grant is `no-access`, the job stays green through an outage |
+| private `DenyVetoResult` | `IReadOnlySet<Guid>` return; `SystemUserDenyVeto` (the systemuser plane's, split by kind not by fault) | Same shape as the existing private `SystemUserDenyVeto`; one method, one result | The write-time check cannot tell a fault from an entry without a second veto implementation (forbidden) |
+| `ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode` (`sdap.access.grant.no_access_unverifiable`); `GranteeDenyListUnreadable` re-shaped to 503 | `grantee_denied` (an entry); `policy_unreadable` (the flags); `/share-user`'s `no_access_unverifiable` | A new code in the existing decision family, mirroring `/share-user`'s; `policy_unreadable` names a different read | The grant routes keep answering an outage as the record's policy (422 — uncounted, non-retryable advice) |
+| `DenyListFault(…, detail)` optional argument | — | Additive | The wall guard's fault would not be named in the log line |
+
+**ADR check (this round's diff)**: ADR-003 — every Unverifiable refuses (grant core, materializer, wall paths), never
+grants; the read path still removes it. ADR-036 A1 — a fault is a counted failure (`Success=false`), never a hold and
+never "done". ADR-008 / ADR-010 — no new endpoint, no new interface (an existing member changed); concretes registered as
+before. ADR-002 — no plugin. ADR-038 — production code between module-boundary doubles (`Mock<INoAccessListReader>` only
+for the null-answer case; no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests); every new guard bites
+(§14.3). ADR-034 A4 rules unchanged (they already say "write nothing when … deny list … cannot be read"). CLAUDE.md §6.5 —
+task 139's route contract change is the owner's round-13 decision, not a silent deviation. `.claude/**`: nothing needed
+this round (no `.claude` file names `IsGranteeDeniedOnRecordAsync`, `grantee_denied` or I-11 — grepped).
+
+**Formatting**: `dotnet format` (the pre-commit hook's command, run first so the suites ran on the committed bytes)
+re-indented the `switch` cases in `EndAssignmentAsync` (whitespace only) and sorted one `using` in
+`GrantExternalAccessEndpoint.cs`.
+
+**Round r4 runs.** Affected sets first: AssignedAccess **157/157** (134 + 23), `GrantorCeilingTests` **48/48** (43 + 5),
+`GranteeNoAccessCheckTests` **16/16**; the seed set **553/553**; the wider affected set (AccessControl, ExternalAccess,
+NoAccess, Grant*, AccessibleRecord*, RecordCreation, FieldMapping, UpdateRecordActionCore, the two AI record handlers,
+DelegationRule, InternalUserShare) **2,739 passed, 0 failed, 1 skipped** (r3: 2,695 + the 44 new). Once at the end,
+sequentially, after `dotnet format` on the changed files: BFF build 0 warnings / 0 errors; full BFF unit suite **14,643
+passed, 17 failed, 54 skipped (14,714 = r3's 14,670 + the 44 new)**, 37m19s — the 17 are timing failures under
+contention (the machine was at ~85% CPU with 1.4 GB of 61.6 GB free and ~270 dotnet processes from other agents'
+suites: 15 WebApplicationFactory tests that timed out after ~3 minutes in Compose, SpeAdmin, Office, Insights, Memory and
+Documents, one regex-engine timeout in `EmailAttachmentProcessorTests`, one `TaskCanceledException` in
+`SseStreamingIntegrationTests`); none touches this round's code. **Re-run in isolation: all pass** (19/19 — the filter
+selects every row of the one theory). `Spaarke.ArchTests` **346/346**; `Sprk.Bff.Api.IntegrationTests` **104/104**;
+`Spe.Integration.Tests` **403 passed, 0 failed, 25 skipped (428)**. No client file changed (no client build/test).
+Publish size: skipped (harness) — main session; no package added (no CVE delta).

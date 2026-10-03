@@ -428,10 +428,20 @@ internal static class ExternalGrantLifecycle
 
     /// <summary>
     /// Stable reason code (422): the grantee — the contact, one of its active organizations, or the organization of an
-    /// organization-wide grant — is on this record's No Access list, or the list could not be read (fail closed).
-    /// Task 140 reuses it verbatim.
+    /// organization-wide grant — is on this record's No Access list (a matching entry). Task 140 reuses it verbatim.
+    /// Since task 142 r4 a list that could not be read is NOT this code: it is
+    /// <see cref="GranteeNoAccessUnverifiableReasonCode"/>.
     /// </summary>
     internal const string GranteeDeniedReasonCode = "sdap.access.grant.grantee_denied";
+
+    /// <summary>
+    /// Stable reason code (503, task 142 r4 · owner round 13 item 4): whether the grantee is on this record's No Access
+    /// list could not be checked — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or
+    /// referenced organizations, a fail-closed deny-list read). Nothing was granted (fail closed); retryable. The grant
+    /// routes' sibling of <c>/share-user</c>'s <c>sdap.access.user_share.no_access_unverifiable</c>. Task 140 reuses it
+    /// verbatim.
+    /// </summary>
+    internal const string GranteeNoAccessUnverifiableReasonCode = "sdap.access.grant.no_access_unverifiable";
 
     /// <summary>Stable reason code (500): the grantor's own rights on the record could not be read (the probe threw).</summary>
     internal const string CallerRightsUnreadableReasonCode = "sdap.access.grant.caller_rights_unreadable";
@@ -624,29 +634,38 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         ". Nothing was changed, so their existing access stays as it is.");
 
     /// <summary>
-    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list, or the list could not be read.
-    /// 422. The detail never names the entry or its reason (task 143's rule for refusal messages).
+    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list (a matching entry). 422. The detail
+    /// never names the entry or its reason (task 143's rule for refusal messages). A list that could not be checked is
+    /// <see cref="GranteeDenyListUnreadable"/> since task 142 r4, so this answer now means an entry and nothing else.
     /// </summary>
     public static GrantPolicyDecision GranteeDenied { get; } = new(
         false,
         ExternalGrantLifecycle.GranteeDeniedReasonCode,
         StatusCodes.Status422UnprocessableEntity,
-        "This contact or organization cannot be given access to this record: it is on the record's No Access list, " +
-        "or that list could not be checked. Nothing was granted.");
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list. " +
+        "Nothing was granted.");
 
     /// <summary>
-    /// Task 142 r3: the No Access check THREW (e.g. an HttpClient timeout, which the deny-veto code rethrows), so the grant
-    /// core refused, fail closed. On the wire it IS <see cref="GranteeDenied"/> — the same reason code, 422 and detail
-    /// ("… or that list could not be checked"), so task 139's route contract is unchanged — but
-    /// <see cref="IsDenyListReadFault"/> lets an in-process caller tell a FAULT from an entry: the Assigned-To
-    /// materializer waits on an entry (a policy hold) and must REPORT a fault, never hold on it.
+    /// The No Access check could not be completed (task 142 r3 for a throw; r4 · owner round 13 item 4 for every read
+    /// fault, through <see cref="NoAccessCheckAnswer.Unverifiable"/>): refused, fail closed, and REPORTED as a fault —
+    /// 503 <see cref="ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode"/>, retryable — never absorbed into
+    /// <see cref="GranteeDenied"/>. <see cref="IsDenyListReadFault"/> lets an in-process caller tell it apart without
+    /// comparing codes: the Assigned-To materializer waits on an entry (a policy hold) and must report a fault.
     /// </summary>
     /// <remarks>
-    /// Faults the deny-veto code absorbs itself (an unreadable membership read, a deny-list reader fault it turns into a
-    /// deny) arrive through <c>IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync</c>'s <c>bool</c> as "denied" and
-    /// cannot be told apart here; that code logs each one (<c>[WF-AUTHZ] Deny-veto resolution …</c>).
+    /// Before r4 this carried <see cref="GranteeDenied"/>'s code, 422 and detail, and the faults the deny-veto code
+    /// absorbed itself (an unreadable membership read, a fail-closed deny-list read) reached the grant routes as a plain
+    /// "denied" — an outage told the operator the person was on the list. The tri-state answer removes both.
     /// </remarks>
-    public static GrantPolicyDecision GranteeDenyListUnreadable { get; } = GranteeDenied with { IsDenyListReadFault = true };
+    public static GrantPolicyDecision GranteeDenyListUnreadable { get; } = new(
+        false,
+        ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode,
+        StatusCodes.Status503ServiceUnavailable,
+        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was " +
+        "granted. Try again in a moment.")
+    {
+        IsDenyListReadFault = true,
+    };
 
     /// <summary>
     /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process

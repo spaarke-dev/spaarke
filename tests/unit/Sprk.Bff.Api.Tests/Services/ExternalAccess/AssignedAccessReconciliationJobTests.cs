@@ -278,6 +278,48 @@ public class AssignedAccessReconciliationJobTests
         }
     }
 
+    /// <summary>
+    /// Task 142 r4 (owner round 13 items 4 and 5): the faults that never THREW now fail the run too, counted by name —
+    /// the deny-veto check's Unverifiable answer (memberships unreadable, a fail-closed deny-list read: before r4 a clean
+    /// run with a <c>no-access</c> skip) and task 143's wall guard answering Unverifiable on a secure record's share path
+    /// (before r4 a clean run with a quiet skip). The clean twin is the "entry on the list" row of the theory above.
+    /// </summary>
+    [Theory]
+    [InlineData("memberships-unreadable")]
+    [InlineData("deny-list-fails-closed")]
+    [InlineData("wall-unverifiable-on-a-secure-share")]
+    public async Task AnUnverifiableNoAccessAnswer_FailsTheRun_CountedAsADenyListFault(string fault)
+    {
+        Guid matter;
+        switch (fault)
+        {
+            case "memberships-unreadable":
+                matter = AssignedMatter();
+                _h.Participations.MembershipsUnreadable = true;
+                break;
+            case "deny-list-fails-closed":
+                matter = AssignedMatter();
+                _h.DenyList.Faults = true;
+                break;
+            default:
+                var (contact, _) = _h.LinkedContact();
+                matter = AssignedMatter(contact);
+                _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+                _h.DenyList.Faults = true;
+                break;
+        }
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("a No Access read fault is reported — the job goes red");
+        result.ErrorMessage.Should().Contain("DENY-LIST-UNREADABLE");
+        var json = Result(result);
+        json.GetProperty("denyListUnreadable").GetInt32().Should().Be(1);
+        json.GetProperty("incompleteTotal").GetInt32().Should().Be(1);
+        _h.Grants.Rows.Should().BeEmpty("fail closed");
+        _h.Shares.Writes.Should().BeEmpty("fail closed");
+    }
+
     [Fact]
     public async Task ALinkThatAppearsBetweenRuns_ConvertsTheGrantToAShare()
     {

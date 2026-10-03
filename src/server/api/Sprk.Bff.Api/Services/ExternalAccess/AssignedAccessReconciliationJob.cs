@@ -224,10 +224,12 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
 
         if (denyListUnreadable > 0)
         {
-            // Task 142 r3: counted on its own, so a deny-list read outage is visible as such — never a policy hold. The
-            // roots are already incomplete (the run is red); this names the cause.
+            // Task 142 r3/r4: counted on its own, so a No Access read outage is visible as such — never a policy hold. Since
+            // r4 it counts every source: the deny-veto check's Unverifiable answer, a throw, and task 143's wall guard on
+            // the share path (owner round 13 items 4 and 5). The roots are already incomplete (the run is red); this names
+            // the cause.
             problems.Add($"DENY-LIST-UNREADABLE: the No Access list could not be checked for {denyListUnreadable} subject(s), " +
-                         "so nothing was granted, suggested, renewed or put back for them (fail closed).");
+                         "so nothing was granted, shared, suggested, renewed or put back for them (fail closed).");
         }
 
         if (!revokeOnChange && wouldRevoke > 0)

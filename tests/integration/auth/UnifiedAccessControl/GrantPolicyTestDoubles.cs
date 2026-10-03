@@ -385,15 +385,17 @@ internal static class GrantPolicyTestDoubles
 
     /// <summary>
     /// A write-time No Access check that answers <paramref name="denied"/> for every grantee — for tests that are not
-    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>).
+    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>). Task 142 r4: the
+    /// check is a tri-state; <c>false</c> answers <see cref="NoAccessCheckAnswer.Allowed"/>, <c>true</c>
+    /// <see cref="NoAccessCheckAnswer.Denied"/>.
     /// </summary>
     internal static IAccessibleRecordSetService DenyListAnswering(bool denied)
     {
         var mock = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
-        mock.Setup(s => s.IsGranteeDeniedOnRecordAsync(
+        mock.Setup(s => s.CheckGranteeNoAccessAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(),
                 It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(denied);
+            .ReturnsAsync(denied ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed);
         return mock.Object;
     }
 }
