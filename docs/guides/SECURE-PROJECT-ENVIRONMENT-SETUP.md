@@ -522,10 +522,11 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   never Assign — owner decision, round 11 item 4. A child filed under two secure records gets only the people shared on
   BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
   child is removed.
-- **The No Access list wins** (task 143). A user on a secure record's No Access list is never given anything on its
-  children, even while their share on the record itself is still there (the No Access enforcement has not run yet, or
-  kept them as the record's last reader). When the enforcement removes their share on the record, its children follow
-  in the same call. If the list cannot be checked for someone, they are given nothing and the child is retried.
+- **The No Access list wins** (task 143). A user on a secure record's No Access list is never given anything new on
+  its children — no new share, no wider one — even while their share on the record itself is still there (the No
+  Access enforcement has not run yet, or kept them as the record's last reader); a share they already hold can only
+  narrow. When the enforcement removes their share on the record, its children follow in the same call. If the list
+  cannot be checked for someone, they are given nothing and the child is retried.
 - **When.** Immediately when a share is added, changed or removed through Manage Access (the response says how many
   related records could not be updated yet, if any); immediately after secure provisioning; immediately after the No
   Access enforcement removes a share on the record; and every two minutes for everything else — a new or re-filed

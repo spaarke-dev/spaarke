@@ -448,6 +448,11 @@ Ten conflicts, each resolved keeping both sides' intent:
 | `DataverseCreateRecordHandler.cs` | **146's G5 create-as-the-app vs 133's interim creator stamp** — decided by owner round 10 ("superseded at integration by task 146's create-as-the-app, which writes the stamp in the create payload"; 133 note §13.8). The owned create of `sprk_project` / `sprk_matter` / `sprk_workassignment` now carries `sprk_createdbyperson` = the caller (`WhoAmI()` under their own token), re-mapped through metadata as a SERVER-set lookup (`WithCreatorPersonAsync`); 133's follow-up app-only update and its `IGenericEntityService` dependency are gone; the refusal of an item that names the column is kept (pre-suspend and on execute). `OwnedChildWrite.CheckCallerMayCreateAsync` exempts ONLY that server-set column from the field-security question (it is field-secured precisely so that only the BFF writes it). Schema not deployed → created without it, logged (133's non-fatal posture) |
 | `InternalUserShareTests`, `BusinessSliceDeterminismContractTests`, `P2LoopInjectionEvalSuiteTests`, `DataverseToolNameFreezeTests`, `DataverseCreateRecordHandlerTests`, `ProvisionProjectTestFixture` | constructor shapes from 146 / both endpoint parameters / both fixture members; the three run-as-user stamp tests (obsolete: those tables take the owned path) replaced by owned-path tests in `SecureChildOwnershipAiToolTests` |
 
+Semantic merge conflict found by the ArchTests (fixed in a follow-up commit, §13.3): task 133 renamed
+`ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync` to `MoveOwnerAsync`; task 146's `RecordOwnerAssignmentCensusTests`
+listed the old name — the census entry now names `MoveOwnerAsync` (kind Root: the move to the Secure team and the
+compensating move back).
+
 Merge-only compile fixes: `NoAccessShareEnforcerTests.InterleavingShares` gains the batched strict read (149's seam
 method); `SecureChildShareMirrorTests` passes a guard that walls nobody to `/share-user`
 (`SecureChildShareWorld.NobodyWalled()`).
@@ -463,7 +468,7 @@ fail; **M2** FLS exemption removed → 4 fail; **M3** column-not-mapped made fat
 | # | Item | Disposition |
 |---|---|---|
 | 1 | Verifier open items (`b4c-findings.json` "149") | Findings 1-3 below; AC6 below; AC4 owner part below. **Still pending for the main session:** live gates G149-1 (AC1, AC5) and G149-2 (AC12), and the publish size (AC13). |
-| 2 | **Merge-order obligation with task 143 (AC6)** | **Done, all three.** (1) `SecureChildShareSynchronizer.MirrorAsync`, after the fresh re-check: every SYSTEM USER still to be granted or widened is asked about through `SecureShareNoAccessGuard.CheckAsync` for EACH of the child's secure ROOTS (cached per run); refused — walled, or unverifiable (ADR-003) — means no grant, no widening, only the narrowing part of the change (`NarrowingPartOnly`); unverifiable also leaves the child not updated (retried). Teams are not asked: an entry cannot name a team, and a team share is never the wall's (owner N2). (2) `NoAccessShareEnforcer` calls `SyncRootAsync(root)` after it removed a share on a record (`SyncChildrenAsync`); an incomplete fan-out is a `children-incomplete` failure naming the record (the root removal stands; the 2-minute reconcile completes it); nothing removed → no fan-out. (3) Negative tests below. The guard is scoped, so the synchronizer is now **scoped** (every consumer already resolves it from a scope). |
+| 2 | **Merge-order obligation with task 143 (AC6)** | **Done, all three.** (1) `SecureChildShareSynchronizer.MirrorAsync`, after the fresh re-check: every SYSTEM USER still to be granted or widened is asked about through `SecureShareNoAccessGuard.CheckAsync` for EACH of the child's secure ROOTS (cached per run); refused — walled, or unverifiable (ADR-003) — means no grant, no widening, only the narrowing part of the change (`NarrowingPartOnly`); unverifiable also leaves the child not updated (retried). Teams are not asked: an entry cannot name a team, and a team share is never the wall's (owner N2). (2) `NoAccessShareEnforcer` calls `SyncRootAsync(root)` after it removed a share on a record (`SyncChildrenAsync`); an incomplete fan-out is a `children-incomplete` failure naming the record (the root removal stands; the 2-minute reconcile completes it); nothing removed → no fan-out. (3) Negative tests below. The guard is scoped, so the synchronizer is now **scoped** (every consumer already resolves it from a scope). Cost: the check runs only when something is to be ADDED, once per (root, user) per run (cached), so the steady-state reconcile tick adds no request; each check is task 143's few app-only reads (flags, the user's link/binding, memberships, referenced organizations, the deny list). |
 | 3 | **Finding 1** — `heldBack ? mask & want : want` unproven | **Closed.** `AHeldChild_WhoseShareIsNarrowerThanTheKnownRootsAllow_IsNeverWidened`: B holds View on a document filed under R and under a flagged-but-not-isolated project; R gives B Collaborate; B stays View, nothing is written on the held child. Seed **S1** (`var target = want;`) → it fails. The two older `…OnlyNarrowedNeverWidened` tests keep their names; the "never widened" half is now this test's. |
 | 4 | **Finding 2** — a MIXED modify dropped whole when the fresh re-read fails | **Fixed.** On that path every change is cut to its narrowing part (mask AND what the share carries): a pure widening is dropped, a mixed one keeps the rights it removes, one left with no Read becomes a revoke. Test `WhenTheFreshReReadFails_AMixedChange_KeepsItsNarrowingPart_AndDropsOnlyItsWideningPart` (A holds Read+Delete on the event, R gives Collaborate: Delete goes, Write/Append/AppendTo are not added, one ModifyAccess to ReadAccess, run Incomplete). Seed **S2** (the old `RemoveAll`) → it fails. The same helper serves the No Access refusal (item 2). |
 | 5 | **Finding 3** — §5 said "142 and 143 do" wire the guard | **Fixed.** §5 "Other root-share writers" now says this task wired it (149 merged second) and why deriving from the root was not enough. §12's obligation and decisions are marked discharged / decided. |
@@ -505,4 +510,25 @@ not edited — the main session may point them at this §13.
 
 ### 13.3 r3 test results (2026-10-03)
 
-__RESULTS__
+- **Merge state** (`57e14adc4`), the resolved files' suites (RecordShare*, InternalUserShare*, DataverseCreateRecordHandler,
+  BusinessSliceDeterminism, P2LoopInjectionEval, Provision*, DataverseToolNameFreeze, SecureChildOwnershipAiTool,
+  NoAccess*, SecureChildShare*, RecordCreatorPerson*, SecureProjectShare, SecureShareNoAccessGuard,
+  ExternalAccessContract): **608/608**.
+- **r3** (`e7e7eec8b`), affected suites (the above + DirectThread*, SecureChildLineage, UnsecureProject): **827/827**.
+- **Full BFF unit suite** (`dotnet test tests/unit/Sprk.Bff.Api.Tests`): **14,742 total = 14,623 passed + 54 skipped
+  (pre-existing) + 65 failed**. The run took **37 minutes** while other agents' suites ran on this machine; the 65 failures
+  (64 distinct names — Office save/quick-create, Compose seam, Insights/Workspace/Config contract, ProvisionNoAccess and
+  similar host-based tests) were re-run in isolation with the same build: **115/115 passed** (the name filter matches 115
+  cases). Contention, not this change; none of the 65 is in a file this round touched.
+- **ArchTests** (`dotnet test tests/Spaarke.ArchTests`): first run **371/372** — `RecordOwnerAssignmentCensusTests`
+  ("every owner write in the server is censused") failed on a **semantic merge conflict**: task 133 (via 143-r2) renamed
+  `ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync` to `MoveOwnerAsync` (it now serves the compensation too),
+  and task 146's census (via this branch) still listed the old name. Fixed by re-pointing the census entry (kind Root,
+  reason extended); re-run **372/372** (incl. `PoaShareClientSingletonGuardTests`). Left alone (133's file, not this
+  task's): a stale `<see cref="AssignOwnerToSecureTeamAsync"/>` in `ProvisionProjectEndpoint`'s remarks (line 126; XML
+  doc warnings are off, so it does not fail the build) and the same old name in a `RecordOwnershipResolver` comment.
+- **Integration suites (project hard gate):** `tests/integration/Sprk.Bff.Api.IntegrationTests` **104/104**;
+  `tests/integration/Spe.Integration.Tests` **428 total = 403 passed + 25 skipped, 0 failed**.
+- **Client:** no client file changed in r3 (the merge brought 143-r2's `CreateProjectWizard` / `SummarizeFilesWizard`
+  changes, which do not overlap 149's `AccessGrantModal` change; nothing was resolved there), so no client build was run.
+- **Publish size:** not measured (main session).
