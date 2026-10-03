@@ -30,6 +30,13 @@ public static class ExternalAccessModule
     /// </summary>
     private static readonly IReadOnlySet<Guid> EmptyRecordIds = new HashSet<Guid>();
 
+    /// <summary>
+    /// The registered views of a module whose grid has an INLINE source (or, for grid-configuration, no grid): none.
+    /// Every outside-counsel grid is inline (read live 2026-10-02, task 157 F1), so the external savedquery routes
+    /// return 404 for every view of these modules.
+    /// </summary>
+    private static readonly IReadOnlySet<Guid> NoSavedQueries = new HashSet<Guid>();
+
     private static readonly IReadOnlySet<Guid> OutsideCounselGridConfigurationIds = new HashSet<Guid>
     {
         Guid.Parse("61711823-1092-f111-b8dc-7ced8ddc4a05"), // Projects
@@ -264,17 +271,25 @@ public static class ExternalAccessModule
         // /record default projection (primary id + primary name, from EntityDefinitions — each descriptor
         // DECLARES its PrimaryNameAttribute and Register refuses a list missing either). NOTHING ELSE.
         // Task 134's rule (b) — the columns of the internal MDA sibling views the grid's ViewSelector offered
-        // — is GONE: the external SPA mounts the shared grid only through ExternalDataGrid.tsx, which forces
-        // showViewSelector={false} at runtime, so no external grid can switch to an internal view. The arch
-        // test ExternalSpaGridViewSelectorGuardTests pins that wrapper and refuses any other import path to
-        // the shared grid (its residuals are listed in its remarks). Whatever the client does, this list
-        // still refuses the internal views' columns with a 400. No live grid references a pointer column,
-        // an FLS-secured column, an alias or an aggregate. Full tables: projects/unified-access-control-r2/
+        // — is GONE: inside the external SPA the shared DataGrid itself shows no view picker and never lists
+        // the saved queries, whatever props reach it (DataGridExternalHost.tsx: the provider at the SPA root
+        // and the constant its Vite build defines), so no external grid can switch to an internal view. The
+        // arch test ExternalSpaGridViewSelectorGuardTests asserts both switches and pins the rule (its residuals
+        // are listed in its remarks). Whatever the client does, this list still refuses the internal views'
+        // columns with a 400. No live grid references a pointer column, an FLS-secured column, an alias or an
+        // aggregate. Full tables: projects/unified-access-control-r2/
         // notes/task-134-external-module-column-allow-list.md (original) and
         // notes/task-157-external-grid-columns.md (shrink + drop sets).
         // ⚠️ Changing a grid configuration to show a new column now REQUIRES adding the column here —
         // otherwise that grid gets a 400. ⚠️ Re-enabling the view selector on an external grid REQUIRES
         // re-deriving these lists with rule (b) first — otherwise every sibling view gets a 400.
+        //
+        // VIEW allow-lists (task 157, finding F1). SavedQueryIds is the set of saved queries a module's grid is
+        // registered to use; the external /savedquery/{id} and /savedqueries/{entity} routes return those and
+        // 404 every other view. Derived from the same sprk_gridconfiguration records, read live and read-only on
+        // 2026-10-02: all six grids have source.type = "inline" and name no savedQueryId, so every module
+        // registers NONE (NoSavedQueries) and both routes answer 404 for every view. ⚠️ Switching a grid to a
+        // savedquery source REQUIRES registering that view here, or its grid errors.
         //
         // sprk_project: grid 61711823. Primary name = sprk_projectnumber. Task 157 dropped (rule (b) only):
         // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref.
@@ -284,6 +299,7 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_project",
             RecordIdAttribute = "sprk_projectid",
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_projectnumber",
             ReadableColumns = new HashSet<string>
             {
@@ -316,6 +332,7 @@ public static class ExternalAccessModule
             // Grid 3af4102c. Primary name = sprk_documentname. Unchanged by task 157 (task 134 already
             // admitted no sibling-view column here). No pointer column (sprk_graphdriveid / sprk_graphitemid /
             // sprk_filepath …).
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_documentname",
             ReadableColumns = new HashSet<string>
             {
@@ -338,6 +355,7 @@ public static class ExternalAccessModule
             },
             // Grid 3ff4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
@@ -358,6 +376,7 @@ public static class ExternalAccessModule
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
             // Grid 42f4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
             // projection). Task 157 dropped (rule (b) only): statecode, createdon, ownerid, sprk_assignedto.
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
@@ -378,6 +397,7 @@ public static class ExternalAccessModule
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
             // Grid 583a2a33. Primary name = sprk_matternumber. Task 157 dropped (rule (b) only): statecode,
             // createdon, sprk_mattertype, sprk_practicearea.
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_matternumber",
             ReadableColumns = new HashSet<string>
             {
@@ -401,6 +421,7 @@ public static class ExternalAccessModule
                     : EmptyRecordIds,
             // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
             // sibling-view column here).
+            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
@@ -427,6 +448,7 @@ public static class ExternalAccessModule
             // `retrieveRecord('sprk_gridconfiguration', configId, ['sprk_configjson'])`
             // (Spaarke.UI.Components DataGrid.tsx fetchConfigRecord) + the /record default projection.
             // No external grid lists grid configurations. Primary name = sprk_name.
+            SavedQueryIds = NoSavedQueries, // no grid shows this entity: no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {

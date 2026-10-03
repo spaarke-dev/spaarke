@@ -22,17 +22,18 @@
  * which console-warns and no-ops without `Xrm` present — a graceful degrade (no crash, no write),
  * consistent with "widgets are READ-ONLY (broker)". See notes/task-016-deviations.md.
  *
- * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). The grid is mounted through
- * `<ExternalDataGrid>`, which forces `showViewSelector={false}` at runtime. That is a SECURITY setting, not a
- * cosmetic one. With the selector on, the grid offered the entity's INTERNAL MDA main views
+ * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). That is a SECURITY setting, not a
+ * cosmetic one. The shared grid enforces it itself inside this SPA (DataGridExternalHost: the provider at the
+ * app root and the constant this SPA's Vite build defines), whatever props reach it, and it then never requests
+ * the saved-query list. As defence in depth the grid is also mounted through `<ExternalDataGrid>`, which forces
+ * `showViewSelector={false}`. With the selector on, the grid offered the entity's INTERNAL MDA main views
  * (`/savedqueries/{entity}`), and the BFF had to admit every column those views project. With it off, the
  * grid only ever runs its own `sprk_gridconfiguration` FetchXML, so each external module's server column
  * allow-list (ExternalAccessModule.cs) is that config's columns plus the scope and /record default columns,
  * and nothing more. Turning the selector back on would make every sibling view error with
- * DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard ExternalSpaGridViewSelectorGuardTests refuses any import
- * of the shared grid outside the wrapper's own file, and any use of `<ExternalDataGrid>` here other than as a
- * JSX tag: called as a plain function, the wrapper returns the inner grid element, which could be cloned with
- * the picker on.
+ * DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard ExternalSpaGridViewSelectorGuardTests asserts the provider
+ * mount and the build constant, and (defence in depth) refuses any import of the shared grid outside the
+ * wrapper's own file and any use of `<ExternalDataGrid>` here other than as a JSX tag.
  */
 import * as React from 'react';
 import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';

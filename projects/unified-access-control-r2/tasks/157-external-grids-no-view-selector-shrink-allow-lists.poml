@@ -55,12 +55,14 @@
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">Every DataGrid mount under src/client/external-spa passes showViewSelector={false} (asserted by a source scan test or the SPA's own tests); the shared DataGrid default is unchanged; the SPA prod build succeeds.</criterion>
+    <criterion testable="true" amended="fix round c1, 2026-10-03">Every shared Spaarke DataGrid that renders inside the external SPA shows no view selector and never requests the entity's saved-query list, BY CONSTRUCTION AT RUNTIME: the shared DataGrid reads DataGridExternalHost (the provider the SPA's root component mounts above every route, or the constant the SPA's Vite build defines) and then ignores showViewSelector, externalViews and any picked view, whatever props, wrappers, clones, spreads or imports reach it. Asserted by the jest suite DataGrid.externalHost.test.tsx (showViewSelector={true} passed directly, under each switch) and by ExternalSpaGridViewSelectorGuardTests (the provider mount, the define, and the rule's text pinned in the shared library). Every other host is unchanged: both switches default off and the shared DataGrid default stays true. The SPA prod build succeeds.</criterion>
+    <criterion-amendment for="1" date="2026-10-03" round="fix round c1">The original criterion asked that every DataGrid MOUNT under src/client/external-spa pass showViewSelector={false}, asserted by a source scan. Seven verifier rounds each compiled a new shape into a live picker-on mount that the scan let through (V7: a carrier file with no extension or an unscanned one). A source scan cannot prove what every JavaScript expression does, so the criterion now asks for the owner's goal itself (round 4 item 7: every external SPA grid has no view selector) and meets it by construction: the rule lives inside the shared grid, so it no longer depends on how the grid is reached. The scan stays as defence in depth, plus one robust assertion (the root mounts the provider) and the build define.</criterion-amendment>
     <criterion testable="true">Each external module's allow-list equals its recorded live derivation (a)+(c)+(d); no column was added.</criterion>
     <criterion testable="true">Negative: a column that was admitted only by rule (b) is refused by /fetch and stripped from /record for that module.</criterion>
     <criterion testable="true">Every column the module's grid configuration references is still admitted (no grid blanks).</criterion>
     <criterion testable="true">The shrink is proven to bite by seeding a dropped column back; BFF unit + NetArchTest green.</criterion>
     <criterion testable="false">MANUAL LIVE GATE (dev, after deploying SPA then BFF): an outside-counsel contact opens each external grid; no view selector shows; each grid renders its configured columns.</criterion>
+    <criterion testable="true" added="fix round c1, 2026-10-03, finding F1">F1 closed (owner decisions C6/C9: a contact gets only what it is granted): (a) with the selector off, and always on the external host, the shared DataGrid does not call retrieveSavedQueriesForEntity; (b) GET /api/v1/external/api/dataverse/savedqueries/{entity} and savedquery/{id} return only the views an external module grid is registered to use (ExternalModuleDescriptor.SavedQueryIds, derived live from the same grid configurations as the column allow-lists), and 404 for any other view. Negative tests on both routes (an internal view id of a registered entity, and another entity) are each proven to bite by a seed.</criterion>
   </acceptance-criteria>
 
   <escalation>
@@ -439,6 +441,157 @@
       Failed 0, Skipped 54, Total 14328 (Debug, 18m31s); SPA npm install --legacy-peer-deps --no-audit --no-fund +
       npm run build (vite) exit 0, clean tree (bundle: ole,{...e,showViewSelector:!1}; showViewSelector:!0 occurs 0
       times). Integration suites: NOT run (item 13; main session).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c1" round="review-7-fix-c1" base="f55f3d426">
+      Base: task/uac-r2-157-b2-r2 merged with work/unified-access-control-r2 (clean, no conflicts) = f55f3d426.
+      Status stays "completed-with-escalation". ONE item stays open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5; F1 adds a step 3 to the gate, note section 6). F1 is CLOSED
+      (no owner decision was needed: owner C6 / C9, a contact gets only what it is granted).
+      ITEM 1, stop the scan arms race (V7 and every earlier shape): CLOSED BY CONSTRUCTION AT RUNTIME.
+      - The rule now lives inside the shared grid. The new DataGridExternalHost.tsx (shared library) holds a React
+        context (default false), its provider (true), the build constant __SPAARKE_DATAGRID_EXTERNAL_HOST__ read
+        behind a typeof guard, and useDataGridExternalHost(), which ORs them. DataGrid.tsx reads the hook. When it
+        is true, the grid forces showViewSelector off (so externalViews is ignored too), never honours a picked view,
+        refuses a savedquery-set source with an error, and never calls retrieveSavedQueriesForEntity, whatever
+        props, wrappers, clones, spreads or imports reach it.
+      - Switch 1: App.tsx returns its whole tree inside DataGridExternalHostProvider, above the app's one
+        BrowserRouter. Switch 2: vite.config.ts defines the constant as 'true', so every copy of the grid in the
+        bundle is external, whatever tree, React root or module instance renders it. That closes what a context
+        alone leaves open: a second createRoot, and a peeled raw Provider value={false}. Both switches are off in
+        every other host, so no other host changes behaviour.
+      - Bundle (vite build): the host check compiles to function soe(){return!0}. Rollup drops the picker branches
+        as dead code, so the picker's "Select view (currently" label occurs 0 times and the constant 0 times.
+        Contrast build with the define removed: the label occurs once and the constant twice. Restored.
+      - V7 compile proof. A carrier file with NO extension (src/zzseed/carrier) imported the grid and set
+        window.SprkGridV7, and a src file mounted it with showViewSelector={true}. vite build compiled it into
+        u.jsx(window.SprkGridV7,{configId:"zzv7",showViewSelector:!0}), yet the bundle holds no picker code
+        (label 0). The runtime rule closes V7. The guard was red on exactly that file with the new round-7 rule
+        (one violation; the b2-r2 rule set passed it). Seeds deleted; main.tsx restored with git checkout and
+        touched.
+      - Scan: the one robust assertion, plus a pin of the rule, plus every earlier zero-false-positive rule kept as
+        defence in depth.
+        - ExternalSpa_RootMountsTheExternalHostProviderAboveEveryRoute: App's one JSX return is one provider
+          element around the app's only BrowserRouter, anchored to the end of the file; no other file binds a
+          router.
+        - ExternalSpa_ViteBuildDefinesTheExternalHostConstant: one define block maps the constant to 'true', with
+          comments stripped first, so a commented-out define does not count; the constant is named once in code.
+        - SharedDataGrid_EnforcesTheExternalHostRule: the host module pinned verbatim (whitespace-insensitive); the
+          grid's nine rule statements present; the raw prop, retrieveSavedQueriesForEntity(, the ViewSelector
+          element and the hook each counted exactly; no props.x access.
+        This pin exists because the shared library's jest suite is not run by CI today.
+      - Tests: jest DataGrid.externalHost.test.tsx, 7/7. It has a control (no host: picker shown, list requested);
+        provider with showViewSelector={true} and externalViews; provider with a wrapper and a cloneElement; the
+        build constant with no provider; a savedquery source loading only its own view; savedquery-set refused;
+        and F1 (a) with the picker off on an ordinary host. Each passes the prop directly.
+      - Seeds (jest, each restored hash-matched and touched):
+        - A1, the context check removed from the hook: 4 red.
+        - A2, the grid ignores the host: 4 red.
+        - B, the build check removed: 1 red.
+        - C, the sibling fetch unconditional: 5 red.
+        - D, the savedquery-set refusal removed: 1 red.
+      - Seeds (arch, on disk, restored and touched):
+        - P7, the provider removed from App.tsx: the root fact red.
+        - P8, the define removed: the define fact red.
+        - P9, the grid ignores the host: the pin fact plus 8 in-memory controls red.
+        - P10, the context check removed: the pin fact plus 10 controls red.
+        - P11, MemoryRouter imported in a page: the root fact red.
+      - Not testable: the picked-view gate (pickedViewId). On the external host no ViewSelector renders, so nothing
+        can set a picked view. It is pinned, not behaviour-tested.
+      - Residuals removed (closed by the runtime rule): a variable-built shared-library import(); edits to
+        DataGrid.tsx ignoring the switch (now pinned); element-tree peeling (Q8).
+      - Residuals kept (honest): (1) a new npm dependency shipping its OWN grid or picker; (2) build config that
+        drops or overrides the define, or re-points the grid module; (3) a new, differently named picker inside
+        DataGrid.tsx.
+      - Criterion 1 is amended to the owner's goal (round 4 item 7: every external SPA grid has no view selector),
+        met by construction. The amendment and its reason are recorded in the POML criterion-amendment element.
+      ITEM 2, F1: CLOSED.
+      - (a) DataGrid requests the sibling list only when the picker is on, and never on the external host.
+        Seed C proves it.
+      - (b) New ExternalModuleDescriptor.SavedQueryIds holds the views a module's grid is registered to use. It is
+        empty by default and fails closed. ExternalModuleRegistry indexes it, refuses Guid.Empty and a view
+        registered by two modules, and exposes FindBySavedQueryId.
+      - GetSavedQueryCoreAsync returns a view only if its id is registered (checked BEFORE any read) and the loaded
+        view's entity is the registering module's. GetSavedQueriesCoreAsync returns only the module's registered
+        views. Everything else gets the same 404 DV_SAVEDQUERY_NOT_FOUND: an internal view, another entity's view,
+        an unknown id, or an entity with no module. Before, an unregistered entity got 403 and every view got 200.
+      - Derivation, live and read-only, 2026-10-02: all six sprk_gridconfiguration records (61711823, 3af4102c,
+        3ff4102c, 42f4102c, 583a2a33, 403e5d37) are source.type "inline" and name no savedQueryId, so all seven
+        modules register NONE (NoSavedQueries). Both routes 404 every view in production.
+      - Tests: ExternalModuleSavedQueryScopeTests, 28. Negative cases on both routes cover an internal view id
+        (404, 0 reads) and another entity (404, 0 reads). There is also a mis-registered id, an absent view,
+        production refusal rows, the live-derivation pin, and the registration checks.
+      - Contract tests: 3 HTTP rows return 404 over the real pipeline (savedqueries/sprk_project,
+        savedqueries/contact, savedquery/{new guid}).
+      - Seeds (each rebuilt, red, restored hash-matched and touched):
+        - B1, the by-id allow-list skipped: 4 red.
+        - B2, the list filter removed: 1 red.
+        - B3, the list's no-view 404 removed: 9 red.
+        - B4, the entity match removed: 2 red.
+        - B5, the Guid.Empty check removed: 1 red.
+        - B6, the duplicate check removed: 1 red.
+        - B7, the project module registers an internal view: 4 red.
+        The HTTP savedquery/{id} row does not bite B1 on its own: the fixture's Dataverse returns no view. The core
+        rows do.
+      ITEM 3, V7 in the remaining scan: CLOSED.
+      - UnscannedImportTargets: every path-like specifier (static, side-effect, dynamic; SPA files and shipped
+        library files, the grid's own included) is resolved as Vite does: the exact file, then the default
+        extensions, then index. It must land on a file the scans read (the ScriptFilesUnder set minus library test
+        paths). A no-extension or other-extension target, and a directory holding a package.json, are refused.
+      - A specifier with nothing to load is left alone. A real one fails the build, and 12 library JSDoc examples
+        quote such paths; reporting them was the first run's false positives.
+      - ScanPackageManifest refuses a "browser" field in either package.json (Vite remaps through it).
+      - Controls: 13 V7 rows, 1 positive, a resolution-order row, and a manifest row. Proof: the V7 disk seed above.
+      ITEM 4, both integration suites in full: see Runs.
+      Section 10/11 (new surface):
+      (i) DataGridExternalHost.tsx, a shared-library module.
+          - Existing: ExternalDataGrid.tsx forces the prop for JSX mounts only, and DataGrid has no host awareness
+            (Grep: no other context or flag reads showViewSelector).
+          - Extension: the rule must live in DataGrid itself, so this is a 40-line extension of the grid's own
+            folder, not a new service. A prop cannot carry it, since props are exactly what the bypasses forged.
+          - Cost of doing nothing: seven verifier rounds compiled picker-on mounts past the scan, and V7 compiles
+            today without it.
+      (ii) The define in vite.config.ts, a build option.
+          - Existing: none (Grep: the SPA defines nothing).
+          - Extension: it extends the SPA's own build config.
+          - Cost of doing nothing: a second React root, or a peeled Provider value={false}, would render the grid
+            outside the context.
+      (iii) ExternalModuleDescriptor.SavedQueryIds and ExternalModuleRegistry.FindBySavedQueryId, an option on the
+          existing registration.
+          - Existing: ReadableColumns on the same descriptor, which is where the owner's "same module registry"
+            points.
+          - Extension: yes, an added property on that descriptor, with no new type or service.
+          - Cost of doing nothing: the external savedquery routes keep returning internal MDA view definitions
+            (names, FetchXML, layoutXml) to any external caller (F1).
+      No new service, DI registration, endpoint, job, Dataverse column or package. The two routes are existing
+      endpoints; their handlers now delegate to testable cores (the /fetch and /record pattern). Placement: the
+      view scope stays in the BFF's external read seam next to the column scope (task 134 section 5). ADR-002: no
+      plugin. ADR-003: every new default fails closed (empty views; 404). Publish size: skipped per instructions.
+      Live: none written. One live READ (Dataverse MCP read_query of the six sprk_gridconfiguration records) for
+      the view derivation. Deploy order unchanged: SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch-or-master-containing-157&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then the note
+      section 6 gate (steps 1-4).
+      Runs (this branch, once at the end):
+      - jest DataGrid.externalHost.test.tsx: 7/7.
+      - Spaarke.UI.Components full jest: 3381 tests, 3367 passed, 14 failed in 9 suites. None of those suites
+        imports DataGrid.tsx or DataGridExternalHost.tsx, and every DataGrid suite passed. This suite is not run by
+        CI; its baseline was not re-measured here.
+      - ExternalSpaGridViewSelectorGuardTests: 194/194 (134 + 3 facts + 57 controls).
+      - NetArchTest: Passed 540, Failed 0, Total 540.
+      - BFF affected: 226/226 (ExternalModuleSavedQueryScopeTests 28; ExternalModuleDataContractTests 18, 3 new).
+      - BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 14305, Failed 1, Skipped 54, Total 14360
+        (Debug, 23m52s). The one failure, PinnedMemoryEndpointsContractTests.CreatePin_Authenticated_Returns201AndEmitsCounter,
+        read a metric tag from another test's emission (an unrelated surface). It passed on an isolated re-run
+        (15/15): contention.
+      - ITEM 4, the integration hard gate, run in full on this branch for the first time:
+        - tests/integration/Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Skipped 0, Total 104.
+        - tests/integration/Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m32s).
+      Client builds:
+      - SPA npm install --legacy-peer-deps --no-audit --no-fund, then npm run build (vite): exit 0.
+      - Shared library npm run build (tsc): exit 0, after building the Spaarke.Auth and Spaarke.SdapClient dists
+        in CI order.
+      - SPA tsc --noEmit: 25 errors. The one in a changed line is App.tsx TS2786 on the provider mount, the same
+        React-18/19 types class as the pre-existing TS2786 on ExternalDataGrid.tsx's DataGrid mount (F2). vite
+        build does not typecheck.
     </outcome>
   </execution>
 </task>

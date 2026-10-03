@@ -94,6 +94,37 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
+    // ── View scope (unified-access-control-r2 task 157, F1) — only registered views, 404 otherwise ──────
+    // Every production module grid is inline and registers no view, so both routes answer 404 over HTTP, and they
+    // answer it before any Dataverse read (none is possible in-process). The pipeline itself is covered in
+    // tests/integration/auth/UnifiedAccessControl/ExternalModuleSavedQueryScopeTests.cs.
+
+    [Theory]
+    [InlineData("sprk_project")]   // a registered entity: its internal MDA views are not listed
+    [InlineData("contact")]        // an entity with no module
+    public async Task ModuleSavedQueries_WhenNoViewIsRegisteredForTheEntity_Returns404(string entity)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        var response = await client.GetAsync($"/api/v1/external/api/dataverse/savedqueries/{entity}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_SAVEDQUERY_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task ModuleSavedQuery_WhenTheViewIsNotRegistered_Returns404()
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        var response = await client.GetAsync($"/api/v1/external/api/dataverse/savedquery/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_SAVEDQUERY_NOT_FOUND");
+    }
+
     // ── Over-read defense (C1) — the FetchXml may reference ONLY the module entity ────────────────
 
     [Fact]

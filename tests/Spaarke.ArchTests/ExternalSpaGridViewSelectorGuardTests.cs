@@ -9,7 +9,7 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// unified-access-control-r2 task 157 (owner round 4 item 7, 2026-10-01) — the external SPA never shows the
-/// shared Spaarke <c>DataGrid</c>'s view picker.
+/// shared Spaarke <c>DataGrid</c>'s view picker, and never fetches the entity's saved-query list.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,26 +27,40 @@ namespace Spaarke.ArchTests;
 /// the pressure to widen it.)
 /// </para>
 /// <para>
-/// <b>Two layers (review round 3).</b> A regex scan cannot prove that no JavaScript expression ever
-/// re-enables a prop — the verifier compiled <c>import.meta.glob</c>, a unicode-escaped identifier and
-/// <c>React.cloneElement</c> past the round-2 scan. So the guarantee now rests on a RUNTIME guard plus a
-/// scan that only has to prove a narrow, checkable fact:
+/// <b>The guarantee is a RUNTIME rule inside the shared grid (fix round c1).</b> Seven review rounds each found a
+/// shape the source scan below let through and <c>vite build</c> compiled into a live mount with the picker on
+/// (round 7, V7: a carrier file with no extension, or one the scan does not read). A regex scan cannot prove what
+/// every JavaScript expression does, so the invariant no longer rests on it. The shared <c>DataGrid.tsx</c> reads
+/// <c>useDataGridExternalHost()</c> (<c>DataGridExternalHost.tsx</c>) and, when it is true, forces the picker off,
+/// ignores <c>externalViews</c> and any picked view, refuses a <c>savedquery-set</c> source, and never calls
+/// <c>retrieveSavedQueriesForEntity</c>, whatever props, wrappers, clones, spreads or imports reach it. Two
+/// independent switches turn it on; both are OFF in every other host, so no other host changes behaviour:
 /// </para>
 /// <list type="number">
-/// <item><b>Runtime:</b> <c>src/client/external-spa/src/widgets/ExternalDataGrid.tsx</c> mounts the shared grid
-/// with <c>showViewSelector={false}</c> AFTER the caller's props, so for every JSX mount of the wrapper no caller
-/// prop or spread, and no <c>cloneElement</c> / <c>createElement</c> of an <c>&lt;ExternalDataGrid&gt;</c> ELEMENT,
-/// can turn the picker on. It does NOT protect the element it RETURNS (review round 5, Q1/Q2): the wrapper has no
-/// hooks, so <c>ExternalDataGrid(props)</c> called as a plain function returns the inner grid element, which can
-/// be cloned with the picker on or whose <c>.type</c> (the shared grid) can be mounted. Its text is PINNED
-/// (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
-/// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid, and
-/// (round 5) no other file may use the wrapper except as a JSX tag. The rules are written to refuse what they
-/// cannot attribute, but a regex scan is not a proof: each of the six review rounds so far found a compiled bypass
-/// of the previous version (round 6: a single comment after <c>from</c> hid an import from every rule). So the
-/// scan refuses the routes to the grid that it knows of, each spelling it recognises; it does not guarantee that
-/// every route goes through a JSX mount of the pinned wrapper. The known residuals are listed below.</item>
+/// <item>the React context <c>DataGridExternalHostProvider</c>, mounted by the SPA's root component above every
+/// route, asserted by <see cref="ExternalSpa_RootMountsTheExternalHostProviderAboveEveryRoute"/>;</item>
+/// <item>the build constant <c>__SPAARKE_DATAGRID_EXTERNAL_HOST__</c>, which the SPA's <c>vite.config.ts</c> defines as
+/// <c>true</c>. Vite replaces it in every module it bundles, so every copy of the grid in that bundle is external,
+/// whatever tree, React root or module instance renders it. In the built bundle the picker branches are dead code
+/// and the picker component is dropped (fix round c1 build: 0 occurrences of its <c>Select view (currently</c>
+/// label). Asserted by <see cref="ExternalSpa_ViteBuildDefinesTheExternalHostConstant"/>.</item>
 /// </list>
+/// <para>
+/// <see cref="SharedDataGrid_EnforcesTheExternalHostRule"/> pins the rule's text in the shared library (the host
+/// module verbatim, and the statements in <c>DataGrid.tsx</c>), so a change to either is a change to this guard and
+/// is gated in CI. The behavioural proof is the jest suite
+/// <c>Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx</c>: under either
+/// switch, with <c>showViewSelector={true}</c> passed directly, no picker renders and the list is never requested.
+/// That package's jest suite is not run by CI today, which is why the pin exists.
+/// </para>
+/// <para>
+/// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
+/// source. They no longer carry the guarantee. <c>src/client/external-spa/src/widgets/ExternalDataGrid.tsx</c>
+/// still mounts the shared grid with <c>showViewSelector={false}</c> AFTER the caller's props, and its text is
+/// pinned by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>. No other file under
+/// <c>src/client/external-spa/src</c> may reach the shared grid, and no other file may use the wrapper except as a
+/// JSX tag.
+/// </para>
 /// <para><b>Scan rules</b> (every script file under <c>src/client/external-spa/src</c>):</para>
 /// <list type="number">
 /// <item>A grid binding is ANY import of <c>DataGrid</c> / <c>DataGridDefault</c> from the shared library —
@@ -106,6 +120,16 @@ namespace Spaarke.ArchTests;
 /// <c>from\s*</c>. A specifier into a <c>node_modules</c> folder inside <c>src</c> is refused, and no such folder may
 /// exist under the SPA's or the library's <c>src</c>: the scans skip <c>node_modules</c>, and a bare specifier
 /// resolves through the nearest one (R5).</item>
+/// <item><b>Every import lands on a file the scans read (round 7, V7, fix round c1).</b> A path-like specifier
+/// (<c>./</c>, <c>../</c>, <c>/</c>, <c>@/</c>, <c>@spaarke/ui-components</c>), in a static, side-effect or dynamic
+/// import of an external-SPA file or a shipped library file, is resolved the way Vite resolves it: the exact file
+/// first, then Vite's default extensions, then a directory's <c>index</c>. The file it lands on must be one these
+/// scans read (a script file under the SPA's or the library's <c>src</c>, not a test path). A file with no
+/// extension or another extension, and a directory holding a <c>package.json</c>, are refused: the scan cannot
+/// follow them, so it fails closed instead of going blind. A specifier with nothing to load is left alone (a real
+/// import of it fails the build; the library's JSDoc examples quote such paths). Neither <c>package.json</c> may
+/// declare a <c>browser</c> field, through which Vite remaps a relative import to another file. See
+/// <see cref="UnscannedImportTargets"/> and <see cref="ScanPackageManifest"/>.</item>
 /// </list>
 /// <para><b>Shared-library fan-in (round 3).</b> The scan refuses <c>DataGridPageShell</c> by name, which is
 /// only enough while it is the one shared component that mounts the grid.
@@ -125,39 +149,35 @@ namespace Spaarke.ArchTests;
 /// followed by a live element (round 2, S2/S3), so every comment is scanned as code. In a file that holds a
 /// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API. In every
 /// file, a comment may not sit directly after a module keyword (round 6).</para>
-/// <para><b>Residual (documented, not scanned).</b> The scan is NOT a proof that no code path can mount the grid
-/// with the picker on. What it does not cover:</para>
+/// <para><b>Residuals (honest; the runtime rule does not cover them).</b></para>
 /// <list type="number">
-/// <item>A NEW npm dependency (a <c>package.json</c> change) that itself bundles and re-exports the shared grid
-/// under another name.</item>
-/// <item>Build configuration: a <c>vite.config.ts</c> resolve alias or plugin that re-points a DECLARED name
-/// (e.g. <c>react</c> or <c>@spaarke/ui-components</c> itself) at another file, or a JSX option in
-/// <c>tsconfig.json</c> / the React plugin (<c>jsxImportSource</c>, <c>jsxFactory</c>) that re-points the JSX
-/// runtime the way the pragma refused above would.</item>
-/// <item>Inside the shared library, a dynamic <c>import()</c> whose path is built in a variable elsewhere (the
-/// fan-in fact reads the call's own argument text only, because the library's prose says "import (" in many
-/// comments).</item>
-/// <item>Edits to the shared library's own <c>DataGrid.tsx</c> (e.g. ignoring the prop).</item>
-/// <item>Peeling an element tree by hand (round 5, widened from "React internals"): starting from ANY element that
-/// holds an <c>&lt;ExternalDataGrid&gt;</c>, reading <c>.props.children</c> / <c>.type</c> and calling the component
-/// functions it finds returns the inner grid element, whose <c>.type</c> is the shared grid. Example (compiled with
-/// <c>vite build</c> in fix round b2-r1 and NOT caught): in a file that never names the wrapper,
-/// <c>const outer = createGridWidgetBody('x')({}).props.children; const T = outer.type(outer.props).type;</c> then
-/// <c>&lt;T configId="x" /&gt;</c>. A fiber walk over React internals is the same class. No fixed spelling identifies
-/// it (computed keys, <c>Object.values</c>, a helper in another file), a scan that refused every <c>.type</c> read
-/// would refuse ordinary code (<c>event.type</c>, <c>file.type</c>), and no wrapper written in the same JavaScript
-/// realm can hide the element it must hand to React. It is deliberate obfuscation, not a regression a developer
-/// makes while fixing a column error.</item>
+/// <item>A NEW npm dependency (a <c>package.json</c> change) that ships its OWN grid or view picker. It is not the
+/// shared grid, so the runtime rule does not apply to it. Server-side, the external <c>savedquery</c> /
+/// <c>savedqueries</c> routes return only the views a module grid is registered to use (404 for every other view,
+/// task 157 F1), and the column allow-lists refuse any other view's columns with a 400.</item>
+/// <item>Build configuration: an edit to <c>vite.config.ts</c> that drops or overrides the constant (the define
+/// fact fails; the provider still covers the app tree), or a resolve alias / plugin that re-points the shared
+/// grid's module at a copy without the rule.</item>
+/// <item>A NEW picker UI added inside <c>DataGrid.tsx</c> under another component name and gated on something other
+/// than the pinned switch. The pins refuse a third <c>&lt;ViewSelector</c>, any other use of the raw prop, and any
+/// other call of <c>retrieveSavedQueriesForEntity</c>; a differently named picker is a reviewed change to the shared
+/// grid.</item>
 /// </list>
-/// <para>Items 1–4 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still
-/// refuses every column the picker's views would need, with a 400: this guard removes the pressure to widen that
-/// list; it is not the data control.</para>
+/// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
+/// every column the picker's views would need, with a 400; it is the data control.</para>
+/// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3–5 through fix
+/// round b2-r2): a shared-library dynamic <c>import()</c> whose path is built in a variable; edits to
+/// <c>DataGrid.tsx</c> that ignore the switch (now pinned, narrowed to item 3); and element-tree peeling (Q8,
+/// <c>.props.children</c> / <c>.type</c> by hand, or a fiber walk). Whatever element, tree or module instance reaches
+/// the shared grid, the grid applies the rule itself. V7 (round 7) is closed the same way, and the round-7 scan rule
+/// above stops the remaining scan going blind on it.</para>
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
 /// rule is paired with a negative control proving it fires and a positive control proving it does not fire
 /// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
 /// KEEP path.</para>
-/// <para><b>Maintenance.</b> If an external grid ever genuinely needs a view picker, do NOT relax this guard
-/// alone: re-derive the module's server allow-list with task 134's rule (b) (sibling-view columns) in the same
+/// <para><b>Maintenance.</b> If an external grid ever genuinely needs a view picker, do NOT relax this guard or the
+/// runtime rule alone: register the views on the module (<c>ExternalModuleDescriptor.SavedQueryIds</c>), re-derive
+/// the module's server allow-list with task 134's rule (b) (sibling-view columns) in the same
 /// change and have the owner approve the wider column exposure.</para>
 /// </remarks>
 public class ExternalSpaGridViewSelectorGuardTests
@@ -183,17 +203,16 @@ public class ExternalSpaGridViewSelectorGuardTests
          * ExternalDataGrid — the ONLY way the external SPA mounts the shared Spaarke grid
          * (unified-access-control-r2 task 157, owner round 4 item 7).
          *
-         * It switches the view picker off at RUNTIME for every JSX mount: `showViewSelector={false}` comes AFTER
-         * the caller's props, so no caller prop or spread, and no clone or re-creation of an <ExternalDataGrid>
-         * element, can turn the picker back on. With the picker on, the grid would offer the entity's internal MDA
-         * views, whose columns the BFF's external allow-lists (ExternalAccessModule.cs) do not admit.
+         * The picker rule itself lives in the shared grid (DataGridExternalHost.tsx). In this SPA the app root mounts
+         * DataGridExternalHostProvider and the Vite build defines __SPAARKE_DATAGRID_EXTERNAL_HOST__, so the grid shows
+         * no view picker and never requests the entity's saved-query list, whatever props reach it. Neither a call of
+         * this wrapper as a plain function nor a clone of the element it returns can turn the picker on. With the picker
+         * on, the grid would offer the entity's internal MDA views, whose columns the BFF's external allow-lists
+         * (ExternalAccessModule.cs) do not admit.
          *
-         * It does NOT protect the element it RETURNS. Called as a plain function, it hands back the inner grid
-         * element, which can be cloned, or whose `.type` can be mounted, with the picker on. So
-         * ExternalSpaGridViewSelectorGuardTests refuses every other import of the shared grid under
-         * src/client/external-spa/src, refuses any use of ExternalDataGrid there except as a JSX tag, and pins this
-         * file's text, so a change here is a change to that guard. Walking an element tree by hand to reach the
-         * inner element is a documented residual of that guard.
+         * This wrapper is defence in depth: it also passes `showViewSelector={false}` AFTER the caller's props, and its
+         * props type omits the switch. ExternalSpaGridViewSelectorGuardTests pins this file's text and refuses every other
+         * import of the shared grid under src/client/external-spa/src, so a change here is a change to that guard.
          */
         import * as React from 'react';
         import { DataGrid, type DataGridProps } from '@spaarke/ui-components/components/DataGrid/DataGrid';
@@ -1121,6 +1140,532 @@ public class ExternalSpaGridViewSelectorGuardTests
         return violations;
     }
 
+    // ── Round 7 (fix round c1, V7): every import must land on a file these scans read ──
+
+    /// <summary>Vite's default <c>resolve.extensions</c>, in Vite's order (the SPA's vite.config.ts does not set them).</summary>
+    private static readonly string[] ViteResolveExtensions = [".mjs", ".js", ".mts", ".ts", ".jsx", ".tsx", ".json"];
+
+    /// <summary>
+    /// The script files the two production facts read: every script file under the SPA's <c>src</c> and under the
+    /// shared library's <c>src</c> (<see cref="ScriptFilesUnder"/>), minus the library's test paths, which the
+    /// fan-in fact skips.
+    /// </summary>
+    private static readonly Lazy<HashSet<string>> ScannedFiles = new(() =>
+    {
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in ScriptFilesUnder(ExternalSpaSource))
+        {
+            files.Add(Path.GetFullPath(file));
+        }
+        foreach (var file in ScriptFilesUnder(SharedLibrarySource))
+        {
+            if (!IsSharedLibraryTestFile(RepoRelative(file)))
+            {
+                files.Add(Path.GetFullPath(file));
+            }
+        }
+        return files;
+    });
+
+    /// <summary>
+    /// The file Vite loads for a path-like specifier that resolved to <paramref name="full"/> (query removed): the exact
+    /// file if it exists, else the first of Vite's default extensions that exists, else a directory's <c>index</c> with
+    /// the same extensions. A directory that holds a <c>package.json</c> is not followed: its <c>main</c> /
+    /// <c>exports</c> can point at any file, so it is REFUSED (<c>null</c> with a non-empty <paramref name="why"/>).
+    /// <c>null</c> with an empty <paramref name="why"/> means there is nothing to load: a real import of it fails the
+    /// build ("Failed to resolve import"), and a comment that quotes one (library JSDoc examples do) loads nothing.
+    /// </summary>
+    internal static string? ViteResolvedFile(
+        string full, Func<string, bool> fileExists, Func<string, bool> directoryExists, out string why)
+    {
+        why = string.Empty;
+        if (fileExists(full))
+        {
+            return full; // Vite tries the exact path first, so `./carrier` beside `carrier.ts` loads `carrier`
+        }
+        foreach (var ext in ViteResolveExtensions)
+        {
+            if (fileExists(full + ext))
+            {
+                return full + ext;
+            }
+        }
+        if (!directoryExists(full))
+        {
+            return null; // nothing to load
+        }
+        if (fileExists(Path.Combine(full, "package.json")))
+        {
+            why = "is a directory holding a package.json, whose main / exports this scan does not follow";
+            return null;
+        }
+        foreach (var ext in ViteResolveExtensions)
+        {
+            var index = Path.Combine(full, "index" + ext);
+            if (fileExists(index))
+            {
+                return index;
+            }
+        }
+        return null; // a directory with no index: nothing to load
+    }
+
+    /// <summary>
+    /// Round 7 (V7): every path-like module specifier of the file — <c>from '…'</c>, a side-effect <c>import '…'</c>, or
+    /// the literal argument of <c>import(…)</c> / <c>require(…)</c> — must land, as Vite resolves it, on a file in
+    /// <paramref name="scannedFiles"/>. Otherwise the module behind it is one these scans never read: a carrier with no
+    /// extension or an unscanned one could import the grid unseen. Fails closed on anything it cannot resolve. A bare
+    /// package is left to the declared-package rule (residual 1). The file-system probes are parameters so the
+    /// controls can run on a virtual tree.
+    /// </summary>
+    internal static IReadOnlyList<string> UnscannedImportTargets(
+        string source, string fileName, IReadOnlySet<string> scannedFiles,
+        Func<string, bool> fileExists, Func<string, bool> directoryExists)
+    {
+        var found = new List<string>();
+        var specifiers = AnyFrom.Matches(source).Concat(SideEffectImport.Matches(source))
+            .Select(m => (m.Index, Spec: m.Groups["spec"].Value))
+            .Concat(DynamicCall.Matches(source)
+                .Select(call => (call.Index, Arg: DynamicLiteralArgAt.Match(source, call.Index + call.Length)))
+                .Where(x => x.Arg.Success)
+                .Select(x => (x.Index, Spec: x.Arg.Groups["spec"].Value)));
+        foreach (var (index, spec) in specifiers)
+        {
+            var where = $"{fileName}:{LineOf(source, index)}";
+            if (spec.Contains('\\'))
+            {
+                found.Add($"{where}: '{spec}' holds an escape, so the file it loads cannot be resolved; write it plainly.");
+                continue;
+            }
+            var full = ResolveSpecifier(spec.Split('?', '#')[0], fileName);
+            if (full is null)
+            {
+                continue; // a bare package: the declared-package rule, and residual 1
+            }
+            var target = ViteResolvedFile(full, fileExists, directoryExists, out var why);
+            if (target is null)
+            {
+                if (why.Length > 0)
+                {
+                    found.Add($"{where}: '{spec}' {why}. These scans cannot follow it to a file they read, so they refuse "
+                              + "it rather than go blind (round 7).");
+                }
+                // else: nothing to load (a real import of it fails the build; a quoted example loads nothing)
+            }
+            else if (!scannedFiles.Contains(Path.GetFullPath(target)))
+            {
+                found.Add($"{where}: '{spec}' resolves to {RepoRelative(target)}, a file these scans do not read (not a "
+                          + $"{string.Join("/", ScriptExtensions)} file under the external SPA's or the shared library's src, "
+                          + "or a test / node_modules path). A module the scan cannot read could carry the grid unseen.");
+            }
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Round 7: a <c>browser</c> field in a <c>package.json</c> makes Vite remap a relative import of that package to
+    /// another file, which <see cref="ViteResolvedFile"/> does not model. Neither the SPA's nor the library's manifest
+    /// may declare one (neither does).
+    /// </summary>
+    internal static IReadOnlyList<string> ScanPackageManifest(string json, string fileName)
+    {
+        using var manifest = System.Text.Json.JsonDocument.Parse(json);
+        return manifest.RootElement.TryGetProperty("browser", out _)
+            ? [$"{fileName}: declares a \"browser\" field. Vite remaps imports through it to files the round-7 rule does not "
+               + "follow; remove it."]
+            : [];
+    }
+
+    // ── Fix round c1: the runtime rule's two switches, and its text in the shared library ──
+
+    /// <summary>The external SPA's root component: the one place that mounts the host provider.</summary>
+    internal const string AppRootFile = "src/client/external-spa/src/App.tsx";
+
+    /// <summary>The external SPA's build configuration: the one place that defines the host constant.</summary>
+    internal const string ViteConfigFile = "src/client/external-spa/vite.config.ts";
+
+    /// <summary>The shared library's host module: the context, the build-constant read, and the hook.</summary>
+    internal const string HostModuleFile = "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridExternalHost.tsx";
+
+    /// <summary>The shared grid itself, which applies the rule.</summary>
+    internal const string SharedGridFile = "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx";
+
+    private const string HostProvider = "DataGridExternalHostProvider";
+
+    private const string HostConstant = "__SPAARKE_DATAGRID_EXTERNAL_HOST__";
+
+    private static readonly Regex ProviderImport = new(
+        @"\bimport\s*\{\s*DataGridExternalHostProvider\s*\}\s*from\s*'@spaarke/ui-components/components/DataGrid/DataGridExternalHost'\s*;",
+        RegexOptions.Compiled);
+
+    // From `export const App` to the end of the file: one `return (` whose whole tree is ONE provider element, then the
+    // component's closing `};` and `export default App;` with nothing after them.
+    private static readonly Regex AppRootReturn = new(
+        @"\breturn\s*\(\s*<DataGridExternalHostProvider>(?<inner>[\s\S]*)</DataGridExternalHostProvider>\s*\)\s*;\s*\}\s*;\s*export\s+default\s+App\s*;\s*\z",
+        RegexOptions.Compiled);
+
+    private static readonly Regex JsxReturn = new(@"\breturn\s*[(<]", RegexOptions.Compiled);
+
+    private static readonly Regex BrowserRouterOpen = new(@"<\s*BrowserRouter(?![\w$])", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The one robust assertion about the context switch: the SPA's root component <c>App</c> returns its WHOLE tree
+    /// inside one <c>&lt;DataGridExternalHostProvider&gt;</c> (imported by name from the shared library's host module),
+    /// and the app's only <c>&lt;BrowserRouter&gt;</c> is inside it. Every route needs a router, and
+    /// <see cref="ScanRouterImports"/> keeps every other router out of the SPA, so every route renders under the
+    /// provider.
+    /// </summary>
+    internal static IReadOnlyList<string> ScanAppRoot(string source)
+    {
+        var violations = new List<string>();
+        if (ProviderImport.Matches(source).Count != 1)
+        {
+            violations.Add($"{AppRootFile}: must import {{ {HostProvider} }} once, by name, from "
+                           + "'@spaarke/ui-components/components/DataGrid/DataGridExternalHost'.");
+        }
+        var app = Regex.Matches(source, @"\bexport\s+const\s+App\b");
+        if (app.Count != 1)
+        {
+            violations.Add($"{AppRootFile}: must declare exactly one `export const App` (found {app.Count}).");
+            return violations;
+        }
+        var tail = source[app[0].Index..];
+        var root = AppRootReturn.Match(tail);
+        if (!root.Success || JsxReturn.Matches(tail).Count != 1)
+        {
+            violations.Add($"{AppRootFile}: App must have ONE JSX return, `return ( <{HostProvider}> … </{HostProvider}> );`, "
+                           + "as the last statement before `export default App;`, so the provider sits above every route.");
+            return violations;
+        }
+        var inner = root.Groups["inner"].Value;
+        if (inner.Contains(HostProvider, StringComparison.Ordinal))
+        {
+            violations.Add($"{AppRootFile}: App's tree holds another {HostProvider} tag. ONE provider element must enclose "
+                           + "the whole tree (a closed provider followed by more JSX would leave that JSX outside it).");
+        }
+        if (BrowserRouterOpen.Matches(source).Count != 1 || BrowserRouterOpen.Matches(inner).Count != 1
+            || !inner.Contains("</BrowserRouter>", StringComparison.Ordinal))
+        {
+            violations.Add($"{AppRootFile}: the app's one <BrowserRouter> must be inside the {HostProvider}, so every "
+                           + "route renders under it.");
+        }
+        return violations;
+    }
+
+    private static readonly Regex RouterModule = new(@"^react-router(?:-dom)?(?:/|$)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Keeps every OTHER router out of the external SPA, so every route is under the root provider: an import or
+    /// re-export from <c>react-router</c> / <c>react-router-dom</c> may not bind a router (any name containing
+    /// <c>Router</c>, e.g. <c>MemoryRouter</c>, <c>RouterProvider</c>, <c>createBrowserRouter</c>), except
+    /// <c>BrowserRouter</c>, unaliased, in <see cref="AppRootFile"/>. Namespace, default and star forms and dynamic
+    /// loads of the router package are refused (they would bind a router under a name this rule cannot read).
+    /// </summary>
+    internal static IReadOnlyList<string> ScanRouterImports(string source, string fileName)
+    {
+        var violations = new List<string>();
+        string Where(int index) => $"{fileName}:{LineOf(source, index)}";
+        foreach (Match statement in AnyStaticImport.Matches(source).Concat(AnyReExport.Matches(source)))
+        {
+            var module = statement.Groups["module"].Value;
+            if (!RouterModule.IsMatch(module))
+            {
+                continue;
+            }
+            var clauseText = statement.Groups["clause"].Value.Trim();
+            if (IsTypeOnlyClause(clauseText))
+            {
+                continue;
+            }
+            var clause = ImportClause.Match(clauseText);
+            if (!clause.Success || clause.Groups["ns"].Success || clause.Groups["default"].Success || clauseText.StartsWith('*'))
+            {
+                violations.Add($"{Where(statement.Index)}: '{clauseText}' from '{module}'. Import from the router package by "
+                               + "plain names only, so no second router can reach the SPA outside the host provider.");
+                continue;
+            }
+            foreach (var raw in clause.Groups["names"].Value.Split(','))
+            {
+                if (string.IsNullOrWhiteSpace(raw) || IsTypeOnlyClause(raw.Trim()))
+                {
+                    continue;
+                }
+                var specifier = ImportSpecifier.Match(raw);
+                if (!specifier.Success)
+                {
+                    violations.Add($"{Where(statement.Index)}: router import '{raw.Trim()}' could not be parsed.");
+                    continue;
+                }
+                var imported = specifier.Groups["imported"].Value;
+                if (!imported.Contains("Router", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                var sanctioned = fileName == AppRootFile && imported == "BrowserRouter" && !specifier.Groups["local"].Success;
+                if (!sanctioned)
+                {
+                    violations.Add($"{Where(statement.Index)}: '{raw.Trim()}' from '{module}'. Only App.tsx may bind a router "
+                                   + $"(BrowserRouter, inside the {HostProvider}); a second router would put routes outside it.");
+                }
+            }
+        }
+        foreach (Match call in DynamicCall.Matches(source))
+        {
+            var arg = DynamicLiteralArgAt.Match(source, call.Index + call.Length);
+            if (arg.Success && RouterModule.IsMatch(arg.Groups["spec"].Value))
+            {
+                violations.Add($"{Where(call.Index)}: dynamic import/require of the router package. Its routers could be "
+                               + "bound under any name; import from it statically by name.");
+            }
+        }
+        return violations;
+    }
+
+    private static readonly Regex DefineBlock = new(@"\bdefine\s*:\s*\{(?<body>[^{}]*)\}", RegexOptions.Compiled);
+
+    private static readonly Regex HostConstantTrue = new(
+        @"(?<![\w$])__SPAARKE_DATAGRID_EXTERNAL_HOST__\s*:\s*(?<q>['""])true\k<q>", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The build switch: <see cref="ViteConfigFile"/> has ONE <c>define: { … }</c> block that maps the host constant to
+    /// <c>'true'</c>, and names the constant nowhere else (a second mention, in a plugin's config hook or a mode
+    /// branch, could redefine it).
+    /// </summary>
+    internal static IReadOnlyList<string> ScanViteConfig(string rawSource)
+    {
+        // A config file, not JSX: comments can be dropped safely here, so a commented-out define does not count.
+        var source = WithoutJsComments(rawSource);
+        var violations = new List<string>();
+        var blocks = DefineBlock.Matches(source);
+        if (blocks.Count != 1 || !HostConstantTrue.IsMatch(blocks[0].Groups["body"].Value))
+        {
+            violations.Add($"{ViteConfigFile}: must have one `define: {{ {HostConstant}: 'true' }}` block. It switches every "
+                           + "copy of the shared DataGrid in the external SPA bundle to the external host (no view picker, no "
+                           + "saved-query list).");
+        }
+        var mentions = Regex.Matches(source, Regex.Escape(HostConstant)).Count;
+        if (mentions != 1)
+        {
+            violations.Add($"{ViteConfigFile}: names {HostConstant} {mentions} times in code. Name it once, in the define "
+                           + "block: another mention (a plugin config hook, a mode branch) could redefine it.");
+        }
+        return violations;
+    }
+
+    /// <summary>
+    /// <paramref name="source"/> with its <c>//</c> and <c>/* */</c> comments blanked (newlines kept) and its string
+    /// literals kept as they are. For a plain config file only: inside JSX children <c>//</c> is text, which is why the
+    /// SPA scan above never strips comments.
+    /// </summary>
+    internal static string WithoutJsComments(string source)
+    {
+        var text = new System.Text.StringBuilder(source.Length);
+        for (var i = 0; i < source.Length; i++)
+        {
+            var c = source[i];
+            if (c is '\'' or '"' or '`')
+            {
+                var j = i + 1;
+                while (j < source.Length && source[j] != c)
+                {
+                    j += source[j] == '\\' ? 2 : 1;
+                }
+                var end = Math.Min(j, source.Length - 1);
+                text.Append(source, i, end - i + 1);
+                i = end;
+                continue;
+            }
+            if (c == '/' && i + 1 < source.Length && source[i + 1] == '/')
+            {
+                while (i < source.Length && source[i] is not ('\n' or '\r') && source[i] != (char)0x2028 && source[i] != (char)0x2029)
+                {
+                    text.Append(' ');
+                    i++;
+                }
+                if (i < source.Length)
+                {
+                    text.Append(source[i]);
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < source.Length && source[i + 1] == '*')
+            {
+                var close = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                var end = close < 0 ? source.Length : close + 2;
+                for (var k = i; k < end; k++)
+                {
+                    text.Append(source[k] == '\n' ? '\n' : ' ');
+                }
+                i = end - 1;
+                continue;
+            }
+            text.Append(c);
+        }
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// The host module's text, pinned (whitespace-insensitive, like the wrapper): the context defaults to <c>false</c>,
+    /// the provider sets <c>true</c>, the build constant is read through a <c>typeof</c> guard, and the hook ORs them.
+    /// </summary>
+    private const string PinnedHostSource = """
+        /**
+         * DataGridExternalHost — the external-SPA rule of the shared `<DataGrid>` (unified-access-control-r2 task 157,
+         * owner round 4 item 7).
+         *
+         * Inside the external SPA (outside counsel over CIAM, and the Teams tab over workforce SSO) a grid must offer
+         * NO view picker and must never fetch the entity's saved-query list. The picker lists the entity's INTERNAL
+         * MDA views, and the BFF's external column allow-lists (ExternalAccessModule.cs) admit only each grid's own
+         * configured columns, so a sibling view either errors or creates pressure to widen those lists. The rule lives
+         * HERE, inside the shared grid, so it holds by construction: no prop, wrapper, clone, spread or import path
+         * that reaches the grid can turn the picker back on. `DataGrid` reads {@link useDataGridExternalHost} and, when
+         * it is true, ignores `showViewSelector`, `externalViews` and any picked view, and never calls
+         * `retrieveSavedQueriesForEntity`.
+         *
+         * Two independent switches, either one is enough:
+         *   1. {@link DataGridExternalHostProvider} — a React context the external SPA's root component mounts above
+         *      every route (`src/client/external-spa/src/App.tsx`).
+         *   2. A build-time constant, `__SPAARKE_DATAGRID_EXTERNAL_HOST__`, that the external SPA's `vite.config.ts`
+         *      defines as `true`. Vite replaces it in every module it bundles, this one included, so every copy of the
+         *      grid in that bundle is external whatever tree, root or module instance renders it.
+         *
+         * Both default to OFF. No other host mounts the provider or defines the constant, so no other host changes
+         * behaviour: internal surfaces keep the picker.
+         *
+         * ExternalSpaGridViewSelectorGuardTests (tests/Spaarke.ArchTests) asserts the provider mount and the define.
+         */
+        import * as React from 'react';
+
+        /**
+         * Defined as `true` by the external SPA's Vite build (`define`). In every other host it is never defined, so
+         * the `typeof` guard below reads it as off without a ReferenceError.
+         */
+        declare const __SPAARKE_DATAGRID_EXTERNAL_HOST__: boolean | undefined;
+
+        const DataGridExternalHostContext = React.createContext<boolean>(false);
+
+        /** True when this bundle was built by the external SPA (its `vite.config.ts` defines the constant). */
+        export function isDataGridExternalHostBuild(): boolean {
+          return typeof __SPAARKE_DATAGRID_EXTERNAL_HOST__ !== 'undefined' && __SPAARKE_DATAGRID_EXTERNAL_HOST__ === true;
+        }
+
+        /** Props for {@link DataGridExternalHostProvider}. */
+        export interface DataGridExternalHostProviderProps {
+          children?: React.ReactNode;
+        }
+
+        /**
+         * Marks everything below it as the external SPA: every `<DataGrid>` in the subtree renders with no view picker
+         * and never requests the saved-query list. Mount it once, at the external SPA's root, above every route.
+         */
+        export const DataGridExternalHostProvider: React.FC<DataGridExternalHostProviderProps> = ({ children }) => (
+          <DataGridExternalHostContext.Provider value={true}>{children}</DataGridExternalHostContext.Provider>
+        );
+
+        /** True when the calling grid renders inside the external SPA (the provider above it, or the external build). */
+        export function useDataGridExternalHost(): boolean {
+          const insideProvider = React.useContext(DataGridExternalHostContext);
+          return insideProvider || isDataGridExternalHostBuild();
+        }
+        """;
+
+    /// <summary>
+    /// The statements of <see cref="SharedGridFile"/> that apply the rule (compared whitespace-insensitively). Each one is
+    /// what the jest suite DataGrid.externalHost.test.tsx exercises; the counts below keep a second path from appearing
+    /// beside them.
+    /// </summary>
+    private static readonly string[] RequiredGridStatements =
+    [
+        "import { useDataGridExternalHost } from './DataGridExternalHost';",
+        "showViewSelector: showViewSelectorProp = true,",
+        "const externalHost = useDataGridExternalHost();",
+        "const showViewSelector = !externalHost && showViewSelectorProp;",
+        "if (externalHost && configRecord?.source?.type === 'savedquery-set') {",
+        "const pickedViewId = externalHost ? undefined : activeSavedQueryId;",
+        "showViewSelector ? dataverseClient.retrieveSavedQueriesForEntity(entityName)",
+        "{showViewSelector && externalViews && externalViews.views.length > 0 ? (",
+        ": showViewSelector && selectorViews.length > 0 ? (",
+    ];
+
+    /// <summary>
+    /// The runtime rule's text in the shared library: the host module verbatim, the grid's statements present, and
+    /// exactly as many uses of the raw prop, the list call, the picker element and the hook as the rule needs.
+    /// </summary>
+    internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource)
+    {
+        var violations = new List<string>();
+        if (Squash(hostSource) != Squash(PinnedHostSource))
+        {
+            violations.Add($"{HostModuleFile} changed. It is the external-host switch every shared DataGrid reads (context "
+                           + "default false, provider true, the build constant behind a typeof guard, OR'd by the hook). If the "
+                           + "change is deliberate and keeps that, update PinnedHostSource in the same change.");
+        }
+        var squashedGrid = Squash(gridSource);
+        foreach (var statement in RequiredGridStatements)
+        {
+            if (!squashedGrid.Contains(Squash(statement), StringComparison.Ordinal))
+            {
+                violations.Add($"{SharedGridFile}: missing `{statement}`. It is part of the external-host rule (no picker, "
+                               + "no saved-query list on the external SPA).");
+            }
+        }
+        void ExpectCount(string pattern, int expected, string what)
+        {
+            var count = Regex.Matches(gridSource, pattern).Count;
+            if (count != expected)
+            {
+                violations.Add($"{SharedGridFile}: {what} occurs {count} times, expected {expected}. Another use could bypass "
+                               + "the external-host rule; route it through the pinned statements.");
+            }
+        }
+        ExpectCount(@"(?<![\w$])showViewSelectorProp(?![\w$])", 2, "the raw showViewSelector prop (showViewSelectorProp)");
+        ExpectCount(@"(?<![\w$])retrieveSavedQueriesForEntity\s*\(", 2, "a retrieveSavedQueriesForEntity( call");
+        ExpectCount(@"<\s*ViewSelector(?![\w$])", 2, "a <ViewSelector element");
+        ExpectCount(@"(?<![\w$])useDataGridExternalHost(?![\w$])", 2, "useDataGridExternalHost");
+        ExpectCount(@"(?<![\w$])props\s*(?:\??\.|\[)", 0, "a direct props member access (props.x / props[...])");
+        ExpectCount(@"retrieveSavedQuery\s*\(\s*activeSavedQueryId", 0, "retrieveSavedQuery(activeSavedQueryId");
+        return violations;
+    }
+
+    [Fact(DisplayName = "The external SPA's root component mounts DataGridExternalHostProvider above every route")]
+    public void ExternalSpa_RootMountsTheExternalHostProviderAboveEveryRoute()
+    {
+        var path = Path.Combine(SourceScan.RepoRoot, AppRootFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(path), $"the external SPA's root component must exist at {AppRootFile}");
+
+        var violations = new List<string>(ScanAppRoot(File.ReadAllText(path)));
+        foreach (var file in ScriptFilesUnder(ExternalSpaSource))
+        {
+            violations.AddRange(ScanRouterImports(File.ReadAllText(file), RepoRelative(file)));
+        }
+
+        Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact(DisplayName = "The external SPA's Vite build defines __SPAARKE_DATAGRID_EXTERNAL_HOST__ as true")]
+    public void ExternalSpa_ViteBuildDefinesTheExternalHostConstant()
+    {
+        var path = Path.Combine(SourceScan.RepoRoot, ViteConfigFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(path), $"the external SPA's build configuration must exist at {ViteConfigFile}");
+
+        var violations = ScanViteConfig(File.ReadAllText(path));
+
+        Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact(DisplayName = "The shared DataGrid applies the external-host rule (pinned host module and grid statements)")]
+    public void SharedDataGrid_EnforcesTheExternalHostRule()
+    {
+        var grid = Path.Combine(SourceScan.RepoRoot, SharedGridFile.Replace('/', Path.DirectorySeparatorChar));
+        var host = Path.Combine(SourceScan.RepoRoot, HostModuleFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(grid), $"the shared grid must exist at {SharedGridFile}");
+        Assert.True(File.Exists(host), $"the host module must exist at {HostModuleFile}");
+
+        var violations = ScanSharedGridRule(File.ReadAllText(grid), File.ReadAllText(host));
+
+        Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+    }
+
     [Fact(DisplayName = "No external-SPA file reaches the shared DataGrid except ExternalDataGrid.tsx, whose mount passes showViewSelector={false}")]
     public void ExternalSpa_EverySpaarkeDataGridMount_TurnsTheViewSelectorOff()
     {
@@ -1131,8 +1676,11 @@ public class ExternalSpaGridViewSelectorGuardTests
         foreach (var file in ScriptFilesUnder(ExternalSpaSource))
         {
             var relative = RepoRelative(file);
-            var result = Scan(File.ReadAllText(file), relative);
+            var source = File.ReadAllText(file);
+            var result = Scan(source, relative);
             violations.AddRange(result.Violations);
+            // Round 7 (V7): every import must land on a file these scans read.
+            violations.AddRange(UnscannedImportTargets(source, relative, ScannedFiles.Value, File.Exists, Directory.Exists));
             if (result.CompliantMounts > 0)
             {
                 compliantByFile[relative] = result.CompliantMounts;
@@ -1145,6 +1693,12 @@ public class ExternalSpaGridViewSelectorGuardTests
 
         // Round 6 (R5): the loop above skips node_modules, so none may exist inside the scanned source.
         violations.AddRange(NodeModulesFoldersUnder(ExternalSpaSource));
+
+        // Round 7 (fix round c1): no browser-field remap in either manifest the SPA build reads.
+        violations.AddRange(ScanPackageManifest(File.ReadAllText(Path.Combine(ExternalSpaRoot, "package.json")),
+            "src/client/external-spa/package.json"));
+        violations.AddRange(ScanPackageManifest(File.ReadAllText(Path.Combine(SharedLibraryRoot, "package.json")),
+            "src/client/shared/Spaarke.UI.Components/package.json"));
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
         // Not vacuous: the wrapper was found, scanned, and holds exactly the one sanctioned mount.
@@ -1346,12 +1900,18 @@ public class ExternalSpaGridViewSelectorGuardTests
         foreach (var file in ScriptFilesUnder(SharedLibrarySource))
         {
             var relative = RepoRelative(file);
-            if (IsSharedLibraryTestFile(relative)
-                || relative.EndsWith("/components/DataGrid/DataGrid.tsx", StringComparison.Ordinal))
+            if (IsSharedLibraryTestFile(relative))
             {
-                continue; // tests are not bundled; DataGrid.tsx is the grid itself
+                continue; // tests are not bundled
             }
             var source = File.ReadAllText(file);
+            // Round 7 (V7, fix round c1): every import of a shipped file, the grid's own included, must land on a file
+            // these scans read.
+            unexpected.AddRange(UnscannedImportTargets(source, relative, ScannedFiles.Value, File.Exists, Directory.Exists));
+            if (relative.EndsWith("/components/DataGrid/DataGrid.tsx", StringComparison.Ordinal))
+            {
+                continue; // DataGrid.tsx is the grid itself (its rule is pinned by SharedDataGrid_EnforcesTheExternalHostRule)
+            }
             unexpected.AddRange(SharedEscapes(source, relative)); // round 5: always reported
             var hits = SharedFanIn(source, relative);
             if (hits.Count == 0)
@@ -1857,5 +2417,263 @@ public class ExternalSpaGridViewSelectorGuardTests
             "import { Button } from '@fluentui/react-components';\n" +
             "import type { AuthenticatedFetchFn } from '@spaarke/auth';\n" +
             "const pdf = import('pdfjs-dist');", NewWidget));
+    }
+
+    // ── Fix round c1 controls: the runtime rule's switches, its pins, and the round-7 import rule ──
+
+    private const string SanctionedApp =
+        "import * as React from 'react';\n" +
+        "import { BrowserRouter, Routes, Route } from 'react-router-dom';\n" +
+        "import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';\n" +
+        "const AppShell: React.FC = () => <Routes><Route path=\"/\" element={<div />} /></Routes>;\n" +
+        "export const App: React.FC = () => {\n" +
+        "  React.useEffect(() => { const cleanup = () => undefined; return cleanup; }, []);\n" +
+        "  return (\n" +
+        "    <DataGridExternalHostProvider>\n" +
+        "      <FluentProvider theme={theme}>\n" +
+        "        <BrowserRouter>\n" +
+        "          <AppShell />\n" +
+        "        </BrowserRouter>\n" +
+        "      </FluentProvider>\n" +
+        "    </DataGridExternalHostProvider>\n" +
+        "  );\n" +
+        "};\n\n" +
+        "export default App;\n";
+
+    private const string ProviderTree =
+        "    <DataGridExternalHostProvider>\n" +
+        "      <FluentProvider theme={theme}>\n" +
+        "        <BrowserRouter>\n" +
+        "          <AppShell />\n" +
+        "        </BrowserRouter>\n" +
+        "      </FluentProvider>\n" +
+        "    </DataGridExternalHostProvider>\n";
+
+    [Fact(DisplayName = "Control (c1): the sanctioned App root passes")]
+    public void ScanAppRoot_WhenTheProviderEnclosesTheWholeTree_Passes()
+    {
+        Assert.Empty(ScanAppRoot(SanctionedApp));
+    }
+
+    [Theory(DisplayName = "Control (c1): an App root that leaves a route outside the provider is reported")]
+    [InlineData("no-provider", "  return (\n      <FluentProvider theme={theme}>\n        <BrowserRouter>\n          <AppShell />\n        </BrowserRouter>\n      </FluentProvider>\n  );\n")]
+    [InlineData("router-beside-a-closed-provider",
+        "  return (\n    <DataGridExternalHostProvider></DataGridExternalHostProvider> && <BrowserRouter><AppShell /></BrowserRouter> || <DataGridExternalHostProvider></DataGridExternalHostProvider>\n  );\n")]
+    [InlineData("early-return-outside", "  if (window.name) return (<BrowserRouter><AppShell /></BrowserRouter>);\n  return (\n" + ProviderTree + "  );\n")]
+    [InlineData("second-router-in-app", "  const other = <BrowserRouter><AppShell /></BrowserRouter>;\n  return (\n" + ProviderTree + "  );\n")]
+    [InlineData("router-not-inside", "  return (\n    <DataGridExternalHostProvider>\n      <AppShell />\n    </DataGridExternalHostProvider>\n  );\n")]
+    public void ScanAppRoot_WhenARouteCanRenderOutsideTheProvider_ReportsIt(string shape, string body)
+    {
+        var source = SanctionedApp[..SanctionedApp.IndexOf("  return (", StringComparison.Ordinal)] + body + "};\n\nexport default App;\n";
+
+        Assert.True(ScanAppRoot(source).Count > 0, $"{shape}: expected a violation");
+    }
+
+    [Theory(DisplayName = "Control (c1): the provider import and the end of App.tsx are pinned")]
+    [InlineData("import-missing", "import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';\n", "")]
+    [InlineData("import-aliased", "import { DataGridExternalHostProvider } from", "import { DataGridExternalHostProvider as DataGridExternalHostProvider2 } from")]
+    [InlineData("code-after-export-default", "export default App;\n", "export default App;\nrenderElsewhere(<AppShell />);\n")]
+    [InlineData("second-app", "export const App: React.FC", "export const App = () => null;\nexport const App: React.FC")]
+    public void ScanAppRoot_WhenTheImportOrTheTailChanges_ReportsIt(string shape, string find, string replace)
+    {
+        var source = SanctionedApp.Replace(find, replace, StringComparison.Ordinal);
+        Assert.NotEqual(SanctionedApp, source);
+
+        Assert.True(ScanAppRoot(source).Count > 0, $"{shape}: expected a violation");
+    }
+
+    [Theory(DisplayName = "Control (c1): a second router anywhere in the SPA is reported")]
+    [InlineData("memory-router", OtherSpaFile, "import { MemoryRouter } from 'react-router-dom';")]
+    [InlineData("browser-router-elsewhere", OtherSpaFile, "import { BrowserRouter } from 'react-router-dom';")]
+    [InlineData("aliased-in-app", AppRootFile, "import { BrowserRouter as BR } from 'react-router-dom';")]
+    [InlineData("hash-router-in-app", AppRootFile, "import { BrowserRouter, HashRouter } from 'react-router-dom';")]
+    [InlineData("data-router", OtherSpaFile, "import { createBrowserRouter, RouterProvider } from 'react-router-dom';")]
+    [InlineData("namespace", OtherSpaFile, "import * as RR from 'react-router-dom';")]
+    [InlineData("default", OtherSpaFile, "import RR from 'react-router';")]
+    [InlineData("star-reexport", OtherSpaFile, "export * from 'react-router-dom';")]
+    [InlineData("named-reexport", OtherSpaFile, "export { MemoryRouter as M } from 'react-router-dom';")]
+    [InlineData("server-subpath", OtherSpaFile, "import { StaticRouter } from 'react-router-dom/server';")]
+    [InlineData("dynamic", OtherSpaFile, "const rr = import('react-router-dom');")]
+    public void ScanRouterImports_WhenASecondRouterIsBound_ReportsIt(string shape, string fileName, string source)
+    {
+        Assert.True(ScanRouterImports(source, fileName).Count > 0, $"{shape}: expected a violation");
+    }
+
+    [Fact(DisplayName = "Control (c1): ordinary router hooks, and BrowserRouter in App.tsx, pass")]
+    public void ScanRouterImports_WhenOnlyHooksAndTheRootRouterAreImported_Passes()
+    {
+        Assert.Empty(ScanRouterImports("import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';", AppRootFile));
+        Assert.Empty(ScanRouterImports(
+            "import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';\n" +
+            "import type { NavigateFunction } from 'react-router-dom';\n" +
+            "import { makeStyles } from '@fluentui/react-components';", OtherSpaFile));
+    }
+
+    private const string SanctionedVite =
+        "export default defineConfig({\n" +
+        "  // the external host constant: see DataGridExternalHost.tsx\n" +
+        "  define: {\n" +
+        "    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n" +
+        "  },\n" +
+        "  plugins: [react({ include: ['src/**/*.tsx', '../shared/Spaarke.UI.Components/src/**/*.ts'] })],\n" +
+        "});\n";
+
+    [Fact(DisplayName = "Control (c1): the sanctioned Vite define passes (other keys and double quotes too)")]
+    public void ScanViteConfig_WhenTheConstantIsDefinedTrueOnce_Passes()
+    {
+        Assert.Empty(ScanViteConfig(SanctionedVite));
+        Assert.Empty(ScanViteConfig(SanctionedVite.Replace(
+            "__SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',", "__APP_VERSION__: '\"1.0\"', __SPAARKE_DATAGRID_EXTERNAL_HOST__: \"true\"", StringComparison.Ordinal)));
+    }
+
+    [Theory(DisplayName = "Control (c1): a Vite config that does not switch the external host on is reported")]
+    [InlineData("missing", "    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n", "")]
+    [InlineData("false", "'true',", "'false',")]
+    [InlineData("commented-out", "    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n", "    // __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n")]
+    [InlineData("block-commented", "  define: {\n    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n  },\n", "  /* define: {\n    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',\n  }, */\n")]
+    [InlineData("redefined-by-a-plugin", "plugins: [", "plugins: [{ name: 'x', config: () => ({ define: { __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'false' } }) }, ")]
+    [InlineData("misspelt", "__SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true'", "__SPAARKE_DATAGRID_EXTERNAL_HOSTS__: 'true'")]
+    public void ScanViteConfig_WhenTheConstantIsNotDefinedTrueOnce_ReportsIt(string shape, string find, string replace)
+    {
+        var source = SanctionedVite.Replace(find, replace, StringComparison.Ordinal);
+        Assert.NotEqual(SanctionedVite, source);
+
+        Assert.True(ScanViteConfig(source).Count > 0, $"{shape}: expected a violation");
+    }
+
+    // Line endings normalised so the in-memory seeds below match a Windows (CRLF) checkout and a Linux (LF) one alike.
+    private static string RepoFileText(string relative) =>
+        File.ReadAllText(Path.Combine(SourceScan.RepoRoot, relative.Replace('/', Path.DirectorySeparatorChar)))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    public static TheoryData<string, string, string> SharedGridRuleBreaks => new()
+    {
+        { "picker-ignores-host", "const showViewSelector = !externalHost && showViewSelectorProp;", "const showViewSelector = showViewSelectorProp;" },
+        { "sibling-fetch-ungated", "showViewSelector\n            ? dataverseClient.retrieveSavedQueriesForEntity(entityName)", "true\n            ? dataverseClient.retrieveSavedQueriesForEntity(entityName)" },
+        { "savedquery-set-allowed", "if (externalHost && configRecord?.source?.type === 'savedquery-set') {", "if (false && configRecord?.source?.type === 'savedquery-set') {" },
+        { "picked-view-honoured", "const pickedViewId = externalHost ? undefined : activeSavedQueryId;", "const pickedViewId = activeSavedQueryId;" },
+        { "hook-not-called", "const externalHost = useDataGridExternalHost();", "const externalHost = false;" },
+        { "raw-prop-read-again", "    externalViews,\n    className,\n  } = props;", "    externalViews,\n    className,\n  } = props;\n  const rawPicker = props.showViewSelector;" },
+        { "third-picker", "            ) : (\n              <span aria-hidden=\"true\" />", "            ) : (\n              <ViewSelector views={[]} activeViewId=\"\" onViewChange={() => undefined} />" },
+        { "third-list-call", "const entityName =", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n        const entityName =" },
+    };
+
+    [Theory(DisplayName = "Control (c1): each break of the shared grid's external-host rule is reported")]
+    [MemberData(nameof(SharedGridRuleBreaks))]
+    public void ScanSharedGridRule_WhenTheGridStopsApplyingTheRule_ReportsIt(string shape, string find, string replace)
+    {
+        var grid = RepoFileText(SharedGridFile);
+        var host = RepoFileText(HostModuleFile);
+        Assert.Empty(ScanSharedGridRule(grid, host)); // the real files pass, so the row below is the break
+        var broken = grid.Replace(find, replace, StringComparison.Ordinal);
+        Assert.True(broken != grid, $"{shape}: the seed text was not found in {SharedGridFile}");
+
+        Assert.True(ScanSharedGridRule(broken, host).Count > 0, $"{shape}: expected a violation");
+    }
+
+    [Theory(DisplayName = "Control (c1): each break of the host module is reported")]
+    [InlineData("context-check-dropped", "return insideProvider || isDataGridExternalHostBuild();", "return isDataGridExternalHostBuild();")]
+    [InlineData("build-check-dropped", "return insideProvider || isDataGridExternalHostBuild();", "return insideProvider;")]
+    [InlineData("context-default-on-elsewhere", "React.createContext<boolean>(false)", "React.createContext<boolean>(true)")]
+    [InlineData("provider-sets-false", "<DataGridExternalHostContext.Provider value={true}>", "<DataGridExternalHostContext.Provider value={false}>")]
+    public void ScanSharedGridRule_WhenTheHostModuleChanges_ReportsIt(string shape, string find, string replace)
+    {
+        var grid = RepoFileText(SharedGridFile);
+        var host = RepoFileText(HostModuleFile);
+        var broken = host.Replace(find, replace, StringComparison.Ordinal);
+        Assert.True(broken != host, $"{shape}: the seed text was not found in {HostModuleFile}");
+
+        Assert.True(ScanSharedGridRule(grid, broken).Count > 0, $"{shape}: expected a violation");
+    }
+
+    /// <summary>A virtual file tree for the round-7 controls (repo-relative paths): files, the directories above them, and the scanned subset.</summary>
+    private static (Func<string, bool> FileExists, Func<string, bool> DirectoryExists, IReadOnlySet<string> Scanned) VirtualTree(
+        string files, string scanned)
+    {
+        static string Full(string relative) => Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+        var fileSet = files.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(Full).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in fileSet)
+        {
+            for (var dir = Path.GetDirectoryName(file); !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
+            {
+                directories.Add(dir);
+            }
+        }
+        var scannedSet = scanned.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(Full).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (path => fileSet.Contains(Path.GetFullPath(path)), path => directories.Contains(Path.GetFullPath(path)), scannedSet);
+    }
+
+    private const string Widgets = "src/client/external-spa/src/widgets/";
+    private const string SpaSrc = "src/client/external-spa/src/";
+    private const string LibSrc = "src/client/shared/Spaarke.UI.Components/src/";
+
+    [Theory(DisplayName = "Control (c1, round 7 / V7): an import that lands on a file the scans do not read is reported")]
+    [InlineData("V7-no-extension", "import './carrier';", Widgets + "carrier", "", "do not read")]
+    [InlineData("V7b-other-extension", "import { G } from './carrier.txt';", Widgets + "carrier.txt", "", "do not read")]
+    [InlineData("V7c-exact-file-beats-ts", "import { G } from './carrier';", Widgets + "carrier;" + Widgets + "carrier.ts", Widgets + "carrier.ts", "do not read")]
+    [InlineData("V7d-json-by-extension-search", "import data from './carrier';", Widgets + "carrier.json", "", "do not read")]
+    [InlineData("V7e-dynamic", "const m = import('./carrier.mdx');", Widgets + "carrier.mdx", "", "do not read")]
+    [InlineData("V7f-require", "const m = require('./carrier.cjs.txt');", Widgets + "carrier.cjs.txt", "", "do not read")]
+    [InlineData("V7g-at-alias", "import '@/zz/carrier.html';", SpaSrc + "zz/carrier.html", "", "do not read")]
+    [InlineData("V7h-library-alias", "import { G } from '@spaarke/ui-components/components/Zz/carrier.vue';", LibSrc + "components/Zz/carrier.vue", "", "do not read")]
+    [InlineData("V7i-library-test-path", "import { G } from '@spaarke/ui-components/components/X/X.test';", LibSrc + "components/X/X.test.ts", "", "do not read")]
+    [InlineData("V7j-src-node-modules", "import '../node_modules/zzc';", SpaSrc + "node_modules/zzc/index.ts", "", "do not read")]
+    [InlineData("V7k-package-json-directory", "import { G } from './pkgdir';", Widgets + "pkgdir/package.json;" + Widgets + "pkgdir/index.ts", Widgets + "pkgdir/index.ts", "package.json")]
+    [InlineData("V7n-escape", "import { G } from './car\\u0072ier';", Widgets + "carrier.ts", Widgets + "carrier.ts", "holds an escape")]
+    [InlineData("V7o-query-on-an-unscanned-file", "import raw from './carrier.txt?raw';", Widgets + "carrier.txt", "", "do not read")]
+    public void UnscannedImportTargets_WhenAnImportLandsOnAFileTheScansDoNotRead_ReportsIt(
+        string shape, string source, string files, string scanned, string expected)
+    {
+        var (fileExists, directoryExists, scannedSet) = VirtualTree(files, scanned);
+
+        var found = UnscannedImportTargets(source, OtherSpaFile, scannedSet, fileExists, directoryExists);
+
+        Assert.True(found.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, found)}");
+    }
+
+    [Fact(DisplayName = "Control (c1, round 7): imports that land on scanned files pass — extensionless, index, @/, the library alias, dynamic, bare; and a specifier with nothing to load")]
+    public void UnscannedImportTargets_WhenEveryImportLandsOnAScannedFile_Passes()
+    {
+        const string Scanned =
+            Widgets + "Ok.tsx;" + Widgets + "dir/index.ts;" + LibSrc + "utils/themeStorage.ts;" + SpaSrc + "pages/Page.tsx;" +
+            SpaSrc + "config.ts;" + Widgets + "Both.mjs;" + Widgets + "Both.ts";
+        var (fileExists, directoryExists, scannedSet) = VirtualTree(Scanned + ";" + Widgets + "emptydir/readme.md", Scanned);
+        const string Source =
+            "import { A } from './Ok';\n" +
+            "import './dir';\n" +
+            "import * as React from 'react';\n" +
+            "import { t } from '@spaarke/ui-components/utils/themeStorage';\n" +
+            "import { c } from '@/config';\n" +
+            "import { b } from './Both';\n" +
+            "const L = () => import('../pages/Page');\n" +
+            // Nothing to load: a real import of these fails the build, and the library's JSDoc examples quote such paths.
+            " *   import { CreateEventWizard } from './components/CreateEventWizard';\n" +
+            "import './emptydir';";
+
+        Assert.Empty(UnscannedImportTargets(Source, OtherSpaFile, scannedSet, fileExists, directoryExists));
+    }
+
+    [Fact(DisplayName = "Control (c1, round 7): a browser field in a package.json is reported; a manifest without one passes")]
+    public void ScanPackageManifest_ReportsABrowserFieldOnly()
+    {
+        Assert.Single(ScanPackageManifest("{ \"name\": \"x\", \"browser\": { \"./src/a.ts\": \"./carrier.txt\" } }", "package.json"));
+        Assert.Single(ScanPackageManifest("{ \"name\": \"x\", \"browser\": \"./carrier.txt\" }", "package.json"));
+        Assert.Empty(ScanPackageManifest("{ \"name\": \"x\", \"main\": \"dist/index.js\", \"sideEffects\": false }", "package.json"));
+    }
+
+    [Fact(DisplayName = "Control (c1, round 7): ViteResolvedFile follows Vite's order — exact file, extensions in order, then index")]
+    public void ViteResolvedFile_FollowsVitesResolutionOrder()
+    {
+        var (fileExists, directoryExists, _) = VirtualTree(
+            Widgets + "x;" + Widgets + "x.ts;" + Widgets + "y.mjs;" + Widgets + "y.ts;" + Widgets + "z/index.tsx", "");
+        string Full(string relative) => Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+
+        Assert.Equal(Full(Widgets + "x"), ViteResolvedFile(Full(Widgets + "x"), fileExists, directoryExists, out _));
+        Assert.Equal(Full(Widgets + "y.mjs"), ViteResolvedFile(Full(Widgets + "y"), fileExists, directoryExists, out _));
+        Assert.Equal(Full(Widgets + "z/index.tsx"), ViteResolvedFile(Full(Widgets + "z"), fileExists, directoryExists, out _));
+        Assert.Null(ViteResolvedFile(Full(Widgets + "none"), fileExists, directoryExists, out var why));
+        Assert.Equal(string.Empty, why); // nothing to load is not a refusal
     }
 }
