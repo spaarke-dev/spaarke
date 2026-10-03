@@ -74,6 +74,13 @@
     <criterion testable="false">ISS-002 in `notes/defer-issues.md` is updated with the verdict and either closed or given an explicit next owner.</criterion>
   </acceptance-criteria>
 
+  <steps mode="directional">
+    <!-- Added 2026-10-02 by task 079 (record integrity) so this file validates. The task was authored WITHOUT a
+         steps element and was executed against its goal, constraints and acceptance criteria, which remain the
+         record of what was asked. This element is not a claim about how the work was done; see notes. -->
+    <step>Work to the goal, constraints and acceptance criteria above. (Authored without steps; see the notes for what was done.)</step>
+  </steps>
+
   <outputs>
     <output type="doc">projects/spaarkeai-word-add-in-r1/notes/044-false-green-diagnosis.md</output>
   </outputs>

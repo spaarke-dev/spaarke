@@ -4,7 +4,8 @@
     <title>A typed-name Email/Attachment save still overwrites on collision — the half of the 2026-09-15 owner decision task 025 could not carry</title>
     <phase>2 Save flow</phase>
     <gate>025 merged — its refuse-before-upload mechanism and its `OFFICE_020` contract are what this extends</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by 6f29ef236 (docs: close 052, 054 and 037). -->
     <rigor>FULL</rigor>
     <rigor-reason>Changes the BFF save spine for immutable content types, where the failure mode is one document's file being overwritten by another. Tags include bff-api and data-integrity.</rigor-reason>
     <model-tier>opus</model-tier>

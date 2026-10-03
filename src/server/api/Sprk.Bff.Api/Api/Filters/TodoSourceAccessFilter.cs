@@ -115,9 +115,10 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
     /// </summary>
     /// <remarks>
     /// That table does double duty: besides naming an entity's collection it is also
-    /// <see cref="EntityAccessFilter"/>'s ALLOW-LIST of legal <c>/office/save</c> association targets (its
-    /// own remarks refuse <c>sprk_todo</c> on exactly that ground — no <c>sprk_document</c> lookup column
-    /// exists for it). Adding <c>sprk_document</c> / <c>sprk_communication</c> there to serve this route
+    /// <see cref="EntityAccessFilter"/>'s ALLOW-LIST of legal <c>/office/save</c> association targets: each
+    /// entry is a type a document may be filed against, kept in lockstep with <c>DocumentAssociationMap</c>
+    /// (see the note beside its <c>sprk_todo</c> entry, added 2026-09-04 once <c>sprk_relatedtodo</c> was
+    /// found). Adding <c>sprk_document</c> / <c>sprk_communication</c> there to serve this route
     /// would silently widen which types a document may be filed against on a different route. Two entries
     /// consulted only after the shared table misses is the smaller cost; the shared table is still asked
     /// first, so the three regarding types this route shares with <c>/office/save</c> are resolved in

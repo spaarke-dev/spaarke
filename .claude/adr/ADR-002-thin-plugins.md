@@ -1,8 +1,8 @@
 # ADR-002: Dataverse Plugins Are Not an Execution Runtime (Concise)
 
-> **Status**: Accepted (reviewed + clarified 2026-09-25)
+> **Status**: Accepted (reviewed + clarified 2026-09-25; WP-1 amended 2026-10-03)
 > **Domain**: Dataverse Extensibility
-> **Last Updated**: 2026-09-25
+> **Last Updated**: 2026-10-03
 
 ---
 
@@ -20,7 +20,7 @@ All business logic, orchestration, integrations, AI processing, **and record inv
 
 A **write-path invariant** = a rule that must always be true about a record when it is saved (stamp, default, isolation, derived field).
 
-- **WP-1** — Each invariant has **exactly one owner**: a BFF server-side write-path component, listed in the invariant registry.
+- **WP-1** — Each invariant has **exactly one owner**, listed in the invariant registry: a **BFF server-side write-path component**, or a **platform-native declarative mechanism** meeting ALL of (a) Dataverse metadata, no Spaarke code runs (autonumber format, alternate key); (b) applied by the platform on **every** create/update, whoever writes; (c) a scripted per-environment `-Verify` named in the registry row. Plugins, low-code plugins, flows, webhooks, business rules and client code **never** own an invariant. *(Amended 2026-10-03, task 087.)*
 - **WP-2** — Client code **MAY preview**, **MUST NOT be the only enforcement**.
 - **WP-3** — Tables with a **registered invariant** are created/updated **via BFF endpoints** (code pages, Office add-ins, sanctioned import, integrations). `Xrm.WebApi` direct writes stay OK for tables with no registered invariant.
 - **WP-4** — Security and "user sees it on load" invariants apply **inline, same request** (not via a queue); multi-row effects in one Dataverse transaction (`$batch` changeset / `ExecuteTransaction`).
@@ -45,7 +45,10 @@ A **write-path invariant** = a rule that must always be true about a record when
 
 - Service endpoint / webhook **step registrations (no code)** as async change signals for WP-5 (HMAC/SAS per ADR-028; idempotent receiver)
 - Plugin-less Custom APIs (business-event contracts only)
-- Alternate keys (uniqueness), simple formula/rollup columns, entity-scope business rules
+- Alternate keys (uniqueness) — may own a uniqueness invariant under WP-1 (a)–(c)
+- **Autonumber columns** (`AutoNumberFormat`) — may own an invariant under WP-1 (a)–(c); the seed is per environment and not carried by a solution import, so the `-Verify` (c) is mandatory
+- Formula/rollup columns — computed on read: not a stored invariant, no registry owner
+- Entity-scope business rules — defaults/UX only; **never** an invariant owner
 - Native Dataverse security (BU/teams/ownership/sharing/column security)
 
 ---
@@ -63,7 +66,7 @@ If reopened: one plugin **package**, `net48`, unsigned, in `Spaarke.sln` + CI; ~
 
 | Concern | Mechanism |
 |---------|-----------|
-| Record invariants | BFF server-side write path (WP-1…WP-4) |
+| Record invariants | BFF server-side write path (WP-1…WP-4); a platform-native declarative mechanism only under WP-1 (a)–(c) |
 | Non-product writes | Async fix-up + reconciliation, fail-closed (WP-5/6) |
 | Business logic / orchestration | BFF endpoints + async workers |
 | Long-running work | Job contracts + queues (ADR-004); where it RUNS is decided per workload under ADR-052 |

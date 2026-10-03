@@ -7,6 +7,11 @@ import {
   MessageBarBody,
   makeStyles,
   tokens,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
 } from '@fluentui/react-components';
 import { MailRegular } from '@fluentui/react-icons';
 import { authService } from '@shared/services';
@@ -38,7 +43,13 @@ import {
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
 } from './services/documentIdentityService';
-import { prepareSendEmail } from './services/sendEmailService';
+import {
+  prepareSendEmail,
+  prepareWordSendEmailChoice,
+  resolveSendEmailAffordance,
+  type SendEmailRelatedRecordInput,
+} from './services/sendEmailService';
+import { openUrlInBrowserWindow } from './services/openRecordLauncher';
 import { cleanGuid } from './utils/cleanGuid';
 
 /**
@@ -50,6 +61,29 @@ import { cleanGuid } from './utils/cleanGuid';
 function toFriendlyRegardingType(entity: string): string {
   const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
   return map[entity] ?? entity;
+}
+
+/**
+ * Builds the `relatedRecord` half of a Send Email request from `savedContext` — shared by the
+ * Outlook-native path (`handleSendEmail`, task 036) and the Word choice (`handleSendEmailChoice`,
+ * task 086) so the label-building rule (`regardingEntity`'s FRIENDLY type, e.g. "Matter", over the
+ * Dataverse logical name) has exactly one definition.
+ */
+function buildSendEmailRelatedRecordInput(
+  savedContext: AppSavedContext | undefined
+): SendEmailRelatedRecordInput | null {
+  return savedContext?.relatedRecord
+    ? {
+        entityType: savedContext.relatedRecord.entityType,
+        id: savedContext.relatedRecord.id,
+        // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
+        // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved below) —
+        // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
+        typeLabel: savedContext.regardingEntity ?? null,
+        displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
+        number: savedContext.relatedRecord.number ?? null,
+      }
+    : null;
 }
 
 /**
@@ -449,10 +483,11 @@ export const App: React.FC<AppProps> = ({
     [savedContext, apiBaseUrl]
   );
 
-  // Send Email via Outlook (task 036 / FR-15). Capability-gated on `hostAdapter.getCapabilities().canComposeEmail`
-  // below (NFR-10) — never a `hostType` conditional. `Office.context.mailbox` does not exist in Word, so
-  // WordAdapter always reports the capability absent and this affordance never renders there; the deferred
-  // Spaarke-modal variant (design.md §4.2) is out of scope — this opens the HOST's own compose window only.
+  // Send Email (task 036 / FR-15, amended 2026-10-02 by task 086). Capability-gated (NFR-10, never a
+  // `hostType` conditional) via `resolveSendEmailAffordance` — see `sendEmailAffordance` below.
+  // `Office.context.mailbox` does not exist in Word, so `canComposeEmail` is always false there:
+  // Outlook gets the single native-compose button (unchanged); Word gets the two-choice menu
+  // (`handleSendEmailChoice`) when it can open a browser tab.
   const [sendEmailStatus, setSendEmailStatus] = useState<'idle' | 'sending'>('idle');
   const [sendEmailError, setSendEmailError] = useState<string | null>(null);
   const { announce: announceSendEmail, liveRegion: sendEmailLiveRegion } = useAnnounce();
@@ -464,18 +499,7 @@ export const App: React.FC<AppProps> = ({
       const subject = await hostAdapter.getSubject();
       const result = await prepareSendEmail({
         document: savedContext?.documentId ? { documentId: savedContext.documentId } : null,
-        relatedRecord: savedContext?.relatedRecord
-          ? {
-              entityType: savedContext.relatedRecord.entityType,
-              id: savedContext.relatedRecord.id,
-              // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
-              // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved above) —
-              // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
-              typeLabel: savedContext.regardingEntity ?? null,
-              displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
-              number: savedContext.relatedRecord.number ?? null,
-            }
-          : null,
+        relatedRecord: buildSendEmailRelatedRecordInput(savedContext),
         subject,
         orgUrl: process.env.ORG_URL,
       });
@@ -486,8 +510,8 @@ export const App: React.FC<AppProps> = ({
         return;
       }
       if (result.kind === 'nothing-to-send') {
-        // Defensive only — the affordance is hidden whenever there is nothing to link (see canSendEmail
-        // below), so this should not be reachable from the UI.
+        // Defensive only — the affordance is hidden whenever there is nothing to link (see
+        // canSendEmailAffordance below), so this should not be reachable from the UI.
         return;
       }
 
@@ -510,6 +534,60 @@ export const App: React.FC<AppProps> = ({
       setSendEmailStatus('idle');
     }
   }, [hostAdapter, savedContext, announceSendEmail]);
+
+  // Word's Send Email choice (task 086 / FR-15 amended 2026-10-02, owner sign-off): Word has no native
+  // compose window (`canComposeEmail` always false there), so it offers TWO browser-tab destinations
+  // instead — opened via `openRecordLauncher.openUrlInBrowserWindow`, the SAME `OpenBrowserWindowApi`
+  // mechanism task 027 uses, gated on `canOpenBrowserWindow` (NFR-10). Both choices resolve the SAME
+  // links (`prepareWordSendEmailChoice` reuses `prepareSendEmail`'s link-resolution step) — picking one
+  // never mints a document share link or builds a record link a second way.
+  const handleSendEmailChoice = useCallback(
+    async (choice: 'spaarke' | 'outlookWeb') => {
+      setSendEmailStatus('sending');
+      setSendEmailError(null);
+      try {
+        const subject = await hostAdapter.getSubject();
+        const result = await prepareWordSendEmailChoice({
+          document: savedContext?.documentId ? { documentId: savedContext.documentId } : null,
+          relatedRecord: buildSendEmailRelatedRecordInput(savedContext),
+          subject,
+          orgUrl: process.env.ORG_URL,
+        });
+
+        if (result.kind === 'error') {
+          setSendEmailError(result.message);
+          announceSendEmail(result.message, 'assertive');
+          return;
+        }
+        if (result.kind === 'nothing-to-send') {
+          // Defensive only — the affordance is hidden whenever there is nothing to link (see
+          // sendEmailAffordance below), so this should not be reachable from the UI.
+          return;
+        }
+
+        if (choice === 'spaarke') {
+          if (!result.spaarkeUrl) {
+            const message = 'Spaarke email is not available: ORG_URL is not configured.';
+            setSendEmailError(message);
+            announceSendEmail(message, 'assertive');
+            return;
+          }
+          openUrlInBrowserWindow(result.spaarkeUrl);
+          announceSendEmail('Opened the Spaarke email composer with the document and record links.', 'polite');
+        } else {
+          openUrlInBrowserWindow(result.outlookWebUrl);
+          announceSendEmail('Opened Outlook on the web with the document and record links.', 'polite');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not send email.';
+        setSendEmailError(message);
+        announceSendEmail(message, 'assertive');
+      } finally {
+        setSendEmailStatus('idle');
+      }
+    },
+    [hostAdapter, savedContext, announceSendEmail]
+  );
 
   // Settings handler (placeholder)
   const handleSettings = () => {
@@ -547,12 +625,20 @@ export const App: React.FC<AppProps> = ({
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
 
-  // Send Email (task 036 / FR-15, NFR-10): gated on the CAPABILITY, never on `hostType` — WordAdapter
-  // always reports `canComposeEmail: false` because `Office.context.mailbox` does not exist in Word, so
-  // this naturally never renders there without needing to branch on which host is running. Also requires
-  // at least one of a document or a related record to link — with neither, there is nothing to send.
-  const canSendEmail =
-    hostAdapter.getCapabilities().canComposeEmail && Boolean(savedContext?.documentId || savedContext?.relatedRecord);
+  // Send Email (task 036 / FR-15; Word choice added by task 086, amended 2026-10-02): gated on
+  // CAPABILITIES only, never `hostType` (NFR-10) — `resolveSendEmailAffordance` is the single tested
+  // gating decision (`shared/taskpane/services/sendEmailService.ts`). Also requires at least one of a
+  // document or a related record to link — with neither, there is nothing to send, so NEITHER
+  // affordance renders (never rendered-and-disabled).
+  const sendEmailAffordance = resolveSendEmailAffordance(
+    {
+      canComposeEmail: hostAdapter.getCapabilities().canComposeEmail,
+      canOpenBrowserWindow: hostAdapter.getCapabilities().canOpenBrowserWindow,
+    },
+    Boolean(savedContext?.documentId || savedContext?.relatedRecord)
+  );
+  const canSendEmail = sendEmailAffordance === 'outlook-native';
+  const canSendEmailWordChoice = sendEmailAffordance === 'word-choice';
 
   // Task 077: what Find calls the pane's item. From the `canGetSender` CAPABILITY (NFR-10), never
   // `hostType` — an item that has a sender IS an email, so this is the exact semantic, not a proxy.
@@ -645,19 +731,42 @@ export const App: React.FC<AppProps> = ({
         showErrorDetails={showErrorDetails}
         onError={handleError}
       >
-        {/* Send Email via Outlook (task 036 / FR-15) — capability-gated (NFR-10), visible on any tab once
-            there is a document and/or related record to link. */}
-        {canSendEmail && (
+        {/* Send Email — capability-gated (NFR-10), visible on any tab once there is a document and/or
+            related record to link. Outlook (task 036 / FR-15): the single native-compose button,
+            unchanged. Word (task 086, FR-15 amended 2026-10-02): the two-choice menu — Spaarke email or
+            Outlook on the web. `sendEmailAffordance` makes the two mutually exclusive. */}
+        {(canSendEmail || canSendEmailWordChoice) && (
           <div className={styles.sendEmailRow}>
             {sendEmailLiveRegion}
-            <Button
-              appearance="secondary"
-              icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
-              onClick={handleSendEmail}
-              disabled={sendEmailStatus === 'sending'}
-            >
-              Send Email
-            </Button>
+            {canSendEmail && (
+              <Button
+                appearance="secondary"
+                icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
+                onClick={handleSendEmail}
+                disabled={sendEmailStatus === 'sending'}
+              >
+                Send Email
+              </Button>
+            )}
+            {canSendEmailWordChoice && (
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <Button
+                    appearance="secondary"
+                    icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
+                    disabled={sendEmailStatus === 'sending'}
+                  >
+                    Send Email
+                  </Button>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem onClick={() => void handleSendEmailChoice('spaarke')}>Spaarke email</MenuItem>
+                    <MenuItem onClick={() => void handleSendEmailChoice('outlookWeb')}>Outlook on the web</MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            )}
             {sendEmailError && (
               <MessageBar intent="error">
                 <MessageBarBody>{sendEmailError}</MessageBarBody>

@@ -4,7 +4,8 @@
     <title>FR-12: surface collision handling per the Spike-4 outcome</title>
     <phase>2 Save flow</phase>
     <gate>UNBLOCKED 2026-09-17 — Spike-4 (005) is closed, and the owner chose "A + C": this task builds the collision prompt</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by cb6397492 (docs: close 025). -->
     <rigor>FULL</rigor>
     <rigor-reason>Save-path change on the BFF upload spine with a data-loss failure mode (a silent REPLACE overwrites an existing file's bytes); tags include bff-api + save-flow.</rigor-reason>
     <model-tier>sonnet</model-tier>

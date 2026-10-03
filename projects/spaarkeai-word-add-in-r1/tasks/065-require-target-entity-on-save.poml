@@ -4,7 +4,8 @@
     <title>F4 — a save with no TargetEntity bypasses EntityAccessFilter entirely, lands in the shared container, and is then profiled and RAG-indexed</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>escalated — partially shipped; awaiting owner decision (see notes/065-require-target-entity.md §6)</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'escalated — partially shipped; awaiting owner decision (see notes/065-require-target-entity.md §6)' while the index read done. Synced to completed: the escalation was resolved by the owner on 2026-09-30 (1ce8261a4): TargetEntity is never required, criteria 2/8 void, residual ownership gap delivered by 080. -->
     <status-note>
       Executed 2026-09-21. F4 is REPRODUCED and PROVEN (note §2: accepted → tenant-wide container → queued
       for profiling + RAG indexing, with CallerRecordAccessProbe never consulted — verbatim ProcessingJob

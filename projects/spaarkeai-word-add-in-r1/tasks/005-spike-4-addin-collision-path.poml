@@ -157,12 +157,12 @@ Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct fi
     before the finalization job is even queued — the queue never touches conflict behaviour. This
     does not change any existing finding or the §5 recommendation; it sharpens hop 4 of the trace.
 
-    Deviation from `<steps>`: steps were executed out of strict numeric order (built the trace and
+    Deviation from `&lt;steps&gt;`: steps were executed out of strict numeric order (built the trace and
     comparison content in one pass rather than 9 discrete edits) — permitted under `mode="directional"`
     since the goal/acceptance-criteria/constraints bound, not the step sequence. No source file under
     `src/server/**` or `src/client/**` was modified (verified via `git status` before and after — the
     only diff introduced by this task is to the report itself and to TASK-INDEX.md/this POML).
     Step 9.5 quality gates were not run: no `.cs`/`.ts`/`.tsx` file was touched, per STANDARD rigor
-    and the POML's own `<rigor-reason>`.
+    and the POML's own `&lt;rigor-reason&gt;`.
   </notes-completion>
 </task>
