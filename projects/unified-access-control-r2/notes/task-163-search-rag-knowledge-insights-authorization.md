@@ -1,0 +1,376 @@
+# Task 163 — Search / RAG / knowledge / Insights route authorization
+
+> **Task**: `tasks/163-search-rag-knowledge-insights-route-authorization.poml` (GitHub #1102; takes over #1041)
+> **Branch**: `task/uac-r2-163` from `work/unified-access-control-r2` @ `91a1c1c83`
+> **Date**: 2026-10-03 · **Rigor**: FULL · **Model**: Opus 5.5
+> **Sweep findings closed**: #3, #4, #5, #6, #17, #20, #21, #26, #27, #28, #30, #40, #41, #46, #49 (17 route keys)
+
+## 0. Outcome in one paragraph
+
+All 17 route keys are closed. **Nine were DELETED** under the binding owner round 10 item 1 amendment
+(no caller in the repo, in no published API description — evidence §2), **eight were FIXED**: every one now asks
+Dataverse, as the caller, about the exact record it acts on (declaration filter, before the handler), or requires
+the SystemAdmin policy, or trims its result rows to documents the caller can Read. Every index write lands in the
+token's tenant partition. **One escalation trigger fired and is NOT answered** (§3.4): the insights-ask playbook
+`matter-health-single` persists synthesized text to `sprk_matter.sprk_performancesummary`, app-only, and a
+caller-supplied non-identifier parameter (`currentGrade`) reaches its synthesis prompt — so whether **Read** is the
+right right for `/api/insights/ask` is an owner decision. The Read gate is implemented as the floor (every
+possible answer is Read-or-stricter); the rule is not finalized.
+
+## 1. Step 0 — re-verification and read-only findings
+
+### 1.1 Anchors
+All POML anchors re-verified on `91a1c1c83` (line numbers drifted by a few lines; behaviour as the POML states).
+One POML claim was **wrong**: `StructuredOutputStreamWidget.tsx` does not CALL `/api/insights/assistant/query` — it
+only renders that endpoint's output (doc comment at :389). A second: the Create* wizards DO send `documentId`
+(`createdDocumentIds`) to `/index-file`, not only a parent (matterService.ts:394-403, CreateEventWizard.tsx:431-440,
+workAssignmentService.ts:582-591, invoiceService.ts:376).
+
+### 1.2 (a) Caller inventory (src/, scripts/, src/solutions/CopilotAgent, .claude/skills, infrastructure, .github; tests are not callers — task 073 precedent)
+
+| Route | In-repo callers | Published API description? |
+|---|---|---|
+| POST /api/ai/rag/search | scripts/Test-RagSharedModel.ps1, Test-RagDedicatedModel.ps1, scripts/load-tests/k6-ai-load-test.js:217, Run-LoadTest.ps1:87 | no |
+| POST /api/ai/rag/index | Test-RagSharedModel.ps1:235/254, Test-RagDedicatedModel.ps1:181/312 | no |
+| POST /api/ai/rag/index/batch | **none** (docs tables only: RAG-ARCHITECTURE.md, AI-DEPLOYMENT-GUIDE.md) | no |
+| DELETE /api/ai/rag/{documentId} | Test-RagSharedModel.ps1:522, Test-RagDedicatedModel.ps1:233/364 | no |
+| DELETE /api/ai/rag/source/{sourceDocumentId} | **none** (RAG-ARCHITECTURE.md diagram only) | no |
+| POST /api/ai/rag/index-file | uploadOrchestrator.ts:597; SdapClient IndexFileOperation.ts:42 ← EntityCreationService.indexUploadedFiles ← Create Matter/Project/Event/Invoice/WorkAssignment wizards; NextStepsStep.tsx | no |
+| GET /api/ai/knowledge/indexes/{indexName}/documents | **none** (not even in docs) | no |
+| DELETE /api/ai/knowledge/indexes/{indexName}/documents/{documentId} | **none** | no |
+| POST /api/ai/knowledge/indexes/reindex/{documentId} | **none** | no |
+| POST /api/ai/knowledge/test-search | **none** | no |
+| POST /api/admin/knowledge/index-references | **none** (RAG-ARCHITECTURE.md table; the `add-reference-to-index` skill uses scripts/ai-search/*.ps1 direct to AI Search, not the BFF) | no |
+| POST /api/admin/knowledge/index-reference/{knowledgeSourceId} | **none** | no |
+| DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId} | **none** | no |
+| POST /api/insights/ask | src/dataverse/forms/sprk_matter/insightCardMount.ts:262/306, insightWidgetOnLoad.ts:156/289 | no |
+| POST /api/insights/assistant/query | none in code — but it is the subject of the **published cross-workstream contract** `projects/ai-spaarke-insights-engine-r2/design-e3-tool-call-contract.md` v1.1 ("the canonical contract between the BFF and the Spaarke Assistant project … binding for the BFF side") | **yes** |
+| POST /api/insights/search | none in code — published to makers as "the canonical caller path" with request/response shapes in docs/guides/INSIGHTS-ENGINE-GUIDE.md §7 and INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md; cited by the E3 contract | **judgment: treated as published** (§2.3) |
+| POST /api/workspace/ai/summary | scripts/Deploy-WorkspaceBff.ps1:69 — the deploy smoke test FAILS the deploy on 404 ("ENDPOINT MISSING") | no |
+
+Published descriptions searched: `src/solutions/CopilotAgent/spaarke-bff-openapi.yaml` (36 paths, none of the 17),
+`spaarke-api-plugin.json`, `declarativeAgent.json`, every `*openapi*`, `ai-plugin*`, `declarativeAgent*`,
+`manifest.json` tracked in the repo (the `knowledge/` ones are third-party samples).
+
+**ParentEntity types sent to /index-file**: Document Upload Wizard strips `sprk_` from the launch entity (any type the
+record-keyed upload route accepts — the same `EntityAccessFilter` map, so every one resolves); Create wizards send
+`sprk_matter|sprk_project|sprk_event|sprk_invoice|sprk_workassignment`, normalized to the short form by
+EntityCreationService. **All resolve through `EntityAccessFilter.TryResolveEntitySet`** — escalation trigger 6 does not fire.
+
+### 1.3 (b) Task 167
+Not on this branch (`RouteAuthorizationGuardTests` has no OwningTask "163" waiver). Per the amendment: no waiver,
+ledger or GovernedFiles edit. The census WAS bumped 120 → 119 because a whole endpoint file was deleted (the
+amendment's explicit instruction, which overrides the POML body's "do not edit the census").
+
+### 1.4 (c) FinanceAuthorizationFilter generalization
+Answered by the binding amendment ("do NOT rename or move …; reuse it as it is"). **No `RecordAccessAuthorizationFilter`
+was created**; the filter file is untouched. Conflict check found `task/uac-r2-159` edits the same file only to forward
+`UniformRecordNotFound` to `ProblemDetailsHelper` (bytes unchanged) — compatible with every call made here.
+
+### 1.5 (d) insights-ask playbooks and their Dataverse writes
+Seeded bindings (`infra/dataverse/sprk_playbookconsumer-rows.json`): `matter-health-single` is bound twice, both as
+`insights-ask` (default p500, named p400); **predict-matter-cost has no insights-ask binding** in the repo seed.
+
+| Playbook | Node | Type | Writes |
+|---|---|---|---|
+| matter-health-single | `persistEnvelope` | UpdateRecord (actionType 22) | **`sprk_matter.sprk_performancesummary`** on `recordId = {{matterId}}` — the FR-14 envelope built from `groundCitations.output.{body,citations,dimensions}`, `{{tenantId}}`, run timestamp |
+| matter-health-single | queryMatterContext / queryKpiAssessments / retrieveObservations / … | LiveFact / QueryDataverse / IndexRetrieve / Agent / Control / Output | reads only |
+| predict-matter-cost | all nodes (AIAnalysis / Control / Output) | — | **no Dataverse write** |
+
+The whole run is app-only (`InsightsPlaybookExecutionCache` → `PlaybookOrchestrationService.ExecuteAppOnlyAsync`).
+**→ escalation trigger 3 FIRES** (§3.4).
+
+### 1.6 (e) Delegated scopes containing "admin"; customer principals holding Admin
+Read-only `az ad app show --id 1e40baad-…`: scopes `access_as_user`, `access_as_external_user`, `SDAP.Access`,
+`user_impersonation` — **none contains "admin"**. But: `signInAudience = AzureADMultipleOrgs`, and the app defines one
+app role, **`Admin` (allowedMemberTypes User, enabled)**, which satisfies the SystemAdmin policy. The workforce scheme
+validates a single tenant (`AzureAd:TenantId = #{TENANT_ID}#`, a GUID per stamp; Model 1 customers are B2B guests in
+the hosting tenant, whose role assignments the hosting tenant controls). Trigger 2 asks about the shared reference index
+(TenantId "system") being writable by a customer admin: **that write path no longer exists** — the three
+/api/admin/knowledge routes are deleted (§2). The two SystemAdmin routes kept here write/delete only the caller's own
+token-tenant partition. Recorded for task 165 (which owns the SystemAdmin policy) rather than stopped on.
+
+## 2. Route dispositions
+
+### 2.1 Deleted (9) — owner round 10 item 1
+| Route | Finding | No-caller evidence | Not-published evidence |
+|---|---|---|---|
+| POST /api/ai/rag/index/batch | #6 | §1.2: no src/script/skill/infra/workflow caller | not in CopilotAgent OpenAPI / plugin / manifests |
+| DELETE /api/ai/rag/source/{sourceDocumentId} | #30 | §1.2 | same |
+| GET /api/ai/knowledge/indexes/{indexName}/documents | #26 | §1.2 (not even documented) | same |
+| DELETE /api/ai/knowledge/indexes/{indexName}/documents/{documentId} | #27 | §1.2 | same |
+| POST /api/ai/knowledge/indexes/reindex/{documentId} | #28 | §1.2 | same |
+| POST /api/ai/knowledge/test-search | #3 | §1.2 | same |
+| POST /api/admin/knowledge/index-references | #49 | §1.2; reference index is fed by scripts/ai-search/*.ps1 | same |
+| POST /api/admin/knowledge/index-reference/{knowledgeSourceId} | #20 | §1.2 | same |
+| DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId} | #21 | §1.2 | same |
+
+Deleted with them ("services, filters and options that only the deleted routes used"): `Api/Ai/AdminKnowledgeEndpoints.cs`
+(whole file → census 120→119), `Services/Ai/ReferenceIndexingService.cs` + its DI registration (AiModule),
+`Services/Ai/Indexing/ISchemaMapper.cs`, `KnowledgeDocumentSchemaMapper.cs` (used only by that service), the
+`MapAdminKnowledgeEndpoints` mapping, the request/response models of the deleted handlers, the I2 arch-test waiver for
+the deleted file, `ReferenceIndexingServiceTests.cs`, `KnowledgeBaseReindexReplaceStaleChunksContractTests.cs`, the
+deleted routes' tests in Spe.Integration.Tests `KnowledgeBaseEndpointsTests.cs` (health tests kept), and the
+ReferenceIndexingService registrations in three Spe fixtures. **Kept deliberately**: `IRagService.GetIndexedDocumentsAsync`
+/ `DeleteIndexedDocumentAsync` (now uncalled) — the POML limits RagService to two changes and the amendment names
+services/filters/options, not members of a live service; recorded as a follow-up (§9). `DeleteBySourceDocumentAsync`
+and `IndexDocumentsBatchAsync` stay (RagIndexingPipeline / FileIndexingService use them).
+
+Absence is pinned by `tests/integration/regression/KnowledgeAndRagRouteRetirementTests.cs` (endpoint table + 404 with a
+bearer + 401 positive controls on the surviving siblings).
+
+### 2.2 Fixed (8)
+| Route | Finding | Mechanism |
+|---|---|---|
+| POST /api/ai/rag/search | #5 | per-row trim in the handler: ONE `IAiAuthorizationService.AuthorizeAsync` per page (as the caller); null/non-GUID ids dropped; failed/denied → no rows; `TotalCount` = rows returned. Parent gate: `AddTargetedRecordAuthorizationFilter` → `FinanceAuthorizationFilter` Read on the parent's set when `Options.ParentEntityId` is set (uniform 404). `SessionId` → 400. Options rebuilt with token tenant + `CallerPrincipal`. |
+| POST /api/ai/rag/index | #6 | `RequireAuthorization("SystemAdmin")`; tenant: filter + handler, partition = token tid |
+| DELETE /api/ai/rag/{documentId} | #30 | `RequireAuthorization("SystemAdmin")`; query tenant must equal token tid (filter + handler); `RagService.DeleteDocumentAsync` deletes only a chunk with that key AND the caller's tenant |
+| POST /api/ai/rag/index-file | #4, #1041 | tenant: new `FileIndexRequest` case in TenantAuthorizationFilter + handler check; partition = token tid. `AddTargetedRecordAuthorizationFilter` (when a document or parent is named): Write on `sprk_documents(DocumentId)`, AppendTo (`entity.associate_document`) on the parent; unresolvable → uniform 404. Handler: KnowledgeSource fields → 400; row read → null = uniform 404; no file / item mismatch / parent mismatch → 409; chunks carry the row's parent when it has one |
+| POST /api/insights/ask | #17 | `AddFinanceAuthorizationFilter(ResolveAskSubjectTargets, UniformNotFound)`: Read on `sprk_matters(GUID)`; non-GUID → 400. Handler: raw playbook GUID only when `GetBindingByPlaybookIdAsync` returns an insights-ask binding; identifier parameters refused (`insights.parameters.not_accepted`); facade gets the CANONICAL subject. **Read sufficiency escalated (§3.4).** |
+| POST /api/insights/assistant/query | #40 | `AddFinanceAuthorizationFilter(ResolveSubjectTargets, UniformNotFound)`: Read on the subject's set (ISubjectParser + EntityAccessFilter map). Runs before the SSE response opens. This is the only path into `AssistantToolCallHandler` (`IInsightsAi.AssistantQuery*` has no other caller; the chat `insights.query` tool is only a capability constant since R6 task 023), so the amendment's "Assistant tool path" carries the same subject authorization. |
+| POST /api/insights/search | #41 | same declaration as /assistant/query |
+| POST /api/workspace/ai/summary | #46 | `WorkspaceAuthorizationFilter` (identity) then `AddFinanceAuthorizationFilter(ResolveSummaryTargets, UniformNotFound)`: Read on sprk_events/matters/projects (map) or sprk_documents (constant), Record path; unsupported type → the service's own 400 body, no rights query; KeyNotFound → the same uniform 404 |
+
+### 2.3 Judgment calls the main session may reverse
+1. **/api/insights/search kept and fixed, not deleted.** No code caller; but the Insights maker guides publish it as the
+   canonical API (request/response shapes) and the published E3 contract cites it. Fixing closes the hole either way;
+   deletion is a one-commit follow-up if the owner reads "published" more narrowly.
+2. **/api/workspace/ai/summary kept**: the deploy smoke script is a caller that fails the deploy on 404.
+
+## 3. Deviations from the POML body (each with reason) and escalations
+
+### 3.1 Deviations
+| POML said | Done | Why |
+|---|---|---|
+| Generalize the filter into `RecordAccessAuthorizationFilter.cs` | Not created | Binding amendment: reuse FinanceAuthorizationFilter as is (rename = task 170). Acceptance criterion "the generalized filter …" is superseded. |
+| A route whose declaration may name no record | `AddTargetedRecordAuthorizationFilter` (private, RagEndpoints.cs) runs `FinanceAuthorizationFilter.InvokeAsync` only when the request names a record | The filter denies zero-check declarations; /search without a parent and /index-file without document+parent must still work (POML). No second check loop — the evaluation is the Finance filter's own. |
+| Workspace sprk_document → Document path | Record path on `sprk_documents` | The only rule in the Document path's chain is `OperationAccessRule` (same decision); the Record path makes the evaluated entity set observable, which the acceptance criterion requires ("asserted on the entity-set argument"). |
+| Body parent must equal "the row's matter/project/invoice" | Must equal ONE of the row's matter/project/invoice lookups when the row carries any | The Create Invoice wizard dual-binds documents (`additionalBinds`), so a row can carry matter AND invoice; requiring the Step-3-first one would 409 a legitimate invoice upload. Chunks carry the matched row value (row id + row name). |
+| index-file 500 detail | fixed detail AND `SdapProblemException` rethrown | the pipeline throws 400 INDEX_NOT_ALLOWED for a disallowed SearchIndexName; swallowing it into a fixed 500 would hide it (ADR-019). |
+| Reuse `ProgrammableRecordAccessSource` | New `CallerAccessSeam` (superset) in the shared harness | the trim runs through the REAL `AiAuthorizationService`, which asks `GetUserAccessAsync` (that source throws there by design), and fail-closed tests need a faulting seam. |
+| Scripts send "the tenant from the token (no change if it already does)" | Both scripts now decode `tid` from the token | they generated random tenant ids; they now assert 403 for every other-tenant step. |
+
+### 3.2 Owner round 12
+Item 6 (oid-vs-systemuserid in playbook lists) and item 9 waivers belong to tasks 164/166 — nothing of this task's
+surface. Item 1 (rate limiting /healthz) is task 167's. No round-12 item touches these routes.
+
+### 3.3 Escalation triggers evaluated
+| # | Trigger | Result |
+|---|---|---|
+| 1 | non-admin caller of a SystemAdmin route | Only the two operator diagnostics (by design SystemAdmin now) and nothing else. Not fired. |
+| 2 | "admin" scope / customer principal with Admin | No admin scope. App is multi-tenant with a User-assignable `Admin` role — reported §1.6; the shared-index write path is deleted, so not stopped. |
+| **3** | **insights-ask playbook writes caller-influenced content** | **FIRED** — §3.4 |
+| 4 | consumer needs knowledge-source chunks from search/test-search | test-search deleted; /search has no in-repo consumer needing them. Not fired. |
+| 5 | consumer sends /ask a raw GUID not bound / identifier params | No product consumer (form scripts send the name + `{}`). Reported: the r1 live smoke runbook `projects/ai-spaarke-insights-engine-r1/notes/phase-1-live-smoke-runbook.md` (inactive project) sends predict-matter-cost's raw GUID with display-number subjects (`matter:M-2024-0341`); it will now get 400 until predict-matter-cost has an insights-ask binding and GUID subjects are used. Not reopened. |
+| 6 | index-file parent type unresolvable | Not fired (§1.2). |
+| 7 | live gate denies a wizard user | Pending live gate. |
+| 8 | internal mixed-tenant batch caller | Both internal callers build single-tenant lists. Not fired. |
+| 9 | another task generalizing the filter | Answered by the amendment. |
+| 10 | new entity-set map / OperationAccessPolicy key / AiAuthorizationFilter change | None needed. |
+
+### 3.4 🔔 ESCALATION — Read may be the wrong right for /api/insights/ask (trigger 3)
+- **Playbook**: `matter-health-single` (bound insights-ask default + named).
+- **Node / field**: `persistEnvelope` (UpdateRecord, actionType 22) → **`sprk_matter.sprk_performancesummary`**, app-only.
+- **How a reader influences it**: `parameters.currentGrade` (does not end in "id", so the specified rule passes it)
+  feeds the synthesize node's `templateParameters.currentGrade` → the LLM's output is persisted onto the matter. With
+  `parameters: {}` (the live shape) the written content is server-derived and the task-130 reasoning holds.
+  `/assistant/query` passes `Parameters: null`, so it is unaffected. The identifier rule already pins the record
+  written to the subject.
+- **Implemented now**: Read on the subject (the floor every option keeps).
+- **Options**: (A) /ask refuses every parameter except the subject's own `matterId` — simplest; the live callers send
+  `{}`; the eval harness/smoke tests would send `{}` too. (B) allow-list the tuning keys the non-persisting playbooks
+  use (`lookBackYears`, `currency`, `matterType`, `dealSizeBucket`, `opposingCounsel`), refuse the rest (incl.
+  `currentGrade`). (C) require **Write** on the subject when any non-identifier parameter is supplied; keep Read for `{}`.
+- **Recommendation**: (C) — live widgets unchanged, tuning still possible for writers, no per-playbook knowledge in the endpoint.
+
+## 4. Placement + CLAUDE.md §10 / §11
+
+**Placement**: in the BFF — existing routes on existing route files; no new service, DI registration, option, job,
+column, package or endpoint (nine routes, one service, one DI registration and two abstraction types removed). Cited:
+`.claude/constraints/bff-extensions.md` §A (no new packages → no publish-size/CVE delta from packages; publish-size
+measurement skipped per the workflow instruction), ADR-001/008/010/013/019.
+
+**§11 three questions** — the only new surface is code-internal:
+- `AddTargetedRecordAuthorizationFilter` (private, RagEndpoints.cs). *Existing*: `FinanceAuthorizationFilter` (declaration
+  machinery), `EntityAccessFilter` (Office body, passes without target), `RecordRouteAccessAuthorizationFilter` (fixed
+  route keys) — grep `AddFinanceAuthorizationFilter|AddRecordRouteAccessAuthorizationFilter` in Api/. *Extension*: it IS
+  an extension — it calls `FinanceAuthorizationFilter.InvokeAsync` unchanged; the amendment forbids editing that filter
+  to add a "may name nothing" mode. *Cost of doing nothing*: /search without a parent and /index-file without a
+  document/parent would be denied for every caller (the Finance filter denies zero-check declarations), breaking the
+  Create wizards' indexing and the operator search script.
+- `WorkspaceAiService.IsSupportedEntityType` / `UnsupportedEntityTypeMessage` (internal static). *Existing*: the private
+  `SupportedEntityTypes` set. *Extension*: yes — exposes it instead of a second list. *Cost*: the declaration filter
+  would need its own copy of the four types and the 400 text, which would drift.
+- Test harness `RouteSweepAuthorizationHarness.cs` (test-only; shared by three test classes).
+
+## 5. Route authorization ledger input (for task 167 — main session records at integration)
+
+167 is not on this branch; nothing was added to `RouteAuthorizationGuardTests` except the census bump (whole file
+deleted). Never count `.AddTenantAuthorizationFilter()`, `WorkspaceAuthorizationFilter` or the health route's
+`AiAuthorizationFilter` as the per-resource decision. `R` = `Sprk.Bff.Api.Tests.Api.Ai.RagEndpointsAuthorizationContractTests`,
+`I` = `Sprk.Bff.Api.Tests.Api.Insights.InsightsRouteAuthorizationContractTests`,
+`W` = `Sprk.Bff.Api.Tests.Api.Workspace.WorkspaceAiSummaryAuthorizationContractTests`,
+`K` = `Sprk.Bff.Api.Tests.KnowledgeAndRagRouteRetirementTests`.
+
+| Route key | Mechanism that now decides | Deny test |
+|---|---|---|
+| `POST /api/ai/rag/search` | **handler decision: per-row trim as the caller** (`IAiAuthorizationService.AuthorizeAsync`, one call per page; RagEndpoints.cs references it — Rule B) + filter `AddTargetedRecordAuthorizationFilter` → FinanceAuthorizationFilter Read on a named parent | `R.Search_CallerWhoCanReadNoneOfTheRows_Gets200EmptyAndZeroCount`; `R.Search_WithANamedParentTheCallerCannotUse_IsTheUniform404_AndNoSearchRuns` |
+| `POST /api/ai/rag/index` | admin policy `RequireAuthorization("SystemAdmin")` (+ token-tenant partition) | `R.Index_SignedInCallerWithoutSystemAdmin_Is403_AndNothingIsIndexed`; `R.Index_AdminNamingAnotherTenant_Is403_AndNothingIsIndexed` |
+| `DELETE /api/ai/rag/{documentId}` | admin policy `RequireAuthorization("SystemAdmin")` (+ tenant-bound delete) | `R.DeleteChunk_SignedInCallerWithoutSystemAdmin_Is403_AndNothingIsDeleted`; `R.DeleteChunk_AdminNamingAnotherTenant_Is403_AndNothingIsDeleted` |
+| `POST /api/ai/rag/index-file` | filter `AddTargetedRecordAuthorizationFilter` → FinanceAuthorizationFilter: "write" on sprk_documents(DocumentId), "entity.associate_document" on the parent; no named record → the caller's OBO download decides (handler decision) | `R.IndexFile_NamedDocumentTheCallerCannotWrite_IsTheUniform404_NothingIndexedOrStamped`; `R.IndexFile_NamedParentTheCallerCannotAppendTo_IsTheUniform404_NothingIndexed`; `R.IndexFile_BodyTenantNotTheTokens_Is403_AndNothingIsIndexedOrStamped` |
+| `POST /api/insights/ask` | filter `AddFinanceAuthorizationFilter(ResolveAskSubjectTargets, UniformNotFound)` — "read" on sprk_matters(subject) | `I.Ask_UnreadableAndAbsentMatters_AreTheIdenticalUniform404_AndTheFacadeIsNeverReached` |
+| `POST /api/insights/assistant/query` | filter `AddFinanceAuthorizationFilter(ResolveSubjectTargets, UniformNotFound)` — "read" on the subject | `I.Assistant_UnreadableAndAbsentSubjects_AreTheIdenticalUniform404_NoFacade_NoSseFrame` |
+| `POST /api/insights/search` | filter `AddFinanceAuthorizationFilter(ResolveSubjectTargets, UniformNotFound)` — "read" on the subject | `I.Search_UnreadableAndAbsentSubjects_AreTheIdenticalUniform404_AndSearchNeverRuns` |
+| `POST /api/workspace/ai/summary` | filter `AddFinanceAuthorizationFilter(ResolveSummaryTargets, UniformNotFound)` — "read" on the named record | `W.UnreadableAndAbsentRecords_AreTheIdenticalUniform404_AndNothingIsRead` |
+| `POST /api/ai/rag/index/batch` | **DELETED** | `K.RetiredRoutes_AreAbsentFromTheEndpointTable`; `K.RetiredRoute_WithAValidBearer_Is404NotRouted` |
+| `DELETE /api/ai/rag/source/{sourceDocumentId}` | **DELETED** | same |
+| `GET /api/ai/knowledge/indexes/{indexName}/documents` | **DELETED** | same |
+| `DELETE /api/ai/knowledge/indexes/{indexName}/documents/{documentId}` | **DELETED** | same |
+| `POST /api/ai/knowledge/indexes/reindex/{documentId}` | **DELETED** | same |
+| `POST /api/ai/knowledge/test-search` | **DELETED** | same |
+| `POST /api/admin/knowledge/index-references` | **DELETED** (whole file) | same |
+| `POST /api/admin/knowledge/index-reference/{knowledgeSourceId}` | **DELETED** (whole file) | same |
+| `DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId}` | **DELETED** (whole file) | same |
+
+For 167's FilterMarker: `.AddTargetedRecordAuthorizationFilter(` matches `\.Add\w*AuthorizationFilter\s*[<(]`, and
+RagEndpoints.cs references `Spaarke.Core.Auth.AuthorizationService` (Rule B). The census in this branch is **119**; any
+Pending waiver 167 created for the nine deleted routes must be deleted at integration (NoWaiverIsStale does not catch a
+deleted route — task 073 §6.1 edit 3).
+
+## 6. Tests
+
+### 6.1 New (closed set = the acceptance criteria + named fail-closed branches; 128 test cases across the five classes)
+| File | Covers |
+|---|---|
+| `tests/integration/contract/Api/Ai/RouteSweepAuthorizationHarness.cs` | shared host: real Program + real filters/AuthorizationService/AiAuthorizationService; seams: IAccessDataSource (deny-by-default, recording, faulting), IRagService, IFileIndexingService, IDocumentDataverseService, IGenericEntityService, IInsightsAi, IConsumerRoutingService |
+| `.../Api/Ai/RagEndpointsAuthorizationContractTests.cs` | /search (a)–(g) + fail-closed + uniformity + 500; /index; DELETE /{id}; /index-file (a)–(g) + fail-closed + uniformity (absent / unwritable / deleted-after-check) + 500; TenantAuthorizationFilter batch case (filter-level: no route binds the type after /index/batch was deleted) |
+| `.../Api/Insights/InsightsRouteAuthorizationContractTests.cs` | /ask (a)–(e) + fail-closed + entity set; /assistant/query × matter/project/invoice × single-shot/SSE × forceMode; /search × 3 schemes; fail-closed |
+| `.../Api/Workspace/WorkspaceAiSummaryAuthorizationContractTests.cs` | 4 types (+ case variant) × unreadable/absent; entity-set argument; deleted-after-check; unsupported type; reader 200; fail-closed |
+| `tests/integration/regression/KnowledgeAndRagRouteRetirementTests.cs` | the nine deleted routes absent; 401 positive controls |
+| `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTenantGuardTests.cs` | DeleteDocumentAsync tenant-bound (own / other tenant / absent); batch mixed tenants (both overloads, case variant) |
+
+Beyond the criteria (one line each): `Search_WithAReadableParent_RunsAndAsksAsTheCallerOnTheParentsSet` and
+`Ask_TheRightsQuestionIsReadOnTheMatter_AsTheCaller` pin the evaluated entity set/token (criterion says "as the caller");
+`IndexDocumentsBatchAsync_ACaseVariantOfTheSameTenant_IsAlsoRefused` pins the Ordinal partition comparison;
+`TenantFilter_BatchWhoseEveryItemIsTheCallersTenant_PassesThrough` is the positive control for the batch case.
+
+### 6.2 Existing tests changed (no authorized-caller assertion weakened)
+| Test | Change | Reason |
+|---|---|---|
+| `RagEndpointsTests` (unit) | reflection call passes the new handler params; `ReferenceEquals(captured, request.Options)` replaced by "TenantId and TopK preserved, no index name introduced" | options are now always rebuilt (token tenant + caller principal); the NFR-02 intent is asserted |
+| `InsightEndpointsContractTests` | `SampleSubject` `matter:M-1234` → a GUID subject; fixture: reader seam + GetBindingByPlaybookIdAsync → insights-ask | subject id must be a GUID; raw GUIDs must be bound |
+| `InsightsSearchEndpointContractTests`, `InsightsAssistantEndpointContractTests` (+ Streaming, same fixture) | reader seam in the fixture | authorized-caller tests |
+| `WorkspaceEndpointsContractTests` | three summary cases use a reader client | the route asks Dataverse first |
+| `PredictMatterCostEvalHarnessTests` | tuple display ids → stable GUID for subject + `matterId`; fixture binds the playbook as insights-ask + reader seam | GUID subject; identifier rule |
+| `Phase1SmokeTest` | `matter:M-FIXTURE-00x` → GUID subjects (one facade-subject assertion follows) | GUID subject |
+| Spe `KnowledgeBaseEndpointsTests` | deleted-route tests removed; health kept | routes deleted |
+| Spe `ReAnalysisFlowTests`, `ChatEndpointsTests` | dropped ReferenceIndexingService registration | service deleted |
+| Spe `InsightsToolIntegrationTests` (live smoke, skipped in CI) | a 404 now fails with "the token's user cannot Read the subject" | uniform 404 meaning |
+| ArchTests `RouteAuthorizationGuardTests` | census 120 → 119 | whole file deleted |
+| ArchTests `I2_AiSearchTenantIdFilterTests` | removed the deleted file's waiver | file deleted |
+
+Deleted: `ReferenceIndexingServiceTests.cs` (service deleted), `KnowledgeBaseReindexReplaceStaleChunksContractTests.cs` (route deleted).
+
+## 7. Seeding proofs (each guard removed locally, named tests seen failing, restored via `git checkout` + touch)
+Batches applied with `seed.ps1` (scratchpad); after each, `git status` was clean.
+
+| Batch | Guard removed | Named test(s) that failed |
+|---|---|---|
+| b1 | /search per-row trim | `Search_CallerWhoCanReadNoneOfTheRows…`, `Search_KeepsOnlyRows…`, `Search_WhenNoRowHasAUsableDocumentId…`, `Search_Trim_FailsClosed…` |
+| b1 | /index SystemAdmin | `Index_SignedInCallerWithoutSystemAdmin_Is403…` |
+| b1 | DELETE /{id} SystemAdmin | `DeleteChunk_SignedInCallerWithoutSystemAdmin_Is403…` |
+| b1 | /index-file record filter | `IndexFile_NamedDocumentTheCallerCannotWrite…`, `IndexFile_NamedParentTheCallerCannotAppendTo…`, `IndexFile_NamedDocument_WithNoOid_Is401` |
+| b1 | TenantAuthorizationFilter every-item batch check (→ first item only) | `TenantFilter_BatchWhoseLaterItemNamesAnotherOrNoTenant_Is403` |
+| b1 | RagService.DeleteDocumentAsync ownership lookup | `DeleteDocumentAsync_ChunkOfAnotherTenantOrAbsent_DeletesNothing…` |
+| b1 | RagService batch mixed-tenant guard | `IndexDocumentsBatchAsync_MixedTenants…`, `…ACaseVariantOfTheSameTenant…` |
+| b1 | /ask filter | `Ask_UnreadableAndAbsentMatters…`, `Ask_FailsClosed`, `Ask_TheRightsQuestionIsRead…` |
+| b1 | /assistant/query filter | `Assistant_UnreadableAndAbsentSubjects…`, `Assistant_TheRightsQuestionNames…`, `AssistantAndSearch_FailClosed` |
+| b1 | /insights/search filter | `Search_UnreadableAndAbsentSubjects…` (Insights) |
+| b1 | workspace summary filter | `UnreadableAndAbsentRecords…`, `TheRightsQuestionNamesTheRecordsEntitySet…`, `FailsClosed` |
+| b1 | route retirement (re-mapped POST /api/ai/knowledge/test-search) | `RetiredRoutes_AreAbsentFromTheEndpointTable`, `RetiredRoute_WithAValidBearer_Is404NotRouted` |
+| b2 | /search parent gate | `Search_WithANamedParentTheCallerCannotUse…`, `Search_ParentGate_FailsClosed`, `…WithNoOid_Is401…`, `…UnreadableAndNonExistentParents…`, `Search_WithAReadableParent…` |
+| b2 | /search SessionId refusal | `Search_WithSessionId_Is400_AndNoSearchRuns` |
+| b2 | /index-file row comparisons (409) | `IndexFile_RequestThatDoesNotMatchTheDocumentRow_Is409…` |
+| b2 | /index-file knowledge-source refusal | `IndexFile_KnowledgeSourceFields_Are400…` |
+| b2 | fixed 500 details (Search, Index, Delete, IndexFile → `ex.Message`) | `Search_ServiceFault…`, `Index_ServiceFault…`, `DeleteChunk_ServiceFault…`, `IndexFile_PipelineFault…` |
+| b2 | /ask raw-GUID binding check | `Ask_RawPlaybookGuidNotBoundAsInsightsAsk…` |
+| b2 | /ask identifier-parameter rule | `Ask_IdentifierParameterOtherThanTheSubjectsOwn…` |
+| b2 | workspace KeyNotFound → uniform 404 | `ADocumentDeletedBetweenTheCheckAndTheFetch…` |
+| b3 | handler tenant checks only (search, index, delete, index-file) | **none failed** — the filter enforces alone (incl. the new FileIndexRequest case) |
+| b4 | handler checks + filter (pass-through) | `Search_BodyTenantNotTheTokens_Is403`, `Index_AdminNamingAnotherTenant…`, `DeleteChunk_AdminNamingAnotherTenant…`, `IndexFile_BodyTenantNotTheTokens…` (+ the filter-level batch test) |
+| b5 | filter only | only the filter-level batch test — **each handler enforces alone** (the #1041 "proven separately" half) |
+| b6 | index-file handler check + only the new `FileIndexRequest` filter case | `IndexFile_BodyTenantNotTheTokens_Is403…` — the new case is what enforced in b3 |
+
+## 8. Quality gates (task-execute Step 9.5)
+**code-review** (standard depth, coverage-first): no Critical. Applied during review: canonical subject string passed to
+the Insights facade (no parse-vs-use divergence; better cache keys); correlation ids on the new 401/403/400 problems;
+removed a null check on a non-nullable dictionary key. Remaining **Warnings**: RagEndpoints.cs grew 1585 → ~1750 lines
+(cohesive: one route group's handlers + its authorization helpers; no new responsibility class) — decomposition
+candidate for the RAG-endpoints owner, not done here; the new tenant problems use the file's existing `code` extension
+(SendToIndex precedent) rather than ADR-019's `errorCode`. **Suggestions**: the two now-uncalled IRagService members (§9).
+AI-smell scan: no single-impl interfaces, no log-rethrow, no restating comments of note.
+**adr-check**: ADR-001/002/003/007/008/009/010/013/019/028/038/052 compliant; no violations; no ADR tension. Zone B
+(Api/Insights) imports only `Api.Filters` (PrecedentAdminEndpoints precedent).
+
+## 9. Follow-ups (not deferral of this task's scope — recorded for owners)
+- Remove `IRagService.GetIndexedDocumentsAsync` / `DeleteIndexedDocumentAsync` (+ `IndexedDocumentsPage`,
+  `IndexedDocumentSummary`, `RagService.DeleteChunksFromIndexAsync`, NullRagService members, one seam fake) — uncalled
+  after §2.1.
+- predict-matter-cost has no insights-ask binding in the seed: a raw-GUID /ask for it is now 400 until one is seeded.
+- Docs: RAG-ARCHITECTURE.md and AI-DEPLOYMENT-GUIDE.md updated; AI-ARCHITECTURE.md / AI-SEARCH-INDEX-CATALOG.md /
+  INSIGHTS-ENGINE-ARCHITECTURE.md still mention ReferenceIndexingService (doc-drift-audit).
+
+## 10. `.claude/**` edit for the main session
+`.claude/skills/add-reference-to-index/SKILL.md` line 176 — replace
+`- \`src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs\` — BFF API indexing service`
+with
+`- (ReferenceIndexingService and /api/admin/knowledge/* were removed by unified-access-control-r2 task 163 — the scripts above are the only indexing path)`.
+
+## 11. Conflict check
+No open PR touches these files; master unchanged for them since the base. Sibling branches: `task/uac-r2-159` edits
+`FinanceAuthorizationFilter.cs` (forwarders only — compatible); `task/uac-r2-160/161/167(-r1)` edit
+`RouteAuthorizationGuardTests.cs` (this task only bumps the census → expected textual merge at integration).
+
+## 12. Test results (2026-10-03, branch tip before the final commit; heavy machine contention — ~270 concurrent dotnet processes from other agents)
+| Run | Result |
+|---|---|
+| BFF build | succeeded, 0 warnings, 0 errors |
+| Affected tests (5 new classes + RagEndpointsTests + SendToIndexAuthorizationContractTests) | 141 / 141 passed |
+| Existing tests touched (Insights contract ×4, Workspace contract, eval harness, Phase1 smoke, Finance contract, RagServiceTests) | 267 / 267 passed |
+| Spe affected (KnowledgeBaseEndpointsTests, ReAnalysisFlowTests, ChatEndpointsTests, InsightsToolIntegrationTests) | 30 passed, 15 skipped (live smoke, env-gated) |
+| **Full BFF unit suite** (	ests/unit/Sprk.Bff.Api.Tests, incl. contract/regression/seam/auth/tenant/data-mutation) | 14231 passed, 54 skipped, **100 failed — every one TaskCanceledException (HttpClient timeout after 3–6 min under contention)**, spread across Office/Compose/SpeAdmin/Workspace-layout/Insights/… classes. **Isolated re-run of all 96 failed names: 127 / 127 passed (2 m 39 s)** → contention, not a defect. |
+| **NetArchTest** (	ests/Spaarke.ArchTests) | 346 / 346 passed (census 119) |
+| **Sprk.Bff.Api.IntegrationTests** (full) | 104 / 104 passed |
+| **Spe.Integration.Tests** (full) | 392 passed, 25 skipped (env-gated live smokes), 0 failed |
+| Operator scripts parse | Parser.ParseFile → 0 errors for both |
+| Seeding batches b1–b6 | §7 |
+
+## 13. Manual live gate (main session, dev, after deploy; ids redacted to 8 chars)
+Use existing non-admin test users in their current BU (e.g. `uac.child.user@demo.spaarke.com`, None on project
+`65a3fab2`) and a reader.
+```pwsh
+$bff = "https://spaarke-bff-dev.azurewebsites.net"
+$h = @{ Authorization = "Bearer $nonReaderToken"; "Content-Type" = "application/json" }
+# (a) uniform 404 for the non-reader, 200 for a reader (repeat with $readerToken)
+Invoke-WebRequest "$bff/api/insights/ask" -Method Post -Headers $h -Body (@{ question="matter-health-single"; subject="matter:$securedMatter"; parameters=@{} } | ConvertTo-Json) -SkipHttpErrorCheck
+Invoke-WebRequest "$bff/api/insights/search" -Method Post -Headers $h -Body (@{ query="status"; subject="project:$secureProject" } | ConvertTo-Json) -SkipHttpErrorCheck
+Invoke-WebRequest "$bff/api/insights/assistant/query" -Method Post -Headers $h -Body (@{ query="status"; subject="project:$secureProject"; forceMode="rag" } | ConvertTo-Json) -SkipHttpErrorCheck
+Invoke-WebRequest "$bff/api/workspace/ai/summary" -Method Post -Headers $h -Body (@{ entityType="sprk_project"; entityId=$secureProject } | ConvertTo-Json) -SkipHttpErrorCheck
+# (b) rag/search as the non-reader returns no chunk of a document under the secure matter
+Invoke-RestMethod "$bff/api/ai/rag/search" -Method Post -Headers $h -Body (@{ query="<a phrase from a secure doc>"; options=@{ tenantId=$tid; topK=20 } } | ConvertTo-Json -Depth 4)
+# (c) deleted routes are 404 with a bearer; the operator routes are 403 for a non-admin
+Invoke-WebRequest "$bff/api/ai/knowledge/test-search" -Method Post -Headers $h -Body '{"query":"x"}' -SkipHttpErrorCheck        # expect 404
+Invoke-WebRequest "$bff/api/admin/knowledge/index-references" -Method Post -Headers $h -SkipHttpErrorCheck                      # expect 404
+Invoke-WebRequest "$bff/api/ai/rag/index" -Method Post -Headers $h -Body '{}' -SkipHttpErrorCheck                                 # expect 403
+```
+(d) Upload a file through the Document Upload Wizard on a matter the user can write → `sprk_searchindexcompletedon`
+stamped on the new document; a Create Matter / Create Event / Create Work Assignment wizard upload still indexes (watch
+escalation trigger 7). (e) If the matter form's insight card loads today for a reader, it still loads (conditional: the
+form scripts call fetch with `credentials:"include"` and no bearer — pre-existing).
+
+## 14. PR obligations
+- Close GitHub **#1041** from the PR.
+- List the nine deleted routes with §2.1's evidence.
+- Cite the Placement Justification (§4) and the §3.4 escalation.
+- Publish-size measurement skipped per the workflow instruction (no package change; publish shrinks — a service and
+  three source files deleted).

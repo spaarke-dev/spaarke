@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
@@ -86,7 +87,14 @@ public static class InsightsAssistantEndpoint
             .RequireRateLimiting("ai-context")
             .WithTags("Insights");
 
+        // Authorization (unified-access-control-r2 task 163, sweep finding #40): the subject (matter,
+        // project or invoice) is authorized for Read, AS THE CALLER, by the declaration filter — which runs
+        // before the handler, so a denial is a plain ProblemDetails and no SSE frame is ever written. Both
+        // the playbook path (app-only LiveFact resolvers) and the RAG path sit behind it, whatever forceMode
+        // says. This is also the only way into AssistantToolCallHandler (IInsightsAi.AssistantQuery*), so
+        // the Assistant tool path carries the same subject authorization as POST /api/insights/ask.
         group.MapPost("/query", AssistantQuery)
+            .AddFinanceAuthorizationFilter(ResolveSubjectTargets, FinanceDenial.UniformNotFound)
             .WithName("InsightsAssistantQuery")
             .WithSummary("Unified Spaarke Assistant tool-call entry point (Wave E3 / FR-05)")
             .WithDescription(
@@ -100,11 +108,55 @@ public static class InsightsAssistantEndpoint
             .Produces<InsightsAssistantQueryResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
+    }
+
+    /// <summary>
+    /// Authorization declaration for <c>POST /api/insights/assistant/query</c> (task 163): Read on the
+    /// subject's record, the entity set resolved from the parsed scheme through the shared
+    /// <c>EntityAccessFilter</c> map. A missing body or subject, or a subject the parser rejects, is the
+    /// handler's own 400 (same body and errorCode), returned BEFORE any rights query. A registered scheme
+    /// with no entity-set mapping declares no check and is denied (uniform 404).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveSubjectTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<InsightsAssistantQueryRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("Request body is required.", "query.required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            return FinanceAuthorizationTargets.Reject(
+                BadRequest("'subject' is required and cannot be empty.", "subject.required"));
+        }
+
+        var subjectParser = context.HttpContext.RequestServices.GetRequiredService<ISubjectParser>();
+        if (!subjectParser.TryParse(request.Subject, out var parsedSubject, out var subjectError))
+        {
+            return FinanceAuthorizationTargets.Reject(
+                BadRequest($"'subject' is invalid: {subjectError}", "subject.invalid"));
+        }
+
+        if (!EntityAccessFilter.TryResolveEntitySet(parsedSubject.EntityType, out var entitySet))
+        {
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = entitySet,
+            RecordId = parsedSubject.EntityId,
+            Operation = "read",
+            Source = "body.subject",
+        });
     }
 
     /// <summary>

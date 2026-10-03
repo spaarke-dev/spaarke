@@ -12,6 +12,16 @@
 
     Task 006: Test Shared Deployment Model
 
+    AUTHORIZATION (unified-access-control-r2 task 163):
+    - POST /api/ai/rag/index and DELETE /api/ai/rag/{id} are operator surfaces: run this script with a
+      token whose user holds the BFF app's Admin / SystemAdmin role, or every index and delete is 403.
+    - The tenant partition is the TOKEN's tenant (its tid claim). The script derives -TenantId from the
+      token; a body or query tenant that differs is rejected 403, so the "other tenant" steps now assert
+      that rejection instead of writing into, or searching, another tenant's partition.
+    - POST /api/ai/rag/search returns only chunks whose documentId is a sprk_document the caller can Read.
+      The synthetic chunks are therefore stamped with -DocumentId (mandatory): a real sprk_document the
+      operator can Read in the target environment.
+
 .PARAMETER Action
     Test action to run: All, Index, Search, TenantIsolation, Latency
 
@@ -19,15 +29,19 @@
     Base URL for the SDAP BFF API
 
 .PARAMETER TenantId
-    Tenant ID to use for testing (generated if not provided)
+    Ignored unless it equals the token's tenant (task 163: the partition is the token's tid).
+
+.PARAMETER DocumentId
+    REQUIRED. A real sprk_document id the operator can Read; stamped as the synthetic chunks' documentId so
+    the per-row trim on /search keeps them.
 
 .PARAMETER Cleanup
     Clean up test data after running tests
 
 .EXAMPLE
-    .\Test-RagSharedModel.ps1 -Action All
-    .\Test-RagSharedModel.ps1 -Action Search -TenantId "test-tenant-123"
-    .\Test-RagSharedModel.ps1 -Action Latency
+    .\Test-RagSharedModel.ps1 -Action All -DocumentId "00000000-0000-0000-0000-000000000000"
+    .\Test-RagSharedModel.ps1 -Action Search -DocumentId "00000000-0000-0000-0000-000000000000"
+    .\Test-RagSharedModel.ps1 -Action Latency -DocumentId "00000000-0000-0000-0000-000000000000"
 #>
 
 param(
@@ -41,6 +55,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$TenantId = '',
 
+    [Parameter(Mandatory=$true)]
+    [string]$DocumentId,
+
     [Parameter(Mandatory=$false)]
     [switch]$Cleanup
 )
@@ -50,10 +67,19 @@ $ErrorActionPreference = 'Stop'
 $Script:TestResults = @()
 $Script:IndexedDocumentIds = @()
 
-if ([string]::IsNullOrWhiteSpace($TenantId)) {
-    $TenantId = "test-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
-}
+$RequestedTenantId = $TenantId
 $OtherTenantId = "other-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
+
+# Task 163: the tenant partition is the TOKEN's tid; decode it rather than invent one.
+function Get-TokenTenantId {
+    param([string]$Jwt)
+    $parts = $Jwt.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+    $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+    return $claims.tid
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " RAG Shared Deployment Model Tests" -ForegroundColor Cyan
@@ -76,6 +102,16 @@ if ([string]::IsNullOrWhiteSpace($token) -or $token.Contains("Error")) {
 }
 
 Write-Host "Token obtained (length: $($token.Length))" -ForegroundColor Green
+
+$TenantId = Get-TokenTenantId -Jwt $token
+if ([string]::IsNullOrWhiteSpace($TenantId)) {
+    Write-Error "The token carries no tid claim; the BFF derives the tenant partition from it (task 163)."
+    exit 1
+}
+if (-not [string]::IsNullOrWhiteSpace($RequestedTenantId) -and $RequestedTenantId -ne $TenantId) {
+    Write-Warning "-TenantId '$RequestedTenantId' differs from the token's tenant; using the token's tenant '$TenantId'."
+}
+Write-Host "Token tenant (partition): $TenantId" -ForegroundColor Gray
 Write-Host ""
 
 # Prepare headers
@@ -159,7 +195,7 @@ function Get-TestDocuments {
             id = "$($Prefix)doc1-chunk0-$(New-Guid)"
             tenantId = $Tenant
             deploymentModel = "Shared"
-            documentId = "$($Prefix)employee-handbook"
+            documentId = $DocumentId
             documentName = "Employee Handbook 2024.pdf"
             documentType = "policy"
             knowledgeSourceId = "ks-hr-policies"
@@ -175,7 +211,7 @@ function Get-TestDocuments {
             id = "$($Prefix)doc1-chunk1-$(New-Guid)"
             tenantId = $Tenant
             deploymentModel = "Shared"
-            documentId = "$($Prefix)employee-handbook"
+            documentId = $DocumentId
             documentName = "Employee Handbook 2024.pdf"
             documentType = "policy"
             knowledgeSourceId = "ks-hr-policies"
@@ -191,7 +227,7 @@ function Get-TestDocuments {
             id = "$($Prefix)doc2-chunk0-$(New-Guid)"
             tenantId = $Tenant
             deploymentModel = "Shared"
-            documentId = "$($Prefix)legal-contract"
+            documentId = $DocumentId
             documentName = "Standard Service Agreement.docx"
             documentType = "contract"
             knowledgeSourceId = "ks-legal-templates"
@@ -259,8 +295,9 @@ function Test-DocumentIndexing {
         }
     }
 
-    Add-TestResult -TestName "Index Documents (Other Tenant)" -Passed ($otherSuccessCount -eq $otherDocs.Count) `
-        -Message "Indexed $otherSuccessCount/$($otherDocs.Count) documents"
+    # Task 163: writing into another tenant's partition is REJECTED (403) - success here is the defect.
+    Add-TestResult -TestName "Index Documents (Other Tenant) Rejected" -Passed ($otherSuccessCount -eq 0) `
+        -Message "Indexed $otherSuccessCount/$($otherDocs.Count) documents into another tenant's partition (must be 0)"
 
     # Wait for index to be searchable
     Write-Host "  Waiting 3 seconds for index consistency..." -ForegroundColor Gray
@@ -388,12 +425,9 @@ function Test-TenantIsolation {
 
     $otherResponse = Invoke-ApiRequest -Url "$ApiBaseUrl/api/ai/rag/search" -Method POST -Body $otherSearchRequest
 
-    if ($otherResponse) {
-        Add-TestResult -TestName "Other Tenant Search Isolation" -Passed $true `
-            -Message "Found $($otherResponse.results.Count) results for other tenant"
-    } else {
-        Add-TestResult -TestName "Other Tenant Search Isolation" -Passed $false -Message "No response"
-    }
+    # Task 163: naming another tenant is rejected (403), so there is no response to inspect.
+    Add-TestResult -TestName "Other Tenant Search Rejected" -Passed (-not $otherResponse) `
+        -Message "A search naming another tenant must be rejected (403)"
 
     # Test 3: Non-existent tenant should return no results
     $nonExistentRequest = @{
@@ -407,13 +441,9 @@ function Test-TenantIsolation {
 
     $nonExistentResponse = Invoke-ApiRequest -Url "$ApiBaseUrl/api/ai/rag/search" -Method POST -Body $nonExistentRequest
 
-    if ($nonExistentResponse) {
-        $noResults = $nonExistentResponse.results.Count -eq 0
-        Add-TestResult -TestName "Non-Existent Tenant Returns Empty" -Passed $noResults `
-            -Message "Found $($nonExistentResponse.results.Count) results (should be 0)"
-    } else {
-        Add-TestResult -TestName "Non-Existent Tenant Returns Empty" -Passed $false -Message "No response"
-    }
+    # Task 163: any tenant other than the token's is rejected (403).
+    Add-TestResult -TestName "Non-Existent Tenant Rejected" -Passed (-not $nonExistentResponse) `
+        -Message "A search naming a tenant that is not the token's must be rejected (403)"
 }
 
 function Test-P95Latency {

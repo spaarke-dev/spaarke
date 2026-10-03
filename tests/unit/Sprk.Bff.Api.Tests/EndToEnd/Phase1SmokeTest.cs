@@ -96,6 +96,12 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
     // ACCEPTANCE CRITERION 2 — predict-matter-cost returns valid Inference
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Task 163 (unified-access-control-r2): the /ask subject id must be a GUID — the route authorizes Read on
+    /// sprk_matters(id) as the caller. The fixture display ids ("M-FIXTURE-001") map to stable GUIDs here.
+    /// </summary>
+    private static string Subject(string fixtureMatterId) =>
+        $"matter:{new Guid(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(fixtureMatterId)))}";
     [Fact]
     public async Task Smoke_PredictMatterCost_ReturnsArtifact()
     {
@@ -110,7 +116,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-001",
+            subject = Subject("M-FIXTURE-001"),
             parameters = new Dictionary<string, string>
             {
                 ["matterType"] = "ip-licensing",
@@ -175,7 +181,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-004",
+            subject = Subject("M-FIXTURE-004"),
             parameters = new Dictionary<string, string> { ["matterType"] = "rare-tort" }
         };
 
@@ -229,7 +235,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-003"
+            subject = Subject("M-FIXTURE-003")
         };
 
         // Act
@@ -273,7 +279,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-009"
+            subject = Subject("M-FIXTURE-009")
         };
 
         // Act
@@ -304,7 +310,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-002"
+            subject = Subject("M-FIXTURE-002")
         };
 
         // Act
@@ -314,7 +320,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         _fixture.InsightsAiMock.Verify(s => s.AnswerQuestionAsync(
             It.Is<InsightsAgentRequest>(r =>
                 r.Question == PredictMatterCostPlaybookId
-                && r.Subject == "matter:M-FIXTURE-002"
+                && r.Subject == Subject("M-FIXTURE-002")
                 && r.TenantId == Phase1SmokeTestFixture.TestTenantId
                 && !string.IsNullOrWhiteSpace(r.AccessibleScopeHash)),
             It.IsAny<CancellationToken>()),
@@ -350,7 +356,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = "matter:M-FIXTURE-001"
+            subject = Subject("M-FIXTURE-001")
         };
 
         // Act
@@ -547,6 +553,19 @@ public class Phase1SmokeTestFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
+
+            // Task 163: /ask accepts a raw playbook GUID only when it is bound as insights-ask, and authorizes
+            // Read on the subject matter as the caller. The smoke models predict-matter-cost bound as
+            // insights-ask and a caller who can read the subject (it verifies the wire contract, not access).
+            var routing = new Mock<IConsumerRoutingService>(MockBehavior.Loose);
+            routing
+                .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                    new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
+            services.RemoveAll<IConsumerRoutingService>();
+            services.AddSingleton(routing.Object);
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
 
             services.RemoveAll<IHostedService>();
 

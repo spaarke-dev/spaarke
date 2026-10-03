@@ -81,7 +81,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
     private readonly InsightEndpointsTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid SampleQuestion = Guid.Parse("11111111-2222-3333-4444-555555555555");
-    private const string SampleSubject = "matter:M-1234";
+    // Task 163: the subject id must now be a GUID — the route's declaration filter parses it and asks
+    // Dataverse, as the caller, for Read on sprk_matters(id) before the handler runs. "matter:M-1234"
+    // (a display number, never a record id) is refused 400 there.
+    private const string SampleSubject = "matter:6a1c0f3e-1234-4cde-8f00-000000001234";
 
     public InsightEndpointsContractTests(InsightEndpointsTestFixture fixture)
     {
@@ -768,6 +771,19 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
             services.RemoveAll<IConsumerRoutingService>();
             services.AddSingleton(ConsumerRoutingMock.Object);
 
+            // Task 163: a raw playbook GUID is accepted only when it is bound as insights-ask. The base
+            // client models "every GUID these tests send is a bound insights-ask playbook".
+            ConsumerRoutingMock
+                .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                    new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
+
+            // Task 163: the route now asks Dataverse, as the caller, for Read on the subject matter. These
+            // tests cover the authorized caller, so the caller reads everything (deny paths:
+            // InsightsRouteAuthorizationContractTests).
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
             // Remove background hosted services that depend on external infrastructure.
             services.RemoveAll<IHostedService>();
 
@@ -813,6 +829,11 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
     public HttpClient CreateAuthenticatedTenantClientWithInsightsAskBindings(Dictionary<string, Guid> bindings)
     {
         var routingMock = new Mock<IConsumerRoutingService>();
+        // Task 163: raw playbook GUIDs must be bound as insights-ask (see the base fixture).
+        routingMock
+            .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
         routingMock
             .Setup(r => r.ResolveBindingAsync(
                 ConsumerTypes.InsightsAsk,

@@ -559,6 +559,19 @@ public partial class RagService : IRagService
         var tenantId = documentList[0].TenantId;
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // unified-access-control-r2 task 163 (sweep finding #6): the search client is picked from the FIRST
+        // document's tenant, but every document is written with its OWN TenantId. Under the Shared deployment
+        // model all tenants share one physical index partitioned by that field, so a mixed list would land
+        // items 2..N in another tenant's partition. Refuse it before any embedding or write. Both internal
+        // callers (FileIndexingService, RagIndexingPipeline) build single-tenant lists, so this never fires
+        // for them; it closes the shape, not a live caller.
+        if (documentList.Any(d => !string.Equals(d.TenantId, tenantId, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "All documents in a batch must carry the same TenantId; a batch is written to one tenant partition.",
+                nameof(documents));
+        }
+
         // Validate all documents have speFileId (required)
         foreach (var doc in documentList)
         {
@@ -719,6 +732,50 @@ public partial class RagService : IRagService
         _logger.LogDebug("Deleting document {DocumentId} for tenant {TenantId}", documentId, tenantId);
 
         var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+        // unified-access-control-r2 task 163 (sweep finding #30): a delete by key alone has no tenant
+        // predicate, and under the Shared deployment model every tenant's chunks live in one physical index —
+        // so a key from another tenant's partition was deletable. Delete only a chunk that carries THIS
+        // tenant: look it up by (id, tenantId) first. A chunk of another tenant and an absent chunk both
+        // return false and delete nothing, so the caller cannot tell them apart.
+        var ownershipQuery = new SearchOptions
+        {
+            Filter = $"id eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'",
+            Size = 1,
+            Select = { "id" }
+        };
+
+        SearchResults<KnowledgeDocument> ownedChunk;
+        if (_resilientClient != null)
+        {
+            ownedChunk = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                searchClient, "*", ownershipQuery, cancellationToken);
+        }
+        else
+        {
+            var ownershipResponse = await searchClient.SearchAsync<KnowledgeDocument>(
+                "*", ownershipQuery, cancellationToken);
+            ownedChunk = ownershipResponse.Value;
+        }
+
+        var ownedByTenant = false;
+        await foreach (var hit in ownedChunk.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (string.Equals(hit.Document?.Id, documentId, StringComparison.Ordinal))
+            {
+                ownedByTenant = true;
+                break;
+            }
+        }
+
+        if (!ownedByTenant)
+        {
+            _logger.LogInformation(
+                "Delete skipped: no chunk with key {DocumentId} in the partition of tenant {TenantId}",
+                documentId, tenantId);
+            return false;
+        }
+
         IndexDocumentsResult deleteResult;
 
         if (_resilientClient != null)

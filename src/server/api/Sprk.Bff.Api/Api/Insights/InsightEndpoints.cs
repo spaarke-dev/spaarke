@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
@@ -37,7 +38,10 @@ namespace Sprk.Bff.Api.Api.Insights;
 /// claims from <see cref="HttpContext.User"/>. Missing <c>tid</c> → 401 ProblemDetails
 /// (token is invalid for Insights Engine purposes); missing <c>oid</c> → 401
 /// ProblemDetails. There is NO role gate — Insights synthesis is a tenant-user
-/// capability (per D-P15 task POML "regular tenant user, not admin role").
+/// capability (per D-P15 task POML "regular tenant user, not admin role"). There IS a
+/// record gate (unified-access-control-r2 task 163): the subject matter is authorized for
+/// Read as the caller by the route's declaration filter, and an unreadable or absent matter
+/// gets the uniform 404.
 /// </para>
 /// <para>
 /// <b>Rate limit</b>: <c>ai-context</c> policy (60 requests/minute sliding window per
@@ -68,7 +72,14 @@ public static class InsightEndpoints
             .RequireRateLimiting("ai-context")
             .WithTags("Insights");
 
+        // Authorization (unified-access-control-r2 task 163, sweep finding #17): the subject matter is
+        // authorized for Read, AS THE CALLER, before IInsightsAi or the playbook cache is reached. A caller
+        // without Read and an absent matter get the identical uniform 404. Read is the right asked of the
+        // subject because the answer discloses facts a reader of the matter can already read; see the
+        // handler for the two input rules that keep it so (registered playbooks only, no identifier
+        // parameters) and the task-163 note for the open owner question on persisting playbooks.
         group.MapPost("/ask", Ask)
+            .AddFinanceAuthorizationFilter(ResolveAskSubjectTargets, FinanceDenial.UniformNotFound)
             .WithName("AskInsights")
             .WithSummary("Synthesize an Insights-mode answer or return a structured decline (D-P15)")
             .WithDescription(
@@ -82,10 +93,123 @@ public static class InsightEndpoints
             .Produces<InsightAskResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
+    }
+
+    /// <summary>reasonCode of the 400 for an identifier key in <c>parameters</c> (task 163).</summary>
+    internal const string ParametersNotAcceptedReasonCode = "insights.parameters.not_accepted";
+
+    /// <summary>
+    /// Authorization declaration for <c>POST /api/insights/ask</c> (task 163): Read on
+    /// <c>sprk_matters(id)</c>, where id is the GUID after <c>matter:</c>. A missing body or subject, a
+    /// non-<c>matter:</c> scheme, or an id that is not a non-empty GUID is a 400 returned BEFORE any rights
+    /// query (the same bodies the handler returns for the first three).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveAskSubjectTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<InsightAskRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("Request body is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("'subject' is required and cannot be empty."));
+        }
+
+        if (!TryParseMatterSubject(request.Subject, out var matterId, out var subjectError))
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest(subjectError));
+        }
+
+        if (!EntityAccessFilter.TryResolveEntitySet("matter", out var matterEntitySet))
+        {
+            // Unreachable while the shared map carries "matter"; declaring no check denies (fail closed).
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = matterEntitySet,
+            RecordId = matterId,
+            Operation = "read",
+            Source = "body.subject",
+        });
+    }
+
+    /// <summary>
+    /// Parses the Phase 1 <c>matter:{guid}</c> subject. The error strings for a wrong scheme and an empty id are
+    /// the ones the handler has always returned; a non-GUID id is new with task 163 (it used to reach the
+    /// facade unparsed).
+    /// </summary>
+    private static bool TryParseMatterSubject(string subject, out Guid matterId, out string error)
+    {
+        matterId = Guid.Empty;
+        error = string.Empty;
+
+        if (!subject.StartsWith(MatterSubjectPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"'subject' must begin with '{MatterSubjectPrefix}' in Phase 1 " +
+                    "(e.g., 'matter:{id}'). Other schemes are not yet supported.";
+            return false;
+        }
+
+        var raw = subject.Substring(MatterSubjectPrefix.Length).Trim();
+        if (string.IsNullOrEmpty(raw))
+        {
+            error = $"'subject' is missing an identifier after '{MatterSubjectPrefix}'.";
+            return false;
+        }
+
+        if (!Guid.TryParse(raw, out matterId) || matterId == Guid.Empty)
+        {
+            error = $"'subject' must be '{MatterSubjectPrefix}' followed by a matter id (a non-empty GUID).";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The identifier-parameter rule (task 163): a <c>parameters</c> key that ends in "id" (case-insensitive —
+    /// matterId, projectId, invoiceId, tenantId, userId, documentId, ...) would let the caller retarget a
+    /// playbook node at a record other than the authorized subject, because the caller's value wins over the
+    /// subject-derived one (<c>InsightsOrchestrator.EnrichParametersFromSubject</c>). The one exception is the
+    /// subject's own key, <c>matterId</c>, with a value equal (as a GUID) to the subject id. Every other key
+    /// passes through unchanged. Returns the first refused key, or <c>null</c>.
+    /// </summary>
+    internal static string? FindRefusedIdentifierParameter(
+        IReadOnlyDictionary<string, string>? parameters, Guid subjectMatterId)
+    {
+        if (parameters is null)
+        {
+            return null;
+        }
+
+        foreach (var (key, value) in parameters)
+        {
+            if (!key.EndsWith("id", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var isSubjectsOwnKey = string.Equals(key, "matterId", StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParse(value, out var supplied)
+                && supplied == subjectMatterId;
+
+            if (!isSubjectsOwnKey)
+            {
+                return key;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -187,7 +311,25 @@ public static class InsightEndpoints
         // names, so it accepts the resolution only when the returned Binding's ConsumerCode
         // equals the requested name (OrdinalIgnoreCase) — a default-row fallback means
         // "not registered" here.
-        if (!Guid.TryParse(request.Question, out var playbookId) || playbookId == Guid.Empty)
+        var unregisteredQuestion = BadRequest(
+            "'question' must be either a valid playbook Guid id OR a canonical name " +
+            "registered as an enabled sprk_playbookconsumer row (consumerType " +
+            $"'{ConsumerTypes.InsightsAsk}', sprk_consumercode = the canonical name). " +
+            $"Received: '{request.Question}'.");
+
+        if (Guid.TryParse(request.Question, out var playbookId) && playbookId != Guid.Empty)
+        {
+            // Task 163 (sweep finding #17): a raw GUID used to run ANY playbook. It is accepted only when an
+            // ENABLED Binding row binds that playbook as consumer type insights-ask — the same registry the
+            // canonical-name path reads — so a raw GUID can reach exactly the playbooks a name can.
+            var boundAs = await consumerRouting.GetBindingByPlaybookIdAsync(playbookId, cancellationToken: ct);
+            if (boundAs is null
+                || !string.Equals(boundAs.ConsumerType, ConsumerTypes.InsightsAsk, StringComparison.OrdinalIgnoreCase))
+            {
+                return unregisteredQuestion;
+            }
+        }
+        else
         {
             var binding = await consumerRouting.ResolveBindingAsync(
                 ConsumerTypes.InsightsAsk, consumerCode: request.Question, cancellationToken: ct);
@@ -207,26 +349,31 @@ public static class InsightEndpoints
             }
             else
             {
-                return BadRequest(
-                    "'question' must be either a valid playbook Guid id OR a canonical name " +
-                    "registered as an enabled sprk_playbookconsumer row (consumerType " +
-                    $"'{ConsumerTypes.InsightsAsk}', sprk_consumercode = the canonical name). " +
-                    $"Received: '{request.Question}'.");
+                return unregisteredQuestion;
             }
         }
 
-        // Phase 1 subject contract: matter:{id}. Other schemes are out of scope per task POML.
-        if (!request.Subject.StartsWith(MatterSubjectPrefix, StringComparison.OrdinalIgnoreCase))
+        // Phase 1 subject contract: matter:{guid}. The route filter has already parsed and authorized it;
+        // this re-parse keeps the handler's own contract if the filter is ever detached.
+        if (!TryParseMatterSubject(request.Subject, out var subjectMatterId, out var subjectError))
         {
-            return BadRequest(
-                $"'subject' must begin with '{MatterSubjectPrefix}' in Phase 1 " +
-                "(e.g., 'matter:{id}'). Other schemes are not yet supported.");
+            return BadRequest(subjectError);
         }
 
-        var subjectId = request.Subject.Substring(MatterSubjectPrefix.Length).Trim();
-        if (string.IsNullOrEmpty(subjectId))
+        // Task 163: identifier parameters are derived from the authorized subject, never supplied.
+        var refusedKey = FindRefusedIdentifierParameter(request.Parameters, subjectMatterId);
+        if (refusedKey is not null)
         {
-            return BadRequest($"'subject' is missing an identifier after '{MatterSubjectPrefix}'.");
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: $"Parameter '{refusedKey}' is not accepted: record identifiers are derived from the subject.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = ParametersNotAcceptedReasonCode,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                });
         }
 
         // ---------------------------------------------------------------
@@ -274,7 +421,10 @@ public static class InsightEndpoints
         // ---------------------------------------------------------------
         var facadeRequest = new InsightsAgentRequest(
             Question: playbookId,
-            Subject: request.Subject,
+            // Task 163: the CANONICAL form of the authorized id, not the raw string — so what the playbook
+            // and the cache key see is exactly the record the route filter asked Dataverse about, whatever
+            // GUID spelling (braces, case, no dashes) the caller sent.
+            Subject: $"{MatterSubjectPrefix}{subjectMatterId}",
             Parameters: request.Parameters,
             TenantId: tenantId,
             AccessibleScopeHash: accessibleScopeHash);

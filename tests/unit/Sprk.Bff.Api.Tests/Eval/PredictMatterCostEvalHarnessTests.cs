@@ -219,13 +219,21 @@ public class PredictMatterCostEvalHarnessTests : IClassFixture<PredictMatterCost
                 .ReturnsAsync(InsightsAgentResult.Declined(decline, cacheHit: false, processingTimeMs: 88));
         }
 
-        // Invoke the endpoint
+        // Invoke the endpoint.
+        //
+        // Task 163 (unified-access-control-r2): the subject id must be a GUID (the route's declaration filter
+        // authorizes Read on sprk_matters(id) as the caller), and the only identifier parameter /ask accepts is
+        // matterId EQUAL to the subject. The golden tuples carry display ids ("M-FIXTURE-001"), so each is mapped
+        // to a stable GUID used for BOTH the subject and the matterId parameter; the tuning keys pass unchanged.
+        var subjectMatterId = SubjectGuidFor(matterId);
+        var parameters = new Dictionary<string, string>(tuple.Parameters) { ["matterId"] = subjectMatterId.ToString() };
+
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = $"matter:{matterId}",
-            parameters = tuple.Parameters
+            subject = $"matter:{subjectMatterId}",
+            parameters
         };
 
         var response = await client.PostAsJsonAsync("/api/insights/ask", request);
@@ -419,6 +427,10 @@ public class PredictMatterCostEvalHarnessTests : IClassFixture<PredictMatterCost
     // -------------------------------------------------------------------------
     // Tuple → facade mock builders
     // -------------------------------------------------------------------------
+
+    /// <summary>A stable GUID per golden-tuple matter id (task 163: the /ask subject must be a GUID).</summary>
+    private static Guid SubjectGuidFor(string fixtureMatterId) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(fixtureMatterId)));
 
     private static InferenceArtifact BuildArtifactFromTuple(GoldenTuple tuple, string matterId)
     {
@@ -738,6 +750,19 @@ public class PredictMatterCostEvalHarnessFixture : WebApplicationFactory<Program
 
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
+
+            // Task 163: /ask accepts a raw playbook GUID only when it is bound as insights-ask, and authorizes
+            // Read on the subject matter as the caller. The harness models predict-matter-cost bound as
+            // insights-ask and a caller who can read the subject — it measures answer quality, not access.
+            var routing = new Mock<IConsumerRoutingService>(MockBehavior.Loose);
+            routing
+                .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                    new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
+            services.RemoveAll<IConsumerRoutingService>();
+            services.AddSingleton(routing.Object);
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
 
             services.RemoveAll<IHostedService>();
 

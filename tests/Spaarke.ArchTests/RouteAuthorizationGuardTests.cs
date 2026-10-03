@@ -872,7 +872,15 @@ public class RouteAuthorizationGuardTests
     //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
     //            affordance would vanish for every user. Both directions are pinned by
     //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 119 (2026-10-03, unified-access-control-r2 task 163). A DOWNWARD move:
+    //
+    //   163  -1  Api/Ai/AdminKnowledgeEndpoints.cs DELETED with all three of its routes (POST
+    //            /api/admin/knowledge/index-references, POST and DELETE /index-reference/{knowledgeSourceId})
+    //            under owner round 10 item 1 — no caller in the repo and in no published API description.
+    //            The file was NOT in GovernedFiles, so there is no entry to remove. Api/Ai/KnowledgeBaseEndpoints.cs
+    //            lost four routes in the same task but keeps GET /indexes/health, so it is still counted.
+    private const int ExpectedEndpointFileCount = 119;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

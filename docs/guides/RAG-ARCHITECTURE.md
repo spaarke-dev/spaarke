@@ -52,11 +52,10 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │                        BFF API Layer                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  RagEndpoints.cs                                                │
-│  ├── POST /api/ai/rag/search      → Hybrid search               │
-│  ├── POST /api/ai/rag/index       → Index document              │
-│  ├── POST /api/ai/rag/index/batch → Batch index                 │
-│  ├── DELETE /api/ai/rag/{id}      → Delete document             │
-│  ├── DELETE /api/ai/rag/source/{id} → Delete by source          │
+│  ├── POST /api/ai/rag/search      → Hybrid search (rows trimmed │
+│  │                                 to documents caller can Read)│
+│  ├── POST /api/ai/rag/index       → Index chunk (SystemAdmin)   │
+│  ├── DELETE /api/ai/rag/{id}      → Delete chunk (SystemAdmin)  │
 │  └── POST /api/ai/rag/embedding   → Generate embedding          │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -376,13 +375,8 @@ Key fields beyond standard `KnowledgeDocument`:
 | `knowledgeSourceName` | Human-readable source name (e.g., "Contract Clause Library") |
 | `documentType` | Domain tag (e.g., "contract-law", "financial-analysis") |
 
-### Admin Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/admin/knowledge/index-references` | Bulk-index all knowledge sources |
-| POST | `/api/admin/knowledge/index-reference/{id}` | Index single source |
-| DELETE | `/api/admin/knowledge/index-reference/{id}` | Delete source chunks |
+### Indexing the reference index
+ reference index is populated by the operator scripts `scripts/ai-search/Add-ReferenceToIndex.ps1` and `scripts/ai-search/Index-AllReferences.ps1` (see the `add-reference-to-index` skill). The BFF admin routes that used to do this (`/api/admin/knowledge/index-references`, `POST`/`DELETE /api/admin/knowledge/index-reference/{id}`) were **deleted** by unified-access-control-r2 task 163: they had no caller and let any signed-in user re-embed, overwrite or wipe the shared grounding index.
 
 ### Knowledge-Augmented Execution
 
