@@ -62,9 +62,11 @@ public static class CommunicationTemplateEndpoints
     }
 
     /// <summary>
-    /// The response a template that does not exist gets — and, since task 161, one the caller cannot read. Built in
-    /// one place so the filter's deny and the handler's not-found branch cannot drift apart. The detail is the exact
-    /// text <see cref="EmailTemplateService"/> returns for a missing template.
+    /// The response a template that does not exist gets — and, since task 161, one the caller cannot read. BOTH the
+    /// record filter's deny and <see cref="RenderTemplateAsync"/>'s not-found branch return this, so the two bodies
+    /// cannot drift apart even if <see cref="EmailTemplateService"/> rewords its error (the handler still recognises
+    /// not-found by that error's "not found" text, as before). The detail is the text the service uses for a missing
+    /// template.
     /// </summary>
     internal static IResult TemplateNotFound(Guid templateId) =>
         Results.Problem(
@@ -142,10 +144,17 @@ public static class CommunicationTemplateEndpoints
             var isNotFound = result.Error is not null
                 && result.Error.Contains("not found", StringComparison.OrdinalIgnoreCase);
 
+            // A missing template answers EXACTLY what the record filter answers for an unreadable one (unknown equals
+            // denied, owner round 9): one body, built in one place.
+            if (isNotFound)
+            {
+                return TemplateNotFound(request.TemplateId);
+            }
+
             return Results.Problem(
                 detail: result.Error,
-                statusCode: isNotFound ? StatusCodes.Status404NotFound : StatusCodes.Status400BadRequest,
-                title: isNotFound ? "Template Not Found" : "Template Render Failed");
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Template Render Failed");
         }
 
         return Results.Ok(new CommunicationTemplateRenderResponse

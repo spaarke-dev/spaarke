@@ -38,7 +38,8 @@ namespace Sprk.Bff.Api.Tests.Api.Communication;
 /// Substitutes only the module boundaries the communication contract tests already use (ADR-038): the caller
 /// resolver, the app-only entity service, the impersonated query, the identity resolver, the delegated user client,
 /// the access data source behind the REAL AuthorizationService, the virtual seams of CallerRecordAccessProbe, the
-/// channel senders, the document metadata service, the association rung set and the SPE download. No HTTP mocks.
+/// channel senders, the document metadata service, the association rung set, the impersonated record-write
+/// boundary (<c>IFieldMappingDataverseService</c>) and the SPE download. No HTTP mocks.
 /// </summary>
 public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory<Program>
 {
@@ -59,6 +60,10 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
     public ScriptedRung Rung { get; } = new();
     public Mock<IEmailTemplateService> Templates { get; } = new();
     public Mock<IGraphClientFactory> Graph { get; } = new();
+
+    /// <summary>The impersonated record-write boundary behind <c>IActionSeam.UpdateRecordAsync</c> (the Job B/C writes).</summary>
+    public Mock<IFieldMappingDataverseService> FieldMapping { get; } = new();
+
     public List<(string DriveId, string ItemId)> Downloads { get; } = new();
 
     /// <summary>Restores every substitute to its defaults: a resolved internal caller, nothing granted, nothing visible.</summary>
@@ -93,6 +98,7 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
         Rung.Reset();
         Templates.Reset();
         Graph.Reset();
+        FieldMapping.Reset();
         Downloads.Clear();
     }
 
@@ -287,6 +293,8 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
             services.AddSingleton(Templates.Object);
             services.RemoveAll<IGraphClientFactory>();
             services.AddSingleton(Graph.Object);
+            services.RemoveAll<IFieldMappingDataverseService>();
+            services.AddSingleton(FieldMapping.Object);
             services.RemoveAll<SpeFileStore>();
             services.AddScoped<SpeFileStore>(sp => new StubSpeFileStore(
                 sp.GetRequiredService<ContainerOperations>(),

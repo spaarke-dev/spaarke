@@ -172,10 +172,13 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
     {
         var gate = new Gate(context, _route);
 
-        // Id-INDEPENDENT preconditions first, so their answer cannot vary with whether a record exists: the caller's
-        // own bearer token (every rights question is asked with it) and a resolvable Dataverse systemuser (every
-        // impersonated question is asked as it). Either missing denies with the route's own deny answer.
-        var denial = await gate.CheckCallerPreconditionsAsync() ?? _route switch
+        // The request's SHAPE first: a regarding type outside the live-verified catalogue is a 400 that depends on
+        // neither the caller nor any record, so it is answered before ANY Dataverse call — including the
+        // caller-resolution lookup below (an app-only systemuser query).
+        // Then the id-INDEPENDENT preconditions, so their answer cannot vary with whether a record exists: the
+        // caller's own bearer token (every rights question is asked with it) and a resolvable Dataverse systemuser
+        // (every impersonated question is asked as it). Either missing denies with the route's own deny answer.
+        var denial = gate.CheckRequestShape() ?? await gate.CheckCallerPreconditionsAsync() ?? _route switch
         {
             CommunicationRecordRoute.Send => await gate.AuthorizeSendAsync(),
             CommunicationRecordRoute.SendBulk => await gate.AuthorizeSendBulkAsync(),
@@ -289,6 +292,57 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
         // ── Preconditions that do not depend on the record ───────────────────────────────────────
 
         /// <summary>
+        /// The 400 a request gets for its shape alone — a missing regarding, or a regarding type with no live-verified
+        /// entity set. It depends on neither the caller nor any record, so it is decided with NO Dataverse call.
+        /// </summary>
+        public Denial? CheckRequestShape() => _route switch
+        {
+            CommunicationRecordRoute.CreateRecordThread => RecordThreadTarget().Invalid,
+            CommunicationRecordRoute.TemplateRender => TemplateRegardingTarget().Invalid,
+            _ => null,
+        };
+
+        /// <summary>The thread's regarding entity set, or the 400 the request gets for its shape.</summary>
+        private (string? EntitySet, Denial? Invalid) RecordThreadTarget()
+        {
+            var request = Bound<CreateRecordThreadRequest>();
+            var type = request?.RegardingEntityType?.Trim();
+            if (string.IsNullOrWhiteSpace(type) || request!.RegardingRecordId == Guid.Empty)
+            {
+                // The handler's own 400, raised here so no Dataverse call is spent on an incomplete request.
+                return (null, Denial.Problem(ValidationError("regardingEntityType and a non-empty regardingRecordId are required.")));
+            }
+
+            var entitySet = RegardingNameFields.EntitySetName(type.ToLowerInvariant());
+            return entitySet is null
+                ? (null, Denial.Problem(ValidationError($"'{type}' is not a supported regarding record type.")))
+                : (entitySet, null);
+        }
+
+        /// <summary>
+        /// The template's regarding entity set (null when the request names no regarding, or no template — the
+        /// handler's 400), or the 400 a regarding type outside the catalogue gets.
+        /// </summary>
+        private (string? EntitySet, Denial? Invalid) TemplateRegardingTarget()
+        {
+            var request = Bound<CommunicationTemplateRenderRequest>();
+            if (request is null
+                || request.TemplateId == Guid.Empty
+                || string.IsNullOrWhiteSpace(request.RegardingEntityType)
+                || request.RegardingRecordId is not { } rid
+                || rid == Guid.Empty)
+            {
+                return (null, null);
+            }
+
+            var type = request.RegardingEntityType.Trim();
+            var entitySet = RegardingNameFields.EntitySetName(type.ToLowerInvariant());
+            return entitySet is null
+                ? (null, Denial.Problem(ValidationError($"'{type}' is not a supported regarding record type.")))
+                : (entitySet, null);
+        }
+
+        /// <summary>
         /// No bearer token, or a caller that does not resolve to a Dataverse systemuser, denies — with the route's
         /// own deny answer, before any record is looked at, so the answer is the same for every id.
         /// </summary>
@@ -378,19 +432,12 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
 
         public async Task<Denial?> AuthorizeCreateRecordThreadAsync()
         {
-            var request = Bound<CreateRecordThreadRequest>();
-            var type = request?.RegardingEntityType?.Trim();
-            if (string.IsNullOrWhiteSpace(type) || request!.RegardingRecordId == Guid.Empty)
-            {
-                // The handler's own 400, raised here so no rights query is spent on an incomplete request.
-                return Denial.Problem(ValidationError("regardingEntityType and a non-empty regardingRecordId are required."));
-            }
+            // The shape was checked before the caller preconditions (CheckRequestShape); re-derived, never assumed.
+            var (entitySet, invalid) = RecordThreadTarget();
+            if (invalid is not null || entitySet is null)
+                return invalid ?? Forbidden(ThreadCreateDenyReasonCode);
 
-            var entitySet = RegardingNameFields.EntitySetName(type.ToLowerInvariant());
-            if (entitySet is null)
-                return Denial.Problem(ValidationError($"'{type}' is not a supported regarding record type."));
-
-            return await HasRightsAsync(entitySet, request.RegardingRecordId, AccessRights.AppendTo)
+            return await HasRightsAsync(entitySet, Bound<CreateRecordThreadRequest>()!.RegardingRecordId, AccessRights.AppendTo)
                 ? null
                 : Forbidden(ThreadCreateDenyReasonCode);
         }
@@ -488,18 +535,14 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
                 return null;
             }
 
-            var hasRegarding = !string.IsNullOrWhiteSpace(request.RegardingEntityType)
-                               && request.RegardingRecordId is { } rid && rid != Guid.Empty;
-            if (hasRegarding)
-            {
-                var type = request.RegardingEntityType!.Trim();
-                var entitySet = RegardingNameFields.EntitySetName(type.ToLowerInvariant());
-                if (entitySet is null)
-                    return Denial.Problem(ValidationError($"'{type}' is not a supported regarding record type."));
+            // The type allow-list was checked before the caller preconditions (CheckRequestShape); re-derived here.
+            var (entitySet, invalid) = TemplateRegardingTarget();
+            if (invalid is not null)
+                return invalid;
 
-                if (!await HasRightsAsync(entitySet, request.RegardingRecordId!.Value, AccessRights.Read))
-                    return Forbidden(TemplateRenderDenyReasonCode);
-            }
+            if (entitySet is not null
+                && !await HasRightsAsync(entitySet, request.RegardingRecordId!.Value, AccessRights.Read))
+                return Forbidden(TemplateRenderDenyReasonCode);
 
             // The template body is fetched app-only inside EmailTemplateService (G5: checked as the user, read as the
             // app). A template the caller cannot read gets EXACTLY the answer a non-existent one gets.

@@ -127,6 +127,30 @@ public class CommunicationTemplateEndpointTests
     }
 
     [Fact]
+    public async Task RenderTemplate_WhenTheServiceReportsNotFoundInOtherWords_AnswersTheSameBodyTheRecordFilterDeniesWith()
+    {
+        // Unknown equals denied (task 161): the record filter answers an UNREADABLE template with
+        // TemplateNotFound(templateId); a MISSING one must get that same body even if the service rewords its error.
+        var templateId = Guid.NewGuid();
+        _emailTemplateServiceMock
+            .Setup(s => s.FetchAndRenderAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EmailTemplateResult.Fail("The requested template was not found in this environment."));
+
+        var result = await InvokeAsync(new CommunicationTemplateRenderRequest { TemplateId = templateId });
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        var filterDeny = CommunicationTemplateEndpoints.TemplateNotFound(templateId).Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(404);
+        problem.ProblemDetails.Title.Should().Be(filterDeny.ProblemDetails.Title).And.Be("Template Not Found");
+        problem.ProblemDetails.Detail.Should().Be(filterDeny.ProblemDetails.Detail).And.Be($"Email template not found: {templateId}");
+    }
+
+    [Fact]
     public async Task RenderTemplate_WhenNoRegarding_CallsRenderWithEmptyVariablesAndDoesNotReadDataverse()
     {
         // Arrange

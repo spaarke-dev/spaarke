@@ -332,5 +332,37 @@ GUARD STATE. `RouteAuthorizationGuardTests.cs` — `ExplicitlyCreditedFilterType
       TESTS: build -warnaserror clean; affected classes green (CommunicationRecordAuthorizationContractTests 159/159); full BFF unit suite 14244 passed / 54 skipped / 143 failed, all 143 HttpClient timeouts under heavy machine contention (268 dotnet processes), and the 55 classes they belong to re-run in isolation 560 passed / 0 failed; ArchTests 346/346; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped; no vulnerable package; 36 seeded removals each fail a named test.
       LIVE GATE (pending, manual, main session): note §13 items (a)-(g).
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-161-r1" base="7f9159027" result="verifier findings closed (code); manual live gate still pending">
+      Adversarial verifier round on 7f9159027. Full record: note §15 (item-by-item), §4.10-§4.11 (behaviour), §7 (tests),
+      §8 S37-S40 (seeding), §12 (r1 verification, the verifier's publish-size numbers).
+      ITEMS 8/14/15 FIXED: POST /threads and POST /template/render answer a regarding type outside RegardingNameFields
+      (and, on /threads, a missing regarding) with their 400 VALIDATION_ERROR BEFORE the caller precondition, so no
+      Dataverse call at all runs, not even the app-only systemuser lookup (Gate.CheckRequestShape before
+      CheckCallerPreconditionsAsync). The two ...Is400BeforeAnyDataverseCall tests assert the ICallerSystemUserResolver
+      and every other Dataverse seam untouched (seed S37 bites both).
+      ITEM 9 FIXED: the template handler's not-found branch returns TemplateNotFound(templateId), the body the filter
+      denies an unreadable template with; the summary now matches; new unit test (seed S38 bites).
+      ITEM 10 FIXED: route descriptions of create-task, the four proposal routes and tasks undo state the 404 for an
+      unknown / invisible id, a missing token and an unresolved caller; rename / pin / thread delete / message delete
+      state the Write requirement; route comments corrected; Produces 404 on create-task and tasks undo.
+      ITEM 11 FIXED: weak positive tests replaced by full authorized-path tests (apply / undo / tasks undo run to 200 and
+      write AS THE CALLER, one audit row); the contract host substitutes IFieldMappingDataverseService (module boundary,
+      ADR-038); deny tests also assert no impersonated write (seeds S39, S40 bite).
+      CONFIRMED, NO CHANGE: items 1, 2 (endpoints-smoke.json observation recorded in note §5), 3, 6, 7, 13.
+      ITEM 12 (owner, deployment sequencing): Write stays required (amendment); recommended to deploy 161 with or after
+      task 146 so app-owned messages / threads are re-owned first.
+      ITEMS 5/16: the verifier measured publish size per CLAUDE.md §10 hazards 3-4: base 45.657 MB, branch 45.683 MB,
+      +0.026 MB, 212 files each, Compress-Archive Optimal, fresh short paths C:\wq161m / C:\wq161b; the PR cites these
+      (r1 not re-measured, on instruction; no package change).
+      PLACEMENT (CLAUDE.md §10): unchanged; r1 adds no service, registration, endpoint, option, job, column or package
+      (two private helpers inside the existing filter; one test-host substitution). No §11 justification needed (no new
+      surface). /conflict-check: 21 open PRs, no overlap; master and the email-communication-intelligence branches
+      unchanged on these files since the base.
+      TESTS (r1): build -warnaserror 0 warnings; affected 170/170; Communication-filtered 1303 passed / 8 skipped / 0
+      failed; full BFF unit suite 14385 passed / 54 skipped / 3 failed of 14442 (all 3 TaskCanceledException under
+      contention, 271 dotnet processes, CPU 100 %), those 3 classes re-run isolated 19/19 passed; ArchTests 346/346;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed.
+      NOT CLOSED: item 17, the MANUAL LIVE GATE (note §13 (a)-(g)), main session.
+    </outcome>
   </execution>
 </task>

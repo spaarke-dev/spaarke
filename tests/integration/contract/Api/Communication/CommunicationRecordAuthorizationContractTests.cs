@@ -318,9 +318,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync()).Should().Contain("VALIDATION_ERROR");
-        _host.Probe.Calls.Should().BeEmpty();
-        _host.Query.Calls.Should().BeEmpty();
-        AssertNoAppOnlyDataverseCall("an unsupported type must not reach Dataverse");
+        AssertNoDataverseCallAtAll("an unsupported type is a 400 decided from the body alone");
     }
 
     [Fact]
@@ -452,6 +450,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         var denied = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/proposals/{reviewLogId}/{action}", new { }));
         AssertNoCreate("sprk_emailreviewlog");
         AssertNoCreate("sprk_event");
+        AssertNoImpersonatedWrite();
 
         // The service's own answer for an unknown reviewLogId.
         _host.Reset();
@@ -481,21 +480,35 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
     }
 
     [Theory]
-    [InlineData("apply")]
-    [InlineData("undo")]
-    public async Task Proposal_VisibleToTheCaller_ReachesTheServiceUnchanged(string action)
+    [InlineData("apply", "after")]
+    [InlineData("undo", "before")]
+    public async Task ProposalApplyAndUndo_AuthorizedCaller_WriteTheTargetAsTheCallerAsToday(string action, string expectedValue)
     {
-        // A visible proposal passes the gate; the service then gives its OWN answer — here, for a row that is no
-        // longer pending, exactly what it answers today.
+        // A visible proposal passes the gate and the service runs to completion exactly as it does today: the
+        // target field is written UNDER THE CALLER'S impersonation (apply writes newValue, undo restores oldValue)
+        // and one audit row is appended.
         var reviewLogId = Guid.NewGuid();
         var communication = Guid.NewGuid();
-        ProposalRow(reviewLogId, communication, Guid.NewGuid(), createTask: false, action: 100000004 /* Dismissed */);
+        var matter = Guid.NewGuid();
+        ProposalRow(reviewLogId, communication, matter, createTask: false,
+            suggestion: """{"oldValue":"before","newValue":"after","citation":{"quotedText":"the matter"}}""");
         VisibleCommunication(communication);
+        AppOnlyCommunication(communication, subject: "Re: the matter");
+        OpenProposal(reviewLogId);
+        AllowListedTextField("sprk_matter", "sprk_description");
 
         var response = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/proposals/{reviewLogId}/{action}"));
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("PROPOSAL_NOT_FOUND");
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadAsStringAsync()).Should().Contain(reviewLogId.ToString());
+        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+                "sprk_matter",
+                matter,
+                It.Is<Dictionary<string, object?>>(d => d.Count == 1 && Equals(d["sprk_description"], expectedValue)),
+                It.IsAny<CancellationToken>(),
+                CallerSystemUserId),
+            Times.Once);
+        _host.Entities.Verify(e => e.CreateAsync(It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -562,17 +575,34 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         (await NormalizedBodyAsync(denied)).Should().Contain("COMMUNICATION_NOT_FOUND");
         (await NormalizedBodyAsync(unknown)).Should().Be((await NormalizedBodyAsync(denied)).Replace(hidden.ToString(), unknownId.ToString()));
         AssertNoCreate("sprk_emailreviewlog");
+        AssertNoImpersonatedWrite();
     }
 
     [Fact]
-    public async Task TaskUndo_VisibleCommunication_ReachesTheServiceUnchanged()
+    public async Task TaskUndo_AuthorizedCaller_CancelsTheTaskAsTheCallerAsToday()
     {
+        // A visible communication passes the gate and the service runs to completion exactly as it does today: the
+        // task is soft-cancelled UNDER THE CALLER'S impersonation and one compensating audit row names the communication.
         var id = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
         VisibleCommunication(id);
 
-        var response = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/tasks/{Guid.NewGuid()}/undo"));
+        var response = await _host.SendAsync(Request(HttpMethod.Post, $"/api/communications/{id}/tasks/{taskId}/undo"));
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("COMMUNICATION_NOT_FOUND");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadAsStringAsync()).Should().Contain(taskId.ToString());
+        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+                "sprk_event",
+                taskId,
+                It.Is<Dictionary<string, object?>>(d => d.ContainsKey("sprk_eventstatus")),
+                It.IsAny<CancellationToken>(),
+                CallerSystemUserId),
+            Times.Once);
+        _host.Entities.Verify(e => e.CreateAsync(
+                It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"
+                                            && x.GetAttributeValue<EntityReference>("sprk_communication").Id == id),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // =============================================================================================
@@ -884,9 +914,9 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             new { templateId = Guid.NewGuid(), regardingEntityType = "systemuser", regardingRecordId = Guid.NewGuid() }));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        _host.Probe.Calls.Should().BeEmpty();
-        _host.Query.Calls.Should().BeEmpty();
-        AssertNoAppOnlyDataverseCall("an unsupported type must not reach Dataverse");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("VALIDATION_ERROR");
+        AssertNoDataverseCallAtAll("an unsupported type is a 400 decided from the body alone");
+        _host.Templates.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -1234,6 +1264,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         _host.Rung.Evaluations.Should().Be(0, "the Association Engine must not run");
         _host.Templates.VerifyNoOtherCalls();
         _host.Graph.Verify(g => g.ForApp(), Times.Never);
+        AssertNoImpersonatedWrite();
     }
 
     // =============================================================================================
@@ -1292,7 +1323,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         assignedTo,
     };
 
-    private void ProposalRow(Guid reviewLogId, Guid communication, Guid matter, bool createTask, int action = ReviewActionProposed)
+    private void ProposalRow(
+        Guid reviewLogId, Guid communication, Guid matter, bool createTask, int action = ReviewActionProposed, string? suggestion = null)
     {
         var row = new DataverseEntity("sprk_emailreviewlog", reviewLogId)
         {
@@ -1301,9 +1333,9 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             ["sprk_targetrecordid"] = matter.ToString(),
             ["sprk_targetfield"] = createTask ? "__create_task__:reply-brief" : "sprk_description",
             ["sprk_action"] = new OptionSetValue(action),
-            ["sprk_aisuggestion"] = createTask
+            ["sprk_aisuggestion"] = suggestion ?? (createTask
                 ? """{"subject":"File the reply brief","citation":{"quotedText":"reply brief"}}"""
-                : """{"proposedValue":"x"}""",
+                : """{"proposedValue":"x"}"""),
         };
         _host.Entities.Setup(e => e.RetrieveAsync("sprk_emailreviewlog", reviewLogId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(row);
@@ -1317,6 +1349,21 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             .ReturnsAsync(new EntityCollection(new List<DataverseEntity>
             {
                 new("sprk_emailreviewlog", reviewLogId) { ["sprk_action"] = new OptionSetValue(ReviewActionProposed) },
+            }));
+    }
+
+    /// <summary>The apply-time allow-list: <paramref name="field"/> on <paramref name="entity"/> is an enabled Text entry.</summary>
+    private void AllowListedTextField(string entity, string field)
+    {
+        var recordTypeRef = Guid.NewGuid();
+        _host.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { new("sprk_recordtype_ref", recordTypeRef) }));
+        _host.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_emailupdatefield"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity>
+            {
+                new("sprk_emailupdatefield", Guid.NewGuid()) { ["sprk_fieldtype"] = new OptionSetValue(100000000) /* Text */ },
             }));
     }
 
@@ -1375,6 +1422,27 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
     private void AssertNoAppOnlyDataverseCall(string because) =>
         _host.Entities.Invocations.Should().BeEmpty(because);
+
+    private void AssertNoImpersonatedWrite() =>
+        _host.FieldMapping.Invocations.Should().BeEmpty("no record is written as the caller on a deny");
+
+    /// <summary>
+    /// Not one Dataverse round trip of any kind: the caller-resolution lookup (an app-only systemuser query), the
+    /// identity resolver, rights and privilege probes, impersonated and delegated reads, the document decision's data
+    /// source, app-only reads and writes, and the impersonated write.
+    /// </summary>
+    private void AssertNoDataverseCallAtAll(string because)
+    {
+        _host.Callers.Invocations.Should().BeEmpty(because + " (not even the caller-resolution lookup)");
+        _host.CommunicationData.Invocations.Should().BeEmpty(because);
+        _host.Identity.Invocations.Should().BeEmpty(because);
+        _host.Probe.Calls.Should().BeEmpty(because);
+        _host.Query.Calls.Should().BeEmpty(because);
+        _host.UserClient.Invocations.Should().BeEmpty(because);
+        _host.Access.DocumentCalls.Should().BeEmpty(because);
+        AssertNoAppOnlyDataverseCall(because);
+        AssertNoImpersonatedWrite();
+    }
 
     private void AssertNoCreate(string logicalName) =>
         _host.Entities.Verify(
