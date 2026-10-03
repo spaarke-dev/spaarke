@@ -14,7 +14,8 @@
  * codes were added, and the result now says whether the SAME caller can retry (`retryable`). Round b2 (2026-10-02)
  * added two codes for a container ALREADY recorded on the project (kept when it is the project's own, refused when
  * another record holds it, unreadable → retry), and reads `creatorState` so an unreadable creator is a retry, not an
- * administrator's job.
+ * administrator's job. Round r2 reads `containerKept`: for a project that kept its own container the administrator's
+ * recovery is a Manage Access share, not another securing call, and the copy says so.
  *
  * CONTRACT CHANGED 2026-08-25 (BFF task 021). The backend no longer creates a business unit per
  * project, no longer creates an External Access Account, and no longer supports umbrella BU
@@ -375,10 +376,30 @@ const RESUME_CREATOR_COLUMN_MISSING = {
 const OWNER_UNVERIFIED_SHARE_CONFIRMED =
   'Securing the project was interrupted: it could not be confirmed whether its ownership changed. Your share on it was read back, so you can open it either way.';
 
+/**
+ * The server's `containerKept: true` (task 133 r1 server, read here since task 133 r2 — verifier round 5 finding 8). The
+ * project kept the document container it already had, so once the secure owner holds it every later securing call
+ * answers `already_provisioned` and finishes nothing: "an administrator needs to finish securing it" would name a
+ * recovery that does not exist for it. The server's detail names the one that does — an administrator shares the
+ * project to its creator through Manage Access — and these two messages follow it. Only the two codes whose default copy
+ * names the administrator's securing call are swapped; every other code's copy is already true for a kept container.
+ */
+const OWNER_UNVERIFIED_CONTAINER_KEPT =
+  'Securing the project was interrupted: it could not be confirmed whether its ownership changed, and a share to you was issued but could not be confirmed. If you cannot open the project, an administrator needs to share it with you through Manage Access.';
+
+const RESUMABLE_CONTAINER_KEPT =
+  'Securing the project stopped partway, and you may not be able to open it. If you cannot, an administrator needs to share it with you through Manage Access.';
+
 /** The ProblemDetails extensions besides `reasonCode` that change the designed state a code maps to. */
 export interface IProvisioningFailureExtensions {
   /** `owner_assignment_unverified` only: whether the creator's share was read back on the record. */
   creatorShareConfirmed?: boolean;
+  /**
+   * Task 133 r1: the project keeps the document container it already had (`owner_assignment_unverified`,
+   * `creator_share_failed_resumable`, and the pre-move `creator_share_failed` refusal). The administrator's recovery is
+   * then a Manage Access share, not another securing call.
+   */
+  containerKept?: boolean;
   /**
    * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
    * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment) — all
@@ -413,6 +434,14 @@ export function classifyProvisioningFailure(
 
   if (reasonCode === 'sdap.provision.owner_assignment_unverified' && extensions?.creatorShareConfirmed === true) {
     return { ...REASON_STATES[reasonCode], errorMessage: OWNER_UNVERIFIED_SHARE_CONFIRMED };
+  }
+
+  if (reasonCode === 'sdap.provision.owner_assignment_unverified' && extensions?.containerKept === true) {
+    return { ...REASON_STATES[reasonCode], errorMessage: OWNER_UNVERIFIED_CONTAINER_KEPT };
+  }
+
+  if (reasonCode === 'sdap.provision.creator_share_failed_resumable' && extensions?.containerKept === true) {
+    return { ...REASON_STATES[reasonCode], errorMessage: RESUMABLE_CONTAINER_KEPT };
   }
 
   if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'unreadable') {
@@ -506,6 +535,9 @@ export async function provisionSecureProject(
         }
         if (typeof problem?.creatorState === 'string') {
           extensions.creatorState = problem.creatorState;
+        }
+        if (typeof problem?.containerKept === 'boolean') {
+          extensions.containerKept = problem.containerKept;
         }
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */

@@ -391,6 +391,52 @@ public class ProvisionRecordedContainerTests : IClassFixture<ProvisionProjectTes
         next.StatusCode.Should().Be(HttpStatusCode.Conflict, "the detail said the next call is the 409, and it is");
     }
 
+    /// <summary>
+    /// The negative direction of the double failure's creator sentence (task 133 r2, verifier round 5 seed P5). Dataverse
+    /// refuses the share to the record's CURRENT owner (live gate (a)), so share-first falls back to the share after the
+    /// move with NOTHING proven; the move lands (read back), the share proof after it fails, and the undo does not take
+    /// effect. Nobody can open the record. The detail must not claim a share "confirmed before the move" — true only when
+    /// share-first proved one (probe 1, above) — and must name the Manage Access recovery; the next call is the 409 it says.
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenTheFallbackShareAndTheUndoFailAfterTheMove_NeverClaimsAConfirmedShare()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer);                // owned by the caller, its creator
+        _fixture.GrantToCurrentOwnerRefused = true;                                // live gate (a) disproved
+        _fixture.FailStrictShareReadWhileSecureOwned = true;                       // the proof after the move fails
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+        _fixture.FailOwnerBindTo = ProvisionProjectTestFixture.CallerSystemUserId; // the undo is refused
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        problem.GetProperty("ownershipRestored").GetBoolean().Should().BeFalse();
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().NotContain("confirmed before the move", "share-first proved nothing: the fallback ran");
+        detail.Should().Contain("may not be able to open it")
+            .And.Contain("already_provisioned").And.Contain(ManageAccessRecovery).And.NotContain("it resumes");
+        _fixture.Grants.Should().BeEmpty("no share to the creator was ever accepted");
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeFalse("the residual the detail and the CRITICAL log describe");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == Microsoft.Extensions.Logging.LogLevel.Critical && e.Message.Contains(projectId.ToString())
+            && e.Message.Contains(ManageAccessRecovery));
+
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailShareWhileSecureOwned = null;
+        _fixture.FailOwnerBindTo = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.Conflict, "the detail said the next call is the 409, and it is");
+        (await ProblemOf(next)).GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonAlreadyProvisioned);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Task 133 r1: a SHARED container (a business unit's, or a configured one) is unlinked BEFORE the owner move, so a
     // failure after the move leaves "owned by the team, no container" — which the next call resumes — never "owned by
@@ -524,5 +570,140 @@ public class ProvisionRecordedContainerTests : IClassFixture<ProvisionProjectTes
         _fixture.FailShareForPrincipal = null;
         var next = await ProvisionAsync(new { projectId });
         next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 133 r2 (verifier round 5, seeds P7 / P8): EVERY failure after the shared container was unlinked says so. The
+    // share-first refusal and the double failure were pinned in r1; these pin the other four sites — the refused move,
+    // the unverified move with and without a share, and the verified undo — so no site can drop the sentence unseen.
+    // Each then makes the next call the detail names.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string BusinessUnitContainer = "b!business-unit-shared";
+
+    /// <summary>Seeds a project owned by a business-unit team that records that business unit's shared container.</summary>
+    private Guid SeedRecordingABusinessUnitsContainer(Guid? owningTeamId)
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.BusinessUnitContainers[Guid.NewGuid()] = BusinessUnitContainer;
+        _fixture.SeedProject(projectId, owningTeamId: owningTeamId, containerId: BusinessUnitContainer);
+        return projectId;
+    }
+
+    /// <summary>The move to the team is refused and read back unchanged: the detail says the link was removed.</summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenTheMoveIsRefused_SaysTheLinkWasRemoved()
+    {
+        var businessUnitTeam = Guid.NewGuid();
+        var projectId = SeedRecordingABusinessUnitsContainer(businessUnitTeam);
+        _fixture.FailOwnerBindTo = ProvisionProjectTestFixture.SecureOwnerTeamId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentFailed);
+        problem.GetProperty("detail").GetString().Should().Contain("unlinked");
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.ContainerIdOf(projectId).Should().BeNull("the link was removed before the move, and stays removed");
+
+        _fixture.FailOwnerBindTo = null;
+        var next = await ProvisionAsync(new { projectId });
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// The owner move cannot be read back; the creator's share is (confirmed). Not a kept container, so the next call
+    /// resumes — and the detail says the link was removed (seed P8).
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenTheMoveIsUnverified_SaysTheLinkWasRemoved()
+    {
+        var projectId = SeedRecordingABusinessUnitsContainer(Guid.NewGuid());
+        _fixture.OwnerReadBackFails = true;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeFalse();
+        problem.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeTrue();
+        problem.GetProperty("detail").GetString().Should().Contain("unlinked").And.Contain("resumed");
+        _fixture.ContainerIdOf(projectId).Should().BeNull();
+
+        _fixture.OwnerReadBackFails = false;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue("the team owns it with no container");
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// The owner move cannot be read back and no share to the creator could be issued — share-first fell back (live gate
+    /// (a)) and the grant after the move failed. The detail says the link was removed and that an administrator's call
+    /// resumes; it does, sharing to the record's creator.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenNoShareExistsAfterAnUnverifiedMove_SaysTheLinkWasRemoved()
+    {
+        var projectId = SeedRecordingABusinessUnitsContainer(owningTeamId: null); // owned by the caller, its creator
+        _fixture.GrantToCurrentOwnerRefused = true;
+        _fixture.OwnerReadBackFails = true;
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeFalse();
+        problem.GetProperty("detail").GetString().Should().Contain("unlinked").And.Contain("resumes");
+        _fixture.ContainerIdOf(projectId).Should().BeNull();
+        _fixture.SomeoneCanOpen(projectId).Should().BeFalse("the state only an administrator's call can finish");
+
+        _fixture.OwnerReadBackFails = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailShareWhileSecureOwned = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask, "the resume shares to the record's creator");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The share proof fails after the move and the move is undone (read back): the record is back with its pre-call
+    /// owner but WITHOUT the shared link, so the detail says it was unlinked (seed P7). The next call provisions it from
+    /// the start.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenTheMoveIsUndone_SaysTheLinkWasRemoved()
+    {
+        var businessUnitTeam = Guid.NewGuid();
+        var projectId = SeedRecordingABusinessUnitsContainer(businessUnitTeam);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        problem.GetProperty("ownershipRestored").GetBoolean().Should().BeTrue();
+        problem.GetProperty("detail").GetString().Should().Contain("unlinked");
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.ContainerIdOf(projectId).Should().BeNull();
+
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
     }
 }

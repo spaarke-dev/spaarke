@@ -478,6 +478,55 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       unit's container is provisioned with its own container and the business unit's left unchanged. (4) Owner acceptance
       of the (e) replay method. (5) Publish size (main session).
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2-r2" round="r2 (verifier round 5)">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier-round-5 code/doc item closed; the open owner items, the
+      section 6.5 path-B sign-off, the live gates and publish size remain. Full record:
+      notes/task-133-provision-creator-lockout.md section 15. Base task/uac-r2-133-b2-r1 (b26efd090), not re-merged (the
+      verifier confirmed the moved work branch still merges cleanly). ProvisionProjectEndpoint.cs is UNCHANGED from r1:
+      this round changes tests, the test fixture and the client.
+
+      (5) Seed P5 closed: new test - kept container, share to the current owner refused (live gate (a)) so the
+          post-move fallback ran with nothing proven, move verified, proof fails, undo refused: creator_share_failed_resumable,
+          containerKept true, ownershipRestored false, detail WITHOUT "confirmed before the move", SomeoneCanOpen false,
+          CRITICAL, next call 409. P5 bites.
+      (6) Seeds P7/P8 closed at EVERY site: unlinkedNote appears in six failure details after the unlink; r1 pinned two,
+          four new tests pin the rest (refused move; unverified + share confirmed = P8; unverified + no share; verified
+          undo = P7), each making the next call its detail names. Each site's removal fails exactly its test.
+      (7) Seed P14 closed: fixture switch CreatorPersonReadFailsWith (HttpStatusCode) raises HttpRequestException with
+          the status, the real DataverseWebApiClient shape; the transient test is a theory over 503/429/500. P14 bites (3).
+      (8) containerKept consumer BUILT: provisioningService.ts reads it; with containerKept true,
+          creator_share_failed_resumable and an unconfirmed owner_assignment_unverified name the Manage Access share
+          instead of "an administrator needs to finish securing it" (a securing call answers already_provisioned for such
+          a project). Kinds and retryable unchanged. Note 14.6 carries a correction (r1 overstated what was built).
+      (9) Note section 10 lists the r1 kept-container refusal as a deviation from the closed share-unreadable criterion.
+      (10) Path-B item (DataverseCreateRecordHandler interim app-only stamp): correctly surfaced, still needs the owner's
+           or PR reviewer's explicit sign-off before merge (PR text note 14.7). Not closable here.
+      (11) Publish size: not measured (main session). No package and no production server code changed this round.
+      (12) Live gates: not run (read-only). Read-only fact: sprk_createdbyperson is NOT on sprk_project in the connected
+           dev environment (Dataverse MCP query, 2026-10-02), so the schema must be applied before master. #1081 (root
+           team now holds Basic User, org-wide read incl. Secure Record; dev-only per round 5): live access proofs must
+           read the record's shares or use a user outside the root business unit (note 2 addendum, 15.5).
+      (13) Closed by (5)-(7).
+      (1-4) Confirmations - no action.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 15.4): no new server surface. Client: one optional member
+      (containerKept) on the existing IProvisioningFailureExtensions plus two private copy constants; without it a
+      kept-container project's failure names a recovery that finishes nothing. Fixture switch replaced, not added.
+
+      TESTS: full BFF unit suite 14,326 passed / 0 failed / 54 skipped (14,380); NetArchTest 345/345; HARD GATE
+      (ea6484102), both in full on this branch: Sprk.Bff.Api.IntegrationTests 104/104, Spe.Integration.Tests 403 passed /
+      0 failed / 25 skipped (428); the verifier's provisioning class set 251/251 (r1 244 + 7); Spaarke.UI.Components jest
+      CreateProjectWizard + SummarizeFilesWizard 103/103 (8 suites), package build (tsc) clean, prettier + eslint clean on
+      the changed TS; dotnet build 0 warnings; dotnet format whitespace clean on the changed C#. No package changed (no
+      CVE delta). Publish size: not measured (main session).
+      Perturbation sweep 9/9 bite (P5, P7, P8, U1, U2, P14 server; C3-C5 client).
+
+      NOT CLOSED. (1) OWNER QUESTION 14.3 (kept-container resume). (2) STOP: Assign cascade under COMPENSATION (13.6).
+      (3) Section 6.5 path-B sign-off for the chat handler's interim stamp (14.7). (4) PENDING MANUAL GATES: schema dry
+      run / -Apply / -Verify in dev BEFORE master (column confirmed absent); live gate (a)-(i) after a deploy, with access
+      proofs that do not rely on a root-team member (#1081). (5) Owner acceptance of the (e) replay method. (6) Publish
+      size (main session).
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>

@@ -205,6 +205,54 @@ describe('provisionSecureProject — failure classification', () => {
     }
   );
 
+  // Task 133 r2 (verifier round 5 finding 8): the server's `containerKept`. A project that kept its own document container
+  // reads as provisioned to every later call once the secure owner holds it, so "an administrator needs to finish securing
+  // it" names a recovery that does not exist; the copy names the one that does — a Manage Access share. Without the flag
+  // (or with it false) the copy is unchanged, and a confirmed share keeps its "you can open it either way" copy.
+  it.each([
+    ['sdap.provision.creator_share_failed_resumable', { containerKept: true }, 'needs-administrator', false, true],
+    ['sdap.provision.creator_share_failed_resumable', { containerKept: false }, 'needs-administrator', false, false],
+    ['sdap.provision.creator_share_failed_resumable', {}, 'needs-administrator', false, false],
+    ['sdap.provision.owner_assignment_unverified', { containerKept: true }, 'interrupted', true, true],
+    [
+      'sdap.provision.owner_assignment_unverified',
+      { containerKept: true, creatorShareConfirmed: false },
+      'interrupted',
+      true,
+      true,
+    ],
+    ['sdap.provision.owner_assignment_unverified', { containerKept: false }, 'interrupted', true, false],
+  ])(
+    'reads containerKept from the problem body: %s %o',
+    async (reasonCode, extensions, kind, retryable, namesManageAccess) => {
+      const authFetch = jest
+        .fn()
+        .mockResolvedValue(problemResponse(500, { detail: 'operator text', reasonCode, ...extensions }));
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe(kind);
+      expect(result.retryable).toBe(retryable);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+      if (namesManageAccess) {
+        expect(result.errorMessage).toMatch(/share it with you through Manage Access/i);
+        expect(result.errorMessage).not.toMatch(/finish securing/i);
+      } else {
+        expect(result.errorMessage).toMatch(/administrator needs to finish securing/i);
+        expect(result.errorMessage).not.toMatch(/Manage Access/i);
+      }
+    }
+  );
+
+  it('keeps the confirmed-share copy for a kept container whose share was read back', () => {
+    const result = classifyProvisioningFailure('sdap.provision.owner_assignment_unverified', {
+      containerKept: true,
+      creatorShareConfirmed: true,
+    });
+    expect(result.errorMessage).toMatch(/read back, so you can open it/i);
+    expect(result.errorMessage).not.toMatch(/Manage Access/i);
+  });
+
   it('does not leak the server ProblemDetails detail or status into what the user is shown', async () => {
     const authFetch = jest.fn().mockResolvedValue(
       problemResponse(500, {

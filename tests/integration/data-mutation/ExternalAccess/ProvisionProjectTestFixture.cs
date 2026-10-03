@@ -307,10 +307,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool ContainerClearSucceeds { get; set; } = true;
 
     /// <summary>
-    /// When true, a read naming <c>sprk_createdbyperson</c> fails TRANSIENTLY (a 503), in an environment that has the
-    /// column (task 133 r1: told apart from the 400 an environment without it answers).
+    /// When set, a read naming <c>sprk_createdbyperson</c> fails TRANSIENTLY with this HTTP status, in an environment that
+    /// has the column (task 133 r1: told apart from the 400 an environment without it answers). Raised in the real
+    /// client's shape — <c>EnsureSuccessStatusCode</c> → <see cref="HttpRequestException"/> carrying the status (task 133
+    /// r2, verifier round 5 seed P14: an <see cref="InvalidOperationException"/> here let "every HTTP failure is
+    /// column-missing" pass unseen).
     /// </summary>
-    public bool CreatorPersonReadFails { get; set; }
+    public System.Net.HttpStatusCode? CreatorPersonReadFailsWith { get; set; }
 
     /// <summary>
     /// When false, the ownership PATCH is accepted but NOT applied to the in-memory row — Dataverse's
@@ -407,7 +410,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
         ContainerClearSucceeds = true;
-        CreatorPersonReadFails = false;
+        CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
         _updateSequence = 0;
         Grants.Clear();
@@ -699,8 +702,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         {
             if (CreatorPersonColumnExists && string.Equals(column, CreatorPersonReadColumn, StringComparison.OrdinalIgnoreCase))
             {
-                if (CreatorPersonReadFails)
-                    throw new InvalidOperationException("Dataverse 503: simulated transient failure reading the creator person.");
+                if (CreatorPersonReadFailsWith is { } transientStatus)
+                {
+                    throw new HttpRequestException(
+                        $"Dataverse {(int)transientStatus}: simulated transient failure reading the creator person.",
+                        inner: null,
+                        statusCode: transientStatus);
+                }
                 continue;
             }
 

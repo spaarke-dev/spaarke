@@ -200,11 +200,21 @@ public class ProvisionResumeCreatorPersonTests : IClassFixture<ProvisionProjectT
     /// The column exists but its read fails TRANSIENTLY: 500 <c>unreadable</c> naming the column (the same caller may call
     /// again), zero writes; once the read works the same caller's call shares to the recorded person.
     /// </summary>
-    [Fact]
-    public async Task Resume_WhenTheColumnReadFailsTransiently_Refuses500Unreadable_AndTheSameCallerCanRetry()
+    /// <remarks>
+    /// <b>Task 133 r2</b> (verifier round 5, seed P14): the failure is raised as the real <c>DataverseWebApiClient</c>
+    /// raises it — <see cref="HttpRequestException"/> carrying the status — for the statuses a transient fault answers.
+    /// Only a 400 is <c>column-missing</c>; reading "any HTTP failure" as one would turn a retryable 503 or 429 into an
+    /// administrator's job.
+    /// </remarks>
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task Resume_WhenTheColumnReadFailsTransiently_Refuses500Unreadable_AndTheSameCallerCanRetry(
+        HttpStatusCode transientStatus)
     {
         var projectId = Guid.NewGuid();
-        _fixture.CreatorPersonReadFails = true;
+        _fixture.CreatorPersonReadFailsWith = transientStatus;
         _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
             createdBy: AppUser, createdByPerson: Maker);
 
@@ -216,7 +226,7 @@ public class ProvisionResumeCreatorPersonTests : IClassFixture<ProvisionProjectT
         problem.GetProperty("creatorColumn").GetString().Should().Be(RecordCreatorPerson.Column);
         AssertNothingWritten();
 
-        _fixture.CreatorPersonReadFails = false;
+        _fixture.CreatorPersonReadFailsWith = null;
         var retry = await ProvisionAsync(new { projectId });
         retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
         _fixture.Grants.Select(g => g.Principal.Id).Should().Equal(Maker);

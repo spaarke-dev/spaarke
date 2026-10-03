@@ -53,6 +53,16 @@ Script: session scratchpad `task133/census.ps1` (GET only, operator `az` token, 
 | Create-time writers of `sprk_containerid` | **0** `sprk_fieldmappingrule` rows target it. Code: `EntityCreationService.applyUserBuDefaults` writes only `sprk_searchindexname` (task 076); `RecordCreationService` never writes it; matter/project/WA services no longer stamp it |
 | Census: secure rows owned in the Secure BU | **0** projects, 0 matters, 0 WAs. The one secure project (`65a3fab2`) is owned by an ordinary BU team (`cf15f587`), container set, created by a human |
 
+**Addendum, round r2 (2026-10-02) — #1081 decided** (relayed by word-add-in-r2; recorded in the owner-decisions note,
+"Peer report: #1081"). The dev root team "Spaarke" now holds Spaarke Basic User (verified live by the peer; Office
+creates owned by it work again). At the root, Basic User's read reaches the whole org — Secure Record included — for
+every root-team member. Under owner round 5 this is a dev-only artifact: in production users sit in the customer's child
+business unit and the BFF application user in the customer business unit, so nothing is codified for the root team and
+no production user is affected. Nothing in this task's code changes. **Consequence for this task's live gates (§15.5):**
+in dev, any root-team member can open every secure record whoever it is shared to, so "someone can open it" proven by a
+root-team member's read proves nothing about provisioning. Live-gate access proofs read the record's SHARES (the strict
+share read / `RetrievePrincipalAccess` for the creator), or use a test user outside the root business unit.
+
 ---
 
 ## 3. Escalation triggers, evaluated
@@ -259,6 +269,14 @@ prettier applied; eslint on changed TS files: 0 errors (1 pre-existing `tenantId
 - **SummarizeFilesDialog** gained the same retry action (second host that provisions; scope found during execution).
 - **Six** reason codes, not "up to two": the container failures and the two new pre-mutation refusals had no code, and the constraint requires one on every new branch.
 - **TASK-INDEX.md / current-task.md** not edited (main session). Publish size not measured (main session).
+- **A record that KEEPS its own container is refused when its pre-call share set cannot be read** (round r1; listed here
+  in round r2 — verifier round 5 finding 9). The closed criterion "the pre-call share set cannot be read → the post-move
+  grant path runs instead" (§1, `Provisioning_WhenThePreCallSharesCannotBeRead_GrantsAfterTheMoveInstead`) still holds
+  for every record without a container of its own, including one whose shared container is replaced. For a record that
+  keeps its own container, provisioning now refuses BEFORE ANY WRITE (`creator_share_failed`, `containerKept: true`;
+  transient — the same caller retries) instead of moving it with no share. Fail closed: once the team owns a record that
+  records a container, the 409 marker answers every later call, so a move with no share could strand it beyond any
+  provisioning call (§14.1 row 2; `Provision_KeepingItsOwnContainer_WhenThePreCallSharesCannotBeRead_RefusesBeforeAnyWrite`).
 
 ---
 
@@ -764,7 +782,7 @@ new endpoint, service, interface, DI registration, option, job, package or colum
 | New surface | Existing (grep) | Extension? | Cost of doing nothing |
 |---|---|---|---|
 | Reason code `sdap.provision.shared_container_not_cleared` | the `sdap.provision.*` set; `container_ownership_unreadable` is a READ failure before any write | Extends the set; no existing code means "a write before the move failed, nothing moved, retry" | The client would show a generic error for a state the same caller can finish |
-| ProblemDetails extension `containerKept` (bool, on `owner_assignment_unverified` / `creator_share_failed_resumable` / the kept-container refusal) | `sharesRestored`, `creatorShareConfirmed` (same convention) | Extension member, additive | A client cannot tell whether the administrator's recovery is a provisioning call or a Manage Access share |
+| ProblemDetails extension `containerKept` (bool, on `owner_assignment_unverified` / `creator_share_failed_resumable` / the kept-container refusal) | `sharesRestored`, `creatorShareConfirmed` (same convention) | Extension member, additive | A client cannot tell whether the administrator's recovery is a provisioning call or a Manage Access share. **Correction (r2, verifier round 5 finding 8):** as built in r1 NO client read it — this cell overstated what was built. Since r2 `provisioningService.ts` reads it (§15.2) |
 | `creatorState` value `column-missing` | the existing `creatorState` vocabulary | Extends it | The wizard offers a "Try securing again" that fails until the schema is applied (finding 10) |
 | Step 4.2 (one `UpdateAsync` clearing `sprk_containerid`) | Step 7's write of the same column | Same column, same writer | A secure record can be 409'd forever while its uploads go to shared storage |
 | Private helpers `KeptContainerRecovery`, `AdministratorRecoveryForLog`, `IsColumnMissing`, `UnusableColumnMissing` | — | — | The same sentence duplicated across four branches, free to drift |
@@ -812,3 +830,124 @@ Paste into the PR (with the publish-size numbers the main session measures):
 | AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, no swallowed failure (the unlink's catch returns a refusal) | — | Clean |
 
 **adr-check**: ADR-001 (no new endpoint), ADR-002 (no plugin), ADR-003 (every new branch fails closed: a failed unlink stops before the move; an unreadable share set refuses a kept record before any write; `column-missing` and `unreadable` both refuse with nothing written; no branch gives anyone access they lacked), ADR-008 (delegation filter unchanged), ADR-010 (no new interface or registration), ADR-019 (ProblemDetails + `reasonCode`; `containerKept` follows the extension convention), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the fixture models Dataverse's exception shape): **compliant, 0 violations**. CLAUDE.md §6.5: the chat handler's interim app-only stamp is cited as a path-B exception for reviewer sign-off (§14.7).
+
+---
+
+## 15. Round r2 (2026-10-02, branch `task/uac-r2-133-b2-r2`) — verifier round 5
+
+Base: `task/uac-r2-133-b2-r1` (`b26efd090`). Not re-merged: the work branch has moved on (`df2d05a5c..62ea6a8ee`),
+the verifier confirmed it still merges cleanly, and none of its files overlap this round's. **No production server code
+changed in this round** — `ProvisionProjectEndpoint.cs` is byte-identical to r1. Server changes are tests and the test
+fixture; the client gained the `containerKept` consumer.
+
+### 15.1 Every verifier-round-5 item
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1–4 | Re-runs, static checks, merge check, the round-4 blocking item | Confirmations — no action |
+| 5 | Seed P5 survives (`creatorText = keepsOwnContainer`): the negative direction of the double failure's creator sentence is unpinned, on the nobody-can-open path | **Closed.** New `Provision_KeepingItsOwnContainer_WhenTheFallbackShareAndTheUndoFailAfterTheMove_NeverClaimsAConfirmedShare`: a kept container whose creator owns it; Dataverse refuses the share to the current owner (live gate (a)) → the post-move fallback with nothing proven; the move lands (read back); the proof after it fails; the undo is refused. Asserts `creator_share_failed_resumable`, `containerKept: true`, `ownershipRestored: false`, a detail WITHOUT "confirmed before the move" and WITH "may not be able to open it", `already_provisioned` and Manage Access; no grant ever accepted; `SomeoneCanOpen` **false**; the CRITICAL line; the next call is the 409 the detail names. Seed P5 fails it |
+| 6 | Seeds P7 / P8 survive: "every later failure detail says unlinked" is unproven at two sites | **Closed at every site, not only the two.** `unlinkedNote` is used in SIX failure details after the unlink; r1 pinned two (the share-first refusal, the double failure). Four new tests pin the other four, each making the next call its detail names: the refused move (`owner_assignment_failed` → 200), the unverified move with the share confirmed (`owner_assignment_unverified`, **P8** → resumed 200), the unverified move with no share issued (`creator_share_failed_resumable` via the (a) fallback → an administrator's call resumes, creator share exact), and the verified undo (`creator_share_failed`, **P7** → 200 from the start). Removing the note at any one site fails exactly that site's test |
+| 7 | Seed P14 survives: the fixture raised the transient creator-column failure as `InvalidOperationException`, so "any `HttpRequestException` is column-missing" passed | **Closed.** Fixture switch `CreatorPersonReadFails` (bool) → `CreatorPersonReadFailsWith` (`HttpStatusCode?`), raising `HttpRequestException` carrying the status — the real `DataverseWebApiClient` shape (`EnsureSuccessStatusCode`). The transient test is now a theory over **503, 429 and 500**; seed P14 fails all three rows |
+| 8 | `containerKept` has no consumer; §14.6 justified it by a client distinction nobody built | **Closed by building the consumer** (§15.2), and §14.6's row carries a correction saying r1 overstated it |
+| 9 | The r1 kept-container refusal changes the literal behaviour of a closed criterion and is not in §10 | **Closed** — §10 entry added |
+| 10 | `DataverseCreateRecordHandler`'s interim app-only stamp of `sprk_createdbyperson` is a §6.5 path-B exception needing explicit approval | **Correctly surfaced; still open.** Not closable here: the owner or the PR reviewer signs it off before merge (PR text §14.7). No code changed |
+| 11 | Publish size not measured | **Not closed** — the main session measures (instruction). No package changed; no production server code changed this round |
+| 12 | Live gates (a)–(i) and the schema not run | **Not closed** — no live writes. Read-only fact added 2026-10-02: a Dataverse MCP query naming `sprk_createdbyperson` on `sprk_project` answers *"entity doesn't contain attribute with Name = 'sprk_createdbyperson'"* — the column is NOT in the connected dev environment, so the deploy-order rule binds (schema `-Apply`/`-Verify` before this reaches master). New gate caveat from #1081 (§2 addendum, §15.5) |
+| 13 | "Every detail describes what happened" only partly proven (P5, P7/P8, P14) | **Closed** by items 5–7; the two further `unlinked` sites are pinned too |
+
+### 15.2 Client — the `containerKept` consumer (finding 8)
+
+`provisioningService.ts` reads `containerKept` from the problem body into `IProvisioningFailureExtensions` (beside
+`creatorShareConfirmed` and `creatorState`). Two copies change, and only when it is `true`:
+
+| Code | Copy without the flag (unchanged) | Copy with `containerKept: true` | Kind / retryable |
+|---|---|---|---|
+| `creator_share_failed_resumable` | "…An administrator needs to finish securing it." | "Securing the project stopped partway, and you may not be able to open it. If you cannot, an administrator needs to share it with you through Manage Access." | `needs-administrator` / false (unchanged) |
+| `owner_assignment_unverified`, share NOT confirmed | "…If you cannot open the project, an administrator needs to finish securing it." | "…If you cannot open the project, an administrator needs to share it with you through Manage Access." | `interrupted` / true (unchanged: if the team does not own it the retry provisions it; if it does, the retry answers `already-provisioned`, whose copy is true) |
+
+Unchanged on purpose: a CONFIRMED unverified move ("you can open it either way" — true either way) and the kept
+container's pre-move `creator_share_failed` refusal ("its ownership is as it was" — nothing was written). Why: once the
+team owns a project that kept its container, every securing call answers `already_provisioned` and finishes nothing, so
+"an administrator needs to finish securing it" named a recovery that does not exist for it; the server's detail names the
+one that does. Reach is unchanged and stated: neither wizard host can meet a kept-container project today (new projects
+have no container since task 076). The classifier is the shared one any later host that secures an EXISTING record
+inherits, which is where this state can occur.
+
+### 15.3 Tests
+
+**New server** (`ProvisionRecordedContainerTests`, +5 facts): P5 above; the four `unlinked` sites (§15.1 item 6), with a
+seed helper `SeedRecordingABusinessUnitsContainer`. **Changed server:** the transient creator-column test
+(`ProvisionResumeCreatorPersonTests`) is a theory over 503 / 429 / 500 (+2 rows); fixture switch replaced (§15.1 item 7).
+**New client** (`provisioningService.test.ts`, +7): `containerKept` read from the body for both codes, true / false /
+absent, each asserting kind, retryable, the Manage Access copy (or its absence) and no "try again" advice; plus the
+confirmed-share copy kept for a kept container.
+
+**Perturbation sweep (round r2)** — seed, build, run, restore the original bytes (`git checkout` for the endpoint, which
+this round does not change; a saved copy for the client file) + touch:
+
+| # | Seeded violation | Result |
+|---|---|---|
+| P5 | double failure: `creatorText = keepsOwnContainer` (the confirmed-share sentence without a proven share) | BITES (1) |
+| P7 | verified-undo `creator_share_failed` detail without `unlinkedNote` (:1345) | BITES (1) |
+| P8 | `owner_assignment_unverified` detail without `unlinkedNote` (:1267) | BITES (1) |
+| U1 | refused-move detail without `unlinkedNote` (:1200) | BITES (1) |
+| U2 | unverified-move, no-share detail without `unlinkedNote` (:1281) | BITES (1) |
+| P14 | `IsColumnMissing` = any `HttpRequestException` | BITES (3) |
+| C3 | client: `containerKept` not read from the body | BITES (3) |
+| C4 | client: kept-container copy for `creator_share_failed_resumable` off | BITES (1) |
+| C5 | client: kept-container copy for `owner_assignment_unverified` off | BITES (2) |
+
+**9/9 bite.**
+
+### 15.4 Placement and component justification (CLAUDE.md §10 / §11)
+
+No new server surface: no endpoint, service, interface, DI registration, option, job, package or column; the endpoint is
+unchanged. Client: one optional member on the existing exported `IProvisioningFailureExtensions` and two private copy
+constants. Three questions for the member — **Existing:** `creatorShareConfirmed` / `creatorState` on the same interface
+(grep: the only reader of ProblemDetails extensions in the package is `provisionSecureProject`). **Extension:** yes — it
+extends that interface and that reader; no new type. **Cost of doing nothing:** a project that kept its container and was
+left owned by the team without a confirmed creator share tells its user "an administrator needs to finish securing it",
+a call that answers `already_provisioned` and finishes nothing. Fixture: a switch replaced (bool → status), not added.
+
+### 15.5 Pending manual gates (main session; nothing here was written live)
+
+Unchanged from §14.8 — schema dry run / `-Apply` / `-Verify` in dev BEFORE this reaches master (now confirmed absent in
+dev, §15.1 item 12); live gate (a)–(f) and (g)–(i) after a deploy; owner §14.3, §13.6, the (e) replay acceptance;
+publish size; the §6.5 path-B sign-off (§14.7). **New caveat (#1081, §2 addendum):** every gate that proves who can open
+a record — (a)/(b) and the "someone can open it" checks of (g)–(i) — reads the record's SHARES (the strict share read, or
+`RetrievePrincipalAccess` for the creator) or uses a test user outside the root business unit. A root-team member opens
+every secure record in dev through Basic User's org-wide read, whoever it is shared to.
+
+### 15.6 Quality gates (round r2 — TEST-MODIFYING, so code-review + adr-check run unconditionally)
+
+**code-review** (all severities):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| The four `unlinked` tests share their seed | Suggestion | Factored into `SeedRecordingABusinessUnitsContainer`; each test keeps its own fault switches and next call, which are what differ |
+| The client copy swaps key on `(reasonCode, containerKept)` alone | — | Intended: the copy asserts only what those two establish ("may not be able to open it", "if you cannot") — the FR-31 rule in the file's own header |
+| The new client copy names "Manage Access" to an end user | Suggestion | It is the administrator's action, named so the user can ask for it; the same name the server's detail and guide §7a use |
+| AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, no swallowed failure, no anti-laziness scaffolding | — | Clean |
+
+**adr-check**: ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor null-check test; the fixture now
+raises the real client's exception type — a fidelity fix, not a mock), ADR-019 (no ProblemDetails change), ADR-003 /
+WP-6 (no server change), ADR-001 / 002 / 008 / 010 (not touched): **compliant, 0 violations**. §6.5: no new exception;
+the path-B item (§14.7) still awaits sign-off.
+
+### 15.7 PR description — addition to §14.7
+
+> **Round r2 (verifier round 5).** Tests only on the server (5 new, 1 widened to a theory; fixture raises the real
+> client's `HttpRequestException`), 9/9 perturbation seeds bite; the client reads `containerKept` and names the Manage
+> Access recovery for a project that kept its own container. `ProvisionProjectEndpoint.cs` unchanged from r1.
+
+### 15.8 Runs (round r2)
+
+Full BFF unit suite **14,326 passed / 0 failed / 54 skipped (14,380)** — r1's 14,373 plus the 5 new facts and the 2
+new theory rows; NetArchTest **345/345**; **hard gate** (`ea6484102`), both in full on this branch:
+`Sprk.Bff.Api.IntegrationTests` **104/104**, `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**; the
+verifier's provisioning class set (ProvisionProject*, SecureProjectShare, ProvisionRecordedContainer,
+ProvisionResumeCreatorPerson, SecureNamedOwnerTeam*, CreatorPerson*, DataverseCreateRecordHandler, RecordShareRightsMask,
+DelegationRule*) **251/251** (r1 244 + 7); Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard
+**103/103 (8 suites)** (r1 96 + 7); package production build (`tsc`) clean; prettier + eslint clean on the changed TS;
+`dotnet build` 0 warnings; `dotnet format whitespace --verify-no-changes` clean on the changed C#. No package changed.
+Publish size: not measured (main session).
