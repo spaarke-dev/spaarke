@@ -45,6 +45,15 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         return problem.RootElement.TryGetProperty("reasonCode", out var reason) ? reason.GetString() : null;
     }
 
+    private static async Task<string?> DetailOf(HttpResponseMessage response)
+    {
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return problem.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
+    }
+
+    /// <summary>The lower-case record label the copy names (<c>SecureRecordRoot.DisplayLabel</c>).</summary>
+    private static string LabelOf(string recordType) => recordType == "workassignment" ? "work assignment" : recordType;
+
     private Task<HttpResponseMessage> PostAsync(string route, object body)
         => _fixture.CreateEntitledClient().PostAsJsonAsync(route, body);
 
@@ -365,6 +374,10 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the caller passed the Write gate but is not the creator");
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        // Owner round 13 item 10 (F6 row 9): option B, verbatim.
+        (await DetailOf(response)).Should().Be(
+            $"Only the person who created this {LabelOf(recordType)} can secure it this way, and you did not create it. " +
+            "Nothing was changed.");
         AssertNothingWritten(recordId);
     }
 
@@ -445,6 +458,10 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable,
             "an unreadable creator is never read as 'the caller created it'");
+        // Owner round 13 item 10 (F6 row 10): option B, verbatim.
+        (await DetailOf(response)).Should().Be(
+            "Who created this project could not be looked up, so whether you may secure it could not be checked. " +
+            "Nothing was changed; you may try again.");
         AssertNothingWritten(recordId);
     }
 
@@ -569,6 +586,10 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorUnresolved,
             "an unidentified caller is never read as the creator");
+        // Owner round 13 item 10 (F6 row 11): option B, verbatim.
+        (await DetailOf(response)).Should().Be(
+            "Your account could not be confirmed, so whether you created this matter could not be checked. Nothing was " +
+            "changed; you may try again.");
         AssertResumeWroteNothing(recordId);
     }
 

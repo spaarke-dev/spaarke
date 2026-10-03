@@ -165,7 +165,10 @@ foreach ($t in $Tables) {
         Report 'DONE' "set $($ids.Count - $failed) of $($ids.Count) NULL row(s) to No"
     }
 
-    $after = if ($Apply) { @(Get-DvAll "$set`?`$select=$idColumn&`$filter=$Column eq null").Count } else { $ids.Count }
+    # Get-DvAll emits its List as ONE object (`, $rows`), so wrapping the call in @(...) made a one-element array and
+    # .Count was always 1 — every -Apply then reported "1 row(s) still hold NULL" per table and exited 1, even after a
+    # full repair (seen live at G-0 in dev, 2026-10-03). Count the List itself.
+    $after = if ($Apply) { (Get-DvAll "$set`?`$select=$idColumn&`$filter=$Column eq null").Count } else { $ids.Count }
     $entry.nullAfter = $after
     if ($Apply) {
         if ($after -eq 0) { Report 'OK' 'after: no row holds NULL' } else { Report 'FAIL' "after: $after row(s) still hold NULL" }

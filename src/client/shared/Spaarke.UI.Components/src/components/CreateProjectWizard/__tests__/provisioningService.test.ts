@@ -370,6 +370,20 @@ describe('provisionSecureProject — failure classification', () => {
     );
   });
 
+  // Task 150, owner round 13 item 10 (F6 rows 7-8): option B, verbatim. The two creator-rule refusals of an UNFLAGGED
+  // record (owner round 10 item 10).
+  it('says only the creator can secure the project this way, and that nothing changed (F6 row 7, option B)', () => {
+    expect(classifyProvisioningFailure('sdap.provision.not_record_creator').errorMessage).toBe(
+      'Only the person who created this project can secure it this way. Nothing about the project changed.'
+    );
+  });
+
+  it('says who created the project could not be checked, so it was not secured (F6 row 8, option B)', () => {
+    expect(classifyProvisioningFailure('sdap.provision.record_creator_unverifiable').errorMessage).toBe(
+      'Who created this project could not be checked, so it was not secured. Nothing about the project changed.'
+    );
+  });
+
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {
     // EMITTED is the endpoint's `internal const string Reason*` set, transcribed — the guard against the drift task
     // 068 found (container_not_recorded once fell through to copy that was wrong in both halves). Adding a Reason*

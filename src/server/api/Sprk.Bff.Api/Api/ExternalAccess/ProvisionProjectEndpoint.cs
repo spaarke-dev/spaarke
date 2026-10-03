@@ -1589,8 +1589,7 @@ public static class ProvisionProjectEndpoint
             : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
     }
 
-    // DRAFT copy (F6 process, task 150 verifier c1 item 5): this `detail` was written by the agent, not picked by the
-    // owner — options in notes/task-150-issecure-lock.md §6, row 9; the owner picks before merge.
+    // F6 row 9 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
     private static IResult NotRecordCreator(
         SecureRecordRoot root, Guid recordId, Guid callerId, string decidingColumn, ILogger logger, string traceId)
     {
@@ -1601,19 +1600,16 @@ public static class ProvisionProjectEndpoint
             callerId, root.WireToken, recordId, decidingColumn, traceId);
 
         return Problem(StatusCodes.Status403Forbidden, "Forbidden",
-            $"This {root.DisplayLabel.ToLowerInvariant()} is not marked secure yet, and a record is secured this way only by " +
-            "the person who created it. You did not create it, so nothing was changed. Securing an existing record " +
-            "someone else created is a separate action, which also moves the content already filed under it.",
+            $"Only the person who created this {root.DisplayLabel.ToLowerInvariant()} can secure it this way, and you did " +
+            "not create it. Nothing was changed.",
             traceId, (ReasonKey, ReasonNotRecordCreator), ("creatorColumn", decidingColumn));
     }
 
-    // DRAFT copy (F6 process, task 150 verifier c1 item 5): this `detail` was written by the agent, not picked by the
-    // owner — options in notes/task-150-issecure-lock.md §6, row 10; the owner picks before merge.
+    // F6 row 10 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
     private static IResult RecordCreatorUnverifiable(SecureRecordRoot root, string traceId) =>
         Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-            $"Whether you created this {root.DisplayLabel.ToLowerInvariant()} could not be checked, because the person who " +
-            "created it could not be looked up — and a record that is not marked secure yet is secured this way only by " +
-            "its creator. Nothing was changed; the same caller may call again.",
+            $"Who created this {root.DisplayLabel.ToLowerInvariant()} could not be looked up, so whether you may secure it " +
+            "could not be checked. Nothing was changed; you may try again.",
             traceId, (ReasonKey, ReasonRecordCreatorUnverifiable));
 
     /// <summary>
@@ -1650,12 +1646,11 @@ public static class ProvisionProjectEndpoint
                 "be established, so it could not be shown to be the record's creator. Nothing was changed. TraceId={TraceId}",
                 root.WireToken, recordId, traceId);
 
-            // DRAFT copy (F6 process, verifier c1 item 5) — options in notes/task-150-issecure-lock.md §6, row 11.
+            // F6 row 11 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
             return Problem(
                 StatusCodes.Status403Forbidden, "Forbidden",
-                $"{root.DisplayLabel} {recordId} is not marked secure yet, and a record is secured this way only by the " +
-                "person who created it. The calling user's Dataverse identity could not be established, so that could not " +
-                "be checked. Nothing was changed; the same caller may retry.",
+                "Your account could not be confirmed, so whether you created this " +
+                $"{root.DisplayLabel.ToLowerInvariant()} could not be checked. Nothing was changed; you may try again.",
                 traceId, (ReasonKey, ReasonCreatorUnresolved), ("ownerTeamId", ownerTeamId));
         }
 
