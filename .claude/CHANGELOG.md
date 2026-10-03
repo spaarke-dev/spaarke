@@ -7,14 +7,6 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
-###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (spaarke-ontology-platform-r1 task 080 / C-19)
-
-`.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
-service. Task 080 deleted it (zero consumers, along with `EntityConfigurationService`, `CustomCommandFactory` and
-`Toolbar/CommandToolbar`), so the example is removed. The full ADR's mention is left alone: it is past tense, and
-accurate as history. Evidence: `projects/spaarke-ontology-platform-r1/notes/task-080-six-hazards-deviations.md`.
-(The task's C-23 Calendar fix was split out to its own PR, #1114, as unrelated to ontology work.)
-
 ###### 2026-10-03 — ADR-040 amended: a durable decision ledger is a SIBLING of `SessionGate` (spaarke-ontology-platform-r1 task 003)
 
 `.claude/adr/ADR-040-session-ledger.md` and `docs/adr/ADR-040-session-ledger.md` now name **`SessionGate` and

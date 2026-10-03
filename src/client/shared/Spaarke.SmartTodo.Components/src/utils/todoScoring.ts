@@ -24,27 +24,12 @@
  *     "3d". Colour tiers (`urgency`) are untouched; only `label` changed. The
  *     Code Page's `utils/dueLabelUtils.ts` (List/Dismissed views) mirrors this.
  *
- * `parseDueDate`'s local-midnight fix (spaarke-ontology-platform-r1 task 080
- * / C-10, 2026-10-03): this file no longer defines its own copy. Two other
- * copies of this exact function had drifted out of sync with it — one in
- * `hooks/useKanbanColumns.ts` (this package), one in
- * `Spaarke.UI.Components/.../TodoDetail/TodoDetail.tsx` — so a To Do's
- * Kanban bucket and its own detail-view score disagreed by a day in every
- * negative-UTC-offset zone. The fix is now the single copy in
- * `@spaarke/ui-components` (`utils/dateLocal.ts`), which both packages
- * already depend on; the composite-score FORMULA/WEIGHTS below remain
- * locked in THIS file per `todoScoreMappings.ts`'s own doc comment — only
- * the date-parsing primitive moved.
- *
  * @see src/solutions/SmartTodo/src/utils/todoScoreUtils.ts (original)
  * @see src/solutions/SmartTodo/src/utils/dueLabelUtils.ts (original)
- * @see hooks/useKanbanColumns.ts (now imports the same parseDueDate)
+ * @see hooks/useKanbanColumns.ts (local copies for hook bucketing)
  */
 
-import { parseDueDate } from '@spaarke/ui-components';
 import type { IKanbanTodoLike } from '../types/kanban';
-
-export { parseDueDate };
 
 // ---------------------------------------------------------------------------
 // Weights — locked to match Code Page `todoScoreUtils.ts`
@@ -70,10 +55,27 @@ export interface IDueLabel {
 }
 
 // ---------------------------------------------------------------------------
-// Parsing — `parseDueDate` is imported from `@spaarke/ui-components` above
-// and re-exported for existing consumers of this module; see the task-080
-// doc comment at the top of this file for why.
+// Parsing
 // ---------------------------------------------------------------------------
+
+/** Parse an ISO date string defensively. Returns null for null/undefined/invalid. */
+export function parseDueDate(isoString: string | undefined | null): Date | null {
+  if (!isoString) return null;
+  // Date-only values (`YYYY-MM-DD`, no time component) are CALENDAR dates, not
+  // instants. `new Date("2026-08-17")` parses as UTC midnight, which in western
+  // (negative-offset) timezones lands on the PREVIOUS local calendar day — so a
+  // task due today reads a day early ("Overdue"/off-by-one). Parse the Y-M-D
+  // parts as LOCAL midnight to preserve the intended calendar day. Full ISO
+  // timestamps (with a time component) are matched by neither branch and stay
+  // unchanged. (smart-todo-r5 UAT 2026-08-17 — item #6.)
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoString.trim());
+  if (dateOnly) {
+    const dt = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+  const d = new Date(isoString);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 // ---------------------------------------------------------------------------
 // Urgency scoring (continuous 0–100 raw value used by composite score)

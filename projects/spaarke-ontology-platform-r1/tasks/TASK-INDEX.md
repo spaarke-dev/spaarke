@@ -66,7 +66,7 @@
 |---|---|---|---|---|---|---|
 | 🔲 050 | [Worklist grid configuration row](050-worklist-gridconfiguration-row.poml) | STANDARD | sonnet/medium | 034 | — | Membership by rule evaluation, never a user filter |
 | 🔲 051 | [**The one row component**](051-worklist-row-component.poml) | FULL | **sonnet/xhigh** | 050, 012 | — | 🔴 All five row-contract requirements. A second row component is a design failure |
-| 🔲 052 | [Extend MetricCard / RowMenu / OutcomeCard](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | **E** | Reuse is binding (§1.3) |
+| 🔲 052 | [Extend MetricCard / RowMenu / OutcomeCard](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | **E** | Reuse is binding (§1.3). **+ C-9** shared `RowActionMenu` |
 | 🔲 053 | [Gate host + acting](053-gate-host-and-acting.poml) | FULL | sonnet/high | 051 | **E** | Dismissal requires a reason |
 | 🔲 054 | [Reconciliation tab + aggregate item](054-reconciliation-tab-and-aggregate-item.poml) | STANDARD | sonnet/medium | 051 | **E** | ONE registration; the surface already exists |
 | 🔲 055 | [**Deploy** Console + shared components](055-deploy-console-and-shared-components.poml) | FULL | sonnet/high | 054 | — | **Real Dataverse** verification, not a mock |
@@ -95,10 +95,17 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| ⚠️ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | 5 of 6 fixed. **C-21 escalated** (privacy shim → [#1112](https://github.com/spaarke-dev/spaarke/issues/1112)); C-19 residual → [#1113](https://github.com/spaarke-dev/spaarke/issues/1113). C-23 moved to its own PR [#1114](https://github.com/spaarke-dev/spaarke/pull/1114) |
-| 🔲 081 | [Duplication cleanup](081-duplication-cleanup.poml) | STANDARD | sonnet/medium | — | **H** | `cleanGuid` ×~50, frame-walk ×7 |
+| ✅ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | Fixes relocated to their own PRs: C-10→084, C-5→085, C-19→086, C-22→088, C-23→[#1114](https://github.com/spaarke-dev/spaarke/pull/1114). C-21: owner chose **delete** (in 086) |
+| 🔲 081 | [On-branch cleanup the worklist needs (C-8, C-11, C-13, C-17)](081-duplication-cleanup.poml) | FULL | sonnet/high | 084 | — | C-13 waits for **084 merged**; C-17 = **3/7/10 days** (owner) |
 | ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
+| 🔲 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | **Live bug.** Merge first; 081 depends on it |
+| 🔲 085 | [Compose cleanup, own PR (C-5, C-16)](085-compose-cleanup-own-pr.poml) | FULL | sonnet/high | — | I | C-5 already lost comment data |
+| 🔲 086 | [Dead + misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)](086-dead-code-own-pr.poml) | FULL | **opus**/high | — | I | C-21 **delete** (owner). Closes #1112, #1113 |
+| 🔲 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | Do **not** touch the shared `FetchXmlService` |
+| 🔲 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | Web resource: needs a deploy after merge |
+| 🔲 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | `cleanGuid` ×~70 |
+| 🔲 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | Audit, then fix |
 
 ### Phase 9 — Wrap-up
 
@@ -124,6 +131,8 @@ build** before dispatching the next — `dotnet build src/server/api/Sprk.Bff.Ap
 | **F** | 062, 063 | 061 | ✅ yes | Configuration plus one policy row |
 | **G** | 071, 072, 073 | 070 | ✅ yes | Three independent surfaces |
 | **H** | 080, 081, 082, 083 | none | ❌ no | 080 carries six separate hazards needing per-item judgement |
+| **I** | 084, 085, 086, 087, 088, 089 | none | ❌ no | Cleanup unrelated to ontology, each in **its own worktree and PR** off master (owner, 2026-10-03). Separate worktrees, so no file overlap with the ontology branch |
+| **I2** | 091 | after wave I | ❌ no | Audit-then-fix; held back so it does not compete with six other PR worktrees |
 
 **Never parallel** — `parallel-safe: false`: **003** (`.claude/` paths, main session only) · **021** (the risk
 item, serial by choice) · **030**, **031**, **032**, **051**, **064**, **070**, **074**, **090** (each is a

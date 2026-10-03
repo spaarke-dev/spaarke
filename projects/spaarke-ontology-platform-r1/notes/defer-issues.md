@@ -263,3 +263,13 @@ unreachable, delete `useKeyboardShortcuts.ts` + `PageChrome/CommandBar.tsx` + it
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
 listed as D-6/D-7 were pulled INTO scope rather than deferred.)*
+
+---
+
+## Owner decisions 2026-10-03 (cleanup placement)
+
+| Item | Decision | Where it lands |
+|---|---|---|
+| **C-21** Pillar-9 `getAgentVisibleState` shim (ISS-005, #1112) | **DELETE.** The server re-derives the shape itself and trims it to identity fields; wiring the client copy live would feed browser-computed data into an LLM prompt. | Dead-code PR for `Spaarke.UI.Components`; trace `SerializedWidgetState.ts` / `WorkspaceTab.ts` consumers first. Closes #1112. |
+| **C-17** to-do due-date tier scheme | **3/7/10 days.** | This branch (Do lane). |
+| Cleanup placement rule | Fix everything, never defer to issues; items unrelated to ontology go to their own PRs grouped by area. | See `notes/cleanup-placement-plan.md`. |

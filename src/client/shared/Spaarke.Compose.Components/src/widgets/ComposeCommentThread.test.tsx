@@ -1,19 +1,17 @@
 /**
  * ComposeCommentThread.test.tsx — FR-23 richer comment-thread UI (spaarkeai-compose-r3 task 044).
  *
- * Two layers, mirroring `ComposeFindReplace.test.tsx` / `usePendingRedline.test.tsx`'s convention:
+ * Three layers, mirroring `ComposeFindReplace.test.tsx` / `usePendingRedline.test.tsx`'s convention:
  *  1. HOOK LOGIC — `useComposeCommentThreads` driven via `renderHook` over a REAL headless TipTap
  *     `@tiptap/core` Editor (StarterKit + `CommentAnchorMark`, the same schema-registration path
  *     ComposeEditor uses). Covers: create-on-selection (mark application + no-op on a collapsed
  *     selection/empty text), reply ordering, resolve, and the FR-25 `importThreads` upsert seam.
- *  2. UI — `ComposeCommentThread` rendered with a real editor instance: thread author/timestamp,
+ *  2. PERSISTENCE SHAPE — `composeCommentThreadsToDocxAnnotations` (pure) asserts the native
+ *     `w:comment`-compatible mapping (root + each reply → its own `Comment`-kind annotation, same
+ *     anchor) and the "no anchorText → skipped" guard.
+ *  3. UI — `ComposeCommentThread` rendered with a real editor instance: thread author/timestamp,
  *     create-on-selection via the composer, reply-appends-in-order, resolve, the SCOPE GUARD flat-
  *     render of a reply set carrying `parentReplyId` provenance, and an ADR-021 dark-mode check.
- *
- * (The former layer 2, PERSISTENCE SHAPE for `composeCommentThreadsToDocxAnnotations` /
- * `composeSessionCommentThreadsToDocxAnnotations`, was removed along with those two functions —
- * spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03. The live save-side mapping,
- * `composeSessionCommentThreadsToAnchoredComments`, is covered by its own test coverage elsewhere.)
  */
 import * as React from 'react';
 import { render, screen, act, renderHook } from '@testing-library/react';
@@ -24,7 +22,12 @@ import StarterKit from '@tiptap/starter-kit';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeCommentThread } from './ComposeCommentThread';
-import type { ComposeCommentThreadModel } from './ComposeCommentThread.types';
+import {
+  composeCommentThreadsToDocxAnnotations,
+  composeSessionCommentThreadsToDocxAnnotations,
+  type ComposeCommentThreadModel,
+} from './ComposeCommentThread.types';
+import { DocxTrackChangeKind } from './useComposeWordShuttle';
 
 function makeEditor(content = '<p>Hello world. Second sentence.</p>'): Editor {
   return new Editor({
@@ -215,17 +218,96 @@ describe('useComposeCommentThreads — create/reply/resolve/import', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. composeCommentThreadsToDocxAnnotations / composeSessionCommentThreadsToDocxAnnotations
-//    — DELETED (spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03). Both were the
-//    retired `DocxAnnotationInput`/`targetText` save shape that rode the now-removed
-//    `annotations` save field the server never deserialized — every comment sent that way
-//    was silently dropped. The live save path is
-//    `composeSessionCommentThreadsToAnchoredComments` (`comments` shape,
-//    `ComposeCommentThread.types.ts`), covered by its own test file. These two functions had
-//    zero production callers (confirmed by grep across src/) — only this file's own
-//    now-removed tests called them. See ComposeCommentThread.types.ts's doc comment on
-//    `composeSessionCommentThreadsToAnchoredComments` for the full history.
+// 2. composeCommentThreadsToDocxAnnotations — persistence shape (pure)
 // ---------------------------------------------------------------------------
+
+describe('composeCommentThreadsToDocxAnnotations (persistence shape → native w:comment)', () => {
+  it('maps a thread with replies to one Comment-kind annotation per comment, all anchored to the same targetText', () => {
+    const threads: ComposeCommentThreadModel[] = [
+      {
+        id: 't1',
+        author: 'Alex Author',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        text: 'Root comment',
+        anchorText: 'Hello',
+        resolved: false,
+        replies: [
+          { id: 'r1', author: 'Sam Reviewer', timestamp: '2026-01-01T01:00:00.000Z', text: 'First reply' },
+          { id: 'r2', author: 'Alex Author', timestamp: '2026-01-01T02:00:00.000Z', text: 'Second reply' },
+        ],
+      },
+    ];
+
+    const annotations = composeCommentThreadsToDocxAnnotations(threads);
+
+    expect(annotations).toHaveLength(3);
+    expect(annotations.every(a => a.kind === DocxTrackChangeKind.Comment)).toBe(true);
+    expect(annotations.every(a => a.targetText === 'Hello')).toBe(true);
+    expect(annotations.map(a => a.commentText)).toEqual(['Root comment', 'First reply', 'Second reply']);
+    expect(annotations.map(a => a.author)).toEqual(['Alex Author', 'Sam Reviewer', 'Alex Author']);
+  });
+
+  it('skips a thread with no captured anchorText (the server requires a non-empty targetText for a Comment)', () => {
+    const threads: ComposeCommentThreadModel[] = [
+      {
+        id: 't1',
+        author: 'Alex Author',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        text: 'No anchor',
+        resolved: false,
+        replies: [],
+      },
+    ];
+
+    expect(composeCommentThreadsToDocxAnnotations(threads)).toEqual([]);
+  });
+
+  it('an empty thread list maps to an empty annotation list', () => {
+    expect(composeCommentThreadsToDocxAnnotations([])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. composeSessionCommentThreadsToDocxAnnotations — item 5b: exclude imported threads
+// ---------------------------------------------------------------------------
+describe('composeSessionCommentThreadsToDocxAnnotations (item 5b — persist only session-authored comments)', () => {
+  const imported: ComposeCommentThreadModel = {
+    id: 'imported-1',
+    author: 'Prior Reviewer',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    text: 'From the original document',
+    anchorText: 'clause A',
+    resolved: false,
+    replies: [],
+  };
+  const authored: ComposeCommentThreadModel = {
+    id: 'thread-new-1',
+    author: 'You',
+    timestamp: '2026-07-21T00:00:00.000Z',
+    text: 'A new comment this session',
+    anchorText: 'clause B',
+    resolved: false,
+    replies: [],
+  };
+
+  it('EXCLUDES imported threads (they ride the retained original — re-emitting would duplicate)', () => {
+    const importedIds = new Set(['imported-1']);
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([imported, authored], importedIds);
+    // Only the session-authored comment is persisted as a new w:comment.
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toMatchObject({ commentText: 'A new comment this session', targetText: 'clause B' });
+  });
+
+  it('with no imported ids, every thread persists (a born-in-editor doc has no imported comments)', () => {
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([authored], new Set());
+    expect(annotations).toHaveLength(1);
+  });
+
+  it('a doc whose only comments are imported persists nothing new on save', () => {
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([imported], new Set(['imported-1']));
+    expect(annotations).toEqual([]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 3. ComposeCommentThread panel — Fluent v9 UI

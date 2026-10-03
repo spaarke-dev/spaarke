@@ -37,25 +37,11 @@
  * Mount mechanism (Phase 4 scope):
  *   Task 042 ships the mount CONTRACT — the registration + host glue. The
  *   production React bundle (esbuild/webpack-bundled @spaarke/ai-widgets +
- *   React 18 + ReactDOM as a single MDA-loadable IIFE) was SUPPOSED to ship in
- *   Task 043 ("Solution package (FormXml + web resource); deploy") but never
- *   did — `window.SpaarkeAiWidgets` has no producer anywhere in this repo
- *   (confirmed by the spaarke-ontology-platform-r1 2026-10-02 reuse audit,
- *   finding X16). `@spaarke/ai-widgets` itself has no browser-IIFE bundler
- *   config at all (only `tsc` module output) — standing one up from scratch is
- *   its own project, not a cleanup fix, so it is NOT attempted here (filed
- *   instead — see notes/defer-issues.md).
- *
- *   Until that bundle exists, this script does NOT render a placeholder card
- *   (spaarke-ontology-platform-r1 task 080 / C-22, 2026-10-03). It used to —
- *   an always-visible "Matter Health insight (Phase 4 placeholder)" card that
- *   read as a shipped, working feature forever, with no path to ever become
- *   real without someone separately noticing and building Task 043. The
- *   bundle-absent case now behaves exactly like the host-not-found case below:
- *   log a diagnostic and skip the mount, leaving the host element empty. The
- *   mount CONTRACT (FormXml host, onLoad handler, `_resolveBundle` check) is
- *   unchanged — the day a real bundle attaches itself to `window.SpaarkeAiWidgets`,
- *   this script mounts it with no further changes needed here.
+ *   React 18 + ReactDOM as a single MDA-loadable IIFE) is shipped in Task 043
+ *   ("Solution package (FormXml + web resource); deploy"). When the bundle is
+ *   absent (e.g., during Phase 4 staging), this script renders a placeholder
+ *   that surfaces the contract is wired correctly — diagnostic only, never
+ *   blocking.
  *
  * Source layout:
  *   - Source: src/dataverse/forms/sprk_matter/insightCardMount.ts
@@ -482,14 +468,80 @@ interface SpaarkeAiWidgetsCardProps {
   };
 
   // ===========================================================================
+  // PLACEHOLDER RENDER (bundle absent — Phase 4 staging only)
+  // ===========================================================================
+
+  /**
+   * Diagnostic placeholder rendered when the @spaarke/ai-widgets bundle is
+   * not yet loaded. Shows the resolved contract (topic / subject / mode /
+   * envelope status) so operators can verify the mount glue is wired before
+   * Task 043 ships the React bundle.
+   */
+  ns._renderPlaceholder = function (host: HTMLElement, subject: string, envelope: CardInsightEnvelope | null): void {
+    while (host.firstChild) {
+      host.removeChild(host.firstChild);
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-testid', 'insight-card-placeholder');
+    wrapper.style.padding = '12px';
+    wrapper.style.border = '1px dashed #c8c6c4';
+    wrapper.style.borderRadius = '4px';
+    wrapper.style.fontFamily = 'Segoe UI, sans-serif';
+    wrapper.style.fontSize = '12px';
+    wrapper.style.color = '#605e5c';
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '8px';
+    title.textContent = 'Matter Health insight (Phase 4 placeholder)';
+    wrapper.appendChild(title);
+
+    const fact = function (k: string, v: string): HTMLElement {
+      const row = document.createElement('div');
+      row.style.lineHeight = '1.4';
+      const key = document.createElement('strong');
+      key.textContent = k + ': ';
+      row.appendChild(key);
+      const val = document.createElement('span');
+      val.textContent = v;
+      row.appendChild(val);
+      return row;
+    };
+
+    wrapper.appendChild(fact('Topic', ns._topic));
+    wrapper.appendChild(fact('Mode', ns._mode));
+    wrapper.appendChild(fact('Subject', subject));
+    wrapper.appendChild(fact('Playbook', ns._playbookName));
+    wrapper.appendChild(
+      fact(
+        'Stored envelope',
+        envelope === null
+          ? '(absent — pre-warm POST fires async per FR-18)'
+          : '(present — FR-19 immediate-render path active)'
+      )
+    );
+
+    // FR-19: when an envelope exists, show its narrative preview inline.
+    if (envelope && (envelope.narrative || envelope.body || envelope.tldr)) {
+      const preview = document.createElement('div');
+      preview.style.marginTop = '8px';
+      preview.style.padding = '8px';
+      preview.style.background = '#f3f2f1';
+      preview.style.borderRadius = '2px';
+      preview.style.color = '#323130';
+      preview.style.whiteSpace = 'pre-wrap';
+      const text = envelope.tldr || envelope.narrative || envelope.body || '(empty envelope)';
+      preview.textContent = String(text).substring(0, 500);
+      wrapper.appendChild(preview);
+    }
+
+    host.appendChild(wrapper);
+  };
+
+  // ===========================================================================
   // MOUNT — production path (bundle present)
   // ===========================================================================
-  //
-  // NOTE (spaarke-ontology-platform-r1 task 080 / C-22, 2026-10-03): there is
-  // deliberately no "bundle absent" render path here any more. See the
-  // file-header NOTE for why — the two onLoad branches below now skip the
-  // mount silently (log + return) when `_resolveBundle()` returns null,
-  // identically to the existing host-not-found branch.
 
   /**
    * Mount the React `InsightSummaryCard` into the host element with the
@@ -616,10 +668,10 @@ interface SpaarkeAiWidgetsCardProps {
                 console.log(
                   '[Matter Insight Card] v' +
                     ns._version +
-                    ' @spaarke/ai-widgets bundle not loaded — skipping mount ' +
-                    '(no placeholder; see notes/defer-issues.md C-22). Card stays absent ' +
-                    'until the production bundle ships.'
+                    ' @spaarke/ai-widgets bundle not loaded — rendering placeholder. ' +
+                    'Production bundle ships in Task 043.'
                 );
+                ns._renderPlaceholder(host, subject, envelope);
                 return;
               }
 
@@ -665,6 +717,7 @@ interface SpaarkeAiWidgetsCardProps {
               }
               const bundle = ns._resolveBundle();
               if (!bundle) {
+                ns._renderPlaceholder(host, subject, null);
                 return;
               }
               const handle = ns._mountCard(host, bundle, subject, null, themeId);

@@ -60,7 +60,6 @@ import {
   AddCircleRegular,
 } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
-import { parseDueDate } from '../../utils/dateLocal';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants (mirror task 009 customization)
@@ -79,21 +78,11 @@ const STATUSCODE_DISMISSED = 659490002;
 // ---------------------------------------------------------------------------
 
 /**
- * Compute To Do Score — mirrors the hoisted `computeTodoScore()`
- * (`Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`) exactly.
+ * Compute To Do Score — mirrors LegalWorkspace computeTodoScore() exactly.
  *
  * Formula: priority*0.50 + invertedEffort*0.20 + urgencyRaw*0.30
  * Uses Math.ceil for diffDays and Math.round for the final score
  * to match the Kanban card computation.
- *
- * Due-date parsing (spaarke-ontology-platform-r1 task 080 / C-10,
- * 2026-10-03): this used to parse `duedate` with a bare `new Date(duedate)`,
- * which — for a date-only `sprk_duedate` value — reads as the PREVIOUS
- * calendar day in every negative-UTC-offset zone, disagreeing with the
- * Kanban bucket the same To Do landed in. Now uses the canonical
- * `parseDueDate` ("mirrors exactly" is an assertion that drifts unless both
- * sides literally import the same function — see that function's doc
- * comment).
  */
 function computeScore(
   priority: number,
@@ -109,15 +98,17 @@ function computeScore(
   const invertedEffort = 100 - effort;
 
   let urgencyRaw = 0;
-  const due = parseDueDate(duedate);
-  if (due) {
-    const now = new Date();
-    const diffMs = due.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) urgencyRaw = 100;
-    else if (diffDays <= 3) urgencyRaw = 80;
-    else if (diffDays <= 7) urgencyRaw = 50;
-    else if (diffDays <= 10) urgencyRaw = 25;
+  if (duedate) {
+    const due = new Date(duedate);
+    if (!isNaN(due.getTime())) {
+      const now = new Date();
+      const diffMs = due.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) urgencyRaw = 100;
+      else if (diffDays <= 3) urgencyRaw = 80;
+      else if (diffDays <= 7) urgencyRaw = 50;
+      else if (diffDays <= 10) urgencyRaw = 25;
+    }
   }
 
   const priorityComponent = priority * 0.5;

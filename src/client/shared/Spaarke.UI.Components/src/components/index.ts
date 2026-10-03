@@ -11,9 +11,8 @@ export * from './SprkButton';
 // Only ViewSelector remains; the new DataGrid framework lives under './DataGrid'.
 export * from './DatasetGrid/ViewSelector';
 
-// (Toolbar/CommandToolbar DELETED here — spaarke-ontology-platform-r1 task 080 / C-19, 2026-10-03 —
-// dead infra from the deleted UniversalDatasetGrid PCF, zero consumers besides its own test. See
-// services/index.ts's note on the same cluster.)
+// Toolbar components
+export * from './Toolbar';
 
 // Page Chrome components (OOB parity)
 export * from './PageChrome';

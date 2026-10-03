@@ -64,6 +64,7 @@ export type {
   IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
+export * from './CommandRegistry';
 export * from './CommandExecutor';
 // Field-mapping engine (context-agnostic, ADR-012). `applyFieldMappings` is the
 // single public entrypoint the Create*Wizard services call (tasks 012+). The

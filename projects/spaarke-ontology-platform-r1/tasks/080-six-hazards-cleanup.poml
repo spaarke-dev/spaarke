@@ -4,7 +4,7 @@
     <title>Resolve the six cleanup hazards</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Each hazard is a live correctness or privacy risk in shipped code, one of which already lost data.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,6 +93,7 @@
     <criterion testable="true">All affected packages build and their tests pass.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">All six hazards diagnosed and fixed. Under the owner placement rule the fixes unrelated to ontology land in their own PRs: C-10 in task 084, C-5 in 085, C-19 in 086, C-22 in 088, C-23 in PR #1114. C-21 resolved by owner decision (delete), executed in 086; the C-19 residual (#1113) is also resolved in 086.</completion>
   <notes>spec.md FR-42. notes/reuse-verification-2026-10-02.md sections 8.7 and 8.9. None of these was caused by this project.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

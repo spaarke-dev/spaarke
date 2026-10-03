@@ -185,16 +185,6 @@ describe('todoScoring.ts remains untouched (locked composite formula)', () => {
     const contents = fs.readFileSync(lockedFilePath, 'utf8');
     const hash = crypto.createHash('sha256').update(contents).digest('hex');
     // Captured via `sha256sum` immediately before task 011 made any edits.
-    //
-    // Re-pinned 2026-10-03 (spaarke-ontology-platform-r1 task 080 / C-10) — this guard's INTENT is
-    // "the composite-score FORMULA/WEIGHTS below don't drift", not "this file's bytes never change
-    // for any reason". Task 080 converged the three independently-drifted copies of `parseDueDate`
-    // (a LIVE BUG: Kanban bucketing disagreed with the composite score by a day in negative-UTC-
-    // offset zones) onto a single implementation in `@spaarke/ui-components`, so this file no longer
-    // defines its own `parseDueDate` — it imports + re-exports the canonical one. The weights
-    // (priority 0.50 / effort 0.20 inverted / urgency 0.30) and every scoring/label function below
-    // are byte-for-byte unchanged; only the date-parsing primitive's SOURCE moved. New hash computed
-    // via `sha256sum` immediately after that edit, reviewed in the same change.
-    expect(hash).toBe('0d71adc88d9235efb47a1a321ebe919c9eb4da7954c01c47e298ab124b081691');
+    expect(hash).toBe('e919bf8f471b35716e071e6fc07f6d899598637a95326eaff5c4b108ee525a72');
   });
 });
