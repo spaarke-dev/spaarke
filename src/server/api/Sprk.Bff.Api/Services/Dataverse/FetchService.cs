@@ -11,7 +11,9 @@ using Sprk.Bff.Api.Services.Dataverse.Models;
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
-/// Executes the FetchXML passthrough query for <c>POST /api/dataverse/fetch</c> (FR-BFF-04).
+/// Executes a FetchXML query APP-ONLY (the BFF's own identity) and projects the rows (FR-BFF-04).
+/// Its only caller is the external module seam (<c>ExternalModuleDataEndpoints</c>,
+/// <c>POST /api/v1/external/api/dataverse/fetch</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,13 +24,16 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 ///   <item><description>Targets &lt;500ms p50 roundtrip on a default tenant; achieved by reusing the singleton ServiceClient (already authenticated) and avoiding per-request token negotiation.</description></item>
 ///   <item><description>Translates Dataverse <see cref="EntityCollection"/> into a JSON-projection-friendly shape (<see cref="IReadOnlyDictionary{TKey,TValue}"/>) so the BFF endpoint can return it via the default <c>System.Text.Json</c> serializer.</description></item>
 ///   <item><description>Injects the caller-supplied paging cookie into the FetchXML root before execution (Dataverse expects <c>page</c> + <c>paging-cookie</c> attributes on <c>&lt;fetch&gt;</c>).</description></item>
-///   <item><description>Throws <see cref="XmlException"/> on malformed FetchXML so the endpoint can return 400 ProblemDetails (NOT 500). The authorization filter typically catches this first; this is defense-in-depth.</description></item>
+///   <item><description>Throws <see cref="XmlException"/> on malformed FetchXML so the endpoint can return 400 ProblemDetails (NOT 500). The external seam's FetchXML guard typically catches this first; this is defense-in-depth.</description></item>
 /// </list>
 /// <para>
-/// Authorization is enforced by <c>DataverseAuthorizationFilter</c> with
-/// <c>EntitySource.FromFetchXmlBody</c> (task 011); the cross-entity privilege check runs
-/// before this service executes. By the time <see cref="ExecuteAsync"/> is called, every
-/// entity referenced in the FetchXML has been verified.
+/// 🔴 NO AUTHORIZATION HAPPENS HERE, and Dataverse applies none either: the query runs as the BFF
+/// application user, so it returns every row and column that identity can read. Scoping is the
+/// CALLER's job. The external seam scopes it (Tier-2 FetchXML injection, the per-module column
+/// allow-list, <c>IsRecordAccessible</c>) because a CIAM contact cannot be impersonated. The internal
+/// <c>POST /api/dataverse/fetch</c>, which called this with only an entity-level privilege check in
+/// front of it, was an org-wide row and column disclosure (route sweep finding #9) and was DELETED by
+/// unified-access-control-r2 task 160. A new workforce caller must run its read AS THE CALLER, not here.
 /// </para>
 /// <para>
 /// Scoped lifetime — depends on <see cref="IDataverseService"/> which is scoped/singleton
@@ -53,7 +58,7 @@ internal sealed class FetchService
     /// Executes the supplied FetchXML against Dataverse and returns the projected rows
     /// plus paging information.
     /// </summary>
-    /// <param name="request">The FetchXML payload (validated by the authorization filter).</param>
+    /// <param name="request">The FetchXML payload (scoped by the caller before this call).</param>
     /// <param name="ct">Cancellation token from the request.</param>
     /// <returns>Rows, paging cookie, and a flag indicating whether more pages remain.</returns>
     /// <exception cref="FetchXmlParseException">

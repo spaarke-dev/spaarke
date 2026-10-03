@@ -1,4 +1,3 @@
-using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
@@ -40,13 +39,6 @@ internal static class MockServiceClientFactory
         fixture.PrivilegeCheckerMock
             .Setup(p => p.HasReadPrivilegeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid _, string entity, CancellationToken _) => readable.Contains(entity));
-
-        // GetReadableEntitiesAsync — returns the configured readable set.
-        // Used by the FetchXML cross-entity check (filter calls this when >1 distinct entity).
-        fixture.PrivilegeCheckerMock
-            .Setup(p => p.GetReadableEntitiesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid _, CancellationToken _) =>
-                (IReadOnlySet<string>)new HashSet<string>(readable, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -57,47 +49,6 @@ internal static class MockServiceClientFactory
         fixture.PrivilegeCheckerMock
             .Setup(p => p.HasReadPrivilegeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-
-        fixture.PrivilegeCheckerMock
-            .Setup(p => p.GetReadableEntitiesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Configures <see cref="IDataverseService.RetrieveAsync"/> to return a populated record for the
-    /// given entity + id. Used by the RecordService happy-path tests.
-    /// </summary>
-    /// <param name="fixture">The fixture whose mocks to configure.</param>
-    /// <param name="entityLogicalName">The entity the mock returns the record for.</param>
-    /// <param name="recordId">The record id.</param>
-    /// <param name="attributes">Attribute name → value pairs to populate on the returned Entity.</param>
-    public static void ReturnRecord(
-        this DataverseIntegrationTestFixture fixture,
-        string entityLogicalName,
-        Guid recordId,
-        Dictionary<string, object> attributes)
-    {
-        var entity = new Entity(entityLogicalName, recordId);
-        foreach (var kvp in attributes)
-        {
-            entity[kvp.Key] = kvp.Value;
-        }
-
-        fixture.DataverseServiceMock
-            .Setup(d => d.RetrieveAsync(entityLogicalName, recordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(entity);
-    }
-
-    /// <summary>
-    /// Configures <see cref="IDataverseService.RetrieveAsync"/> to throw a Dataverse-style
-    /// "record does not exist" exception for any retrieve. Used by 404 tests.
-    /// </summary>
-    public static void ReturnRecordNotFound(this DataverseIntegrationTestFixture fixture)
-    {
-        fixture.DataverseServiceMock
-            .Setup(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException(
-                "Record with Id = aaaaaaaa-1111-1111-1111-111111111111 Does Not Exist"));
     }
 
     /// <summary>
@@ -110,16 +61,6 @@ internal static class MockServiceClientFactory
             .Count(i => i.Method.Name == nameof(IDataversePrivilegeChecker.HasReadPrivilegeAsync)
                         && i.Arguments.Count >= 2
                         && string.Equals(i.Arguments[1] as string, entityLogicalName, StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
-    /// Returns how many times the privilege checker's <c>GetReadableEntitiesAsync</c> was invoked.
-    /// Used to verify the FetchXML cross-entity check makes a single call regardless of breadth.
-    /// </summary>
-    public static int GetReadableEntitiesCalls(this DataverseIntegrationTestFixture fixture)
-    {
-        return fixture.PrivilegeCheckerMock.Invocations
-            .Count(i => i.Method.Name == nameof(IDataversePrivilegeChecker.GetReadableEntitiesAsync));
     }
 
     /// <summary>

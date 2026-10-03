@@ -17,7 +17,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.IntegrationTests;
@@ -62,10 +61,10 @@ internal static class DataverseTestConstants
 /// the underlying <c>ServiceClient</c> (which is itself a sealed type without a public mockable
 /// contract). For integration tests we substitute a <c>Mock&lt;IDataverseService&gt;</c>; happy-path
 /// service code paths surface as 500 (recorded in deviations). The tests in this project cover the
-/// behaviors that DO NOT need a live ServiceClient: the authorization filter (the security gate),
-/// endpoint-level 400 validation, RecordService happy-path with <c>$select</c> (uses
-/// <see cref="IDataverseService.RetrieveAsync"/> directly), and the cross-entity privilege bypass
-/// check (entirely filter-level).
+/// behaviors that DO NOT need a live ServiceClient: the authorization filter (the entity-level gate)
+/// and endpoint-level 400 validation. The internal fetch and record routes this fixture also served were
+/// DELETED by unified-access-control-r2 task 160; <c>DataverseProxyRoutesRemovedTests</c> pins that they
+/// stay gone.
 /// </para>
 /// </remarks>
 public class DataverseIntegrationTestFixture : WebApplicationFactory<Program>
@@ -82,13 +81,6 @@ public class DataverseIntegrationTestFixture : WebApplicationFactory<Program>
     /// filter, which never reach the service).
     /// </summary>
     public Mock<IDataverseService> DataverseServiceMock { get; } = new(MockBehavior.Loose);
-
-    /// <summary>
-    /// Real FetchXmlEntityExtractor (it's pure XML parsing — using the real one yields fidelity to
-    /// the production cross-entity check and avoids re-implementing the parser in a mock).
-    /// Internal because <see cref="IFetchXmlEntityExtractor"/> is internal.
-    /// </summary>
-    internal IFetchXmlEntityExtractor FetchXmlExtractor { get; } = new FetchXmlEntityExtractor();
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -232,11 +224,9 @@ public class DataverseIntegrationTestFixture : WebApplicationFactory<Program>
             // Remove all hosted services so background workers don't contact external systems.
             services.RemoveAll<IHostedService>();
 
-            // Replace IDataverseService with the test mock. SavedQueryService, MetadataService,
-            // FetchService all hard-cast IDataverseService → DataverseServiceClientImpl to reach
-            // ServiceClient; the mock fails this cast and surfaces as 500. This is documented in
-            // 016-deviations.md. RecordService happy-path uses IDataverseService.RetrieveAsync
-            // directly and IS testable via this mock.
+            // Replace IDataverseService with the test mock. SavedQueryService and MetadataService
+            // hard-cast IDataverseService → DataverseServiceClientImpl to reach ServiceClient; the
+            // mock fails this cast and surfaces as 500. This is documented in 016-deviations.md.
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(DataverseServiceMock.Object);
 
@@ -244,11 +234,6 @@ public class DataverseIntegrationTestFixture : WebApplicationFactory<Program>
             // every authorization test calls into this mock.
             services.RemoveAll<IDataversePrivilegeChecker>();
             services.AddSingleton(PrivilegeCheckerMock.Object);
-
-            // Replace IFetchXmlEntityExtractor with the real implementation (pure XML parsing).
-            // The cross-entity privilege bypass test depends on the real parser's behavior.
-            services.RemoveAll<IFetchXmlEntityExtractor>();
-            services.AddSingleton(FetchXmlExtractor);
 
             // Register a no-op "standard" rate-limit policy.
             //
