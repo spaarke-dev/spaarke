@@ -142,9 +142,11 @@ public sealed record AssignedAccessListEntry(
 /// secure record gets no share (task 143's guard, reused). An unreadable list or flag set writes nothing.</item>
 /// <item>Never lower: an existing grant that CONFERS access today (not merely statecode 0 — an expired row confers
 /// nothing) at Collaborate or above, or a share already carrying Collaborate's rights, is left untouched
-/// (<see cref="AssignedAccessState.CoveredByExisting"/>). A lower conferring one is raised, and put back when the
-/// assignment ends. A covering grant that LAPSES is a known cause (owner (e)), not an operator's removal: the
-/// still-assigned subject is given its access again.</item>
+/// (<see cref="AssignedAccessState.CoveredByExisting"/>) — not raised, not renewed. A lower conferring one is raised; the
+/// rule renews it like its own while the assignment lasts (A5), and when the assignment ends puts back its earlier level
+/// AND date, both recorded in the ledger reason (<see cref="AssignedAccessReason.RaisedFromLevel"/>). A covering grant
+/// that LAPSES is a known cause (owner (e)), not an operator's removal: the still-assigned subject is given its access
+/// again.</item>
 /// <item>Operator removal sticks (item 5): /revoke, /unshare-user, Dismiss, and a removal outside the BFF all record
 /// <see cref="AssignedAccessState.Declined"/>, which no trigger re-creates while the assignment persists. A KNOWN cause
 /// is not a decline: a closed record, an inactive organization (R2), task 143's enforcer.</item>
@@ -841,7 +843,10 @@ public sealed class AssignedAccessMaterializer
         // renewal applies only to the rule's own grants. Conferral is the read filter's own predicate.
         var conferring = Conferring(active, run.Today);
 
-        // Never lower (and never extend someone else's live grant): a CONFERRING row at Collaborate or above covers.
+        // Never lower: a CONFERRING row at Collaborate or above covers, and the rule leaves it exactly as it is — level and
+        // date (CoveredByExisting is never renewed; its date is its owner's). A LOWER conferring row is different: it is
+        // raised below, renewed like the rule's own while the assignment lasts (A5), and put back — level AND date — when
+        // the assignment ends (task 142 r2, finding 1).
         if (conferring.FirstOrDefault(r => (r.AccessLevel ?? 0) >= (int)ExternalAccessLevel.Collaborate) is { } covering)
         {
             await EnsureRowsAsync(run, subject, byField,
@@ -885,7 +890,19 @@ public sealed class AssignedAccessMaterializer
         // that confers nothing. The date is the same DefaultExpiry renewal writes (owner A5); no conferring row exists
         // whose date it could shorten. A lapsed row's level is not a "prior" to put back: it conferred nothing, so the end
         // of the assignment leaves the subject where it started — with no access here.
+        //
+        // RECORDED DEVIATION (task 142 r2, finding 3; notes §6): when that lapsed row's stored level is ABOVE Collaborate
+        // (an expired Full Access grant), the core writes Collaborate over it — the rule's ceiling (A1) cannot write Full,
+        // and the core's never-lower refusal guards only a NARROWED request. The row conferred nothing, so no ACCESS is
+        // lowered (none → Collaborate); refusing would leave an assigned subject with nothing (rule 5), and renewing it at
+        // Full would grant above the rule's level for 90 days. The expired Full level is not restored at the end.
+        //
+        // A raise records what the subject held, to put back when the assignment ends — the highest conferring level AND
+        // the latest conferring date (task 142 r2, finding 1: renewal extends a raised grant while it is assigned, so the
+        // level alone would leave the operator's grant outliving the date the operator chose). Every conferring row here is
+        // below Collaborate (one at or above it covered, above) and carries a date (ConfersAccessOn: null confers nothing).
         var prior = conferring.Count > 0 ? conferring.Max(r => r.AccessLevel ?? 0) : (int?)null;
+        var priorExpiry = conferring.Count > 0 ? conferring.Max(r => r.ExpiresDate) : null;
         DateOnly? expiry = active.Count > 0 && conferring.Count == 0 ? ExternalGrantLifecycle.DefaultExpiry(run.Today) : null;
         var outcome = await WriteGrantAsync(run, subject, ExternalAccessLevel.Collaborate, expiry, ct).ConfigureAwait(false);
         if (outcome.Refusal is { } refusal)
@@ -915,7 +932,7 @@ public sealed class AssignedAccessMaterializer
             ?? (active.Count > 0
                 ? ExternalGrantLifecycle.ElectSurvivor(active, run.Today).ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(run.Today)
                 : ExternalGrantLifecycle.DefaultExpiry(run.Today));
-        var reason = prior is { } p ? AssignedAccessReason.RaisedFromLevelPrefix + p : null;
+        var reason = prior is { } p && priorExpiry is { } d ? AssignedAccessReason.RaisedFromLevel(p, d) : null;
 
         await EnsureRowsAsync(run, subject, byField,
             new AssignedAccessLedgerWrite(AssignedAccessState.Granted, reason, outcome.AccessRecordId, null,
@@ -1028,13 +1045,33 @@ public sealed class AssignedAccessMaterializer
                     return;
                 }
 
-                if (TryParsePrior(row.Reason, AssignedAccessReason.RaisedFromLevelPrefix, out var priorLevel)
+                if (TryParseRaisedGrant(row.Reason, out var priorLevel, out var priorExpiry)
                     && Enum.IsDefined(typeof(ExternalAccessLevel), priorLevel))
                 {
-                    // A raised MANUAL grant goes back to the level someone chose — an explicit lower request, not narrowed.
-                    var restored = await WriteGrantAsync(run, subject, (ExternalAccessLevel)priorLevel, null, ct).ConfigureAwait(false);
+                    // A raised MANUAL grant goes back to what someone chose — the level AND the date (task 142 r2, finding
+                    // 1): an explicit lower request carrying an explicit date, so the core writes both and the rule's own
+                    // renewal (A5) never outlives the assignment. Not narrowed (the earlier level is below Collaborate).
+                    var conferredBefore = ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, run.Today);
+                    var restored = await WriteGrantAsync(run, subject, (ExternalAccessLevel)priorLevel, priorExpiry, ct)
+                        .ConfigureAwait(false);
                     if (restored.Refusal is { } refusal)
                     {
+                        if (IsPolicyHold(refusal))
+                        {
+                            // Task 142 r2, finding 2: the record's policy (Restricted, an organization on a Secure or
+                            // Limited record) or its No Access list forbids writing this grantee now — for as long as that
+                            // lasts, possibly indefinitely (a secure record stays secure). Not a failure: nothing is
+                            // exposed (the read path suppresses this grant on the same terms) and nothing can be done until
+                            // it changes. The ledger row stays Granted, so every pass tries again and the restore happens
+                            // the first pass after the policy allows it — a form save, Update Access, or the job.
+                            _logger.LogInformation(
+                                "[ASSIGNED-ACCESS] {Type} {RootId}: putting back {Subject}'s raised grant waits on the record's " +
+                                "policy ({Reason}).", run.Logical, run.RootId, subject, refusal.ReasonCode);
+                            run.Entry(subject, fields, null, AssignedAccessState.Granted,
+                                AssignedAccessReason.RestorePendingPrefix + refusal.ReasonCode, AssignedAccessAction.None);
+                            return;
+                        }
+
                         run.Fail(subject, "restore-refused",
                             $"The raised grant of {subject} could not be put back to its earlier level ({refusal.ReasonCode}).");
                         return;
@@ -1044,13 +1081,18 @@ public sealed class AssignedAccessMaterializer
 
                     if (restored.Warning is not null)
                     {
-                        // ADR-003 (task 142 r1, finding 2): the earlier level is back on the row, but the grant had LAPSED,
-                        // so it confers nothing — no access was put back, and none is reported. The rule's own access had
-                        // already ended by expiry (a known cause, owner (e)); nothing is left to retry.
+                        // ADR-003: the earlier level and date are back on the row, but that date has passed, so the grant
+                        // confers nothing — no access was put back, and none is reported. When the grant still conferred
+                        // before this write (the rule had renewed it past the operator's date), putting the date back ENDED
+                        // the access: reported as revoked. The core returns before its own cache invalidation on this
+                        // path, so the grantee's cached grant set is cleared here — never left serving the ended access.
                         _logger.LogWarning(
-                            "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject}'s raised grant had lapsed; its earlier level was put " +
-                            "back, but it confers no access ({Warning}).", run.Logical, run.RootId, subject, restored.Warning);
-                        await EndAsync(AssignedAccessReason.PriorLevelRestoredLapsed, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                            "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject}'s raised grant was put back to its earlier level and " +
+                            "date, which has passed; it confers no access ({Warning}).", run.Logical, run.RootId, subject,
+                            restored.Warning);
+                        await InvalidateGrantSetAsync(subject).ConfigureAwait(false);
+                        await EndAsync(AssignedAccessReason.PriorLevelRestoredLapsed,
+                            conferredBefore ? AssignedAccessAction.Revoked : AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
 
@@ -1437,6 +1479,37 @@ public sealed class AssignedAccessMaterializer
                && int.TryParse(reason[prefix.Length..], System.Globalization.NumberStyles.Integer,
                    System.Globalization.CultureInfo.InvariantCulture, out value);
     }
+
+    /// <summary>
+    /// Reads a raise's reason (<see cref="AssignedAccessReason.RaisedFromLevel"/>: <c>raised-from:{level}@{yyyy-MM-dd}</c>).
+    /// A reason without BOTH parts is not a raise this owner can put back exactly: the caller then removes the access
+    /// (fail closed — never a restore that could outlive the operator's date). No such row exists: the ledger was never
+    /// deployed with the level-only form.
+    /// </summary>
+    private static bool TryParseRaisedGrant(string? reason, out int level, out DateOnly expiry)
+    {
+        level = 0;
+        expiry = default;
+        if (reason is null || !reason.StartsWith(AssignedAccessReason.RaisedFromLevelPrefix, StringComparison.Ordinal))
+            return false;
+
+        var parts = reason[AssignedAccessReason.RaisedFromLevelPrefix.Length..].Split('@');
+        return parts.Length == 2
+               && int.TryParse(parts[0], System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture, out level)
+               && DateOnly.TryParseExact(parts[1], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.None, out expiry);
+    }
+
+    /// <summary>
+    /// The grant core's refusals that state the record's CURRENT policy or No Access list — task 138's Restricted and
+    /// direct-only organization rules, FR-23's deny check — rather than a fault. A restore refused for one of them waits
+    /// (task 142 r2, finding 2); any other refusal (an unreadable policy, a ceiling refusal) is a failure the job reports.
+    /// </summary>
+    private static bool IsPolicyHold(GrantPolicyDecision refusal)
+        => refusal.ReasonCode is ExternalGrantLifecycle.RecordRestrictedReasonCode
+            or ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode
+            or ExternalGrantLifecycle.GranteeDeniedReasonCode;
 
     private static ExternalGrantKey GrantKeyFor(Run run, AssignedSubject subject)
         => subject.Kind == AssignedSubjectKind.Contact

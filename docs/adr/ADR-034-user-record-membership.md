@@ -546,8 +546,10 @@ access**: a `sprk_externalrecordaccess` grant (contact or organization), or a PO
   expiry becomes today + 90 through `DefaultExpiry`), shares through `IDataverseRecordShareService` with the
   `RecordShareLevels` Collaborate mask and the strict read + read-back discipline. **MUST NOT** write
   `sprk_externalrecordaccess` directly or introduce a new level constant.
-- **MUST NOT** lower existing access: an equal or higher grant/share is left untouched (`CoveredByExisting`); a lower one
-  is raised and put back when the assignment ends.
+- **MUST NOT** lower existing access: an equal or higher grant/share that confers access is left untouched
+  (`CoveredByExisting`); a lower one is raised and put back — its level AND its date — when the assignment ends. (An
+  expired grant confers nothing and is not existing access: the rule gives Collaborate over it, even over an expired
+  Full Access level, which it cannot write back — task 142 notes §6.)
 - **MUST** record an operator's removal (Manage Access revoke/unshare, Dismiss of a suggestion, or a removal outside the
   BFF that no known cause explains) as **`Declined`**, and **MUST NOT** re-create a Declined entry while the assignment
   persists. Declined is **not** a veto: a manual grant of the same subject still succeeds (and is recorded `Adopted`).

@@ -80,7 +80,7 @@ $States = [ordered]@{
 $StringColumns = @(
     @{ Name = 'sprk_ledgerkey';   Schema = 'sprk_LedgerKey';   Max = 200; Label = 'Ledger Key';   Description = 'BFF-computed uniqueness key: {root}:{rootId}:{sourceField}:{contact|organization}:{subjectId}. Carries the alternate key. Written only by the BFF.' }
     @{ Name = 'sprk_sourcefield'; Schema = 'sprk_SourceField'; Max = 100; Label = 'Source Field'; Description = 'The "Assigned *" column (logical name) that named the subject.' }
-    @{ Name = 'sprk_reason';      Schema = 'sprk_Reason';      Max = 100; Label = 'Reason';       Description = 'Why the row is in its state (skip reason, how an assignment ended, raised-from level). A stable code, never free text.' }
+    @{ Name = 'sprk_reason';      Schema = 'sprk_Reason';      Max = 100; Label = 'Reason';       Description = 'Why the row is in its state (skip reason, how an assignment ended, raised-from level and date). A stable code, never free text.' }
 )
 $Lookups = @(
     @{ Name = 'sprk_project';              Schema = 'sprk_Project';              Target = 'sprk_project';              Rel = 'sprk_sprk_project_sprk_assignedaccess_project';                Delete = 'Cascade';    Label = 'Project' }

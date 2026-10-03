@@ -1,17 +1,17 @@
 # Task 142 — Assigned-To auto-grants (#1065)
 
 > Branch `task/uac-r2-142` (from `task/uac-r2-143-r2` + `task/uac-r2-137-b2` + `work/unified-access-control-r2`, base
-> `ee925b903`); verifier fix round **`task/uac-r2-142-r1`** (§11). Server, client, web resources, ribbon source and schema
-> script complete. **Live writes: none** — every live step is a pending manual gate (§7). The ADR-034 amendment A4 is
-> drafted and **awaits the owner's §6.5 acceptance** (§8); the code merges with it, never before — and only after the
-> dependency merges in §7 G-0.
+> `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11) and **`task/uac-r2-142-r2`** (§12). Server, client, web
+> resources, ribbon source and schema script complete. **Live writes: none** — every live step is a pending manual gate
+> (§7). The ADR-034 amendment A4 is drafted and **awaits the owner's §6.5 acceptance** (§8); the code merges with it,
+> never before — and only after the dependency merges in §7 G-0.
 
 ## 1. Owner answers applied (no escalation fired as a stop)
 
 | POML trigger | Answer (source) | Applied as |
 |---|---|---|
 | (a) Secure | A3 = prompt; existing auto grants KEPT when a record becomes secure (round 3, accepted as recommended) | Secure root: contact grant / POA share → ledger `PendingConfirmation`, shown in Manage Access "Suggested Access" naming the source field, **Grant** (normal `/grant` at Collaborate, or `/share-user` for a linked user) → `Adopted`, **Dismiss** (`POST /assigned-access/dismiss`) → `Declined`. A grant that existed before the record became secure stays `Granted`; an auto share is never removed on a secure record by the rule (S5) |
-| (b) Changed/cleared | A4 = revoke the unmodified auto access (round 3) | `EndAssignmentAsync`: revokes only `Granted`/`Shared` rows whose level/expiry (mask) still equal what the owner wrote, not when another registry column still names the subject, never `Adopted`/`Declined`. A raised manual grant/share is put back to its prior level (`raised-from:` / `raised-from-mask:`) |
+| (b) Changed/cleared | A4 = revoke the unmodified auto access (round 3) | `EndAssignmentAsync`: revokes only `Granted`/`Shared` rows whose level/expiry (mask) still equal what the owner wrote, not when another registry column still names the subject, never `Adopted`/`Declined`. A raised manual grant is put back to its prior level AND date (`raised-from:{level}@{date}`, r2), a raised share to its prior mask (`raised-from-mask:`); a restore the record's policy forbids waits (r2, `restore-pending:`) |
 | (c) Q1 vs Q5 | A1 = Q5 governs: always Collaborate, NO grantor cap (round 3 + 3b); `sprk_grantedby` = saving user, empty for the job | `GrantCeiling.AssignedToRule` (Collaborate, uncapped) through the ONE grant core `CreateGrantAsync`; grantor oid = the sync caller / the Office maker; `null` for the job **and for the AI-tool and field-mapping L1 triggers** (reminders go to the record owner — residual R-4) |
 | (d) Retire read-time terms? | A2 **REVERSED** = KEEP standing and organization access (round 3) | `AccessibleRecordSetService` untouched. Criterion 17 "keep" branch: removing an auto grant whose subject still reaches the record names the term BEFORE (Manage Access confirm, from `GET /assigned-access` `residualAccessTerms`) and AFTER (`RevokeAccessResponse.ResidualAccessTerms`): `standing-grant`, `organization-standing-grant`, `organization-members-standing-grant` (an organization's own grant), or `unknown` |
 | (e) Expiry | A5 = renew (round 3) | An unmodified, still-assigned auto grant inside the FR-33 reminder window (`GrantExpiryReminderJob.ReminderDays.Max()` = 30 days) — or already lapsed — is renewed to today + 90 through `DefaultExpiry`, by any trigger |
@@ -111,7 +111,7 @@ existing `FakeRecordShareTable`, a `GrantTable` interpreting the core's real ODa
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 69 (55 + 14 in round r1) | criteria 2–11, 16 (conversion, renewal, cache key, Restricted after a grant), A6, inline gating; r1: expired grants never cover (P1/P2 + twins), never "granted"/"restored" over a lapsed grant (P3, the read race, the lapsed restore), the share half of criterion 10 (other field, modified mask, S5), the R2 known cause, a disabled linked user |
+| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 78 (55 + 14 in round r1 + 9 in round r2) | criteria 2–11, 16 (conversion, renewal, cache key, Restricted after a grant), A6, inline gating; r1: expired grants never cover (P1/P2 + twins), never "granted"/"restored" over a lapsed grant (P3, the read race, the lapsed restore), the share half of criterion 10 (other field, modified mask, S5), the R2 known cause, a disabled linked user |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs` | 12 | criterion 12 THROUGH the real `/api/v1/external-access` filter pipeline (Write → handler; no Write and unknown id → the same filter 403; 401; body subject ids ignored; ProblemDetails with reason codes; list + dismiss gated; cache key = caller tenant) |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessMarkerTests.cs` | 13 | criteria 6, 9, 17 through the production `/revoke`, `/unshare-user`, `/grant`, `/share-user` handlers |
 | `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | 14 | criterion 16 (sweep, idempotent second run, switch on/off, cadence/enabled values, faulted scan → Success=false, TRUNCATED, ROTATING + recent-first, deployment-tenant cache key, no tenant, incomplete root, link conversion) |
@@ -178,6 +178,20 @@ Round r1 seeds (each alone; build + the now **118** AssignedAccess tests; restor
 | R2 the renewal guard AND the core's Restricted refusal both removed | 1 |
 | E a Shared row is re-decided when its user turns ineligible | 1 |
 
+Round r2 seeds (each alone, applied by exact string replacement; build + the now **127** AssignedAccess tests; restored
+byte-for-byte — MD5 re-checked after every restore — and touched; §12):
+
+| Seed | Failed |
+|---|---|
+| S6 the restore writes the level only (expiry `null`, the r1 behaviour) | 2 — both new finding-1 tests |
+| S7 the raise records the level only (`raised-from:L`, no date) | 10 — every raise/restore test |
+| S8 no grant-cache invalidation when the restore leaves a grant that confers nothing | 1 |
+| S9 a restore whose date has passed is always reported `ledger` | 1 (the renewed-past-the-date test) |
+| S9b … always reported `revoked` | 1 (r1's already-lapsed test) |
+| S10 no policy hold (every restore refusal is a failure — the r1 behaviour) | 5 — every row of the hold theory |
+| S11 every restore refusal is a hold | 1 — the unreadable-policy twin |
+| S12 an expired grant above Collaborate is skipped instead of given Collaborate | 1 — the finding-3 deviation pin |
+
 Web resources (no test harness exists for classic scripts): `node --check` both; a scratch smoke run in a fake form
 confirmed — helper absent: OnPostSave logs "BffAuth is not loaded" and makes no call, `canUpdateAccess` = false,
 Update Access shows the reload message; no token: no call + "Sign-in needed"; with a token: exactly one POST to
@@ -215,6 +229,17 @@ last modal change).
   read-only, but the merged import is a live write and the export needs a solution containing the entities). The work-
   assignment ribbon export/check-in (UX (f)) is therefore a manual gate (§7). The mechanism was verified locally.
 - **Office A7** was already delivered by task 152; this task adds only the L1 materialization after the create.
+- **"Never downgrades a level" — an EXPIRED grant above Collaborate** (r2, verifier finding 3; POML constraint "never
+  lower access"). When the key's only rows are lapsed (none confers) and one carries Full Access, the rule writes
+  Collaborate with today + 90 over it: the core upserts in place on the key, the rule's ceiling `GrantCeiling.AssignedToRule`
+  (owner A1) cannot write Full, and the core's never-lower refusal guards only a NARROWED request. No ACCESS is lowered —
+  the expired row conferred nothing, so the subject goes from none to Collaborate — but the stored Full level is
+  overwritten and is not restored at the end of the assignment (the row is then removed, as for any lapsed row: the
+  subject had no access here before). Alternatives rejected: refusing (skip with `grant-refused:…would_lower_existing`)
+  leaves an assigned subject with nothing, against rule 5 / Q5 (binding); renewing at Full would grant above the rule's
+  Collaborate for 90 days, and the core refuses it anyway. Pinned by
+  `AnExpiredFullAccessGrant_IsGivenCollaborate_TheRecordedDeviation_ItConferredNothing` (seed S12). The owner may revisit;
+  no ADR is involved (§6.5 not triggered).
 
 ## 7. Pending manual gates (main session; live writes — exact commands)
 
@@ -295,14 +320,23 @@ spec.md (MUST NOT list, FR-32) and design.md §7 amendment text. Paste into the 
   Dataverse refuses a disabled user's sign-in, and re-enabled, the still-assigned user should have it (owner round 7:
   inactive principals are read guards, no data repair). An operator hand-editing the locked link outside the product
   would leave the old user's share until the field changes.
-- **R-12** (r1, found while pinning finding 10 — NOT changed here, out of this round's scope) A RAISED manual grant
-  whose assignment ends while the record is Restricted cannot be put back: the grant core refuses every contact-grant
-  write on a Restricted record (`record_restricted`), so each sync and each job tick reports `restore-refused`
-  (`Success=false`) until the record is no longer Restricted, when the restore succeeds. Probed 2026-10-03: two passes,
-  both `restore-refused`, level stays Collaborate, ledger stays `Granted`. No exposure (the read path suppresses contact
-  access on a Restricted record) and the report is truthful, but the job is red for as long as the record stays
-  Restricted. Candidate fix for the next round: settle the row as "restore pending (restricted)" without a failure and
-  retry on the transition back.
+- **R-12** (r1; **understated there, FIXED in r2** — verifier r2 finding 2) A RAISED manual grant whose assignment ends
+  while the grant core refuses this grantee kind on the record cannot be put back. r1 named only Restricted and called it
+  temporary; it is wider and can be permanent: an ORGANIZATION grant on a Secure or Limited record
+  (`org_grant_direct_only_record` — and owner round 6: a secure child stays secure), any grant on a Restricted record
+  (`record_restricted`), and a subject now on the No Access list (`grantee_denied`). Before r2 every sync and every job
+  pass then failed with `restore-refused` indefinitely (`Success=false`; each form save got HTTP 500 `sync_incomplete`
+  and the false "retried within 5 minutes" warning). Now (§12): those three refusals are a **hold**, not a failure — the
+  outcome entry reads `Granted` / `restore-pending:{reasonCode}` / action `none`, nothing is written, the ledger row stays
+  `Granted` (kept live on purpose: a `Revoked` row is never revisited, and the job's ledger scan skips roots whose rows
+  are all `Revoked`, so the restore would be lost and the grant would come back at Collaborate when the policy changed),
+  and the first pass after the policy allows it puts the level and date back. Nothing is exposed meanwhile (the read
+  path suppresses the same grant on the same terms; the deny check fails closed on both paths). Residual: between the
+  policy change and that pass the grant confers at Collaborate, not the operator's lower level — a form save or Update
+  Access applies it at once (the post-save script syncs on every save), otherwise the job within 5 minutes (owner
+  R3/R4 cadence). The core reports an unreadable deny list with the same `grantee_denied` code as an entry, so that case
+  also holds rather than fails; it is retried every pass. An unreadable POLICY (`policy_unreadable`) is still a failure
+  (pinned by the unreadable-policy twin, seed S11). The form shows nothing for a hold (no message names it).
 
 ## 10. Quality gates (Step 9.5)
 
@@ -357,3 +391,38 @@ tests. BFF build 0 errors / 0 warnings. No client file changed in this round (no
 service, DI registration, endpoint, option, job, column or package — one reason-code constant
 (`AssignedAccessReason.PriorLevelRestoredLapsed`) and one test-double hook (`GrantTable.BeforeGrantQuery`); publish size
 left to the main session.
+
+## 12. Round r2 — verifier findings (2026-10-03, branch `task/uac-r2-142-r2`)
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 / 11 | DEFECT (medium-high, criterion 10, ADR-003): a raised MANUAL grant renewed by the rule (A5) was "restored" at the end of the assignment with the level only (`WriteGrantAsync(priorLevel, expiry: null)` — the core keeps the survivor's date), so the operator's View Only grant kept the rule's today + 90 (probe: chosen 2026-10-13, ended 2027-01-01) and was reported `prior-level-restored`. The ledger never recorded the earlier date; the `:844` comment ("never extend someone else's live grant") contradicted the renewal | **Fixed (the verifier's first option).** A raise now records the earlier level AND date — `raised-from:{level}@{yyyy-MM-dd}` (`AssignedAccessReason.RaisedFromLevel`; the highest conferring level and the latest conferring date; every conferring row here is below Collaborate and carries a date, since `null` confers nothing). The end of the assignment writes BOTH back through the grant core (an explicit lower request with an explicit date — not narrowed, so no never-lower refusal). If that date has passed, the core writes it and answers its ADR-003 warning: recorded `Revoked(prior-level-restored-lapsed)`, action **`revoked`** when the grant still conferred before the write (the rule's renewal had kept it alive — putting the date back ENDED the access) or `ledger` when it had already lapsed (r1's case); the materializer then clears the grantee's cached grant set itself, because the core returns before its own invalidation on that path. Renewal while assigned is unchanged (rule 5: an assigned subject holds Collaborate). A reason without the date (never written to a live ledger — the table is not deployed) is not restorable exactly and takes the removal path (fail closed). The `:844` comment and the class remarks now say what the code does. Tests: `ARaisedGrantRenewedWhileAssigned_IsPutBackToTheOperatorsLevelAndDate_WhenTheAssignmentEnds` (the probe scenario: ends at ViewOnly + 2026-10-13), `ARaisedGrantRenewedPastTheOperatorsDate_EndsWithTheAssignment_ReportedRevoked_NeverRestored` (no access outlives the operator's date; cache cleared); r0's raise test now also asserts the restored date. Seeds S6 (2), S7 (10), S8 (1), S9 (1), S9b (1) |
+| 2 / 12 | DEFECT (medium; R-12 understated): a raised manual ORGANIZATION grant whose assignment ends on a Secure/Limited record failed `restore-refused` on every pass indefinitely (`org_grant_direct_only_record`; secure stays secure, owner round 6) — job `Success=false` for good, HTTP 500 `sync_incomplete` on every form save with a false "retried within 5 minutes" warning | **Fixed (the verifier's suggestion, with one correction).** The grant core's refusals that state the record's CURRENT policy — `record_restricted`, `org_grant_direct_only_record`, `grantee_denied` (`IsPolicyHold`) — are a hold, not a failure: the entry reads `Granted` / `restore-pending:{reasonCode}` (`AssignedAccessReason.RestorePendingPrefix`) / action `none`, nothing is written, `Complete` stays true (job green, no 500, no warning). The correction: the row is NOT settled `Revoked` — a `Revoked` row is never revisited by the ended-assignment loop and the job's ledger scan skips roots whose rows are all `Revoked`, so the restore would be lost and the grant would confer at Collaborate again when the policy changed (fail-open). The row stays `Granted`, every pass retries, and the first pass after the policy allows it restores level and date. `policy_unreadable` stays a failure (ADR-003). R-12 rewritten (§9) with the true scope and the residual (≤ one pass at Collaborate after the policy relaxes). Tests: the theory `ARaisedGrantWhoseRestoreThePolicyForbids_WaitsWithoutFailing_AndIsPutBackOnceThePolicyAllows` — organization on Secure, on Limited, on Restricted; contact on Restricted; contact on the No Access list — each: two passes complete with zero writes, then restored once allowed; twin `ARestoreRefusedBecauseThePolicyCouldNotBeRead_IsStillAFailure_TheTwinOfThePolicyHold` (the core's flag read faults through the existing `BeforeGrantQuery` hook). Seeds S10 (5), S11 (1) |
+| 3 / 13 | LOW: a lapsed key at FULL access is rewritten at Collaborate (contradicts "never downgrades a level" literally; not recorded) | **Recorded as a deviation (the verifier's second option), §6**, with the code comment beside the write and a pinning test (`AnExpiredFullAccessGrant_IsGivenCollaborate_TheRecordedDeviation_ItConferredNothing`, seed S12). The first option is not available: the rule's ceiling (A1) cannot write Full, the core refuses a narrowed request over a higher row, and renewing at Full would grant above the rule's level. No access is lowered (none → Collaborate) |
+| 4 | LOW (POML hygiene): `<status>completed</status>` while criteria 18, 20 (publish size), 21 and steps 10–11 are open | **Fixed**: `<status>in-progress</status>` plus a `<status-note>` naming exactly what is open (TASK-INDEX already shows 🔲 [open]; not edited per the harness) |
+| 5–9 | Verified OK | No action |
+| 10 | MERGE PRECONDITIONS G-0 (133/137/143 commits incl. WIP `b38756ba6`, `33108909e`; the 137×143 fix `843d62b46`) and G-9 (ADR-034 A4 PROPOSED) | **Not closable by this agent** (no merges into `work/*`; owner acceptance). Unchanged: §7 G-0, G-9 |
+| 14 | criterion 18 (ADR-034 A4 owner §6.5 acceptance; concise `.claude/adr` edit; PR path-B block) | **Not closable by this agent** — owner gate G-9; sub-agents cannot write `.claude/`; no PRs. Draft and §8 block ready |
+| 15 | criterion 20 (publish size) | **Not closable here** — the main session measures (harness). Build, suites, ArchTests below; no package added (no CVE delta) |
+| 16 | criterion 21 (live gate G-7; UX live items (a)(b)(c)(e)(f) incl. the work-assignment ribbon export check-in, G-5) | **Not closable by this agent** (live writes are the main session's). Unchanged: §7 G-5, G-7 |
+
+**Round r2 surface**: no new service, DI registration, endpoint, option, job, column or package. Two `AssignedAccessReason`
+members (the `RaisedFromLevel` formatter and the outcome-only `RestorePendingPrefix`), two private materializer helpers
+(`TryParseRaisedGrant`, `IsPolicyHold`), the `sprk_reason` value format (`raised-from:{level}@{date}` — same Text 100
+column, no schema change; the script's column description and `entity-schema.md` updated), 9 tests. The PROPOSED
+ADR-034 A4 draft's never-lower bullet now says "level AND date" and names the expired-grant case (finding 3). No client
+file changed. Live writes: none.
+
+**Self-review (Step 9.5 scope, this round's diff only)**: ADR-003 — a hold is granted only for refusals that STATE the
+record's policy; an unreadable policy stays a failure (twin + seed S11), and a restore whose date has passed ends access
+and clears the cache rather than leaving it served (seed S8). ADR-036 A1 — a held restore is reported as such
+(`restore-pending:{code}`), never as done and never as a failure it is not. ADR-002 / D-1 — no plugin, the same three
+triggers. ADR-038 — tests run the production materializer and grant core between module-boundary doubles; no banned
+shape; each guard bites. CLAUDE.md §10/§11 — no new surface beyond the members listed above.
+
+**Round r2 runs.** AssignedAccess server set **127/127** (118 + 9 new). The verifier's affected BFF set (AssignedAccess,
+GrantLifecycleCharacterization, InternalUserShare, GrantorCeiling, RecordCreation, DelegationRule, NoAccess) **524/524**
+(515 + 9). `Spaarke.ArchTests` **346/346** (after the last code change, and again after the last doc change). Full BFF
+unit suite (once, at the end): **14,609 passed, 0 failed, 54 skipped (14,663)**, 17m46s — the previous 14,654 plus the 9
+new tests. BFF build 0 errors / 0 warnings. No client file changed (no client build/test needed). Publish size left to
+the main session.

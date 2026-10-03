@@ -108,8 +108,10 @@ public static class AssignedAccessReason
     public const string PriorLevelRestored = "prior-level-restored";
 
     /// <summary>
-    /// The assignment ended; a raised grant's earlier level was put back, but the grant had lapsed (expired), so it confers
-    /// nothing — no access was restored (ADR-003: never reported as done).
+    /// The assignment ended; a raised grant's earlier level AND date were put back, but that date has passed, so the grant
+    /// confers nothing — no access was restored (ADR-003: never reported as done). Either the grant had already lapsed, or
+    /// the rule's own renewal had kept it alive past the operator's date and putting the date back ended the access (the
+    /// entry's action then says <c>revoked</c>).
     /// </summary>
     public const string PriorLevelRestoredLapsed = "prior-level-restored-lapsed";
 
@@ -128,8 +130,27 @@ public static class AssignedAccessReason
     /// <summary>The assignment ended; there was no auto access to remove.</summary>
     public const string AssignmentEnded = "assignment-ended";
 
-    /// <summary>Prefix of a reason recording the grant level a raised grant had before (<c>raised-from:100000000</c>).</summary>
+    /// <summary>
+    /// Prefix of a reason recording what a raised grant had before: its level AND the date the subject's access ran until
+    /// (<c>raised-from:100000000@2026-10-13</c>, written by <see cref="RaisedFromLevel"/>). Both are put back when the
+    /// assignment ends — the rule renews a raised grant like its own while the assignment lasts (owner A5), so restoring
+    /// only the level would leave the operator's grant extended by the rule (task 142 r2, finding 1).
+    /// </summary>
     public const string RaisedFromLevelPrefix = "raised-from:";
+
+    /// <summary>The reason recording a raise: the earlier level and the earlier expiry (<see cref="RaisedFromLevelPrefix"/>).</summary>
+    public static string RaisedFromLevel(int level, DateOnly expiry)
+        => RaisedFromLevelPrefix + level.ToString(CultureInfo.InvariantCulture) + "@"
+           + expiry.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Prefix of an OUTCOME reason (never written to the ledger): a raised grant's assignment ended, but the grant core
+    /// refuses to write this grantee kind on the record now (<c>restore-pending:sdap.access.grant.…</c> — Restricted, an
+    /// organization on a Secure or Limited record, or the No Access list). Nothing is written and nothing is exposed (the
+    /// read path suppresses the same grant); the ledger row stays <see cref="AssignedAccessState.Granted"/>, so every pass
+    /// tries again and the restore happens once the record's policy allows it (task 142 r2, finding 2).
+    /// </summary>
+    public const string RestorePendingPrefix = "restore-pending:";
 
     /// <summary>Prefix of a reason recording the share mask a raised share had before (<c>raised-from-mask:1</c>).</summary>
     public const string RaisedFromMaskPrefix = "raised-from-mask:";
