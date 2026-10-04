@@ -88,8 +88,8 @@ public sealed class WorkspaceTab
     public required string TenantId { get; init; }
 
     /// <summary>
-    /// Pillar 9 visibility flag — when true, the tab's getAgentVisibleState() participates
-    /// in the per-turn system-prompt snapshot.
+    /// Pillar 9 visibility flag — when true, the tab's agent-visible state (derived server-side by
+    /// <c>SprkChatAgentFactory.TryDeriveVisibleState</c>) participates in the per-turn system-prompt snapshot.
     /// </summary>
     [JsonPropertyName("visibleToAssistant")]
     public required bool VisibleToAssistant { get; init; }

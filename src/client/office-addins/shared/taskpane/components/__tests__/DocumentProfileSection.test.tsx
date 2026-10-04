@@ -358,7 +358,8 @@ describe('DocumentProfileSection', () => {
       expect(mockGet).toHaveBeenCalledTimes(1);
     });
 
-    // Task 088 (UAT-6): SaveFlow's saved state turns "Saved" back into "Save version" on this callback.
+    // Task 088 (UAT-6), wording fixed by task 094: SaveFlow's saved state turns "Saved" back into an
+    // enabled "Save" on this callback.
     it('calls onProfileGenerated once when the server accepts the request — and not when it refuses it', async () => {
       mockGet.mockResolvedValue(envelope({ summaryStatus: 100000000 }));
       mockPost

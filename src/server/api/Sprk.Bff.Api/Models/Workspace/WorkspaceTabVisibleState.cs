@@ -2,9 +2,10 @@ namespace Sprk.Bff.Api.Models.Workspace;
 
 /// <summary>
 /// R6 Task 074 (Pillar 9 / FR-57) — discriminated union of agent-visible state shapes
-/// derived from <see cref="WorkspaceTabWidgetData"/> at the BFF. Mirrors the frontend
-/// <c>SerializedWidgetState</c> contract returned by per-widget
-/// <c>getAgentVisibleState()</c> implementations (task 073).
+/// derived from <see cref="WorkspaceTabWidgetData"/> at the BFF by
+/// <see cref="SprkChatAgentFactory.TryDeriveVisibleState"/> — the SINGLE source of the
+/// agent-visible shape. (A former client-side copy of this union and its per-widget
+/// derivations was never called in production and was deleted 2026-10-03, reuse audit C-21.)
 ///
 /// <para>
 /// <b>Why server-side derivation (OPTION A) over persisted-state (OPTION B)</b>:
@@ -18,8 +19,7 @@ namespace Sprk.Bff.Api.Models.Workspace;
 ///   <item>No schema change, no frontend wiring, no migration story for existing
 ///   persisted tabs.</item>
 /// </list>
-/// Trade-off accepted: per-widget mapping logic exists in both client (task 073) and
-/// server (this file). Both must be kept in sync; the FR-57 spec is the single source.
+/// The per-widget mapping logic lives ONLY here (server); the FR-57 spec defines the shapes.
 /// </para>
 ///
 /// <para>
@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Models.Workspace;
 /// definitions. Summary's full <c>body</c> is NOT a field — only a truncated
 /// <c>summary</c> projection alongside <c>tldr</c> + <c>hasUserEdits</c>. DocumentViewer's
 /// <c>selectionText</c> is the only content-bearing field; respected with a 200-char cap
-/// per task 073's frontend contract. Dashboard never carries chart data. Table never
+/// (<see cref="SprkChatAgentFactory.SelectionTextMaxChars"/>). Dashboard never carries chart data. Table never
 /// carries raw rows or selected-row IDs — only counts.
 /// </para>
 ///
@@ -95,9 +95,8 @@ public abstract record WorkspaceTabVisibleState
     /// <summary>
     /// spaarkeai-assistant-enhancements-r2 task 041 (FR-C2 server) — visible state for an
     /// Email tab. Shape: <c>{ widgetType, subject, from, date, threadId?, snippet? }</c>.
-    /// Mirrors the client's <c>WorkspaceTabWidgetType</c> Email contract (see
-    /// <c>WorkspaceTab.ts</c>) and the closed <c>SerializedWidgetState</c> Email variant
-    /// (task 040) 1:1. <see cref="Subject"/>/<see cref="From"/>/<see cref="Date"/> are
+    /// Mirrors the client's <c>WorkspaceTabWidgetType</c> Email carrier (see
+    /// <c>WorkspaceTab.ts</c> <c>EmailTabWidgetData</c>), from which it is derived server-side. <see cref="Subject"/>/<see cref="From"/>/<see cref="Date"/> are
     /// identity/metadata fields — always emitted, like <see cref="DocumentViewer"/>'s
     /// filename/mimeType/sizeBytes. <see cref="Snippet"/> is the ONLY content-bearing
     /// field per ADR-015; capped at 200 chars upstream (mirrors

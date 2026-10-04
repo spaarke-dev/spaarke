@@ -296,3 +296,18 @@ word/commands/__tests__/notify.test.ts
 # Microsoft To Do blue check) are pinned by the two suites already listed above:
 # TaskPaneNavigation.test.tsx and TaskPaneShell.test.tsx (both updated by this task).
 shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
+# --- name lock/Save-as-new, "Save" wording, content-change re-enable, two-button Open (task 094, owner --
+# 2026-10-04, UAT round 3 follow-up) -----------------------------------------------------------------
+# Pins: once a document is in Spaarke (pre-save identity-resolved, or this pane already saved it this
+# session) the name box is LOCKED (read-only, with a hint) and "Save as new document" is the only unlock;
+# the save button is "Save" whenever enabled -- NEVER "Save version", anywhere in the pane; with content-
+# change detection supported "Saved" (gray) turns into an enabled "Save" on a Word content-change event,
+# and the pane's own identity-mark write (writeDocumentStamp) never fires it; without detection the
+# button is an enabled "Save" immediately after saving, never gray; an accepted Generate Profile still
+# re-enables it (088 kept); the saved-state bundle, lifted to the caller (App.tsx), survives a Save-tab
+# remount (switching to To Do/Find and back); "Name Already Exists" offers "Open in Word" (PC/Mac,
+# unsupported anchor-click trial) alongside "Open in browser" (always). Changed suites already listed
+# above: SaveFlow.savedState, SaveFlow.versionMode, SaveFlowCollision, openRecordLauncher, capabilities,
+# OutlookAdapter.
+shared/adapters/__tests__/WordAdapter.documentChangeDetection.test.ts
+shared/taskpane/components/views/__tests__/SaveView.documentChangeDetection.test.tsx
