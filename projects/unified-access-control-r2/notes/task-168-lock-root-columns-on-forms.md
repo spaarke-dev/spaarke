@@ -3,7 +3,8 @@
 > **Task**: 168 (#1107) · owner round 8 item 3 · amendments: owner rounds 9-10 (round 10 item 2 = add the picker to the analysis form, then lock)
 > **Branch**: `task/uac-r2-168`, from `task/uac-r2-156-c1-r2` with `work/unified-access-control-r2` merged in (clean merge, no conflicts). Base `144b36b51`.
 > **Rigor**: FULL (security edge, live form definitions, TEST-MODIFYING). Model tier sonnet @ high (run on Opus).
-> **Status (r1, 2026-10-04)**: **completed-with-escalation.** The verifier's findings are closed in code, and owner round 19 items 1, 2 and 4 are delivered as two new operator scripts. Two first-class stops are reported: **trigger 9** (built on 156's unmerged branch; merge 156 first) and **round 19 item 3** (the grid has no OnRowLoad event). Live runs are the main session's gate, §10.4. See **§10**.
+> **Status (r2, 2026-10-04, branch `task/uac-r2-168-r2`)**: **completed-with-escalation.** The r1 verifier's two surviving seeds are pinned (picker fixture 14, inline "foreign section" case), the stale §3 line numbers, I-1 row, grid REPORT pointer and §10.7 jest wording are corrected, and a third first-class stop is raised: the raw pair and intermediate lookup controls that stay visible and editable after the picker (§11.2). Trigger 9 is unchanged: merge 156 first. See **§11**.
+> **Status (r1, 2026-10-04, superseded)**: **completed-with-escalation.** The verifier's findings are closed in code, and owner round 19 items 1, 2 and 4 are delivered as two new operator scripts. Two first-class stops are reported: **trigger 9** (built on 156's unmerged branch; merge 156 first) and **round 19 item 3** (the grid has no OnRowLoad event). Live runs are the main session's gate, §10.4. See **§10**.
 > **Status (2026-10-03, superseded)**: **completed-with-escalation.** The code, fixtures, presave, tests and docs are done and green. Three escalation triggers fired on live dev and one blocker was found in the analysis amendment (below). The live `-Apply` is the main session's manual gate. As the script stands it REFUSES the full four-table apply until the owner decides on trigger 1.
 
 ---
@@ -21,7 +22,8 @@
 | **Trigger 3 FIRED (literally)**: the Event main form hosts the RegardingResolver without the presave | ✅ decided (round 19 item 2); the same picker script adds the presave and hidden cells (§10). Live gate pending. |
 | **Trigger 5 FIRED**: the `sprk_event` and `sprk_analysis` home grids are EDITABLE Power Apps grids | 🔔 round 19 item 3 chose an OnRowLoad handler, but the grid has no OnRowLoad event, and such a handler would breach ADR-006. Stopped with an ADR-conflict report (§10.5); the script still reports the grids. |
 | **Round 10 item 2 (add the RegardingResolver to the analysis form) BLOCKED**: `sprk_analysis` has no `sprk_regardingrecordurl`, and the picker writes it unconditionally | ✅ decided (round 19 item 4): `Add-AnalysisRegardingRecordUrlColumn.ps1`, then the picker script, then the lock (§10). Live gate pending. |
-| **Trigger 9** (r1): built on task 156's unmerged branch | 🔔 reported (§10.5): merge 156 first, then 168. |
+| **Trigger 9** (r1): built on task 156's unmerged branch | 🔔 reported (§10.5): merge 156 first, then 168. Re-checked r2: still unmerged; both trial merges conflict-free. |
+| **r2 stop**: raw pair / intermediate lookup controls stay visible and editable on event `90d2eff7` / `835b8ee8` and message `b58ec3d8` after the picker | 🔔 raised (§11.2): recommended fix (a), hide their cells through the picker script; not built (beyond round 19's text). |
 | Live `-Apply` | ⏳ manual gate (**§10.4**, which supersedes §8): presave → schema script → picker script → lock → checks. |
 
 ---
@@ -91,13 +93,13 @@ On every CREATE-capable form inspected, no text-field control (`sprk_regardingre
 `scripts/Lock-CoreAncestorStampColumnsOnForms.ps1` is structured on `Retire-CommunicationAccessPermission.ps1` (comment help with exit codes 0/2/1, `Get-DataverseToken`, `Invoke-Dv -AllowNotFound`, `Write-Step/Plan/Done/Info`, `Stop-Refused` exit 2, a pure transform, every write after the dry-run exit). Its `-Verify` follows the convention of `Set-SecureRecordOwnerRolePrivileges.ps1` (VERIFY PASS exits 0; VERIFY FAIL names each gap and exits 1).
 
 - **Modes:** with no switch it runs as a dry run. `-Apply`, `-Verify`, `-RestoreFrom` and `-SelfTest` are mutually exclusive: passing two throws before any read (checked: `-Apply -Verify` exits 1 with "separate modes"). `-Tables` (default: the four tables) scans a subset. `-Apply` refuses any table outside the four.
-- **Writes and their line numbers.** No PATCH, POST or DELETE runs outside the `-RestoreFrom` branch (from :519) or the `-Apply` section (after `if (-not $Apply) { … exit 0 }` at :718):
-  - **:560** `PATCH systemforms(formid)`: restore of `formXmlBefore`. Runs inside `if ($RestoreFrom)`, after the environment-URL refusal, the snapshot self-hash check and the "current hash = stored/written hash" refusal (:551).
-  - **:564** `Publish-Table` → **:512** `POST PublishXml`: restore.
-  - **:780** `PATCH systemforms(formid)`: apply. Runs after every refusal check, after the snapshot is written, read back and re-hashed (refused at :761), after a re-read of all forms (:765), and after a re-read of THIS form (:776-777).
-  - **:785** `Publish-Table` → **:512** `POST PublishXml`: apply, once per changed table.
+- **Writes and their line numbers** (re-taken r2, 2026-10-04, on the r1/r2 script; r2 changed one REPORT string at :723 and no line count). No PATCH, POST or DELETE runs outside the `-RestoreFrom` branch (`if ($RestoreFrom)` at :564, ending in `exit 0` at :619) or the `-Apply` section (after `if (-not $Apply) { … exit 0 }` at :762-765). The script has no DELETE.
+  - **:605** `PATCH systemforms(formid)`: restore of `formXmlBefore`. Runs inside `if ($RestoreFrom)`, after the environment-URL refusal (:571), the snapshot self-hash refusal (:577) and the "current hash = stored/written hash" refusal (:596).
+  - **:609** `Publish-Table` → **:557** `POST PublishXml`: restore.
+  - **:824** `PATCH systemforms(formid)`: apply. Runs after every refusal check (the refusal exit at :754), after the snapshot is written, read back and re-hashed (refused at :805), after a re-read of all forms (:811-812), and after a re-read of THIS form (:821-822).
+  - **:829** `Publish-Table` → **:557** `POST PublishXml`: apply, once per changed table.
 
-  `Publish-Table` (:510) is only a definition; it is called at :564 and :785 only.
+  `Publish-Table` (:555-558) is only a definition; it is called at :609 and :829 only. (The r0 numbers first recorded here, :512/:560/:564/:718/:780/:785, were for the r0 file; r1 moved them and the note was not re-taken — verifier r1 item 7.)
 - **After the apply, the script reads every written form back** (added during the Step 9.5 review):
   - It records `formXmlStored` and `sha256Stored` in the snapshot. Dataverse may normalize the form XML it is given; without this, `-RestoreFrom`'s "unchanged since the apply" check could refuse forever.
   - It throws if any locked-column control is still not disabled.
@@ -386,6 +388,7 @@ Live gate results: _pending (main session)_.
 - The trigger's instruction is STOP and report. This round changed no 156 file.
 - **Integration must merge 156 first, then 168 (whose own diff is then only the 168 files), or rebase 168 onto `work` after 156 lands.**
 - 168 cannot be rebased off 156 today, because it edits the I-1 row and the 156 note in the form 156 left them.
+- **Re-checked r2 (2026-10-04):** `9544c3b01` (156 c1-r2) is still not an ancestor of `work/unified-access-control-r2` (`8166dd9ea`); it is reached only by `integ/uac-r2-batch4`, the 156/168/169 task branches. `git diff work...task/uac-r2-168-r1` = 133 files, +14,255 / −418, of which 156 alone (`work...9544c3b01`) is 57 files, +8,773 / −408, and 168's own diff (`144b36b51..r1`) is 78 files, +5,483 / −11. In-memory trial merges (`git merge-tree --write-tree`, no ref moved) of `work` + `9544c3b01` and of `work` + this branch are both conflict-free, so the order "156, then 168" merges cleanly today.
 
 🔔 **ADR Conflict — Resolution Required (owner round 19 item 3, the editable home grids)**
 
@@ -454,7 +457,7 @@ Final hashes (after all seeds): see §10.7.
 | `Add-AnalysisRegardingRecordUrlColumn.ps1 -SelfTest` | exit 0: **10 inline** |
 | The same two fixture sets converted to CRLF (what a Windows checkout produces) | both exit 0 |
 | Mode exclusivity | `-Apply -Verify` (schema script) and `-Apply -SelfTest` (picker script) each throw before any read: exit 1 |
-| RegardingResolver jest, full (`npx jest`) | **115 passed, 3 suites** (114 + the new empty-id test), run twice green. A third run, made while `npm run build:prod` and the .NET suites were running, reported one suite that failed to load (48 tests ran, 0 failed). Re-run alone, all three suites passed. This is contention, not a failure. |
+| RegardingResolver jest, full (`npx jest`) | **115 passed, 3 suites** (114 + the new empty-id test), run twice green. A third run, made while `npm run build:prod` was running, reported one suite that failed to load (48 tests ran, 0 failed). Re-run alone, all three suites passed. **Corrected in r2 (verifier r1 item 9):** this was not timing contention. The same symptom reproduces deterministically when `RegardingResolver/generated/ManifestTypes` is absent (`RegardingResolverApp.test.tsx` fails to load), and `build:prod` regenerates that file; the likely cause is that the third run read it while the concurrent `build:prod` was regenerating it. Run jest after `build:prod`, never alongside it. |
 | RegardingResolver `npm run build:prod` | succeeded |
 | NetArchTest (`tests/Spaarke.ArchTests`) | **346 / 346 passed** |
 | `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
@@ -471,3 +474,67 @@ Scope against `01c591391` (r0):
 - no change under `src/server/**`, `tests/Spaarke.ArchTests/**`, the RegardingResolver or CommunicationConnections PCF source, `src/client/webresources/**` or `src/client/shared/**`;
 - no new web resource and no waiver;
 - `.claude/**` needed no edit.
+
+## 11. Round r2 (2026-10-04): the r1 verifier's findings
+
+Branch `task/uac-r2-168-r2`, from `task/uac-r2-168-r1` (`0dccaaed8`). Input: the r1 verifier's 17 items. Items 1-3 and 11-13 verify r1 and need no change.
+
+### 11.1 What changed, per item
+
+| # | Item | Closure |
+|---|---|---|
+| 1, 2, 3, 11, 12, 13 | Verified green / correct by the verifier | No change. |
+| 4, 15 | Seed: the picker script's PICKER_MISCONFIGURED **host-column** guard (`if ($p.HostColumn -ine $RecordTypeColumn)`) could be replaced by `if ($false)` with `-SelfTest` green; fixture 07 pins only the entity mismatch | **Fixed.** New fixture **`tests/fixtures/form-filing-picker/14-refuse-picker-wrong-host-column`**: the RegardingResolver names the RIGHT entity (`sprk_event`) but is hosted by a control bound to `sprk_regardingrecordname`; expected refusal PICKER_MISCONFIGURED. Seed Q1 (the verifier's exact mutation) makes **only** fixture 14 fail ("expected refusal PICKER_MISCONFIGURED, got []"). |
+| 5, 15 | Seed: `Test-PickerTransform`'s `isAllowed` `'section'` branch could be replaced by `return $true` with `-SelfTest` green | **Fixed.** New inline case **"parse: a foreign section added"**: a `<section name="sprk_rogue">` inserted beside the original section of the real transform's output must be reported. Seed Q2 (the verifier's exact mutation) makes **only** that case fail. |
+| 6, 16 | Trigger 9: the branch carries 156's unmerged work; not mergeable into `work` as it stands | **Not closable on this branch** (re-checked, §10.5): 156 (`9544c3b01`) is still not in `work` (`8166dd9ea`). The integration order stays **156 first, then 168**; both trial merges are conflict-free today. The 156 dependency is the POML `<gate>` itself ("startable after 156 is merged"): 168 edits the I-1 row and the 156 note in the form 156 left them, so it cannot be rebased off 156. |
+| 7, 14 | §3 listed the r0 line numbers of the PATCH / POST calls | **Fixed.** §3 now lists the current numbers: restore PATCH :605, publish :609; apply PATCH :824, publish :829; `PublishXml` POST :557 inside `Publish-Table` (:555-558); the dry-run exit :762-765; the refusal lines :571 / :577 / :596 / :754 / :805 / :812 / :822. r2 changed one string on :723 and no line count. For the two r1 scripts (not required by criterion 2, recorded for the reviewer): picker `-RestoreFrom` from :715, restore PATCH :744, publish :747; dry-run exit :832; apply PATCH :875, publish :879; `PublishXml` POST :696 in `Publish-Table` (:694). Schema script: dry-run exit :244; apply POST `EntityDefinitions(...)/Attributes` :257, `PublishXml` POST :259; no other write. |
+| 8 | Stale docs: the I-1 row still said "three forms with no filing picker plus the event / analysis editable home grids await owner decisions"; the lock script's grid REPORT pointed to "section 5.3" | **Fixed.** The I-1 row's task-168 parenthetical now names owner round 19, the schema and picker scripts and their order, the manual gates, and the STOPPED grid item (note §10.4-§10.5). The rest of the row is byte-identical. The lock script's grid REPORT text now points to "task 168 note section 10.5" (same line, :723). |
+| 9 | §10.7 called the 48-tests-ran jest run "contention" | **Corrected** in §10.7: the same symptom reproduces deterministically when `RegardingResolver/generated/ManifestTypes` is absent, and `build:prod` regenerates it; a concurrent `build:prod` is the likely cause. Run jest after `build:prod`, never alongside it. |
+| 10 | Goal (2) residual: after the picker is added, the raw pair controls and intermediate lookups stay visible and editable | **Raised as a first-class stop** (§11.2), confirmed on the live form XML (read-only GET, 2026-10-04). Not implemented; §11.2 says why. |
+| 17 | Pending live gate | Still pending (main session), §10.4. |
+
+### 11.2 🔔 First-class stop: the raw pair and intermediate lookup controls stay visible and editable (r1 verifier item 10)
+
+**Facts (live dev, read-only GET of the form XML, 2026-10-04; "visible" = no `visible="false"` on the cell, section or tab; none is disabled):**
+
+| Form | Visible, editable controls bound to a pair column or a non-root `sprk_regarding*` lookup (the picker script adds only MISSING columns and leaves these untouched) |
+|---|---|
+| sprk_event `90d2eff7` Event modal form | `sprk_regardingrecordtype` (plain lookup, twice), `sprk_regardingrecordid` (twice), `sprk_regardingrecordname` (twice), `sprk_regardingrecordurl`; lookups account, agreement, analysis, budget, contact, invoice, organization |
+| sprk_event `835b8ee8` Event Assign Work main form | `sprk_regardingrecordtype` (plain lookup), `sprk_regardingrecordid`, `sprk_regardingrecordname` (one copy each; the url and the second type / id / name copies are hidden); lookups account, agreement, analysis, budget, contact, invoice, organization |
+| sprk_communication `b58ec3d8` Message main form | `sprk_regardingrecordname`; lookups account, invoice, event, organization, person |
+| sprk_event `eaf22dcb` Event main form, sprk_analysis `d408a721` | none (the pair columns there are hidden or absent) |
+
+**Why it matters.** The job and the cascade derive the root from the row's PAIR (rule 3) or, with no pair, from a single intermediate (rule 5). On the two event forms a user can type a pair (`sprk_regardingrecordtype` = matter, `sprk_regardingrecordid` = a matter id) on a filed row; the job then stamps that matter as the root, so the row is re-filed under a root without the picker. That is the form-level input owner round 8 item 3 meant to remove; the lock covers only the four root columns. The intermediate lookups matter only on a row with no pair.
+
+**Why this is stopped, not built.**
+- Round 19 item 1 decided "the filing picker (RegardingResolver) with hidden cells for the pair and lookups". r1 implemented that as written: hidden cells are ADDED for the pair and lookup columns the form lacks. The decision does not say to hide or disable the controls users already have, and the POML constraint ("do not touch any other control") forbids it. Hiding them removes 6-14 visible inputs per form that users see today (for example account, organization and person on the Message form). That is a user-facing change beyond the decision's text (CLAUDE.md §6: scope expansion), and the verifier classed it as an owner question.
+- The decision is between two complete fixes, which change different things:
+  - **(a) Recommended: hide them.** Extend `Add-RegardingFilingPickerToForms.ps1` to add `visible="false"` to the `<cell>` of every existing control on the round-19 target forms that is bound to a pair column or a non-root `sprk_regarding*` lookup, except the picker's host control. The parse check gains exactly one allowed change: `visible="false"` on exactly those cells. Fixtures and seeds as for the other guards; `-Verify` fails on a visible one. Hidden controls stay enabled, so the RegardingResolver's `setValue` writes on a re-file and on a clear are submitted as today. The picker shows the chosen record, so the filing stays visible to the user.
+  - **(b) Lock them** (`disabled="true"`, the lock script's mechanism). This keeps them on screen. But the RegardingResolver writes the pair text columns and the chosen lookup with `setValue` on UPDATE, and whether a disabled control's script-set value is submitted on UPDATE is unproven on dev (§2.6). The presave's `forceSubmit` runs on CREATE only, and the PCF source is out of scope, so (b) needs either a PCF change (forceSubmit in `applyResolverFields` / `clearRegarding`) or a live proof first.
+- Per the owner's standing directive (round 15), no "accept" option is offered. The raw write outside the forms (Web API, import, flow), which the owner accepted in round 8 item 3, is a different path and is not affected.
+
+### 11.3 Seeds (r2): each red, then restored byte-identical (SHA-256 compared, file touched)
+
+| Seed | Mutation | Red |
+|---|---|---|
+| Q1 | `if ($p.HostColumn -ine $RecordTypeColumn) {` → `if ($false) {` (verifier item 4) | only **14-refuse-picker-wrong-host-column**: "expected refusal PICKER_MISCONFIGURED, got []"; exit 1 |
+| Q2 | `'section' { return (…name -ceq $PickerSectionName -or … -ceq $HiddenSectionName) }` → `'section' { return $true }` (verifier item 5) | only **inline "parse: a foreign section added"**; exit 1 |
+
+`Add-RegardingFilingPickerToForms.ps1` SHA-256 before and after both seeds: `2eda6187f732a3ff2ecb7f5e6a92d43f4b766c70fecd5f32aaa52e821ea811e2` (working tree, CRLF).
+
+### 11.4 Tests (r2)
+
+| Suite | Result |
+|---|---|
+| `Add-RegardingFilingPickerToForms.ps1 -SelfTest` | exit 0: **14 fixtures + 10 inline** (was 13 + 9) |
+| `Lock-CoreAncestorStampColumnsOnForms.ps1 -SelfTest` | exit 0: **14 fixtures + 13 inline** (unchanged; one REPORT string edited) |
+| `Add-AnalysisRegardingRecordUrlColumn.ps1 -SelfTest` | exit 0: **10 inline** (unchanged) |
+| RegardingResolver jest / `build:prod` | not re-run: r2 changes no client file (the presave and the PCF are byte-identical to r1) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **346 / 346 passed** |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
+| `tests/integration/Spe.Integration.Tests` | **403 passed, 25 skipped** (428), 0 failed |
+| BFF unit (`tests/unit/Sprk.Bff.Api.Tests`), full run | **14,399 passed, 0 failed, 54 skipped** (14,453), 19 m 5 s |
+
+Working-tree SHA-256 (CRLF) after r2: `Lock-CoreAncestorStampColumnsOnForms.ps1` `8940e905…`; `Add-RegardingFilingPickerToForms.ps1` `2eda6187…`; `Add-AnalysisRegardingRecordUrlColumn.ps1` `0323532f…` (unchanged since r1; the committed r1 bytes hash to `0323532f…` in CRLF, so the `8fc0f591…` recorded in §10.7 was not the committed file's hash); `sprk_todo_regarding_presave.js` unchanged.
+
+Scope against `0dccaaed8` (r1): one new fixture folder, one inline case and one REPORT string in the scripts, the I-1 row's task-168 parenthetical, this note and the POML. No change under `src/**`, under `tests/**` other than the new fixture, or under `.claude/**`; no new web resource, waiver, column or component.

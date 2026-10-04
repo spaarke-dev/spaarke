@@ -618,6 +618,7 @@ if ($SelfTest) {
         @{ Name = 'parse: an original attribute changed'; After = $good.Replace('<section name="main" id="s1">', '<section name="main" id="s2">'); Want = $true },
         @{ Name = 'parse: an original node removed'; After = $good.Replace('<control id="sprk_name" datafieldname="sprk_name" />', ''); Want = $true },
         @{ Name = 'parse: an unexpected element added'; After = $good.Replace('</form>', '<Navigation /></form>'); Want = $true },
+        @{ Name = 'parse: a foreign section added'; After = $good.Replace('<section name="main" id="s1">', '<section name="sprk_rogue" id="r1" /><section name="main" id="s1">'); Want = $true },
         @{ Name = 'parse: a foreign library added'; After = $good.Replace("<Library name=""$PresaveLibrary""", '<Library name="sprk_other" libraryUniqueId="{1}" /><Library name="' + $PresaveLibrary + '"'); Want = $true },
         @{ Name = 'parse: picker names another entity'; After = $good.Replace('>sprk_event</entity>', '>sprk_todo</entity>'); Want = $true },
         @{ Name = 'parse: a needed hidden cell dropped'; After = [regex]::Replace($good, '<row><cell id="[^"]*" locklevel="0" colspan="1" rowspan="1"><labels><label description="Regarding Matter"[^/]*/></labels><control[^>]*/></cell></row>', ''); Want = $true },

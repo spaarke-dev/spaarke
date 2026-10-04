@@ -720,7 +720,7 @@ try {
         $grid = Invoke-Dv -Endpoint "customcontroldefaultconfigs?`$select=controldescriptionxml&`$filter=primaryentitytypecode eq '$table'"
         foreach ($g in $grid.value) {
             if ("$($g.controldescriptionxml)" -match '<EnableEditing[^>]*>\s*yes\s*</EnableEditing>') {
-                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 19 item 3 is escalated (the grid has no OnRowLoad event; task 168 note section 5.3); not changed by this script"
+                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 19 item 3 is escalated (the grid has no OnRowLoad event; task 168 note section 10.5); not changed by this script"
             }
         }
     }
