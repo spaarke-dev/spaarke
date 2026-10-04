@@ -4,7 +4,7 @@
     <title>CI: nightly advisory PCF build:prod, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>completed</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits a CI workflow (hot path: ci-workflows); a wrong trigger or blocking flag affects every project's merges.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -79,7 +79,7 @@
 
   <notes>Created 2026-10-04 from task 092's CI finding, on the owner's decision to add it.</notes>
 
-  <completion>COMPLETED 2026-10-04. PR #1282 merged (e7f1129ec): .github/workflows/pcf-build-prod-nightly.yml, nightly 08:00 UTC + workflow_dispatch, advisory, discovers PCFs with a build:prod script and primes the three shared libs they need. First run (37213447388, master, ubuntu-latest, Node 20.20.2): 17 of 18 PCFs pass. ScopeConfigEditor fails (Cannot find module 'eslint', an undeclared build dependency). Surprise: the six Communication PCFs PASS in CI, while they fail locally on Windows/Node 22.14, so task 092's pdfjs break is environment-dependent; sent back to 092 to root-cause before PR #1123 merges. Acceptance criterion 2 (dispatch run) was met after merge, because GitHub only dispatches workflows present on the default branch.</completion>
+  <completion>COMPLETED 2026-10-04. PR #1282 merged (e7f1129ec): .github/workflows/pcf-build-prod-nightly.yml, nightly 08:00 UTC + workflow_dispatch, advisory, discovers PCFs with a build:prod script and primes the three shared libs they need. First run (37213447388, master, ubuntu-latest, Node 20.20.2): 17 of 18 PCFs pass. ScopeConfigEditor fails (Cannot find module 'eslint', an undeclared build dependency). Surprise: the six Communication PCFs PASS in CI, while they fail locally on Windows/Node 22.14, so task 092's pdfjs break is environment-dependent; sent back to 092 to root-cause before PR #1123 merges. Acceptance criterion 2 (dispatch run) was met after merge, because GitHub only dispatches workflows present on the default branch. CORRECTION 2026-10-04 (REOPENED): the first run's table was FALSE. pcf-scripts build exits 0 when webpack fails, so every PCF recorded 'pass'. Scanning each job log for [build] Failed/Succeeded gives: 9 failed at build (6 Communication*, CommunicationAttachments, VisualHost, UpdateRelatedButton), ScopeConfigEditor failed before build (eslint), 8 succeeded. The pdfjs break is therefore NOT environment-dependent (the earlier conclusion came from this false signal). A second workflow defect: shared-lib prep was decided from each PCF's prebuild script, so UpdateRelatedButton got none. Follow-up fix in progress (branch ci/pcf-nightly-detect-failure): detect failure from output, decide prep from dependencies, and list scripts that trust build:prod's exit code before deploying. Completes when that PR merges and a run's table matches its logs.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
