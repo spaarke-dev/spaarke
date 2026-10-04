@@ -12,12 +12,15 @@
 //                           the Worker managed identity's federated credential (task 251, owner
 //                           D24). The sidecar holds no credential. The token is never logged.
 //
+// Each body also names the tenant's initial domain as `organization` (from the same token source):
+// the only -Organization value that lets app-only Exchange writes succeed.
+//
 // WIRE (task 251 — RBAC for Applications, owner D26):
-//   POST /apply-mailbox-access { tenantId, appId, servicePrincipalObjectId, displayName,
+//   POST /apply-mailbox-access { tenantId, organization, appId, servicePrincipalObjectId, displayName,
 //        scopeGroupId, assignments:[{name, role}], correlationId, timeoutSeconds }
 //     200 { outcome: Success|AlreadyCompliant|Drift|Failure, createdCount,
 //           assignments:[{name, role, scope, inExpectedScope}], conflicts:[..], diagnostic }
-//   POST /read-mailbox-access  { tenantId, appId, scopeGroupId, roles:[..], correlationId }
+//   POST /read-mailbox-access  { tenantId, organization, appId, scopeGroupId, roles:[..], correlationId }
 //     200 { outcome: Success|Failure, servicePrincipalRegistered, assignments:[..], diagnostic }
 //   400 invalid body / missing token · 401 bad shared secret · 404 unknown route
 //   503 sidecar missing a setting · other 5xx server error
@@ -122,6 +125,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         var wire = new SidecarApplyRequest
         {
             TenantId = request.TenantId,
+            Organization = headers.Organization,
             AppId = request.AppId,
             ServicePrincipalObjectId = request.ServicePrincipalObjectId,
             DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName,
@@ -180,6 +184,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         var wire = new SidecarReadRequest
         {
             TenantId = request.TenantId,
+            Organization = headers.Organization,
             AppId = request.AppId,
             ScopeGroupId = string.IsNullOrWhiteSpace(request.ScopeGroupId) ? null : request.ScopeGroupId,
             Roles = request.Roles.ToArray(),
@@ -230,7 +235,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         return null;
     }
 
-    /// <summary>The shared secret and the Exchange token — both, or a diagnostic. Never an empty header.</summary>
+    /// <summary>The shared secret, the Exchange token and the organization — all three, or a diagnostic. Never an empty header.</summary>
     private async Task<Headers> ResolveHeadersAsync(string tenantId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.SidecarSharedSecretVaultName)
@@ -279,7 +284,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         var token = await _tokenSource.GetTokenAsync(tenantId, cancellationToken).ConfigureAwait(false);
         return token switch
         {
-            ExchangeTokenResult.Success t => Headers.Ok(secret, t.AccessToken),
+            ExchangeTokenResult.Success t => Headers.Ok(secret, t.AccessToken, t.Organization),
             ExchangeTokenResult.Failure f => Headers.Fail(f.Diagnostic),
             _ => Headers.Fail($"Unhandled {nameof(ExchangeTokenResult)} '{token.GetType().Name}'."),
         };
@@ -375,6 +380,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
     internal sealed class SidecarApplyRequest
     {
         [JsonPropertyName("tenantId")] public string TenantId { get; init; } = default!;
+        [JsonPropertyName("organization")] public string Organization { get; init; } = default!;
         [JsonPropertyName("appId")] public string AppId { get; init; } = default!;
         [JsonPropertyName("servicePrincipalObjectId")] public string ServicePrincipalObjectId { get; init; } = default!;
         [JsonPropertyName("displayName")] public string? DisplayName { get; init; }
@@ -387,6 +393,7 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
     internal sealed class SidecarReadRequest
     {
         [JsonPropertyName("tenantId")] public string TenantId { get; init; } = default!;
+        [JsonPropertyName("organization")] public string Organization { get; init; } = default!;
         [JsonPropertyName("appId")] public string AppId { get; init; } = default!;
         [JsonPropertyName("scopeGroupId")] public string? ScopeGroupId { get; init; }
         [JsonPropertyName("roles")] public string[] Roles { get; init; } = default!;
@@ -422,13 +429,13 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
 
     private readonly record struct Sent(int Status, string Body, string? Failure);
 
-    private readonly record struct Headers(string Secret, string Token, string? Failure)
+    private readonly record struct Headers(string Secret, string Token, string Organization, string? Failure)
     {
         /// <summary>Never prints the secret or the token (code review W10).</summary>
-        public override string ToString() => Failure is null ? "Headers { Secret = ***, Token = *** }" : $"Headers {{ Failure = {Failure} }}";
+        public override string ToString() => Failure is null ? $"Headers {{ Secret = ***, Token = ***, Organization = {Organization} }}" : $"Headers {{ Failure = {Failure} }}";
 
-        public static Headers Ok(string secret, string token) => new(secret, token, null);
-        public static Headers Fail(string diagnostic) => new(string.Empty, string.Empty, diagnostic);
+        public static Headers Ok(string secret, string token, string organization) => new(secret, token, organization, null);
+        public static Headers Fail(string diagnostic) => new(string.Empty, string.Empty, string.Empty, diagnostic);
     }
 
     private readonly record struct ApplyAttempt(ExchangePolicyApplyOutcome? Outcome, string? RetryDiagnostic)

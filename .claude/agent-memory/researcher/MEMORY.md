@@ -81,6 +81,7 @@
 
 - [EXO sidecar identity (2026-10-03)](exo-sidecar-identity-2026-10-03.md) — EXO -ManagedIdentity internals (verified), MI-FIC -AccessToken recommendation, AAP→RBAC-for-Apps status, perms
 - [EXO RBAC-for-Apps design (2026-10-04)](exo-rbac-for-apps-design-2026-10-04.md) — T251 cmdlet sequence, caller perms + Role Management escalation, subscriptions gap, cache, limits
+- [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo

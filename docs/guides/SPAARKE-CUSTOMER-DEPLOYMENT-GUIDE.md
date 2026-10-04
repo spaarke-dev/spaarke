@@ -405,15 +405,20 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
      `Application Mail.Send` and `Application MailboxSettings.Read`. The delegating assignments are what limit it: tested
      2026-10-04, it is refused when it tries to grant itself Exchange Full Access, Role Management or Mail Recipients.
 3. **Platform parameter** `exchangeAdminAppId` = the app's client id (`platform-controlplane-{env}.bicepparam`).
+4. **Graph read for the Worker**: the L2 Worker managed identity must be able to read `GET /organization` in the tenant
+   (`Organization.Read.All` or `Directory.Read.All`; on Spaarke's tenant it already holds `Directory.ReadWrite.All`). The
+   Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
+   `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
+   connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
 
 Residual risk, stated plainly: an identity that can create application role assignments can grant any app — itself
 included — the four mailbox roles organization-wide (the scope is optional). Only the L2 Worker can obtain its token;
 audit `New-ManagementRoleAssignment` in the unified audit log.
 
-> **Status (2026-10-04)**: the identity, sign-in, connect and escalation refusals are verified live. App-only *writes*
-> (`New-ServicePrincipal`, `New-ManagementRoleAssignment`) were refused with "doesn't have write permission to target DC"
-> during the hour after `Enable-OrganizationCustomization`; see
-> `projects/customer-provisioning-orchestration-r1/notes/t251-exchange-sidecar-design.md` §7 for the current result.
+> **Verified live (2026-10-04)**: sign-in, connect with the initial domain, app-only writes (`New-ServicePrincipal`,
+> `New-ManagementRoleAssignment -RecipientGroupScope`), the escalation refusals, and `Test-ServicePrincipalAuthorization`
+> (a mailbox in the group is in scope, one outside is not). Log:
+> `projects/customer-provisioning-orchestration-r1/notes/t251-exchange-sidecar-design.md` §7.
 
 ### 4.3 L3 operator skill — `/provision-environment` (Phase D)
 
@@ -1124,7 +1129,8 @@ pac admin application list --environment <dv-org-url>
 az rest --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<uami-principal-id>/appRoleAssignments"
 
 # T4 — the stamp identity's Exchange mailbox roles, all limited to the customer's group (Organization Management admin)
-Get-ManagementRoleAssignment | Where-Object { $_.RoleAssignee -eq '<uami-principal-id>' } | Select Name, Role, RecipientGroupScope
+# A group-scoped assignment reads RecipientWriteScope = Group, with the group's Name in CustomResourceScope
+Get-ManagementRoleAssignment -RoleAssignee '<uami-principal-id>' | Select Name, Role, RecipientWriteScope, CustomResourceScope
 
 # T6 — the run's container is listed for its container type, app-only as the owning app
 # Performed by H13 (the owning app is reachable only through the L2 Worker UAMI's federated credential);

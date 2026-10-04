@@ -17,7 +17,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   mailbox role in Entra (H10 grants `GetEntraGranted()`, T3 fails otherwise); the Worker signs in as
   `Spaarke Exchange Admin` via its UAMI's federated credential and passes the token to the sidecar (no secret,
   certificate or Entra directory role on that app; narrowed Exchange role); a `sitecontainers` variable names an app
-  setting, never a literal.
+  setting, never a literal. Two more bullets added after the live spike: the sidecar connects with the tenant's
+  **initial domain**, never the tenant GUID (with a GUID, every Exchange write fails "doesn't have write permission to
+  target DC"); and a group-scoped assignment reads back as `RecipientWriteScope = Group` + `CustomResourceScope =
+  <group Name>`, so scope is matched on those fields.
+- **`.claude/agent-memory/researcher/`**: `exo-apponly-dc-write-error-2026-10-04.md` (new, confirmed live) and the
+  RBAC-for-apps note's open question answered.
 - **`.claude/skills/provision-environment/SKILL.md`**: `exchangePolicyScopeGroupId` row (direct members only), the H14
   plan line and the T3/T4 report lines reworded for RBAC for Applications.
 - **`.claude/agent-memory/researcher/`**: two findings files (EXO identity, RBAC-for-Applications design) moved from

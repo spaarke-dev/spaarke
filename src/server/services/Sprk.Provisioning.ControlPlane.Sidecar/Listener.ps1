@@ -11,13 +11,15 @@
                       first sidecar refused to start and held the Worker at 503).
 
       POST /apply-mailbox-access   (H14a; X-Sidecar-Auth + X-Exchange-Access-Token)
-        Body: { tenantId, organization?, appId, servicePrincipalObjectId, displayName?,
+        Body: { tenantId, organization, appId, servicePrincipalObjectId, displayName?,
                 scopeGroupId, assignments: [{ name, role }], correlationId, timeoutSeconds? }
         200:  { outcome: Success|AlreadyCompliant|Drift|Failure, createdCount,
                 assignments: [{ name, role, scope, inExpectedScope }], conflicts: [..], diagnostic }
 
       POST /read-mailbox-access    (H13 T4; read-only; same headers)
-        Body: { tenantId, organization?, appId, scopeGroupId, roles: [..], correlationId }
+        Body: { tenantId, organization, appId, scopeGroupId, roles: [..], correlationId }
+              organization = the tenant's initial domain (contoso.onmicrosoft.com), required: with
+              the tenant GUID Exchange connects and reads, but every write fails.
         200:  { outcome: Success|Failure, servicePrincipalRegistered, assignments: [..], diagnostic }
               assignments = EVERY "Application *" role the app holds (not only `roles`), each
               marked inExpectedScope; an unknown scope group is outcome Failure.
@@ -139,7 +141,7 @@ while ($listener.IsListening) {
         # Validate BEFORE reading any field (StrictMode: a missing property would throw -> 500).
         $errors = if ($route -eq 'POST /apply-mailbox-access') { Test-ApplyRequest -Body $body } else { Test-ReadRequest -Body $body }
         if ($errors.Count -gt 0) { Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = ($errors -join '; ') }; continue }
-        $organization = if ($body.PSObject.Properties['organization'] -and $body.organization) { [string]$body.organization } else { [string]$body.tenantId }
+        $organization = [string]$body.organization   # required + shape-checked above; never the tenant GUID
 
         if ($route -eq 'POST /apply-mailbox-access') {
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /apply-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; scopeGroupId = $body.scopeGroupId; assignmentCount = @($body.assignments).Count }

@@ -77,6 +77,11 @@
 .PARAMETER TenantId
     Exchange tenant id sent in the request body. Default: all-zero GUID (SAFE).
 
+.PARAMETER Organization
+    The tenant's initial domain (contoso.onmicrosoft.com) the sidecar passes to Connect-ExchangeOnline
+    -Organization. Never the tenant id: Exchange then connects but refuses every write. Default:
+    contoso.onmicrosoft.com (SAFE -- not a Spaarke tenant).
+
 .PARAMETER PolicyScopeGroupId
     Entra object id of the mail-enabled security group the roles are scoped to. Default: all-zero GUID (SAFE).
 
@@ -189,6 +194,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$TenantId = '00000000-0000-0000-0000-000000000000',
+
+    [Parameter(Mandatory = $false)]
+    [string]$Organization = 'contoso.onmicrosoft.com',
 
     [Parameter(Mandatory = $false)]
     [string]$PolicyScopeGroupId = '00000000-0000-0000-0000-000000000000',
@@ -415,10 +423,10 @@ function Invoke-SidecarViaKudu {
     # The token goes only in its header; without a real one the sidecar's Connect-ExchangeOnline fails.
     $token = if ($script:ExchangeAccessToken) { $script:ExchangeAccessToken } else { 'live-verify-not-a-real-token' }
     $bodyObj = if ($Route -eq 'read') {
-        @{ tenantId = $script:TenantId; appId = $script:AppId; scopeGroupId = $script:PolicyScopeGroupId
+        @{ tenantId = $script:TenantId; organization = $script:Organization; appId = $script:AppId; scopeGroupId = $script:PolicyScopeGroupId
            roles = @('Application Mail.Read'); correlationId = $CorrelationId }
     } else {
-        @{ tenantId = $script:TenantId; appId = $script:AppId; servicePrincipalObjectId = $script:ServicePrincipalObjectId
+        @{ tenantId = $script:TenantId; organization = $script:Organization; appId = $script:AppId; servicePrincipalObjectId = $script:ServicePrincipalObjectId
            displayName = 'Spaarke-liveverify-test-app'; scopeGroupId = $script:PolicyScopeGroupId
            assignments = @(@{ name = 'Spaarke-liveverify-MailRead'; role = 'Application Mail.Read' })
            correlationId = $CorrelationId; timeoutSeconds = 300 }

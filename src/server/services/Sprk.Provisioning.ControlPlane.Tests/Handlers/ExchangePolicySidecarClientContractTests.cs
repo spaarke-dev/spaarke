@@ -10,7 +10,10 @@
 //   - transport, status and parse failures are explicit Failures;
 //   - no HTTP call is made without BOTH credentials (shared secret, Exchange token) — never an
 //     empty header. The Exchange token comes only from the managed-identity federated credential
-//     (owner D24); a missing ExchangeAdminAppId or a sign-in failure stops before any call.
+//     (owner D24); a missing ExchangeAdminAppId or a sign-in failure stops before any call;
+//   - every body names the tenant's initial domain as `organization` (looked up once per tenant);
+//     a failed lookup stops before any call — a tenant GUID would let Exchange connect but fail
+//     every write (live, 2026-10-04).
 //
 // ADR-038: pure unit tests over a hand-rolled HttpMessageHandler (never Mock<HttpMessageHandler>)
 // and a fake TokenCredential. Live verification against a running sidecar is
@@ -42,6 +45,7 @@ public sealed class ExchangePolicySidecarClientContractTests
     private const string SharedSecretName = "Sidecar-Shared-Secret";
     private const string SharedSecretValue = "per-boot-shared-secret-value-42";
     private const string ExchangeToken = "exo-access-token-value";
+    private const string InitialDomain = "contoso.onmicrosoft.com";
 
     // ========== Apply: request ==========
 
@@ -62,6 +66,7 @@ public sealed class ExchangePolicySidecarClientContractTests
         using var doc = JsonDocument.Parse(sent.BodyJson!);
         var root = doc.RootElement;
         root.GetProperty("tenantId").GetString().Should().Be(TenantId);
+        root.GetProperty("organization").GetString().Should().Be(InitialDomain);
         root.GetProperty("appId").GetString().Should().Be(UamiClientId);
         root.GetProperty("servicePrincipalObjectId").GetString().Should().Be(UamiObjectId);
         root.GetProperty("displayName").GetString().Should().Be("Spaarke-acme-stamp-identity");
@@ -252,13 +257,62 @@ public sealed class ExchangePolicySidecarClientContractTests
         var handler = new CapturingHandler { ResponseFactory = _ => OkJson(WireApply("Success", 1)) };
         string? tenant = null, app = null;
         var credential = new FakeCredential();
-        var source = new ExchangeAdminTokenSource((t, a) => { tenant = t; app = a; return credential; }, Options.Create(NewOptions()));
+        var source = new ExchangeAdminTokenSource((t, a) => { tenant = t; app = a; return credential; }, FoundDomain, Options.Create(NewOptions()));
 
         await NewClient(handler, tokenSource: source).ApplyAsync(BuildRequest(), CancellationToken.None);
 
         tenant.Should().Be(TenantId);
         app.Should().Be(ExchangeAdminAppId);
         credential.LastScopes.Should().Equal("https://outlook.office365.com/.default");
+    }
+
+    public static TheoryData<string> InitialDomainProblems => new() { "throws", "none" };
+
+    [Theory]
+    [MemberData(nameof(InitialDomainProblems))]
+    public async Task Apply_InitialDomainUnknown_FailsBeforeAnyCall_NeverFallingBackToTheTenantId(string problem)
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson(WireApply("Success", 1)) };
+        Func<string, CancellationToken, Task<string?>> lookup = problem == "throws"
+            ? (_, _) => throw new HttpRequestException("Graph GET /organization returned HTTP 403")
+            : (_, _) => Task.FromResult<string?>(null);
+        var opts = Options.Create(NewOptions());
+
+        var result = await NewClient(handler, tokenSource: new ExchangeAdminTokenSource((_, _) => new FakeCredential(), lookup, opts))
+            .ApplyAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<ExchangePolicyApplyOutcome.Failure>().Which.Diagnostic.Should().Contain("initial domain").And.Contain("Organization.Read.All");
+        handler.CapturedRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InitialDomain_IsLookedUpOncePerTenant()
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson(WireApply("Success", 1)) };
+        var lookups = new List<string>();
+        var source = new ExchangeAdminTokenSource(
+            (_, _) => new FakeCredential(),
+            (t, _) => { lookups.Add(t); return Task.FromResult<string?>(InitialDomain); },
+            Options.Create(NewOptions()));
+        var client = NewClient(handler, tokenSource: source);
+
+        await client.ApplyAsync(BuildRequest(), CancellationToken.None);
+        await client.ApplyAsync(BuildRequest(), CancellationToken.None);
+
+        lookups.Should().Equal(TenantId);
+    }
+
+    [Fact]
+    public void ParseInitialDomain_PicksTheInitialVerifiedDomain()
+    {
+        const string body = """
+            { "value": [ { "verifiedDomains": [
+                { "name": "contoso.com", "isInitial": false, "isDefault": true },
+                { "name": "contoso.onmicrosoft.com", "isInitial": true, "isDefault": false } ] } ] }
+            """;
+
+        ExchangeAdminTokenSource.ParseInitialDomain(body).Should().Be("contoso.onmicrosoft.com");
+        ExchangeAdminTokenSource.ParseInitialDomain("{ \"value\": [] }").Should().BeNull();
     }
 
     // ========== Read (H13 T4) ==========
@@ -268,7 +322,7 @@ public sealed class ExchangePolicySidecarClientContractTests
     {
         var handler = new CapturingHandler { ResponseFactory = _ => OkJson("""
             { "outcome": "Success", "servicePrincipalRegistered": true,
-              "assignments": [ { "name": "Spaarke-acme-MailSend", "role": "Application Mail.Send", "scope": "CN=g", "inExpectedScope": true },
+              "assignments": [ { "name": "Spaarke-acme-MailSend", "role": "Application Mail.Send", "scope": "Group:g", "inExpectedScope": true },
                                { "name": "manual", "role": "Application Mail.Read", "scope": "", "inExpectedScope": false } ],
               "diagnostic": "2 assignments" }
             """) };
@@ -280,7 +334,7 @@ public sealed class ExchangePolicySidecarClientContractTests
         var success = result.Should().BeOfType<ExchangePolicyReadOutcome.Success>().Subject;
         success.ServicePrincipalRegistered.Should().BeTrue();
         success.Assignments.Should().Equal(
-            new ExchangeRoleAssignmentView("Spaarke-acme-MailSend", "Application Mail.Send", "CN=g", true),
+            new ExchangeRoleAssignmentView("Spaarke-acme-MailSend", "Application Mail.Send", "Group:g", true),
             new ExchangeRoleAssignmentView("manual", "Application Mail.Read", "", false));
         var sent = handler.CapturedRequests.Should().ContainSingle().Subject;
         sent.RequestUri!.AbsolutePath.Should().Be(ExchangePolicySidecarClient.ReadPath);
@@ -289,6 +343,7 @@ public sealed class ExchangePolicySidecarClientContractTests
         using var doc = JsonDocument.Parse(sent.BodyJson!);
         doc.RootElement.GetProperty("roles").GetArrayLength().Should().Be(2);
         doc.RootElement.GetProperty("scopeGroupId").GetString().Should().Be(ScopeGroupId);
+        doc.RootElement.GetProperty("organization").GetString().Should().Be(InitialDomain);
     }
 
     [Theory]
@@ -368,10 +423,12 @@ public sealed class ExchangePolicySidecarClientContractTests
         return new ExchangePolicySidecarClient(
             httpClient,
             kvReader ?? new FakeKvSecretReader { Result = new KvSecretReadResult.Success(SharedSecretValue) },
-            tokenSource ?? new ExchangeAdminTokenSource((_, _) => credential ?? new FakeCredential(), opts),
+            tokenSource ?? new ExchangeAdminTokenSource((_, _) => credential ?? new FakeCredential(), FoundDomain, opts),
             opts,
             NullLogger<ExchangePolicySidecarClient>.Instance);
     }
+
+    private static Task<string?> FoundDomain(string tenantId, CancellationToken cancellationToken) => Task.FromResult<string?>(InitialDomain);
 
     private static HttpResponseMessage OkJson(string json)
         => new(HttpStatusCode.OK) { Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json") };
@@ -381,8 +438,8 @@ public sealed class ExchangePolicySidecarClientContractTests
         "outcome": "{{outcome}}",
         "createdCount": {{createdCount}},
         "assignments": [
-          { "name": "Spaarke-acme-MailSend", "role": "Application Mail.Send", "scope": "CN=g", "inExpectedScope": true },
-          { "name": "Spaarke-acme-MailRead", "role": "Application Mail.Read", "scope": "CN=g", "inExpectedScope": true }
+          { "name": "Spaarke-acme-MailSend", "role": "Application Mail.Send", "scope": "Group:g", "inExpectedScope": true },
+          { "name": "Spaarke-acme-MailRead", "role": "Application Mail.Read", "scope": "Group:g", "inExpectedScope": true }
         ],
         "conflicts": [],
         "diagnostic": "{{diagnostic}}"

@@ -26,6 +26,7 @@
 //   SIDECAR_LIVE_VERIFY_POLICY_GROUP_ID    (default: all-zero GUID — same)
 //   SIDECAR_LIVE_VERIFY_APP_ID_1           (default: all-zero GUID)
 //   SIDECAR_LIVE_VERIFY_APP_ID_2           (default: all-ones GUID)
+//   SIDECAR_LIVE_VERIFY_ORGANIZATION       (default: contoso.onmicrosoft.com — the tenant's initial domain)
 //
 // The default all-zero-GUID payload is intentionally SAFE against a real
 // sidecar: Listener.ps1 accepts it (the validation is shape-only — 2 entries),
@@ -297,6 +298,7 @@ public sealed class ExchangePolicySidecarLiveVerificationTests
     // SIDECAR_LIVE_VERIFY_EXCHANGE_TOKEN to exercise a real tenant (a live-ceremony operation).
     private static ExchangeAdminTokenSource NewTokenSource(IntegrationWiringOptions options)
         => new((_, _) => new StaticToken(Environment.GetEnvironmentVariable("SIDECAR_LIVE_VERIFY_EXCHANGE_TOKEN") ?? "live-verify-not-a-real-token"),
+            (_, _) => Task.FromResult<string?>(Environment.GetEnvironmentVariable("SIDECAR_LIVE_VERIFY_ORGANIZATION") ?? "contoso.onmicrosoft.com"),
             Options.Create(options));
 
     private static ExchangePolicySidecarClient NewClient(string baseUrl, string sharedSecretValue)

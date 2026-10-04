@@ -53,20 +53,23 @@ Describe 'Invoke-MailboxAccessApply' {
             assignments = @([pscustomobject]@{ name = 'Spaarke-acme-MailSend'; role = 'Application Mail.Send' },
                             [pscustomobject]@{ name = 'Spaarke-acme-MailRead'; role = 'Application Mail.Read' })
         }
-        function script:Assignment($Name, $Role, $Scope = 'CN=grp') {
-            [pscustomobject]@{ Name = $Name; Role = $Role; RoleAssignee = $script:Oid; RecipientGroupScope = $Scope }
+        # Shape Exchange returns (live, 2026-10-04): a -RecipientGroupScope assignment reads back as
+        # RecipientWriteScope 'Group' with the group's Name in CustomResourceScope.
+        function script:Assignment($Name, $Role, $Scope = 'grp', $Kind = 'Group') {
+            if (-not $Scope) { $Kind = 'Organization' }
+            [pscustomobject]@{ Name = $Name; Role = $Role; RoleAssignee = $script:Oid; RecipientWriteScope = $Kind; CustomResourceScope = $Scope }
         }
     }
     BeforeEach {
         $global:T251Held = @()
         $global:T251SpExists = $true
         Mock -ModuleName SidecarCore Get-Recipient { @([pscustomobject]@{ DistinguishedName = 'CN=grp' }) }
-        Mock -ModuleName SidecarCore Get-Group { [pscustomobject]@{ DistinguishedName = 'CN=grp'; Guid = 'g'; ExternalDirectoryObjectId = 'e'; RecipientTypeDetails = 'MailUniversalSecurityGroup' } }
+        Mock -ModuleName SidecarCore Get-Group { [pscustomobject]@{ Name = 'grp'; DistinguishedName = 'CN=grp'; Guid = 'g'; RecipientTypeDetails = 'MailUniversalSecurityGroup' } }
         Mock -ModuleName SidecarCore Get-ServicePrincipal { if ($global:T251SpExists) { [pscustomobject]@{ ObjectId = $script:Oid; AppId = $script:App; Identity = $script:Oid } } }
         Mock -ModuleName SidecarCore New-ServicePrincipal { $global:T251SpExists = $true; [pscustomobject]@{ ObjectId = $script:Oid; AppId = $script:App; Identity = $script:Oid } }
         Mock -ModuleName SidecarCore Get-ManagementRoleAssignment -ParameterFilter { $RoleAssignee } { $global:T251Held }
         Mock -ModuleName SidecarCore Get-ManagementRoleAssignment -ParameterFilter { $Identity } { $global:T251Held | Where-Object Name -eq $Identity }
-        Mock -ModuleName SidecarCore New-ManagementRoleAssignment { $global:T251Held += Assignment $Name $Role $RecipientGroupScope }
+        Mock -ModuleName SidecarCore New-ManagementRoleAssignment { $global:T251Held += Assignment $Name $Role ($RecipientGroupScope -replace '^CN=([^,]+).*$', '$1') }
     }
 
     It 'registers the identity and creates every missing assignment in scope' {
@@ -88,15 +91,25 @@ Describe 'Invoke-MailboxAccessApply' {
     }
 
     It 'is Drift, creating nothing, when a named assignment has another scope' {
-        $global:T251Held = @(Assignment 'Spaarke-acme-MailSend' 'Application Mail.Send' 'CN=other-customer')
+        $global:T251Held = @(Assignment 'Spaarke-acme-MailSend' 'Application Mail.Send' 'other-customer')
         $global:T251SpExists = $true
 
         $r = Invoke-MailboxAccessApply -Request $script:Request
 
         $r.outcome | Should -Be 'Drift'
-        ($r.conflicts -join ' ') | Should -BeLike '*CN=other-customer*'
+        ($r.conflicts -join ' ') | Should -BeLike '*Group:other-customer*'
         Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 0 -Exactly
         Should -Invoke -ModuleName SidecarCore New-ServicePrincipal -Times 0 -Exactly
+    }
+
+    It 'is Drift when a named assignment uses a management scope that shares the group''s name' {
+        $global:T251Held = @(Assignment 'Spaarke-acme-MailSend' 'Application Mail.Send' 'grp' 'CustomRecipientScope')
+
+        $r = Invoke-MailboxAccessApply -Request $script:Request
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*CustomRecipientScope:grp*'
+        Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 0 -Exactly
     }
 
     It 'is Drift when the identity holds any other application role' {
@@ -128,10 +141,25 @@ Describe 'Invoke-MailboxAccessApply' {
 }
 
 Describe 'Request validation' {
+    BeforeAll {
+        function script:ApplyBody($Organization = 'contoso.onmicrosoft.com', $Role = 'Application Mail.Read') {
+            [pscustomobject]@{ tenantId = 't'; organization = $Organization; appId = '11111111-2222-3333-4444-555555555555'
+                               servicePrincipalObjectId = '99999999-8888-7777-6666-555555555555'; scopeGroupId = 'group@contoso.com'; correlationId = 'c'
+                               assignments = @([pscustomobject]@{ name = 'x'; role = $Role }) }
+        }
+    }
+    It 'accepts a complete request' {
+        (Test-ApplyRequest -Body (ApplyBody)).Count | Should -Be 0   # the function returns its list comma-wrapped
+    }
     It 'refuses a role outside the allow-list' {
-        $body = [pscustomobject]@{ tenantId = 't'; appId = '11111111-2222-3333-4444-555555555555'; servicePrincipalObjectId = '99999999-8888-7777-6666-555555555555'
-                                   scopeGroupId = 'group@contoso.com'; correlationId = 'c'
-                                   assignments = @([pscustomobject]@{ name = 'x'; role = 'Application Exchange Full Access' }) }
-        (Test-ApplyRequest -Body $body) -join ' ' | Should -BeLike '*not one the sidecar may grant*'
+        (Test-ApplyRequest -Body (ApplyBody -Role 'Application Exchange Full Access')) -join ' ' | Should -BeLike '*not one the sidecar may grant*'
+    }
+    # Writes fail with "doesn't have write permission to target DC" when connected by tenant GUID (live, 2026-10-04).
+    It 'refuses the tenant GUID as the organization' {
+        (Test-ApplyRequest -Body (ApplyBody -Organization 'a221a95e-6abc-4434-aecc-e48338a1b2f2')) -join ' ' | Should -BeLike '*initial domain*'
+    }
+    It 'requires the organization on the read route too' {
+        $body = [pscustomobject]@{ tenantId = 't'; appId = '11111111-2222-3333-4444-555555555555'; scopeGroupId = 'group@contoso.com'; roles = @('Application Mail.Read') }
+        (Test-ReadRequest -Body $body) -join ' ' | Should -BeLike '*organization is required*'
     }
 }

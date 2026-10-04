@@ -24,6 +24,10 @@
     Online token for the 'Spaarke Exchange Admin' app (federated credential trusting the
     Worker's managed identity) and sends it with each request in X-Exchange-Access-Token; the
     sidecar runs Connect-ExchangeOnline -AccessToken. The token is never logged.
+
+    ORGANIZATION: every request names the tenant's initial domain (contoso.onmicrosoft.com), the
+    only -Organization value Microsoft documents for app-only sign-in. A tenant GUID connects and
+    reads, but writes then fail with "doesn't have write permission to target DC" (live, 2026-10-04).
 #>
 
 Set-StrictMode -Version Latest
@@ -39,6 +43,7 @@ $script:DefaultListenPrefix = 'http://127.0.0.1:8091/'
 $script:AllowedRoles = @('Application Mail.Read', 'Application Mail.ReadWrite', 'Application Mail.Send', 'Application MailboxSettings.Read')
 $script:GuidPattern  = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 $script:EmailPattern = '^[^@\s'']+@[^@\s'']+\.[^@\s'']+$'
+$script:DomainPattern = '^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))+$'
 $script:TokenHeaderName     = 'X-Exchange-Access-Token'
 $script:AuthHeaderName      = 'X-Sidecar-Auth'
 
@@ -87,7 +92,7 @@ function Get-ExchangeConnectParameters {
     if ([string]::IsNullOrWhiteSpace($AccessToken)) {
         throw "No Exchange access token: the Worker must send $($script:TokenHeaderName) (the sidecar holds no credential)."
     }
-    if ([string]::IsNullOrWhiteSpace($Organization)) { throw 'organization (the tenant) is required to connect to Exchange Online.' }
+    if ([string]::IsNullOrWhiteSpace($Organization)) { throw 'organization (the tenant''s initial .onmicrosoft.com domain) is required to connect to Exchange Online.' }
     @{ AccessToken = $AccessToken; Organization = $Organization; ShowBanner = $false; SkipLoadingFormatData = $true }
 }
 
@@ -95,7 +100,7 @@ function Test-ApplyRequest {
     <# Returns a list of validation errors for a POST /apply-mailbox-access body (empty = valid). #>
     param($Body)
     $errors = @()
-    foreach ($f in 'tenantId', 'appId', 'servicePrincipalObjectId', 'scopeGroupId', 'correlationId') {
+    foreach ($f in 'tenantId', 'organization', 'appId', 'servicePrincipalObjectId', 'scopeGroupId', 'correlationId') {
         if (-not ($Body.PSObject.Properties[$f] -and -not [string]::IsNullOrWhiteSpace([string]$Body.$f))) { $errors += "$f is required" }
     }
     foreach ($f in 'appId', 'servicePrincipalObjectId') {
@@ -104,6 +109,7 @@ function Test-ApplyRequest {
     if ($Body.PSObject.Properties['scopeGroupId'] -and [string]$Body.scopeGroupId -and -not (Test-ScopeGroupIdShape ([string]$Body.scopeGroupId))) {
         $errors += 'scopeGroupId must be the group''s Entra object id (GUID) or email address'
     }
+    $errors += Test-OrganizationShape $Body
     $assignments = if ($Body.PSObject.Properties['assignments']) { @($Body.assignments) } else { @() }
     if ($assignments.Count -eq 0) { $errors += 'assignments must list at least one {name, role}' }
     foreach ($a in $assignments) {
@@ -120,9 +126,10 @@ function Test-ReadRequest {
     <# Returns a list of validation errors for a POST /read-mailbox-access body (empty = valid). #>
     param($Body)
     $errors = @()
-    foreach ($f in 'tenantId', 'appId') {
+    foreach ($f in 'tenantId', 'organization', 'appId') {
         if (-not ($Body.PSObject.Properties[$f] -and -not [string]::IsNullOrWhiteSpace([string]$Body.$f))) { $errors += "$f is required" }
     }
+    $errors += Test-OrganizationShape $Body
     if ($Body.PSObject.Properties['appId'] -and [string]$Body.appId -and [string]$Body.appId -notmatch $script:GuidPattern) { $errors += 'appId must be a GUID' }
     if (-not ($Body.PSObject.Properties['roles'] -and @($Body.roles).Count -gt 0)) { $errors += 'roles must list at least one role' }
     if (-not ($Body.PSObject.Properties['scopeGroupId'] -and [string]$Body.scopeGroupId)) { $errors += 'scopeGroupId is required' }
@@ -131,6 +138,16 @@ function Test-ReadRequest {
 }
 
 function Test-ScopeGroupIdShape([string]$Value) { return ($Value -match $script:GuidPattern -or $Value -match $script:EmailPattern) }
+
+function Test-OrganizationShape($Body) {
+    <# The organization must be a domain name, never the tenant GUID (writes fail with a GUID). #>
+    $o = if ($Body.PSObject.Properties['organization']) { [string]$Body.organization } else { '' }
+    if (-not $o) { return @() }
+    if ($o -match $script:GuidPattern -or $o -notmatch $script:DomainPattern) {
+        return @('organization must be the tenant''s initial domain (contoso.onmicrosoft.com), not a tenant id')
+    }
+    return @()
+}
 
 function Get-PropertyText($Object, [string]$Name) {
     if ($null -ne $Object -and $Object.PSObject.Properties[$Name]) { return [string]$Object.$Name }
@@ -147,15 +164,29 @@ function Test-AssigneeIs {
     return $false
 }
 
+function Get-AssignmentScopeText($Assignment) {
+    <# How an assignment is scoped, for views and diagnostics: 'Group:<name>', 'CustomRecipientScope:<name>', 'Organization', ... #>
+    $kind = Get-PropertyText $Assignment 'RecipientWriteScope'
+    $target = Get-PropertyText $Assignment 'CustomResourceScope'
+    if ($target) { return "${kind}:$target" }
+    return $kind
+}
+
 function Test-AssignmentInScope {
-    <# True when an assignment is limited to exactly the customer's scope group. #>
+    <#
+    True when an assignment is limited to exactly the customer's scope group. Exchange records an
+    assignment made with -RecipientGroupScope as RecipientWriteScope 'Group' with the group's Name in
+    CustomResourceScope — there is no RecipientGroupScope property to read back (live, 2026-10-04).
+    A management-scope assignment reads 'CustomRecipientScope', so the two cannot be confused even
+    when a scope and a group share a name. The group's Name is unique within the tenant's
+    organization (Exchange refuses a duplicate), so on Model 1, where every customer's group lives
+    in Spaarke's tenant, it still identifies one group (code review W2).
+    #>
     param($Assignment, $Group)
-    $scope = Get-PropertyText $Assignment 'RecipientGroupScope'
-    if (-not $scope) { return $false }
-    # Unique ids only (code review W2): on Model 1 every customer's group lives in Spaarke's tenant, so names can collide.
-    $ids = @('DistinguishedName', 'Guid', 'ExternalDirectoryObjectId') | ForEach-Object { Get-PropertyText $Group $_ } | Where-Object { $_ }
-    foreach ($y in $ids) { if ([string]::Equals($scope, $y, [StringComparison]::OrdinalIgnoreCase)) { return $true } }
-    return $false
+    if ((Get-PropertyText $Assignment 'RecipientWriteScope') -ne 'Group') { return $false }
+    $scope = Get-PropertyText $Assignment 'CustomResourceScope'
+    $name = Get-PropertyText $Group 'Name'
+    return [bool]($scope -and $name -and [string]::Equals($scope, $name, [StringComparison]::OrdinalIgnoreCase))
 }
 
 function Resolve-ScopeGroup {
@@ -163,6 +194,7 @@ function Resolve-ScopeGroup {
     param([string]$GroupId)
     # Shape-checked by Test-ApplyRequest / Test-ReadRequest (GUID or email) before it reaches the OPATH filter.
     $g = @()
+    # Get-Recipient, not Get-Group: Get-Group does not return ExternalDirectoryObjectId (live, 2026-10-04).
     if ($GroupId -match $script:GuidPattern) { $g = @(Get-Recipient -Filter "ExternalDirectoryObjectId -eq '$GroupId'" -ErrorAction SilentlyContinue) }
     if ($g.Count -eq 0) { $g = @(Get-Group -Identity $GroupId -ErrorAction SilentlyContinue) }
     if ($g.Count -ne 1) { return $null }
@@ -193,7 +225,7 @@ function ConvertTo-AssignmentView($Assignment, $Group) {
     [ordered]@{
         name            = Get-PropertyText $Assignment 'Name'
         role            = Get-PropertyText $Assignment 'Role'
-        scope           = Get-PropertyText $Assignment 'RecipientGroupScope'
+        scope           = Get-AssignmentScopeText $Assignment
         inExpectedScope = [bool]($Group -and (Test-AssignmentInScope $Assignment $Group))
     }
 }
@@ -228,12 +260,12 @@ function Invoke-MailboxAccessApply {
         if (-not $named) { $missing += $a; continue }
         if ((Get-PropertyText $named 'Role') -ne [string]$a.role) { $conflicts += "Assignment '$($a.name)' has role '$(Get-PropertyText $named 'Role')', expected '$($a.role)'." }
         elseif (-not $sp -or -not (Test-AssigneeIs $named $sp)) { $conflicts += "Assignment '$($a.name)' belongs to '$(Get-PropertyText $named 'RoleAssignee')', not app $($Request.appId)." }
-        elseif (-not (Test-AssignmentInScope $named $group)) { $conflicts += "Assignment '$($a.name)' is scoped to '$(Get-PropertyText $named 'RecipientGroupScope')', expected group '$groupScope'." }
+        elseif (-not (Test-AssignmentInScope $named $group)) { $conflicts += "Assignment '$($a.name)' is scoped to '$(Get-AssignmentScopeText $named)', expected 'Group:$(Get-PropertyText $group 'Name')'." }
     }
     $expectedNames = @($assignments | ForEach-Object { [string]$_.name })
     foreach ($h in $held) {
         if ($expectedNames -notcontains (Get-PropertyText $h 'Name')) {
-            $conflicts += "App $($Request.appId) also holds '$(Get-PropertyText $h 'Role')' through assignment '$(Get-PropertyText $h 'Name')' (scope '$(Get-PropertyText $h 'RecipientGroupScope')')."
+            $conflicts += "App $($Request.appId) also holds '$(Get-PropertyText $h 'Role')' through assignment '$(Get-PropertyText $h 'Name')' (scope '$(Get-AssignmentScopeText $h)')."
         }
     }
     if ($conflicts.Count -gt 0) {
