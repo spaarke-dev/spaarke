@@ -212,7 +212,7 @@ $token = az account get-access-token --resource api://<API_APP_ID> --query acces
 $body = @{
   question = "<friendly_name_snake_case_v1>"
   subject  = "matter:<real-matter-guid>"
-  parameters = @{ ... }
+  parameters = @{}   # only keys the shared playbook-parameter policy declares; anything else is a 400
 } | ConvertTo-Json
 
 Invoke-RestMethod -Uri "https://spaarke-bff-dev.azurewebsites.net/api/insights/ask" `
@@ -221,6 +221,15 @@ Invoke-RestMethod -Uri "https://spaarke-bff-dev.azurewebsites.net/api/insights/a
 ```
 
 Expected: 200 OK with `{artifact: {...}, decline: null}` (sufficient evidence) OR `{artifact: null, decline: {...}}` (insufficient).
+
+**Who may run it (unified-access-control-r2 task 163; owner round 16 items 1 and 3).** The route asks Dataverse AS THE
+CALLER for **Read** on the subject record when no node that can write reaches the subject (through `{{matterId}}` /
+`{{projectId}}` / `{{invoiceId}}`), and **Write** when one does (e.g. an UpdateRecord whose `recordId` is
+`{{matterId}}`) — so a playbook that persists onto its subject can be run only by users who could edit that record
+themselves. Record parameters get the same rule. `parameters` pass task 164's SHARED playbook-parameter policy
+(`Services/Ai/PlaybookParameterPolicy.cs`): server-owned keys (`userId`, `tenantId`, `run.*`, …), undeclared keys and
+mistyped values are a 400 (`errorCode = playbook.parameter-rejected`); a new prompt input must be added to that policy's
+declared lists (a policy change) before callers may send it. Denials are the uniform 404.
 
 ---
 
