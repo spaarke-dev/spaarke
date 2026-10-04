@@ -92,6 +92,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         Owner(fields).Should().NotBe(Directory.SecureDefaultTeam);
         Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})");
         CreatedRecordId(result).Should().Be(id);
+        // c1-r1 (owner round 13 item 9): createdby is the application, so the caller is recorded as the person who asked.
+        fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind")
+            .WhoseValue.Should().Be($"/systemusers({Caller:D})");
     }
 
     [Fact]
@@ -148,6 +151,19 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         result.Success.Should().BeFalse();
         _appCreates.Should().BeEmpty("the server owns the owner on the app-only path");
+    }
+
+    [Fact]
+    public async Task CreateRecord_NamingTheCreatorPersonColumn_IsRefused_AndCreatesNothing()
+    {
+        // c1-r1: who created a record is the server's to stamp, like its owner — a caller never chooses it.
+        var result = await CreateRecord("sprk_todo",
+            Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter),
+            ("sprk_createdbyperson", JsonSerializer.SerializeToElement(new { relatedTable = "systemuser", recordId = Guid.NewGuid() })));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("sprk_createdbyperson").And.Contain("set by the server");
+        _appCreates.Should().BeEmpty();
     }
 
     [Fact]
@@ -492,7 +508,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be("sdap.unsecure.not_permitted");
-        result.ErrorMessage.Should().Contain("Full Access");
+        // c1-r1 (verifier c1 item 4): an F3 refusal is an AUTHORIZATION answer and is worded as one — the unsecure
+        // endpoint's message, never the owner refusal's "the record's owner could not be decided".
+        result.ErrorMessage.Should().StartWith(
+            "The update was NOT written. Moving this document out of the secure record it is filed under ends its secure "
+            + "protection. Only someone with Full Access")
+            .And.NotContain("owner could not be decided");
         _user.Patches.Should().BeEmpty("refused before the caller's PATCH");
         _world.Assignments.Should().BeEmpty();
     }
@@ -578,6 +599,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
+                ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
             },
             ["sprk_matter"] = new[] { ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal") },
             ["sprk_workassignment"] = new[]

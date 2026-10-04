@@ -162,6 +162,13 @@ internal sealed class UpdateRecordActionCore
                 RecordId = input.RecordId,
                 ParentChanges = parentChanges,
                 CallerSystemUserId = input.ImpersonateSystemUserId,
+                // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this update
+                // IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An update that
+                // impersonates nobody (a playbook node acting for no person) passes no caller and is refused such a move.
+                SecureExitCaller = input.ImpersonateSystemUserId is { } person
+                    ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                        person, scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>())
+                    : null,
             },
             Patch,
             cancellationToken).ConfigureAwait(false);

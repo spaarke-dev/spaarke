@@ -65,8 +65,10 @@ public class InvoiceReviewWritePathTests
             .Callback<JobContract, CancellationToken>((job, _) => _submitted.Add(job))
             .Returns(Task.CompletedTask);
 
-        _ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(TeamId);
+        // c1-r1: the invoice owner is asked with ResolveOwnerAsync, so the reviewer can be recorded as its creator person.
+        _ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RecordOwnershipContext context, CancellationToken _) =>
+                RecordOwnerResolution.Owned(TeamId) with { CreatedByPerson = context.RequestedBy?.SystemUserId });
 
         // Task 146: linking the document files it under the invoice — a reparent through the resolver, which runs the
         // create + link as its change. This pass-through applies the change and answers the matter's team.
@@ -109,6 +111,38 @@ public class InvoiceReviewWritePathTests
         result.StatusUrl.Should().Be($"/api/finance/jobs/{result.JobId}/status");
         result.ExtractionAlreadyQueued.Should().BeFalse();
         _submitted.Should().ContainSingle().Which.IdempotencyKey.Should().Be($"invoice-extraction-{result.InvoiceId}");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Confirm_RecordsTheReviewerOnTheAppCreatedInvoice_OnlyWhenTheEndpointNamedThem(bool named)
+    {
+        // Task 146 c1-r1 (owner round 13 item 9): the invoice is created by the application, so the reviewer the endpoint
+        // names (from the signed-in caller, never the body) is recorded as sprk_createdbyperson.
+        var reviewer = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000f1");
+        var request = NewRequest() with { RequestedBy = named ? RecordRequester.Of(reviewer) : null };
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+
+        await Sut().ConfirmInvoiceAsync(request, "corr-c1r1");
+
+        var create = _records.Writes.Should().Contain(w => w.Kind == WriteKind.Upsert && w.Entity == "sprk_invoice").Subject;
+        if (named)
+            create.Fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind").WhoseValue.Should().Be($"/systemusers({reviewer:D})");
+        else
+            create.Fields.Keys.Should().NotContain(k => k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Confirm_TheReviewerIsNeverBoundFromTheRequestBody()
+    {
+        var body = "{\"documentId\":\"" + Guid.NewGuid() + "\",\"matterId\":\"" + Guid.NewGuid() + "\",\"vendorOrgId\":\""
+                   + Guid.NewGuid() + "\",\"requestedBy\":{\"systemUserId\":\"" + Guid.NewGuid() + "\"}}";
+        var bound = System.Text.Json.JsonSerializer.Deserialize<InvoiceReviewConfirmRequest>(
+            body, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+
+        bound.RequestedBy.Should().BeNull("a client never chooses who created a record");
     }
 
     [Fact]
@@ -205,7 +239,7 @@ public class InvoiceReviewWritePathTests
 
         await Sut().ConfirmInvoiceAsync(request, "corr-3");
 
-        _ownership.Verify(o => o.ResolveOwningTeamAsync(
+        _ownership.Verify(o => o.ResolveOwnerAsync(
             It.Is<RecordOwnershipContext>(c =>
                 c.TargetEntityLogicalName == "sprk_matter"
                 && c.TargetRecordId == request.MatterId
@@ -219,8 +253,8 @@ public class InvoiceReviewWritePathTests
     {
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId);
-        _ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+        _ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoDefaultOwnerTeam, "no default team"));
 
         var act = () => Sut().ConfirmInvoiceAsync(request, "corr-4");
 
@@ -541,7 +575,7 @@ public class InvoiceReviewWritePathTests
         failure.InvoiceId.Should().BeNull("the other matter's invoice was never authorized for this caller");
         failure.Message.Should().NotContain(otherInvoice.ToString()).And.NotContainEquivalentOf(otherInvoice.ToString("N"));
         _records.Writes.Should().BeEmpty();
-        _ownership.Verify(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ownership.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

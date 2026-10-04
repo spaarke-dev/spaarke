@@ -28,8 +28,12 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// where the resolver keeps the creator (unfiled communications/threads, E1/E2), per-user tables, and tables with no
 /// user/team ownership. <c>email.draft</c> takes it for a filed draft (an unfiled draft keeps its creator, E1).
 /// Reads and deletes stay user-OBO, and so does an update's PATCH. The update tool's re-file owner assignment
-/// (<c>DataverseUpdateRecordHandler</c> → <c>ReparentAsync</c>) is app-only under task 146's separate path-A exception
-/// (note §12c), which this amendment does not supersede.</para>
+/// (<c>DataverseUpdateRecordHandler</c> → <c>ReparentAsync</c>) is app-only too, and since owner round 13 item 7
+/// (2026-10-03) it is folded into the same path-B amendment ("as round 8 did for 156's re-stamp"); the path-A record of
+/// task 146 note §12c is superseded for it.</para>
+/// <para><b>Who asked (task 146 c1-r1, owner round 13 item 9).</b> The app-only create records the caller as the row's
+/// creator person (<c>sprk_createdbyperson</c>), so F3's "or the creator" branch admits them; a caller-supplied value for
+/// that column is refused like the owner.</para>
 /// <para><b>What "as the user" covers</b> — everything a run-as-user create would have had Dataverse check, so the
 /// app-only create grants nothing the caller lacks: (1) the table's Create privilege, and Append when the row sets a
 /// lookup, by the privilege names the table's own metadata declares (activity tables share <c>prvCreateActivity</c>);
@@ -239,8 +243,14 @@ internal static class OwnedChildWrite
         if (!check.Succeeded)
             return check;
 
+        // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
+        // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(ParentsOf(item), callerObjectId, me.SystemUserId), ct).ConfigureAwait(false);
+            RecordOwnershipContext.ForParents(ParentsOf(item), callerObjectId, me.SystemUserId) with
+            {
+                RequestedBy = RecordRequester.Of(me.SystemUserId),
+            },
+            ct).ConfigureAwait(false);
         if (!owner.IsOwned)
             return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
 
@@ -262,6 +272,7 @@ internal static class OwnedChildWrite
 
         var fields = BodyFields(item.JsonBody);
         fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
+        owner.StampCreatorOn(fields, table);
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
@@ -279,7 +290,9 @@ internal static class OwnedChildWrite
         IReadOnlySet<string>? serverSetLookupColumns,
         CancellationToken ct)
     {
-        var serverOwned = item.Columns.FirstOrDefault(ServerOwnedColumns.Contains);
+        // The creator person (task 133 / 146 c1-r1) is the server's to stamp, like the owner: a caller never chooses who
+        // created a record.
+        var serverOwned = item.Columns.FirstOrDefault(c => ServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c));
         if (serverOwned is not null)
         {
             return new Outcome

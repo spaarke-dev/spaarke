@@ -130,7 +130,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fx.ChatRepo.Bound.Should().BeEmpty();
     }
@@ -154,7 +154,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -195,7 +195,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "an already-promoted session must not be re-parented to a second Analysis");
     }
@@ -230,7 +230,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -267,7 +267,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
 
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(documentId, "Compensating Promote", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(documentId, "Compensating Promote", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _fx.EntityServiceMock.Verify(
             e => e.DeleteAsync("sprk_analysis", AnalysisPromoteEndpointTestFixture.AnalysisId, It.IsAny<CancellationToken>()),
@@ -297,7 +297,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
         fetched!.HostContext.Should().BeNull("a casual chat has no Analysis-owned HostContext by default");
 
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "a loose/ad-hoc chat session must NEVER auto-create an sprk_analysis record");
     }
@@ -347,7 +347,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
                 It.IsAny<Guid?>(),
                 It.Is<AnalysisRegardingTarget?>(t => t != null && t.EntityLogicalName == "sprk_matter" && t.RecordId == matterId),
                 It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()),
+                It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "a regarding-anchored promotion must forward the target and allow a document-less analysis");
 
@@ -384,7 +384,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 }
@@ -511,7 +511,7 @@ public sealed class AnalysisPromoteEndpointTestFixture : IAsyncLifetime, IDispos
     {
         AnalysisServiceMock
             .Setup(s => s.CreateAnalysisAsync(
-                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AnalysisId);
     }
 

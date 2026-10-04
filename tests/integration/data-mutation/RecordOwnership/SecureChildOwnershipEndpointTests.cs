@@ -300,6 +300,23 @@ public class SecureChildOwnershipEndpointTests
     }
 
     [Fact]
+    public async Task EventCreate_RecordsTheCallerAsThePersonWhoAsked_OnTheEventAndItsLogRow()
+    {
+        // c1-r1 (owner round 13 item 9): the create is app-only (createdby = the application), so the signed-in caller —
+        // looked up by their object id — is recorded as sprk_createdbyperson on both rows.
+        var callerSystemUser = Guid.Parse("c1c1c1c1-0000-4000-8000-000000000146");
+        var world = World().WithUser(callerSystemUser, Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId), Directory.ChildBu);
+        await using var host = await EventsHost.StartAsync(world.Resolver());
+
+        var response = await host.SendAsync(Authenticated(HttpMethod.Post, "/api/v1/events",
+            new { subject = "Filing deadline", regardingRecordType = 0, regardingRecordId = SecureProject }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Events.Creates.Should().ContainSingle().Which.CreatedByPersonId.Should().Be(callerSystemUser);
+        host.Events.LogPersons.Should().Equal(callerSystemUser);
+    }
+
+    [Fact]
     public async Task EventCreate_RegardingAFlaggedButNotIsolatedProject_Is409_AndCreatesNothing()
     {
         await using var host = await EventsHost.StartAsync(World().Resolver());
@@ -448,6 +465,9 @@ public class SecureChildOwnershipEndpointTests
         public List<Spaarke.Dataverse.CreateEventRequest> Creates { get; } = new();
         public List<Guid?> LogOwners { get; } = new();
 
+        /// <summary>The creator person each log row was written with (task 146 c1-r1).</summary>
+        public List<Guid?> LogPersons { get; } = new();
+
         public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default) =>
             Task.FromResult(Existing is { } e && e.Id == id ? e : null);
 
@@ -463,9 +483,12 @@ public class SecureChildOwnershipEndpointTests
             return Task.FromResult((Guid.NewGuid(), DateTime.UtcNow));
         }
 
-        public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, CancellationToken ct = default)
+        public Task<Guid> CreateEventLogAsync(
+            Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null,
+            CancellationToken ct = default)
         {
             LogOwners.Add(owningTeamId);
+            LogPersons.Add(createdByPersonId);
             return Task.FromResult(Guid.NewGuid());
         }
 

@@ -223,7 +223,8 @@ public sealed class MessageAttachmentMaterializer
         // The attachment document + its link row are content of the message: owned like it (the named Secure team's
         // for a secure message; the creator while the message is unfiled, E1).
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", request.CommunicationId),
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", request.CommunicationId)
+                with { RequestedBy = request.RequestedBy }, // task 146 c1-r1 — the sender, when the caller knows them
             cancellationToken);
         if (owner.IsRefused)
         {
@@ -390,6 +391,12 @@ public sealed record MaterializeAttachmentRequest
 {
     /// <summary>The parent <c>sprk_communication</c> (message) record id the attachment belongs to.</summary>
     public required Guid CommunicationId { get; init; }
+
+    /// <summary>
+    /// The person who sent the attachment (task 146 c1-r1, owner round 13 item 9): recorded on the document and link row
+    /// the application creates. <c>null</c> when the caller acts for nobody. Server-set; never bound from a body.
+    /// </summary>
+    public Sprk.Bff.Api.Services.Dataverse.RecordRequester? RequestedBy { get; init; }
 
     /// <summary>File name including extension. Sanitized before it becomes the SPE upload path.</summary>
     public required string FileName { get; init; }

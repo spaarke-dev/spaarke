@@ -52,7 +52,7 @@ public sealed class SecureChildOwnershipAnalysisForkTests : IClassFixture<Analys
             "the analysis is a child of its document — the resolver decides from it");
         _fx.AnalysisServiceMock.Verify(s => s.CreateAnalysisAsync(
             documentId, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<CancellationToken>()), Times.Once);
+            RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class SecureChildOwnershipAnalysisForkTests : IClassFixture<Analys
             .Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
         _fx.AnalysisServiceMock.Verify(s => s.CreateAnalysisAsync(
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         _fx.ChatRepo.Archived.Should().BeEmpty();
     }
 }
@@ -113,7 +113,7 @@ public sealed class SecureChildOwnershipAnalysisPromoteTests : IClassFixture<Ana
             || r.Parents.Any(p => p.EntityLogicalName == "sprk_document" && p.RecordId == documentId));
         _fx.AnalysisServiceMock.Verify(s => s.CreateAnalysisAsync(
             documentId, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<CancellationToken>()), Times.Once);
+            RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class SecureChildOwnershipAnalysisPromoteTests : IClassFixture<Ana
             .Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
         _fx.AnalysisServiceMock.Verify(s => s.CreateAnalysisAsync(
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         _fx.ChatRepo.Bound.Should().BeEmpty();
     }
 }

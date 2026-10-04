@@ -682,12 +682,17 @@ public static class DataverseDocumentsEndpoints
             // user (the caller included) can read it. The body names no record, so the caller's business-unit
             // default owner team decides. OwningTeamId and Id are [JsonIgnore]d on the request, so the body can
             // no longer set either; the owner is decided here, server-side, or the create is refused.
-            var owningTeamId = await ownershipResolver.ResolveOwningTeamAsync(
+            //
+            // Task 146 c1-r1 (owner round 13 item 9): the caller is also recorded as the person who asked
+            // (sprk_createdbyperson) — this create is app-only, so createdby is the application user.
+            var owner = await ownershipResolver.ResolveOwnerAsync(
                 new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
                 {
                     CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
                 },
                 ct);
+            var owningTeamId = owner.IsOwned ? owner.OwningTeamId : null;
 
             if (owningTeamId is null)
             {
@@ -709,6 +714,7 @@ public static class DataverseDocumentsEndpoints
             }
 
             request.OwningTeamId = owningTeamId;
+            request.CreatedByPersonId = owner.CreatedByPerson;
 
             var documentId = await dataverseService.CreateDocumentAsync(request);
 

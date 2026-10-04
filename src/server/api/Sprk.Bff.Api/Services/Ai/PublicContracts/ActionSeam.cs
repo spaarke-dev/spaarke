@@ -105,7 +105,8 @@ public sealed class ActionSeam : IActionSeam
                 RegardingObjectType: request.RegardingObjectType,
                 OwnerId: request.OwnerId,
                 ActingUserId: request.ActingUserId,
-                AssignedToContactId: request.AssignedToContactId),
+                AssignedToContactId: request.AssignedToContactId,
+                RequestedBySystemUserId: request.RequestedBySystemUserId), // task 146 c1-r1
             cancellationToken);
 
         return new CreateTaskResult(true, taskId, null);

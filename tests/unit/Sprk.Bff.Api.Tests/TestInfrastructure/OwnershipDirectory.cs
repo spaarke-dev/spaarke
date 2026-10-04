@@ -229,6 +229,19 @@ internal sealed class OwnershipDirectory
         return this;
     }
 
+    private readonly HashSet<(string Entity, string Column)> _absentColumns = new();
+
+    /// <summary>
+    /// Task 146 c1-r1: <paramref name="entity"/> has no <paramref name="column"/> in this environment (its schema step has
+    /// not run). A query that SELECTS it faults as Dataverse's SDK does — <c>0x80041103</c>, QueryBuilderNoAttribute; an
+    /// every-column read simply returns rows without it.
+    /// </summary>
+    public OwnershipDirectory WithoutColumn(string entity, string column)
+    {
+        _absentColumns.Add((entity, column));
+        return this;
+    }
+
     public OwnershipDirectory WithUser(Guid systemUserId, Guid objectId, Guid businessUnit)
     {
         _users.Add((systemUserId, objectId, businessUnit));
@@ -250,6 +263,18 @@ internal sealed class OwnershipDirectory
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedEntities.Add(query.EntityName);
+        if (!query.ColumnSet.AllColumns
+            && query.ColumnSet.Columns.FirstOrDefault(c => _absentColumns.Contains((query.EntityName, c))) is { } absent)
+        {
+            throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault
+                {
+                    ErrorCode = unchecked((int)0x80041103),
+                    Message = $"'{query.EntityName}' entity doesn't contain attribute with Name = '{absent}'.",
+                },
+                new System.ServiceModel.FaultReason($"'{query.EntityName}' entity doesn't contain attribute with Name = '{absent}'."));
+        }
+
         var conditions = query.Criteria.Conditions.ToDictionary(
             c => c.AttributeName, c => c.Values.Single(), StringComparer.OrdinalIgnoreCase);
 

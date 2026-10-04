@@ -42,7 +42,11 @@ internal sealed record TaskActionInput(
     Guid? AssignedToContactId = null,
     /// <summary><c>sprk_finalduedate</c> — the OUTER bound, where <paramref name="ScheduledEnd"/>
     /// (<c>sprk_duedate</c>) is the target. Optional; defaulted so existing call sites are unaffected.</summary>
-    DateTime? FinalDueDate = null);
+    DateTime? FinalDueDate = null,
+    /// <summary>Task 146 c1-r1 (owner round 13 item 9): the systemuser who ASKED for the task (e.g. the user confirming
+    /// a proposal) — recorded as the app-created task's creator person. Distinct from <paramref name="ActingUserId"/>,
+    /// the person the task is FOR. Null: nobody asked (a playbook node) and nobody is recorded.</summary>
+    Guid? RequestedBySystemUserId = null);
 
 /// <summary>
 /// Session-agnostic core that builds a <c>sprk_event</c> (event type = Task) and creates it, preserving the
@@ -204,6 +208,7 @@ internal sealed class TaskActionCore
         var ownerContext = RecordOwnershipContext.ForChild(entity, regardingParent) with
         {
             CallerSystemUserId = input.OwnerId ?? input.ActingUserId,
+            RequestedBy = RecordRequester.Of(input.RequestedBySystemUserId), // task 146 c1-r1
         };
 
         // A Dataverse fault here PROPAGATES (it is not a refusal, PR #1045 F2) — the callers' own catch turns it into
@@ -228,6 +233,7 @@ internal sealed class TaskActionCore
         }
 
         entity["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+        owner.StampCreatorOn(entity); // task 146 c1-r1 — the person who asked, when one did
 
         // Task 152 (#1044 split agreed with word-add-in-r1): the task names the PERSON it is for. A supplied assignee
         // wins; otherwise the acting user's linked contact; otherwise the regarding parent's responsible internal

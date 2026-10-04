@@ -9,6 +9,10 @@
 > Fix round c1 (branch `task/uac-r2-146-c1`, owner rounds 10-11): §16 — moving a child OUT of a secure root needs F3
 > (round 10 item 7), through ONE helper shared with task 150's unsecure endpoint (§16c: the integration step); E1
 > accepted (round 10 item 8); every open escalation re-checked (§16d).
+> Fix round c1-r1 (branch `task/uac-r2-146-c1-r1`, the c1 verifier + owner round 13): §17 — the gate's fail-closed
+> rules pinned by tests and seeds; an impersonating playbook is asked F3 as that user (round 13 item 8); children the BFF
+> creates as the application record the person who asked (round 13 item 9: `sprk_createdbyperson` on 17 child tables,
+> schema step G146-6, a HARD pre-deploy gate); the update tool's re-file folded into path B (round 13 item 7).
 
 ## 1. Outcome
 
@@ -475,6 +479,10 @@ doubles are transport doubles that ADR-038 B1 rules out ("transport-level mock �
 the per-site census AND the owner-write census.
 
 ### 12c. CLAUDE.md §6.5 path A — S1 against the AI tool plane's "user-OBO" MUST
+
+> **Superseded in full, 2026-10-03.** The create scope by owner round 7 item 3 (path B, spec Amendment A-UAC146, §13b);
+> the update tool's re-file owner scope by **owner round 13 item 7** ("the update tool's re-file step is folded into ADR
+> path B, as round 8 did for 156's re-stamp"; §17a item 19). Kept below as the record of what path A covered.
 
 - **Spec rule in question**: spaarke-ai-architecture-redesign-r1, MUST "run user-OBO for all Dataverse tool access"
   (FR-P0-10: "no app-only Dataverse path reachable from AI").
@@ -1048,6 +1056,10 @@ the project hard gate "run both integration suites in full before a PR".
   `SpendSnapshotService`'s keyed `UpsertRequest`, which is already in `UnscannedWriters`.
 
 ### 14c. Item 7: the update tool's app-only owner assignment
+
+> **Superseded 2026-10-03 by owner round 13 item 7 (BINDING): the step below is folded into path B** — spec Amendment
+> A-UAC146 now covers it, and every place listed here was updated in c1-r1 (§17a item 19). The "owner option" at the end
+> of this section is answered.
 
 **What the code does.** `dataverse.update_record` re-files a CHILD row through `ReparentAsync`:
 1. The checks run as the caller: the row must be visible to them, and they must hold AppendTo on each record it moves
@@ -1708,3 +1720,347 @@ filing) cost no extra Dataverse read. S8 proves the check is not vacuous.
 - **Main session:** publish size and #1034 (AC13); the PR (AC16; text in §14e + §15e + §16h); the tool-description
   follow-up (§13b); task 133's `sprk_createdbyperson` stamp in the G5 create payload (§16c).
 - **Owner option, not a blocker:** fold the update tool's re-file step into path B (§14c).
+
+## 17. Fix round c1-r1 (2026-10-03, branch `task/uac-r2-146-c1-r1`)
+
+**Base.** `task/uac-r2-146-c1` @ `7e52f722d`. The owner decisions were read from `work/unified-access-control-r2`
+@ `d7d1af61b` (rounds 1-13): round 13 (2026-10-03) answers the c1 verifier's open questions. No live write was made.
+One READ-ONLY dry run of the new schema script ran against spaarkedev1 (§17e), plus two read-only metadata GETs and one read-only FetchXml query (§17e).
+
+### 17a. The items
+
+| # | Item (c1 verifier / owner round 13) | Disposition |
+|---|---|---|
+| 1 | The "secure but no nameable root → creator only" rule had no test (seeds A, K, L survived; L fails OPEN) | **Closed.** Resolver: a Secure-BU-owned message with no nameable secure root, moved to an ordinary matter, by a Full Access non-creator → refused `permission_unverifiable` (basis `SecureRecordUnidentified`, no rights asked, nothing written); by its creator → applied. Helper: `IncludesUnidentifiedSecureRecord` with empty `SecuredRecords` is never permitted for a non-creator, even a Full Access one; its creator is. Seeds A, K, L bite (§17g). |
+| 2 | The gate's depth-limit refusal had no test (seed B) | **Closed.** A document still under its secure project (so the answer stays secure and only the walk can see the move) leaves a parent document whose filing runs past `MaxLineageDepth` to ANOTHER secure matter → refused `record_owner_parent_unresolved` ("…whether the change leaves a secure record cannot be decided"), no F3 asked, nothing written. Seed B bites: without the refusal the move is applied with no F3 — the fail-open the verifier named. |
+| 3 | The gate's own `secureBu.Ambiguous` refusal looked dead (seed J) | **Proved reachable, kept, tested.** A communication cleared of its only parent keeps its creator (E1): the owner decision answers Unchanged WITHOUT reading business units, so the gate is the first to find two units named "Secure Record". Test: refused `record_owner_secure_bu_ambiguous` before any F3 question. Seed J bites (without it a Full Access holder moves the message out of a unit nobody can identify). |
+| 4 | `DataverseUpdateRecordHandler`'s `{ IsForbidden: true }` arm indistinguishable (seed G) | **Closed.** The distinction matters: an F3 refusal is an AUTHORIZATION answer, and the owner-refusal arm would tell the model "the record's owner could not be decided", which misdirects the user. The Write-only test pins the exact prefix `The update was NOT written. Moving this document out of the secure record it is filed under ends its secure protection. Only someone with Full Access` and the absence of "owner could not be decided". Seed G bites. |
+| 5 | `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-2/I-6 stale (AC12) | **Closed.** I-6: E1 "ACCEPTED by owner round 10 item 8" with the owner's words (was "pending owner confirmation"). I-2: the c1 F3 gate on a move out of a secure root (round 10 item 7), the c1-r1 impersonation and creator-person changes, path B for the update tool's re-file (round 13 item 7), G146-1 applied in dev. Header date 2026-10-03. |
+| 6 | `UpdateRecordActionCore` mislabelled "acts for no person" | **Superseded by item 20** (implemented: it is asked F3 as the impersonated user). Corrected writer table: §17c; behaviour change in the PR line §17l. |
+| 7 | INFO: the creator branch never fires for app-created children | **Closed by item 21** (owner round 13 item 9). |
+| 8 | INFO: a child under TWO secure roots that leaves one is treated as leaving a root | **Recorded explicitly** (§17d). |
+| 9-12 | Verified | No action. |
+| 13-15 | Criteria not met (round-10 "seed fails", AC12, AC17) | Closed by items 1, 2, 5 and §17f's test-scope line. |
+| 16 | Pending main session (AC13, AC16, AC11, AC14) | Unchanged; §17j. |
+| 17 | Round 13 item 3: G146-3 and G146-5 are covered by round 11 | **Recorded** (§17i). §16d's "main session to confirm" row is answered. |
+| 18 | Round 13 item 6: keep the shared F3 helper's behaviour; it supersedes 150's private check at integration | **Recorded.** §16c's four behaviour differences are ACCEPTED as built (a missing creator column → 403 `permission_unverifiable`; a Full Access holder is admitted when the creator read fails). At integration 150's `RefuseUnlessPermittedToRemoveAsync` becomes §16c's call, so exactly one F3 check remains. |
+| 19 | Round 13 item 7: fold the update tool's re-file into ADR path B | **Done.** spaarke-ai-architecture-redesign-r1 `spec.md` (MUST-rule marker; Amendment A-UAC146 widened: "Rule amended", "Path", the re-file bullet now "covered by this amendment since 2026-10-03", the record list); `notes/user-obo-audit.md` header; `DataverseUpdateRecordHandler` XML doc; `OwnedChildWrite` remarks; write-path I-2; this note's §12c and §14c marked superseded; POML amendment R13. **No `.claude` ADR text is needed:** the rule amended is the project spec's MUST (FR-P0-10), not a `.claude/adr` rule — the same place round 8 put 156's re-stamp (Amendment A-UAC156 in the same spec). |
+| 20 | Round 13 item 8: an impersonating playbook is checked under F3 AS THAT USER | **Implemented** (§17b). |
+| 21 | Round 13 item 9: children the BFF creates as the application record the person who asked | **Implemented** (§17e). |
+
+### 17b. Item 20: F3 as the impersonated user
+
+`UpdateRecordActionCore` (the playbook update node and `IActionSeam.UpdateRecordAsync`, whose only impersonating callers
+are the Job B apply services `CommunicationProposalApplyService` / `CommunicationCreateTaskApplyService` — the confirming
+user) now passes `SecureExitCaller = SecureRemovalCaller.ForImpersonatedUser(person, IDataverseRecordShareService)` when
+the input impersonates a user:
+
+- **Who**: the systemuserid the PATCH itself runs as (MSCRMCallerID), server-resolved by the apply service from the
+  signed-in caller — never a body value.
+- **Rights**: `RetrievePrincipalAccess` bound to that user and asked AS that user (MSCRMCallerID), through
+  `DataverseWebApiService.RetrievePrincipalRightsAsync` on the existing record-access seam
+  (`IDataverseRecordShareService.GetPrincipalRightsAsync`). `403`/`404` are Dataverse's "cannot see it" → no rights
+  (`not_permitted`); any other failure THROWS → `permission_unverifiable` (500), never "allowed".
+- **Fail closed when the seam is missing**: the interface member's default body faults, and a scope without the seam
+  faults; both answer "could not be checked".
+- **Truly person-less stays refused**: an update that impersonates nobody passes no caller (unchanged).
+
+### 17c. The re-file writers and who they act for (replaces §16b's table and corrects its mislabel)
+
+| Writer | Caller for F3 |
+|---|---|
+| `PUT /api/v1/documents/{id}`, `associate-record`, `PUT /api/v1/events/{id}` | the HTTP caller (`SecureRemovalCaller.ForRequest`) |
+| `dataverse.update_record` | the chat caller (WhoAmI, RetrievePrincipalAccess on their token) |
+| `UpdateRecordActionCore` **impersonating a user** (Job B apply) | **that user** (c1-r1, round 13 item 8) |
+| `UpdateRecordActionCore` impersonating nobody (a playbook node) | none → a move out is refused (truly person-less) |
+| `DataverseUpdateHandler` (playbook output mapping, a background job) | none → refused (truly person-less) |
+| `IncomingAssociationResolver` (inbound filing) | none → refused (truly person-less; additive in practice) |
+| the thread JOIN (`ThreadResolver`, `CommunicationService`) and `InvoiceReviewService`'s document link | none. They only ADD parents (`InheritedParents`), so F3 is reached only in the "secure but no nameable root" case (a message leaving a secure record thread for an ordinary one), which then refuses — fail closed. `InvoiceReviewService` holds no caller identity, and its change never removes a parent. |
+
+### 17d. Two secure roots (c1 verifier item 8)
+
+A child under TWO secure roots that leaves ONE of them while staying under the other IS treated as leaving a root: F3 is
+asked on the root it leaves ("before minus after", §16b). This is the stricter reading of round 10 item 7 ("to no
+secure root, or to a different one"), chosen because round 11 item 4 gives a child under two roots the INTERSECTION of
+their sharee sets: leaving one root WIDENS the child's sharee set to the remaining root's, an un-secure toward everyone
+shared on that root only. Pinned by `Reparent_FromOneSecureRootToAnother_AsksF3OnTheRootItLeaves_NotTheOneItJoins` (the
+same rule covers the stay-under-one case). Owner-reversible; recorded for the owner.
+
+### 17e. Item 21: the person who asked, recorded on app-created children
+
+**Design (one owner, extended in place).**
+- `RecordOwnershipContext.RequestedBy` (`RecordRequester`: a systemuserid, else an Entra object id) — server-derived only.
+- `IRecordOwnershipResolver.ResolveOwnerAsync` resolves it AFTER the owner decision into
+  `RecordOwnerResolution.CreatedByPerson`: a systemuserid is taken as given (no read); an object id is looked up
+  (`systemuser.azureactivedirectoryobjectid`, TOP 2 — exactly one user, else nobody). An unknown person refuses NOTHING
+  (the row records nobody, so F3 admits only Full Access holders); a refused owner never reads it; a fault propagates.
+  `ResolveOwningTeamAsync` (team only) never reads it.
+- `RecordOwnerResolution.ApplyTo(Entity)` writes the person with the owner (also for Unchanged — who asked is a fact
+  about the create); `StampCreatorOn(Entity)` / `StampCreatorOn(IDictionary, table)` serve writers that write the owner
+  themselves. Both stamp only a table that carries the column (`RecordCreatorPerson.IsStamped`).
+- The shared seams (`Spaarke.Dataverse`) take the person as they take the owner team: `CreateDocumentRequest`,
+  `AnalysisOutputEntity` and `CreateEventRequest` gain `[JsonIgnore] CreatedByPersonId`; `CreateAnalysisAsync` and
+  `CreateEventLogAsync` gain an optional `createdByPersonId`; the artifact creates map a `CreatedByPersonId` property.
+  The column's names are spelled ONCE, in `Spaarke.Dataverse.RecordCreatorPersonColumn`; the BFF's
+  `RecordCreatorPerson.Column` / `TargetEntity` / `NavigationProperty` reference it.
+- **F3 reads it for children.** `ReparentAsync` takes it from the row's every-column read. When the row came back
+  without it and the table carries the column, it is read on its own: a table WITHOUT the column (schema not applied)
+  faults `0x80041103` → `CreatorPersonAnswer.ColumnAbsent` → `permission_unverifiable`, never "allowed" (main-session
+  condition 2, now for children); an empty column is a definite "nobody recorded". The code was MEASURED read-only
+  2026-10-03: a FetchXml query naming `sprk_createdbyperson` on `sprk_documents` answered
+  `{"code":"0x80041103","message":"'sprk_Document' entity doesn't contain attribute with Name = 'sprk_createdbyperson'…"}`
+  (the same query builder the SDK's QueryExpression uses). Any other fault → creator unreadable → 500 unverifiable.
+- **The navigation property** `sprk_CreatedByPerson` was READ live (read-only) on task 133's root relationships
+  (`RelationshipDefinitions(SchemaName='sprk_systemuser_sprk_matter_createdbyperson')` and the project one →
+  `ReferencingEntityNavigationPropertyName = sprk_CreatedByPerson`); the child script sets it explicitly and verifies it.
+
+**The child tables** (`RecordCreatorPerson.StampedChildTables`, 17) — every child/content table a census create writes
+(routed or seam), plus `sprk_spendsnapshot` (an unscanned keyed upsert): `sprk_document`, `sprk_todo`, `sprk_event`,
+`sprk_eventlog`, `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`,
+`sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_analysis`, `sprk_analysisoutput`, `sprk_emailartifact`,
+`sprk_attachmentartifact`, `sprk_fileversion`, `sprk_invoice`, `sprk_spendsignal`, `sprk_spendsnapshot`. All are in the
+codified Secure Record Owner child set (the census pins both directions). The six codified child tables the BFF never
+creates app-only (`sprk_memo`, `sprk_agreement`, `sprk_billingevent`, `sprk_budget`, `sprk_kpiassessment`,
+`sprk_reportcard`) are client-created (their `createdby` is the human), so they get no column.
+
+**Every app-create writer that acts for a person** (pinned per member by the census `PersonBearingWriters`; behaviour
+tests in §17f):
+
+| Writer | Person |
+|---|---|
+| `OwnedChildWrite.CreateAsync` (`dataverse.create_record`, filed `email.draft`) | the chat caller (WhoAmI); a caller-supplied `sprk_createdbyperson` is refused like the owner |
+| `POST /api/v1/documents` | the caller (oid) |
+| `POST /api/v1/events` and its log row; the event status / delete / complete / cancel log rows | the caller (oid). Delete / Complete / Cancel gained an `HttpContext` handler parameter. |
+| `POST /api/ai/analysis/create`, fork, promote | the caller |
+| `AnalysisResultPersistence` (profile outputs from `ExecutePlaybookAsync`; the review memo from `GenerateReviewMemo`) | the caller, handed in |
+| `ComposeCreateOnSavePromoter` | the saving user (oid) |
+| `DocumentCheckoutService.CreateFileVersionAsync` | the user checking out |
+| `CommunicationService` (shared-mailbox, user-mode and message sends; the archive .eml, attachment documents and rows; the on-demand archive) | the sender / the HTTP caller |
+| `EmailUploadCaptureService` | the Office user who saved the email |
+| `MessageAttachmentMaterializer` | `MaterializeAttachmentRequest.RequestedBy` (no production caller today; tests only) |
+| `ThreadResolver.CreateRecordThreadAsync` | the caller |
+| `CommunicationProposalApplyService` / `CommunicationCreateTaskApplyService` audit rows; the task the latter creates (`CreateTaskRequest.RequestedBySystemUserId`) | the confirming user |
+| `TaskActionCore` (via `ActionSeam.CreateTaskAsync`) | `RequestedBySystemUserId` when somebody asked (null for a playbook node) |
+| Office save (`OfficeService.SaveAsync` → `OfficeDocumentPersistence`, and carried on the job payload to `UploadFinalizationWorker`: the document, its artifacts, its attachment children) | the saving user (oid), carried with the team |
+| Office invoice quick-create, Office To Do | the Office user |
+| `InvoiceReviewService` (the G5 invoice confirm) | the reviewer (`InvoiceReviewConfirmRequest.RequestedBy`, `[JsonIgnore]`, set by the endpoint) |
+
+**Writers that act for NOBODY** (census `PersonLessWriters`, each with its reason): inbound mail and its attachments
+(`IncomingCommunicationProcessor`, `EmailAttachmentProcessor`), `MessagingIngestor` (inbound channel message, E1),
+participant indexing, enrichment review logs, `TodoGenerationService`, spend signals and snapshots, the observation
+mirror, `AppOnlyAnalysisService` (background profile), the external portal (`ExternalDataService`: the person is a
+CONTACT and the column names a systemuser), Direct threads (E2: owned by the caller themselves) and
+`DataverseUpdateHandler` (a re-file, not a create). Their rows record nobody, and F3 admits only Full Access holders for
+them.
+
+**Schema** (`scripts/Set-ChildRecordCreatorPersonSchema.ps1`, in the pattern of task 133's): dry run by default,
+`-Apply`, `-Verify`. It creates the lookup and relationship (cascade NoCascade, Delete RemoveLink; navigation property
+`sprk_CreatedByPerson` set and verified); reuses the SAME two field-security profiles task 133 created (it creates them
+only when absent); secures each column (reader read=4 on every BU default team; writer read/create/update=4 on the BFF
+app users only; any other writer FAILS); checks solution membership (a column or relationship counts as included when
+its table is in the solution with `rootcomponentbehavior = 0`, so the false negative batch 4 found in 133's verify is
+not repeated); and publishes.
+**Dry run, read-only, 2026-10-03, spaarkedev1:** 17 × WOULD create; both profiles OK with their members (2 BFF app users;
+6 default teams); the writer profile clean; 17 × WOULD secure; app-created rows with no person: document 416, todo 13,
+event 1, communication 254, thread 76, attachment 113, participant 238, review log 10, analysis 787, email artifact 65,
+attachment artifact 7, file version 33, the rest 0. **`-Apply` NOT run** (task brief).
+
+**Integration with task 133 (main session).**
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordCreatorPerson.cs` exists on BOTH branches → an add/add conflict.
+  This branch's file is 133's `task/uac-r2-133-c1-r2` file (blob `ab4c7069c`) plus the c1-r1 additions: `Column` and
+  `TargetEntity` reference `Spaarke.Dataverse.RecordCreatorPersonColumn`; `NavigationProperty`; `StampedChildTables`;
+  `IsStamped` widened to roots ∪ children; `Bind`; a remarks paragraph. `StampedTables` is untouched (133's
+  `RecordCreatorPersonSchemaAgreementTests` pins it against 133's script). **Resolve by taking this branch's file**, then
+  re-apply any change 133 made to its file after `fde7441f7`.
+- 133's interim app-only stamp in `DataverseCreateRecordHandler` (an update after an OBO create) is replaced, as the
+  batch-4 checklist already says: the G5 path stamps in the create payload (`OwnedChildWrite.CreateAsync`). Keep 133's
+  `RecordCreatorPerson.IsNamedIn` refusals in `ValidateChat` / `ExecuteChatAsync` (defense in depth beside the G5 path's
+  server-owned-column refusal). With `IsStamped` widened, the interim block must NOT survive the merge: it would
+  app-stamp run-as-user children too.
+- `RecordCreationService` (Office quick-create roots) and `WorkAssignmentEndpoints` keep 133's
+  `RecordCreatorPerson.Stamp` calls (unchanged API).
+- The c1 integration step "switch the resolver's `sprk_createdbyperson` constant to 133's" is DONE here: the resolver
+  reads `RecordCreatorPerson.Column`.
+
+### 17f. Tests
+
+**New** (each tests a rule or writer family named in the items; ADR-038: no `Mock<HttpMessageHandler>`, no
+DI-registration or constructor null-check tests):
+(Counts are test CASES; a Theory counts once per InlineData.)
+- `RecordOwnershipResolverTests` +12 (11 methods): the unidentified root by a Full Access non-creator (refused unverifiable) and by
+  its creator (applied); the gate's depth limit; the gate's ambiguous Secure BU; the requester by systemuserid (no read),
+  by object id (looked up), unknown or ambiguous (Theory ×2: records nobody, refuses nothing); a refused owner never reads
+  it; `ApplyTo` stamps a carrying table (owned and unchanged) and never a non-carrying one; F3 on a child whose table
+  LACKS the column (unverifiable) and on one that has it empty (not permitted).
+- `SecureDesignationRemovalTests` +2: an unidentified secure record is never permitted for a non-creator even with Full
+  Access (no probe asked); its creator is.
+- `SecureChildOwnershipTests` +5: the impersonated playbook update — Full Access (applied, asked as that user, PATCH
+  impersonated), Write-only (not_permitted, nothing written), nobody (unverifiable); `TaskActionCore` records the
+  requester only when somebody asked (Theory ×2). The record-thread create asserts the stamp.
+- `SecureChildOwnershipWriterTests` +3: a shared-mailbox send by a signed-in caller, an upload capture, an analysis
+  create record the person; the apply audit row asserts it.
+- `SecureChildOwnershipEndpointTests` +1: an event create records the caller on the event and its log row.
+- `SecureChildOwnershipAiToolTests` +1: a caller-supplied `sprk_createdbyperson` is refused. The G5 secure create asserts
+  the stamp; the Write-only move-out pins the F3 message prefix (item 4).
+- `SecureChildOwnershipComposeTests`: the promote asserts the stamp. `OfficeRecordOwnershipTests`: the save (the document,
+  and the payload carried to the worker), the To Do and the invoice assert it.
+- `EventEndpointsMembershipPublishingTests` +2 (Theory): the event payload binds the person only when there is one.
+- `InvoiceReviewWritePathTests` +3: the invoice create binds the reviewer only when named (Theory ×2); the reviewer is
+  never bound from the body.
+- `ChildRecordCreatorPersonSchemaAgreementTests` (new file, 7): the child script ↔ `RecordCreatorPerson` (column, schema
+  name, navigation property, target, tables = `StampedChildTables`, secured), plus the parser on a seed and 5 drifts.
+- `RecordOwnerAssignmentCensusTests` +3: every census child table carries the column and stays inside the codified set;
+  every person-bearing writer names its person (48 members) and the person-less list has no stale file; a negative
+  control.
+
+**Changed because the contract changed**: the mocks of `CreateAnalysisAsync` / `CreateEventLogAsync` gained the new
+argument (`It.IsAny<Guid?>()`, mechanically, 21 sites); two mocks stubbed `ResolveOwningTeamAsync` for paths that now ask
+`ResolveOwnerAsync` (POST documents, the invoice confirm); `RecordingEventService` records the log person;
+`RecordOwnershipResolverDouble` echoes the requester; `OwnershipDirectory.WithoutColumn` faults the way Dataverse does;
+the Office test auth handler accepts an optional `X-Test-Oid` header (a GUID oid, as in production; requests without it
+are unchanged); the AI tool's scripted metadata lists `sprk_createdbyperson` on `sprk_todo` (the post-schema shape).
+
+**Test scope (AC17).** Nothing beyond the resolver rules and the writer families. Three writers are not driven end to
+end and are pinned by the census `PersonBearingWriters` member check instead: `UploadFinalizationWorker` (Service Bus),
+the `DocumentCheckoutService` file version (raw `HttpClient`) and the `DataverseServiceClientImpl` seams
+(`ServiceClient`) — the same ADR-038 B1 limits §8/§11b recorded for their owners.
+
+### 17g. Seed-and-bite (c1-r1)
+
+Runner: `scratchpad/c1r1/seeds.py` (absolute paths; each plant restored from a byte copy, checked byte-identical, then
+touched). Every seed was run against the final source.
+
+| Seed | Plant | Caught by (failed / passed in the filtered run) |
+|---|---|---|
+| A | resolver: `unidentified` forced false | the unidentified-root Full Access non-creator test (1 / 87) |
+| K | resolver: `mayLeaveIsolation` forced false | the same test (1 / 87) |
+| L | helper: the unidentified-record clause dropped (fails OPEN) | the helper test and the resolver test (2 / 86) |
+| B | resolver: the gate's depth-limit refusal skipped | the depth-limit test (1 / 87) |
+| J | resolver: the gate's `secureBu.Ambiguous` refusal skipped | the ambiguous-Secure-BU KeepCreator test (1 / 87) |
+| G | update tool: the `IsForbidden` arm disabled | the Write-only F3 message-prefix test (1 / 32) |
+| P1 | void: the first plant did not compile (CS8519, a constant null never matches a pattern) | — |
+| P1b | `UpdateRecordActionCore`: an impersonating update passes no caller (person-less again) | both impersonated playbook tests, Full Access and Write-only (2 / 29) |
+| P2 | helper: the impersonated rights read answers Full Access without asking | the same two tests (2 / 29) |
+| C1 | resolver: `ApplyTo` stops stamping the person on an owned row | the `ApplyTo` test, the shared-mailbox send, the apply audit row (3 / 208) |
+| C2 | resolver: the requester never resolved | 11 tests: both resolver requester tests, the task core, the Compose promote, the record thread, the G5 to-do, the send, the upload capture, the analysis create, the audit row, the event create (11 / 209) |
+| C3 | resolver: F3 never reads the creator person for a child | the child-table-lacks-the-column test (1 / 87) |
+| C4 | `UploadFinalizationWorker`: the document record drops the carried person | the census person-bearing writer check (ArchTests, 1 / 28) |
+| C5 | `OwnedChildWrite`: a caller-supplied `sprk_createdbyperson` no longer refused | the AI tool refusal test (1 / 32) |
+| C6 | schema script: `sprk_invoice` dropped from the child tables | the child script agreement test (1 / 6) |
+| C7 | `BuildCreateEventPayload`: the person bind removed | the event payload Theory (1 / 34) |
+| C8 | `InvoiceReviewService`: the invoice stamp removed | the reviewer-stamp Theory (1 / 44) |
+| C9 | `InvoiceReviewConfirmRequest.RequestedBy` loses `[JsonIgnore]` | the never-from-the-body test (1 / 44) |
+
+Every seed except the void P1 bit (P1b replaces it). Each file was restored byte-identical and touched.
+
+### 17h. Placement and component justification (CLAUDE.md §10 / §11)
+
+- **No new service, endpoint, DI registration, option, job or package.**
+- **NEW COLUMN** `sprk_createdbyperson` on 17 child tables (+ a relationship each), created by a NEW schema script
+  `scripts/Set-ChildRecordCreatorPersonSchema.ps1`.
+  - **Existing:** task 133's same column on the three roots (`scripts/Set-RecordCreatorPersonSchema.ps1`); `createdby`;
+    `createdonbehalfby`; the "for" columns (`sprk_assignedto`, `sprk_sentby`).
+  - **Extension:** the SAME column, profiles and helper as 133, extended to the children (owner round 13 item 9 names
+    it). A second script rather than widening 133's: 133's script and its agreement test are on an unmerged branch and
+    pin the ROOT set; the two scripts share the profiles by name. `createdby` cannot serve (it is the application user
+    for an app-only create, and `createdonbehalfby` is empty); the "for" columns name who a record is FOR (a contact on
+    most tables), not who asked.
+  - **Cost of doing nothing:** F3's "or the creator" branch can never admit the person who made a BFF-created child (c1
+    verifier item 7): only Full Access holders could ever move a G5 create, an Office save, an outbound email or an
+    invoice out of a secure record, which round 13 item 9 rejects.
+- **New members on existing types** (no new owner of logic: every person still comes from the one resolver):
+  `RecordOwnershipContext.RequestedBy`; `RecordRequester` (a small record beside the context); `RecordOwnerResolution.
+  CreatedByPerson` / `StampCreatorOn`; the resolver's requester read and creator-column read; the `RecordCreatorPerson`
+  additions (above); `Spaarke.Dataverse.RecordCreatorPersonColumn` (one new static file: the column's spelling, shared
+  by the seams and the BFF so they cannot drift); `CreatedByPersonId` on `CreateDocumentRequest`,
+  `AnalysisOutputEntity`, `CreateEventRequest` and the upload job payload; an optional `createdByPersonId` on
+  `CreateAnalysisAsync` / `CreateEventLogAsync`; `CreateTaskRequest.RequestedBySystemUserId` /
+  `TaskActionInput.RequestedBySystemUserId`; `InvoiceReviewConfirmRequest.RequestedBy` (`[JsonIgnore]`);
+  `MaterializeAttachmentRequest.RequestedBy`; optional requester parameters on `CommunicationService`,
+  `AnalysisResultPersistence` and the Office persistence/queue methods; an `HttpContext` handler parameter on four routes
+  (analysis create; event delete, complete, cancel).
+- **Item 20:** `IDataverseRecordShareService.GetPrincipalRightsAsync` (+ `DataverseWebApiService.RetrievePrincipalRightsAsync`)
+  and `SecureRemovalCaller.ForImpersonatedUser`.
+  - **Existing:** `CallerRecordAccessProbe` asks RetrievePrincipalAccess with a bearer token a playbook does not hold;
+    `OwnedChildWrite.RightsOnAsync` uses the chat tool's OBO client; the share seam reads POA shares, not effective
+    rights.
+  - **Extension:** one member on the existing record-access seam (the ADR-010 testing seam over the concrete
+    `DataverseWebApiService`), impersonating through the existing `DataverseImpersonation` helper — the mechanism the
+    impersonated PATCH already uses. A default interface body (it faults) keeps the existing doubles unchanged and fail
+    closed.
+  - **Cost of doing nothing:** round 13 item 8 is unmet — a confirming user's Job B update that moves a child out of a
+    secure root is refused even when that user holds Full Access.
+- **ADR-002:** no plugin. **ADR-003:** an unknown person refuses nothing but records nobody; an absent column, a rights
+  fault and a missing seam are all "unverifiable". **ADR-010:** no new DI registration.
+- **Publish size:** not measured here (task brief).
+
+### 17i. Manual gates
+
+- **G146-6 (NEW; a HARD pre-deploy gate; owner round 13 item 9 approved the schema step as a dev live step).** A BFF
+  carrying c1-r1 WRITES `sprk_createdbyperson` on every app-created child it creates for a person, and Dataverse refuses a
+  create naming a missing column. Run BEFORE deploying this code, from a SHORT path, inside PowerShell (not `pwsh -File`):
+
+  ```powershell
+  # 1) dry run (read-only): expect 17 x WOULD create / secure, both profiles OK
+  & ./scripts/Set-ChildRecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
+      -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
+  # 2) apply
+  & ./scripts/Set-ChildRecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
+      -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply
+  # 3) verify: exit 0 ("VERIFY PASS")
+  & ./scripts/Set-ChildRecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
+      -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
+  # 4) per table, read-only: GET {entityset}?$select=_sprk_createdbyperson_value&$top=1 answers 200
+  ```
+  G146-4 then also confirms that one app-created child per family records the probe user in `sprk_createdbyperson`,
+  and that the probe user (Collaborate on the secure root) can move THEIR app-created child out of it while a second
+  Collaborate user cannot.
+- **G146-3 and G146-5 are covered by owner round 11's "all of them"** (owner round 13 item 3, 2026-10-03).
+- G146-1 (applied in dev 2026-10-03, `notes/batch4-live-gates-2026-10-03.md`) and G146-2 (done 2026-10-03): unchanged.
+  G146-4: after the deploy with 149, on TEST records (round 11).
+
+### 17j. Not closed (and why)
+
+- **Main session (AC13, AC16):** publish size and #1034; the PR (text: §14e + §15e + §16h + §17l).
+- **Live (AC11, AC14):** G146-6 (new, pre-deploy) and G146-4 (after the deploy with 149); G146-1/2 are done in dev; the 17
+  evidence entries in `config/secure-record-owner-role.json` are copied in at integration (batch-4 checklist).
+- **Integration:** task 150's F3 method (§16c, owner-accepted by round 13 item 6); task 133's `RecordCreatorPerson.cs`
+  add/add conflict and interim stamp (§17e).
+- **E2** stays with task 149. The tool-description follow-up (§13b) stays with the main session.
+
+### 17k. Counts
+
+Each suite was run once in full on the final source, after the seeds:
+
+- **BFF unit:** 14,427 passed / 12 failed / 54 skipped (14,493). All 12 failures were HttpClient timeouts
+  (`TaskCanceledException` after 2 to 12 minutes) under machine-wide contention: 7 concurrent testhosts and 268 dotnet
+  processes. Their 12 classes, re-run in isolation, passed 172 / 172. The classes: NdaSaveNo422Regression,
+  DocumentIdentityContract, OfficeVersionSaveAiRefreshPayload, ComposeFidelityRoundTripSeam, DocumentProfileContract,
+  ComposePhase1IngestSeam, OfficeQuickCreateProjectContract, OfficeSaveDocumentStampContract,
+  PredictMatterCostEvalHarness, InsightsSearchEndpointContract, InsightEndpointsContract and
+  InsightsAssistantEndpointContract.
+- **ArchTests:** 375 / 375.
+- **Sprk.Bff.Api.IntegrationTests:** 104 / 104.
+- **Spe.Integration.Tests:** 403 passed / 0 failed / 25 skipped (428).
+- **CVE:** `dotnet list package --vulnerable --include-transitive` reports no vulnerable packages, and no package
+  reference changed.
+- **Publish size:** not measured (task brief).
+
+### 17l. PR description addendum (append to §14e + §15e + §16h)
+
+> **c1-r1 (the c1 verifier and owner round 13):**
+> - **The re-file gate's fail-closed rules are pinned by tests and seeds:** a secure row whose secure root cannot be named
+>   admits only its creator; a filing deeper than the lineage limit refuses; an ambiguous Secure business unit refuses;
+>   the update tool words an F3 refusal as an authorization answer.
+> - **Behaviour change: a playbook that impersonates a user is checked under F3 AS THAT USER** (round 13 item 8;
+>   `RetrievePrincipalAccess` asked as the impersonated user). Before this round every playbook re-file out of a secure
+>   root was refused. Truly person-less writers (the playbook output mapping, a node impersonating nobody, inbound
+>   filing) are still refused.
+> - **Children the BFF creates as the application record the person who asked** (round 13 item 9): `sprk_createdbyperson`
+>   on 17 child tables, stamped by every app-create writer that acts for a person; F3's creator branch reads it (a table
+>   without it → unverifiable). **G146-6 (`scripts/Set-ChildRecordCreatorPersonSchema.ps1`) must run before this BFF
+>   deploys**, or every person-bearing app create of those tables fails.
+> - **Path B** (round 13 item 7): the update tool's app-only re-file steps are covered by spaarke-ai-architecture-redesign-r1
+>   Amendment A-UAC146; the path-A record is superseded.
+> - **Integration:** take this branch's `RecordCreatorPerson.cs` over task 133's (task note §17e); 150's F3 method calls
+>   the shared helper (§16c, owner-accepted).

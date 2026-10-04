@@ -241,6 +241,16 @@ public sealed record RecordOwnershipContext
     public UnfiledOwnership WhenUnfiled { get; init; } = UnfiledOwnership.ActingUserTeam;
 
     /// <summary>
+    /// The PERSON who asked for the row, when the BFF creates it as the application (task 146 c1-r1, owner round 13 item 9:
+    /// "children the BFF creates as the application record the person who asked"). The resolver turns it into a
+    /// <c>systemuserid</c> (<see cref="RecordOwnerResolution.CreatedByPerson"/>) and the writer stamps it with the owner
+    /// (<see cref="RecordOwnerResolution.ApplyTo"/>), so F3's "or the creator" branch can admit that person later. It
+    /// decides NOTHING about the owner. <c>null</c>: the writer acts for nobody (inbound mail, a background job), and the
+    /// row records no person.
+    /// </summary>
+    public RecordRequester? RequestedBy { get; init; }
+
+    /// <summary>
     /// For a CONTENT row hanging off its primary target (a review log, a participant row, an attachment row of a
     /// communication). When the target IS team-owned, the row resolves record-first from it like any child. When the
     /// target is NOT team-owned (it kept a user or application owner), the target's OWN parent lookups decide:
@@ -346,6 +356,30 @@ public sealed record RecordOwnershipContext
         TargetRecordId = parentId,
         KeepCreatorUnlessTargetIsTeamOwned = true,
     };
+}
+
+/// <summary>
+/// The person who asked for a row the BFF creates as the application (task 146 c1-r1) — by <c>systemuserid</c> when the
+/// path already resolved it, else by Entra object id (the resolver looks the user up, exactly as it does for an unfiled
+/// row's acting user). Server-derived only: never bound from a request body.
+/// </summary>
+public sealed record RecordRequester(Guid? SystemUserId, Guid? ObjectId)
+{
+    /// <summary>A requester from whatever the path holds; <c>null</c> when it holds neither id (the row records nobody).</summary>
+    public static RecordRequester? Of(Guid? systemUserId = null, Guid? objectId = null) =>
+        systemUserId is { } s && s != Guid.Empty
+            ? new RecordRequester(s, objectId is { } o && o != Guid.Empty ? o : null)
+            : objectId is { } oid && oid != Guid.Empty
+                ? new RecordRequester(null, oid)
+                : null;
+
+    /// <summary>A requester from an Entra object id held as text (a claim, a queued payload); <c>null</c> when it is not one.</summary>
+    public static RecordRequester? OfObjectId(string? objectId) =>
+        Guid.TryParse(objectId, out var oid) ? Of(objectId: oid) : null;
+
+    /// <summary>The signed-in caller of an HTTP request (their <c>oid</c> claim, the same one every route resolves).</summary>
+    public static RecordRequester? OfCaller(System.Security.Claims.ClaimsPrincipal? user) =>
+        OfObjectId(Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(user));
 }
 
 /// <summary>A reparent: an existing row whose parent lookups are about to change.</summary>
@@ -554,6 +588,36 @@ public sealed record RecordOwnerResolution(
     /// owner refusal — HTTP writers answer it with the unsecure endpoint's ProblemDetails, not the owner refusal's 409.</summary>
     public bool IsForbidden => IsRefused && SecureRemovalRefusal is not null;
 
+    /// <summary>
+    /// The <c>systemuserid</c> of the person who asked for the row (<see cref="RecordOwnershipContext.RequestedBy"/>), when
+    /// the context named one and it resolved to exactly one Dataverse user; <c>null</c> otherwise (task 146 c1-r1, owner
+    /// round 13 item 9). Written by <see cref="ApplyTo"/> / <see cref="StampCreatorOn(Entity)"/> as
+    /// <c>sprk_createdbyperson</c> on a table that carries it (<see cref="RecordCreatorPerson.IsStamped"/>).
+    /// </summary>
+    public Guid? CreatedByPerson { get; init; }
+
+    /// <summary>
+    /// Stamps <see cref="CreatedByPerson"/> on an SDK create payload when the row's table carries the column; does nothing
+    /// otherwise (no person, or a table without the column). Never call it for a refusal.
+    /// </summary>
+    public void StampCreatorOn(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (CreatedByPerson is { } person && person != Guid.Empty && RecordCreatorPerson.IsStamped(row.LogicalName))
+            RecordCreatorPerson.Stamp(row, person);
+    }
+
+    /// <summary>
+    /// <see cref="StampCreatorOn(Entity)"/> for a Web API create payload of <paramref name="entityLogicalName"/>
+    /// (<c>sprk_CreatedByPerson@odata.bind</c>).
+    /// </summary>
+    public void StampCreatorOn(IDictionary<string, object?> webApiFields, string entityLogicalName)
+    {
+        ArgumentNullException.ThrowIfNull(webApiFields);
+        if (CreatedByPerson is { } person && person != Guid.Empty && RecordCreatorPerson.IsStamped(entityLogicalName))
+            RecordCreatorPerson.Bind(webApiFields, person);
+    }
+
     /// <summary>A resolved team.</summary>
     public static RecordOwnerResolution Owned(Guid teamId) => new(RecordOwnerOutcome.Owned, teamId, null, null);
 
@@ -576,7 +640,8 @@ public sealed record RecordOwnerResolution(
     /// <summary>
     /// Writes this answer's owner onto a row about to be created: <c>ownerid</c> = the team when
     /// <see cref="IsOwned"/>; nothing when <see cref="RecordOwnerOutcome.Unchanged"/> (the row keeps its creator).
-    /// Never call it for a refusal — the writer must not write at all.
+    /// Never call it for a refusal — the writer must not write at all. Task 146 c1-r1: also stamps the person who asked
+    /// (<see cref="StampCreatorOn(Entity)"/>), whether or not the owner changes — who asked is a fact about the create.
     /// </summary>
     /// <exception cref="InvalidOperationException">The answer is a refusal.</exception>
     public void ApplyTo(Entity row)
@@ -586,6 +651,7 @@ public sealed record RecordOwnerResolution(
             throw new InvalidOperationException($"A refused owner ({RefusalCode}) cannot be applied to a new {row.LogicalName}.");
         if (IsOwned)
             row["ownerid"] = new EntityReference("team", OwningTeamId!.Value);
+        StampCreatorOn(row);
     }
 }
 
@@ -717,7 +783,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <inheritdoc />
     public async Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
     {
-        var resolution = await ResolveOwnerAsync(context, ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(context);
+        var resolution = await ResolveOwnerOnlyAsync(context, ct).ConfigureAwait(false);
         return resolution.IsOwned ? resolution.OwningTeamId : null;
     }
 
@@ -726,6 +793,50 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        var resolution = await ResolveOwnerOnlyAsync(context, ct).ConfigureAwait(false);
+        if (resolution.IsRefused || context.RequestedBy is not { } requester)
+            return resolution;
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked, recorded with the owner. It never changes the owner,
+        // and an unknown person refuses nothing — the row simply records nobody (F3 then admits Full Access holders only).
+        var person = await ResolveRequesterAsync(requester, ct).ConfigureAwait(false);
+        return person is { } id ? resolution with { CreatedByPerson = id } : resolution;
+    }
+
+    /// <summary>
+    /// The <c>systemuserid</c> of the person who asked: the one given, or the ONE Dataverse user whose
+    /// <c>azureactivedirectoryobjectid</c> is the object id given (TOP 2: two matches are ambiguous and name nobody). A
+    /// Dataverse fault propagates, as every resolver read does.
+    /// </summary>
+    private async Task<Guid?> ResolveRequesterAsync(RecordRequester requester, CancellationToken ct)
+    {
+        if (requester.SystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+            return systemUserId;
+
+        if (requester.ObjectId is not { } objectId || objectId == Guid.Empty)
+            return null;
+
+        var query = new QueryExpression(SystemUserEntity)
+        {
+            ColumnSet = new ColumnSet("systemuserid"),
+            TopCount = 2,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, objectId);
+
+        var users = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
+        if (users.Count == 1 && users[0].Id != Guid.Empty)
+            return users[0].Id;
+
+        _logger.LogWarning(
+            "The person who asked for a new row (Entra object id {ObjectId}) matches {Count} Dataverse users; the row records "
+            + "no creator person (task 146, owner round 13 item 9).", objectId, users.Count);
+        return null;
+    }
+
+    /// <summary>The owner decision alone — <see cref="ResolveOwnerAsync"/> without the person who asked.</summary>
+    private async Task<RecordOwnerResolution> ResolveOwnerOnlyAsync(RecordOwnershipContext context, CancellationToken ct)
+    {
         var parents = CollectParents(context);
 
         // ── 1. PREFERRED: the parents' business units (record-first, secure-if-any) ─────────────────────
@@ -965,12 +1076,42 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string CreatedByColumn = "createdby";
 
     /// <summary>
-    /// The server-stamped creator person, read by its LOGICAL NAME (task 133's <c>sprk_createdbyperson</c>; at integration
-    /// with task 133 this becomes <c>RecordCreatorPerson.Column</c>) — the F3 creator for a row the BFF created app-only.
-    /// Taken from the row's own every-column read: task 133 stamps the three roots only, and no CHILD table carries the
-    /// column, so for a child the creator is its <c>createdby</c> ("sprk_createdbyperson, else a human createdby").
+    /// Dataverse error <c>0x80041103</c> (QueryBuilderNoAttribute) as a signed 32-bit integer, which is how
+    /// <see cref="OrganizationServiceFault.ErrorCode"/> exposes it: a query named an attribute this table does not have.
+    /// Measured read-only against spaarkedev1 on 2026-10-03: a FetchXml query naming the column on a table without it
+    /// answered this code. Typed on the code, not the (localized) message — the house idiom
+    /// (<c>RecordContainerResolver.IsRecordNotFound</c>).
     /// </summary>
-    private const string CreatedByPersonColumn = "sprk_createdbyperson";
+    private const int AttributeDoesNotExistErrorCode = unchecked((int)0x80041103);
+
+    /// <summary>
+    /// The row's recorded creator person (<see cref="RecordCreatorPerson.Column"/>), read on its own because the
+    /// every-column read returned no value for it (task 146 c1-r1). A row with the column but no value is "nobody
+    /// recorded" (a definite answer); a table WITHOUT the column (its schema step has not run here) is
+    /// <see cref="Sprk.Bff.Api.Services.Access.CreatorPersonAnswer.ColumnAbsent"/> — "could not tell", never "allowed". Any other fault propagates to
+    /// the F3 helper, which reads it as "could not be checked".
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Services.Access.CreatorPersonAnswer> ReadCreatorPersonAsync(RecordReparent request, CancellationToken ct)
+    {
+        var query = new QueryExpression(request.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(RecordCreatorPerson.Column),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition($"{request.EntityLogicalName}id", ConditionOperator.Equal, request.RecordId);
+
+        try
+        {
+            var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            return Sprk.Bff.Api.Services.Access.CreatorPersonAnswer.Recorded(row?.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id);
+        }
+        catch (System.ServiceModel.FaultException<OrganizationServiceFault> fault)
+            when (fault.Detail?.ErrorCode == AttributeDoesNotExistErrorCode)
+        {
+            return Sprk.Bff.Api.Services.Access.CreatorPersonAnswer.ColumnAbsent;
+        }
+    }
 
     /// <summary>
     /// Owner round 10 item 7 (task 146 c1): the refusal to send when the re-file takes the row out from under a secure
@@ -1048,7 +1189,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     .ToArray(),
                 IncludesUnidentifiedSecureRecord = unidentified,
                 CreatedBy = current.GetAttributeValue<EntityReference>(CreatedByColumn)?.Id,
-                CreatedByPerson = current.GetAttributeValue<EntityReference>(CreatedByPersonColumn)?.Id,
+                CreatedByPerson = current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id,
+                // c1-r1 (owner round 13 item 9): a child table now carries the person too. The every-column read cannot
+                // tell "nobody recorded" from "this environment lacks the column", so when the row came back without it,
+                // the column is read on its own — an absent column is "could not tell" (unverifiable), never "allowed"
+                // (main-session condition 2, now for children as for roots). Asked only when nothing else admitted.
+                ReadCreatedByPersonAsync =
+                    RecordCreatorPerson.IsStamped(request.EntityLogicalName)
+                    && !current.Attributes.ContainsKey(RecordCreatorPerson.Column)
+                        ? token => ReadCreatorPersonAsync(request, token)
+                        : null,
             },
             ct).ConfigureAwait(false);
 

@@ -1412,6 +1412,275 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().BeEmpty();
     }
 
+    // ---- c1-r1: the gate's own fail-closed rules (verifier c1 items 1-3) ----
+
+    /// <summary>
+    /// A message held in the Secure Record business unit (owned by the named team) whose own columns name NO secure root:
+    /// it was secured by the record thread it joined, and its regarding names an ordinary matter. Moving it to another
+    /// ordinary matter takes it out of isolation, yet no secure root can be named whose Full Access could count.
+    /// </summary>
+    private static (FakeDirectory Directory, Guid MessageId, Guid OtherOrdinaryMatterId) UnidentifiedSecureMessageWorld(Guid createdBy)
+    {
+        var messageId = Guid.NewGuid();
+        var otherOrdinaryMatterId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", otherOrdinaryMatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_communication", messageId, SecureBu, owningTeam: SecureNamedTeam, extra: new()
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+                ["createdby"] = new EntityReference("systemuser", createdBy),
+            });
+        return (directory, messageId, otherOrdinaryMatterId);
+    }
+
+    private static RecordReparent MoveMessageTo(
+        Guid messageId, Guid matterId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller caller) => new()
+    {
+        EntityLogicalName = "sprk_communication",
+        RecordId = messageId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+        },
+        SecureExitCaller = caller,
+    };
+
+    [Fact]
+    public async Task Reparent_OfASecureBuRowWhoseSecureRootCannotBeNamed_ByAFullAccessNonCreator_IsRefusedUnverifiable()
+    {
+        // Item 1 (note §16b): "a row held in the Secure BU whose root cannot be named admits only its creator". Full Access
+        // on everything does not help: there is no secure record to ask it about.
+        var (directory, messageId, otherMatterId) = UnidentifiedSecureMessageWorld(createdBy: SomeoneElse);
+        var asked = new List<Guid>();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveMessageTo(messageId, otherMatterId, CallerHolding(FullAccess, asked: asked)),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue("leaving secure isolation is an un-secure (owner round 10 item 7)");
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        resolution.SecureRemovalRefusal!.Basis.Should().Be(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.SecureRecordUnidentified);
+        asked.Should().BeEmpty("no secure root can be named, so nobody's Full Access is asked");
+        applied.Should().BeFalse("refused BEFORE the change is written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_OfASecureBuRowWhoseSecureRootCannotBeNamed_ByItsCreator_IsApplied()
+    {
+        var (directory, messageId, otherMatterId) = UnidentifiedSecureMessageWorld(createdBy: CallerUserId);
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveMessageTo(messageId, otherMatterId, CallerHolding(Collaborate)),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        applied.Should().BeTrue();
+        directory.Assignments.Should().Equal(("sprk_communication", messageId, ChildTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheFilingLeftIsDeeperThanTheLineageLimit_RefusesUnresolved_NeverSkipsF3()
+    {
+        // Item 2: the document stays under the secure project (so the answer keeps it secure), but it also leaves a
+        // parent document whose filing runs past MaxLineageDepth to ANOTHER secure matter. Read as "no root there", the
+        // move would leave that matter with no F3 question at all (fail-open). The gate refuses instead.
+        var documentId = Guid.NewGuid();
+        var chain = Enumerable.Range(0, 6).Select(_ => Guid.NewGuid()).ToArray();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam, extra: new()
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+                ["sprk_parentdocument"] = new EntityReference("sprk_document", chain[0]),
+                ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+            });
+        for (var i = 0; i < chain.Length; i++)
+        {
+            var filing = i + 1 < chain.Length
+                ? new EntityReference("sprk_document", chain[i + 1])
+                : new EntityReference("sprk_matter", OtherSecureMatterId);
+            directory.WithRecord("sprk_document", chain[i], SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_parentdocument"] = filing });
+        }
+
+        var asked = new List<Guid>();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_parentdocument"] = null },
+                SecureExitCaller = CallerHolding(Collaborate, asked: asked),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("a filing left unread at the depth limit might hold a secure root");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.Reason.Should().Contain("levels").And.Contain("leaves a secure record");
+        asked.Should().BeEmpty();
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_WhenTheSecureBusinessUnitIsAmbiguous_RefusesBeforeF3_EvenForAKeepCreatorRow()
+    {
+        // Item 3: the gate's own ambiguity refusal is REACHABLE. A communication cleared of its only parent keeps its
+        // creator (E1), so the owner decision answers Unchanged without ever reading the business units; the gate is
+        // then the first to find two units carrying the Secure Record name. Without the refusal it would ask F3 on the
+        // flagged matter and a Full Access holder would move the message out of a unit nobody can identify.
+        var messageId = Guid.NewGuid();
+        var directory = Directory()
+            .WithBusinessUnit(Guid.NewGuid(), SecureBuName) // a second BU with the configured name
+            .WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_communication", messageId, SecureBu, owningTeam: SecureNamedTeam, extra: new()
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
+            });
+        var asked = new List<Guid>();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_communication",
+                RecordId = messageId,
+                ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingmatter"] = null },
+                WhenUnfiled = UnfiledOwnership.KeepCreator,
+                SecureExitCaller = CallerHolding(FullAccess, asked: asked),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureBusinessUnitAmbiguous);
+        asked.Should().BeEmpty("refused before F3 is asked");
+        applied.Should().BeFalse();
+    }
+
+    // ---- c1-r1, owner round 13 item 9: children the BFF creates as the application record the person who asked ----
+
+    [Fact]
+    public async Task ResolveOwner_RecordsTheRequesterNamedBySystemUserId_WithoutReadingAnyUser()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
+                with { RequestedBy = RecordRequester.Of(SomeoneElse) },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
+        resolution.CreatedByPerson.Should().Be(SomeoneElse);
+        directory.QueriedEntities.Should().NotContain("systemuser", "a systemuserid needs no lookup");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_LooksAnObjectIdRequesterUpAsTheirOneSystemUser()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
+                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+            CancellationToken.None);
+
+        resolution.CreatedByPerson.Should().Be(CallerUserId);
+        directory.UserKeyColumns.Should().Equal("azureactivedirectoryobjectid");
+    }
+
+    [Theory]
+    [InlineData(false)] // no Dataverse user carries the object id
+    [InlineData(true)]  // two do — ambiguous
+    public async Task ResolveOwner_ARequesterWhoIsNotExactlyOneUser_RecordsNobody_AndRefusesNothing(bool ambiguous)
+    {
+        var unknownOid = Guid.NewGuid();
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+        if (ambiguous)
+        {
+            directory.WithUser(Guid.NewGuid(), unknownOid, GeneralBu).WithUser(Guid.NewGuid(), unknownOid, GeneralBu);
+        }
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
+                with { RequestedBy = RecordRequester.Of(objectId: unknownOid) },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "an unknown person is not a reason to refuse the row");
+        resolution.CreatedByPerson.Should().BeNull("a row records nobody rather than a guess");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ARefusedOwner_NeverReadsTheRequester()
+    {
+        var directory = Directory(); // the named matter does not exist
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
+                with { RequestedBy = RecordRequester.Of(objectId: CallerOid) },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.CreatedByPerson.Should().BeNull();
+        directory.QueriedEntities.Should().NotContain("systemuser");
+    }
+
+    [Fact]
+    public void ApplyTo_StampsThePersonOnATableThatCarriesTheColumn_EvenWhenTheRowKeepsItsCreator_AndNowhereElse()
+    {
+        var owned = RecordOwnerResolution.Owned(ChildTeam) with { CreatedByPerson = CallerUserId };
+        var kept = RecordOwnerResolution.Unchanged("E1") with { CreatedByPerson = CallerUserId };
+        var document = new Entity("sprk_document");
+        var unfiledMessage = new Entity("sprk_communication");
+        var memo = new Entity("sprk_memo"); // a child table the BFF never creates app-only: it carries no column
+
+        owned.ApplyTo(document);
+        kept.ApplyTo(unfiledMessage);
+        owned.ApplyTo(memo);
+
+        document.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId);
+        unfiledMessage.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId,
+            "who asked is a fact about the create, whoever owns the row");
+        memo.Attributes.Should().NotContainKey(RecordCreatorPerson.Column, "Dataverse refuses a create naming a missing column");
+    }
+
+    [Fact]
+    public async Task Reparent_OfAChildWhoseTableLacksTheCreatorColumn_ANonCreatorIsUnverifiable_NeverNotPermitted()
+    {
+        // Main-session condition 2, now for children: a table without the column (its schema step has not run) is "could
+        // not tell who created it", never "nobody did".
+        var (directory, documentId) = SecureDocumentWorld();
+        directory.WithoutColumn("sprk_document", RecordCreatorPerson.Column);
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)), _ => Task.CompletedTask, CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        resolution.SecureRemovalRefusal!.Basis.Should().Be(Sprk.Bff.Api.Services.Access.SecureRemovalBasis.CreatorColumnAbsent);
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_OfAChildWithTheCreatorColumnButNobodyRecorded_ANonCreatorIsNotPermitted()
+    {
+        // Control for the test above: the column exists and is empty (a row created before the stamp) — a definite answer.
+        var (directory, documentId) = SecureDocumentWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)), _ => Task.CompletedTask, CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+    }
+
     // ---- Lineage depth limit (task 146 b2, verifier LOW) ----
 
     [Fact]

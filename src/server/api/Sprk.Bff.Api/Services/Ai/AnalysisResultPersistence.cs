@@ -104,12 +104,15 @@ public class AnalysisResultPersistence
     /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
     /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
     /// </summary>
+    /// <param name="requestedBy">Task 146 c1-r1 (owner round 13 item 9): the person who ran the profile, recorded on the
+    /// app-only analysis and output rows as their creator person; <c>null</c> when nobody did (a background profile).</param>
     public async Task<DocumentProfileResult> StoreDocumentProfileOutputsAsync(
         Guid analysisId,
         Guid documentId,
         string playbookName,
         Dictionary<string, string?> toolResults,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         try
         {
@@ -122,14 +125,15 @@ public class AnalysisResultPersistence
             // and falls to the outer catch.
             Guid dataverseAnalysisId;
             var owner = await _ownership.ResolveOwnerAsync(
-                analysisId != Guid.Empty
+                (analysisId != Guid.Empty
                     ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
                     {
                         TargetEntityLogicalName = "sprk_analysis",
                         TargetRecordId = analysisId,
                     }
                     : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                        new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }),
+                        new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }))
+                    with { RequestedBy = requestedBy },
                 cancellationToken);
 
             if (!owner.IsOwned)
@@ -157,6 +161,7 @@ public class AnalysisResultPersistence
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
                     owningTeamId: owner.OwningTeamId,
+                    createdByPersonId: owner.CreatedByPerson, // task 146 c1-r1
                     ct: cancellationToken);
             }
 
@@ -184,6 +189,7 @@ public class AnalysisResultPersistence
                         OutputTypeId = null,
                         SortOrder = sortOrder++,
                         OwningTeamId = owner.OwningTeamId,
+                        CreatedByPersonId = owner.CreatedByPerson, // task 146 c1-r1
                     };
 
                     await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
@@ -336,10 +342,13 @@ public class AnalysisResultPersistence
     /// <param name="memo">The assembled, self-contained memo (see <see cref="ReviewMemoAssembler"/>).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The new <c>sprk_analysisoutputid</c>.</returns>
+    /// <param name="requestedBy">Task 146 c1-r1 (owner round 13 item 9): the person who generated the memo, recorded on
+    /// the app-only output row as its creator person.</param>
     public async Task<Guid> PersistReviewMemoAsync(
         Guid analysisId,
         ReviewMemoDocument memo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         ArgumentNullException.ThrowIfNull(memo);
 
@@ -351,6 +360,7 @@ public class AnalysisResultPersistence
             {
                 TargetEntityLogicalName = "sprk_analysis",
                 TargetRecordId = analysisId,
+                RequestedBy = requestedBy,
             },
             cancellationToken);
         if (!owner.IsOwned)
@@ -379,6 +389,7 @@ public class AnalysisResultPersistence
             // output type needs the same treatment, or when rows exist and a rename is genuinely wanted.
             OutputTypeId = null,
             OwningTeamId = owner.OwningTeamId, // task 146
+            CreatedByPersonId = owner.CreatedByPerson, // task 146 c1-r1
         };
 
         var outputId = await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);

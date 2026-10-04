@@ -104,6 +104,21 @@ public class SecureChildOwnershipWriterTests
     }
 
     [Fact]
+    public async Task Send_ByASignedInCaller_RecordsThemAsThePersonWhoAsked_OnTheAppCreatedCommunication()
+    {
+        // c1-r1 (owner round 13 item 9): the communication is created by the application (createdby = the app), so the
+        // signed-in caller — looked up by object id — is recorded as sprk_createdbyperson. Owner unchanged.
+        var harness = new SendHarness(World().Resolver());
+
+        await harness.Service.SendAsync(SendFiledTo("sprk_matter", SecureMatter), harness.SignedInUser());
+
+        var communication = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        communication.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Directory.SecureNamedTeam);
+        communication.Attributes.Should().ContainKey("sprk_createdbyperson");
+        communication.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(Directory.CallerUserId);
+    }
+
+    [Fact]
     public async Task Send_FiledToAFlaggedButNotIsolatedProject_Is409BeforeTheSend_AndNothingIsSentOrCreated()
     {
         // Verifier item 10: the owner used to be decided after the email had gone, so a refusal left a delivered email
@@ -257,6 +272,20 @@ public class SecureChildOwnershipWriterTests
     }
 
     [Fact]
+    public async Task UploadCapture_RecordsTheSavingUserAsThePersonWhoAsked()
+    {
+        // c1-r1 (owner round 13 item 9): the Office user who saved the email, by object id.
+        var (capture, created) = UploadCapture(
+            World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)));
+
+        await capture.CaptureAsync(EmailSave("invoice", OrdinaryInvoice), Directory.CallerOid.ToString(), CancellationToken.None);
+
+        var row = created.Should().ContainSingle().Subject;
+        row.Attributes.Should().ContainKey("sprk_createdbyperson");
+        row.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(Directory.CallerUserId);
+    }
+
+    [Fact]
     public async Task UploadCapture_WhenItsFilingCannotBeBuiltForTheCreate_IsSkipped_AndNothingIsCreated()
     {
         var (capture, created) = UploadCapture(World().Resolver(), AncestorsOnceThenFailing(("sprk_regardingmatter", SecureMatter)));
@@ -380,7 +409,26 @@ public class SecureChildOwnershipWriterTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Analyses.Verify(a => a.CreateAnalysisAsync(
             documentId, "Review", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            Directory.SecureNamedTeam, It.IsAny<CancellationToken>()), Times.Once);
+            Directory.SecureNamedTeam, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AnalysisCreate_RecordsTheCallerAsThePersonWhoAsked()
+    {
+        // c1-r1 (owner round 13 item 9): the caller's object id (the fake auth's oid) resolves to their systemuser.
+        var documentId = Guid.NewGuid();
+        var callerSystemUser = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000a5");
+        await using var host = await AnalysisHost.StartAsync(World()
+            .WithUser(callerSystemUser, Guid.Parse("00000000-0000-0000-0000-000000000aaa"), Directory.ChildBu)
+            .WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam)
+            .Resolver());
+
+        var response = await host.Client.PostAsJsonAsync("/api/ai/analysis/create", new { name = "Review", documentId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Analyses.Verify(a => a.CreateAnalysisAsync(
+            documentId, "Review", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
+            Directory.SecureNamedTeam, callerSystemUser, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -394,7 +442,7 @@ public class SecureChildOwnershipWriterTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         host.Analyses.Verify(a => a.CreateAnalysisAsync(
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =====================================================================================
@@ -442,8 +490,11 @@ public class SecureChildOwnershipWriterTests
         await harness.Service.ApplyAsync(ApplyHarness.ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
 
         harness.TargetWrites.Should().Be(1);
-        harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_emailreviewlog")
-            .Which.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Directory.SecureNamedTeam);
+        var auditRow = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_emailreviewlog").Subject;
+        auditRow.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Directory.SecureNamedTeam);
+        // c1-r1 (owner round 13 item 9): the confirming user asked for the app-created audit row.
+        auditRow.Attributes.Should().ContainKey("sprk_createdbyperson");
+        auditRow.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(Directory.CallerUserId);
     }
 
     [Fact]
@@ -970,7 +1021,7 @@ public class SecureChildOwnershipWriterTests
         {
             Analyses.Setup(a => a.CreateAnalysisAsync(
                     It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-                    It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });

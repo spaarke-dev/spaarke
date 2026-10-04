@@ -54,6 +54,8 @@ public sealed class SecureChildOwnershipComposeTests
         row.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", Directory.SecureNamedTeam));
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(SecureMatter, "the copy inherits the filing");
         row.KeyAttributes.Should().ContainKey("sprk_graphitemid", "the SPE alternate key is not relaxed");
+        // c1-r1 (owner round 13 item 9): the saving user asked for the app-upserted row.
+        row.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(Directory.CallerUserId);
     }
 
     [Fact]

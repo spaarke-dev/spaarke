@@ -166,7 +166,9 @@ public static class ReviewMemoEndpoints
         Guid outputId;
         try
         {
-            outputId = await persistence.PersistReviewMemoAsync(analysisId, memo, cancellationToken);
+            outputId = await persistence.PersistReviewMemoAsync(
+                analysisId, memo, cancellationToken,
+                Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User)); // task 146 c1-r1
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
         {

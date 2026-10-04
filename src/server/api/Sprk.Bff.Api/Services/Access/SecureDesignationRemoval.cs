@@ -260,6 +260,23 @@ public sealed class SecureRemovalCaller
             (record, ct) => probe.GetCallerRightsAsync(
                 token, SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName), record.RecordId, ct));
     }
+
+    /// <summary>
+    /// The user a writer ACTS AS by impersonation (<c>MSCRMCallerID</c>) — a playbook update the confirming user approved
+    /// (task 146 c1-r1, owner round 13 item 8: "a playbook that impersonates a user is checked under F3 as that user; only
+    /// truly person-less writers are refused"). The identity is the one the write itself runs as; the rights are
+    /// <c>RetrievePrincipalAccess</c> asked AS that user (<see cref="IDataverseRecordShareService.GetPrincipalRightsAsync"/>).
+    /// A missing seam, or a read that fails, FAULTS the rights question — the rule answers it "could not be checked",
+    /// never "allowed".
+    /// </summary>
+    public static SecureRemovalCaller ForImpersonatedUser(Guid systemUserId, IDataverseRecordShareService? access) =>
+        new(
+            _ => Task.FromResult<Guid?>(systemUserId == Guid.Empty ? null : systemUserId),
+            (record, ct) => access is null
+                ? Task.FromException<AccessRights>(new InvalidOperationException(
+                    "No record-access seam is registered, so the impersonated user's rights cannot be read."))
+                : access.GetPrincipalRightsAsync(
+                    systemUserId, SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName), record.RecordId, ct));
 }
 
 /// <summary>How a <see cref="SecureDesignationRemoval"/> question was answered.</summary>

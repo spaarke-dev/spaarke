@@ -147,6 +147,47 @@ public class SecureDesignationRemovalTests
         decision.ReasonCode.Should().Be(SecureDesignationRemoval.NotPermittedReasonCode);
     }
 
+    /// <summary>
+    /// A secure record that cannot be named (c1-r1, verifier c1 item 1): there is no root to ask Full Access about, so the
+    /// Full Access branch must not be read as "every root granted it" — only the creator is admitted.
+    /// </summary>
+    private static SecureRemovalQuestion UnidentifiedOnly(SecureRemovalCaller caller) => new()
+    {
+        Caller = caller,
+        SecuredRecords = Array.Empty<SecuredRecordRef>(),
+        IncludesUnidentifiedSecureRecord = true,
+        CreatedBy = SomeoneElse,
+        ReadCreatedByPersonAsync = _ => Task.FromResult(CreatorPersonAnswer.Recorded(SomeoneElse)),
+    };
+
+    [Fact]
+    public async Task AnUnidentifiedSecureRecordWithNoNamedRoot_IsNeverPermitted_ForANonCreator_EvenWithFullAccess()
+    {
+        var probed = false;
+        var caller = new SecureRemovalCaller(_ => Task.FromResult<Guid?>(Me), (_, _) =>
+        {
+            probed = true;
+            return Task.FromResult(FullAccess);
+        });
+
+        var decision = await SecureDesignationRemoval.DecideAsync(UnidentifiedOnly(caller), CancellationToken.None);
+
+        decision.IsPermitted.Should().BeFalse("an empty list of roots is not Full Access on every root");
+        decision.ReasonCode.Should().Be(SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        decision.Basis.Should().Be(SecureRemovalBasis.SecureRecordUnidentified);
+        probed.Should().BeFalse("there is no record to ask about");
+    }
+
+    [Fact]
+    public async Task AnUnidentifiedSecureRecordWithNoNamedRoot_AdmitsItsCreator()
+    {
+        var decision = await SecureDesignationRemoval.DecideAsync(
+            UnidentifiedOnly(Caller(_ => Collaborate)) with { CreatedBy = Me }, CancellationToken.None);
+
+        decision.IsPermitted.Should().BeTrue();
+        decision.Basis.Should().Be(SecureRemovalBasis.Creator);
+    }
+
     [Fact]
     public async Task ARefusal_IsTheUnsecureEndpointsProblemDetails()
     {

@@ -145,6 +145,14 @@ public sealed record CreateTaskRequest
 
     /// <summary>A supplied assignee (contact) for <c>sprk_event.sprk_assignedto</c>. Never overwritten.</summary>
     public Guid? AssignedToContactId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 146 c1-r1 (owner round 13 item 9): the systemuser who ASKED for the task (the user
+    /// confirming a proposal), recorded as the app-created task's creator person (<c>sprk_createdbyperson</c>) so F3's
+    /// "or the creator" branch can admit them. Null when nobody asked. Distinct from <see cref="ActingUserId"/>, the
+    /// person the task is FOR.
+    /// </summary>
+    public Guid? RequestedBySystemUserId { get; init; }
 }
 
 /// <summary>Result of a <see cref="IActionSeam.CreateTaskAsync"/> call. <see cref="TaskId"/> is

@@ -257,7 +257,11 @@ public static class FinanceEndpoints
 
         try
         {
-            var result = await invoiceReviewService.ConfirmInvoiceAsync(request, correlationId, cancellationToken);
+            // Task 146 c1-r1 (owner round 13 item 9): the signed-in reviewer asked for the invoice the app creates.
+            var result = await invoiceReviewService.ConfirmInvoiceAsync(
+                request with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+                correlationId,
+                cancellationToken);
 
             logger.LogInformation(
                 "Invoice review confirmed. InvoiceId={InvoiceId}, JobId={JobId}, CorrelationId={CorrelationId}",

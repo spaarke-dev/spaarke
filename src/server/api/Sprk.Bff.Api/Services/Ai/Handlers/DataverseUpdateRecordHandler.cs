@@ -44,9 +44,11 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// must see the row and hold AppendTo on each record it is moved under, so a refusal never answers questions about
 /// records they cannot see. A row of any other table moved under a SECURE record is refused (it cannot be re-owned here).
 /// The app-only steps are the resolver's reads, the owner assignment and, if that assignment fails, the restore of the
-/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). They run under CLAUDE.md §6.5
-/// PATH A, task 146 note §12c, which stays in force for this tool. spaarke-ai-architecture-redesign-r1 spec Amendment
-/// A-UAC146 (path B, owner round 7 item 3) covers the two CREATE tools only, and records this exception beside it.
+/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). <b>CLAUDE.md §6.5 PATH B — owner
+/// round 13 item 7 (2026-10-03): "the update tool's re-file step is folded into ADR path B, as round 8 did for 156's
+/// re-stamp."</b> spaarke-ai-architecture-redesign-r1 spec Amendment A-UAC146 now covers this step beside the two CREATE
+/// tools; it supersedes the project-scoped path-A record (task 146 note §12c) for it. The caller's own PATCH stays
+/// user-OBO; F3 on a move out of a secure root is asked AS THE CALLER (task 146 c1).
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,

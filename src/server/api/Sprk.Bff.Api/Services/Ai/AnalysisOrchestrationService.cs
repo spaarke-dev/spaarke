@@ -990,7 +990,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 documentId,
                 playbook.Name ?? "Unknown",
                 structuredOutputs,
-                cancellationToken);
+                cancellationToken,
+                // Task 146 c1-r1 (owner round 13 item 9): the person who ran it, recorded on the app-only rows.
+                Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
 
             if (!storageResult.Success)
             {

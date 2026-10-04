@@ -59,6 +59,15 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the document (unified-access-control-r2 task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>: this create is app-only, so <c>createdby</c> is the BFF
+    /// application user. Resolved by the BFF from the request's own caller; <c>null</c> for a writer that acts for nobody
+    /// (inbound mail). 🔒 Never bound from a request body, for the same reason as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 /// <summary>
@@ -835,6 +844,14 @@ public class AnalysisOutputEntity
     /// </summary>
     [JsonIgnore]
     public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the output (task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>; <c>null</c> for a writer that acts for nobody. Never bound from
+    /// a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -969,6 +986,13 @@ public class CreateEventRequest
     /// </summary>
     [JsonIgnore]
     public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the event (task 146 c1-r1, owner round 13 item 9), bound as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/>: the create is app-only. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 
     /// <summary>
     /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /

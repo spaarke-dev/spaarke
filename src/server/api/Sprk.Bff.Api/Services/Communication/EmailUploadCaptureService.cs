@@ -110,7 +110,11 @@ public sealed class EmailUploadCaptureService
                 return null;
             }
 
-            var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
+            // Task 146 c1-r1 (owner round 13 item 9): the Office user who saved the email asked for the capture the
+            // application creates.
+            var owner = await _ownership.ResolveOwnerAsync(
+                ownershipContext with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId) },
+                ct);
             if (owner.IsRefused)
             {
                 // Best-effort writer (NFR-04): a refusal is a SKIPPED capture — nothing is written, the save proceeds
@@ -156,6 +160,8 @@ public sealed class EmailUploadCaptureService
             {
                 communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
             }
+
+            owner.StampCreatorOn(communication); // task 146 c1-r1 — the person who saved it
 
             var (communicationId, wasDuplicate) = await _communicationService
                 .CreateCommunicationRaceProofAsync(communication, email.InternetMessageId, ct);

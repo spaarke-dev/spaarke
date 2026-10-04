@@ -90,6 +90,14 @@ public record InvoiceReviewConfirmRequest
 
     /// <summary>Optional reviewer notes — written to the document's <c>sprk_invoicereviewnotes</c>.</summary>
     public string? Notes { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 146 c1-r1 (owner round 13 item 9): the reviewer confirming the invoice — set by the
+    /// endpoint from the signed-in caller, recorded as the app-created invoice's creator person. 🔒 Never bound from the
+    /// request body: a client never chooses who created a record.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RecordRequester? RequestedBy { get; init; }
 }
 
 /// <summary>
@@ -679,13 +687,15 @@ public class InvoiceReviewService : IInvoiceReviewService
     /// </summary>
     private async Task<Guid> CreateInvoiceRecordAsync(InvoiceReviewConfirmRequest request, CancellationToken ct)
     {
-        var ownerTeamId = await _ownership.ResolveOwningTeamAsync(
+        var invoiceOwner = await _ownership.ResolveOwnerAsync(
             new RecordOwnershipContext
             {
                 TargetEntityLogicalName = MatterEntity,
                 TargetRecordId = request.MatterId,
+                RequestedBy = request.RequestedBy, // task 146 c1-r1 — the reviewer, recorded on the app-created invoice
             },
             ct);
+        var ownerTeamId = invoiceOwner.IsOwned ? invoiceOwner.OwningTeamId : null;
 
         if (ownerTeamId is null || ownerTeamId == Guid.Empty)
         {
@@ -700,6 +710,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         var (matterName, matterNumber) = await ReadMatterNameAndNumberAsync(request.MatterId, ct);
         var fields = BuildInvoiceCreateFields(
             request, ownerTeamId.Value, vendorName, matterRecordTypeId, matterName, matterNumber);
+        invoiceOwner.StampCreatorOn(fields, InvoiceEntity);
 
         // A fresh GUID PATCHed without If-Match is a CREATE (Dataverse upserts) — the pattern this service has
         // always used, and the reason UpdateRecordFieldsAsync must keep its upsert semantics.

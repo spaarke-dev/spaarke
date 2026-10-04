@@ -326,7 +326,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
 
         // Task 146: the audit row is owned like its communication. Resolved BEFORE the task is created, so a refusal
         // (409) leaves no unaudited task behind.
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, ct).ConfigureAwait(false);
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false);
 
         // (6) CREATE the sprk_event via the blessed write core (Subject/Description/DueDate/Regarding/Owner). App-only:
         //     the facade exposes no impersonated create and ADR-013 forbids widening it (see class remarks); the
@@ -345,6 +345,8 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 // confirmer assigned it to when one was chosen, else the confirming user. (Verifier round 1 item 8:
                 // naming the CONFIRMER here made a task assigned to someone else "for" the confirmer too.)
                 ActingUserId = request?.AssignedTo ?? callerSystemUserId,
+                // Task 146 c1-r1 (owner round 13 item 9): the confirming user asked for the app-created task.
+                RequestedBySystemUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 
@@ -478,7 +480,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         }
 
         // Task 146: resolve the audit row's owner BEFORE the create (as the applied-proposal path does).
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, ct).ConfigureAwait(false);
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, callerSystemUserId, ct).ConfigureAwait(false);
 
         // (3) CREATE the sprk_event via the blessed write core (app-only create, same as the applied-proposal path —
         //     the confirming user is attributed via ownerid + the impersonated PATCH + the audit row).
@@ -494,6 +496,8 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 // Task 152: the person the task is FOR names it — the chosen assignee when one was given, else the
                 // confirming user (verifier round 1 item 8).
                 ActingUserId = request.AssignedTo ?? callerSystemUserId,
+                // Task 146 c1-r1 (owner round 13 item 9): the confirming user asked for the app-created task.
+                RequestedBySystemUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 
@@ -596,7 +600,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         }
 
         // Task 146: resolve the compensating audit row's owner BEFORE the cancel write.
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, ct).ConfigureAwait(false);
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, callerSystemUserId, ct).ConfigureAwait(false);
 
         // (2) Soft-cancel via the SAME blessed impersonated write core the create PATCH uses (String mapping →
         //     metadata-driven Choice coercion). Preserves the event + its audit trail; reversible. Impersonation is
@@ -860,11 +864,16 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     /// (the named Secure team's for a secure message), or the creator while the message is unfiled (E1). A REFUSAL is
     /// a 409 carrying the stable reason code; nothing has been written yet.
     /// </summary>
+    /// <remarks>Task 146 c1-r1 (owner round 13 item 9): the confirming user asked for the audit row the application
+    /// creates — it is recorded as the row's creator person.</remarks>
     private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveAuditRowOwnerAsync(
-        Guid communicationId, CancellationToken ct)
+        Guid communicationId, Guid callerSystemUserId, CancellationToken ct)
     {
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId),
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId) with
+            {
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(callerSystemUserId),
+            },
             ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {

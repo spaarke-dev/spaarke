@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -191,6 +192,76 @@ public class SecureChildOwnershipTests
     }
 
     // =====================================================================================
+    // Re-file — UpdateRecordActionCore (playbook update), c1-r1 / owner round 13 item 8:
+    // "a playbook that impersonates a user is checked under F3 AS THAT USER; only truly person-less writers are refused"
+    // =====================================================================================
+
+    private static readonly Guid ImpersonatedUser = Guid.Parse("13131313-0000-4000-8000-000000000008");
+
+    /// <summary>A document filed under the secure project, owned by the named team, created by someone else.</summary>
+    private static (Directory World, Guid DocumentId) SecureDocument()
+    {
+        var documentId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProject),
+                ["createdby"] = new EntityReference("systemuser", Guid.NewGuid()),
+            });
+        return (world, documentId);
+    }
+
+    private static UpdateRecordActionInput MoveToOrdinaryProject(Guid documentId, Guid? impersonate) => new(
+        "sprk_document", documentId, FieldMappings: null, LegacyFields: null,
+        Lookups: new[] { new RenderedLookup("sprk_project", "sprk_project", OrdinaryProject.ToString()) },
+        ImpersonateSystemUserId: impersonate);
+
+    [Fact]
+    public async Task PlaybookUpdate_ImpersonatingAFullAccessHolder_MovesTheDocumentOutOfItsSecureProject_AskedAsThatUser()
+    {
+        var (world, documentId) = SecureDocument();
+        var (core, writes, rights) = ActionCore(world.Resolver());
+        rights.Grant(ImpersonatedUser, SecureProject, FullAccessRights);
+
+        await core.UpdateAsync(MoveToOrdinaryProject(documentId, ImpersonatedUser), CancellationToken.None);
+
+        rights.Asked.Should().Equal(new[] { (ImpersonatedUser, "sprk_projects", SecureProject) },
+            "F3 is asked of the user the update impersonates, on the secure root the document leaves");
+        writes.Should().ContainSingle().Which.As.Should().Be(ImpersonatedUser, "the PATCH still runs as that user");
+        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task PlaybookUpdate_ImpersonatingAWriteOnlyHolder_IsRefusedNotPermitted_AndNothingIsWritten()
+    {
+        var (world, documentId) = SecureDocument();
+        var (core, writes, rights) = ActionCore(world.Resolver());
+        rights.Grant(ImpersonatedUser, SecureProject, CollaborateRights);
+
+        var act = () => core.UpdateAsync(MoveToOrdinaryProject(documentId, ImpersonatedUser), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode,
+                "a definite 'no' for that user — not 'could not be checked'");
+        writes.Should().BeEmpty("refused before the PATCH");
+        world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PlaybookUpdate_ImpersonatingNobody_IsTrulyPersonLess_AndRefusedUnverifiable()
+    {
+        var (world, documentId) = SecureDocument();
+        var (core, writes, rights) = ActionCore(world.Resolver());
+
+        var act = () => core.UpdateAsync(MoveToOrdinaryProject(documentId, impersonate: null), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        rights.Asked.Should().BeEmpty("nobody to ask about");
+        writes.Should().BeEmpty();
+    }
+
+    // =====================================================================================
     // Create — TaskActionCore (AI create-task: ActionSeam / CreateTaskNodeExecutor)
     // =====================================================================================
 
@@ -211,6 +282,27 @@ public class SecureChildOwnershipTests
         var owner = created.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid");
         owner.LogicalName.Should().Be("team");
         owner.Id.Should().Be(expectedTeam, "a task belongs with what it is filed against, never the supplied user");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CreateTask_RecordsThePersonWhoAskedForIt_OnlyWhenSomebodyDid(bool asked)
+    {
+        // c1-r1 (owner round 13 item 9): a task the application creates for a confirming user records them; a playbook node
+        // acting for nobody records nobody.
+        var (core, created) = TaskCore(World().Resolver());
+
+        await core.CreateAsync(
+            new TaskActionInput("Review", null, null, SecureMatter, "sprk_matter", OwnerId: null,
+                RequestedBySystemUserId: asked ? Directory.CallerUserId : null),
+            CancellationToken.None);
+
+        var row = created.Should().ContainSingle().Subject;
+        if (asked)
+            row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(Directory.CallerUserId);
+        else
+            row.Attributes.Should().NotContainKey(RecordCreatorPerson.Column);
     }
 
     [Fact]
@@ -252,9 +344,12 @@ public class SecureChildOwnershipTests
             Directory.CallerUserId, "Strategy", new RecordThreadAnchor("sprk_matter", SecureMatter.ToString(), "M"),
             CancellationToken.None);
 
-        var owner = created.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid");
+        var thread = created.Should().ContainSingle().Subject;
+        var owner = thread.GetAttributeValue<EntityReference>("ownerid");
         owner.LogicalName.Should().Be("team");
         owner.Id.Should().Be(Directory.SecureNamedTeam);
+        // c1-r1 (owner round 13 item 9): the team-owned thread records the caller who asked for it.
+        thread.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(Directory.CallerUserId);
     }
 
     [Fact]
@@ -516,6 +611,79 @@ public class SecureChildOwnershipTests
         var handler = new DataverseUpdateHandler(
             fields.Object, Mock.Of<IGenericEntityService>(), ownership, NullLogger<DataverseUpdateHandler>.Instance);
         return (handler, writes);
+    }
+
+    /// <summary>Full Access: Collaborate plus Delete (RecordShareLevels).</summary>
+    private const AccessRights FullAccessRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
+        | AccessRights.Delete;
+
+    /// <summary>Collaborate: Write without Delete — the Write holder F3 does not admit.</summary>
+    private const AccessRights CollaborateRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
+
+    /// <summary>
+    /// The playbook update core over the REAL resolver: the PATCH (and the user it impersonates) is captured at
+    /// <see cref="IFieldMappingDataverseService"/>; F3's "rights as that user" are answered by <see cref="RightsAsUser"/>,
+    /// registered in the scope the core resolves its services from.
+    /// </summary>
+    private static (UpdateRecordActionCore Core, List<(Guid? As, Dictionary<string, object?> Fields)> Writes, RightsAsUser Rights)
+        ActionCore(IRecordOwnershipResolver ownership)
+    {
+        var writes = new List<(Guid? As, Dictionary<string, object?> Fields)>();
+        var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        fields
+            .Setup(f => f.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
+                It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, f, _, impersonate) => writes.Add((impersonate, f)))
+            .Returns(Task.CompletedTask);
+
+        var rights = new RightsAsUser();
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
+            .AddSingleton(ownership)
+            .AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(rights)
+            .BuildServiceProvider();
+        var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(services);
+        return (new UpdateRecordActionCore(fields.Object, scopes, NullLogger.Instance), writes, rights);
+    }
+
+    /// <summary>
+    /// Dataverse's answer to "what may THIS user do on that record" (RetrievePrincipalAccess as the user), by stated
+    /// grants; every question is recorded. The share-writing members are never reached by these tests.
+    /// </summary>
+    private sealed class RightsAsUser : Sprk.Bff.Api.Services.Access.IDataverseRecordShareService
+    {
+        private readonly Dictionary<(Guid Principal, Guid Record), AccessRights> _grants = new();
+
+        public List<(Guid Principal, string EntitySet, Guid Record)> Asked { get; } = new();
+
+        public void Grant(Guid principal, Guid record, AccessRights rights) => _grants[(principal, record)] = rights;
+
+        public Task<AccessRights> GetPrincipalRightsAsync(
+            Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct = default)
+        {
+            Asked.Add((principalSystemUserId, entitySetName, recordId));
+            return Task.FromResult(_grants.TryGetValue((principalSystemUserId, recordId), out var granted)
+                ? granted
+                : AccessRights.None);
+        }
+
+        public Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task ModifyAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private static (TaskActionCore Core, List<Entity> Created) TaskCore(IRecordOwnershipResolver ownership)
