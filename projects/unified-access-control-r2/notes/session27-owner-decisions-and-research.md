@@ -416,6 +416,27 @@ These codes are emitted by `ProvisionProjectEndpoint` but have no client entry, 
    - Container or child steps that do not complete leave a PROVISIONED-but-incomplete record, which the existing re-entry branch completes.
    - The out-of-band path (rows written outside the BFF) stays with the job, which secures them (ADR-002 WP-5).
 
+## Owner round 32 (2026-10-04). BINDING. Task 158 Q2.
+
+The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "Path B: secure inline (Recommended)").
+- Amendment A-UAC146 (spaarke-ai-architecture-redesign-r1 spec) is EXTENDED: when the user-OBO `dataverse.update_record` re-files a record under a secure parent, it runs provisioning's app-only steps inline, right after the caller's own write.
+- Record the amendment text beside round 8 item 1 / round 13 item 7 in that spec. Mark 158's remarks ACCEPTED (no longer PROPOSED), and cite this round in the PR's §6.5 block.
+
+## Round 33 (2026-10-04). BINDING. Main-session decisions under round 15. Task 150's integration lane (R-150-1 to R-150-5).
+
+1. **R-150-1: Make Secure stays open to every Write holder.**
+   - Round 9 item 10 limits `/provision-project` on an UNFLAGGED record to its creator, and says "secure an existing record belongs to task 148's surface". Owner round 3b says that surface (the Make Secure ribbon) stays open to Write holders.
+   - So the request names the Make Secure transition (an explicit field, e.g. `transition: "make-secure"`), and the endpoint holds that path to the Write gate. The wizard's create-then-secure path keeps the creator rule. Both are tested, and the guard bites by seeding.
+   - The non-creator's own access after securing is exactly what owner round 27's copy says.
+2. **R-150-2: the Remove Secure confirmation.** Recommended wording, applying owner round 27's stance (adjust in UAT). ONE constant, pinned verbatim:
+   - **Title:** Remove the secure designation from this {record}?
+   - **Paragraph 1:** The {record} and its related records return to normal access: people who can see records in its business unit will be able to see them, and the individual sharing set up while it was secure is removed.
+   - **Paragraph 2:** To secure it again later, use Make Secure.
+   - **Buttons:** **Remove Secure** (primary) · **Cancel**
+3. **R-150-3:** the success lines ("This {record} is now secure." / "This {record} is no longer secure.") and the status-only fallback are accepted as written, adjustable in UAT.
+4. **R-150-4:** external-spa eslint and vitest come with task 140's merge, which adds their configs and a vitest runner. Re-run lint and vitest after 140 merges into the integration branch.
+5. **R-150-5:** an unknown skipped-principal reason code shows a generic per-person warning ("{name} was not given access to this project.") as well as the log entry. Never silent.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
