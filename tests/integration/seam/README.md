@@ -52,6 +52,34 @@ Files: `CredentialOrderingSeamTests`, `CredentialSelectionSeamTests`, `IdentityC
 > `tests/Spaarke.ArchTests/**`, a separate KEEP path since **ADR-038 Amendment A1** (2026-08-24). Behaviour
 > here; structure there.
 
+## Sub-category: `seam/Signals/**` — Dataverse-predicate seams
+
+**Established by**: `spaarke-ontology-platform-r1` task 021, 2026-10-04. Adjudicated here for the same reason as
+`seam/Auth/**`, so that these files do not inherit deletion protection **by accident**.
+
+The spine here is the Signal/Policy evaluation spine, driven end to end rather than shape-checked:
+
+```
+sprk_policy scope (PolicyScopeResolver) → sprk_policyversion.sprk_rulebody → PredicateCompiler
+                                        → ONE FetchXML query → Dataverse → the subjects for which the rule holds
+```
+
+**The bar.** A predicate fails silently: a broken anti-join returns every row or no row, and **both read as a
+working predicate**. So a test here MUST assert **membership AND non-membership** against known data (a positive
+case plus negative controls), and MUST include the empty-source case both ways. "It returned something" proves
+nothing.
+
+**Two kinds of file, both deletion-protected:**
+
+- **Branch seams** (`PolicyScopeResolverSeamTests`): real evaluation logic, Dataverse doubled at
+  `IGenericEntityService`. Run in CI.
+- **Live seams** (`SignalPredicateTests`): run the compiled query against a real environment and check the
+  compiler's allow-lists (joins, primary keys, read depth) against live metadata. This is the ADR-038 real-schema
+  pairing for every name the compiler hard-codes. **Opt-in, skip-via-return** (`SIGNALS_LIVE_DATAVERSE_URL`;
+  `SIGNALS_LIVE_CALLER_ID` to run as the evaluating principal), so a CI pass means *skipped*, not *verified*.
+  Live tests pin their clock to the seed's anchor rather than the wall clock, so seeded rows cannot age out of a
+  relative window and read as a regression.
+
 ## Rules (per ADR-038 + ADR-043)
 
 - **Real path, not mocked.** The binder, the completion engine, the output router, and the session

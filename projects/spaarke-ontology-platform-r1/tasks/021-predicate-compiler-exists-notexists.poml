@@ -4,7 +4,7 @@
     <title>The predicate compiler: exists plus notExists over a fixed window</title>
     <phase>2 Policy and rule bodies</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The one item in the project whose value is unproven, and the notExists half has no prior art anywhere in the repo.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -110,4 +110,15 @@
   <notes>spec.md FR-06, FR-07 and NFR-07. design.md section 8.0.1. THE RISK ITEM: serial, opus, xhigh. The acceptance criterion about an empty source table is deliberate, because a broken anti-join most often fails by returning every row or no row, and both read as a working predicate.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion date="2026-10-04" rigor="FULL" escalation-fired="false">
+    <summary>PredicateCompiler compiles an Existence rule body into ONE FetchXML query: exists = inner link-entity with the filter inside the link; notExists = outer link-entity with the filter in the ON clause plus a root null test on the linked primary key. The hand-written query was run on spaarkedev1 first; the compiler output is pinned byte-for-byte to it. Full evidence: notes/pathb-fetchxml-reference.md.</summary>
+    <real-data-result>Compiled from the live sprk_rulebody and run verbatim (pac org fetch, read-only, as the operator): 4 matters returned, namely REAL-2026-123456.01 (positive) plus PAT-477689, EMPL-307998 and Form D - 2023. Those three hold real fee/scope communications from 2026-09-29 with no budget revision, confirmed independently through Dataverse SQL. NC1 (b68299c6) and NC2 (d14d79f4) are not returned; narrowed per matter: .01 = 1 row, NC1 = 0, NC2 = 0. Empty exists source = 0 rows; empty notExists source = exactly the exists set (5), not 62.</real-data-result>
+    <acceptance>All 8 criteria met. Criterion 8: BFF builds with 0 warnings; full BFF unit suite "Passed! - Failed: 0, Passed: 14355, Skipped: 54, Total: 14409, Duration: 26 m 35 s" (uncontended, after the Step 9.5 fixes).</acceptance>
+    <quality-gates>Independent code-review + adr-check: pass with findings, no Critical, no section 6.5 conflict. High F1 (unverified join path) fixed with a closed VerifiedJoins list; F2, F3, F5, F6, F7, F8, F9, F11, F12, F15, F16, F17, F19, F21 and F22 fixed; F14 and F23 rejected with reasons; F10, F13 and F20 logged for task 030 and rule authors. Disposition table: notes/pathb-fetchxml-reference.md section 6.</quality-gates>
+    <not-observed>Not run as the writer principal 3121bf1b. The live seam test SignalPredicateTests is written but NOT yet run: the workstation DefaultAzureCredential (local tooling, not the app managed identity) could not obtain a token. Read depth is therefore asserted only from notes/security-roles.md section 9 until task 030 runs as the writer in the app. Boolean filter values (emitted as 1/0) are not exercised on real data.</not-observed>
+    <carried-to-030>Verify the evaluating principal's LIVE read depth for the subject and every clause entity, failing closed per policy (EvaluatorGlobalReadableEntities mirrors role configuration and can drift). Consider column-level security (F10). Page distinct results (order element is emitted).</carried-to-030>
+    <publish-size>Fresh worktrees, Compress-Archive, PDBs included, 212 files each side: master 62277d50a 45.66 MB; HEAD plus task 45.67 MB; task delta +8,189 bytes. CVE scan clean, csproj unchanged.</publish-size>
+    <coordinator-flag>Task 020's RuleBodySchemaValidatorTests.cs is still at the non-KEEP path tests/unit/Sprk.Bff.Api.Tests/Services/Signals/ (review F5); not moved here because it is another task's file.</coordinator-flag>
+  </completion>
 </task>
