@@ -3,8 +3,9 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// Schema scripts decide solution membership one way (unified-access-control-r2 batch 4 integration): every
-/// <c>scripts/Set-*Schema.ps1</c> that puts components into a solution answers "is it in the solution?" through
+/// Schema scripts decide solution membership one way (unified-access-control-r2 batch 4 integration): every top-level
+/// <c>scripts/*.ps1</c> with a <c>-Verify</c> mode that touches a solution (adds a component, creates under the
+/// solution header, or reads <c>solutioncomponents</c>) answers "is it in the solution?" through
 /// <c>scripts/common/DataverseSolutionMembership.ps1</c>, never through its own <c>solutioncomponents</c> read.
 /// </summary>
 /// <remarks>
@@ -16,18 +17,18 @@ namespace Spaarke.ArchTests;
 /// <para><b>MAINTENANCE PROCEDURE</b>: a failure names the script. Dot-source the helper
 /// (<c>. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')</c>), read membership with
 /// <c>Get-DvSolutionMembership</c> and decide each component with <c>Test-DvInSolution</c> (pass the owning table's
-/// MetadataId for a column, key or relationship). Never satisfy the test by renaming the script out of the
-/// <c>Set-*Schema.ps1</c> pattern.</para>
+/// MetadataId for a column, key or relationship). Never satisfy the test by dropping the script's <c>-Verify</c> mode or
+/// moving it out of <c>scripts/</c>.</para>
 /// <para>Per <c>tests/CLAUDE.md</c> "Structural fitness functions" this file is MAINTAIN-class.</para>
 /// </remarks>
 public class SchemaScriptSolutionMembershipGuardTests
 {
     private const string HelperPath = "scripts/common/DataverseSolutionMembership.ps1";
 
-    [Fact(DisplayName = "Schema scripts: every Set-*Schema.ps1 that adds solution components decides membership through the shared helper")]
+    [Fact(DisplayName = "Schema scripts: every verify-mode script that touches a solution decides membership through the shared helper")]
     public void EverySchemaScriptUsesTheSharedMembershipHelper()
     {
-        var scripts = Directory.GetFiles(Path.Combine(SourceScan.RepoRoot, "scripts"), "Set-*Schema.ps1", SearchOption.TopDirectoryOnly)
+        var scripts = Directory.GetFiles(Path.Combine(SourceScan.RepoRoot, "scripts"), "*.ps1", SearchOption.TopDirectoryOnly)
             .Select(path => (Path: "scripts/" + Path.GetFileName(path), Content: File.ReadAllText(path)))
             .ToList();
 
@@ -55,28 +56,40 @@ public class SchemaScriptSolutionMembershipGuardTests
     public void NegativeControl_FlagsAScriptWithItsOwnMembershipRead()
     {
         const string ownRead = """
+            param([switch]$Verify)
             Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id }
             $inSolution = @((Invoke-DvGet "solutioncomponents?`$select=objectid").value)
             """;
         const string headerOnly = """
+            param([switch]$Verify)
             Invoke-DvWrite POST 'EntityDefinitions' $body @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName }
             """;
         const string helperButOwnReadToo = """
+            param([switch]$Verify)
             . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
             $how = Test-DvInSolution -Membership $m -ComponentId $c.Id
             Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id }
             $rows = Invoke-DvGet "solutioncomponents?`$select=objectid"
             """;
 
-        var offenders = Offenders(new[] { ("a.ps1", ownRead), ("b.ps1", headerOnly), ("c.ps1", helperButOwnReadToo) });
+        const string verifyReadOnly = """
+            param([switch]$Verify)
+            $rows = Invoke-DvGet "solutioncomponents?`$select=objectid"
+            """;
 
-        Assert.Equal(3, offenders.Count);
+        var offenders = Offenders(new[]
+        {
+            ("a.ps1", ownRead), ("b.ps1", headerOnly), ("c.ps1", helperButOwnReadToo), ("d.ps1", verifyReadOnly),
+        });
+
+        Assert.Equal(4, offenders.Count);
     }
 
-    [Fact(DisplayName = "Schema scripts: positive control — a script using the helper, or touching no solution, passes")]
+    [Fact(DisplayName = "Schema scripts: positive control — a script using the helper, touching no solution, or with no verify mode passes")]
     public void PositiveControl_AcceptsAScriptUsingTheHelper()
     {
         const string usesHelper = """
+            param([switch]$Verify)
             . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
             $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
             $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
@@ -84,7 +97,9 @@ public class SchemaScriptSolutionMembershipGuardTests
             """;
         const string noSolution = "Invoke-DvWrite PATCH 'contacts(1)' @{ firstname = 'x' }";
 
-        Assert.Empty(Offenders(new[] { ("a.ps1", usesHelper), ("b.ps1", noSolution) }));
+        const string noVerifyMode = "$all = Invoke-DvGet \"solutioncomponents?`$select=objectid\" # an enumeration, not a gate";
+
+        Assert.Empty(Offenders(new[] { ("a.ps1", usesHelper), ("b.ps1", noSolution), ("c.ps1", noVerifyMode) }));
     }
 
     private static List<string> Offenders(IEnumerable<(string Path, string Content)> scripts)
@@ -93,8 +108,9 @@ public class SchemaScriptSolutionMembershipGuardTests
         foreach (var (path, content) in scripts)
         {
             var touchesSolution = content.Contains("AddSolutionComponent", StringComparison.Ordinal)
-                || content.Contains("MSCRM.SolutionUniqueName", StringComparison.Ordinal);
-            if (!touchesSolution)
+                || content.Contains("MSCRM.SolutionUniqueName", StringComparison.Ordinal)
+                || content.Contains("solutioncomponents?", StringComparison.OrdinalIgnoreCase);
+            if (!touchesSolution || !content.Contains("$Verify", StringComparison.Ordinal))
                 continue;
 
             var reasons = new List<string>();
