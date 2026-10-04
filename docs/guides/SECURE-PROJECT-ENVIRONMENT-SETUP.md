@@ -696,7 +696,7 @@ brought into line by ONE engine, `SecureChildReconciler`, called from three plac
 |---|---|---|
 | `/provision-project` | Step 8: after the record is isolated (Step 5), shared (Step 5.5 + colleagues) and has its container (Steps 6/7, or the one it keeps); also on a call for an ALREADY provisioned record, before it answers 409 | Each child is re-owned to `Secure Record Owners` (the ownership rule, task 146), read back; then the record's sharees are mirrored onto it (task 149 — its former Step 8). Incomplete → `children_incomplete` (§7a table); calling again completes it (200 `childrenOnly: true`); nothing left to do → 409 `already_provisioned` as before |
 | `/unsecure-project` | Step 3.5: after the record moved to its new owner (Step 3), BEFORE its own shares are revoked (Step 4) and its flag cleared (Step 5) | Each child the team owns is re-owned to the owner the rule gives a child of an ordinary record (its business unit's team), THEN its mirrored shares are removed. The SharePoint document locations / documents the record's Assign cascaded to the new owner are placed by the same rule (owner round 13 item 1). Incomplete → 500 `sdap.unsecure.children_incomplete`: **the record's shares stay and `sprk_issecure` stays set**, so the people shared on it keep the children that are still isolated; calling again completes it. On a record already not secure, the call completes the children an earlier unsecure left behind. Before the move, the cascade rows are read (`sdap.unsecure.cascade_children_unreadable` refuses before any write, as provisioning does) |
-| `secure-child-reconciliation` job | Disabled by default; a manual trigger, or the schedule task 147 sets | Every record flagged `sprk_issecure = true` (projects, matters, work assignments), in a fixed order, at most `SecureChild:Reconciliation:MaxRootsPerRun` (default 50) per run; each run's `resumeAfter` is where the next continues (the run history is per instance — a restart starts the sweep over, harmlessly). **Report-only** unless `SecureChild__Reconciliation__WritesEnabled=true` |
+| `secure-child-reconciliation` job | Disabled by default; a manual trigger, or the schedule task 147 sets | Every record flagged `sprk_issecure = true` (projects, matters, work assignments), in a fixed order, at most `SecureChild:Reconciliation:MaxRootsPerRun` (default 50) per run; each run's `startPosition` is where it began and `resumeAfter` where the next continues (the place in the list is a per-instance cursor, and the run history is per instance — a restart starts the sweep over, harmlessly). **Report-only** unless `SecureChild__Reconciliation__WritesEnabled=true` |
 
 **Which rows.** A record's descendants through every lookup task 149's lineage map lists — a document's `sprk_project`
 AND `sprk_relatedproject`, the `sprk_regarding{project|matter|workassignment}` links, and further hops (a to-do filed only
@@ -704,18 +704,39 @@ under a document of the record). **Never**: a row filed under nothing; a row of 
 master thread; a work assignment or project filed under the record — it is a ROOT of its own (owner round 6; task 158),
 and neither it nor its own children are moved. A row is moved only across the isolation boundary: an ordinary row the
 rule would give another ordinary team is left alone. A row also filed under a SECOND secure record stays isolated
-(secure-if-any).
+(secure-if-any). A row filed under the record AND under one of its other children (an analysis of a document that also
+carries `sprk_regardingproject`; a communication regarding an event, stamped) is decided again after that child moves,
+until nothing moves — it never stays isolated because it was looked at before its parent.
 
 **Ordering and the invariant.** Into isolation the re-own comes first and the mirror second (task 149 mirrors only
-team-owned rows): for the length of the pass the record's sharees may briefly not see a child they saw through their
-business unit — never the reverse; no principal that could not read a child before gains it. Out of isolation the
-re-own comes first, so a child is never readable by nobody.
+team-owned rows; owner round 11 item 3): for the length of the pass the record's sharees may briefly not see a child they
+saw through their business unit — never the reverse; no principal that could not read a child before gains it. Out of
+isolation the re-own comes first, so a child is never readable by nobody, and then its mirrored shares are removed — ONLY
+from a child the Secure team owned when the pass began (owner round 22): a share someone gave on an ordinary child that
+was never isolated (for example a model-driven-app share of a user-owned document) is that user's intent and is kept. A
+child whose mirrored shares cannot all be removed is put back on the Secure team (its sharees keep it; nobody new gains
+it) and the call answers `children_incomplete`; calling again moves it out and finishes the removal.
 
 ### 7c.1 The one-time backfill — runbook
 
 Run on each environment ONCE after the BFF carrying task 148 is deployed and the §5 role set is applied. The script only
 triggers the job and reads its run history; the rule is the BFF's. It needs an Azure CLI login of a user holding the
 BFF's `SystemAdmin` policy (the `/api/admin/jobs` routes), and for `-Apply` rights to change the App Service settings.
+
+**Prerequisites — check before step 1, or the dry run, apply and verify are not about the same list:**
+
+- **ONE App Service instance.** The job's place in the list of secure records (its cursor) and its run history are per
+  instance, and the script polls the run history of whichever instance answers. With more than one instance, a trigger
+  can run on one instance and its report be looked for on another, and two instances keep two places in the list. Scale
+  the BFF's App Service plan to **1 instance** for the whole runbook, and back afterwards. Check:
+  `az appservice plan show --ids (az webapp show -g <rg> -n <bff-app-service> --query appServicePlanId -o tsv) --query
+  sku.capacity` → `1`; scale: `az webapp scale -g <rg> -n <bff-app-service> --instance-count 1`. A plan with autoscale
+  rules needs its minimum and maximum set to 1 too (`az monitor autoscale show/update`).
+- **The job's schedule disabled** (`POST /api/admin/jobs/secure-child-reconciliation/disable`, or confirm `enabled:
+  false` on its `/status`). It is registered disabled; once task 147 schedules it, a scheduled tick moves its place in the
+  list mid-pass. The script refuses a pass whose runs are not contiguous from the first secure record (each run's
+  `startPosition`), so a moved place makes it stop with an error rather than pass on part of the list — re-run it after
+  disabling the schedule.
 
 ```powershell
 # 1. DRY RUN (report-only; the default). Repeats until the pass completes, prints every planned change with the row's
@@ -731,7 +752,9 @@ BFF's `SystemAdmin` policy (the `/api/admin/jobs` routes), and for `-Apply` righ
 .\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default `
   -Apply -ResourceGroup <rg> -AppName <bff-app-service>
 
-# 4. VERIFY (report-only): exit 0 only when a full pass plans ZERO changes and refuses / fails nothing.
+# 4. VERIFY (report-only): exit 0 only when a FULL pass — runs contiguous from the first secure record (startPosition 1),
+#    adding up to all of them — plans ZERO changes and refuses / fails nothing. A first run that begins mid-list (the tail
+#    of an earlier pass) is printed but not counted; the script carries on to a pass that starts at the first record.
 .\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Verify
 ```
 

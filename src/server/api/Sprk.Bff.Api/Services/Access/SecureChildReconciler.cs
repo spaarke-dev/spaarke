@@ -107,7 +107,8 @@ public sealed record SecureChildTableCounts(
 /// <param name="Changes">Every row re-owned, to be re-owned, refused or failed, with its previous owner.</param>
 /// <param name="Shares">The share synchronization run for an isolated root after its children were re-owned (Apply only).</param>
 /// <param name="MirrorSharesRevoked">Mirrored child shares taken off children leaving isolation (Apply only).</param>
-/// <param name="MirrorRemovalsIncomplete">Children leaving isolation whose mirrored shares could not all be removed.</param>
+/// <param name="MirrorRemovalsIncomplete">Children leaving isolation whose mirrored shares could not all be removed — each put
+/// back on the Secure team and counted <see cref="SecureChildRowOutcome.Failed"/>.</param>
 /// <param name="Detail">Why the pass is <see cref="SecureChildReconcileStatus.Failed"/> or NotApplicable.</param>
 public sealed record SecureChildReconcileReport(
     SecureChildReconcileStatus Status,
@@ -129,13 +130,12 @@ public sealed record SecureChildReconcileReport(
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
     /// <summary>
-    /// Rows NOT in their invariant state after this pass: refused + failed (+ planned, report-only), plus children whose
-    /// shares are not in line and children whose mirrored shares could not be removed.
+    /// Rows NOT in their invariant state after this pass: refused + failed (+ planned, report-only) — a child whose mirrored
+    /// shares could not be removed is among the failed — plus children whose shares are not in line.
     /// </summary>
     public int ChildrenRemaining =>
         Tables.Sum(t => t.Refused + t.Failed + t.WouldChange)
-        + (Shares is { IsComplete: false } s ? Math.Max(s.ChildrenLeftOutOfLine, 1) : 0)
-        + MirrorRemovalsIncomplete;
+        + (Shares is { IsComplete: false } s ? Math.Max(s.ChildrenLeftOutOfLine, 1) : 0);
 
     /// <summary>True when the pass wrote anything: an owner, a child share, or a mirrored share removed.</summary>
     public bool WroteAnything =>
@@ -166,22 +166,35 @@ public sealed record SecureChildReconcileReport(
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
 /// its record thread's filing (S6, as <c>AssignToThreadReconcilingOwnerAsync</c> passes it); a row that names no parent keeps
-/// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are processed shallowest first, so a grandchild is decided
-/// after its parent moved. A row is moved only when the move crosses the isolation boundary — INTO the Secure team, or OUT of
-/// it; an ordinary row the rule would hand another ordinary team is not this transition's (<see
-/// cref="SecureChildRowOutcome.Untouched"/>). The platform-cascade rows belong to the root alone and always take the rule's
-/// owner (owner round 13 item 1).</para>
+/// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and, when the pass writes,
+/// REPEATED TO A FIXPOINT (task 148 r1): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
+/// stamped communication regarding an event) may be decided before that parent moves, so every row a move could change —
+/// through any chain of rows of the pass — is decided again until nothing is left to move. Each round applies one kind of
+/// move: OUT of isolation first, and only for rows that do not rest on a row still waiting to move IN (a move out widens
+/// access, so it is made once it is certain); otherwise the moves IN (narrowing). So a row is never left isolated by a
+/// parent that left after it, never pulled into isolation behind a parent about to leave, and never released and pulled
+/// back; a row the pass did pull in whose support then left goes back to its start owner. A row is moved only when the
+/// move crosses the isolation boundary — INTO the Secure team, or OUT of it; an ordinary row the rule would hand another
+/// ordinary team is not this transition's (<see cref="SecureChildRowOutcome.Untouched"/>). The
+/// platform-cascade rows belong to the root alone and always take the rule's owner (owner round 13 item 1). A report-only
+/// pass writes nothing, so it decides each row once against the owners it reads: a grandchild whose only route to
+/// isolation is a parent the same pass would move is planned only once that parent has moved.</para>
 /// <para><b>Ordering.</b> INTO isolation: every child re-owned, then <see cref="SecureChildShareSynchronizer.SyncRootAsync"/>
 /// mirrors the root's sharees (149 mirrors only Secure-team-owned rows, so the mirror follows the re-own — the transient is an
 /// UNDER-share of the root's sharees for the length of the pass, never an over-share: no principal that could not read a
-/// child before can read it after a re-own). OUT of isolation: every child re-owned first (so it is reachable through its
-/// business unit), then its mirrored shares removed (<see cref="SecureChildShareSynchronizer.RemoveMirrorAsync"/>). The
-/// caller does the root's own steps around this pass.</para>
+/// child before can read it after a re-own; sanctioned by owner round 11 item 3, "148 re-owns the children, then calls
+/// SyncRootAsync"). OUT of isolation (whichever trigger): every child re-owned first (so it is reachable through its
+/// business unit), then its mirrored shares removed (<see cref="SecureChildShareSynchronizer.RemoveMirrorAsync"/>) — ONLY from
+/// a child the Secure team owned when the pass read it (owner round 22); a child found already ordinary keeps every share. A
+/// child whose mirror cannot all be removed is put back on the Secure team (an under-share), so no later pass can mistake it
+/// for a never-isolated child and leave its former sharees on it. The caller does the root's own steps around this
+/// pass.</para>
 /// <para><b>Every assign</b> is its own operation, never folded into a field update, read back, and preceded by a log line
 /// naming the row's previous owner (reversal evidence); the report carries the same.</para>
 /// <para><b>Fail closed</b> (ADR-003). An unreadable root, Secure team or descendant set decides nothing and writes nothing
-/// (<see cref="SecureChildReconcileStatus.Failed"/>). A refusal or failure on one row leaves THAT row as it was and makes
-/// the pass <see cref="SecureChildReconcileStatus.Incomplete"/>; the next pass (a repeated provisioning or unsecure call, or
+/// (<see cref="SecureChildReconcileStatus.Failed"/>). A refusal or failure on one row leaves THAT row as it was (one whose
+/// mirror could not be removed is put back in isolation) and makes the pass <see cref="SecureChildReconcileStatus.Incomplete"/>;
+/// the next pass (a repeated provisioning or unsecure call, or
 /// the sweep) completes it — every step is keyed on observed state, so a pass is idempotent.</para>
 /// </remarks>
 public sealed class SecureChildReconciler
@@ -407,59 +420,203 @@ public sealed class SecureChildReconciler
             // 1. The rows the root's own Assign cascades to: the rule's owner for a child of the root (owner round 13 item 1).
             await PlaceCascadeRowsAsync().ConfigureAwait(false);
 
-            // 2. Every descendant, shallowest first (a grandchild is decided after its parent moved).
-            var leaving = new List<(string Table, Guid Id, bool WasIsolated)>();
-            foreach (var (_, row) in _descendants
-                         .OrderBy(d => d.Level)
-                         .ThenBy(d => d.Row.LogicalName, StringComparer.Ordinal)
-                         .ThenBy(d => d.Row.Id))
+            // 2. Every descendant, decided by the rule against the owners its parents have NOW — repeated, when this pass
+            //    writes, until nothing is left to move (a fixpoint). One ordered sweep is not enough: a row's parents can sit
+            //    at its OWN level (an FR-26-stamped analysis of a document, a stamped communication regarding an event), so a
+            //    row decided before such a parent reads that parent's OLD owner. Leaving isolation, that kept a row on the
+            //    Secure team (secure-if-any) — left isolated, with its mirror, by a pass that reported Completed — and pulled
+            //    an ordinary row INTO isolation behind a parent about to leave it.
+            //
+            //    So each round decides the rows a move could have changed, then applies ONE kind of move:
+            //      - moves OUT of isolation first, but only those that do not rest on a row still waiting to move IN (its
+            //        support may be on the way); a move out widens access, so it is made only once it is certain;
+            //      - otherwise the moves INTO isolation (narrowing — the safe direction);
+            //    and decides again. A row this pass moved IN whose support then left goes back to the owner it had when the
+            //    pass began (not to an ordinary team the rule picks — it was never this transition's), once; a row asked to
+            //    move after that does not settle and is reported failed. So the rounds end; a ceiling backs that up, and
+            //    whatever is still waiting at the ceiling is reported failed (fail closed, left as it is).
+            var ordered = _descendants
+                .OrderBy(d => d.Level)
+                .ThenBy(d => d.Row.LogicalName, StringComparer.Ordinal)
+                .ThenBy(d => d.Row.Id)
+                .Select(d => d.Row)
+                .ToList();
+            var keys = ordered.Select(r => (Table: r.LogicalName, r.Id)).ToList();
+            var rows = ordered.ToDictionary(r => (r.LogicalName, r.Id));
+            var ancestors = AncestorsInPass(ordered);
+
+            // Owner round 22: the owner each row had when this pass began — before any re-own — decides whether it WAS
+            // isolated (and so whether its shares are task 149's mirror). `current` follows this pass's own writes.
+            var start = ordered.ToDictionary(r => (r.LogicalName, r.Id), OwnerOf);
+            var current = new Dictionary<(string Table, Guid Id), DataversePrincipalRef?>(start);
+            var decisions = new Dictionary<(string Table, Guid Id), RowDecision>();
+            var failures = new Dictionary<(string Table, Guid Id), string>();
+            var written = new HashSet<(string Table, Guid Id)>();
+            var movedIn = new HashSet<(string Table, Guid Id)>();
+            var restored = new HashSet<(string Table, Guid Id)>();
+            var maxRounds = 2 * ordered.Count + 2;
+
+            IReadOnlySet<(string Table, Guid Id)> toDecide = keys.ToHashSet();
+            for (var round = 1; ; round++)
             {
-                var outcome = await ReconcileRowAsync(row).ConfigureAwait(false);
-                if (outcome is { } leave)
-                    leaving.Add(leave);
+                foreach (var key in keys.Where(toDecide.Contains))
+                    decisions[key] = await DecideRowAsync(rows[key], current[key]).ConfigureAwait(false);
+
+                // Report-only writes nothing, so a second round would read the same owners.
+                if (_mode != SecureChildReconcileMode.Apply)
+                    break;
+
+                bool Open((string Table, Guid Id) k) => !failures.ContainsKey(k);
+                var ins = keys.Where(k => Open(k) && decisions[k].Move == RowMove.In).ToHashSet();
+                var outs = keys.Where(k => Open(k) && decisions[k].Move == RowMove.Out).ToList();
+                if (ins.Count == 0 && outs.Count == 0)
+                    break;
+
+                if (round > maxRounds)
+                {
+                    foreach (var k in ins.Concat(outs))
+                        failures[k] = "its owner did not settle within this pass; it is left as it is for the next pass";
+                    break;
+                }
+
+                var certainOuts = outs.Where(k => !ancestors[k].Overlaps(ins)).ToList();
+                var batch = certainOuts.Count > 0 ? certainOuts : ins.Count > 0 ? keys.Where(ins.Contains).ToList() : outs;
+
+                foreach (var key in batch)
+                {
+                    var decision = decisions[key];
+                    var target = decision.Target!.Value;
+                    if (restored.Contains(key))
+                    {
+                        // Already put back once in this pass and asked to move again: it does not settle — left as it is.
+                        failures[key] = "its owner did not settle within this pass; it is left as it is for the next pass";
+                        continue;
+                    }
+
+                    if (decision.Move == RowMove.Out && movedIn.Contains(key))
+                    {
+                        // Moved INTO isolation by this pass, now ruled out of it: the isolated row it rested on has since
+                        // left. It was NOT isolated when the pass began, so it goes back to the owner it had then (never to
+                        // a team the rule picks for an ordinary row — that is not this transition's), and keeps every share
+                        // it had (owner round 22).
+                        var back = await RestoreStartOwnerAsync(key.Table, key.Id, start[key]).ConfigureAwait(false);
+                        if (back is not null)
+                        {
+                            failures[key] = $"this pass moved it into isolation, its support has since left, and it could not " +
+                                $"be put back on its owner ({back}); it stays isolated until the next pass";
+                            continue;
+                        }
+
+                        current[key] = start[key];
+                        decisions[key] = decision with
+                        {
+                            Move = RowMove.Stay,
+                            Kind = start[key] == DataversePrincipalRef.Team(target)
+                                ? SecureChildRowOutcome.AlreadyCorrect
+                                : SecureChildRowOutcome.Untouched,
+                        };
+                        restored.Add(key);
+                        continue;
+                    }
+
+                    // Reversal evidence BEFORE the write (constraint "every assign").
+                    Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
+                        key.Table, key.Id, Describe(current[key]), target);
+                    var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!).ConfigureAwait(false);
+                    if (fault is not null)
+                    {
+                        failures[key] = fault;
+                        continue;
+                    }
+
+                    current[key] = DataversePrincipalRef.Team(target);
+                    decisions[key] = decision with { Move = RowMove.Stay };
+                    written.Add(key);
+                    if (decision.Move == RowMove.In && !IsIsolated(start[key]))
+                        movedIn.Add(key);
+                }
+
+                // Decide again every open row a move of this round could change (its parents run, through rows of this
+                // pass, to a row that moved). The rest keep their decision.
+                var batchSet = batch.ToHashSet();
+                toDecide = keys.Where(k => Open(k) && ancestors[k].Overlaps(batchSet)).ToHashSet();
             }
+
+            var results = keys.ToDictionary(
+                k => k, k => Outcome(decisions[k], start[k], current[k], failures.GetValueOrDefault(k), written.Contains(k)));
 
             SecureChildShareSyncResult? shares = null;
             var mirrorRevoked = 0;
             var mirrorIncomplete = 0;
-            var faulted = false;
 
             if (_mode == SecureChildReconcileMode.Apply)
             {
-                if (_rootIsolated)
+                // 3a. OUT of isolation — whichever trigger moved the row (an unsecure; a pre-148 unsecure completed; or a
+                // sweep over an isolated root whose rule hands one row an ordinary team): after its re-own, its mirrored
+                // shares come off. Owner round 22: ONLY a row the Secure team owned when this pass began (it was isolated, so
+                // every direct share on it is task 149's mirror — the synchronizer revokes anything else); a row found
+                // already ordinary is never moved here and keeps every share it has (a user's own share on a never-isolated
+                // child is that user's intent).
+                foreach (var row in ordered)
                 {
-                    // 3a. INTO isolation: the root's sharees mirrored onto every Secure-team-owned child (task 149).
-                    shares = await _owner._shares.SyncRootAsync(_root.EntityLogicalName, _root.RecordId, _ct).ConfigureAwait(false);
-                }
-                else if (leaving.Count > 0)
-                {
-                    // 3b. OUT of isolation: after the re-owns, the mirrored shares come off. A child that WAS isolated loses
-                    // every direct share (all of them were the mirror); one found already ordinary during an unsecure loses
-                    // only the root's sharees' shares (a resumed pass, or a child the root never isolated).
-                    IReadOnlySet<DataversePrincipalRef>? rootSharees = null;
-                    if (leaving.Any(l => !l.WasIsolated))
-                        rootSharees = await RootShareesAsync().ConfigureAwait(false);
+                    var key = (row.LogicalName, row.Id);
+                    if (results[key] is not { LeftIsolation: true } left)
+                        continue;
 
-                    foreach (var (table, id, wasIsolated) in leaving)
+                    var removal = await _owner._shares.RemoveMirrorAsync(row.LogicalName, row.Id, _ct).ConfigureAwait(false);
+                    mirrorRevoked += removal.SharesRevoked;
+                    if (removal.IsComplete)
+                        continue;
+
+                    // The mirror could not all be removed. Left OUT of isolation the row would carry its former sharees'
+                    // shares into its business unit — and the next pass, which (round 22) treats a row it finds ordinary as
+                    // never isolated, would leave them there for good: an over-share once the record's own shares go. So
+                    // it is put BACK on the Secure team (read back): isolated again with part of its mirror — an
+                    // under-share, never an over-share — and the next pass, finding it isolated, moves it out again.
+                    mirrorIncomplete++;
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: its mirrored shares were not all removed " +
+                        "({Status}: {Detail}); putting it back on the Secure Record owner team.",
+                        row.LogicalName, row.Id, removal.Status, removal.Detail);
+                    var back = await RestoreStartOwnerAsync(row.LogicalName, row.Id, left.Previous).ConfigureAwait(false);
+                    if (back is not null)
                     {
-                        if (!wasIsolated && rootSharees is null)
-                        {
-                            mirrorIncomplete++;
-                            faulted = true;
-                            continue;
-                        }
-
-                        var removal = await _owner._shares
-                            .RemoveMirrorAsync(table, id, wasIsolated ? null : rootSharees, _ct).ConfigureAwait(false);
-                        mirrorRevoked += removal.SharesRevoked;
-                        if (!removal.IsComplete)
-                        {
-                            mirrorIncomplete++;
-                            Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: its mirrored shares were not all removed " +
-                                "({Status}: {Detail}).", table, id, removal.Status, removal.Detail);
-                        }
+                        Log.LogCritical("[SECURE-CHILD-RECONCILE] {Table} {Id} is OUT of isolation with mirrored shares left on " +
+                            "it and could not be put back ({Back}). Revoke every direct share on it by hand.",
+                            row.LogicalName, row.Id, back);
                     }
+
+                    results[key] = left with
+                    {
+                        Outcome = SecureChildRowOutcome.Failed,
+                        Detail = back is null
+                            ? $"its mirrored shares could not all be removed ({removal.Detail}); it was put back on the " +
+                              "Secure Record owner team for the next pass"
+                            : $"its mirrored shares could not all be removed ({removal.Detail}) and it could not be put back " +
+                              $"({back}): revoke every direct share on it by hand",
+                    };
                 }
+
+                // 3b. INTO isolation: the root's sharees mirrored onto every Secure-team-owned child (task 149) — the rows
+                // put back above included.
+                if (_rootIsolated)
+                    shares = await _owner._shares.SyncRootAsync(_root.EntityLogicalName, _root.RecordId, _ct).ConfigureAwait(false);
+            }
+
+            foreach (var row in ordered)
+            {
+                var d = results[(row.LogicalName, row.Id)];
+                Count(row.LogicalName, Examined);
+                Count(row.LogicalName, d.Outcome switch
+                {
+                    SecureChildRowOutcome.AlreadyCorrect => AlreadyCorrect,
+                    SecureChildRowOutcome.Changed => Changed,
+                    SecureChildRowOutcome.WouldChange => WouldChange,
+                    SecureChildRowOutcome.Untouched => Untouched,
+                    SecureChildRowOutcome.Refused => Refused,
+                    _ => Failed,
+                });
+                if (d.Outcome is not (SecureChildRowOutcome.AlreadyCorrect or SecureChildRowOutcome.Untouched))
+                    _changes.Add(new(row.LogicalName, row.Id, d.Previous, d.Target, d.Outcome, d.Detail));
             }
 
             var tables = _counts
@@ -470,7 +627,7 @@ public sealed class SecureChildReconciler
                 .ToList();
 
             var rowsOk = tables.All(t => t.Refused == 0 && t.Failed == 0);
-            var complete = rowsOk && !faulted && mirrorIncomplete == 0 && shares is not { IsComplete: false };
+            var complete = rowsOk && mirrorIncomplete == 0 && shares is not { IsComplete: false };
             var status = complete ? SecureChildReconcileStatus.Completed : SecureChildReconcileStatus.Incomplete;
 
             Log.Log(
@@ -490,16 +647,51 @@ public sealed class SecureChildReconciler
         }
 
         /// <summary>
-        /// One descendant. Returns the row when it LEFT (or, mid-unsecure, sits outside) isolation and must have its mirrored
-        /// shares removed; <c>WasIsolated</c> says whether it was owned by the Secure team when this pass read it.
+        /// For every row of the pass, the rows of the pass it rests on: its ownership parents (<see cref="ContextFor"/> — a
+        /// message's record-thread filing included) that are themselves rows of this pass, and theirs, transitively (the
+        /// resolver reads each parent FRESH, and looks through a user-owned parent to its own filing). A row whose parents
+        /// are all outside the pass (the root, another record) rests on nothing a move inside it can change.
         /// </summary>
-        private async Task<(string Table, Guid Id, bool WasIsolated)?> ReconcileRowAsync(Entity row)
+        private Dictionary<(string Table, Guid Id), HashSet<(string Table, Guid Id)>> AncestorsInPass(IReadOnlyList<Entity> ordered)
+        {
+            var inPass = ordered.Select(r => (r.LogicalName, r.Id)).ToHashSet();
+            var parentsOf = ordered.ToDictionary(
+                r => (r.LogicalName, r.Id),
+                r => ContextFor(r).Parents
+                    .Select(p => (p.EntityLogicalName.ToLowerInvariant(), p.RecordId))
+                    .Where(inPass.Contains)
+                    .ToArray());
+
+            var ancestors = new Dictionary<(string Table, Guid Id), HashSet<(string Table, Guid Id)>>();
+            foreach (var key in parentsOf.Keys)
+            {
+                var found = new HashSet<(string Table, Guid Id)>();
+                var stack = new Stack<(string Table, Guid Id)>(parentsOf[key]);
+                while (stack.Count > 0)
+                {
+                    var next = stack.Pop();
+                    if (next != key && found.Add(next))
+                    {
+                        foreach (var parent in parentsOf[next])
+                            stack.Push(parent);
+                    }
+                }
+
+                ancestors[key] = found;
+            }
+
+            return ancestors;
+        }
+
+        /// <summary>
+        /// The rule's answer for one row against the owner it has NOW (<paramref name="current"/>) — no write. A move is
+        /// proposed only across the isolation boundary: IN (the rule gives the Secure team, the row is not on it) or OUT (the
+        /// row is on it, the rule gives an ordinary team); an ordinary row the rule would hand another ordinary team is not
+        /// this transition's (<see cref="SecureChildRowOutcome.Untouched"/>).
+        /// </summary>
+        private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current)
         {
             var table = row.LogicalName;
-            Count(table, Examined);
-            var previous = OwnerOf(row);
-            var wasIsolated = previous is { Kind: DataversePrincipalKind.Team } p && p.Id == _secureTeamId;
-
             RecordOwnerResolution resolution;
             try
             {
@@ -509,77 +701,97 @@ public sealed class SecureChildReconciler
             {
                 Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: its owner could not be decided (a read failed); " +
                     "it is left as it is.", table, row.Id);
-                Count(table, Failed);
-                _changes.Add(new(table, row.Id, previous, null, SecureChildRowOutcome.Failed, "its owner could not be decided"));
-                return null;
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, "its owner could not be decided");
             }
 
             if (resolution.IsRefused)
             {
-                Count(table, Refused);
-                _changes.Add(new(table, row.Id, previous, null, SecureChildRowOutcome.Refused,
-                    $"{resolution.RefusalCode}: {resolution.Reason}"));
                 Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: the ownership rule refused ({Code}: {Reason}); it is " +
                     "left as it is.", table, row.Id, resolution.RefusalCode, resolution.Reason);
-                return null;
+                return new(RowMove.None, SecureChildRowOutcome.Refused, null, $"{resolution.RefusalCode}: {resolution.Reason}");
             }
 
             if (!resolution.IsOwned)
-            {
-                Count(table, Untouched); // names no parent the rule reads: it keeps its owner
-                return null;
-            }
+                return new(RowMove.None, SecureChildRowOutcome.Untouched, null, null); // names no parent the rule reads
 
             var target = resolution.OwningTeamId!.Value;
             var targetIsSecure = target == _secureTeamId;
-
-            if (previous == DataversePrincipalRef.Team(target))
+            var move = (targetIsSecure, IsIsolated(current)) switch
             {
-                Count(table, AlreadyCorrect);
-                return !targetIsSecure && _unsecuring ? (table, row.Id, false) : null;
-            }
+                (true, false) => RowMove.In,
+                (false, true) => RowMove.Out,
+                _ => RowMove.Stay,
+            };
 
-            // Only a move across the isolation boundary is this transition's.
-            if (!targetIsSecure && !wasIsolated)
+            if (move != RowMove.Stay && _mode == SecureChildReconcileMode.ReportOnly)
             {
-                Count(table, Untouched);
-                return !targetIsSecure && _unsecuring ? (table, row.Id, false) : null;
-            }
-
-            if (_mode == SecureChildReconcileMode.ReportOnly)
-            {
-                Count(table, WouldChange);
-                _changes.Add(new(table, row.Id, previous, target, SecureChildRowOutcome.WouldChange, null));
                 Log.LogInformation("[SECURE-CHILD-RECONCILE] plan: {Table} {Id} owner {Previous} -> team {Target} (report-only).",
-                    table, row.Id, Describe(previous), target);
-                return null;
+                    table, row.Id, Describe(current), target);
             }
 
-            // Reversal evidence BEFORE the write (constraint "every assign").
-            Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
-                table, row.Id, Describe(previous), target);
-
-            var moved = await AssignAsync(table, row.Id, target).ConfigureAwait(false);
-            if (moved is null)
-            {
-                Count(table, Changed);
-                _changes.Add(new(table, row.Id, previous, target, SecureChildRowOutcome.Changed, null));
-                // (A deeper row's decision reads this row FRESH through the resolver, so it sees the new owner — which is
-                // why rows are taken shallowest first.)
-                return targetIsSecure ? null : (table, row.Id, wasIsolated);
-            }
-
-            Count(table, Failed);
-            _changes.Add(new(table, row.Id, previous, target, SecureChildRowOutcome.Failed, moved));
-            return null;
+            var kind = current == DataversePrincipalRef.Team(target)
+                ? SecureChildRowOutcome.AlreadyCorrect
+                : SecureChildRowOutcome.Untouched;
+            return new(move, kind, resolution, null);
         }
 
         /// <summary>
-        /// Assigns the row to the team in its own update and reads it back. <c>null</c> on success, else what went wrong. A
-        /// write that reports failure may still have landed, so the read-back decides (the task 133 restore rule).
+        /// What happened to one row over the whole pass, reported against the owner it had when the pass began
+        /// (<paramref name="start"/> — the reversal evidence). <c>LeftIsolation</c>: owned by the Secure team when the pass
+        /// began and no longer — its mirrored shares must come off (owner round 22).
         /// </summary>
-        private async Task<string?> AssignAsync(string table, Guid id, Guid teamId)
+        private RowResult Outcome(
+            RowDecision decision, DataversePrincipalRef? start, DataversePrincipalRef? current, string? failure, bool written)
         {
+            var left = written && IsIsolated(start) && !IsIsolated(current);
+            if (failure is not null)
+                return new(SecureChildRowOutcome.Failed, start, decision.Target, failure, left);
+            if (decision.Kind is SecureChildRowOutcome.Refused or SecureChildRowOutcome.Failed)
+                return new(decision.Kind, start, decision.Target, decision.Detail, left);
+            if (written && current != start)
+                return new(SecureChildRowOutcome.Changed, start, current?.Id, null, left);
+            if (decision.Move is RowMove.In or RowMove.Out)
+                return new(SecureChildRowOutcome.WouldChange, start, decision.Target, null, false); // report-only
+            return new(decision.Kind, start, decision.Target, null, false);
+        }
+
+        private bool IsIsolated(DataversePrincipalRef? owner) =>
+            owner is { Kind: DataversePrincipalKind.Team } team && team.Id == _secureTeamId;
+
+        /// <summary>The move a round's decision proposes.</summary>
+        private enum RowMove
+        {
+            /// <summary>No owner to give: refused, failed, or names no parent the rule reads.</summary>
+            None,
+
+            /// <summary>Already where the rule puts it, or not this transition's to move.</summary>
+            Stay,
+
+            /// <summary>Into the Secure Record owner team.</summary>
+            In,
+
+            /// <summary>Out of the Secure Record owner team, to the team the rule gives it.</summary>
+            Out,
+        }
+
+        /// <summary>One round's decision for one row: the move, and the resolution the rule answered (when it gave an owner).</summary>
+        private sealed record RowDecision(RowMove Move, SecureChildRowOutcome Kind, RecordOwnerResolution? Resolution, string? Detail)
+        {
+            public Guid? Target => Resolution is { IsOwned: true } r ? r.OwningTeamId : null;
+        }
+
+        /// <summary>One row's outcome over the whole pass.</summary>
+        private sealed record RowResult(
+            SecureChildRowOutcome Outcome, DataversePrincipalRef? Previous, Guid? Target, string? Detail, bool LeftIsolation);
+
+        /// <summary>
+        /// Assigns the row to the team the ownership rule gave it (<paramref name="resolution"/>), in its own update, and reads
+        /// it back. <c>null</c> on success, else what went wrong. A write that reports failure may still have landed, so the
+        /// read-back decides (the task 133 restore rule).
+        /// </summary>
+        private async Task<string?> AssignAsync(string table, Guid id, RecordOwnerResolution resolution)
+        {
+            var teamId = resolution.OwningTeamId!.Value;
             string? writeFault = null;
             try
             {
@@ -594,12 +806,53 @@ public sealed class SecureChildReconciler
                     table, id, teamId);
             }
 
+            return await ReadBackAsync(table, id, DataversePrincipalRef.Team(teamId), writeFault).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Puts a row back on the owner it had when THIS pass began — a compensation for a later step of the same pass, never
+        /// an owner decided here: a row taken out of isolation whose mirrored shares could not all be removed goes back on
+        /// the Secure Record owner team; a row this pass moved INTO isolation whose support then left goes back to its
+        /// ordinary owner. Its own update, read back; <c>null</c> on success, else what went wrong.
+        /// </summary>
+        private async Task<string?> RestoreStartOwnerAsync(string table, Guid id, DataversePrincipalRef? startOwner)
+        {
+            if (startOwner is not { } owner)
+                return "its owner when this pass began is not known";
+
+            Log.LogInformation("[SECURE-CHILD-RECONCILE] put back: {Table} {Id} -> {Owner} (its owner when this pass began).",
+                table, id, Describe(owner));
+            string? writeFault = null;
             try
             {
-                var query = new QueryExpression(table) { ColumnSet = new ColumnSet(OwningTeamColumn), TopCount = 1, NoLock = true };
+                var ownerRef = new EntityReference(owner.Kind == DataversePrincipalKind.Team ? "team" : "systemuser", owner.Id);
+                await _owner._dataverse.UpdateAsync(
+                    table, id, new Dictionary<string, object> { [OwnerColumn] = ownerRef }, _ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+            {
+                writeFault = ex.Message;
+                Log.LogError(ex, "[SECURE-CHILD-RECONCILE] Dataverse refused putting {Table} {Id} back on {Owner}.",
+                    table, id, Describe(owner));
+            }
+
+            return await ReadBackAsync(table, id, owner, writeFault).ConfigureAwait(false);
+        }
+
+        /// <summary>Whether a row reads as owned by <paramref name="owner"/> after an owner write; <c>null</c> when it does.</summary>
+        private async Task<string?> ReadBackAsync(string table, Guid id, DataversePrincipalRef owner, string? writeFault)
+        {
+            try
+            {
+                var query = new QueryExpression(table)
+                {
+                    ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn),
+                    TopCount = 1,
+                    NoLock = true,
+                };
                 query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
                 var after = (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-                if (after?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id == teamId)
+                if (after is not null && OwnerOf(after) == owner)
                     return null;
 
                 return writeFault is null
@@ -739,23 +992,6 @@ public sealed class SecureChildReconciler
                     _changes.Add(new(child.LogicalName, child.Id, child.Owner, target, SecureChildRowOutcome.Failed,
                         $"{result.Outcome}; to place it by hand: {result.Child.RestoreCall}"));
                 }
-            }
-        }
-
-        /// <summary>The root's direct sharees (strict read), or <c>null</c> when they cannot be read.</summary>
-        private async Task<IReadOnlySet<DataversePrincipalRef>?> RootShareesAsync()
-        {
-            try
-            {
-                var shares = await _owner._shares.ReadRootShareesAsync(_root.EntityLogicalName, _root.RecordId, _ct)
-                    .ConfigureAwait(false);
-                return shares;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
-            {
-                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] The shares on {Table} {RootId} could not be read; children found " +
-                    "outside isolation keep their shares this pass.", _root.EntityLogicalName, _root.RecordId);
-                return null;
             }
         }
 

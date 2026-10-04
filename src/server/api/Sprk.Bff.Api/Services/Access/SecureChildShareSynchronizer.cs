@@ -215,36 +215,16 @@ public sealed class SecureChildShareSynchronizer
     public Task<SecureChildShareSyncResult> ReconcileAllAsync(CancellationToken ct) => RunAsync(scope: null, ct);
 
     /// <summary>
-    /// Task 148 — the principals holding a DIRECT share on a root (the strict read; inherited-only rows are not shares).
-    /// What <see cref="RemoveMirrorAsync"/> is given for a child an unsecure finds already outside the Secure team. Throws
-    /// when the shares cannot be read.
-    /// </summary>
-    public async Task<IReadOnlySet<DataversePrincipalRef>> ReadRootShareesAsync(
-        string rootLogicalName, Guid rootId, CancellationToken ct)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(rootLogicalName);
-        if (!SecureChildLineage.IsRoot(rootLogicalName))
-            throw new ArgumentOutOfRangeException(nameof(rootLogicalName), rootLogicalName, "Not a secure-root table.");
-
-        var shares = await _recordShare.GetPrincipalAccessOrThrowAsync(rootLogicalName, rootId, ct).ConfigureAwait(false);
-        return shares.Where(s => s.AccessRightsMask != 0).Select(s => s.Principal).ToHashSet();
-    }
-
-    /// <summary>
-    /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that an unsecure transition has
-    /// already re-owned OUT of the Secure Record owner team (owner round 11 item 3: "148 re-owns the children, then calls
-    /// <see cref="SyncRootAsync"/>"; after an unsecure the root's share set is going away, so "in line with the root" means
-    /// "carrying none of its sharees").
+    /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that a pass has just re-owned OUT of the
+    /// Secure Record owner team (owner round 11 item 3: "148 re-owns the children, then calls <see cref="SyncRootAsync"/>";
+    /// after an unsecure the root's share set is going away, so "in line with the root" means "carrying none of its
+    /// sharees"). EVERY direct share on the child is revoked: the child was owned by the Secure team when the pass began, and
+    /// every direct share on a Secure-team-owned child is this synchronizer's mirror (it revokes anything else). Owner round
+    /// 22: a child that was NOT isolated when the pass began is never given to this method — a share on an ordinary,
+    /// never-isolated child is its user's own intent and is kept.
     /// </summary>
     /// <param name="childLogicalName">One of the codified child tables (<see cref="SecureChildLineage"/>).</param>
     /// <param name="childId">The child.</param>
-    /// <param name="principals">
-    /// <c>null</c> — revoke EVERY direct share on the child: it was owned by the Secure team when the transition began, and
-    /// every direct share on a Secure-team-owned child is this synchronizer's mirror (it revokes anything else). Otherwise
-    /// only the shares of these principals — the root's sharees — for a child the transition found already outside the
-    /// Secure team (a pass resumed after an interruption, or a child the root never isolated); a share of anyone else on an
-    /// ordinary child is not the mirror's and is left alone.
-    /// </param>
     /// <param name="ct">Cancellation.</param>
     /// <remarks>
     /// <para><b>Ownership first, always</b> (the unsecure endpoint's own ordering rule). A child still owned by the Secure
@@ -255,8 +235,7 @@ public sealed class SecureChildShareSynchronizer
     /// <see cref="SecureChildShareSyncStatus.Incomplete"/>. Removing access is never the unsafe direction, so nothing is
     /// re-checked before a revoke.</para>
     /// </remarks>
-    public async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(
-        string childLogicalName, Guid childId, IReadOnlySet<DataversePrincipalRef>? principals, CancellationToken ct)
+    public async Task<SecureChildMirrorRemoval> RemoveMirrorAsync(string childLogicalName, Guid childId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         if (!SecureChildLineage.Children.TryGetValue(childLogicalName, out var table))
@@ -307,8 +286,7 @@ public sealed class SecureChildShareSynchronizer
             return new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Failed, 0, $"the shares on {child} could not be read");
         }
 
-        bool Removable(DataversePrincipalRef p) => principals is null || principals.Contains(p);
-        var targets = shares.Where(s => s.AccessRightsMask != 0).Select(s => s.Principal).Distinct().Where(Removable).ToList();
+        var targets = shares.Where(s => s.AccessRightsMask != 0).Select(s => s.Principal).Distinct().ToList();
         if (targets.Count == 0)
             return new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Completed, 0, null);
 
@@ -331,7 +309,7 @@ public sealed class SecureChildShareSynchronizer
         try
         {
             var after = await _recordShare.GetPrincipalAccessOrThrowAsync(table.LogicalName, childId, ct).ConfigureAwait(false);
-            if (after.Any(s => s.AccessRightsMask != 0 && Removable(s.Principal)))
+            if (after.Any(s => s.AccessRightsMask != 0))
             {
                 _logger.LogWarning("[SECURE-CHILD-SHARES] {Child} still carries a mirrored share after the unsecure removal.", child);
                 failed = true;

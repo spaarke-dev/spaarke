@@ -24,15 +24,20 @@
       - Dry run is the DEFAULT: with neither -Apply nor -Verify the job runs report-only and writes nothing.
       - -Apply needs -ResourceGroup and -AppName, and asks for confirmation (use -Confirm:$false in automation). The setting
         is removed again in a finally block, whatever happens.
-      - -Verify runs report-only and exits 0 ONLY when a full pass plans zero changes and refuses / fails nothing.
+      - -Verify runs report-only and exits 0 ONLY when a FULL pass plans zero changes and refuses / fails nothing. A pass
+        counts from a run that began at the first secure record (the report's startPosition = 1); a run that began
+        mid-list (the job's place is shared with an interrupted earlier run or a scheduled tick) is the tail of an earlier
+        pass and is not counted. The counted runs must be contiguous, see an unchanged number of secure records, and add
+        up to all of them — otherwise the script throws (exit non-zero) instead of passing on part of the list.
       - Idempotent and resumable: every step the job takes is keyed on observed state, so a re-run after an interruption
         completes the work and changes nothing already done.
       - The reversal record: every re-own the BFF makes is logged BEFORE it is written
         ("[SECURE-CHILD-RECONCILE] reassign: <table> <id> owner <previous> -> team <target>"), and the saved reports carry
         the first 200 changes per run with the previous owner.
 
-    ⚠️ The job runs on the App Service instance that serves the trigger, and its run history is per instance. Run this
-    against a single-instance app (dev), or scale to one instance for the backfill.
+    ⚠️ The job runs on the App Service instance that serves the trigger, and its run history AND its place in the list (a
+    cursor) are per instance. Run this against a single-instance app (dev), or scale to one instance for the backfill; and
+    with the job's schedule disabled (it is registered disabled), so no scheduled tick moves its place mid-pass.
 
 .PARAMETER BffBaseUrl
     The BFF's base URL, e.g. https://spe-api-dev-67e2xz.azurewebsites.net
@@ -135,13 +140,50 @@ function Invoke-OneRun {
 }
 
 function Invoke-Pass([string] $ExpectedMode) {
+    # A pass counts only from a run that began at the FIRST secure record (startPosition = 1). The job keeps its place in a
+    # per-instance cursor shared with every other trigger of it — an interrupted earlier run, or a scheduled tick once task
+    # 147 schedules it — so the first run this script triggers may begin mid-list. Such a run is the tail of an earlier
+    # pass: its report is saved and printed (with -Apply its writes are real), but it is NOT counted, and the script carries
+    # on to the next run, which begins at 1. Then every run must begin exactly where the previous one ended, the number of
+    # secure records must not change, and the runs must add up to all of them — otherwise the pass is refused, never
+    # reported as a clean pass over part of the list.
     $totals = [ordered]@{ roots = 0; examined = 0; alreadyCorrect = 0; changed = 0; wouldChange = 0; refused = 0; failed = 0 }
     $incomplete = New-Object System.Collections.Generic.List[string]
+    $covering = $false
+    $total = $null
     for ($n = 1; $n -le $MaxRuns; $n++) {
         $result = Invoke-OneRun
         $r = $result.Report
         if ($r.mode -ne $ExpectedMode) {
             throw "The job ran in mode '$($r.mode)', expected '$ExpectedMode'. Check $WritesSetting on the App Service."
+        }
+        if ($null -eq $r.PSObject.Properties['startPosition']) {
+            throw "Run $n's report has no startPosition: the deployed BFF predates this script. Deploy it first."
+        }
+        if (-not $covering) {
+            if ($r.startPosition -ne 1) {
+                foreach ($c in @($r.changes)) {
+                    if ($c) {
+                        Write-Host ("  (tail) {0,-12} {1} {2} {3}  previous={4} target={5} {6}" -f $c.outcome, $c.root, $c.table,
+                            $c.id, $c.previousOwner, $c.targetTeam, $c.detail)
+                    }
+                }
+                Write-Host ("Run {0}: began at secure record {1} of {2} — the tail of an earlier pass; not counted." -f $n,
+                    $r.startPosition, $r.rootsTotal)
+                continue
+            }
+            $covering = $true
+            $total = $r.rootsTotal
+        } elseif ($r.startPosition -ne $totals.roots + 1) {
+            $message = ("Run {0} began at secure record {1}, but the pass had reached {2}: another trigger of the job (a " +
+                "scheduled tick?) moved its place during the pass. Disable the job's schedule and run the script again.") -f
+                $n, $r.startPosition, $totals.roots
+            throw $message
+        }
+        if ($r.rootsTotal -ne $total) {
+            $message = "The number of secure records changed during the pass ({0} -> {1}); run the script again." -f
+                $total, $r.rootsTotal
+            throw $message
         }
         $totals.roots += $r.rootsInRun
         foreach ($k in 'examined', 'alreadyCorrect', 'changed', 'wouldChange', 'refused', 'failed') { $totals[$k] += $r.$k }
@@ -152,8 +194,13 @@ function Invoke-Pass([string] $ExpectedMode) {
                     $c.previousOwner, $c.targetTeam, $c.detail)
             }
         }
-        Write-Host ("Run {0}: {1} of {2} secure records, passComplete={3}" -f $n, $r.rootsInRun, $r.rootsTotal, $r.passComplete)
+        Write-Host ("Run {0}: secure records {1}-{2} of {3}, passComplete={4}" -f $n, $r.startPosition,
+            ($r.startPosition + $r.rootsInRun - 1), $r.rootsTotal, $r.passComplete)
         if ($r.passComplete) {
+            if ($totals.roots -ne $total) {
+                $message = "The pass covered {0} of {1} secure records; run the script again." -f $totals.roots, $total
+                throw $message
+            }
             return [pscustomobject]@{ Totals = $totals; Incomplete = $incomplete }
         }
     }

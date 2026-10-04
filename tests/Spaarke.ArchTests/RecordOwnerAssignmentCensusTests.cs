@@ -342,6 +342,13 @@ public class RecordOwnerAssignmentCensusTests
 
         /// <summary>An owner set only on a row filed under NOTHING — asserted: the member checks the filing first.</summary>
         UnfiledOnly,
+
+        /// <summary>
+        /// Task 148 r1: puts a row back on the owner it had when the SAME pass began (read by that pass before its own
+        /// write), as a compensation for a later step of the pass that failed — never an owner decided another way. Asserted:
+        /// the member's owner value is its start-owner parameter, and the file's only caller of it passes the snapshot.
+        /// </summary>
+        Restore,
     }
 
     private sealed record OwnerWriteEntry(string FileName, string Member, int Writes, OwnerWriteKind Kind, string Reason);
@@ -413,6 +420,11 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
             "Task 148: an EXISTING child of a root moved into or out of isolation (provisioning, unsecure, the sweep) — the " +
             "team IRecordOwnershipResolver answered for the row's own parents, its own update, read back."),
+        new OwnerWriteEntry("SecureChildReconciler.cs", "RestoreStartOwnerAsync", 1, OwnerWriteKind.Restore,
+            "Task 148 r1: a row the same pass moved is put back on the owner the pass read before its write — a child taken " +
+            "out of isolation whose mirrored shares could not all be removed (back on the Secure team, so no later pass reads " +
+            "it as never isolated), or a row the pass pulled into isolation whose support then left (back on its ordinary " +
+            "owner); read back."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
@@ -699,6 +711,71 @@ public class RecordOwnerAssignmentCensusTests
             problems.Count == 0,
             "Routed owner writes whose value is not a resolution made in (or handed to) the member that writes it (task 146 "
             + "b2). A child's owner is IRecordOwnershipResolver's answer — write THAT answer, not a team found another way:\n"
+            + string.Join("\n", problems));
+    }
+
+    // Task 148 r1: a Restore owner write is a compensation — it may only write back the owner its pass read before its own
+    // write. Asserted on the VALUE (it comes from the member's single start-owner parameter, never a literal) and on every
+    // same-file CALL (the argument is that pass's snapshot: a `start…` name or a `.Previous` the pass recorded).
+    [Fact(DisplayName = "Task 148 r1: a Restore owner write writes back only the start owner its pass recorded")]
+    public void EveryRestoreOwnerWriteWritesBackOnlyTheStartOwnerItsPassRecorded()
+    {
+        var files = ServerFiles();
+        var globalKeys = GlobalOwnerKeys(files);
+        var problems = new List<string>();
+
+        foreach (var entry in OwnerWrites.Where(e => e.Kind == OwnerWriteKind.Restore))
+        {
+            if (CodeOf(files, entry.FileName) is not { } code || MethodBody(code, entry.Member) is not { } body)
+            {
+                problems.Add($"{entry.FileName}.{entry.Member}: not found");
+                continue;
+            }
+
+            var parameters = ParametersOf(body, entry.Member).Select(p => p.Name).ToList();
+            var startParameters = parameters.Where(p => p.StartsWith("start", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+            if (startParameters.Count != 1)
+            {
+                problems.Add($"{entry.FileName}.{entry.Member}: Restore needs exactly one start-owner parameter (named start…)");
+                continue;
+            }
+
+            var fromStart = ResolvedNamesIn(body, entry.Member, new HashSet<string>(StringComparer.Ordinal), startParameters);
+            foreach (var (_, valueStart) in OwnerWritesIn(body, globalKeys))
+            {
+                var (end, _) = ValueEnd(body, valueStart);
+                var value = body[valueStart..end];
+                var identifiers = Regex.Matches(value, @"\b[A-Za-z_]\w*\b").Select(m => m.Value).ToHashSet(StringComparer.Ordinal);
+                if (HardCodedId.IsMatch(value) || !identifiers.Overlaps(fromStart))
+                    problems.Add($"{entry.FileName}.{entry.Member}: owner value `{value.Trim()}` is not its start-owner parameter");
+            }
+
+            var members = MemberDeclaration.Matches(code).ToList();
+            var declarationParens = members
+                .Where(d => MemberNameAt(code, members, d.Index) == entry.Member)
+                .Select(d => code.IndexOf('(', d.Index))
+                .ToHashSet();
+            var calls = Regex.Matches(code, @"\b" + Regex.Escape(entry.Member) + @"\s*\(")
+                .Where(m => !declarationParens.Contains(m.Index + m.Length - 1))
+                .ToList();
+            if (calls.Count == 0)
+                problems.Add($"{entry.FileName}.{entry.Member}: never called");
+
+            foreach (var site in calls)
+            {
+                var open = site.Index + site.Length - 1;
+                var arguments = ArgumentsByParameter(SplitTopLevel(code[(open + 1)..MatchingClose(code, open)]), parameters);
+                var snapshot = arguments.TryGetValue(startParameters.Single(), out var argument)
+                               && !HardCodedId.IsMatch(argument)
+                               && Regex.IsMatch(argument, @"\bstart\w*\b|\.Previous\b");
+                if (!snapshot)
+                    problems.Add($"{entry.FileName}.{entry.Member}: a call passes `{argument?.Trim()}`, not the pass's start-owner snapshot");
+            }
+        }
+
+        Assert.True(
+            problems.Count == 0,
+            "Restore owner writes that could write something other than the owner their pass read first (task 148 r1):\n"
             + string.Join("\n", problems));
     }
 

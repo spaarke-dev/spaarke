@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <remarks>
 /// <para><b>Why it exists.</b> Provisioning and unsecure reconcile the children of the ONE record they act on. The records
 /// that were already secure before task 148 — and any child a pass left incomplete — are reached only by a sweep. Run once
-/// with writes on, it is the one-time backfill (operator runbook: SECURE-PROJECT-ENVIRONMENT-SETUP.md §7b, script
+/// with writes on, it is the one-time backfill (operator runbook: SECURE-PROJECT-ENVIRONMENT-SETUP.md §7c.1, script
 /// <c>scripts/Invoke-SecureChildBackfill.ps1</c>); task 147 schedules it as the standing L4 safety net.</para>
 /// <para><b>Ships disabled AND report-only</b> (the <c>ExternalAccessReconciliationJob</c> posture). The registration is
 /// <c>AddScheduledJob&lt;&gt;(cron, enabled: false)</c>, and writes need <see cref="WritesEnabledConfigKey"/> = <c>true</c>:
@@ -24,8 +24,10 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <see cref="MaxRootsPerRunConfigKey"/> per run (default <see cref="DefaultMaxRootsPerRun"/>). The next run continues
 /// after the last root the previous one reached (a cursor in this singleton, per instance — the task 143 job's precedent),
 /// until a run reaches the end (<c>passComplete: true</c>) and the next starts again from the beginning. Each run's
-/// <c>ResultJson</c> records the same position (<c>resumeAfter</c>), and every root is a progress line in the log before it
-/// is processed, so an interrupted run's position is visible. Because every step of a pass is keyed on observed state,
+/// <c>ResultJson</c> records the same position (<c>startPosition</c>, <c>resumeAfter</c>), and every root is a progress line
+/// in the log before it is processed, so an interrupted run's position is visible — and a reader can tell a pass that
+/// covered the whole list (its first run began at position 1) from one that covered only a tail. The cursor and the run
+/// history are per App Service instance, so the backfill runbook runs on ONE instance. Because every step of a pass is keyed on observed state,
 /// re-processing a root is harmless: a restart only starts the sweep over.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
@@ -200,6 +202,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 mode = writes ? ModeWrite : ModeReportOnly,
                 rootsInRun = batch.Count,
                 rootsTotal = roots.Count,
+                // Where in the ordered list this run began (1 = the first secure record). A pass is covered only from a run
+                // that began at 1 — the cursor is shared with every other trigger of this job on this instance, so a run
+                // can begin mid-list; Invoke-SecureChildBackfill.ps1 -Verify refuses a pass that did not.
+                startPosition = start + 1,
                 passComplete,
                 // The progress log: the next run continues after this root. Null when this run reached the end.
                 resumeAfter = passComplete ? null : lastKey,

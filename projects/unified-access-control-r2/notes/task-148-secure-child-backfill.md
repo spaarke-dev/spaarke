@@ -32,26 +32,45 @@ assignment) into the state task 146's rule gives it, called from three places:
    resolver reads a row's parents from whatever lookups it carries), paged with a ceiling. A fault → Failed, nothing written.
 3. Places the platform-cascade rows (task 133's `AssignCascadeChildOwners`: snapshot, then its restore aimed at the
    resolver's owner for a child of the root — read, assign only when different, read back).
-4. For each descendant, SHALLOWEST FIRST: the resolver's answer for the row's own parents — `RecordOwnershipContext.ParentsOf`
-   over all its columns (the reparent's input), plus its record thread's filing for a message (S6), `WhenUnfiled =
-   KeepCreator` (a row naming no parent keeps its owner), and, mid-unsecure only, `UnsecuringRoot` (§3). A row is moved
-   ONLY across the isolation boundary (into the Secure team, or out of it); an ordinary row the rule would give another
-   ordinary team is untouched. Each move: a log line naming the previous owner FIRST (reversal evidence), its own update,
-   a read-back (a write reported failed may have landed — the read decides).
-5. Into isolation: `SyncRootAsync(root)`. Out of isolation: `RemoveMirrorAsync` on each child that left — every direct
-   share for a child that WAS Secure-team-owned (each was the synchronizer's mirror), the root's sharees' shares only for a
-   child found already outside (a resumed unsecure, or a child the root never isolated).
+4. For each descendant, shallowest first and — with writes — REPEATED TO A FIXPOINT (r1, §12): the resolver's answer for
+   the row's own parents — `RecordOwnershipContext.ParentsOf` over all its columns (the reparent's input), plus its record
+   thread's filing for a message (S6), `WhenUnfiled = KeepCreator` (a row naming no parent keeps its owner), and, mid-unsecure
+   only, `UnsecuringRoot` (§3) — against the owners its parents have NOW. A row is moved ONLY across the isolation boundary
+   (into the Secure team, or out of it); an ordinary row the rule would give another ordinary team is untouched. Each round
+   applies one kind of move: OUT first, and only for rows resting on no row still waiting to move IN; otherwise the INs.
+   Each move: a log line naming the previous owner FIRST (reversal evidence), its own update, a read-back (a write reported
+   failed may have landed — the read decides).
+5. Out of isolation (any trigger): `RemoveMirrorAsync` on each child that left — ONLY a child the Secure team owned when
+   the pass BEGAN (owner round 22; every direct share on it was the synchronizer's mirror); a child found ordinary keeps
+   every share. A child whose mirror cannot all be removed is put back on the Secure team (r1, §12). Into isolation:
+   `SyncRootAsync(root)`.
 6. Reports per table (examined / already correct / re-owned / would re-own / untouched / refused / failed), every changed,
    planned, refused or failed row with its previous owner, the share sync and the mirror removals.
 
-## 2. Ordering: the constraint's fallback order is the one shipped (recorded, per the constraint)
+## 2. Ordering: two recorded deviations from the provisioning ordering constraint
 
-The ordering constraint asks for **mirror → re-own** on provisioning, "if 149 Part A shows shares do not survive Assign, the
-order becomes re-own → mirror and the transient under-share (never an over-share) is recorded". Shipped: **re-own → mirror**,
-for a reason that holds whatever probe (g) answers: task 149's synchronizer mirrors ONLY rows the Secure team already owns
-(that is its scope rule — it never touches an ordinary-team-owned row), and the scope constraint binds shares to "ONLY task
-149's reconcile(root) — no second implementation". Mirroring before the re-own would need a second share writer for
-ordinary rows. Probe (g) (G149-1 step 4) is still unrun, so the shipped order does not depend on it either way.
+The constraint reads: "PROVISIONING: root isolated (Step 5) → root shared (Step 5.5) → child shares mirrored (task 149
+mechanism) → children re-owned → reconcile(root) verifies → (container steps unchanged)". Shipped differs in TWO places,
+each recorded here as a deviation (r1 — verifier items 5 and 6; the first draft recorded the second only as a review fix
+and mis-cited the first):
+
+**Deviation 1 — re-own → mirror, not mirror → re-own.** Sanctioned by **owner round 11 item 3** ("148 re-owns the
+children, then calls `SyncRootAsync`") — that decision, not the constraint's conditional fallback, is the authority: the
+fallback ("if 149 Part A shows shares do not survive Assign, the order becomes re-own → mirror") is conditional on probe (g)
+(G149-1 step 4), which is still unrun, so it cannot be what sanctions the order. The engineering reason is the same: task
+149's synchronizer mirrors ONLY rows the Secure team already owns (its scope rule — it never touches an ordinary-team-owned
+row), and the scope constraint binds shares to "ONLY task 149's reconcile(root) — no second implementation"; mirroring
+before the re-own would need a second share writer for ordinary rows.
+
+**Deviation 2 — the child pass runs AFTER the container steps, not before them.** The constraint puts the children before
+"(container steps unchanged)". Shipped: Step 8, after Steps 6/7 (review fix R1, §10). Reason: a related record the rule
+refuses (e.g. also filed under a record flagged secure but not isolated) would otherwise keep a secure record from ever
+getting its own storage, and task 133's compensation path (which owns a failure before/at the container) would have to
+learn the child pass — two resume paths, which the resumability constraint forbids. With the pass after the container, an
+incomplete child pass leaves a PROVISIONED record whose one re-entry point is the already-provisioned branch. The invariant
+the constraint protects is unaffected: children are only ever re-owned INTO isolation by provisioning (an under-share
+transient, never an over-share), whatever the position of the pass relative to the container. Not an ADR deviation (no
+§6.5 path needed): the ordering is a task constraint; recorded here and in the POML for the reviewer.
 
 **The transient, recorded:** between a child's re-own and the `SyncRootAsync` that follows the pass, the root's sharees
 cannot read that child through a share (they read it before through their business unit, if they were in it). An
@@ -104,7 +123,7 @@ scaling need, no separate identity). No package; no endpoint; no column; no plug
 |---|---|---|---|
 | `SecureChildReconciler` (service + 1 Scoped DI line, concrete — ADR-010) | `ProvisionProjectEndpoint` / `UnsecureProjectEndpoint` touch the ROOT row only (grep `sprk_documents\|sprk_events\|sprk_todos`: none); `RecordOwnershipResolver` decides the owner of a row being created or RE-FILED; `SecureChildShareSynchronizer` mirrors shares on rows the Secure team ALREADY owns (its walk never passes an ordinary-team row); `AssignCascadeChildOwners` covers only the platform's Assign-cascade rows; reconciliation jobs (`ExternalAccessReconciliationJob`, `MembershipReconciliationJob`, `SecureChildShareReconciliationJob`) reconcile grant rows, junctions, child SHARES | Not in the endpoints (3 triggers would copy the pass — the L1/L4 drift the write-path architecture forbids); not in the resolver (decides, does not walk or write); not in the synchronizer (owns POA on isolated rows; its scope rule is load-bearing). The reconciler composes the three; no rule is re-implemented | a record made secure after it has children leaves every one readable by ordinary users; an unsecured record leaves its children owned by a memberless team (reachable only through stale mirrors — the round 11 ship gate); every record secure today keeps its children exposed |
 | `SecureChildReconciliationJob` (`IScheduledJob` + `AddScheduledJob(…, enabled: false)`) | `SecureChildShareReconciliationJob` (shares only, writes on — it IS 149's mechanism); `ExternalAccessReconciliationJob` (the disabled + report-only precedent) | Folding owner moves into 149's 2-minute share job would give a writes-on, every-2-minutes job a bulk OWNERSHIP write path the owner has not reviewed; the report-only + disabled posture needs its own registration | the records secure before 148 never get their children secured (no backfill), and task 147 has no L4 net to schedule |
-| `SecureChildShareSynchronizer.RemoveMirrorAsync` + `ReadRootShareesAsync` (methods on the existing class) | the synchronizer is the ONE child-POA writer; nothing removes a released child's mirror | extend it, so every child POA write stays in one class (and the refusal "still Secure-owned → refuse" lives next to the mirror) | a child moved out of isolation keeps its former sharees' shares indefinitely (invisible access) |
+| `SecureChildShareSynchronizer.RemoveMirrorAsync` (method on the existing class; r1 removed its `principals` parameter and the `ReadRootShareesAsync` method — owner round 22 made them dead) | the synchronizer is the ONE child-POA writer; nothing removes a released child's mirror | extend it, so every child POA write stays in one class (and the refusal "still Secure-owned → refuse" lives next to the mirror) | a child moved out of isolation keeps its former sharees' shares indefinitely (invisible access) |
 | `RecordOwnershipContext.UnsecuringRoot` (one property on the existing context) | the resolver's C11 refusal | extend in place (§3) | unsecure can never re-own a child (every one refused) |
 | `SecureChildPassSummary` DTO + `Children` / `ChildrenOnly` on the two responses (additive JSON) | none report child outcomes | — | the caller cannot tell whether the related records moved |
 | `JobRunDetail.ResultJson` on `GET /api/admin/jobs/{id}/history` and `/status` (additive; SystemAdmin only) | `JobRunResult.ResultJson` is persisted for "the admin UI / history queries" (FR-2.8) but no route returned it | extend the existing run DTO — one optional member, one mapping line | the backfill's dry run / verify could not read a run's report without App Service log access |
@@ -248,3 +267,94 @@ No secret, no new route, no CRUD→AI dependency, no package (CVE scan: no vulne
 ## 11. `.claude/**` edits needed
 
 None.
+
+## 12. r1 fix round — verifier items 1-17 (2026-10-04, branch `task/uac-r2-148-r1`, base `00c1602c2`)
+
+Owner decisions applied: rounds 1-13 + **round 22** (2026-10-04, main session under the round-15 directive: on unsecure a
+share is removed from a child ONLY if the Secure team owned it when the pass BEGAN; a share on an ordinary never-isolated
+child is kept; the set is snapshotted before any re-own). No escalation trigger fired; nothing was left for the owner.
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | CRITICAL — unsecure reports Completed while a stamped grandchild whose table sorts before its same-level parent stays isolated with its mirror | **Fixed** — `SecureChildReconciler` now decides rows against their parents' CURRENT owners and, with writes, repeats to a fixpoint: after each round every open row resting (through any chain of rows of the pass — `AncestorsInPass`, which follows the resolver's look-through) on a row that moved is decided again. Writing it surfaced two siblings of the same root cause, both fixed in the same loop: (a) an ordinary row (a user-owned message regarding an event) was pulled INTO isolation behind an isolated parent decided-but-not-yet-released; (b) a row could be released and pulled back. So each round applies ONE kind of move — OUT first, but only for rows resting on no row still waiting to move IN (a move out widens access, so it is made once it is certain), otherwise the INs (narrowing); a row the pass pulled in whose support then left goes back to its start owner; a row asked to move again after that, or still moving at a ceiling of 2N+2 rounds, is reported Failed (left as it is). Tests: `Unsecure_ReleasesAStampedGrandchild_WhoseTableSortsBeforeItsParents` × 5 (analysis→document via `sprk_documentid`, communication→event, agreement→document, analysis→communication, analysis→invoice — each stamped `sprk_regardingproject`, each asserting both rows on the BU team, no shares, status Completed, `alreadyCorrect` 0 everywhere, and the grandchild's mirror revoked before the record's shares); `Unsecure_ReleasesARowKeptIsolatedThroughAUserOwnedParent` (the look-through chain; the message is never written); `Unsecure_NeverReleasesARowWhoseSupportIsMovingIn`; `Unsecure_PutsARowItPulledIntoIsolationBackOnItsOwner_WhenItsSupportLeaves` (back on its USER, not the BU team, share kept) |
+| 2 | HIGH — ten fail-closed guards never seeded | Each now has a test that fails when the guard is seeded (table below). **V4 is moot**: owner round 22 removed the code path (an unsecure no longer reads the root's sharees to strip them from ordinary children — `ReadRootShareesAsync` and `RemoveMirrorAsync`'s `principals` parameter are deleted), so there is no unreadable-sharees branch left to guard |
+| 3 | MEDIUM — `-Verify` can pass on the tail of a list | **Fixed** — each run's `ResultJson` carries `startPosition` (1-based, where the run began); `Invoke-Pass` counts a pass only from a run that began at 1 (a tail is printed, saved, not counted, and the script carries on to the next run, which begins at 1), requires every counted run to begin where the previous ended (else: "another trigger moved its place — disable the schedule"), an unchanged `rootsTotal`, and the counted runs to add up to it; a report without `startPosition` (a BFF older than the script) is refused. Verified offline by `scratchpad/t148r1/verify-pass.ps1` (the script's own `Invoke-Pass`, extracted from its AST, over scripted run reports: full pass / tail-then-full / cursor moved / total changed / empty / pre-r1 BFF — 6/6), and each of its three checks seeded (P1-P3, each turns a case red) |
+| 4 | MEDIUM — single-instance prerequisite only in the script help | **Fixed** — guide §7c.1 opens with a **Prerequisites** block: ONE App Service instance (why; the check `az appservice plan show … --query sku.capacity`, the scale command, autoscale min/max) and the job's schedule disabled (why; the script now refuses a non-contiguous pass); the §7c table row names the per-instance cursor; the script help says the same |
+| 5 | LOW — child pass after the container recorded only as a review fix | **Fixed** — §2 Deviation 2 records it as a deviation from the provisioning ordering constraint, with the reason and why the constraint's invariant is unaffected |
+| 6 | LOW — re-own → mirror justified by the wrong source | **Fixed** — §2 Deviation 1 cites owner round 11 item 3 as the authority (the constraint's fallback is conditional on unrun probe (g)); the reconciler remarks cite it too |
+| 7 | LOW — doc / comment drift | **Fixed** — `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-2: "resumable through a per-instance cursor in the job (never the scheduler's store — ADR-052 §5), each run reporting where it began and where the next continues" (+ the fixpoint and round 22); `SecureChildReconciliationJob` remarks cite §7c.1 |
+| 8 | LOW (design) — unsecure strips root sharees' shares from never-isolated children | **Fixed per owner round 22**: mirror removal only for a row owned by the Secure team when the pass began (`start` snapshot, before any re-own; `RowResult.LeftIsolation = written && IsIsolated(start) && !IsIsolated(current)`); `RemoveMirrorAsync` always revokes every direct share and is only ever given such a row. Consequence handled: a released row whose mirror removal fails is PUT BACK on the Secure team (read back) — left out, the next pass would read it as never isolated and keep its former sharees for good. Tests: `Unsecure_KeepsTheSharesOfAChildThatWasNeverIsolated_EvenOneOfTheRecordsSharees` (mirror removed from the isolated child; a Colleague's manual share on a user-owned child kept — both seeded, R22a/R22b); `Unsecure_WhenAChildsMirrorCannotBeRemoved_IsIncomplete_PutsItBack_AndTheSecondCallRemovesIt` (renamed; writes GeneralTeam then SecureTeam; second call completes) |
+| 9 | LOW — a row released by a sweep of an isolated root keeps its mirror | **Fixed** — the mirror removal runs for every row that left isolation, whatever the trigger (before `SyncRootAsync`, so a row put back is re-synced). Test: `TheSweep_RemovesTheMirrorOfARowItTakesOutOfIsolation` |
+| 10 | INFO — the already-not-secure branch now writes; task 150's F3 gate must cover it | **Handoff recorded** (below and POML): when task 150's F3 gate (Full Access + creator; owner round 3b F3 / round 10 item 7) is integrated into `UnsecureProjectEndpoint`, it must sit BEFORE the `record.sprk_issecure != true` early return, not only on the transition path — that branch re-owns children out of isolation. Not changed here (150 is not in this base) |
+| 11 | VERIFIED OK | No change |
+| 12 | AC2 not met | **Met** — item 1 |
+| 13 | AC5 not met | **Met** — item 1 (+ round 22, the put-back, "never released and pulled back") |
+| 14 | AC3 not met | **Met** — item 1 removes the false Completed; V1/V2/V6/V10 (+ V7/V9) are tested and seeded |
+| 15 | AC7 not proven for projects/matters | **Met** — `TheSweep_ReportOnly_OverAProjectOrMatter_WritesNothing_NotEvenItsCascadeRows` × 2 drives the REAL job over the provisioning fixture's world and Web API double: report-only lists the document, the event and the SharePoint location (with its current owner) and writes nothing — no Web API update, no owner, no grant/revoke/modify (V3 seeded) |
+| 16 | AC9 live gate | **PENDING** — G148-1..4 (§8), main session; unchanged |
+| 17 | AC11 publish size | **NOT MEASURED** (instruction). CVE scan below |
+
+**Item 2, guard by guard** (each seeded in production code by `scratchpad/t148r1/seeds.py` — one mutation, build, the
+named suite, file restored from its bytes and touched; `git diff --stat` identical before and after every batch):
+
+| Seed | Guard removed | Test(s) that fail |
+|---|---|---|
+| V1 | unsecure Step 2.5 refusal (`cascade_children_unreadable`) | 2 — `Unsecure_WhenTheRowsItsMoveCascadesToCannotBeRead_RefusesBeforeAnyWrite` × (503 unreadable, 403 refused) |
+| V2 | unreadable descendant set → Completed | 2 — `ATransitionWhoseRelatedRecordsCannotBeRead_IsFailed_NeverASuccess` × (unsecure, provision) |
+| V3 | report-only writes the cascade rows | 2 — `TheSweep_ReportOnly_OverAProjectOrMatter_WritesNothing_NotEvenItsCascadeRows` × (project, matter) |
+| V5 | "unsecuring but root still isolated" refusal | 1 — `TheReconciler_RefusesToUnsecureTheChildrenOfARecordStillIsolated` |
+| V6 | already-not-secure branch ignores an incomplete pass | 2 — `Unsecure_OnAnAlreadyUnsecuredRecord_WhoseStrandedChildCannotBeReowned_IsIncomplete`, `…_WhoseCascadeRowsCannotBeRead_IsIncomplete` |
+| V7 | reconciler cascade-snapshot fault ignored | 1 — `Unsecure_OnAnAlreadyUnsecuredRecord_WhoseCascadeRowsCannotBeRead_IsIncomplete` |
+| V8 | the job lists every root | 3 — `TheSweep_ListsOnlyTheRecordsFlaggedSecure` (+2 sweep tests whose worlds hold an ordinary root) |
+| V9 | resolver read fault counted Untouched | 1 — `TheSweep_WhenARowsOwnerCannotBeDecided_CountsItFailed_AndTheRunIsNotASuccess` |
+| V10 | `IsComplete` treats Failed as complete | 5 — the two `ATransition…` cases, `TheSweep_WhenTheRecordOrTheSecureTeamCannotBeRead_IsFailed_AndWritesNothing` × 2, `TheReconciler_Refuses…` |
+| J1 | `startPosition` off by one | 1 — `TheSweep_IsCappedPerRun_AndTheNextRunResumesAfterTheLastRecord` (asserts 1 then 2) |
+
+**The r1 engine, seeded the same way:**
+
+| Seed | Mutation | Failed |
+|---|---|---|
+| F1 | nothing re-decided after a move (the defect) | 16 (all 5 stamped shapes, the look-through, the put-back, the provisioning grandchild, …) |
+| F2 | every move applied at once (no "out only once certain") | 2 (`NeverReleasesARowWhoseSupportIsMovingIn`, `…ThroughAUserOwnedParent` — the message is written) |
+| F3 | a row pulled in and then ruled out is not put back | 1 |
+| F4b / R22b | an ordinary row nobody moved loses its shares (round 22) | 3 / 1 |
+| R22a | the mirror of a child isolated at the start is not removed | 1 |
+| F5 | no put-back after a failed mirror removal | 1 |
+| F6 | no mirror removal when the root is isolated (item 9) | 1 |
+| F7 | only direct parents re-decided (no transitive closure) | 2 |
+| S1r / S2r / S12r | re-checks of the original S1 (boundary filter) / S2 (SyncRootAsync) / S12 (read-back) on the rewritten loop | 3 / 6 / 2 |
+| A3 / A4 | census: Restore writes a team of its own / is called with the current owner, not the snapshot | 1 / 1 (ArchTests) |
+| A5 | census: `AssignAsync` writes the Secure team instead of the resolution | 1 (ArchTests) |
+| F4 (a) | `LeftIsolation` without the `IsIsolated(start)` term | 0 — an **equivalent mutant**: a written row not isolated at the start can only have moved IN and been put back (current = start), which takes the no-change branch; F4b/R22b are the bites for round 22 |
+
+**New owner-write path and census kind.** The put-back is an owner write whose value is NOT a resolution (it restores the
+owner the pass read first), so it cannot sit in the Routed `AssignAsync`. It is its own member, `RestoreStartOwnerAsync`,
+under a NEW census kind `Restore` in `RecordOwnerAssignmentCensusTests`, with its own assertion
+(`EveryRestoreOwnerWriteWritesBackOnlyTheStartOwnerItsPassRecorded`): the value comes from the member's single `start…`
+parameter (never a literal), and every same-file call passes the pass's snapshot (`start[key]` / `left.Previous`) —
+seeds A3/A4. `AssignAsync` now takes the `RecordOwnerResolution` itself, so the Routed value check sees the resolution.
+CLAUDE.md §11 for the new member: (1) existing — `AssignAsync` writes only a resolution (census), task 133's
+`RestoreOneAsync` restores only platform-cascade rows; (2) extension — folding it into `AssignAsync` would let the Routed
+member write a non-resolution value, which the census exists to forbid; (3) cost of doing nothing — a released child whose
+mirror removal fails keeps its former sharees permanently once the record's shares go (round 22 makes the next pass treat
+it as never isolated), and a row pulled into isolation would be handed to the BU team instead of its own user. No new
+service, registration, endpoint, option, job, column or package; the job's `ResultJson` gains one additive member
+(`startPosition`).
+
+**Observation (not a verifier item, not changed): the report-only plan is a lower bound for grandchildren.** A report-only
+pass writes nothing, so it decides each row once against the owners it reads: a grandchild whose ONLY route into isolation
+is a parent the same pass would move (e.g. a to-do filed only under an ordinary-team document of a secure record) is
+planned only after that parent has moved — the dry run lists the parent, not the grandchild; the apply moves both (the
+fixpoint), and `-Verify` then proves nothing is left. Making the dry run exact would need the resolver to accept planned
+owners (a new input to the ONE rule) — recorded for the owner, not built.
+
+**Complexity (§11.5).** `SecureChildReconciler.cs` ≈ 900 lines: one cohesive pass (walk → decide-to-fixpoint → assign /
+restore → share → report); the fixpoint loop and its helpers share the pass's state. Not decomposed.
+
+**Results (r1, 2026-10-04):** transitions suite 42/42 (19 → 42); affected suites 766/766; full BFF unit suite **14,828 =
+14,774 passed + 54 skipped (pre-existing), 0 failed** (+23); ArchTests **373/373** (+1, the Restore assertion);
+`Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **428 = 403 passed + 25 skipped, 0 failed**. CVE:
+`dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` — no vulnerable packages. Publish size: not
+measured (instruction). `dotnet format` on the changed C# files: no change.
+
+**Handoffs added by r1:** task 150 F3 gate must cover the already-not-secure branch of `/unsecure-project` (item 10).
