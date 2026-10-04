@@ -350,6 +350,21 @@ public class CatalogToolDescriptionParityContractTests
             return mock.Object;
         }
 
+        // A delegate parameter (e.g. CoreAncestorResolver.EntityColumnProbe, reached through a sealed concrete dependency
+        // such as CoreAncestorAfterWriteRestamp → CoreAncestorRestamper → CoreAncestorResolver): a no-op instance of the
+        // delegate type. Its only public ctor is (object, IntPtr), which cannot be stubbed — recursing into it threw
+        // "Value cannot be null (Parameter 'method')". Never invoked: this helper reads a compile-time Metadata field.
+        // Added by unified-access-control-r2 task 156 (owner round 8 item 1); fixes the class, not the instance.
+        if (typeof(Delegate).IsAssignableFrom(serviceType))
+        {
+            var invoke = serviceType.GetMethod("Invoke")!;
+            var delegateParameters = invoke.GetParameters()
+                .Select(p => System.Linq.Expressions.Expression.Parameter(p.ParameterType, p.Name))
+                .ToArray();
+            return System.Linq.Expressions.Expression.Lambda(
+                serviceType, System.Linq.Expressions.Expression.Default(invoke.ReturnType), delegateParameters).Compile();
+        }
+
         // Sealed/concrete leaf: recurse through its smallest public ctor.
         var leafCtor = serviceType.GetConstructors()
             .OrderBy(c => c.GetParameters().Length)

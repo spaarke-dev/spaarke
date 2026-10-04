@@ -98,6 +98,7 @@ public static class DataverseDocumentsEndpoints
             IDocumentDataverseService dataverseService,
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
             Spaarke.Core.Auth.AuthorizationService authorization,
+            [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -164,6 +165,14 @@ public static class DataverseDocumentsEndpoints
                         return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
                     }
                 }
+
+                // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work
+                // assignment re-stamps every to-do and analysis filed under it, in this same request. Never thrown: a
+                // child that fails is logged and the reconciliation job repairs it; the document's own update stands.
+                await restamper.AfterWriteAsync(
+                    "sprk_document", Guid.Parse(id),
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.DocumentColumnsWritten(request),
+                    CancellationToken.None);
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
 

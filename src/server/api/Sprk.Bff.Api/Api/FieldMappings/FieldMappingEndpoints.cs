@@ -436,6 +436,7 @@ public static class FieldMappingEndpoints
     private static async Task<IResult> PushFieldMappingsAsync(
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -553,6 +554,7 @@ public static class FieldMappingEndpoints
             // Step 4: For each child, apply mapping rules and update
             var (updatedCount, failedCount, skippedCount, errors, fieldResults) = await ApplyMappingsToChildRecordsAsync(
                 dataverseService,
+                restamper,
                 profile.Rules,
                 sourceValues,
                 request.TargetEntity,
@@ -680,8 +682,10 @@ public static class FieldMappingEndpoints
     /// <summary>
     /// Applies mapping rules to each child record and updates them.
     /// </summary>
-    private static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
+    /// <remarks>Internal (not private) so the test assembly can drive it directly (task 156: the re-file cascade).</remarks>
+    internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
         IFieldMappingDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         FieldMappingRuleDto[] rules,
         Dictionary<string, object?> sourceValues,
         string targetEntity,
@@ -714,6 +718,12 @@ public static class FieldMappingEndpoints
                 {
                     await dataverseService.UpdateRecordFieldsAsync(targetEntity, childRecordId, updatePayload, ct);
                     updated++;
+
+                    // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this
+                    // record is filed under or its matter / project — so the copies that depend on it are re-stamped in
+                    // the same operation. A write that cannot move a stamp reads nothing; a child that fails is logged
+                    // and repaired by the reconciliation job, and never fails this push.
+                    await restamper.AfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, CancellationToken.None);
                 }
                 else
                 {

@@ -152,6 +152,7 @@ public sealed class RiActionsViaSeamSeamTests
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger<ActionSeam>.Instance);
 
         var outbox = new OutboxService(entity.Object, NullLogger<OutboxService>.Instance);       // REAL outbox

@@ -416,6 +416,10 @@ public class SecureChildOwnershipEndpointTests
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton(resolver);
+            // Task 156 (merged with 146): a re-file re-stamps the copies under the record after it stands. Not under test
+            // here — an empty in-memory world, so the re-stamp finds nothing to move and never throws.
+            builder.Services.AddSingleton(
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);
             Register(builder.Services);
 
             builder.WebHost.UseTestServer();

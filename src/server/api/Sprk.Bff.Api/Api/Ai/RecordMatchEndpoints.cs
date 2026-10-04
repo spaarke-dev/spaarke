@@ -151,10 +151,12 @@ public static class RecordMatchEndpoints
     /// <summary>
     /// Associate a document with a Dataverse record by updating the lookup field.
     /// </summary>
-    private static async Task<IResult> AssociateRecord(
+    /// <remarks>Internal (not private) so the test assembly can drive the handler directly (task 156: the re-file cascade).</remarks>
+    internal static async Task<IResult> AssociateRecord(
         AssociateRecordRequest request,
         IDocumentDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -180,6 +182,7 @@ public static class RecordMatchEndpoints
         try
         {
             var recordGuid = Guid.Parse(request.RecordId);
+            var documentGuid = Guid.Parse(request.DocumentId); // before the write: a bad id never fails after it
 
             // Build the update request with the appropriate lookup field
             var updateRequest = new UpdateDocumentRequest();
@@ -208,6 +211,14 @@ public static class RecordMatchEndpoints
             {
                 return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(reparent, "association");
             }
+
+            // Task 156 (owner round 4 item 5, option b): associating a document with a different matter / project / work
+            // assignment re-files it, so every to-do and analysis filed under it is re-stamped in this same request.
+            // Never thrown: a child that fails is logged and the reconciliation job repairs it.
+            await restamper.AfterWriteAsync(
+                "sprk_document", documentGuid,
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.DocumentColumnsWritten(updateRequest),
+                CancellationToken.None);
 
             logger.LogInformation(
                 "Successfully associated document {DocumentId} with {RecordType} {RecordId}",

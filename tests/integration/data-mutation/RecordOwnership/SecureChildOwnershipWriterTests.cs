@@ -809,15 +809,24 @@ public class SecureChildOwnershipWriterTests
                 if (Interlocked.Increment(ref reads) > 1)
                     return Task.FromException<DataverseEntity>(new TimeoutException("throttled on the second read"));
 
+                // Task 156 (merged): an intermediate names its root through its OWN typed column (an invoice's matter is
+                // sprk_matter), so the ancestor is placed where the derivation reads it — as CoreAncestorResolverFixtures
+                // .WithAncestors does — and the probe reports every root column an intermediate can carry.
                 var row = new DataverseEntity(logicalName, id);
                 foreach (var (lookupAttribute, recordId) in ancestors)
-                    row[lookupAttribute] = new EntityReference("sprk_matter", recordId);
+                {
+                    var column = CoreAncestorResolver.IntermediateRootColumns.TryGetValue(logicalName, out var roots)
+                        ? roots.FirstOrDefault(r => string.Equals(r.RootEntity, "sprk_matter", StringComparison.OrdinalIgnoreCase)).Column
+                        : null;
+                    row[column ?? lookupAttribute] = new EntityReference("sprk_matter", recordId);
+                }
+
                 return Task.FromResult(row);
             });
 
         return new CoreAncestorResolver(
             entityService.Object,
-            CoreAncestorResolverFixtures.ProbeReturning(CoreAncestorResolverFixtures.AllCoreAncestorColumns),
+            CoreAncestorResolverFixtures.ProbeReturning(CoreAncestorResolverFixtures.AllRootColumns),
             NullLogger<CoreAncestorResolver>.Instance);
     }
 

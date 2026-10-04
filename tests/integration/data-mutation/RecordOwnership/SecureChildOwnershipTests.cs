@@ -506,7 +506,9 @@ public class SecureChildOwnershipTests
             .Returns(Task.CompletedTask);
 
         var handler = new DataverseUpdateHandler(
-            fields.Object, Mock.Of<IGenericEntityService>(), ownership, NullLogger<DataverseUpdateHandler>.Instance);
+            fields.Object, Mock.Of<IGenericEntityService>(), ownership,
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            NullLogger<DataverseUpdateHandler>.Instance);
         return (handler, writes);
     }
 
@@ -515,7 +517,7 @@ public class SecureChildOwnershipTests
         var (entities, created) = CapturingCreates();
         return (new TaskActionCore(
             entities, CoreAncestorResolverFixtures.Inert(), ownership,
-            IdentityNormalizationFixtures.NoLinkedContact(), NullLogger.Instance), created);
+            IdentityNormalizationFixtures.NoLinkedContact(), Mock.Of<ICommunicationDataverseService>(), NullLogger.Instance), created);
     }
 
     private static (ThreadResolver Resolver, List<Entity> Created) Threads(IRecordOwnershipResolver ownership)

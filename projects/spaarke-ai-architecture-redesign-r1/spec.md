@@ -281,6 +281,16 @@ it does not re-open design.
   outside the Binding table; ❌ MUST NOT gate by tool-name lists; ❌ MUST NOT land new capability
   on the frozen engine; ❌ MUST NOT emit ungrounded free-form output; ❌ MUST NOT create new
   manifest tables; ❌ MUST NOT retain compat shims past a surface's cutover.
+- ⚠️ **Amendment A-UAC156 (2026-10-03): the update tool's core-ancestor re-stamp.** It amends "✅ MUST run
+  user-OBO for all Dataverse tool access" (above) and FR-P0-10 for ONE step of `dataverse.update_record`
+  (`DataverseUpdateRecordHandler`). This is CLAUDE.md §6.5 **path B**, decided by the owner in unified-access-control-r2
+  owner decisions round 8 item 1 (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`).
+  The caller's PATCH still runs user-OBO. Once that PATCH has succeeded, `CoreAncestorAfterWriteRestamp.AfterWriteAsync`
+  re-stamps APP-ONLY, in the same operation, the `sprk_regarding{core}` copies the write moved: the record's own copy and
+  the copies of the records filed under it. The helper is narrow by construction: one member, no `IServiceProvider`, no
+  client exposed, stamp columns only, and values derived from the data, never from the caller. A refused PATCH re-stamps
+  nothing. This amendment covers only that re-stamp. Record: `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`,
+  "Owner round 8".
 
 ### Existing Patterns to Follow
 - Prompted executor: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/` (ActionRunner + PromptSchemaRenderer)

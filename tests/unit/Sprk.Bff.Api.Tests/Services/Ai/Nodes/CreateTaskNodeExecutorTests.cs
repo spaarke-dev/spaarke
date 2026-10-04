@@ -47,6 +47,7 @@ public class CreateTaskNodeExecutorTests
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             _loggerMock.Object);
     }
 

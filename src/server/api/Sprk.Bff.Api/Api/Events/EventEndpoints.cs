@@ -457,6 +457,10 @@ public static class EventEndpoints
     /// <param name="id">The event ID.</param>
     /// <param name="request">The update event request.</param>
     /// <param name="dataverseService">Dataverse service for updating records.</param>
+    /// <param name="restamper">
+    /// Re-stamps the event (and every record filed under it) when the update changed what the event is filed under
+    /// (unified-access-control-r2 task 156).
+    /// </param>
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>200 OK with updated event on success, 404 if not found, or 400 if validation fails.</returns>
@@ -467,6 +471,7 @@ public static class EventEndpoints
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Core.Auth.AuthorizationService authorization,
         HttpContext httpContext,
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -594,6 +599,17 @@ public static class EventEndpoints
             {
                 await dataverseService.UpdateEventAsync(id, dataverseRequest, ct);
             }
+
+            // Task 156 (verifier round 2 item 8): the update writes the event's regarding pair and — since task 146 r1 —
+            // the entity-specific regarding lookups beside it (UpdateEventRequest.RegardingLookupWrites). A pair change
+            // moves what the event's copy comes from, so the event's own copy, and the copies of everything filed under
+            // it, are re-stamped in this same request, AFTER any re-file has stood (a re-file put back after a failed
+            // owner assignment throws above). A write that does not touch the pair reads nothing. Never thrown: a record
+            // that fails is logged and the reconciliation job repairs it; this update stands.
+            await restamper.AfterWriteAsync(
+                "sprk_event", id,
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.EventColumnsWritten(dataverseRequest),
+                CancellationToken.None);
 
             // If status changed, create Event Log entry — after any reparent, so it is owned like the event now is.
             if (request.StatusCode.HasValue)

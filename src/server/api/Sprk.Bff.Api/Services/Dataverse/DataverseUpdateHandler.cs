@@ -11,17 +11,20 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly CoreAncestorRestamper _restamper;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
         IRecordOwnershipResolver ownership,
+        CoreAncestorRestamper restamper,
         ILogger<DataverseUpdateHandler> logger)
     {
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -51,6 +54,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
+            await RestampAsync(entityLogicalName, recordId, fields);
             return;
         }
 
@@ -67,7 +71,18 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
         }
+
+        // Re-stamped only once the re-file has STOOD (its owner assignment read back): a re-file the resolver put
+        // back after a failed assignment throws above and is never re-stamped from the filing it no longer has.
+        await RestampAsync(entityLogicalName, recordId, fields);
     }
+
+    // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
+    // analysis is filed under, or the matter / project of a record others are filed under — so the affected copies
+    // are re-stamped in the same operation. A write that cannot move a stamp reads nothing. Never thrown: a child
+    // that fails is logged and the reconciliation job repairs it; this record's own update stands.
+    private Task RestampAsync(string entityLogicalName, Guid recordId, Dictionary<string, object?> fields) =>
+        _restamper.AfterWriteAsync(entityLogicalName, recordId, fields.Keys, CancellationToken.None);
 
     private async Task WriteAsync(
         string entityLogicalName,
@@ -92,6 +107,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 "Updated {EntityType} {RecordId} with {FieldCount} fields (no concurrency control)",
                 entityLogicalName, recordId, fields.Count);
         }
+
     }
 
     /// <summary>
