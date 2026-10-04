@@ -453,6 +453,27 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
 6. **163's CreateEventWizard defect** (`sprk_Event@odata.bind` on `sprk_document`, which has no such column; its event lookup is `sprk_relatedevent` / `sprk_RelatedEvent`) is fixed by **task 147**, which moves that writer onto the BFF (round 28). The BFF create binds `sprk_relatedevent`, with a test.
 7. **167 `/healthz/catalog`:** the HealthCheckResult is memoized for 30 seconds (one result shared across callers; a fault is not cached beyond the same 30 s), as well as the `health-probe` rate limit. One anonymous IP can then drive at most one catalog read set per 30 seconds. Tested with a fake TimeProvider.
 
+## Round 35 (2026-10-04). BINDING. Main-session decisions under round 15. Task 165's five verifier questions, and task 147's Q2.
+
+1. **165 Q1: every container-creation path stamps, not only the BFF's.**
+   - The control-plane H8 handler (`GraphContainerTypeProvisioner`), `scripts/New-BusinessUnitContainer.ps1` and `scripts/Provision-Customer.ps1` stamp the container they create with round 20's property and the same rule: read back, and remove the container if the stamp does not read back.
+   - The property name is ONE constant on each side (C# and PowerShell). A guard test fails on a container-create call site in `src/` or `scripts/` that does not stamp.
+   - Task 165 owns all three. The H8 change is recorded in `customer-provisioning-orchestration-r1`'s notes for that project.
+2. **165 Q2: an UNBOUND container is reachable by no admin route.** This amends round 20 item 2 ("an unbound container only a ROOT-unit admin").
+   - **Why:** under Model 1, the root admin of ANY environment whose config names a shared type would otherwise reach another customer's unbound containers.
+   - **The rule:** the per-container routes answer the uniform 404 for an unbound container, and log reason `unbound`.
+   - **Binding:** binding happens only through creation stamping (item 1) and the backfill script. The backfill gains an explicit `-Bind <containerId>=<businessUnitId>` input for containers whose owner cannot be derived, and its `-Verify` lists every container still unbound.
+   - **Gates:** backfill `-Apply` plus `-Verify` exit 0 in every environment is a manual gate BEFORE 165's BFF is deployed. The same gate applies before a further environment is onboarded onto a shared type, and it is written into the onboarding guide.
+3. **165 Q3: `sprk_keyvaultsecretname` is allow-listed.**
+   - Allowed names use ONE pinned prefix, taken from the existing configs' naming (read the live configs read-only to choose it).
+   - Config POST/PUT answer 400 for any other name. At read, the BFF refuses to resolve a non-conforming name: it fails closed with its own reason code and never reads the secret.
+   - A `-Verify` script lists the live configs that do not conform; renaming them is a manual gate.
+4. **165 Q4: the security-alerts and secure-score routes are platform-operator-only.** They require a ROOT-unit admin, through the same check as the environment write rule (round 16 item 4). Tests + seeds.
+5. **165 Q5: the container-type permission and consumer READS get the Write rule.** `GET /containertypes/{typeId}/permissions` and `/consumers` require every config of the type to be reachable by the caller.
+   - **Why:** these routes list every customer's consuming app.
+   - The test `ALeafAdmin_ReadingItsOwnSharedContainerType_ReachesTheHandler` is replaced by its refusing counterpart, plus a positive test for an admin who reaches every config of the type.
+6. **147 Q2:** answered by round 28 item 1 as written. Every browser-initiated child create through the BFF is owned by the team `RecordOwnershipResolver` names. For a child of a NON-secure parent, that is the business-unit default team (I-6). Children are no longer user-owned on that path.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
