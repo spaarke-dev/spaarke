@@ -186,12 +186,14 @@ public class CosmosProvisioningSecretGuardTests
     /// in any vault yet — writing it there is what this record is for.
     /// </para>
     /// <para>
-    /// <b>ExchangePolicySidecarClient+SharedSecretResolution</b> and
-    /// <b>ExchangePolicySidecarReadClient+SharedSecretResolution</b> — a <c>private readonly struct</c>
-    /// returned by <c>ResolveSharedSecretAsync</c>, holding either the resolved sidecar shared secret
-    /// or a failure. Private, nested, method-local, never serialized; it exists to make
-    /// "resolved-or-failed" a single return value instead of an out-parameter. Two entries because
-    /// the read and write clients each declare their own nested copy.
+    /// <b>ExchangePolicySidecarClient+Headers</b> — a <c>private readonly record struct</c> returned by
+    /// <c>ResolveHeadersAsync</c>, holding either the two sidecar request credentials (the resolved
+    /// shared secret and the Exchange access token) or a failure. Private, nested, method-local, never
+    /// serialized; it exists to make "resolved-or-failed" a single return value. Task 251 (2026-10-04)
+    /// replaced the former <c>ExchangePolicySidecarClient+SharedSecretResolution</c> /
+    /// <c>ExchangePolicySidecarReadClient+SharedSecretResolution</c> pair with this one type when the
+    /// read client merged into the apply client and the request gained the Exchange token — same
+    /// rationale, same exclusion, one entry instead of two.
     /// </para>
     /// <para>
     /// <b>SolutionVerificationRequest</b> — transient record carrying the plaintext client secret
@@ -248,8 +250,7 @@ public class CosmosProvisioningSecretGuardTests
 
         // #839 (2026-08-27) — genuine cleartext, provably transient. Rationale per type above.
         "Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg.PendingKvSecretWrite",
-        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarClient+SharedSecretResolution",
-        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarReadClient+SharedSecretResolution",
+        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarClient+Headers",   // task 251 (was +SharedSecretResolution x2)
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionVerificationRequest",
 
         // #839 (2026-08-27) — `Key` is an app-setting NAME on both. Rationale per type above.

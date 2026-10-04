@@ -7,10 +7,12 @@
 // PURPOSE:
 //   Registers the BFF app-registration AND the UAMI as Dataverse System
 //   Administrator Application Users on the target Dataverse environment, then
-//   syncs the Microsoft Graph application (app-only) permission catalog (15
-//   roles as of task 144; Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally
-//   via IGraphAppRolesRegistry — see that file's header for the L2/BFF
-//   assembly-isolation rationale) onto the UAMI service principal.
+//   syncs the Microsoft Graph application (app-only) permission catalog
+//   (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally via
+//   IGraphAppRolesRegistry — see that file's header for the L2/BFF
+//   assembly-isolation rationale) onto the UAMI service principal: the 11
+//   Entra-granted roles. The 4 mailbox roles are granted by H14a through
+//   Exchange, scoped to the customer's group (task 251) — never here.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-13 (H10
@@ -347,9 +349,13 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
         var uamiSystemUserId = ((DataverseAppUserVerificationResult.Verified)t2Result).SystemUserId;
 
-        // (12) Grant all Graph app-roles (15 as of task 144) onto the UAMI service principal.
+        // (12) Grant the Entra-granted Graph app-roles onto the UAMI service principal. The mailbox
+        //      roles (Mail.*, MailboxSettings.Read) are NOT granted here: H14a grants them through
+        //      Exchange, scoped to the customer's group (task 251, owner D26) — an Entra grant would
+        //      reach every mailbox in the tenant and void that scope.
+        var entraRoles = _rolesRegistry.GetEntraGranted();
         var grantOutcome = await _roleGranter.GrantRolesAsync(
-            uamiObjectId, tenantId, expectedRoles, cancellationToken).ConfigureAwait(false);
+            uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
         if (grantOutcome is GraphAppRoleGrantOutcome.Failure grantFailure)
         {
             var diagnostic =
@@ -362,7 +368,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
-            uamiObjectId, tenantId, expectedRoles, cancellationToken).ConfigureAwait(false);
+            uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
         if (t3Result is GraphAppRoleParityResult.Partial partial)
         {
             var diagnostic =
@@ -380,7 +386,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         _logger.LogInformation(
             "H10 succeeded: runId={RunId} customerId={CustomerId} uamiSystemUserId={UamiSystemUserId} " +
             "bffSystemUserId={BffSystemUserId} rolesGranted={RolesGranted} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, uamiSystemUserId, bffSystemUserId, expectedRoles.Count,
+            envelope.RunId, envelope.CustomerId, uamiSystemUserId, bffSystemUserId, entraRoles.Count,
             stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(

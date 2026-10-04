@@ -390,7 +390,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                         ? containerTypeId?.Trim() ?? string.Empty
                         : string.Empty,
                     // T6 looks for H8's container in the owning app's app-only listing (task 248).
-                    SpeContainerId: run.InterStepState.SpeContainerId?.Trim() ?? string.Empty),
+                    SpeContainerId: run.InterStepState.SpeContainerId?.Trim() ?? string.Empty,
+                    // T4 checks the stamp identity's Exchange roles are limited to this group (task 251).
+                    ExchangeScopeGroupId: parameters.TryGetValue(IntakeParameterCatalog.ExchangePolicyScopeGroupId, out var scopeGroupId)
+                        ? scopeGroupId?.Trim() ?? string.Empty
+                        : string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

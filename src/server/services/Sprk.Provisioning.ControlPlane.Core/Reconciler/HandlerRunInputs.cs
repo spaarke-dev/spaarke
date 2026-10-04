@@ -236,6 +236,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
                 // T248: T6 looks for H8's container in the owning app's app-only listing (absent → T6 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
+                RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
             ],
             [HandlerIds.H14] =
             [
@@ -247,9 +248,9 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.CommunicationGraphResource, required: false),
                 RunInput.Intake(IntakeParameterCatalog.EmailGraphResource, required: false),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
-                RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
+                RunInput.Output(nameof(InterStepState.MiObjectId)),   // T251: H14a registers the identity in Exchange
             ],
         };
 }

@@ -4,7 +4,7 @@
     <title>Make the Exchange-policy sidecar work on the L2 Worker (G30) — correct its settings wiring, give it a real Exchange identity (preferably managed identity), deploy the Worker + sidecar together healthy</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T251 (gap G30, found during T248's dev deploy 2026-10-03)</phase>
     <gate>startable now; the Exchange identity choice is an owner decision (escalation 1)</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-sensitive (Exchange Online app-only identity for H14a), Bicep for a live App Service, sidecar code, and a dev deployment.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -100,6 +100,11 @@ param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 // resolves the ACR pull via the shared control-plane UAMI's AcrPull grant.
 param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest'
 
+// Task 251 (owner D24, 2026-10-04): 'Spaarke Exchange Admin' -- the Worker signs in as it through
+// the federated credential trusting sprk-controlplane-dev-uami (no certificate, no secret). Its
+// Exchange permission is the narrowed role 'Spaarke App RBAC Admin' (owner D25).
+param exchangeAdminAppId = '46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7'
+
 // ============================================================================
 // SPE OWNING APPS (task 245b; task 248 — MI-FIC, owner decision D16)
 // ============================================================================

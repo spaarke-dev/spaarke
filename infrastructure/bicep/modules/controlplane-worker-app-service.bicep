@@ -8,9 +8,10 @@
 //   the background-processing host (C1.1 session-serialized dispatcher +
 //   state-reconciler + crash-recovery + the 20-handler fleet, task 100/102)
 //   -- on the SAME App Service Plan as .Api ($0 marginal Azure cost per
-//   DS-3 Option 2). Also emits the DS-1b Exchange ApplicationAccessPolicy
-//   sidecar as a Microsoft.Web/sites/sitecontainers child resource, moving
-//   the Exchange-admin-capable container off the internet-facing .Api site.
+//   DS-3 Option 2). Also emits the H14a Exchange sidecar (RBAC for
+//   Applications since task 251) as a Microsoft.Web/sites/sitecontainers
+//   child resource, moving the Exchange-admin-capable container off the
+//   internet-facing .Api site.
 //
 // SPEC / DESIGN REFERENCES (customer-provisioning-orchestration-r1)
 //   - DS-3 Section 3 Option 2 (owner-locked): .Worker is a NEW slotless App
@@ -23,11 +24,17 @@
 //   - design.md Section 4.2a: main site(s) are stock DOTNETCORE|10.0
 //     code-based deploys -- zero custom container image on the main site;
 //     the EXO sidecar (H14a only) is the one designed exception.
-//   - DS-1b Section 3: sitecontainer message contract -- localhost:8091,
-//     POST /apply-policy with X-Sidecar-Auth per-boot shared secret from
-//     platform KV; sidecar fetches the Exchange cert from KV at call time
-//     via the SAME UAMI (App Service MSI endpoint reachable from
-//     sitecontainers -- shared network namespace).
+//   - DS-1b Section 3 (task 251): sitecontainer message contract --
+//     localhost:8091, POST /apply-mailbox-access + /read-mailbox-access with
+//     X-Sidecar-Auth (per-boot shared secret, platform KV) and
+//     X-Exchange-Access-Token (the Worker signs in as 'Spaarke Exchange Admin'
+//     through its UAMI's federated credential; the sidecar holds NO
+//     credential and reads no Key Vault -- owner D24).
+//   - SITECONTAINER SETTINGS CONTRACT (task 251, G30): a sitecontainer
+//     environmentVariables value is the NAME of an app setting on this site,
+//     never a literal -- App Service resolves it at start and passes an empty
+//     string when the setting does not exist. Literals here are why the first
+//     sidecar (2026-10-03) started with every variable empty.
 //   - ADR-028: UAMI-only identity; DefaultAzureCredential; NEVER
 //     SystemAssigned.
 //
@@ -52,12 +59,8 @@
 //     handler, not a Bicep concern.
 //   - keyVaultReferenceIdentity PATCH: applied post-deploy by the H4
 //     handler on the Worker site (parity with .Api's T1/T5 handling).
-//   - The real ACR image for the Exchange sidecar: task 114 built the
-//     Dockerfile/image; task 115 wires the CI build+push to the platform
-//     ACR. Until task 115 lands, `acrImageTag` defaults to a documented
-//     public placeholder (see param description + the POML's own
-//     escalation-trigger guidance) so this module's shape can be authored
-//     and validated independently of the CI pipeline landing first.
+//   - The Exchange sidecar image: built by .github/workflows/build-provisioning-sidecar.yml
+//     into the platform ACR; `acrImageTag` selects it (dev bicepparam pins the ACR tag).
 //
 // DS-5 C5.1 FOLLOW-ON FIX (task 110, applied here)
 //   DS-5's C5.1 finding scoped ONLY modules/controlplane-app-service.bicep
@@ -105,9 +108,6 @@ param cosmosRunsContainerName string
 @description('Key Vault name (for @Microsoft.KeyVault references in appSettings + sitecontainer environmentVariables).')
 param keyVaultName string
 
-@description('Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3).')
-param keyVaultUri string
-
 @description('Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix, applied here by task 110 -- MI-only send/receive, no connection string per ServiceBusModule.cs:53). SAME value passed to the .Api module.')
 param serviceBusNamespaceName string
 
@@ -136,14 +136,11 @@ param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 @description('ACR authentication mode for the sitecontainer pull. Anonymous is correct ONLY for the public MCR placeholder default above. Switch to UserAssigned (with userManagedIdentityClientId = uamiClientId) once acrImageTag points at the platform ACR (task 115) -- the UAMI needs AcrPull RBAC on that registry, granted alongside task 110 and task 111 other RBAC grants.')
 param sidecarAuthType string = 'Anonymous'
 
-@description('Name of the KV secret holding the per-boot shared secret the Worker site injects into the sidecar as SIDECAR_SHARED_SECRET (DS-1b Section 3 main-to-sidecar auth leg).')
+@description('Name of the platform KV secret holding the per-boot shared secret between the Worker and the Exchange sidecar (DS-1b Section 3). The Worker reads it from Key Vault (IntegrationWiring__SidecarSharedSecret*); the sidecar receives it through the ExchangeSidecar__SharedSecret Key Vault reference app setting.')
 param sidecarSharedSecretKvSecretName string = 'Sidecar-Shared-Secret'
 
-@description('Name of the KV secret holding the Exchange Online connect certificate (PFX) the sidecar fetches at call time via the App Service MSI endpoint. This is the SECRET NAME passed as EXCHANGE_CERT_SECRET_NAME -- not the certificate value itself (DS-1b Section 3 sidecar-to-Exchange auth leg).')
-param exchangeCertKvSecretName string = 'Exchange-Connect-Cert'
-
-@description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding.')
-param exchangeConnectAppId string = ''
+@description('Client id of the \'Spaarke Exchange Admin\' app registration (task 251, owner D24). The Worker signs in as it through the federated identity credential that trusts this module\'s UAMI and hands the Exchange Online token to the sidecar per request -- no certificate, no secret. Emitted as IntegrationWiring__ExchangeAdminAppId. Empty: the Worker and sidecar start, and H14a / H13 T4 report "ExchangeAdminAppId is not configured" on first use.')
+param exchangeAdminAppId string = ''
 
 @description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6).')
 param customerRunGuardTenantId string = ''
@@ -428,18 +425,35 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'ControlPlaneIdentity__PrincipalObjectId', value: controlPlanePrincipalId }
         { name: 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', value: 'true' }
+
+        // ---------------------------------------------------------------
+        // Task 251 (G30): H14a's Exchange sidecar. The Worker reads the shared
+        // secret from Key Vault (all three settings, else H14a fails loudly at
+        // first call) and signs in to Exchange as 'Spaarke Exchange Admin'.
+        // ExchangeSidecar__SharedSecret exists only so the sitecontainer can
+        // name it (see the sitecontainer below).
+        // ---------------------------------------------------------------
+        { name: 'IntegrationWiring__SidecarSharedSecretVaultName', value: keyVaultName }
+        { name: 'IntegrationWiring__SidecarSharedSecretSubscriptionId', value: subscription().subscriptionId }
+        { name: 'IntegrationWiring__SidecarSharedSecretName', value: sidecarSharedSecretKvSecretName }
+        { name: 'IntegrationWiring__ExchangeAdminAppId', value: exchangeAdminAppId }
+        {
+          name: 'ExchangeSidecar__SharedSecret'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
+        }
       ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
     }
   }
 }
 
 // ============================================================================
-// EXCHANGE APPLICATIONACCESSPOLICY SIDECAR (DS-1b Section 3 / design.md
-// Section 4.2a) -- Microsoft.Web/sites/sitecontainers child resource.
-// Shares the Worker site's network namespace (localhost-only, not publicly
-// routed) and the Worker's UAMI (sitecontainers can reach the App Service
-// MSI endpoint -- IDENTITY_ENDPOINT / IDENTITY_HEADER are injected
-// automatically by the platform for any identity-bound site; NOT set here).
+// H14a EXCHANGE SIDECAR (DS-1b Section 3 / design.md Section 4.2a; task 251)
+// -- Microsoft.Web/sites/sitecontainers child resource. Shares the Worker
+// site's network namespace (localhost-only, not publicly routed). Holds no
+// credential: the Worker sends the Exchange token with each request.
+// Each environmentVariables value NAMES an app setting above (Microsoft's
+// sitecontainers contract) -- never a literal. The sidecar binds its port
+// even when a setting is missing, so it can never hold the Worker site down.
 // ============================================================================
 
 resource exchangePolicySidecar 'Microsoft.Web/sites/sitecontainers@2024-04-01' = {
@@ -456,23 +470,10 @@ resource exchangePolicySidecar 'Microsoft.Web/sites/sitecontainers@2024-04-01' =
     // (the MCR-placeholder default), so unconditionally setting it is safe.
     userManagedIdentityClientId: uamiClientId
     environmentVariables: [
-      // PLATFORM_KV_URI + EXCHANGE_CERT_SECRET_NAME + EXCHANGE_CONNECT_APP_ID
-      // are plain (non-secret) values per Listener.ps1's documented
-      // .ENVIRONMENT contract (task 114).
-      { name: 'PLATFORM_KV_URI', value: keyVaultUri }
-      { name: 'EXCHANGE_CERT_SECRET_NAME', value: exchangeCertKvSecretName }
-      { name: 'EXCHANGE_CONNECT_APP_ID', value: exchangeConnectAppId }
-
-      // SIDECAR_SHARED_SECRET is the main-to-sidecar auth leg (DS-1b
-      // Section 3) -- KV-reference syntax, same convention as every other
-      // secret-bearing appSetting in this module. Requires the Worker's
-      // keyVaultReferenceIdentity PATCH (H4, post-deploy) to resolve at
-      // runtime -- same T1 pattern as the main site's Cosmos/SB/Dataverse
-      // settings above.
-      {
-        name: 'SIDECAR_SHARED_SECRET'
-        value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
-      }
+      // The Worker -> sidecar shared secret (DS-1b Section 3), through the
+      // ExchangeSidecar__SharedSecret Key Vault reference app setting -- which
+      // resolves with the site's keyVaultReferenceIdentity (Deploy-ControlPlane.ps1).
+      { name: 'SIDECAR_SHARED_SECRET', value: 'ExchangeSidecar__SharedSecret' }
     ]
   }
 }

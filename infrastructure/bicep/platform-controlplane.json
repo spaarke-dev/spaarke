@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14137870858376761704"
+      "templateHash": "5380486564974638054"
     }
   },
   "parameters": {
@@ -96,11 +96,11 @@
         "description": "ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed."
       }
     },
-    "exchangeConnectAppId": {
+    "exchangeAdminAppId": {
       "type": "string",
-      "defaultValue": "00000000-0000-0000-0000-000000000000",
+      "defaultValue": "",
       "metadata": {
-        "description": "Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default '' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: \"all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation\"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding."
+        "description": "Client id of the 'Spaarke Exchange Admin' app registration the Worker signs in as for H14a (task 251, owner D24) -- through its federated identity credential that trusts the control-plane UAMI; no certificate, no secret. Threaded to modules/controlplane-worker-app-service.bicep (IntegrationWiring__ExchangeAdminAppId). Empty: the Worker and its sidecar start, and H14a reports \"not configured\" on first use -- never a placeholder value. Created by docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Exchange admin app)."
       }
     },
     "speContainerTypeOwners": {
@@ -1461,9 +1461,6 @@
           "keyVaultName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultName.value]"
           },
-          "keyVaultUri": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultUri.value]"
-          },
           "serviceBusNamespaceName": {
             "value": "[variables('effectiveServiceBusNamespaceName')]"
           },
@@ -1482,8 +1479,8 @@
           "sidecarAuthType": {
             "value": "[parameters('sidecarAuthType')]"
           },
-          "exchangeConnectAppId": {
-            "value": "[parameters('exchangeConnectAppId')]"
+          "exchangeAdminAppId": {
+            "value": "[parameters('exchangeAdminAppId')]"
           },
           "controlPlanePrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
@@ -1517,7 +1514,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "3051002304773829210"
+              "templateHash": "6092684834651833351"
             }
           },
           "parameters": {
@@ -1574,12 +1571,6 @@
               "type": "string",
               "metadata": {
                 "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings + sitecontainer environmentVariables)."
-              }
-            },
-            "keyVaultUri": {
-              "type": "string",
-              "metadata": {
-                "description": "Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3)."
               }
             },
             "serviceBusNamespaceName": {
@@ -1645,21 +1636,14 @@
               "type": "string",
               "defaultValue": "Sidecar-Shared-Secret",
               "metadata": {
-                "description": "Name of the KV secret holding the per-boot shared secret the Worker site injects into the sidecar as SIDECAR_SHARED_SECRET (DS-1b Section 3 main-to-sidecar auth leg)."
+                "description": "Name of the platform KV secret holding the per-boot shared secret between the Worker and the Exchange sidecar (DS-1b Section 3). The Worker reads it from Key Vault (IntegrationWiring__SidecarSharedSecret*); the sidecar receives it through the ExchangeSidecar__SharedSecret Key Vault reference app setting."
               }
             },
-            "exchangeCertKvSecretName": {
-              "type": "string",
-              "defaultValue": "Exchange-Connect-Cert",
-              "metadata": {
-                "description": "Name of the KV secret holding the Exchange Online connect certificate (PFX) the sidecar fetches at call time via the App Service MSI endpoint. This is the SECRET NAME passed as EXCHANGE_CERT_SECRET_NAME -- not the certificate value itself (DS-1b Section 3 sidecar-to-Exchange auth leg)."
-              }
-            },
-            "exchangeConnectAppId": {
+            "exchangeAdminAppId": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding."
+                "description": "Client id of the 'Spaarke Exchange Admin' app registration (task 251, owner D24). The Worker signs in as it through the federated identity credential that trusts this module's UAMI and hands the Exchange Online token to the sidecar per request -- no certificate, no secret. Emitted as IntegrationWiring__ExchangeAdminAppId. Empty: the Worker and sidecar start, and H14a / H13 T4 report \"ExchangeAdminAppId is not configured\" on first use."
               }
             },
             "customerRunGuardTenantId": {
@@ -1760,7 +1744,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'ConnectionStrings__Redis', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true')), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'ConnectionStrings__Redis', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
                 }
               }
             },
@@ -1776,20 +1760,8 @@
                 "userManagedIdentityClientId": "[parameters('uamiClientId')]",
                 "environmentVariables": [
                   {
-                    "name": "PLATFORM_KV_URI",
-                    "value": "[parameters('keyVaultUri')]"
-                  },
-                  {
-                    "name": "EXCHANGE_CERT_SECRET_NAME",
-                    "value": "[parameters('exchangeCertKvSecretName')]"
-                  },
-                  {
-                    "name": "EXCHANGE_CONNECT_APP_ID",
-                    "value": "[parameters('exchangeConnectAppId')]"
-                  },
-                  {
                     "name": "SIDECAR_SHARED_SECRET",
-                    "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName'))]"
+                    "value": "ExchangeSidecar__SharedSecret"
                   }
                 ]
               },

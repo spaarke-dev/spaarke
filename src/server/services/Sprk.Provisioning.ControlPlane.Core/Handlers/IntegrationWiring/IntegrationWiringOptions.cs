@@ -60,20 +60,24 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 /// </summary>
 public sealed class IntegrationWiringOptions
 {
-    // ---------- H14a Exchange policy naming (sidecar wire) ----------
+    // ---------- H14a Exchange mailbox access (task 251, owner D24 + D26) ----------
 
     /// <summary>
-    /// Description prefix applied to every <c>New-ApplicationAccessPolicy</c>
-    /// call inside the sidecar so policies created by H14 are greppable in
-    /// <c>Get-ApplicationAccessPolicy</c> output. Full description is
-    /// <c>{prefix}-{appId}</c>. Sent to the sidecar on the wire as
-    /// <c>descriptionPrefix</c> (Listener.ps1 line 23). Empty value causes
-    /// the sidecar to fall back to its own server-side default
-    /// (<c>Spaarke-Provisioning-AppAccessPolicy</c>); see
-    /// <see cref="ExchangePolicySidecarClient.BuildWireRequest"/> for the
-    /// omit-when-empty envelope behavior.
+    /// Client id of the <c>Spaarke Exchange Admin</c> app registration. The Worker signs in as it
+    /// through the federated identity credential that trusts the Worker's managed identity (ADR-028
+    /// A4 -- no certificate, no secret) and sends the resulting Exchange Online token to the sidecar
+    /// with each request; the sidecar holds no credential. Empty: H14a and the H13 T4 probe report
+    /// "not configured" on first use (the Worker still boots). Validated as a GUID when set.
     /// </summary>
-    public string ExchangePolicyDescriptionPrefix { get; set; } = "Spaarke-Provisioning-AppAccessPolicy";
+    public string ExchangeAdminAppId { get; set; } = "";
+
+    /// <summary>
+    /// Prefix of the Exchange role-assignment names H14a creates:
+    /// <c>{prefix}-{customerId}-{role}</c> (64 characters max; longer names end in a hash).
+    /// The names are H14a's idempotency key in Exchange, so changing the prefix after customers
+    /// exist makes H14a see their existing assignments as Drift.
+    /// </summary>
+    public string ExchangeAssignmentNamePrefix { get; set; } = "Spaarke";
 
     // ---------- H14b Graph webhooks ----------
 
@@ -249,6 +253,22 @@ public sealed class IntegrationWiringOptions
             throw new InvalidOperationException(
                 $"Configuration '{IntegrationWiringModule.ConfigSection}:KvReadTimeout' must be between " +
                 $"1 second and 5 minutes (actual: {KvReadTimeout}).");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ExchangeAdminAppId) && !Guid.TryParse(ExchangeAdminAppId, out _))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:ExchangeAdminAppId' must be the client id " +
+                $"(a GUID) of the 'Spaarke Exchange Admin' app registration (actual: '{ExchangeAdminAppId}').");
+        }
+
+        if (string.IsNullOrWhiteSpace(ExchangeAssignmentNamePrefix)
+            || ExchangeAssignmentNamePrefix.Length > 16
+            || !ExchangeAssignmentNamePrefix.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{IntegrationWiringModule.ConfigSection}:ExchangeAssignmentNamePrefix' must be 1-16 " +
+                $"letters, digits or hyphens (actual: '{ExchangeAssignmentNamePrefix}').");
         }
 
         if (!Uri.TryCreate(SidecarBaseUrl, UriKind.Absolute, out _))

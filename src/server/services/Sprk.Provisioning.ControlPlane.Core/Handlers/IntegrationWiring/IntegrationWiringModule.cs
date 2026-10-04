@@ -127,7 +127,7 @@ public static class IntegrationWiringModule
         // interface once assembly task 185 wires it into the aggregate
         // IE2ETrapVerifier composition, per the sibling standalone-probe
         // convention (T1/T5/T6 file headers).
-        services.AddHttpClient<IExchangePolicyReadClient, ExchangePolicySidecarReadClient>();
+        services.AddHttpClient<IExchangePolicyReadClient, ExchangePolicySidecarClient>();
 
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —

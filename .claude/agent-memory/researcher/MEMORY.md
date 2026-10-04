@@ -79,6 +79,9 @@
 - [BFF Dataverse HTTP unification (2026-06-23)](bff-dataverse-http-unification-2026-06.md) — orphan named clients; REC IDataverseHttpClient
 - [Customer-stamp pricing (2026-08-12)](spaarke-customer-stamp-pricing-2026-08-12.md) — ~$3.5-4.5K/mo per customer; AI Search S1 biggest floor
 
+- [EXO sidecar identity (2026-10-03)](exo-sidecar-identity-2026-10-03.md) — EXO -ManagedIdentity internals (verified), MI-FIC -AccessToken recommendation, AAP→RBAC-for-Apps status, perms
+- [EXO RBAC-for-Apps design (2026-10-04)](exo-rbac-for-apps-design-2026-10-04.md) — T251 cmdlet sequence, caller perms + Role Management escalation, subscriptions gap, cache, limits
+
 ## AI platform / models / competitors
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo
 - [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology still preview, read-only over OneLake; complements, not replaces

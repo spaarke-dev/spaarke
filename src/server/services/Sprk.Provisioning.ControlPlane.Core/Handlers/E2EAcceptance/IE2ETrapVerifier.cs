@@ -101,7 +101,8 @@ public sealed record TrapVerificationRequest(
     string ResourceGroupName,
     string UamiObjectId = "",
     string ContainerTypeId = "",
-    string SpeContainerId = "");
+    string SpeContainerId = "",
+    string ExchangeScopeGroupId = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).
@@ -114,10 +115,10 @@ public enum TrapKind
     /// <summary>T2 — Dataverse App User systemusers filter returns the expected UAMI + BFF app-reg pair.</summary>
     T2DataverseAppUser = 2,
 
-    /// <summary>T3 — UAMI SP appRoleAssignments == all 14 in GraphAppRoles.cs.</summary>
+    /// <summary>T3 — UAMI SP appRoleAssignments == the Entra-granted Graph roles, and none of the mailbox roles (task 251).</summary>
     T3GraphAppRoleParity = 3,
 
-    /// <summary>T4 — Exchange <c>Get-ApplicationAccessPolicy</c> returns 2 entries with matching principals.</summary>
+    /// <summary>T4 — the stamp identity holds every Exchange mailbox role, limited to the customer's scope group (RBAC for Applications, task 251).</summary>
     T4ExchangePolicyCount = 4,
 
     /// <summary>T5 — both-slot MI KV RBAC OR UAMI structural (post-Phase-C).</summary>

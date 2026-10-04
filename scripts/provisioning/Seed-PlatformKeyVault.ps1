@@ -43,10 +43,11 @@
                                   container + Worker both resolve the SAME KV
                                   secret, so a generated value is immediately
                                   self-consistent).
-      4. Exchange-Connect-Cert    -- base64 cert bytes from
-                                  -ExchangeConnectCert, else sentinel (cert
-                                  material can only come from an operator OOB
-                                  ceremony).
+      (Exchange-Connect-Cert is no longer seeded -- task 251: the Exchange
+       sidecar holds no credential; the Worker signs in as 'Spaarke Exchange
+       Admin' through its managed identity's federated credential. An existing
+       sentinel copy in a vault is left in place -- never deleted -- and is
+       unused.)
       5. Redis-ConnectionString   (G-8 Batch 4 AMENDMENT, for G-8 Batch 3's
                                   audit defect #6 fix) -- the Worker's
                                   ConnectionStrings__Redis KV-ref source
@@ -104,12 +105,6 @@
     shared secret). If unset, a random GUID is GENERATED and seeded -- both
     the Worker and the sidecar container resolve this same KV secret, so a
     generated value is self-consistent without operator follow-up.
-
-.PARAMETER ExchangeConnectCert
-    Optional base64-encoded certificate bytes for Exchange-Connect-Cert. If
-    unset, the sentinel 'pending-oob-population' is seeded and an operator
-    MUST replace it with the real cert material out-of-band before the
-    Exchange sidecar can connect.
 
 .PARAMETER RedisConnectionString
     Optional real value for Redis-ConnectionString (StackExchange.Redis
@@ -185,9 +180,6 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$SidecarSharedSecret,
-
-    [Parameter(Mandatory = $false)]
-    [string]$ExchangeConnectCert,
 
     [Parameter(Mandatory = $false)]
     [string]$RedisConnectionString,
@@ -367,8 +359,7 @@ else {
 # Names MUST match the Bicep modules' KV-reference SecretName= values exactly:
 #   modules/controlplane-app-service.bicep        -> Dataverse-ClientSecret
 #   modules/controlplane-worker-app-service.bicep -> Dataverse-ClientSecret,
-#       BFF-API-ClientSecret, Sidecar-Shared-Secret,
-#       Exchange-Connect-Cert, Redis-ConnectionString
+#       BFF-API-ClientSecret, Sidecar-Shared-Secret, Redis-ConnectionString
 # -----------------------------------------------------------------------------
 
 $secretPlan = @(
@@ -392,13 +383,6 @@ $secretPlan = @(
         Provenance = if ($SidecarSharedSecret) { 'parameter' } else { 'generated' }
         FollowUp   = $null
         Note       = 'X-Sidecar-Auth shared secret. Worker AND sidecar container both resolve this same KV secret, so a generated value is self-consistent.'
-    }
-    [pscustomobject]@{
-        Name       = 'Exchange-Connect-Cert'
-        Value      = if ($ExchangeConnectCert) { $ExchangeConnectCert } else { $SentinelValue }
-        Provenance = if ($ExchangeConnectCert) { 'parameter' } else { 'sentinel' }
-        FollowUp   = if ($ExchangeConnectCert) { $null } else { 'Operator MUST replace with real base64 cert bytes out-of-band before the Exchange ApplicationAccessPolicy sidecar can connect.' }
-        Note       = 'Base64 Exchange app-only certificate for the DS-1b sidecar.'
     }
     [pscustomobject]@{
         Name       = 'Redis-ConnectionString'

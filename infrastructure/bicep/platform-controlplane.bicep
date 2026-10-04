@@ -175,8 +175,8 @@ param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 @description('ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed.')
 param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? 'Anonymous' : 'UserAssigned'
 
-@description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default \'\' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: "all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding.')
-param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
+@description('Client id of the \'Spaarke Exchange Admin\' app registration the Worker signs in as for H14a (task 251, owner D24) -- through its federated identity credential that trusts the control-plane UAMI; no certificate, no secret. Threaded to modules/controlplane-worker-app-service.bicep (IntegrationWiring__ExchangeAdminAppId). Empty: the Worker and its sidecar start, and H14a reports "not configured" on first use -- never a placeholder value. Created by docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Exchange admin app).')
+param exchangeAdminAppId string = ''
 
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
@@ -456,7 +456,6 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     cosmosDatabaseName: cosmos.outputs.databaseName
     cosmosRunsContainerName: cosmos.outputs.containerName
     keyVaultName: keyVault.outputs.keyVaultName
-    keyVaultUri: keyVault.outputs.keyVaultUri
     // DS-5 C5.1 follow-on fix (task 110): MI-only FQNS + queue name, NOT a
     // KV-ref connection string -- same fix shape as .Api above, applied to
     // .Worker (task 101 added this module after DS-5 was authored, carrying
@@ -473,11 +472,8 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // module's concern (Batch 3).
     acrImageTag: acrImageTag
     sidecarAuthType: sidecarAuthType
-    // Wave H-3 fix-at-discovery 2026-08-21: worker module always had this
-    // param but nothing plumbed it here; empty value caused sidecar Listener.ps1
-    // fail-fast (exit 1) → App Service killed whole site startup. See top-level
-    // exchangeConnectAppId param description for full rationale.
-    exchangeConnectAppId: exchangeConnectAppId
+    // Task 251: the Exchange admin app the Worker signs in as (H14a / H13 T4).
+    exchangeAdminAppId: exchangeAdminAppId
     // Task 245b (G25): L2's own principal (H4 grants it Secrets Officer on each customer vault —
     // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
     controlPlanePrincipalId: uami.outputs.principalId

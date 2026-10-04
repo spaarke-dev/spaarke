@@ -792,6 +792,11 @@ builder.Services.AddOptions<SpeContainerOptions>()
     }, "SpeContainerOptions failed validation — see inner exception (Validate throws).")
     .ValidateOnStart();
 builder.Services.AddSingleton<SpeConfidentialClientGraphFactory>();
+
+// Task 251 (owner D24): the Exchange Online token the Worker sends to the H14a sidecar — signed in as
+// 'Spaarke Exchange Admin' through the same managed-identity federated credential mechanism (no
+// certificate, no secret; the sidecar holds no credential). Consumed by ExchangePolicySidecarClient.
+builder.Services.AddSingleton<ExchangeAdminTokenSource>();
 builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
 builder.Services.AddScoped<H8SpeContainerHandler>();

@@ -61,8 +61,8 @@
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId/subscriptionId/            │ Resumable                 │
 //   │ exchangePolicyScopeGroupId (run params)     │                           │
-//   │ Missing keyVaultName/bffAppRegId/           │ Resumable (upstream       │
-//   │ miClientId/dataverseEnvUrl/bffApiUrl        │ handler hasn't run yet)   │
+//   │ Missing keyVaultName/miClientId/            │ Resumable (upstream       │
+//   │ miObjectId/dataverseEnvUrl/bffApiUrl        │ handler hasn't run yet)   │
 //   │ (InterStepState)                            │                           │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
 //   │ T4 drift (H14a)                             │ QuarantineRequired        │
@@ -263,16 +263,17 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
         TryGetNonEmpty(parameters, EmailGraphResourceParameterKey, out var emailResource);
 
         var interStep = run.InterStepState;
-        if (string.IsNullOrWhiteSpace(interStep.BffAppRegId))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingBffAppRegId,
-                "InterStepState.bffAppRegId is not populated — H3 (Entra app-reg) must complete before H14.",
-                cancellationToken).ConfigureAwait(false);
-        }
         if (string.IsNullOrWhiteSpace(interStep.MiClientId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingUamiClientId,
                 "InterStepState.miClientId is not populated — the UAMI (H2a/uami.bicep) must complete before H14.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (string.IsNullOrWhiteSpace(interStep.MiObjectId))
+        {
+            // H14a registers the stamp identity in Exchange by its Entra service-principal object id (task 251).
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingUamiObjectId,
+                "InterStepState.miObjectId is not populated — the UAMI (H2a/uami.bicep) must complete before H14.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
@@ -282,15 +283,15 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var bffAppRegId = interStep.BffAppRegId!;
         var uamiClientId = interStep.MiClientId!;
+        var uamiObjectId = interStep.MiObjectId!;
         var dataverseEnvUrl = interStep.DataverseEnvUrl!;
         var dataverseWebhookUrl = $"{notificationBaseUrl.TrimEnd('/')}/api/webhooks/dataverse/communication";
 
         // (4) Compute each sub-step's deterministic expected key + build its
         // dispatch task (pre-completed Success if already recorded, else a
         // real invocation) — Task.WhenAll always awaits exactly 3 tasks.
-        var h14aKey = H14aExchangePolicySubHandler.BuildIdempotencyKey(envelope.CustomerId, new[] { bffAppRegId, uamiClientId });
+        var h14aKey = _h14a.ExpectedIdempotencyKey(envelope.CustomerId, uamiClientId, policyScopeGroupId, _options.ExchangeAssignmentNamePrefix);
         var h14bResources = new List<string>();
         if (!string.IsNullOrWhiteSpace(communicationResource)) h14bResources.Add(communicationResource);
         if (!string.IsNullOrWhiteSpace(emailResource)) h14bResources.Add(emailResource);
@@ -308,7 +309,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                     RunId = envelope.RunId,
                     CustomerId = envelope.CustomerId,
                     ParametersJson = H14aExchangePolicySubHandler.BuildParametersJson(
-                        tenantId, bffAppRegId, uamiClientId, policyScopeGroupId, _options.ExchangePolicyDescriptionPrefix),
+                        tenantId, uamiClientId, uamiObjectId, policyScopeGroupId, _options.ExchangeAssignmentNamePrefix),
                     EnqueuedAt = DateTimeOffset.UtcNow,
                 },
                 cancellationToken));

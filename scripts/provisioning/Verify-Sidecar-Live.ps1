@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Live verification harness for the Exchange ApplicationAccessPolicy sidecar
-    (task 114) running as a sitecontainer under the L2 control-plane Worker
+    Live verification harness for the H14a Exchange sidecar (task 114; RBAC
+    for Applications + token sign-in since task 251) running as a sitecontainer under the L2 control-plane Worker
     App Service (task 101). Runs 6 non-destructive checks per task 162's POML
     acceptance criteria; produces a structured pass/fail report the operator
     hands off to the completed-live-verification note.
@@ -12,12 +12,11 @@
     started. Executed AFTER the live ceremony (Wave G-1 backlog step 5) has
     deployed the Worker App Service + published the sidecar image to ACR.
     Non-destructive by design: every check is READ-ONLY against Azure (`az`
-    show/list commands, GET HTTP) EXCEPT the two POST /apply-policy checks
-    which fire against DEFAULT SAFE placeholder GUIDs that Listener.ps1's
-    Set-ExchangeApplicationAccessPolicy.ps1 fails at Connect-ExchangeOnline
-    before touching any real Exchange tenant. Operators wanting to exercise a
-    real Exchange mutation must override the -TenantId / -PolicyScopeGroupId /
-    -ExpectedAppIds parameters explicitly.
+    show/list commands, GET HTTP). Checks 4 and 6 call the READ-ONLY
+    POST /read-mailbox-access route with a placeholder Exchange token, which
+    the sidecar cannot connect with -- they prove routing + the shared-secret
+    guard without touching Exchange. Check 5 (the apply route) runs only when
+    the operator supplies a real -ExchangeAccessToken for a test tenant.
 
     Each check maps to one of the POML acceptance criteria + one of the DS-1b
     §3 security properties:
@@ -30,26 +29,21 @@
       3. PUBLIC_ISOLATION  — sidecar's port is NOT reachable from the public
                              Worker hostname (network-namespace isolation).
                              Direct HTTP: GET https://{worker}.azurewebsites.net:8091/healthz  MUST fail/timeout
-      4. ROUND_TRIP_AUTH   — a POST /apply-policy with the CORRECT
+      4. ROUND_TRIP_AUTH   — a POST /read-mailbox-access with the CORRECT
                              X-Sidecar-Auth header is accepted (not 401).
                              Kudu REST: POST /api/command with a curl POST
-      5. ROUND_TRIP_IDEMP  — the SAME POST returns AlreadyCompliant on 2nd run
-                             (script's get-before-set idempotency survives the
-                             container+HTTP wrapping — proven from OUTSIDE the
-                             script, at the wire).
-      6. AUTH_REJECTION    — a POST /apply-policy WITHOUT (or with a WRONG)
+      5. ROUND_TRIP_IDEMP  — POST /apply-mailbox-access twice returns
+                             AlreadyCompliant on the 2nd run (get-before-set
+                             idempotency proven at the wire). Needs a REAL
+                             -ExchangeAccessToken + test tenant/app/group.
+      6. AUTH_REJECTION    — a POST /read-mailbox-access WITHOUT (or with a WRONG)
                              X-Sidecar-Auth header is rejected (HTTP 401).
                              Kudu REST: POST /api/command with a bad-secret curl
 
-    Checks 4/5 require a REAL Exchange tenant to move past Failure — with the
-    default safe placeholders they will return wire Failure (Connect-Exchange
-    Online rejects the all-zero-GUID tenantId), which is still a PASS for
-    check 4 (proves the auth path did NOT reject the request) BUT is not a
-    pass for check 5's idempotency assertion (the sidecar cannot demonstrate
-    AlreadyCompliant if it never got past Connect). Operators wanting the
-    full check 5 pass must supply real tenant/group/app-id parameters. This
-    script REPORTS THE DISTINCTION EXPLICITLY rather than silently marking
-    check 5 as "N/A" — see the report section for the discriminator.
+    With the placeholder token, check 4 returns a wire Failure from
+    Connect-ExchangeOnline -- still a PASS (the request got past the 401
+    guard). Check 5 is reported as WARN (not N/A) until an operator supplies a
+    real token -- the report says so explicitly.
 
 .PARAMETER Environment
     Target environment name (dev, staging, production). Drives default
@@ -81,15 +75,19 @@
     Sidecar-Shared-Secret (per Bicep module default).
 
 .PARAMETER TenantId
-    Exchange tenantId to send in the /apply-policy body. Default: all-zero
-    GUID (SAFE — Connect-ExchangeOnline rejects it before mutation). Override
-    with a REAL test tenant to exercise idempotency check 5 end-to-end.
+    Exchange tenant id sent in the request body. Default: all-zero GUID (SAFE).
 
 .PARAMETER PolicyScopeGroupId
-    Mail-enabled group ObjectId to send. Default: all-zero GUID (SAFE).
+    Entra object id of the mail-enabled security group the roles are scoped to. Default: all-zero GUID (SAFE).
 
-.PARAMETER ExpectedAppIds
-    2 app-registration client IDs to send. Default: two safe placeholder GUIDs.
+.PARAMETER AppId
+    Client id of the app granted access (a test app, never a customer's). Default: all-zero GUID.
+
+.PARAMETER ServicePrincipalObjectId
+    That app's Entra service-principal object id (check 5 only).
+
+.PARAMETER ExchangeAccessToken
+    An Exchange Online token for 'Spaarke Exchange Admin' (check 5 only). Without it check 5 is WARN.
 
 .PARAMETER SkipChecks
     Comma-separated list of check names to skip. Valid names:
@@ -109,7 +107,8 @@
     .\Verify-Sidecar-Live.ps1 `
         -TenantId 12345678-1234-1234-1234-123456789012 `
         -PolicyScopeGroupId aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee `
-        -ExpectedAppIds @("bff-app-reg-guid", "uami-client-id-guid")
+        -AppId <test-app-client-id> -ServicePrincipalObjectId <its-sp-object-id> `
+        -ExchangeAccessToken <token for Spaarke Exchange Admin>
 
 .EXAMPLE
     # Dev — skip public-isolation check (some corp networks time out at
@@ -158,10 +157,10 @@
 [CmdletBinding(SupportsShouldProcess = $false)]  # this script is read-only; no ShouldProcess needed
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSReviewUnusedParameter', 'PolicyScopeGroupId',
-    Justification = 'Referenced via $script:PolicyScopeGroupId inside Invoke-SidecarApplyPolicyViaKudu — PSScriptAnalyzer does not trace cross-function script-scope usage.')]
+    Justification = 'Referenced via $script:PolicyScopeGroupId inside Invoke-SidecarViaKudu — PSScriptAnalyzer does not trace cross-function script-scope usage.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSReviewUnusedParameter', 'ExpectedAppIds',
-    Justification = 'Referenced via $script:ExpectedAppIds inside Invoke-SidecarApplyPolicyViaKudu — PSScriptAnalyzer does not trace cross-function script-scope usage.')]
+    'PSReviewUnusedParameter', 'ServicePrincipalObjectId',
+    Justification = 'Referenced via $script:ServicePrincipalObjectId inside Invoke-SidecarViaKudu.')]
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'staging', 'production')]
@@ -192,7 +191,13 @@ param(
     [string]$PolicyScopeGroupId = '00000000-0000-0000-0000-000000000000',
 
     [Parameter(Mandatory = $false)]
-    [string[]]$ExpectedAppIds = @('00000000-0000-0000-0000-000000000000', 'ffffffff-ffff-ffff-ffff-ffffffffffff'),
+    [string]$AppId = '00000000-0000-0000-0000-000000000000',
+
+    [Parameter(Mandatory = $false)]
+    [string]$ServicePrincipalObjectId = '00000000-0000-0000-0000-000000000000',
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExchangeAccessToken = '',
 
     [Parameter(Mandatory = $false)]
     [string]$SkipChecks = '',
@@ -397,25 +402,28 @@ function Test-PublicIsolation {
 
 # ---- Check 4: ROUND_TRIP_AUTH (valid X-Sidecar-Auth) ----------------------
 
-function Invoke-SidecarApplyPolicyViaKudu {
+function Invoke-SidecarViaKudu {
     param(
+        [ValidateSet('read', 'apply')][string]$Route,
         [string]$SharedSecret,
         [string]$CorrelationId
     )
-    # Reference script-scope params explicitly so PSScriptAnalyzer's
-    # cross-function usage tracking can see them (avoids false-positive
-    # PSReviewUnusedParameter warnings on script-param level).
-    $bodyObj = @{
-        tenantId           = $script:TenantId
-        expectedAppIds     = $script:ExpectedAppIds
-        policyScopeGroupId = $script:PolicyScopeGroupId
-        descriptionPrefix  = "Spaarke-Provisioning-AppAccessPolicy-LiveVerify"
-        correlationId      = $CorrelationId
-        timeoutSeconds     = 300
+    # read  = POST /read-mailbox-access (never mutates); apply = POST /apply-mailbox-access.
+    # The token goes only in its header; without a real one the sidecar's Connect-ExchangeOnline fails.
+    $token = if ($script:ExchangeAccessToken) { $script:ExchangeAccessToken } else { 'live-verify-not-a-real-token' }
+    $bodyObj = if ($Route -eq 'read') {
+        @{ tenantId = $script:TenantId; appId = $script:AppId; scopeGroupId = $script:PolicyScopeGroupId
+           roles = @('Application Mail.Read'); correlationId = $CorrelationId }
+    } else {
+        @{ tenantId = $script:TenantId; appId = $script:AppId; servicePrincipalObjectId = $script:ServicePrincipalObjectId
+           displayName = 'Spaarke-liveverify-test-app'; scopeGroupId = $script:PolicyScopeGroupId
+           assignments = @(@{ name = 'Spaarke-liveverify-MailRead'; role = 'Application Mail.Read' })
+           correlationId = $CorrelationId; timeoutSeconds = 300 }
     }
+    $path = if ($Route -eq 'read') { '/read-mailbox-access' } else { '/apply-mailbox-access' }
     $bodyJson = ($bodyObj | ConvertTo-Json -Compress -Depth 6).Replace('"', '\"')
     # curl inside the Worker container.
-    $curl = "curl -sS -m 360 -o /tmp/apply-policy-response.json -w 'HTTP_%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Sidecar-Auth: $SharedSecret' -d `"$bodyJson`" http://127.0.0.1:$SidecarPort/apply-policy; echo; cat /tmp/apply-policy-response.json; rm -f /tmp/apply-policy-response.json"
+    $curl = "curl -sS -m 360 -o /tmp/sidecar-response.json -w 'HTTP_%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Sidecar-Auth: $SharedSecret' -H 'X-Exchange-Access-Token: $token' -d `"$bodyJson`" http://127.0.0.1:$SidecarPort$path; echo; cat /tmp/sidecar-response.json; rm -f /tmp/sidecar-response.json"
     return Invoke-KuduCommand -Command $curl
 }
 
@@ -431,7 +439,7 @@ function Test-RoundTripAuth {
         return
     }
     $corr = "live-verify-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr
+    $result = Invoke-SidecarViaKudu -Route read -SharedSecret $secret -CorrelationId $corr
     $out = $result.Output
     if ($result.ExitCode -ne 0) {
         Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' `
@@ -478,17 +486,17 @@ function Test-RoundTripIdempotency {
         Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'FAIL' -Message "Cannot read shared secret from KV: $($_.Exception.Message)"
         return
     }
-    if ($TenantId -eq '00000000-0000-0000-0000-000000000000') {
+    if (-not $ExchangeAccessToken -or $TenantId -eq '00000000-0000-0000-0000-000000000000') {
         Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'WARN' `
-            -Message "SAFE-DEFAULT MODE: check 5's idempotency cannot be verified with an all-zero tenantId (Connect-ExchangeOnline rejects it before get-before-set can run). Re-run with -TenantId, -PolicyScopeGroupId, -ExpectedAppIds pointing at a real safely-scoped test tenant to verify AlreadyCompliant-on-2nd-run." `
+            -Message "SAFE-DEFAULT MODE: check 5 needs a real -ExchangeAccessToken plus -TenantId, -PolicyScopeGroupId, -AppId and -ServicePrincipalObjectId for a safely-scoped TEST app and group (it creates a group-scoped Exchange role assignment). Re-run with them to verify AlreadyCompliant-on-2nd-run." `
             -Details @{ reason = 'safe-default-mode'; hint = 'operator override required for full check' }
         return
     }
     # Same request twice; expect AlreadyCompliant (wire outcome) on 2nd run.
     $corr1 = "live-verify-idemp-1-{0}" -f ([guid]::NewGuid().ToString('N'))
     $corr2 = "live-verify-idemp-2-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result1 = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr1
-    $result2 = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr2
+    $result1 = Invoke-SidecarViaKudu -Route apply -SharedSecret $secret -CorrelationId $corr1
+    $result2 = Invoke-SidecarViaKudu -Route apply -SharedSecret $secret -CorrelationId $corr2
     $out1 = $result1.Output
     $out2 = $result2.Output
     if ($out2 -match '"outcome"\s*:\s*"AlreadyCompliant"') {
@@ -511,7 +519,7 @@ function Test-AuthRejection {
     }
     $wrongSecret = 'definitely-not-the-real-secret-' + [guid]::NewGuid().ToString('N')
     $corr = "live-verify-auth-reject-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $wrongSecret -CorrelationId $corr
+    $result = Invoke-SidecarViaKudu -Route read -SharedSecret $wrongSecret -CorrelationId $corr
     $out = $result.Output
     if ($out -match 'HTTP_401') {
         Write-CheckResult -Name 'AUTH_REJECTION' -Status 'PASS' `
