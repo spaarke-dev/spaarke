@@ -5,8 +5,8 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
 /// DI module for the Signal/Policy domain (ADR-010: feature module pattern; spec FR-09..FR-16,
-/// spaarke-ontology-platform-r1 task 023). Registers the policy-scope resolution building block; the
-/// predicate compiler (task 021), Signal writer (task 030) and the nightly/event-triggered evaluators
+/// spaarke-ontology-platform-r1 task 023). Registers the policy-scope resolution building block, the
+/// predicate compiler (task 021) and the Signal writer (task 030). The nightly/event-triggered evaluators
 /// (tasks 031/032) add their own registrations here as they land.
 /// </summary>
 public static class SignalsModule
@@ -26,6 +26,26 @@ public static class SignalsModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<RuleBodySchemaValidator>();
         services.AddSingleton<PredicateCompiler>();
+
+        // OntologyWriterDataverseClient (task 030; rework F10 — ADR-010 Path C): registered as the CONCRETE
+        // type (public sealed, no interface of this project's own) — see its own XML doc for why that is safe
+        // for testability (the typed seam is the SDK's own IOrganizationServiceAsync2, not a throwaway
+        // interface). Its credential resolution (and therefore OntologyWriterCredentialFactory's fail-closed
+        // throw) is deferred behind its own Lazy<IOrganizationServiceAsync2> — NOT performed in this factory
+        // delegate. ValidateOnBuild resolves every singleton once at app startup; doing the credential lookup
+        // here would crash Build() in every environment that has not yet set
+        // Ontology:Writer:ManagedIdentityClientId (today, every environment except a deployed spaarke-bff-dev
+        // with the app setting added).
+        services.AddSingleton(sp => new OntologyWriterDataverseClient(
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<OntologyWriterDataverseClient>>()));
+
+        // SignalWriter (task 030; spec FR-03/FR-14/NFR-08): writes sprk_signal via the dedicated client above,
+        // plus the SHARED sysadmin IGenericEntityService (GraphModule.AddGraphModule) for the one read that is
+        // metadata, not a Signal write — the grouping matter's owningbusinessunit (F25). Two DIFFERENT
+        // Dataverse connections, injected as two DIFFERENT types, so neither can be swapped for the other by
+        // accident.
+        services.AddSingleton<SignalWriter>();
 
         return services;
     }

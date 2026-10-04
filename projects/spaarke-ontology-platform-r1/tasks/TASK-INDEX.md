@@ -46,7 +46,7 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021, 006 | — | 🔴 FR-14 owner-from-matter. One line now, a migration later |
+| ✅ 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021, 006 | — | Two independent reviews. Writer owns, owning BU from matter; create-first + reconcile; fail-closed MI; refusals logged (EventId 50300) + metered. Live as writer: matter PASS; **communication blocked by F26 (owner role decision)** |
 | 🔲 031 | [Nightly re-evaluating `IScheduledJob`](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/high | 030, 003 | — | ONE evaluator, not evaluator + sweep |
 | 🔲 032 | [Two event triggers](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish |
 | 🔲 033 | [Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | **C** | Aged-out maps to `ConditionCleared` |
