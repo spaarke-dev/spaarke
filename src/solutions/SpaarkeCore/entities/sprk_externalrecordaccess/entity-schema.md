@@ -41,6 +41,7 @@
 | sprk_workassignment (read: `_sprk_workassignment_value`) | `sprk_WorkAssignment@odata.bind` | Work Assignment | Lookup | One-of | sprk_workassignment | Grant root (see above) |
 | sprk_organization (read: `_sprk_organization_value`) | `sprk_Organization@odata.bind` | Organization | Lookup | No | sprk_organization | Firm/org association — targets the custom `sprk_organization` table, NOT the OOB `account` (owner steer 2026-08-11; `GrantExternalAccessEndpoint.cs:330-334`). Supersedes the originally documented `sprk_organization` → account |
 | sprk_grantedby | `sprk_GrantedBy@odata.bind` | Granted By | Lookup | No | systemuser | Core User who created the grant (audit field — resolved from the caller's AAD oid and OMITTED when unresolvable rather than failing the grant; `GrantExternalAccessEndpoint.cs:199-231`) |
+| sprk_grantedbycontact (read: `_sprk_grantedbycontact_value`) | `sprk_GrantedByContact@odata.bind` | Granted By (Contact) | Lookup | No | contact | *Added by unified-access-control-r2 task 140 (#1063).* The CONTACT who issued the grant from the external SPA (contact-side Grant Access, owner C4 / Q2). Written by the BFF only — **field-secured** (`Spaarke BFF-Managed Field Writers` = the BFF application users; `Spaarke BFF-Managed Field Readers` = every business-unit default team, so everyone still reads it). `sprk_grantedby` stays EMPTY on a contact-issued row. A contact may change or revoke only rows whose value is themselves; when an internal user (or the Assigned-To rule) CHANGES a contact-issued row through the grant core, this is cleared and `sprk_grantedby` set — the row becomes theirs. Created by `scripts/Deploy-ExternalRecordAccessContactGrantor.ps1` (dry run / `-Apply` / `-Verify`); relationship `sprk_contact_sprk_externalrecordaccess_grantedbycontact` (NoCascade; Delete RemoveLink). ⚠️ Deploy order: the column must exist before a BFF carrying task 140 is deployed — the BFF selects it on every grant-row read. |
 
 ### Access Control Fields
 
@@ -175,6 +176,7 @@ Same columns as above, no filter.
 | sprk_externalrecordaccess_matterid_sprk_matter | sprk_matter | sprk_matter | Cascade — deactivate all access when matter is deactivated |
 | (organization lookup, added task 070) | sprk_organization | sprk_organization | Referential (no cascade) |
 | sprk_externalrecordaccess_grantedby_systemuser | sprk_grantedby | systemuser | Referential (no cascade) |
+| sprk_contact_sprk_externalrecordaccess_grantedbycontact *(task 140; name set by the schema script)* | sprk_grantedbycontact | contact | Referential — NoCascade for Assign/Share/Unshare/Reparent/Merge, Delete RemoveLink |
 | sprk_externalrecordaccess_approvedby_systemuser | sprk_approvedby | systemuser | Referential (no cascade) |
 
 ---
@@ -252,6 +254,7 @@ This table is queried by:
 | `RevokeExternalAccessEndpoint` | Deactivate record by ID + invalidate cache (+ defensive SPE cleanup when `ContainerId` supplied) | Revoke external access |
 | `ProjectClosureEndpoint` | Deactivate all records for project | Cascade revocation on project close |
 | `ExternalUserContextEndpoint` | Resolved principal's grant set | Return user's project membership to SPA |
+| `ContactGrantEndpoints` *(task 140)* — `POST/GET /api/v1/external/contact-grants`, `POST …/contact-grants/revoke` | Through the grant core in contact-issuer mode; the list reads active rows where `_sprk_grantedbycontact_value` = the caller | A Collaborate/Full Access contact grants colleagues of its own organization (capped at its level and its own expiry), lists and revokes the grants it issued. Never writes `sprk_contactorganization`. |
 
 **Redis Cache Key** *(corrected 2026-08-20; version updated 2026-09-30)*: tenant-scoped `ITenantCache` entry — resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion`), 60s TTL (per ADR-009). Each cached grant holds the record id, the effective `sprk_accesslevel` and the direct-only level. The old flat `sdap:external:access:{contactId}` key is no longer accurate.
 

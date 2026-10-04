@@ -117,6 +117,20 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("_sprk_workassignment_value")]
     public Guid? WorkAssignmentId { get; set; }
 
+    /// <summary>
+    /// The SYSTEMUSER who issued the grant (<c>sprk_grantedby</c>), when the issuer was an internal user.
+    /// </summary>
+    [JsonPropertyName("_sprk_grantedby_value")]
+    public Guid? GrantedBySystemUserId { get; set; }
+
+    /// <summary>
+    /// The CONTACT who issued the grant (<c>sprk_grantedbycontact</c>, unified-access-control-r2 task 140) — set only
+    /// on a grant a contact made through the external SPA. It is the issuer the contact-side routes scope to: a contact
+    /// may change or revoke only a row whose value is themselves, so a row anyone else issued is never theirs to alter.
+    /// </summary>
+    [JsonPropertyName("_sprk_grantedbycontact_value")]
+    public Guid? GrantedByContactId { get; set; }
+
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
 }
@@ -258,10 +272,27 @@ internal static class ExternalGrantLifecycle
     // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
     // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
     // that had already expired. Verified DATE ONLY in live metadata (task 007).
+    //
+    // The two ISSUER columns (task 140): sprk_grantedby (systemuser, long-standing) and sprk_grantedbycontact (contact,
+    // added by scripts/Deploy-ExternalRecordAccessContactGrantor.ps1). The contact-side routes decide "is this row the
+    // caller's?" from the second, and /grant re-stamps a row a contact issued when a systemuser changes it, so both read
+    // paths need it. ⚠️ DEPLOY ORDER: the column must exist in the environment BEFORE a BFF carrying this select is
+    // deployed — Dataverse answers 400 to a $select naming an unknown attribute (task 140 notes §live gate).
     private const string RowSelect =
         "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
-        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value";
+        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
+        "_sprk_grantedby_value,_sprk_grantedbycontact_value";
+
+    /// <summary>
+    /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
+    /// (task 140). The schema script creates the lookup with SchemaName <c>sprk_GrantedByContact</c>, so — like every
+    /// other lookup on this table (task 070) — its navigation property is the PascalCase schema name.
+    /// </summary>
+    internal const string GrantedByContactNavigationProperty = "sprk_GrantedByContact";
+
+    /// <summary>The <c>@odata.bind</c> navigation property of the systemuser issuer lookup <c>sprk_grantedby</c>.</summary>
+    internal const string GrantedByNavigationProperty = "sprk_GrantedBy";
 
     /// <summary>
     /// Every ACTIVE row for one logical grant, ordered deterministically (ascending id).
@@ -329,6 +360,21 @@ internal static class ExternalGrantLifecycle
             filter: ActiveRowsForRootFilter(rootType, rootId),
             select: RowSelect,
             top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Every ACTIVE row on one record that a given CONTACT issued (<c>sprk_grantedbycontact</c>, task 140) — what the
+    /// contact-side list shows the caller. Same row shape and root half as <see cref="ActiveRowsForRootFilter"/>; the
+    /// issuer half is the only addition. No expiry predicate: the caller's own lapsed grants are listed so they can see
+    /// and revoke them. Exceptions propagate.
+    /// </summary>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsIssuedByContactAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid issuerContactId,
+        CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: $"{ActiveRowsForRootFilter(rootType, rootId)} and _sprk_grantedbycontact_value eq {issuerContactId}",
+            select: RowSelect,
             cancellationToken: ct);
 
     /// <summary>
@@ -445,6 +491,14 @@ internal static class ExternalGrantLifecycle
 
     /// <summary>Stable reason code (500): the grantor's own rights on the record could not be read (the probe threw).</summary>
     internal const string CallerRightsUnreadableReasonCode = "sdap.access.grant.caller_rights_unreadable";
+
+    /// <summary>
+    /// Stable reason code (409, task 140 · no proxy revocation or extension): a CONTACT grantor asked to grant someone
+    /// who already holds an active row on the record that somebody ELSE issued (a systemuser, the Assigned-To rule, or
+    /// another contact). The row is left exactly as it is — re-stamping it would let the contact later revoke it, and
+    /// extending it would override the issuer's own time bound.
+    /// </summary>
+    internal const string ContactGrantManagedElsewhereReasonCode = "sdap.access.contact_grant.managed_elsewhere";
 
     /// <summary>
     /// The lower of the requested level and the ceiling — levels are ordered by their option-set values
@@ -668,6 +722,17 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
     };
 
     /// <summary>
+    /// Task 140: a CONTACT grantor's request names a grantee who already holds an active row somebody else issued. 409;
+    /// nothing is changed. The contact-side handler restates the detail with the grantee's name.
+    /// </summary>
+    public static GrantPolicyDecision ManagedElsewhere { get; } = new(
+        false,
+        ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode,
+        StatusCodes.Status409Conflict,
+        "This person already has access to this record that was granted by someone else; ask them or the record's " +
+        "team to change it. Nothing was changed.");
+
+    /// <summary>
     /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process
     /// only: never part of a response (<c>PolicyRefusalProblem</c> maps the code, status and detail explicitly).
     /// </summary>
@@ -722,6 +787,26 @@ internal sealed class GrantCeiling
         => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
 
     /// <summary>
+    /// The ceiling of a CONTACT grantor (unified-access-control-r2 task 140, owner C4 / Q1, settled round 3b): the
+    /// contact's EFFECTIVE post-veto rights on the record — the evaluator's answer carried on <c>CallerPrincipal</c>,
+    /// on either sign-in plane — through the same ceiling table as a human systemuser grantor
+    /// (<see cref="ExternalAccessLevels.GrantCeilingFor"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a contact's rights, not a probe.</b> A contact is not a Dataverse principal, so there is no
+    /// <c>RetrievePrincipalAccess</c> answer to probe (and the CIAM token cannot be exchanged OBO). The evaluator's answer
+    /// is already rights-based (task 033), vetoed (Restricted, the No Access list, inactive roots — tasks 135/137) and
+    /// Read-gated (task 136), and on a Secure or Limited record it counts the contact's DIRECT grants only (FR-22): exactly
+    /// the level the owner's rule is about (decision G3 (a), round 3: the level a contact HOLDS).</para>
+    /// <para>A contact's rights map is always one of R / R|C|W / R|C|W|D (<see cref="ExternalAccessLevels.ToAccessRights"/>)
+    /// or a union of those, so the table maps them back exactly.</para>
+    /// </remarks>
+    public static GrantCeiling FromContactGrantorRights(AccessRights contactGrantorRights)
+        => new(
+            ExternalAccessLevels.GrantCeilingFor(contactGrantorRights),
+            $"contact grantor effective rights {contactGrantorRights}");
+
+    /// <summary>
     /// The ceiling of an Assigned-To auto-grant (unified-access-control-r2 task 142): exactly Collaborate, with NO
     /// grantor-level cap. Owner round 3 A1 and round 3b: "Assigned-To auto-grants follow rule 5: always Collaborate,
     /// uncapped" — the grantor is the owner's rule, not a person, so there is no person's level to cap at (the cap stays
@@ -738,6 +823,23 @@ internal sealed class GrantCeiling
 
     public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
 }
+
+/// <summary>
+/// The CONTACT who is issuing a grant through the contact-side routes (unified-access-control-r2 task 140). Passing one
+/// to the grant core switches it into the contact-issuer mode: the row is stamped with <c>sprk_grantedbycontact</c>
+/// (and <c>sprk_grantedby</c> stays empty), a grantee holding a row anybody else issued is refused
+/// (<see cref="GrantPolicyDecision.ManagedElsewhere"/>), the caller's own row is never LOWERED (any lower request,
+/// narrowed or not, is <see cref="GrantPolicyDecision.WouldLowerExisting"/>) and its expiry is never SHORTENED, and the
+/// written expiry is capped at <see cref="ExpiryCap"/>.
+/// </summary>
+/// <param name="ContactId">The grantor contact — the caller.</param>
+/// <param name="ExpiryCap">
+/// The latest date the grantor's own qualifying access lasts (owner decision G2 (i), session 27 round 3: a grantor
+/// cannot hand out time they do not hold), or <c>null</c> when the grantor's level does not rest on a dated grant
+/// (a standing-grant or organization-expansion term, which carries no date). The written expiry is the requested one
+/// (or today + 90) capped at this date.
+/// </param>
+internal sealed record ContactGrantIssuer(Guid ContactId, DateOnly? ExpiryCap);
 
 /// <summary>Who a grant check is about — the shape the write-time checks need (task 139).</summary>
 /// <param name="Kind">The grantee kind the record's access policy judges.</param>

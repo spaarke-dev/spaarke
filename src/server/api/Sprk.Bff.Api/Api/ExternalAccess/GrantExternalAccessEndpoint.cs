@@ -279,6 +279,16 @@ public static class GrantExternalAccessEndpoint
     /// would overwrite somebody else's Full Access grant (409). A grantee on the record's No Access list is refused
     /// (422). All of it runs in <see cref="CheckGrantAsync"/>, BEFORE any write, and is shared with
     /// <c>/invite-and-grant</c>'s pre-onboarding check.</para>
+    /// <para><b>The contact-issuer mode (task 140).</b> When <paramref name="contactIssuer"/> is supplied — only by the
+    /// contact-side routes — the same core writes the grant with three differences, each owner-mandated: the row is
+    /// stamped with the contact issuer (<c>sprk_grantedbycontact</c>) and never with <c>sprk_grantedby</c>; a grantee
+    /// holding a row anybody else issued is refused and left untouched (409 managed_elsewhere — no proxy revocation or
+    /// extension); and on the caller's OWN row the level is never lowered and the expiry never shortened, while the
+    /// written expiry is the requested one (or today + 90) capped at the grantor's own (owner G2 (i)).</para>
+    /// <para><b>Systemuser over a contact-issued row (task 140).</b> In the default mode, when the upsert CHANGES a row a
+    /// contact issued, the row's issuer becomes the systemuser making the change (the contact stamp is cleared), so the
+    /// contact can no longer revoke a decision an internal user made. A no-op re-grant changes nothing, so it leaves the
+    /// issuer as it was.</para>
     /// </remarks>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
@@ -291,19 +301,32 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ContactGrantIssuer? contactIssuer = null)
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
 
         var key = ResolveGrantKey(request, rootType, rootId);
 
+        // ── Task 140: a contact issuer's expiry — the requested date (or today + 90), capped at the grantor's own ──
+        // Resolved BEFORE the checks so every later decision (create, raise, the ADR-003 conferral check) sees the date
+        // that will actually be written. Narrowed, never refused — the time analogue of the level cap (owner G2 (i)).
+        var expiryNarrowed = false;
+        if (contactIssuer is { } issuerForExpiry)
+        {
+            var asked = request.ExpiryDate ?? ExternalGrantLifecycle.DefaultExpiry(today);
+            var capped = issuerForExpiry.ExpiryCap is { } cap && cap < asked ? cap : asked;
+            expiryNarrowed = capped != asked;
+            request = request with { ExpiryDate = capped };
+        }
+
         // ── Tasks 138 + 139: policy, ceiling, never-lower, No Access — BEFORE any side effect ──
         // The grantee comes from the SAME key the upsert writes, so the checks judge exactly the row that would be
         // written (an OrganizationId beside a ContactId is the contact's firm — a deny subject, not the grantee).
         var check = await CheckGrantAsync(
             GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling,
-            dataverseClient, participations, accessibleRecords, logger, ct);
+            dataverseClient, participations, accessibleRecords, logger, ct, contactIssuer);
         if (check.Refusal is { } refusal)
             return GrantUpsertOutcome.Refused(refusal);
 
@@ -356,8 +379,12 @@ public static class GrantExternalAccessEndpoint
             // date, so two different values wore one name twenty lines apart — and substituting this one
             // into the election would have been circular (it is derived FROM the survivor) and would have
             // compiled.
-            var expiryToWrite = request.ExpiryDate
-                ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null);
+            //
+            // Task 140 — a CONTACT issuer never SHORTENS its own row: the (already capped) date is written only when it
+            // is later than the row's current one. The never-lower rule for the level ran in CheckGrantAsync.
+            DateOnly? expiryToWrite = contactIssuer is null
+                ? request.ExpiryDate ?? (survivor.ExpiresDate is null ? ExternalGrantLifecycle.DefaultExpiry(today) : null)
+                : survivor.ExpiresDate is { } current && current >= request.ExpiryDate!.Value ? null : request.ExpiryDate;
             var expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
 
@@ -370,6 +397,23 @@ public static class GrantExternalAccessEndpoint
 
                 if (expiryChanged)
                     update["sprk_expiresdate"] = FormatDateOnly(expiryToWrite!.Value);
+
+                // Task 140: a systemuser (or the Assigned-To rule) CHANGING a row a contact issued takes the row over —
+                // the contact stamp is cleared, so the contact can no longer revoke a decision somebody else made (the
+                // contact-side revoke is scoped to rows whose contact issuer is the caller). The systemuser is recorded
+                // when it resolves; an audit field never blocks the write (the create path's rule).
+                if (contactIssuer is null && survivor.GrantedByContactId is not null)
+                {
+                    update[$"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"] = null;
+                    var takeOverBy = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
+                    if (Guid.TryParse(takeOverBy, out var takeOverSystemUserId))
+                        update[$"{ExternalGrantLifecycle.GrantedByNavigationProperty}@odata.bind"] = $"/systemusers({takeOverSystemUserId})";
+
+                    logger.LogInformation(
+                        "[EXT-GRANT] Row {AccessRecordId} was issued by contact {IssuerContactId}; this change makes it " +
+                        "the internal user's ({SystemUserId}) — the contact can no longer revoke it.",
+                        survivor.Id, survivor.GrantedByContactId, takeOverBy ?? "(unresolved)");
+                }
 
                 await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
 
@@ -417,7 +461,11 @@ public static class GrantExternalAccessEndpoint
             //
             // Conferral itself is ExternalParticipationService.ConfersAccessOn — the in-memory mirror of
             // the read filter's own predicate.
-            var effectiveExpiry = ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today);
+            // Task 140: a contact issuer's request may carry a date the row does NOT take (never shortened), so what the row
+            // carries is the written date, else its own.
+            var effectiveExpiry = contactIssuer is null
+                ? ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today)
+                : expiryToWrite ?? survivor.ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(today);
             if (!ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today))
             {
                 logger.LogWarning(
@@ -433,6 +481,8 @@ public static class GrantExternalAccessEndpoint
                 {
                     GrantedLevel = check.GrantedLevel,
                     Narrowed = check.Narrowed,
+                    GrantedExpiry = effectiveExpiry,
+                    ExpiryNarrowed = expiryNarrowed,
                 };
             }
 
@@ -443,20 +493,29 @@ public static class GrantExternalAccessEndpoint
             {
                 GrantedLevel = check.GrantedLevel,
                 Narrowed = check.Narrowed,
+                GrantedExpiry = effectiveExpiry,
+                ExpiryNarrowed = expiryNarrowed,
             };
         }
 
         // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
         // DISTINCT from the caller's Azure AD object id (oid). Resolve the systemuserid from the oid;
         // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
-        var grantedBySystemUserId = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
+        //
+        // Task 140: a CONTACT issuer is stamped on its own, contact-typed lookup instead — sprk_grantedby is a systemuser
+        // lookup and stays EMPTY on a contact-issued grant (the caller's oid is a CIAM or contact-only identity, which no
+        // systemuser carries; resolving it would only ever cost a query and find nothing).
+        var grantedBySystemUserId = contactIssuer is null
+            ? await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct)
+            : null;
 
         // FR-33 (task 097): a new grant is never written unbounded — an absent expiry becomes
         // today + DefaultExpiryDays.
         var createRequest = request.ExpiryDate is null
             ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
             : request;
-        var payload = BuildGrantPayload(createRequest, rootType, rootId, grantedBySystemUserId, today);
+        var payload = BuildGrantPayload(
+            createRequest, rootType, rootId, grantedBySystemUserId, today, contactIssuer?.ContactId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -474,6 +533,13 @@ public static class GrantExternalAccessEndpoint
         try
         {
             var afterCreate = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
+
+            // Task 140: a contact issuer converges ONLY over its own rows. A row another issuer raced in beside it is
+            // never deactivated by a contact's write (no proxy revocation); the mixed pair is left for the next grant
+            // or revoke on the key, which sweep by key.
+            if (contactIssuer is { } racingIssuer)
+                afterCreate = afterCreate.Where(r => r.GrantedByContactId == racingIssuer.ContactId).ToList();
+
             if (afterCreate.Count > 1)
             {
                 // Same election rule as the match path (task 106), and for the same reason: the rank is
@@ -505,6 +571,8 @@ public static class GrantExternalAccessEndpoint
         {
             GrantedLevel = check.GrantedLevel,
             Narrowed = check.Narrowed,
+            GrantedExpiry = createRequest.ExpiryDate,
+            ExpiryNarrowed = expiryNarrowed,
         };
     }
 
@@ -556,7 +624,8 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        ContactGrantIssuer? contactIssuer = null)
     {
         ArgumentNullException.ThrowIfNull(ceiling);
 
@@ -589,7 +658,30 @@ public static class GrantExternalAccessEndpoint
             ? await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct)
             : Array.Empty<ExternalGrantRow>();
 
-        if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
+        // (3a) Task 140 — a CONTACT issuer never touches access somebody else gave (no proxy revocation or extension):
+        // any active row on the key that the caller did not issue — a systemuser's, the Assigned-To rule's, another
+        // contact's, or a legacy row with no issuer — refuses, and nothing is changed. On the caller's OWN row any LOWER
+        // request refuses, narrowed or not (owner: "it never lowers the level").
+        if (contactIssuer is { } issuer)
+        {
+            if (existing.Any(row => row.GrantedByContactId != issuer.ContactId))
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Refused: {Key} already holds access issued by someone other than contact {IssuerContactId}; " +
+                    "a contact grant never changes a row somebody else issued.",
+                    grantee.Key, issuer.ContactId);
+                return GrantCheck.Refused(GrantPolicyDecision.ManagedElsewhere, requestedLevel);
+            }
+
+            if (existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Refused: contact {IssuerContactId}'s own grant on {Key} is above {Granted}; a contact " +
+                    "grant never lowers it.", issuer.ContactId, grantee.Key, granted);
+                return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
+            }
+        }
+        else if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
         {
             logger.LogWarning(
                 "[EXT-GRANT] Refused: {Key} already holds a level above {Granted}, and the request was narrowed to it " +
@@ -651,6 +743,18 @@ public static class GrantExternalAccessEndpoint
 
         /// <summary>The grantor's ceiling lowered the request (task 139).</summary>
         public bool Narrowed { get; init; }
+
+        /// <summary>
+        /// The expiry the surviving row carries after the write (task 140 reports it to a contact grantor). Null on a
+        /// refusal.
+        /// </summary>
+        public DateOnly? GrantedExpiry { get; init; }
+
+        /// <summary>
+        /// A contact issuer's requested expiry (or the +90 default) was cut back to the grantor's own (task 140, owner
+        /// G2 (i)). Always false outside the contact-issuer mode.
+        /// </summary>
+        public bool ExpiryNarrowed { get; init; }
 
         /// <summary>
         /// The record's access policy refused the grant (task 138): nothing was queried or written, and there is
@@ -925,9 +1029,13 @@ public static class GrantExternalAccessEndpoint
     /// so the two can never straddle a UTC midnight. Optional only for direct callers that build a payload
     /// outside a request; they get the wall-clock UTC date.
     /// </param>
+    /// <param name="grantedByContactId">
+    /// Task 140: the CONTACT who issued the grant through the contact-side routes, bound to <c>sprk_grantedbycontact</c>.
+    /// Null for every other writer — a contact-issued grant never carries <c>sprk_grantedby</c> as well.
+    /// </param>
     internal static object BuildGrantPayload(
         GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId,
-        DateOnly? today = null)
+        DateOnly? today = null, Guid? grantedByContactId = null)
     {
         // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
         // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
@@ -960,6 +1068,12 @@ public static class GrantExternalAccessEndpoint
             Guid.TryParse(grantedBySystemUserId, out var systemUserId))
         {
             payload["sprk_GrantedBy@odata.bind"] = $"/systemusers({systemUserId})";
+        }
+
+        // Task 140: the contact issuer, on its own contact-typed lookup (sprk_grantedby can only reference a systemuser).
+        if (grantedByContactId is { } issuerContactId && issuerContactId != Guid.Empty)
+        {
+            payload[$"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"] = $"/contacts({issuerContactId})";
         }
 
         if (request.ExpiryDate.HasValue)
