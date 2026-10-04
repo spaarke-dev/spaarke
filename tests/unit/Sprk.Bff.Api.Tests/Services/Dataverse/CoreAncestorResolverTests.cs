@@ -144,6 +144,95 @@ public class CoreAncestorResolverTests
             .Should().Equal(CoreAncestorResolver.ChildRecordEntities);
     }
 
+    /// <summary>
+    /// Cross-language parity (task 169): the TypeScript <c>INTERMEDIATE_ROOT_COLUMNS</c>, which the
+    /// RegardingResolver PCF's <c>deriveCoreAncestorStamps</c> reads to stamp a child at save time, MUST equal
+    /// <see cref="CoreAncestorResolver.IntermediateRootColumns"/> row for row. If they drift, the client previews
+    /// a different access answer from the one the server owns (ADR-002 WP-2), and nothing else fails.
+    /// </summary>
+    /// <remarks>
+    /// The TypeScript table is PARSED, so its shape is pinned too: a flat array of single-quoted object literals.
+    /// A row the parser cannot see (a spread, a referenced constant, a helper call, a row hidden in a comment) would
+    /// let the runtime table differ from what this test compares, so any such content fails the test.
+    /// </remarks>
+    [Fact]
+    public void IntermediateRootColumns_MatchTheTypeScriptSide()
+    {
+        var ts = ReadTypeScriptResolver();
+        var body = ParseTsArrayBody(ts, "INTERMEDIATE_ROOT_COLUMNS");
+
+        AssertPlainLiteralArray(body, "INTERMEDIATE_ROOT_COLUMNS");
+
+        var rowPattern = new Regex(
+            @"\{\s*intermediate\s*:\s*'(?<intermediate>[^']*)'\s*,\s*column\s*:\s*'(?<column>[^']*)'\s*,"
+            + @"\s*rootEntity\s*:\s*'(?<root>[^']*)'\s*,?\s*\}",
+            RegexOptions.Singleline);
+        var matches = rowPattern.Matches(body);
+
+        body.Count(c => c == '{').Should().Be(matches.Count,
+            "every object literal in INTERMEDIATE_ROOT_COLUMNS must be a row the parser reads "
+            + "({ intermediate: '…', column: '…', rootEntity: '…' }, in that order)");
+        Regex.Replace(rowPattern.Replace(body, string.Empty), @"[\s,]", string.Empty)
+            .Should().BeEmpty(
+                "INTERMEDIATE_ROOT_COLUMNS may contain only literal rows; anything else (a referenced constant, a "
+                + "helper call) is a row the runtime has and this test cannot see");
+
+        var tsRows = matches
+            .Select(m => (
+                Intermediate: m.Groups["intermediate"].Value.ToLowerInvariant(),
+                Column: m.Groups["column"].Value.ToLowerInvariant(),
+                Root: m.Groups["root"].Value.ToLowerInvariant()))
+            .ToList();
+        var csRows = CoreAncestorResolver.IntermediateRootColumns
+            .SelectMany(kv => kv.Value.Select(r => (
+                Intermediate: kv.Key.ToLowerInvariant(),
+                Column: r.Column.ToLowerInvariant(),
+                Root: r.RootEntity.ToLowerInvariant())))
+            .ToList();
+
+        tsRows.Should().OnlyHaveUniqueItems("a duplicated TypeScript row hides a missing one from a count check");
+        tsRows.Should().HaveCount(csRows.Count);
+        tsRows.Should().BeEquivalentTo(csRows,
+            "the TypeScript stamp derivation must read exactly the server's intermediate table");
+    }
+
+    /// <summary>
+    /// Cross-language parity (task 169): the TypeScript <c>CORE_ANCESTOR_LOOKUPS</c> root → stamp-column pairs MUST
+    /// equal <see cref="CoreAncestorResolver.CoreAncestorLookups"/>. The client mirror writes every derived stamp
+    /// through that table, so a drift there stamps the right root onto the wrong column.
+    /// </summary>
+    [Fact]
+    public void CoreAncestorLookups_MatchTheTypeScriptSide()
+    {
+        var ts = ReadTypeScriptResolver();
+        var body = ParseTsArrayBody(ts, "CORE_ANCESTOR_LOOKUPS");
+
+        var rows = Regex.Matches(body, @"\{(?<row>[^{}]*)\}", RegexOptions.Singleline)
+            .Select(m => m.Groups["row"].Value)
+            .ToList();
+        body.Count(c => c == '{').Should().Be(rows.Count, "every CORE_ANCESTOR_LOOKUPS entry must be an object literal");
+        body.Should().NotContain("...", "a spread entry is invisible to this parser");
+
+        var tsPairs = rows
+            .Select(row =>
+            {
+                var entityType = Regex.Match(row, @"entityType\s*:\s*'(?<v>[^']*)'");
+                var lookupAttribute = Regex.Match(row, @"lookupAttribute\s*:\s*'(?<v>[^']*)'");
+                entityType.Success.Should().BeTrue($"every CORE_ANCESTOR_LOOKUPS row needs a literal entityType: {row}");
+                lookupAttribute.Success.Should().BeTrue(
+                    $"every CORE_ANCESTOR_LOOKUPS row needs a literal lookupAttribute: {row}");
+                return (EntityType: entityType.Groups["v"].Value.ToLowerInvariant(),
+                    LookupAttribute: lookupAttribute.Groups["v"].Value.ToLowerInvariant());
+            })
+            .ToList();
+        var csPairs = CoreAncestorResolver.CoreAncestorLookups
+            .Select(l => (EntityType: l.EntityType.ToLowerInvariant(), LookupAttribute: l.LookupAttribute.ToLowerInvariant()))
+            .ToList();
+
+        tsPairs.Should().HaveCount(csPairs.Count);
+        tsPairs.Should().BeEquivalentTo(csPairs);
+    }
+
     // ---------------------------------------------------------------------
     // Derivation
     // ---------------------------------------------------------------------
@@ -582,5 +671,37 @@ public class CoreAncestorResolverTests
         return Regex.Matches(match.Groups["body"].Value, @"'([^']+)'")
             .Select(m => m.Groups[1].Value)
             .ToList();
+    }
+
+    /// <summary>The TypeScript resolver source (the parity source for the lock-step tests).</summary>
+    private static string ReadTypeScriptResolver()
+    {
+        var tsPath = FindRepoFile(
+            "src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts");
+        tsPath.Should().NotBeNull(
+            "the TypeScript resolver is the parity source; if it moved, this test must be updated, not deleted");
+        return File.ReadAllText(tsPath!);
+    }
+
+    /// <summary>
+    /// The raw body of an exported TS `const NAME: ... = [ ... ]` array, up to its first <c>]</c> (the same shape
+    /// <see cref="ParseTsStringArray"/> matches).
+    /// </summary>
+    private static string ParseTsArrayBody(string source, string constName)
+    {
+        var match = Regex.Match(
+            source,
+            $@"export\s+const\s+{Regex.Escape(constName)}\s*:[^=]*=\s*\[(?<body>[^\]]*)\]",
+            RegexOptions.Singleline);
+        match.Success.Should().BeTrue($"{constName} must exist in the TypeScript resolver");
+        return match.Groups["body"].Value;
+    }
+
+    /// <summary>A parsed array body may hold no spread and no comment: either can hide a row from the parser.</summary>
+    private static void AssertPlainLiteralArray(string body, string constName)
+    {
+        body.Should().NotContain("...", $"{constName} must not use a spread (the parser cannot see spread rows)");
+        body.Should().NotContain("//", $"{constName} must not contain a comment (explanations go in its JSDoc)");
+        body.Should().NotContain("/*", $"{constName} must not contain a comment (explanations go in its JSDoc)");
     }
 }
