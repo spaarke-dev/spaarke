@@ -71,10 +71,23 @@ public class HealthProbeRateLimitContractTests : IClassFixture<CustomWebAppFacto
     public async Task TheProbes_AreStillRateLimited_PerClientIp()
     {
         // Round 12 item 1 still holds: a probe flood from one address is refused, at once (no queue), with Retry-After.
-        const string flooder = "203.0.113.20";
-        for (var i = 1; i <= 120; i++)
+        // The limiter runs on the wall clock (a sliding window returns a segment's permits 60 s later), so the 120 calls
+        // must land inside one window; on a starved machine an attempt that took longer is repeated from a fresh address
+        // rather than read as a pass or a fail.
+        string flooder = string.Empty;
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            (await GetAsync("/ping", flooder)).StatusCode.Should().Be(StatusCodes.Status200OK, $"request {i} of 120 is within the budget");
+            flooder = $"203.0.113.{20 + attempt}";
+            var started = DateTime.UtcNow;
+            for (var i = 1; i <= 120; i++)
+            {
+                (await GetAsync("/ping", flooder)).StatusCode.Should().Be(StatusCodes.Status200OK, $"request {i} of 120 is within the budget");
+            }
+
+            if (DateTime.UtcNow - started < TimeSpan.FromSeconds(50))
+            {
+                break;
+            }
         }
 
         var refused = await GetAsync("/ping", flooder);
@@ -82,7 +95,7 @@ public class HealthProbeRateLimitContractTests : IClassFixture<CustomWebAppFacto
             "the 121st probe in a minute from one address exceeds \"health-probe\" — the anonymous probe keeps a MANDATORY control");
         refused.Headers.RetryAfter.ToString().Should().NotBeNullOrEmpty("a 429 tells the poller when to come back (ADR-016)");
 
-        (await GetAsync("/ping", "203.0.113.21")).StatusCode.Should().Be(StatusCodes.Status200OK,
+        (await GetAsync("/ping", "203.0.113.99")).StatusCode.Should().Be(StatusCodes.Status200OK,
             "the budget is per client IP: one address's flood does not refuse another's probe");
     }
 
@@ -91,10 +104,20 @@ public class HealthProbeRateLimitContractTests : IClassFixture<CustomWebAppFacto
     {
         // Proves the limiter is live in this host (so the no-429 assertion above is not vacuous) and that the looser
         // probe budget did not spread: GET /status, an anonymous metadata probe, still refuses the 11th call.
-        const string scraper = "203.0.113.30";
-        for (var i = 1; i <= 10; i++)
+        string scraper = string.Empty;
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            (await GetAsync("/status", scraper)).StatusCode.Should().Be(StatusCodes.Status200OK, $"request {i} of 10 is within \"anonymous\"");
+            scraper = $"203.0.113.{30 + attempt}";
+            var started = DateTime.UtcNow;
+            for (var i = 1; i <= 10; i++)
+            {
+                (await GetAsync("/status", scraper)).StatusCode.Should().Be(StatusCodes.Status200OK, $"request {i} of 10 is within \"anonymous\"");
+            }
+
+            if (DateTime.UtcNow - started < TimeSpan.FromSeconds(50))
+            {
+                break;   // inside one fixed window (see the flood test for why a slow attempt is repeated)
+            }
         }
 
         (await GetAsync("/status", scraper)).StatusCode.Should().Be(StatusCodes.Status429TooManyRequests,

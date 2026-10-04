@@ -5,10 +5,12 @@
 > with only a sign-in check fails the build."
 > **Evidence**: `notes/route-authorization-sweep-2026-10-02.md` (82 findings, 90 route keys).
 > **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`; verifier round r1 on
-> `task/uac-r2-167-r1` (§15); verifier round r2 on `task/uac-r2-167-r2` (§16 — test code, the POML and this note
-> only; **one item left for the owner**, §16.3). **One `src/` file changed, by owner decision**: owner round 12 item 1 rate-limits
-> `GET /healthz`, `GET /healthz/catalog` and `GET /ping` (`Infrastructure/DI/EndpointMappingExtensions.cs`, three
-> `.RequireRateLimiting("anonymous")` lines). Nothing else under `src/` changed.
+> `task/uac-r2-167-r1` (§15); verifier round r2 on `task/uac-r2-167-r2` (§16); fix round f1 on `task/uac-r2-167-f1`
+> (§17 — owner round 14 items 1-2 and the r2 verifier's residuals; **nothing left open**). **`src/` changes, each by
+> owner decision**: round r1 (owner round 12 item 1) rate-limited `GET /healthz`, `GET /healthz/catalog` and `GET /ping`;
+> round f1 (owner round 14) moved those three to a dedicated `"health-probe"` policy (`RateLimitingModule.cs`) and set
+> the authorization FallbackPolicy (`AuthorizationModule.ApplyFallbackPolicy`), plus comment-only corrections in three
+> endpoint files that said "no FallbackPolicy exists" (§17.6).
 
 ## 0. ⚠️ Read first — a HIGH finding the sweep never traced (escalation trigger 7, sent to the main session)
 
@@ -475,6 +477,9 @@ treat a 429 as a retry, but their FINAL window has the same edge (polls 23-24). 
 looser dedicated probe policy — a new registration needing its own §11 justification, so it is not added here; r2
 puts the choice to the owner (§16.3).
 
+**SUPERSEDED in round f1 — use the row in §17.8 instead** (the probes are now on the 120/min `health-probe` policy,
+so "poll at most every 6 s" is no longer the advice).
+
 **`.claude/` edit for the main session (main-session-only path), exact text** — append a row to the troubleshooting
 table in `.claude/skills/bff-deploy/SKILL.md` (the table that holds the "Health check fails at 60s" row):
 
@@ -600,6 +605,8 @@ endings byte-for-byte (2,612 CRLF lines, `zzref` absent) before the next run.
    without bound on a Degraded app; the rate limit now turns the 11th call into a counted 429. Worth a script fix by
    whoever owns it.
 
+**ANSWERED by owner round 14 item 1 (binding): option B — a dedicated `health-probe` policy. Applied in round f1 (§17).**
+
 **🔔 Owner question (verifier r2 item 5 — not decided here; owner round 12 item 1 chose "a rate limit", not which one).**
 
 | Option | What | New surface | Fixes the 5-s edge | Cost |
@@ -647,3 +654,211 @@ Test scope beyond the listed behaviours: none (the one added assertion pins a cr
 ADR-038 bans hold in everything added: inline-fixture source analysis only — no `Mock<HttpMessageHandler>`, no
 DI-registration test, no constructor null-check test, no Dataverse/Azure call. The live evidence in §16.3 came from
 read-only `az monitor app-insights query` calls made by hand, not from any test.
+
+## 17. Fix round f1 (2026-10-04) — branch `task/uac-r2-167-f1`
+
+Base `a6d85598d` (`task/uac-r2-167-r2`). Binding inputs: owner round 14 items 1-2 (re-stated by main-session rounds
+16 item 6 and 25 item 7) and the r2 verifier's nine items. **Every item is closed; nothing is owed, deferred or left
+for the owner.** No live write (no Dataverse, Azure, Entra or SPE call).
+
+### 17.1 Per item
+
+| # | Item | Disposition | Where |
+|---|---|---|---|
+| 1 | Owner round 14 item 1: GET `/healthz`, `/healthz/catalog`, `/ping` on a DEDICATED per-IP `health-probe` policy, not the shared `anonymous` one; pin it | **Closed.** New policy `"health-probe"` in the existing `RateLimitingModule`: per client IP, **sliding window 120/min** (the owner's example; the task's floor was 30/min), 6 segments, **no queue**. The three probes carry it; every other anonymous route keeps `"anonymous"` (10/min). Pinned at build time (`TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes`: exactly these three routes, each anonymous, each with ONE rate limit; `NamedRoutes_CarryTheirRecordedClassification` asserts `health-probe` and not `anonymous` on the chain and in the waiver reason) and at runtime against the real app (`HealthProbeRateLimitContractTests`: 24 polls of `/healthz` + 24 of `/ping` from one IP see no 429; the 121st `/ping` from one IP is refused with `Retry-After` and another IP is not; `/status` still refuses its 11th call). The three AnonymousByDesign waivers now name `RequireRateLimiting("health-probe")`. | `RateLimitingModule.cs` 6d; `EndpointMappingExtensions.cs:71/:79/:127`; Ledger `HealthProbeRoutes`; `tests/integration/contract/Api/HealthProbeRateLimitContractTests.cs` |
+| 2 | Owner round 14 item 2: an authorization **FallbackPolicy** requiring an authenticated user AND the build rule kept; every intentionally anonymous endpoint carries an explicit `AllowAnonymous` (listed); negative and positive controls for both | **Closed.** `AuthorizationModule.ApplyFallbackPolicy` sets `options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()`, applied first inside `AddAuthorization(...)`. Build-time pin `TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser` (exactly one assignment in BFF + shared code, exactly that policy, applied inside `AddAuthorization`) with `FallbackPolicy_NegativeControl_EachUnsafeShapeFails` (missing, permissive, `null`, `options.DefaultPolicy`, written-but-unapplied, set twice, the `SetFallbackPolicy` builder form; positive: inline and the real helper shape). Runtime: `AuthorizationFallbackPolicyTests` — real app (anonymous unmatched request → 401; the same with a bearer → 404; `/ping`, `/status`, `/healthz` still answer anonymously; every endpoint in the real endpoint table carries `IAuthorizeData`/`AuthorizationPolicy` or `IAllowAnonymous`) and a host built on the SAME `ApplyFallbackPolicy` (undeclared endpoint: 401 anonymous, 200 signed in; `AllowAnonymous` still open; `RequireAuthorization()` still 401) with the negative control **without** the fallback (undeclared endpoint serves anyone). The build rule `NoRouteIsAnonymousByOmission` is KEPT (and strengthened — item 6). The explicit anonymous surface is a pinned set (`ExplicitlyAnonymousRoutes`, 16 routes, §17.3; `TheExplicitlyAnonymousSurfaceIsPinned` + its control). | `AuthorizationModule.cs`; `RouteAuthorizationGuardTests.cs` (runtime-half section); `tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs` |
+| 3 | Verifier's own runs (ArchTests 384/384, both integration suites, the 16 probe-calling unit tests) | **Verified, not open.** Re-run in full on the f1 state (§17.9). | — |
+| 4 | Verifier's seeds (a)-(e) for `NoRouteIsAnonymousByOmission` | **Verified, not open.** (d) — the brace-less `if (...) docs.RequireAuthorization();` — now fails with an explicit scanner problem instead of being silently unread (item 5's fix). | — |
+| 5 | LOW fail-open: a group continuation inside a BRACED (conditional) block was credited, because `AtStatementStart` treats `{` as a statement start | **Closed.** `AttachContinuations` now credits a continuation only in the **unbroken run** of `group.…;` statements that starts IMMEDIATELY after the group's declaration statement (or, for a group the method receives, after the body's opening brace). Nothing but whitespace/comments may separate them, so no `if`/`else`/loop/`switch`/lambda/`try`/`return`/`throw`/`break`/`continue`/`goto` can stand between the group and the call. Every OTHER authorization-shaped call on a group variable or parameter — braced block, brace-less `if`, `var y = g.X()`, `return g.X()`, after an intervening statement, in a lambda — is a **scanner problem** (fails `EveryRouteDeclaresHowItIsAuthorized`) and earns nothing. This is wider than the item's suggestion ("the enclosing block is the method body"): an early `return` in the SAME block would have kept the fail-open. Control `GroupContinuation_NegativeControl_OnlyAnUnconditionalRunIsCredited` (the verifier's seed + 8 more conditional/skippable shapes + the received-parameter case; positives: adjacent, after a same-group statement, several in a row, inside the declaring block, first statement of the receiving method). Seeded on real code (f1-1). | `RouteAuthorizationGuardTests.Scanner.cs` `AttachContinuations` / `UnconditionalContinuationStarts`; `GroupNode.StatementEnd` |
+| 6 | LOW by design: `RequiresSignIn` credited ANY `RequireAuthorization` form, relying on census review | **Closed.** Sign-in is now PROVEN from source (`SignInVerdict` over `PolicyCatalogOf`): bare `RequireAuthorization()` counts only while no DefaultPolicy override is permissive; a named form counts only when every argument resolves (string literal or `AuthPolicies` constant) to EXACTLY ONE `AddPolicy` registration inside `AddAuthorization(...)` and at least one of them calls `RequireAuthenticatedUser()`; an inline lambda, a policy object or an unresolvable name never counts. A reviewer classifying a permissive policy as NotAuthorization no longer makes it sign-in. `EveryRequireAuthorizationFormOnALiveRouteRequiresAnAuthenticatedUser` proves the four forms in use today (bare, `"SystemAdmin"`, `AuthPolicies.ExternalCollaboration`, `AuthPolicies.RagApiKey`) from their registrations; `SignInVerdict_NegativeControl_PermissivePoliciesAreNotSignIn` (permissive literal/constant, a rate-limit policy name, unregistered, registered twice, inline lambda, policy object, partly unresolvable, a permissive DefaultPolicy override; positives incl. a qualified constant and a permissive+proven pair). The FallbackPolicy cannot cover this case (it never applies to an endpoint that declares authorization), which is why the build check is the control. Seeded on real code (f1-2). Resource policies (`can*`) are deliberately NOT proven (they rely on `ResourceAccessHandler`): a future route naming one fails until its registration says `RequireAuthenticatedUser()` (it also fails the empty `PolicyOnlyRoutes` pin). | `RouteAuthorizationGuardTests.cs` "SIGN-IN IS VERIFIED, NOT ASSUMED" |
+| 7 | Other r2 items verified | **Verified, not open.** | — |
+| 8 | The r1 `src` change and the 5-second-poller edge | **Closed by item 1** (the edge is gone: 120/min per IP; also covers `Rotate-RedisKey.ps1`, another 24 x 5 s `/healthz` poller found this round). | — |
+| 9 | Verifier's process note (main-checkout seed residue) | **Verified, read-only:** in `C:\code_files\spaarke`, `UserEndpoints.cs` and `DocumentVersionEndpoints.cs` contain no seed text and `tests/Spaarke.ArchTests/` holds no stray `RouteAuthorizationGuardTests.Ledger.cs`. This round touched only its own worktree. | — |
+
+### 17.2 Consequences of the FallbackPolicy, each fixed in this round
+
+The FallbackPolicy also applies to a request that matches **no** endpoint (ASP.NET Core combines an empty metadata set
+into the fallback). So an **anonymous** request to an unmapped path, or to a mapped path with the wrong verb, now answers
+**401** instead of 404/405. A signed-in request still gets 404/405. CORS preflights are unaffected (`UseCors` answers them
+before `UseAuthorization`; `CorsAndAuthTests.Cors_Preflight_AllowsConfiguredOrigin` preflights an unmapped path and still
+gets 204). Platform pings of unmapped paths (Always On `/`, the container warm-up `/robots933456.txt`) only need a response,
+so 401 serves them as 404 did. Everything that read "anonymous 401 ⇒ route registered" or "anonymous 404 ⇒ route absent":
+
+| Artifact | Was | Now |
+|---|---|---|
+| `tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs` | absence by anonymous 404; presence by anonymous 401 | absence by the endpoint table + a SIGNED-IN 404; presence by a signed-in not-404 |
+| `tests/integration/regression/DriveKeyedWriteRouteRetirementTests.cs`, `MiContainerKeyedWriteRouteRetirementTests.cs` | anonymous-404 absence twins and an anonymous-401 presence control | removed (the signed-in twins and the endpoint-table assertion carry the scenario); summaries say why |
+| `ChatRefineEndpointTests.Refine_GetMethod_NotAllowed` | anonymous GET → 404/405 | GET **with a bearer** → 404/405 (anonymous is now 401 — the one failure the f1 suite run showed) |
+| 21 `*_EndpointExists_*` tests in `ChatActions`, `ChatRefine`, `DocumentIntelligenceEnqueue`, `Handler`, `Model`, `Node`, `PlaybookRun` endpoint tests and `EndpointGroupingTests.UserEndpoints_ExistAndRequireAuth` | anonymous `NotBe(404)` (would now pass for a MISSING route) | each also asserts `EndpointTable.AssertMapped(...)` — new helper `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/EndpointTable.cs` reads the real endpoint table by verb + route template |
+| `scripts/Test-Deployment.ps1` 3a/3b | probed `/api/containers` and `/api/drives/{id}/children` — DELETED by auth-v4 090 and UAC-r2 071/083 (so 3a, critical, already failed with 404) — and read 401 as "exists" | probe mapped routes (`/api/spe/containers`, `/api/documents/{id}/preview-url`) and assert only "authentication enforced" (401), stating that registration is not provable anonymously |
+| `scripts/Deploy-WorkspaceBff.ps1` step 5 | "a 401 confirms the endpoint exists" | new optional `-AccessToken`: with it, anything but 404 = registered (403 = registered, not entitled; 401 = token rejected); without it, a 401 is reported as "auth enforced; registration not provable anonymously" |
+| `scripts/Capture-BffBaseline.ps1` help | "what it tests: route exists" | says an anonymous probe cannot prove registration, and names the probe rate limits |
+| `docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md` Step 4 + checklist, `M365-COPILOT-DEPLOYMENT-GUIDE.md` (verify + both troubleshooting entries), `SCOPE-CONFIGURATION-GUIDE.md` step 5 | "401 = route registered" | signed-in request (`az account get-access-token --resource api://<BFF-API-APP-ID>`): anything but 404 = registered; anonymous 401 = auth enforced only |
+| `infrastructure/byok/main.bicep` + `infrastructure/byok/README.md` | `healthCheckPath: '/health'` and `curl …/health` — a path the BFF never mapped (404 before, 401 now: the BYOK App Service health check could never pass) | `/healthz` (compiled with `az bicep build`); found while checking every platform prober against the probe policy |
+| Comments in `FinanceRollupEndpoints.cs`, `Office/CommunicationsEndpoints.cs`, `SpeAdmin/ContainerItemEndpoints.cs`, `tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs`; Ledger `NotAuthorizationForms` | "no Default/FallbackPolicy exists" | "neither the default policy nor the FallbackPolicy (an authenticated user) raises that bar" — still the point those comments make |
+| `.claude/skills/bff-deploy/SKILL.md` (main-session-only) | "401 = route found, 404 = not registered" (three places) | exact replacement text in §17.8 |
+
+Not changed, deliberately: `INCIDENT-RESPONSE.md:268` (401-vs-403 on a mapped route, still true), `RAG-CONFIGURATION.md:688`
+and `Decommission-Customer.ps1` (they call WITH a token, so 404 still means missing), `Configure-CustomDomain.ps1` /
+`Test-CustomDomain.ps1` (a 404 on `/healthz` = the BFF is not deployed — `/healthz` is anonymous, unaffected).
+**For the main session:** `projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md` item **4a / D3-02**
+("set FallbackPolicy=RequireAuthenticatedUser; add the 401-by-default contract test") is now done by this round.
+
+### 17.3 The explicitly anonymous surface (16 routes — each `.AllowAnonymous()` on a scanned chain)
+
+| Route | Declared at | Mandatory control | Waiver |
+|---|---|---|---|
+| `GET /healthz` | `Infrastructure/DI/EndpointMappingExtensions.cs:70` | `RequireRateLimiting("health-probe")` | Permanent AnonymousByDesign |
+| `GET /healthz/catalog` | `EndpointMappingExtensions.cs:78` | `RequireRateLimiting("health-probe")` | Permanent AnonymousByDesign |
+| `GET /ping` | `EndpointMappingExtensions.cs:126` | `RequireRateLimiting("health-probe")` | Permanent AnonymousByDesign |
+| `GET /healthz/dataverse` | `EndpointMappingExtensions.cs:85` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `GET /healthz/dataverse/crud` | `EndpointMappingExtensions.cs:88` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `GET /healthz/dataverse/doc/{id}` | `EndpointMappingExtensions.cs:122` | rate limit only | **Pending 166** (an anonymous document read — §0) |
+| `GET /status` | `EndpointMappingExtensions.cs:140` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `GET /api/config/client` | `Api/ConfigEndpoints.cs` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `GET /api/config` | `Api/ConfigEndpoints.cs` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `GET /api/office/health` | `Api/Office/OfficeEndpoints.cs` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `POST /api/office/save-debug` | `Api/Office/OfficeEndpoints.cs` | mapped only when `env.IsDevelopment()` | Permanent AnonymousByDesign |
+| `POST /api/registration/demo-request` | `Api/RegistrationEndpoints.cs` | `RequireRateLimiting("anonymous")` | Permanent AnonymousByDesign |
+| `POST /api/onboarding/consent-callback` | `Endpoints/Onboarding/ConsentCallbackEndpoint.cs` | HMAC-SHA256 over the body | Permanent AnonymousByDesign |
+| `POST /api/compose/webhooks/spe-doc-changed` | `Api/ComposeSyncEndpoints.cs` | `RequireWebhookSignature` | Permanent AnonymousByDesign |
+| `POST /api/communications/incoming-webhook` | `Api/CommunicationEndpoints.cs` | `RequireWebhookSignature` | Permanent AnonymousByDesign |
+| `POST /api/communications/acs/eventgrid` | `Api/AcsEventGridEndpoints.cs` | the shared secret is OPTIONAL | **Pending UNOWNED-NEW** (§3 row 3) |
+
+`AnonymityIsDeclaredOnlyOnAScannedChain` refuses every other way to be anonymous (attribute, metadata, wrapper);
+`TheExplicitlyAnonymousSurfaceIsPinned` fails on an added or removed public route; the real-app test
+`RealApp_EveryMappedEndpoint_DeclaresAuthorizationOrAnonymity` confirms from the built endpoint table that every other
+endpoint declares authorization.
+
+### 17.4 Seeding proofs (f1) — each seeded on REAL source, run, failure captured, restored with `git checkout` and touched
+
+| # | Rule | Seeded | Result |
+|---|---|---|---|
+| f1-1 | Item 5 (unconditional continuations) — the r2 verifier's own seed | `Api/DocumentVersionEndpoints.cs`: `var docs = app.MapGroup("/api/documents");` + `if (DateTime.UtcNow.Year < 0) { docs.RequireAuthorization(); }` | **2 failed / 59 passed**: `EveryRouteDeclaresHowItIsAuthorized` — "Api/DocumentVersionEndpoints.cs:101: 'docs.RequireAuthorization()' adds to group 'docs' outside the unbroken run … It is NOT credited"; `NoRouteIsAnonymousByOmission` names `GET /api/documents/{documentId}/versions` and `…/versions/{versionId}/content`. (On r2 this seed stayed green.) |
+| f1-2 | Item 6 (proven sign-in) — a permissive policy a reviewer classified | `AuthorizationModule.cs` `options.AddPolicy("ZzOpen", p => p.RequireAssertion(_ => true));` + `GET /api/me` → `.RequireAuthorization("ZzOpen")` + `NotAuthorizationForm("RequireAuthorization(\"ZzOpen\")")` in the Ledger | **2 failed**: `EveryRequireAuthorizationFormOnALiveRouteRequiresAnAuthenticatedUser` — "RequireAuthorization("ZzOpen"): none of the policies "ZzOpen" calls RequireAuthenticatedUser()…"; `NoRouteIsAnonymousByOmission` names `GET /api/me`. (On r2 the census classification made it pass.) |
+| f1-3 | Item 1 — a probe back on `"anonymous"` | `/ping` → `RequireRateLimiting("anonymous")` | Guard **2 failed**: `TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes` — "removed: GET /ping"; `NamedRoutes_…`. Runtime **2 failed**: `AFiveSecondDeployPoller_NeverSees429…` — statuses `…200, 429, 200, 429…` (the deploy-poller edge, reproduced); `TheProbes_AreStillRateLimited…` — "request 11 of 120 … found 429". |
+| f1-4 | Item 1 — the looser policy spreads | `/status` → `RequireRateLimiting("health-probe")` | Guard **1 failed**: "added: GET /status". Runtime **1 failed**: `NegativeControl_TheOtherAnonymousRoutes…` — "expected 429 … but found 200". |
+| f1-5 | Item 2 — fallback written but not applied | `ApplyFallbackPolicy(options);` removed | Guard **1 failed**: "AuthorizationModule.cs:417: the FallbackPolicy is assigned in ApplyFallbackPolicy, but nothing applies it inside AddAuthorization(...)". Runtime **1 failed**: `RealApp_AnAnonymousRequest…IsChallenged401` — "found 404". |
+| f1-6 | Item 2 — permissive fallback | `…RequireAssertion(_ => true).Build()` in `ApplyFallbackPolicy` | Guard **1 failed**: "FallbackPolicy = …RequireAssertion(_ => true)… — it must be exactly …RequireAuthenticatedUser()…". Runtime **3 failed** (the host built on the real method serves `/declares-nothing` anonymously — 200; unmatched anonymous → 404, twice). |
+| f1-7 | Item 2 — a route loses its declaration | `.RequireAuthorization()` removed from `GET /api/me` | Guard **1 failed**: `NoRouteIsAnonymousByOmission` names `GET /api/me`. Runtime **1 failed**: `RealApp_EveryMappedEndpoint_DeclaresAuthorizationOrAnonymity` — `{"GET /api/me  (HTTP: GET /api/me => GetCurrentUserAsync)"}`. And the runtime stays CLOSED: in that seeded state `EndpointGroupingTests.UserEndpoints_ExistAndRequireAuth("/api/me")` still got 401 — the fallback. |
+| f1-8 | Item 2 — a route made public unlisted | `GET /api/me` → `.RequireAuthorization().AllowAnonymous()` | **4 failed**: `TheExplicitlyAnonymousSurfaceIsPinned` ("added: GET /api/me"), Rule A ("ANONYMOUS with no AnonymousByDesign or Pending waiver"), the waiver rule (CallerScopedOnly on an anonymous route), `AnonymityIsDeclaredOnlyOnAScannedChain` (count 17 ≠ 16). |
+
+After the last restore `git status` was clean (every seed restored from the commit with `git checkout --`, then touched).
+The inline-fixture controls listed in §17.1 run on every build.
+
+### 17.5 Placement and justification (CLAUDE.md §10 / §11)
+
+New BFF surface, each answered with the three questions:
+
+- **`"health-probe"` rate-limit policy** (`RateLimitingModule.cs`). *Existing*: the `"anonymous"` policy (fixed 10/min/IP,
+  shared by 12 anonymous routes) — grep found no other probe policy. *Extension*: no — raising `"anonymous"` would triple
+  the budget of routes that create rows (`demo-request`), take an HMAC'd callback, or hit Dataverse anonymously
+  (`/healthz/dataverse*`); the probes need a looser budget, the rest need the strict one. *Cost of doing nothing*: a 5-second
+  poller (deploy-bff-api.yml, Deploy-BffApi.ps1, control plane H9, Rotate-RedisKey.ps1) loses its 11th/12th poll of a
+  window to 429, so a production verify could roll back a good deploy; a 429 on the slot-swap warm-up stops the swap.
+  Owner round 14 item 1 decided it.
+- **`AuthorizationModule.ApplyFallbackPolicy(AuthorizationOptions)`** (public static method in the existing module; no new
+  type, registration or option). *Existing*: `AddAuthorization(...)` in the same module — the method is called from there.
+  *Extension*: it IS the extension; it is a separate method only so the test can build a host on the real policy (the
+  module's own `AddCredentialSelection` precedent). *Cost of doing nothing*: an endpoint that declares nothing is callable by
+  anyone (owner round 14 item 2), and the behaviour could only be tested against a re-declaration of the policy.
+- No new endpoint, service, DI registration of a type, option, job, column, package, PCF or plugin (ADR-002). Fail closed
+  (ADR-003): the fallback, the proven-sign-in rule and the continuation rule each fail CLOSED. Placement: the BFF
+  (cross-cutting authorization and throughput policy of the BFF's own pipeline — §10 decision criteria: nothing to place
+  elsewhere).
+- New test files: `AuthorizationFallbackPolicyTests.cs` (auth KEEP path), `HealthProbeRateLimitContractTests.cs` (contract
+  KEEP path), `TestInfrastructure/EndpointTable.cs` (helper; no existing endpoint-table helper — the two retirement tests
+  inline the same enumeration). ADR-038 bans: none (no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor
+  null-check; the real app is exercised over HTTP).
+- **Publish size** (CLAUDE.md §10 item 4, measured — not estimated): fresh source exports of the base `a6d85598d` and of
+  this branch to short paths (`C:\w167b`, `C:\w167h`), `dotnet publish -c Release`, zipped with PowerShell
+  `Compress-Archive` over `deploy\api-publish\*` (the `Deploy-BffApi.ps1` method), PDBs included: base **45.65 MB**
+  (47,870,004 bytes, 212 files, 4 PDBs) vs branch **45.65 MB** (47,870,402 bytes, 212 files, 4 PDBs) = **+398 bytes**. Equal
+  file counts on both sides. **CVE**: no package reference changed (no `.csproj` / `Directory.Packages.props` edit), so the
+  vulnerable-package set is unchanged.
+
+### 17.6 `src/` files changed in f1
+
+`Infrastructure/DI/RateLimitingModule.cs` (the policy + summary text), `Infrastructure/DI/EndpointMappingExtensions.cs`
+(three probes → `"health-probe"`, comments), `Infrastructure/DI/AuthorizationModule.cs` (`ApplyFallbackPolicy` + its call),
+and comment-only lines in `Api/Finance/FinanceRollupEndpoints.cs`, `Api/Office/CommunicationsEndpoints.cs`,
+`Api/SpeAdmin/ContainerItemEndpoints.cs`. None is a parallel-unsafe zone of this project.
+
+### 17.7 /conflict-check (round f1)
+
+Open PRs: **21 checked, none** touches any file this round edits. `origin/master` and the work branch have not changed
+them since 167's merge base. Local sibling branches that edit the same files (textual merges at integration, soft warn):
+`task/uac-r2-163*`, `-164*`, `-166*` and `-167-r1/-r2` (`EndpointMappingExtensions.cs`, other regions); `task/uac-r2-165*`
+(`AuthorizationModule.cs` — the SystemAdmin policy fix; this round adds a call at the top of the `AddAuthorization` lambda
+and a new method after `AddAuthorizationModule`), `task/uac-r2-165-f1` (`ContainerItemEndpoints.cs` and
+`SpeAdminContainerItemRouteGateTests.cs` — hunks from line 44 on; this round's comment edit is at lines 37-38),
+`task/uac-r2-161*` and `work/smart-todo-decoupling-r3` (`Office/CommunicationsEndpoints.cs`). **Integration note for the
+main session:** any sibling that ADDS a `RequireAuthorization("NewPolicy")` form, a public route, or a rate-limit policy on
+a probe must update `EveryRequireAuthorizationFormOnALiveRouteRequiresAnAuthenticatedUser`'s four-form list,
+`ExplicitlyAnonymousRoutes`, or `HealthProbeRoutes` in the same merge — by design. Task 166's removal of
+`GET /healthz/dataverse/doc/{id}` deletes its line from `ExplicitlyAnonymousRoutes`.
+
+### 17.8 `.claude/` edits for the main session (main-session-only paths) — exact text
+
+**(a) `.claude/skills/bff-deploy/SKILL.md`, the route-registration check** — replace the code block and rule that read
+"`# Unauthenticated test — expect 401 (route found, needs auth)` … `**Key verification rule**: Any endpoint behind
+.RequireAuthorization() should return 401 without a token. If it returns 404, the route didn't register (incomplete
+deployment).`" with:
+
+````
+```bash
+# Signed-in test — expect anything but 404 (the BFF API app id: docs/architecture/auth-azure-resources.md)
+TOKEN=$(az account get-access-token --resource api://<BFF-API-APP-ID> --query accessToken -o tsv)
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
+  https://spaarke-bff-dev.azurewebsites.net/api/documents/00000000-0000-0000-0000-000000000000/preview-url
+# Expected: 403 (routed; the per-document filter refuses the unknown id). 404 = the route did NOT register.
+```
+
+**Key verification rule**: prove registration with a **signed-in** request — anything but 404 means the route is
+registered. An **anonymous** request answers **401 whether or not the route exists**: since UAC-r2 task 167 the BFF's
+authorization FallbackPolicy also challenges requests that match no route. An anonymous 401 proves only that
+authentication is enforced.
+````
+
+**(b) Same file, "Manual Quick Deploy" step 3** — replace "`# Expect 401 (auth required) — NOT 404`" with
+"`# With -H "Authorization: Bearer $TOKEN": expect anything but 404 (an anonymous 401 does not prove the route exists)`".
+
+**(c) Same file, troubleshooting table** — replace the row "Health check passes but specific endpoints return 404 | … |
+Test specific endpoints behind `.RequireAuthorization()` — should return 401 (route found, auth needed), NEVER 404. If 404,
+deploy is incomplete." with:
+
+```
+| Health check passes but specific endpoints return 404 to a SIGNED-IN request | Incomplete package: route handler couldn't compile at startup due to missing DLL | Call the endpoint WITH a bearer token — anything but 404 means it registered. Do not use an anonymous 401 as proof: the authorization FallbackPolicy (UAC-r2 task 167) answers 401 for a missing route too. |
+```
+
+and append (this replaces the §15.3 row, which is withdrawn):
+
+```
+| `/healthz` or `/ping` returns 429 | More than 120 requests a minute from one client IP: the probes' "health-probe" rate limit (UAC-r2 task 167, owner round 14). Deploy and rotation pollers make at most 12/min | Wait for the window to slide (Retry-After header). A 429 is not a failed deploy. |
+```
+
+**(d) Same file, §9c** (`/healthz/dataverse/doc/{id}` smoke check) — unchanged by this round; task 166 owns moving it to
+`GET /healthz/dataverse` (§0).
+
+### 17.9 🔔 Found while applying item 1 — for the main session (not an open item of this task)
+
+`GET /healthz/catalog` is not a cheap probe: every call runs `RoutingConsumerTypeHealthCheck.ReconcileAsync` (2-3
+uncached Dataverse queries over `sprk_playbookconsumer` / `sprk_analysistool` / `sprk_analysisaction`,
+`Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs:166-186`) and `ComposeIdentityKeyHealthCheck.ProbeAsync`
+(a Dataverse metadata read, `Services/Compose/ComposeIdentityKeyHealthCheck.cs:146-152`). Owner round 14 item 1 puts it on
+`health-probe` (120/min per client IP) with the other two probes, as this task applied. So one anonymous address can
+drive about 360-480 Dataverse requests a minute through the BFF's own identity — roughly a quarter to a third of
+Dataverse's per-identity service-protection budget (6,000 per 5 minutes) — and a handful of addresses can exhaust it,
+throttling every user. For scale: production today has NO limit on this route (round r1 added `"anonymous"` 10/min, not
+yet deployed), so f1 is still a large improvement on what runs; and no poller calls `/healthz/catalog` (the pollers use
+`/healthz` and `/ping`; grep over scripts, workflows, infrastructure and the control plane). **Proposed complete fix**:
+bound the catalog route's Dataverse cost independently of the request rate — a single-flight, 30-second memo of the
+`HealthCheckResult` in `RoutingConsumerTypeHealthCheck` and in `ComposeIdentityKeyHealthCheck` (both are singletons:
+`RoutingModule.cs:74`, `ComposeModule.cs:80`), so any number of probes costs at most one reconciliation per 30 s per
+instance, with a test that N concurrent probes cause one reconciliation and that a result older than the TTL is refreshed.
+Not applied here because it changes the freshness of another project's deploy gate (ai-architecture-redesign FR-P0-04)
+and is outside owner round 14's text; it needs a main-session decision under round 15.
+
+### 17.10 Test runs (round f1, final state)
+
+TEST-RESULTS-PLACEHOLDER

@@ -32,6 +32,7 @@ public class HandlerEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert - endpoint exists (not 404)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", "/api/ai/handlers");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]

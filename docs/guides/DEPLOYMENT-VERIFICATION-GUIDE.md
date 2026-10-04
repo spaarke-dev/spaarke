@@ -63,14 +63,22 @@ curl https://spe-api-dev-67e2xz.azurewebsites.net/ping
 
 **This is the key verification that catches silent failures.** A health check passing does NOT guarantee all endpoints registered.
 
+Since unified-access-control-r2 task 167 (owner round 14) the BFF sets an authorization **FallbackPolicy** (an authenticated user), which ASP.NET Core also applies to a request that matches **no** route. So an **anonymous** request answers **401 whether or not the route is registered** — a 401 without a token proves only that authentication is enforced. Registration is proven **with a bearer token**: anything but 404 means the route is registered; 404 means it is not.
+
 ```bash
-# Unauthenticated test -- any auth-protected endpoint should return 401
-curl -s -o /dev/null -w "%{http_code}" https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/test/preview-url
+# Signed-in test -- the BFF API app id is in docs/architecture/auth-azure-resources.md
+TOKEN=$(az account get-access-token --resource api://<BFF-API-APP-ID> --query accessToken -o tsv)
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
+  https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/00000000-0000-0000-0000-000000000000/preview-url
+# Expected: anything but 404 -- for this all-zero id the per-document filter answers 403 before any handler runs
+
+# Unsigned test -- proves authentication is enforced, NOT that the route exists
+curl -s -o /dev/null -w "%{http_code}" https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/00000000-0000-0000-0000-000000000000/preview-url
 # Expected: 401
 ```
 
-**Interpretation**:
-- **401** = Route is registered and requires auth -- deployment succeeded
+**Interpretation** (signed-in request):
+- **Anything but 404** = Route is registered -- deployment succeeded
 - **404** = Route did NOT register -- incomplete package, redeploy
 - **500** = App has DI or startup errors -- check Application Insights logs
 
@@ -87,7 +95,7 @@ If the code behavior doesn't match what was deployed:
 - [ ] Package size shows 55-65 MB
 - [ ] `/healthz` returns `Healthy` (HTTP 200)
 - [ ] `/ping` returns JSON with `status: ok`
-- [ ] Changed endpoints return 401 (not 404) without auth
+- [ ] Changed endpoints answer a SIGNED-IN request with anything but 404 (an anonymous 401 does not prove registration — FallbackPolicy)
 - [ ] Deployment Center shows new entry with current timestamp
 
 ---

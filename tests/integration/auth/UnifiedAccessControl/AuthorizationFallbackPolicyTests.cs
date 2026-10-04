@@ -135,6 +135,25 @@ public class AuthorizationFallbackPolicyTests : IClassFixture<CustomWebAppFactor
         endpoints.Should().Contain(e => e.Metadata.GetMetadata<IAuthorizeData>() != null);
     }
 
+    [Fact]
+    public async Task EndpointTableHelper_TellsAMappedRouteFromAMissingOne_WhereAnAnonymous401CannotAnyMore()
+    {
+        // The reason EndpointTable exists: anonymously, a mapped and an unmapped path now answer the same 401.
+        (await _factory.CreateClient().GetAsync("/api/me")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await _factory.CreateClient().GetAsync(NoSuchRoute)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        // POSITIVE: mapped routes, including a parameterised and an aggregator-bound one.
+        EndpointTable.Maps(_factory, "GET", "/api/me").Should().BeTrue();
+        EndpointTable.Maps(_factory, "GET", "/ping").Should().BeTrue();
+        EndpointTable.Maps(_factory, "GET", $"/api/documents/{Guid.NewGuid()}/preview-url").Should().BeTrue();
+        EndpointTable.Maps(_factory, "GET", "/api/spe/containers?configId=x").Should().BeTrue();
+
+        // NEGATIVE: an unmapped path, a mapped path with the wrong verb, and a retired route.
+        EndpointTable.Maps(_factory, "GET", NoSuchRoute).Should().BeFalse();
+        EndpointTable.Maps(_factory, "POST", "/ping").Should().BeFalse();
+        EndpointTable.Maps(_factory, "GET", "/api/obo/containers/c1/children").Should().BeFalse();
+    }
+
     // =============================================================================================
     // A HOST BUILT ON THE SAME AuthorizationModule.ApplyFallbackPolicy — with and without it
     // =============================================================================================

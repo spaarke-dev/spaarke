@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration.</parallel-reason>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7).</parallel-reason>
     <deps>none</deps>
     <tags>testing, security, auth, archtest, bff-api</tags>
     <estimated-effort>2-3 days</estimated-effort>
@@ -813,7 +813,7 @@ Negative: removing any one fails Rule A naming it. POST /api/ai/rag/send-to-inde
 - GET /api/office/search/matter-types keeps Permanent ReferenceData.
 - The three /api/office/communications routes and GET /api/office/search/entities are either converted to verified HandlerDecision declarations (with their Permanent waivers deleted), or keep Permanent with a basis. The choice and the reason are recorded in the note.
 - No Pending waiver is converted to Permanent.</criterion>
-    <criterion testable="true">Scope: git diff shows changes only under tests/Spaarke.ArchTests/, in projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md, in this task's TASK-INDEX.md status cell, in this POML's status, and in projects/unified-access-control-r2/current-task.md. No file under src/ changed. [SUPERSEDED in part by owner round 12 item 1 (binding, 2026-10-03), recorded in round r2: exactly one src/ file changes - three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs on /healthz, /healthz/catalog and /ping. See parallel-reason and execution/justification-of-src-change.]</criterion>
+    <criterion testable="true">Scope: git diff shows changes only under tests/Spaarke.ArchTests/, in projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md, in this task's TASK-INDEX.md status cell, in this POML's status, and in projects/unified-access-control-r2/current-task.md. No file under src/ changed. [SUPERSEDED in part by owner round 12 item 1 (binding, 2026-10-03), recorded in round r2: exactly one src/ file changes - three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs on /healthz, /healthz/catalog and /ping. See parallel-reason and execution/justification-of-src-change.] [SUPERSEDED further by owner round 14 items 1-2 (binding, 2026-10-03), recorded in round f1: the three probes use a dedicated "health-probe" policy (RateLimitingModule.cs), the authorization FallbackPolicy is set (AuthorizationModule.cs), comment-only corrections in three endpoint files, and the consequences in tests/, scripts/, docs/guides/ and infrastructure/byok/ listed in note section 17.2. See execution/justification-of-src-change round="f1".]</criterion>
     <criterion testable="true">Seeding proofs: for every new rule, the task note records what was seeded and the failure text observed. The rules are: the census set, the scanner forms, duplicate keys, aggregator binding, Rule E's exception, every-route Rule A, the attachment-form census, the non-credited forms, the pass-through pins, whole-identifier tokens, the admin pin, HandlerDecision, each stale rule, and the sweep ledger.</criterion>
     <criterion testable="true">Suites: these are run in full before the PR, with counts recorded in the note:
 - tests/Spaarke.ArchTests (green);
@@ -954,6 +954,52 @@ The route counts in the background come from a Python approximation of the scann
       PLACEMENT (CLAUDE.md section 10/11): no new BFF service, registration, endpoint, option, job, column, package or
       file in r2. No Dataverse plugin (ADR-002). The new rule fails closed (ADR-003).
     </outcome>
+    <outcome date="2026-10-04" branch="task/uac-r2-167-f1" base="a6d85598d" result="completed; nothing open" round="fix f1 (owner round 14 + verifier r2 residuals)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 17.
+      ITEM 1 (owner round 14 item 1, closed): new "health-probe" rate-limit policy in RateLimitingModule (per client IP,
+      sliding window 120/min, 6 segments, no queue) on GET /healthz, /healthz/catalog, /ping only; every other anonymous
+      route keeps "anonymous" (10/min). Pinned at build time (TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes;
+      NamedRoutes asserts health-probe, not anonymous) and at runtime on the real app (HealthProbeRateLimitContractTests:
+      48 polls see no 429; the 121st /ping from one IP is 429 with Retry-After, another IP is not; /status still 429s its
+      11th call).
+      ITEM 2 (owner round 14 item 2, closed): AuthorizationModule.ApplyFallbackPolicy sets FallbackPolicy = an
+      authenticated user, applied inside AddAuthorization; build pin TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser
+      + FallbackPolicy_NegativeControl_EachUnsafeShapeFails; runtime AuthorizationFallbackPolicyTests (real app: anonymous
+      unmatched 401, signed-in 404, probes still anonymous, every endpoint declares authorization or anonymity; a host on
+      the same method with a no-fallback negative control). The build rule NoRouteIsAnonymousByOmission is kept and
+      strengthened. The 16 explicitly anonymous routes are a pinned set (ExplicitlyAnonymousRoutes) listed in note 17.3.
+      ITEM 5 (closed): a group continuation is credited only in the unbroken run of same-group statements directly after
+      the declaration (or the receiving method's opening brace); any other authorization-shaped call on a group is a
+      scanner problem (braced or brace-less conditional, lambda, try, after an early return or another statement).
+      ITEM 6 (closed): sign-in is PROVEN from source - a RequireAuthorization form counts only when its policy's
+      AddPolicy registration inside AddAuthorization calls RequireAuthenticatedUser (or bare with no permissive
+      DefaultPolicy override); lambdas, policy objects and unresolvable names never count.
+      ITEMS 3, 4, 7, 8, 9: verified; 8 closed by item 1; 9 verified read-only on the main checkout.
+      CONSEQUENCES FIXED: an anonymous request to an unmapped path is now 401, so every artifact that read "anonymous
+      401 = registered" or "anonymous 404 = absent" was corrected - three route-retirement regression tests (endpoint
+      table + signed-in 404), Refine_GetMethod_NotAllowed (bearer), 21 vacuous *_EndpointExists_* tests (new
+      EndpointTable helper), scripts/Test-Deployment.ps1 (also pointed at deleted routes), scripts/Deploy-WorkspaceBff.ps1
+      (-AccessToken), scripts/Capture-BffBaseline.ps1, three docs/guides files, and the BYOK bicep + README health check
+      path ('/health' was never mapped). The .claude/skills/bff-deploy/SKILL.md edit is recorded in note 17.8 for the
+      main session.
+      SEEDING: 8 seeds on real source (f1-1..f1-8), each failed the named rule(s), each restored and touched.
+      TESTS: see note section 17.9.
+      PUBLISH SIZE: base 45.65 MB vs branch 45.65 MB (+398 bytes), Compress-Archive, 212 files each, PDBs included. No
+      package change (CVE set unchanged).
+    </outcome>
+    <justification-of-src-change round="f1">
+      Owner round 14 items 1-2 (binding). NEW SURFACE: (1) the "health-probe" rate-limit policy. EXISTING: the
+      "anonymous" policy (RateLimitingModule.cs, fixed 10/min per IP, 12 anonymous routes). EXTENSION: no - raising
+      "anonymous" would triple the budget of row-creating, HMAC and Dataverse-hitting anonymous routes. COST OF DOING
+      NOTHING: 5-second pollers (deploy-bff-api.yml, Deploy-BffApi.ps1, control plane H9, Rotate-RedisKey.ps1) lose
+      polls 11-12 of a window to 429 and a production verify can roll back a good deploy; a 429 on the slot-swap
+      warm-up stops the swap. (2) AuthorizationModule.ApplyFallbackPolicy (a public static method of the existing
+      module). EXISTING: AddAuthorization in the same module, which calls it. EXTENSION: it is the extension; a separate
+      method only so a test host can use the real policy (the AddCredentialSelection precedent). COST OF DOING NOTHING: an
+      endpoint that declares nothing is callable by anyone (owner round 14 item 2). No new endpoint, service type, DI
+      registration of a type, option, job, column, package, PCF or Dataverse plugin (ADR-002). Fail closed (ADR-003).
+      Publish size measured: +398 bytes (note 17.5).
+    </justification-of-src-change>
     <justification-of-src-change round="r1">
       Owner round 12 item 1 (binding) overrides this POML's "change NO file under src/" for one purpose: rate-limit
       GET /healthz, GET /healthz/catalog and GET /ping. Three .RequireRateLimiting("anonymous") calls on EXISTING routes
@@ -962,6 +1008,17 @@ The route counts in the background come from a Python approximation of the scann
       "anonymous" policy, RateLimitingModule.cs:95-104), so the section 11 three-question template for NEW surface is not
       triggered. Publish size not measured (harness rule). No Dataverse plugin (ADR-002). Fail closed unchanged (ADR-003).
     </justification-of-src-change>
+    <justification-of-new-files round="f1">
+      tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs (auth KEEP path) and
+      tests/integration/contract/Api/HealthProbeRateLimitContractTests.cs (contract KEEP path): the runtime proofs owner
+      round 14 asks for ("negative and positive controls"); EXISTING: no test exercised a fallback policy or the probe rate
+      limit (RateLimitingContractTests covers the AI policies on a minimal host); EXTENSION: the existing classes test other
+      subjects; COST OF DOING NOTHING: the FallbackPolicy and the probe budget would be pinned only in source, never shown to
+      behave. tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/EndpointTable.cs: EXISTING: the two retirement tests inline
+      the same endpoint-table enumeration (kept, they assert absence); EXTENSION: a shared helper is the extension for 21
+      call sites; COST OF DOING NOTHING: 21 existence tests could no longer fail once anonymous 401 stopped proving a route
+      exists.
+    </justification-of-new-files>
     <justification-of-new-files>
       tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs and RouteAuthorizationGuardTests.Ledger.cs.
       EXISTING: RouteAuthorizationGuardTests.cs (task 074) is the only route guard (grep found no other); these files are
