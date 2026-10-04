@@ -117,8 +117,14 @@ describe('SaveFlow — FR-11 save mode (task 024)', () => {
     // A version save neither re-files nor renames, so those inputs are not offered.
     expect(screen.queryByTestId('related-to-picker')).toBeNull();
     expect(screen.queryByLabelText('Document name')).toBeNull();
+    // Task 094: the document is already in Spaarke — its name shows LOCKED (read-only), never the owner's
+    // banned "Save version" wording. "Save as new document" is the only way to rename. (Two matches: the
+    // Document Info header's itemName, and the locked Document Details box — same string here by fixture.)
+    expect(screen.getAllByText('Engagement Letter').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('button', { name: 'Save as new document' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save version' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     const [body] = await sentBodies();
     expect(body!.document.existingDocumentId).toBe(DOCUMENT_ID);
@@ -193,7 +199,7 @@ describe('SaveFlow — FR-11 save mode (task 024)', () => {
     );
     renderPane(RESOLVED);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     const offer = await screen.findByRole('button', { name: 'Save as new document' });
     fireEvent.click(offer);
 

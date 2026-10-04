@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04. Phase 6 (088/089/091/092/093) ALL ✅, committed `df75f2d33`; PR **#1124** open, CI running
+> **Last Updated**: 2026-10-04. PR #1124 MERGED `fb8280aee`; BFF deployed + hash-verified; add-in site deployed (run 37208025253). Waiting on the owner: re-upload package 1.1.1, then UAT round 4
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,16 +18,15 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### ▶️ NEXT: merge PR #1124, then deploy (owner go) and UAT round 4
+### ▶️ NEXT: owner re-uploads package 1.1.1, then UAT round 4
 
 | Field | Value |
 |---|---|
-| **Task** | none in progress. Phase 6 ✅ ×5 (088 `534bfc360`; 089 + 093 `08e451240`; 091 `df75f2d33`). 93 tasks: 90 closed; 042 🔄 (UAT round 4 pending); 083 🔲 (UAC-r2 141); 090 🔲 |
-| **PR** | **#1124** https://github.com/spaarke-dev/spaarke/pull/1124 — merge with `gh pr merge 1124 --merge` (**NEVER `--delete-branch`**) when **`Router` AND `Build & Test (Debug)`** pass and `grep -c pending` = 0. Tier 2 Full Unit Tests cancelled at 30 min = advisory |
-| **Publish size** | fresh master `62277d50a` 47,875,740 B vs branch `df75f2d33` 47,875,690 B → **−50 B**, 212 = 212 files (Compress-Archive, short-path fresh worktrees) |
-| **Deploy (needs the owner's go — dev BFF slot is shared)** | 1) BFF first: `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` from master after merge (the pane offers "Save as new version" only on the new `canSaveAsVersion` flag); 2) add-in: master push auto-deploys the SWA; 3) owner re-uploads `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`); 4) UAT round 4 = the live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning |
-| **Open owner questions** | (1) collision Open → desktop Word? (no supported `ms-word:` launch; anchor-click needs a live test) (2) version save keeps the old name — rename the record? (3) Saved state lost on tab switch — follow-up in `App.tsx`? |
-| **Local build needs** | `npm run build` requires ADDIN_CLIENT_ID / TENANT_ID / BFF_API_CLIENT_ID / BFF_API_BASE_URL (+ ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL) — values in `.github/workflows/deploy-office-addins.yml` |
+| **State** | PR #1124 merged `fb8280aee`. BFF on `spaarke-bff-dev` = `fb8280aee` (4/4 hashes, healthz, CORS; 9 route probes, 0 × 404). Add-in site = `fb8280aee` (run 37208025253); hosted Word manifest 1.0.10.0 with Open Spaarke |
+| **Owner** | Admin center → Integrated apps → update Spaarke with `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`, run 37208025253). Then UAT round 4: live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning. Record results in `notes/042-uat-round3-2026-10-03.md` (or a round-4 note) |
+| **Open owner questions** | (1) collision Open → desktop Word (anchor-click, needs live test)? (2) version save keeps the old name — rename the record? (3) Saved state lost on tab switch — follow-up in `App.tsx`? |
+| **Then** | 042 → ✅ when UAT passes; 090 wrap-up with `/test-diet`. 083 still blocked on UAC-r2 141 |
+| **Caution** | `spaarke-bff-dev` is shared; another project's deploy can overwrite this build before UAT — re-check Kudu deployments if behaviour looks old |
 
 ### Files modified this session (all committed and pushed)
 `scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·

@@ -119,7 +119,7 @@ export interface DocumentProfileSectionProps {
   /**
    * Task 088 (UAT-6): called once each time a Generate Profile request is ACCEPTED by the server (202 — the
    * profile job is queued; the hook does not poll for the job's end, #1090). `SaveFlow` uses it to turn its
-   * gray "Saved" button back into "Save version". Not called when the request is refused or fails.
+   * gray "Saved" button back into an enabled "Save" (task 094). Not called when the request is refused or fails.
    */
   onProfileGenerated?: () => void;
 }

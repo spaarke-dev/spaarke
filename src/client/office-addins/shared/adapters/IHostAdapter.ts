@@ -216,6 +216,24 @@ export interface IHostAdapter {
   writeDocumentStamp(documentId: string): Promise<'written' | 'unchanged'>;
 
   /**
+   * Register a handler that fires when the open document's CONTENT changes (spaarkeai-word-add-in-r1
+   * task 094 — the owner's "Re-enable on document edits" rule). Only supported when
+   * {@link HostCapabilities.canDetectDocumentChanges} is `true`. Callers MUST check the capability
+   * flag before calling — matching the {@link getDocumentUrl} / {@link readDocumentStamp} convention.
+   *
+   * Resolves to an UNSUBSCRIBE function once registration completes; callers MUST call it on
+   * unmount (or when no longer interested) to remove the handler. The handler does not fire for a
+   * change THIS adapter itself made while writing the identity stamp ({@link writeDocumentStamp}) —
+   * that write touches a custom XML part, not the document body, so it is not expected to fire a
+   * paragraph event at all; the adapter additionally suppresses its own write window defensively.
+   *
+   * @param onChange Invoked (no arguments) on every qualifying content-change event.
+   * @returns A promise resolving to the unsubscribe function.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability.
+   */
+  registerDocumentChangeHandler(onChange: () => void): Promise<() => void>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling
