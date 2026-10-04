@@ -110,7 +110,7 @@
 | ✅ 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | [PR #1123](https://github.com/spaarke-dev/spaarke/pull/1123). 6 PCF builds fixed (broken since the 2026-08-14 CVE bump); 17 failing suites fixed or evidenced; **one user-visible fix** (FR-02 section height) |
 | ✅ 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1282](https://github.com/spaarke-dev/spaarke/pull/1282) + fix [PR #1285](https://github.com/spaarke-dev/spaarke/pull/1285) **merged**. Nightly PCF build check now reports real results (10 fail / 8 pass on master, matching the logs) |
 | ✅ 094 | [PCF deploy procedures verify the real build result, own PR](094-pcf-deploy-build-verification-own-pr.poml) | FULL | **opus**/high | — | I2 | [PR #1286](https://github.com/spaarke-dev/spaarke/pull/1286). **Merge after #1123** (release PCF build fails on clean checkout until #1123 fixes 18 tsconfig extends) |
-| 🔲 095 | [Flaky email-attachment regex timeout, own PR](095-flaky-email-attachment-regex-timeout-own-pr.poml) | FULL | sonnet/high | — | I2 | Owner approved 2026-10-04 |
+| ✅ 095 | [Flaky email-attachment regex timeout, own PR](095-flaky-email-attachment-regex-timeout-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1287](https://github.com/spaarke-dev/spaarke/pull/1287). Test now exercises production code (it tested a private copy without the catch); production unchanged |
 
 ### Phase 9 — Wrap-up
 

@@ -4,7 +4,7 @@
     <title>Flaky EmailAttachmentProcessorTests regex timeout, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes build/deploy procedure or test code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -49,6 +49,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-04; owner approved the fix in its own PR.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1287 (fix/email-attachment-regex-timeout), ef6784096. Root cause: the test asserted against a private hand-copied AttachmentFilterTestHelper (ADR-038 violation) whose regex had the same 1 s timeout but NO try/catch, so a timeout under load threw instead of failing open like production. Fix: helper deleted; tests construct the real EmailAttachmentProcessor and call ShouldFilterAttachment. Mechanism proven (forced FromTicks(1): 2000/2000 throws; old helper shape throws unhandled; production catches). Could not reproduce a genuine &gt;1 s stall from CPU spin contention (max ~2.7 ms), reported honestly. Production unchanged: 1 s + fail-open is a convention in 12+ files. New EmailProcessingOptions.SignatureImageRegexTimeout (default 1 s, byte-identical) is a config seam; tests use 5 s, stated in the PR. Permanent regression test pins fail-open on timeout. Targeted 57/57; full suite 1 unrelated failure (InsightsSearchEndpointContractTests) that passed alone in 5 s.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
