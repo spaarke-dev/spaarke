@@ -42,7 +42,10 @@ public class DriveItemOperations
         string? itemId = null,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListChildren");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -140,7 +143,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFile");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -190,7 +196,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DeleteFile");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -243,7 +252,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetFileMetadata");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -333,7 +345,10 @@ public class DriveItemOperations
         ListingParameters parameters,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListChildrenAsUser");
         activity?.SetTag("containerId", containerId);
 
@@ -443,7 +458,10 @@ public class DriveItemOperations
             return null;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileWithRangeAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -591,7 +609,10 @@ public class DriveItemOperations
             return null;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "UpdateItemAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -680,7 +701,10 @@ public class DriveItemOperations
             return false;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DeleteItemAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -733,7 +757,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetFileMetadataAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -800,7 +827,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -858,7 +888,10 @@ public class DriveItemOperations
         string versionId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileVersionAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -921,7 +954,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetCurrentVersionIdAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -986,7 +1022,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListFileVersionsAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -1065,7 +1104,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListFileVersions");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -1125,7 +1167,10 @@ public class DriveItemOperations
         string? correlationId = null,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetPreviewUrl");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);

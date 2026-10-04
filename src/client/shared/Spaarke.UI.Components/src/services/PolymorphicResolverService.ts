@@ -45,6 +45,11 @@
  *   value is null/empty (NFR-06 graceful-blank).
  */
 
+// `cleanGuid` moved to utils/guid.ts (C-7) — imported here (not just re-exported)
+// because this module's own functions call it internally.
+import { cleanGuid } from '../utils/guid';
+export { cleanGuid };
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -344,31 +349,16 @@ export function _resetDisplayNameFieldCacheForTests(): void {
 }
 
 // ---------------------------------------------------------------------------
-// GUID normalization (canonical) — the ONE place braces get stripped
-// ---------------------------------------------------------------------------
-
-/**
- * Normalize a GUID for use in a Dataverse OData `@odata.bind` key predicate
- * (or any `/entityset(guid)` reference URL).
- *
- * Several sources hand back GUIDs in registry/braced format — e.g.
- * `Xrm.Utility.lookupObjects` and `Xrm.Utility.getGlobalContext().userSettings`
- * return `{39CDE3E3-9D15-...}`, and `Xrm.WebApi.createRecord` can return a braced
- * id. Dataverse rejects `({GUID})` in a key predicate with a generic HTTP 400
- * "Bad Request - Error in query syntax."
- *
- * This is the single canonical normalizer — strip braces + whitespace and
- * lowercase (Dataverse GUID keys are case-insensitive). Every wizard/service/
- * adapter that builds an `@odata.bind` value (or ingests an Xrm-sourced GUID)
- * routes through here rather than interpolating it raw.
- *
- * Null/undefined-safe: returns '' for a falsy input. No-op on already-bare ids.
- */
-export function cleanGuid(id: string | null | undefined): string {
-  if (!id) return '';
-  return id.replace(/[{}]/g, '').trim().toLowerCase();
-}
-
+// GUID normalization — `cleanGuid` moved to utils/guid.ts (C-7, see the
+// `import`/`export` pair at the top of this file). Relocated because the
+// comment this replaced called this file "the ONE place braces get
+// stripped," which the spaarke-ontology-platform-r1 reuse audit (U1) found
+// false — the identical one-liner was reimplemented at ~70 other call
+// sites. Still re-exported from here, unchanged, because this module's
+// compiled path (`@spaarke/ui-components/dist/services/PolymorphicResolverService`)
+// is ADR-044's documented deep-import fallback and has a real consumer
+// (`RegardingResolver` PCF, which deep-imports `cleanGuid` from this exact
+// path). Do not remove that top-of-file export without updating that import.
 // ---------------------------------------------------------------------------
 // Record URL builder
 // ---------------------------------------------------------------------------
@@ -395,7 +385,7 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
         new URLSearchParams(window.location.search).get('appid') ??
         new URLSearchParams(window.parent?.location?.search ?? '').get('appid') ??
         '';
-      if (appId) url.searchParams.set('appid', appId.replace(/[{}]/g, '').toLowerCase());
+      if (appId) url.searchParams.set('appid', cleanGuid(appId));
       url.searchParams.set('pagetype', 'entityrecord');
       url.searchParams.set('etn', entityLogicalName);
       url.searchParams.set('id', cleanId);

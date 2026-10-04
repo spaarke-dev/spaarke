@@ -50,7 +50,7 @@ function getHostRecordId(): string | undefined {
   const xrm = getXrm();
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -79,7 +79,7 @@ function getHostEntityName(): string | undefined {
  * the record).
  */
 function shouldAutoOpenConversation(): boolean {
-  const searches: Array<() => string | undefined> = [
+  const searches: (() => string | undefined)[] = [
     () => window.top?.location?.search,
     () => window.parent?.location?.search,
     () => window.location.search,

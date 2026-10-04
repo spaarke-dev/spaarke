@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/teams-manifest/MicrosoftTeams.schema.json",
   "manifestVersion": "devPreview",
   "id": "b3965ea0-6942-4f17-81b3-2c645bd05ebf",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "name": {
     "short": "Spaarke Word",
     "full": "Spaarke Document Management for Word"
@@ -84,7 +84,7 @@
               "type": "executeFunction"
             },
             {
-              "id": "shareDocument",
+              "id": "openSpaarke",
               "type": "executeFunction"
             }
           ]
@@ -164,9 +164,9 @@
                       "actionId": "quickSave"
                     },
                     {
-                      "id": "ShareButton",
+                      "id": "OpenSpaarkeButton",
                       "type": "button",
-                      "label": "Share",
+                      "label": "Open Spaarke",
                       "icons": [
                         {
                           "size": 16,
@@ -182,10 +182,10 @@
                         }
                       ],
                       "supertip": {
-                        "title": "Share via Spaarke",
-                        "description": "Create a Spaarke share link for this document and copy it to the clipboard"
+                        "title": "Open Spaarke",
+                        "description": "Open Spaarke in your browser, on the Workspace"
                       },
-                      "actionId": "shareDocument"
+                      "actionId": "openSpaarke"
                     }
                   ]
                 }

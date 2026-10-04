@@ -32,6 +32,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { cleanGuid } from "@spaarke/ui-components";
+
 /**
  * Narrow structural type covering only the `Xrm.WebApi.retrieveRecord` shape
  * used by the resolver. Lets callers pass either the full Xrm handle or a
@@ -104,7 +106,7 @@ export async function resolveSearchIndexNameForRecord(
         }
         const buRef = record["_owningbusinessunit_value"];
         if (typeof buRef === "string" && buRef.length > 0) {
-            parentOwningBuId = buRef.replace(/[{}]/g, "");
+            parentOwningBuId = cleanGuid(buRef);
         }
     } catch {
         // Parent record read failed (or field unavailable on this entity) —

@@ -53,6 +53,7 @@ import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -671,7 +672,7 @@ async function resolveCurrentUserEmail(dataService: IDataService): Promise<strin
         const xrm = (frame as any).Xrm;
         if (xrm?.Utility?.getGlobalContext) {
           const ctx = xrm.Utility.getGlobalContext();
-          userId = ctx.userSettings?.userId?.replace(/[{}]/g, '').toLowerCase() ?? '';
+          userId = cleanGuid(ctx.userSettings?.userId);
           if (userId) break;
         }
       } catch {

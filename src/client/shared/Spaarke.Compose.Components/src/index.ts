@@ -141,7 +141,7 @@ export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 // -------------------------------------------------------------------------
 export { ComposeCommentThread } from './widgets/ComposeCommentThread';
 export type { ComposeCommentThreadProps, ComposeCommentPendingRange } from './widgets/ComposeCommentThread';
-export { composeCommentThreadsToDocxAnnotations, findCommentAnchorRange } from './widgets/ComposeCommentThread.types';
+export { findCommentAnchorRange } from './widgets/ComposeCommentThread.types';
 export type {
   ComposeCommentAuthorStamp,
   ComposeCommentReply,
@@ -205,7 +205,6 @@ export {
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
-  anchoredAnnotationsToDocxAnnotations,
   DocxTrackChangeKind,
 } from './widgets/useComposeWordShuttle';
 export type {

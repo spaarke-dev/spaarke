@@ -17,6 +17,8 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { cleanGuid } from '@spaarke/ui-components';
+
 declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -64,7 +66,7 @@ export function getUserId(): string {
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';
-    return raw.replace(/[{}]/g, '');
+    return cleanGuid(raw);
   }
   console.warn('[CommunicationConversationPage] Unable to resolve userId from Xrm');
   return '';

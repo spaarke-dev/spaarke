@@ -47,7 +47,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { getDefaultWorkspaceRenderer, type WorkspaceRenderer } from '@spaarke/ui-components';
+import { getDefaultWorkspaceRenderer, cleanGuid, type WorkspaceRenderer } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -216,10 +216,10 @@ function getUserIdSafe(): string {
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';
-    return String(raw).replace(/[{}]/g, '');
+    return cleanGuid(String(raw));
   }
   if (xrm?.userSettings?.userId) {
-    return String(xrm.userSettings.userId).replace(/[{}]/g, '');
+    return cleanGuid(String(xrm.userSettings.userId));
   }
   return '';
 }

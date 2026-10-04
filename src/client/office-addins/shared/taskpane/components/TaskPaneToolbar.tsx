@@ -59,6 +59,14 @@ const useStyles = makeStyles({
     flexGrow: 1,
     minWidth: 0,
   },
+  // Task 091 (UAT-4): visible spacing between Save / To Do / Find — the owner's round-3 UAT found them
+  // crowded together. `TabList` is itself a flex row (confirmed by `TaskPaneNavigation.tsx`'s own
+  // `className` override of its `justifyContent`), so an additional `gap` here is additive, not a
+  // replacement of its internal layout. A modest gap (not `spacingHorizontalL`+) so three tabs plus the
+  // overflow menu still fit the pane's documented 320px minimum width without wrapping or clipping.
+  tabListGap: {
+    gap: tokens.spacingHorizontalM,
+  },
   overflow: {
     flexShrink: 0,
   },
@@ -129,6 +137,7 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
       {showTabs && isAuthenticated && tabs.length > 0 && (
         <div className={styles.tabs}>
           <TabList
+            className={styles.tabListGap}
             selectedValue={selectedTab}
             onTabSelect={(_, data) => {
               const tab = data.value as NavigationTab;

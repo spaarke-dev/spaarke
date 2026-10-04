@@ -138,6 +138,9 @@ export * from './ThreePaneLayout';
 // PaneHeader - Canonical pane-header primitive (icon + title + rightSlot) for SpaarkeAi three-pane shell (FR-01, task 010)
 export * from './PaneHeader';
 
+// PaneHeaderToolsMenu - Shared pane-header "⋮ tools" trigger + dropdown (C-12, spaarke-ontology-platform-r1 reuse audit D5)
+export * from './PaneHeaderToolsMenu';
+
 // TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
 export * from './TagFilter';
 

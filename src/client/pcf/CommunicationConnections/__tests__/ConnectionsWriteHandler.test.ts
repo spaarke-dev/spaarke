@@ -24,6 +24,11 @@ jest.mock('@spaarke/ui-components', () => {
     __esModule: true,
     TODO_REGARDING_CATALOG: CATALOG,
     applyResolverFields: jest.fn().mockResolvedValue({ recordNumber: 'MTR-2025-0001', displayName: 'Acme v. Beta' }),
+    // Real implementation (task 089 / ADR-044): the mock must match it, not just the
+    // signature — `ConnectionsWriteHandler.ts` calls `cleanGuid(...).length === 36` to
+    // validate the host record id, so a stub that doesn't lowercase/brace-strip would
+    // pass tests a real mismatch would catch.
+    cleanGuid: (id: string | null | undefined) => (id ?? '').replace(/[{}]/g, '').trim().toLowerCase(),
   };
 });
 

@@ -22,10 +22,14 @@ export type {
 // IEventRecord — RETIRED in task 033b (2026-06-03) with the GridSection
 // directory deletion. The DataGrid framework uses `Record<string, unknown>`
 // for record rows; consumers that need typed event fields define them inline.
-
-export type { SavedView } from '../components/ViewSelectorDropdown/ViewSelectorDropdown';
-
-export type { FetchXmlResult, ViewDefinition, LayoutColumn } from '../services/FetchXmlService';
+//
+// SavedView (from ViewSelectorDropdown) and FetchXmlResult/ViewDefinition/
+// LayoutColumn (from the Events-local FetchXmlService) — DELETED (task 087,
+// C-24/C-25, 2026-10-03) along with their owning modules. Zero consumers
+// outside this package's own barrels. See
+// projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md
+// §8.8 X20/X21. Note: this is NOT `Spaarke.UI.Components/src/services/FetchXmlService.ts`,
+// the different, live service cited by ADR-012.
 
 export type {
   EventsPageFilters,

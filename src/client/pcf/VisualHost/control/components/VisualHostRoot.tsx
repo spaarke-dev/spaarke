@@ -38,7 +38,7 @@ import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
 import { CardChrome } from './CardChrome';
-import type { MatrixJustification } from '../../../../shared/Spaarke.Visuals/src/components/MetricCardMatrix';
+import type { MatrixJustification } from '@spaarke/visuals';
 import { logger } from '../utils/logger';
 import {
   loadChartDefinition as loadChartDefinitionFromDataverse,
@@ -316,7 +316,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     }
     try {
       const entityName = chartDefinition.sprk_entitylogicalname;
-      const recordId = contextRecordId.replace(/[{}]/g, '');
+      const recordId = cleanGuid(contextRecordId);
       const record = await context.webAPI.retrieveRecord(entityName, recordId, `?$select=${aiSummaryField}`);
       const summaryText = record[aiSummaryField] as string | null;
       return { summary: summaryText || null, tldr: null };
@@ -625,7 +625,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     let filterValue: string | null = null;
     if (ctxField && contextRecordId) {
       filterField = ctxField.replace(/^_/, '').replace(/_value$/, '');
-      filterValue = contextRecordId.replace(/[{}]/g, '');
+      filterValue = cleanGuid(contextRecordId);
       logger.info('VisualHostRoot', 'Context filter for drill-through', {
         filterField,
         filterValue,
@@ -658,13 +658,13 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           if (entityName) params.set('entityName', entityName);
           if (filterField) params.set('filterField', filterField);
           if (filterValue) params.set('filterValue', filterValue);
-          if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          if (viewId) params.set('viewId', cleanGuid(viewId));
           // Drill-through view allowlist (operator-configured on the chart def,
           // delimited by `;` or `,`). Forwarded so the DataGrid page shell can
           // restrict its view-switcher without editing the grid config record.
           const allowedViews = (chartDefinition.sprk_drillthroughviews ?? '')
             .split(/[;,]/)
-            .map(g => g.trim().replace(/[{}]/g, ''))
+            .map(g => cleanGuid(g))
             .filter(g => g.length > 0);
           if (allowedViews.length > 0) params.set('availableViews', allowedViews.join(';'));
           params.set('mode', 'dialog');
@@ -703,7 +703,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
             pageType: 'entitylist',
             entityName: drillThroughTarget,
           };
-          if (viewId) pageInput.viewId = viewId.replace(/[{}]/g, '');
+          if (viewId) pageInput.viewId = cleanGuid(viewId);
 
           try {
             await xrm.Navigation.navigateTo(pageInput, {

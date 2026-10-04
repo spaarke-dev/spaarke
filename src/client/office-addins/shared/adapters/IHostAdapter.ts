@@ -194,6 +194,28 @@ export interface IHostAdapter {
   readDocumentStamp(): Promise<string | null>;
 
   /**
+   * Write the identity stamp into the document OPEN in the host, so the next save of the same document — from the
+   * pane or the ribbon, in this session or after the file is reopened — resolves it instead of colliding with its
+   * own record (spaarkeai-word-add-in-r1 task 089, UAT-9). The server stamps only the STORED copy (task 014).
+   *
+   * Only supported when {@link HostCapabilities.canWriteDocumentStamp} is `true`. Callers MUST check it first.
+   *
+   * Leaves the document with exactly ONE stamp part, carrying `documentId`:
+   * - a part already carrying `documentId` → nothing is written at all (no add, no delete) → `'unchanged'`;
+   * - otherwise every other part in the stamp namespace is deleted and, if none carried `documentId`, one is
+   *   added → `'written'`.
+   *
+   * Writing marks the document changed, so Word asks to save the local copy on close (accepted by the owner,
+   * 2026-10-03). A document opened from Spaarke already carries the server's stamp with the same id → no write.
+   *
+   * @param documentId The saved `sprk_document` id, canonical bare lowercase (ADR-044).
+   * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` when the host cannot write the stamp; `UNKNOWN_ERROR`
+   * when `documentId` is not a canonical GUID or the host refuses the write. Callers treat every throw as
+   * non-fatal: the save itself has already succeeded.
+   */
+  writeDocumentStamp(documentId: string): Promise<'written' | 'unchanged'>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling
