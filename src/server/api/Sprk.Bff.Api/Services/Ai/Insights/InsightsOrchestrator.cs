@@ -425,8 +425,8 @@ public sealed class InsightsOrchestrator : IInsightsAi
         // like resolveLiveFacts have configJson `"subject": "matter:{{matterId}}"` — without
         // this enrichment the literal "{{matterId}}" was passed to LiveFactResolver, which
         // rejected the request as InvalidConfiguration. Wave B5 SC-01 unblock.
-        IReadOnlyDictionary<string, string>? enrichedParameters = EnrichParametersFromSubject(
-            request.Parameters, request.Subject);
+        IReadOnlyDictionary<string, string>? enrichedParameters = BindServerOwnedParameters(
+            EnrichParametersFromSubject(request.Parameters, request.Subject), request.TenantId);
 
         var cacheRequest = new InsightsPlaybookExecutionRequest(
             PlaybookId: request.Question,
@@ -1099,6 +1099,32 @@ public sealed class InsightsOrchestrator : IInsightsAi
             model: null,            // use configured SummarizeModel
             maxOutputTokens: 400,
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Binds the SERVER-OWNED <c>tenantId</c> playbook parameter from the request's tenant — the route's token tenant
+    /// (unified-access-control-r2 task 163). The shared playbook-parameter policy (task 164, owner round 16 item 3)
+    /// refuses <c>tenantId</c> from an HTTP caller because "the server or the scheduler binds it"; this is that binding
+    /// for the Insights runs, which declare it required (<c>matter-health-single</c>'s AgentService thread key and the
+    /// <c>tenantId</c> of the envelope it persists; <c>predict-matter-cost</c>'s synthesis). Any value already present is
+    /// overwritten: a run's tenant is never a caller's choice. Returns a NEW dictionary.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BindServerOwnedParameters(
+        IReadOnlyDictionary<string, string>? parameters, string tenantId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        var bound = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (parameters is not null)
+        {
+            foreach (var (key, value) in parameters)
+            {
+                bound[key] = value;
+            }
+        }
+
+        bound["tenantId"] = tenantId;
+        return bound;
     }
 
     /// <summary>

@@ -347,7 +347,26 @@ public class InsightsOrchestratorTests
         captured.Parameters!.Should().Contain("k1", "v1");
         captured.Parameters.Should().Contain("k2", "v2");
         captured.Parameters.Should().Contain("matterId", "M-9999");
+        captured.Parameters.Should().Contain("tenantId", TenantId,
+            "task 163: tenantId is server-owned (the shared parameter policy refuses it from a caller) and is bound here");
         captured.Ttl.Should().BeNull("orchestrator defers to cache DefaultTtl");
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_TheRunsTenantId_IsTheRequestsTenant_NeverAParameterValue()
+    {
+        PlaybookRunRequest? run = null;
+        ArrangeCacheMissThatDrainsTheEngine();
+        _playbookOrchestrationMock.Setup(o => o.ExecuteAsync(
+                It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((r, _, _) => run = r)
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((_, _, ct) => SyntheticEngineStreamAsync(ct));
+
+        await CreateSut().AnswerQuestionAsync(MakeAgentRequest(new Dictionary<string, string> { ["TENANTID"] = "someone-elses-tenant" }));
+
+        run.Should().NotBeNull();
+        run!.Parameters.Should().ContainKey("tenantId").WhoseValue.Should().Be(TenantId);
+        run.Parameters!.Values.Should().NotContain("someone-elses-tenant");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
