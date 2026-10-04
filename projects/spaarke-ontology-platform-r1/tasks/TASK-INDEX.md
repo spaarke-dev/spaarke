@@ -107,7 +107,7 @@
 | ✅ 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | [PR #1116](https://github.com/spaarke-dev/spaarke/pull/1116). Web resource: needs a deploy after merge |
 | ✅ 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1121](https://github.com/spaarke-dev/spaarke/pull/1121). All ~40 deferred sites converged; case-semantics audit in PR body. #1118 and #1121 must merge before 081 |
 | ✅ 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1122](https://github.com/spaarke-dev/spaarke/pull/1122). 4 colour violations fixed; 3 cards documented as different; SECTION_REGISTRY kept with consumer cited |
-| 🔲 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | Found by 089: 6 PCFs fail `build:prod` on master; 11 failing suites in 3 shared packages, plus 6 in UI.Components (from 091). Reproduce first |
+| ✅ 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | [PR #1123](https://github.com/spaarke-dev/spaarke/pull/1123). 6 PCF builds fixed (broken since the 2026-08-14 CVE bump); 17 failing suites fixed or evidenced; **one user-visible fix** (FR-02 section height) |
 
 ### Phase 9 — Wrap-up
 

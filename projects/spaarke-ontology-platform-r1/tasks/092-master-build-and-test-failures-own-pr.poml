@@ -4,7 +4,7 @@
     <title>Master build and test failures surfaced by task 089, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Root-cause work on a broken production build path (PCF build:prod) across several packages; modifies .ts/.tsx/build config.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,6 +89,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-04 from task 089's report under the owner's fix-now rule. Dispatched after task 021's full BFF suite reports, so the two do not contend for CPU.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1123 (fix/master-build-test-baseline), head 1e60a90ca, 26 files, no lockfile changes, open and ready for review. Code-review + adr-check: no Critical or Warning. (1) Six Communication PCFs fail build:prod since CVE bump 66a45cf6 (2026-08-14, pdfjs-dist upgrade): the SprkChat barrel export pulls pdfjs-dist/mammoth dynamic imports into single-chunk PCF bundles and pcf-scripts babel crashes on pdfjs. Fixed with webpack aliases to throwing stubs (src/client/pcf/shared/stubs/); reachability traced: no PCF imports SprkChat. Deployed versions likely predate the break. (2) ONE user-visible fix: buildDynamicWorkspaceConfig.ts restores the FR-02 clamped-section ceiling broken by 803c77ace1 (2026-07-03), shown unintentional via dataset-grid-framework-r2 lessons-learned. (3) Tests: UI.Components 6 suites, Communication.Components 2, DailyBriefing.Components 5, AI.Widgets OOM (one file re-requiring the whole ui-components source barrel per test; fixed with a narrow jest.doMock at the default heap, no memory/maxWorkers change) plus the masked communications-list exact-once bug (supersedes task 054's planned fix). Hand-written mocks guarded with satisfies Partial&lt;typeof import(...)&gt;. ReconciliationWorkspace: one assertion's timeout 1000-&gt;4000 ms, justified by a same-commit render trace (87-97% -&gt; 20/20 under load). Left alone with evidence: emailInFlow (byte-identical, load-sensitive), AccessGrantModal.userShare (17/17 alone), todoScoreMappings (fixed by #1118), 2 describe.skip smoke tests (other workstream's DEF). CI finding: no workflow runs PCF build:prod; client-tests.yml is a deliberate nightly advisory Phase 1 baseline (continue-on-error by design, promotion after a green baseline).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

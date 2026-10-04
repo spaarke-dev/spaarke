@@ -34,7 +34,7 @@
     <constraint source="project">Scope: the aggregate Work Item is a COMPUTED COUNT rendered in the worklist, NOT a Signal. Making it a Signal would make the association engine a policy producer, which it is not.</constraint>
     <constraint source="project">Scope: exactly ONE aggregate item. Decision 9: one needs-attention surface, not four queues. Four places to look means nobody looks.</constraint>
     <constraint source="project">Scope: reconciliation is NOT a worklist lane. Bulk triage is a different interaction from a gated single decision, and its volume would bury the Decide lane.</constraint>
-    <constraint source="project">Scope: fix the test that is already RED on master: register-workspace-widgets.test.ts, "registers communications-list exactly ONCE", fails since commit 0e5d0fafd because communications-reconciliation is also registered. Decide from the code whether the assertion is too broad (counts the reconciliation id) or the registration is genuinely duplicated, and fix the right one. Found by task 086 on 2026-10-03; it is hidden in full runs because that suite runs out of memory.</constraint>
+    <constraint source="project">SUPERSEDED 2026-10-04: the red register-workspace-widgets.test.ts ("registers communications-list exactly ONCE", red since 0e5d0fafd) is fixed in PR #1123 (task 092), together with the OOM that had masked it. Do NOT re-fix it here. If #1123 has not merged when this task runs, merge master after it does, then confirm the file passes; if it is still red, that is a regression to report, not a fix to redo.</constraint>
   </constraints>
 
   <knowledge>
