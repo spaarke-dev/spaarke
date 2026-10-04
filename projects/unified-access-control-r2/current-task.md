@@ -1,5 +1,59 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-04 ~14:45 EDT (context-handoff, **checkpoint #10, before a MACHINE RESTART**). This block SUPERSEDES #9/#8/#7 for "what is running" (nothing is). Read it first.
+>
+> ## ⚡ CHECKPOINT #10 — everything was STOPPED cleanly for a restart
+> - **Stopped:** both workflows (`wf_64880481-ea0` batch 4d, `wf_2d0a851a-5d5` follow-up 1), the agents `lane150integ` and `fix158`, the watchers.
+> - **Nothing is running.** In-flight work is saved on `wip/<branch>-restart` branches. They are unverified: each continues from there.
+> - **Verifier findings** for every lane are in the journals: `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl` (label `verify:<id>` / `reverify<k>:<id>`; fields `findings`, `criteriaNotActuallyMet`, `ownerQuestionsOpen`). 158's are also in `scratchpad/v158.json`.
+>
+> **Binding decisions since #9** (work-branch note `notes/session27-owner-decisions-and-research.md`):
+> - Rounds 26 and 28–31 and 33–34 are main-session decisions; rounds 27 and 32 are the OWNER's.
+> - **26:** 150's reason code kept; 150's remaining items done on the integration branch; Make Secure relocates existing files through ONE BFF `DocumentContainerRelocator`, shared with 166's migration.
+> - **27 (owner):** the Make Secure confirmation copy.
+> - **28 (147):** E1 = A1/G5 creates through the BFF; E2 = native in-product creates under a secure parent replaced by BFF commands, plus L4 every 2 min with writes on; 169 rebases onto 147; 152 reads `RecordCreatorPerson`.
+> - **29:** copy for 143's five codes.
+> - **30 (158 Q1):** provenance in 142's ledger, plus `sprk_subjectteam`.
+> - **31 (158):** the creator honours the parent's No Access list too; records are created INTO isolation.
+> - **32 (owner, 158 Q2):** path B, secure inline (A-UAC146 extended).
+> - **33:** Make Secure on the Write gate via an explicit transition; Remove Secure copy; unknown skip code never silent.
+> - **34:** document delete cascades to analyses and outputs; 162's promote fault body ratified; contact-issued rows are taken over by any internal change; 167 ledger retirement and admin-only rules; CreateEventWizard's event bind goes via 147; `/healthz/catalog` memoized for 30 s.
+>
+> **Integration branch `integ/uac-r2-batch4`** (`C:\wt4i`, tip `3aa4ebce6`, pushed). Since #9:
+> - `f54b5b29b` merges 150 (ONE F3 check; the resolver and synchronizer read an empty flag as flagged).
+> - `3aa4ebce6` merges 149-f1 (superseded by 148's Step 8; its tests kept).
+>
+> **Per-lane resume plan** (each: fix → adversarial verify → up to 2 fix rounds; Opus; verifiers at high):
+>
+> | Lane | State at stop | Resume from | Inputs to the fixer |
+> |---|---|---|---|
+> | 147 | fix1 mid-round | `wip/uac-r2-147-r1-restart` | `verify:147` findings (4d journal); round 28 IN FULL; round 34 item 6 |
+> | 158 | fix mid-round (Agent) | `wip/uac-r2-158-r1-restart` | `scratchpad/v158.json`; rounds 30, 31, 32 (mark Q2 ACCEPTED); may need to merge 142-r6 for the ledger |
+> | 150-integ | round 33 follow-up mid-way (A–E done in `d6e768c51` + `2a5f618f7`) | `wip/uac-r2-150-integ-restart` | round 33 items 1, 2, 5; then verify; then merge into integ |
+> | 132-f1 | verify needs-fixes; fix1 mid | `wip/uac-r2-132-f1-v1-restart` | `verify:132` findings (follow-up journal) |
+> | 140 | verify needs-fixes; fix1 mid | `wip/uac-r2-140-x1-v1-restart` | `verify:140` findings; round 34 item 3 |
+> | 165 | verify needs-fixes; fix NOT started | `task/uac-r2-165-f1` | `verify:165` findings |
+> | 167 | verify needs-fixes; fix NOT started | `task/uac-r2-167-f1` | `verify:167` findings; round 34 items 4, 5, 7 (`scratchpad/note167.md`) |
+> | 166 | verify was RUNNING (killed) | `task/uac-r2-166-f1` | re-run the verify (round 21 item 1 (i)–(iii), round 25 item 6, round 26 item 3: it may have built `DocumentContainerRelocator`) |
+> | 168 | verify was RUNNING (killed) | `task/uac-r2-168-f1` | re-run the verify |
+> | 162, 163 | READY to merge (sweep integration) | `task/uac-r2-162-f1`, `task/uac-r2-163-f1` | 162 + round 34 item 1 (cascade schema script) at the sweep integration |
+> | Old 150 worktree | stale uncommitted edits | `wip/uac-r2-150-c1-restart` | superseded by 150-c1-r2-r2 (merged) — reference only, do not merge |
+>
+> **Integration checklist** (`notes/batch4-integration-steps.md`), still owed:
+> - 148 × 132 child evictions, after 132-f1.
+> - Make Secure's file relocation: the 150-integ caller of 166's relocator.
+> - 158's Remove Secure related-records checkboxes plus its two codes.
+> - Merge 140; external-SPA lint after 140.
+> - Convert 166/168 scripts to the membership helper at their merges.
+> - Publish size vs a fresh master, CVE, full suites, PR.
+> - Live steps: the child-table creator `-Apply`, the 142 ledger `-Apply`, G-140-1, the 150 FLS lock, G-11 ribbon; then deploy and the live gates.
+>
+> **After the restart:**
+> 1. `cd /c/code_files/spaarke` (UPPERCASE `C:`) before any workflow or agent spawn.
+> 2. `git -C C:/wt4i status` should be clean.
+> 3. Relaunch the lanes above. A continuation workflow script with these inputs is preferred; Opus pinned; at most 4 at once.
+> 4. Re-arm `journal_watch.py` with the new run ids.
+
 > **Last Updated**: 2026-10-04 ~14:30Z (checkpoint #9). Read #8 and #7 below (still accurate); this block adds deltas.
 >
 > ## ⚡ CHECKPOINT #9 — deltas since #8
