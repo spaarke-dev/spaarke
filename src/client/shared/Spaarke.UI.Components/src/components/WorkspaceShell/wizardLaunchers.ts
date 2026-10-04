@@ -52,6 +52,7 @@
 // ---------------------------------------------------------------------------
 
 import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
@@ -517,7 +518,7 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (isOpenExisting) {
     // Strip braces per the pre-031 SmartTodoApp.tsx convention — registry
     // format `{...}` GUIDs are accepted by callers, `entityId` wants bare.
-    pageInput.entityId = (params.entityId as string).replace(/[{}]/g, '');
+    pageInput.entityId = cleanGuid(params.entityId as string);
   }
   // OOB pre-seed: `data` on an entityrecord pageInput is a FLAT
   // attribute-name → default-value dictionary (same rules as `openForm`'s
@@ -541,7 +542,7 @@ export async function navigateToEntityRecordSurfaceAsync(
   ) {
     pageInput.createFromEntity = {
       entityType: params.createFromEntity.entityType,
-      id: params.createFromEntity.id.replace(/[{}]/g, ''),
+      id: cleanGuid(params.createFromEntity.id),
       name: params.createFromEntity.name ?? '',
     };
   }
@@ -583,6 +584,11 @@ export async function navigateToEntityRecordSurfaceAsync(
     if (ref?.id) {
       return {
         launched: true,
+        // C-7 escalation (spaarke-ontology-platform-r1 reuse audit): deliberately
+        // brace-strip ONLY, not the canonical `cleanGuid` — `launchSurface.test.ts`
+        // pins case preservation here (`{TODO-42}` → `TODO-42`), because this id
+        // comes from `Xrm.Navigation.navigateTo`'s `savedEntityReference` and is
+        // not guaranteed to be a canonical lowercase Dataverse GUID in every path.
         savedEntityReference: { id: String(ref.id).replace(/[{}]/g, ''), entityType: ref.entityType, name: ref.name },
       };
     }

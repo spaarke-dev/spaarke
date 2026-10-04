@@ -42,7 +42,7 @@ import {
   mergeClasses,
 } from '@fluentui/react-components';
 import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
-import { getXrmForPicker, SprkModal } from '@spaarke/ui-components';
+import { getXrmForPicker, SprkModal, cleanGuid } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
@@ -56,7 +56,7 @@ import { DEFAULT_LINK_CATALOG } from './EmailConnectionsReview.helpers';
 import { CandidateCard, BlankCard } from './EmailConnectionsReviewRows';
 
 const candidateKey = (c: Pick<PrimaryCandidate, 'entity' | 'targetId'>): string =>
-  `${c.entity}:${c.targetId.replace(/[{}]/g, '').toLowerCase()}`;
+  `${c.entity}:${cleanGuid(c.targetId)}`;
 
 export function EmailConnectionsReview(props: EmailConnectionsReviewProps): React.ReactElement {
   const {
@@ -256,7 +256,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       // card + select it — the reviewer clicks Confirm to file it (no auto-write here).
       const cand: PrimaryCandidate = {
         entity: entityType,
-        targetId: picked.id.replace(/[{}]/g, '').toLowerCase(),
+        targetId: cleanGuid(picked.id),
         targetName: picked.name,
         confidence: 1,
       };

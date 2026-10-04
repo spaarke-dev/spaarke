@@ -12,6 +12,7 @@
 
 import type { IDataverseClient, ITokenProvider, ILogger, DataverseRecordRef } from './types';
 import { consoleLogger } from './types';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Configuration for ODataDataverseClient.
@@ -113,7 +114,7 @@ export class ODataDataverseClient implements IDataverseClient {
    */
   async updateRecord(entityLogicalName: string, id: string, data: Record<string, unknown>): Promise<void> {
     const entitySetName = this.getEntitySetName(entityLogicalName);
-    const sanitizedId = id.replace(/[{}]/g, '').toLowerCase();
+    const sanitizedId = cleanGuid(id);
     const url = `${this.baseApiUrl}/${entitySetName}(${sanitizedId})`;
 
     this.logger.info('ODataDataverseClient', `Updating ${entityLogicalName} record: ${sanitizedId}`, { url });

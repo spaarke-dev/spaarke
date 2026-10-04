@@ -41,13 +41,30 @@
  * `sendEmailService.ts`'s Word Send Email choice so the two compose URLs open through the SAME
  * mechanism as an opened record, not a second one.
  *
+ * **Task 088 (UAT-1, `notes/042-uat-round3-2026-10-03.md` §3a)**: a link that names no app opens in the
+ * user's DEFAULT model-driven app, which may not be Spaarke's. Every record link therefore names the Spaarke
+ * user app by its UNIQUE name (`appname=`) — stable across environments, unlike the app GUID — taken from the
+ * `SPAARKE_APP_NAME` build setting ({@link configuredSpaarkeAppName}; injected by `webpack.config.js` exactly
+ * like `ORG_URL`, default `sprk_MatterManagement`). Empty → the link is built WITHOUT `appname` (the
+ * behaviour before task 088), never with a guessed value.
+ *
  * @see projects/spaarkeai-word-add-in-r1/spec.md FR-10
  * @see projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md
  * @see projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md
  * @see projects/spaarkeai-word-add-in-r1/notes/086-word-send-email-and-focused-open.md
+ * @see projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md
  */
 
 import { cleanGuid } from '../utils/cleanGuid';
+
+/**
+ * The Spaarke model-driven app's unique name, from the `SPAARKE_APP_NAME` build setting (task 088). An unset
+ * or blank setting yields `''`, which {@link buildOpenRecordUrl} treats as "name no app". The default
+ * (`sprk_MatterManagement`) lives in the build setting, not here — this function never invents one.
+ */
+export function configuredSpaarkeAppName(): string {
+  return (process.env.SPAARKE_APP_NAME ?? '').trim();
+}
 
 /** Inputs for opening an existing Dataverse record from the pane. */
 export interface OpenRecordInput {
@@ -62,6 +79,12 @@ export interface OpenRecordInput {
   entityType: string;
   /** Record id in any form (braced, mixed-case) — canonicalized via `cleanGuid` before use. */
   recordId: string;
+  /**
+   * Task 088: the model-driven app to open the record in (its unique name). Omitted → the
+   * `SPAARKE_APP_NAME` build setting ({@link configuredSpaarkeAppName}), so every caller names the Spaarke
+   * app without having to thread it. `''` → no `appname` (the user's default app).
+   */
+  appName?: string;
 }
 
 /**
@@ -86,9 +109,52 @@ export interface OpenRecordResult {
  * the Quick Create URL in `App.tsx` (`onQuickCreate`), which sets BOTH `navbar=off` AND `cmdbar=false`
  * for its small popup create form — that URL is a separate, pre-existing builder and is out of this
  * task's scope.
+ *
+ * `appname=` (task 088): names the model-driven app the record opens in, by its unique name, URL-encoded.
+ * A blank `appName` builds the link WITHOUT `appname` — the record then opens in the user's default app,
+ * exactly as before task 088. Callers pass {@link configuredSpaarkeAppName} (or let {@link openRecord}
+ * default to it).
  */
-export function buildOpenRecordUrl(orgUrl: string, entityType: string, canonicalRecordId: string): string {
-  return `${orgUrl}/main.aspx?etn=${entityType}&id=${canonicalRecordId}&pagetype=entityrecord&navbar=off`;
+export function buildOpenRecordUrl(
+  orgUrl: string,
+  entityType: string,
+  canonicalRecordId: string,
+  appName = ''
+): string {
+  const app = appName.trim();
+  const appParam = app ? `appname=${encodeURIComponent(app)}&` : '';
+  return `${orgUrl}/main.aspx?${appParam}etn=${entityType}&id=${canonicalRecordId}&pagetype=entityrecord&navbar=off`;
+}
+
+/** The Console's web resource — Matter Management's "Work → Workspace" page (`notes/042-uat-round3-2026-10-03.md` §3a). */
+export const SPAARKE_CONSOLE_WEB_RESOURCE = 'sprk_spaarkeai';
+
+/**
+ * Task 089 (UAT-10): the URL the Word ribbon's "Open Spaarke" opens — the Spaarke app at its Workspace (the
+ * Console): `{orgUrl}/main.aspx?appname={appName}&pagetype=webresource&webresourceName=sprk_spaarkeai`.
+ *
+ * Built from the build settings only (`ORG_URL`, `SPAARKE_APP_NAME` — the same reader every record link uses,
+ * {@link configuredSpaarkeAppName}); every query value is URL-encoded; no token, secret or BFF URL is ever part
+ * of it. `null` when either setting is blank or `orgUrl` is not an absolute https URL — the command then says it
+ * is not set up rather than opening a guessed or broken link (the pane's own ORG_URL rule, and §3a: "never a guess").
+ */
+export function buildOpenSpaarkeUrl(orgUrl: string | undefined, appName: string): string | null {
+  const org = (orgUrl ?? '').trim().replace(/\/+$/, '');
+  const app = appName.trim();
+  if (!org || !app) {
+    return null;
+  }
+  try {
+    if (new URL(org).protocol !== 'https:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return (
+    `${org}/main.aspx?appname=${encodeURIComponent(app)}` +
+    `&pagetype=webresource&webresourceName=${encodeURIComponent(SPAARKE_CONSOLE_WEB_RESOURCE)}`
+  );
 }
 
 /**
@@ -109,6 +175,44 @@ function defaultOpener(url: string): void {
  */
 export function openUrlInBrowserWindow(url: string, opener: (url: string) => void = defaultOpener): void {
   opener(url);
+}
+
+/**
+ * Task 088 (UAT-5): opens an https file URL — the colliding document's `webUrl` from
+ * `GET /api/documents/{id}/open-links` — by whichever of the two supported mechanisms the host has
+ * (NFR-10: decided by capability, never `hostType`):
+ *
+ * - `canOpenBrowserWindow` → `Office.context.ui.openBrowserWindow` (desktop Word/Outlook), the same opener
+ *   {@link openRecord} uses;
+ * - otherwise → `window.open(url, '_blank')` (Office on the web, where `OpenBrowserWindowApi` is not
+ *   supported). A `null` return means the browser blocked the window; that is reported, never swallowed.
+ *
+ * Only https: `openBrowserWindow` is documented to accept http/https only (Microsoft Learn, Office.UI;
+ * OfficeDev/office-js#2820 closed "by design" for Office URI schemes), which is why the open-links
+ * `desktopUrl` (`ms-word:…`) is not launched from the pane — see `notes/088-save-tab-after-save.md` §3.
+ */
+export function openFileUrl(
+  url: string,
+  canOpenBrowserWindow: boolean,
+  openers: {
+    browserWindow?: (url: string) => void;
+    windowOpen?: (url: string, target: string) => Window | null;
+  } = {}
+): OpenRecordResult {
+  if (canOpenBrowserWindow) {
+    (openers.browserWindow ?? defaultOpener)(url);
+    return { opened: true };
+  }
+
+  const opened = (openers.windowOpen ?? ((u: string, t: string) => window.open(u, t)))(url, '_blank');
+  if (!opened) {
+    const reason = 'Your browser blocked the new window. Allow pop-ups for this add-in and try again.';
+    console.warn(`[Spaarke] Open file: ${reason}`);
+    return { opened: false, reason };
+  }
+  // The opened page must not be able to script this pane (the noopener feature would hide the null check above).
+  opened.opener = null;
+  return { opened: true };
 }
 
 /**
@@ -136,7 +240,7 @@ export function openRecord(input: OpenRecordInput, opener: (url: string) => void
     return { opened: false, reason };
   }
 
-  const url = buildOpenRecordUrl(input.orgUrl, input.entityType, id);
+  const url = buildOpenRecordUrl(input.orgUrl, input.entityType, id, input.appName ?? configuredSpaarkeAppName());
   opener(url);
   return { opened: true };
 }

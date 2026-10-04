@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-03 (by context-handoff, before /compact). 076 ✅ · 086 ✅ · 087 ✅ — all pushed (`773cc57a9`); PR #1110 open, CI running
+> **Last Updated**: 2026-10-04. Phase 6 (088/089/091/092/093) ALL ✅, committed `df75f2d33`; PR **#1124** open, CI running
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,17 +18,16 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### ▶️ NEXT: merge PR #1110 when CI is green
+### ▶️ NEXT: merge PR #1124, then deploy (owner go) and UAT round 4
 
 | Field | Value |
 |---|---|
-| **Task** | none in progress — 076, 086, 087 all ✅ (88 tasks: 85 closed; 042 🔄 owner UAT; 083 🔲 blocked on UAC-r2 141; 090 🔲 wrap-up after 042) |
-| **PR** | **#1110 OPEN** — https://github.com/spaarke-dev/spaarke/pull/1110 — title/body updated for 087. Carries everything since `5e39f2bea`: 060/068 records, 079, 080 backfill records, 086, 076, **087 (root CLAUDE.md + ADR-002 + plugins.md + CHANGELOG)**, master merge `141ad4c4b`. CI restarted on the `773cc57a9` push (2026-10-03) |
-| **Next Action** | `gh pr checks 1110` → wait until `grep -c pending` = 0. Merge only when **`Router` AND `Build & Test (Debug)`** pass: `gh pr merge 1110 --merge` (**NEVER `--delete-branch`**). Tier 2 "Full Unit Tests" cancelled at its 30-min cap is advisory, not a failure. Known pre-existing flake: `PinnedMemoryEndpointsContractTests.*Pin*EmitsCounter` (metrics tag cross-talk; passes alone). After merge: fast-forward the main checkout (`C:\code_files\spaarke`, `git pull origin master`) and this worktree; record the merge SHA here; portfolio #945 stays 88/85 |
-| **Then** | Nothing executable without the owner: **042** UAT (live Word/Outlook — list in `notes/defer-issues.md` register) → **090** wrap-up with `/test-diet` (binding gate). **083** waits on UAC-r2 141's contract |
-| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` (then `-Verify`) in each environment AFTER its SpaarkeCore import (deployment guide §7.4); where tables are managed the script only seeds + backfills. (b) **078 add-in**: owner sees THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML = "…Spaarke DMS", unified = "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in `notes/078-manifest-decision.md` once the owner confirms which zips were uploaded |
-| **Live checks pending the next deploy from master** | 086 AC8 (both Word Send Email choices; `main.aspx`+`data=` URL has no shipped precedent; Word-web popup-blocker risk after a slow share-link mint) · 076's BFF retry/warning (platform half verified live) |
-| **Drift checker** | `scripts/check-task-status-drift.ps1` on master is red for a PARSER reason (cannot read this index layout; fix `233ff9341` on customer-provisioning, unmerged). Verified by hand 2026-10-03: **88/88 POML↔index pairs agree** (scratchpad `status_audit.py`) |
+| **Task** | none in progress. Phase 6 ✅ ×5 (088 `534bfc360`; 089 + 093 `08e451240`; 091 `df75f2d33`). 93 tasks: 90 closed; 042 🔄 (UAT round 4 pending); 083 🔲 (UAC-r2 141); 090 🔲 |
+| **PR** | **#1124** https://github.com/spaarke-dev/spaarke/pull/1124 — merge with `gh pr merge 1124 --merge` (**NEVER `--delete-branch`**) when **`Router` AND `Build & Test (Debug)`** pass and `grep -c pending` = 0. Tier 2 Full Unit Tests cancelled at 30 min = advisory |
+| **Publish size** | fresh master `62277d50a` 47,875,740 B vs branch `df75f2d33` 47,875,690 B → **−50 B**, 212 = 212 files (Compress-Archive, short-path fresh worktrees) |
+| **Deploy (needs the owner's go — dev BFF slot is shared)** | 1) BFF first: `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` from master after merge (the pane offers "Save as new version" only on the new `canSaveAsVersion` flag); 2) add-in: master push auto-deploys the SWA; 3) owner re-uploads `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`); 4) UAT round 4 = the live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning |
+| **Open owner questions** | (1) collision Open → desktop Word? (no supported `ms-word:` launch; anchor-click needs a live test) (2) version save keeps the old name — rename the record? (3) Saved state lost on tab switch — follow-up in `App.tsx`? |
+| **Local build needs** | `npm run build` requires ADDIN_CLIENT_ID / TENANT_ID / BFF_API_CLIENT_ID / BFF_API_BASE_URL (+ ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL) — values in `.github/workflows/deploy-office-addins.yml` |
 
 ### Files modified this session (all committed and pushed)
 `scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·

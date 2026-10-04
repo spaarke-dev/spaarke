@@ -1,6 +1,6 @@
 import * as React from "react";
 import { tokens, Spinner } from "@fluentui/react-components";
-import { WorkspaceShell } from "@spaarke/ui-components";
+import { WorkspaceShell, cleanGuid } from "@spaarke/ui-components";
 import type {
   SectionFactoryContext,
   NavigateTarget,
@@ -173,7 +173,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   React.useEffect(() => {
     (async () => {
       try {
-        const cleanUserId = userId.replace(/[{}]/g, "");
+        const cleanUserId = cleanGuid(userId);
         const user = await webApi.retrieveRecord("systemuser", cleanUserId, "?$select=_businessunitid_value");
         const buId = user["_businessunitid_value"] as string;
         if (buId) setBusinessUnitId(buId);

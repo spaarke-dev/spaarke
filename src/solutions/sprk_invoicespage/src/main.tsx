@@ -15,6 +15,7 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import {
   DataGridPageShell,
+  cleanGuid,
   type DataGridParentContext,
 } from "@spaarke/ui-components";
 
@@ -70,7 +71,7 @@ function parseMatterId(): string {
   }
   // eslint-disable-next-line no-console
   console.info("[sprk_invoicespage] parseMatterId resolved to:", id);
-  return id.replace(/[{}]/g, "");
+  return cleanGuid(id);
 }
 
 function buildParentContext(): DataGridParentContext | undefined {

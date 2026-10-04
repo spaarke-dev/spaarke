@@ -70,6 +70,9 @@ jobs:
           # Dataverse org the pane's "Open" buttons (task 027) and the Quick Create deep link
           # point at. Unset, the pane hides the Open buttons rather than showing ones that do nothing.
           ORG_URL: https://spaarkedev1.crm.dynamics.com
+          # The Spaarke model-driven app (unique name) every record link opens in (task 088). Without it a
+          # record opens in the user's default app. Same in every environment; empty → links name no app.
+          SPAARKE_APP_NAME: sprk_MatterManagement
 
       # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
       # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->

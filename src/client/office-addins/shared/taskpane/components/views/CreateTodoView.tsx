@@ -6,6 +6,7 @@ import {
   Field,
   Input,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Option,
@@ -18,9 +19,9 @@ import {
 import {
   CheckmarkRegular,
   DismissRegular,
+  OpenRegular,
   PersonSearchRegular,
   SearchRegular,
-  TaskListAddRegular,
 } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
 import {
@@ -31,6 +32,9 @@ import {
   priorityChoiceToScore,
   effortChoiceToScore,
 } from '../../services/todoChoices';
+import { MicrosoftToDoIcon } from '../icons/MicrosoftToDoIcon';
+import { useAnnounce } from '../../hooks/useAnnounce';
+import { openRecord } from '../../services/openRecordLauncher';
 
 /**
  * CreateTodoView — inline "Create To Do" tool in the Spaarke taskpane.
@@ -90,7 +94,19 @@ export interface SavedTodoContext {
 export interface ContactOption {
   id: string;
   name: string;
+  /**
+   * The server's `displayInfo` for this contact — today, the job title, or (when the contact has none)
+   * the literal entity-type string `"contact"` (`OfficeSearchService.MapSearchRow`'s own fallback — not
+   * this task's scope to change, since the SAME field feeds the shared "Related to" record picker).
+   * Rendered as the quieter, third line ONLY when it is not that literal (task 091 / UAT-2: "no literal
+   * 'contact'").
+   */
   displayInfo?: string;
+  /**
+   * The contact's email (task 091 / UAT-2) — additive, from the server's new `EntitySearchResult.Email`.
+   * Absent when the contact has no email on file. Lets the picker tell apart two contacts sharing a name.
+   */
+  email?: string;
 }
 
 /** Human-authored fields for the create-To-Do call (the client resolves Priority/Effort to scores). */
@@ -107,6 +123,12 @@ export interface CreateTodoInput {
 export interface CreateTodoResult {
   ok: boolean;
   error?: string;
+  /**
+   * Task 091 (UAT-2): the created `sprk_todo` id (the server's `CreateTodoResponse.TodoId`), echoed back
+   * so the confirmation can offer "Open in Spaarke". Absent on failure, and absent on the browser test
+   * harness's demo-success path (no real row was written, so there is nothing to open).
+   */
+  todoId?: string;
 }
 
 export interface CreateTodoViewProps {
@@ -123,9 +145,27 @@ export interface CreateTodoViewProps {
   onSearchContacts: (query: string) => Promise<ContactOption[]>;
   /** Navigate to the Save tab (offered when the email isn't filed yet). */
   onGoToSave?: () => void;
+  /**
+   * Task 091 (UAT-2, NFR-10): whether this host can open a browser tab
+   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `App` from the live adapter — never a
+   * `hostType` check here, same pattern as `FindView.canOpenRecord` / `SaveView.canOpenRecord`). Gates the
+   * created-To-Do confirmation's "Open in Spaarke" link; also requires `ORG_URL` to be configured.
+   * Defaults to `false`.
+   */
+  canOpenRecord?: boolean;
 }
 
 type FlowStatus = 'idle' | 'creating' | 'created' | 'error';
+
+/**
+ * Task 091 (UAT-2): the contact's job title, or `undefined` when there isn't one — INCLUDING when the
+ * server's `displayInfo` fallback is the literal Dataverse logical-name string `"contact"`
+ * (`OfficeSearchService.MapSearchRow`'s fallback for a contact with no job title). That literal must
+ * never render as if it were a job title ("no literal 'contact'"). Pure — independently testable.
+ */
+function realJobTitle(contact: ContactOption): string | undefined {
+  return contact.displayInfo && contact.displayInfo !== 'contact' ? contact.displayInfo : undefined;
+}
 
 const useStyles = makeStyles({
   container: {
@@ -181,6 +221,9 @@ const useStyles = makeStyles({
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   lookupMeta: { color: tokens.colorNeutralForeground3 },
+  // Task 091 (UAT-2): the job title, kept as a third, QUIETER line than the email line above it — same
+  // color token, smaller text size (the <Text size={100}> below), rather than a new, unproven token.
+  lookupMetaQuiet: { color: tokens.colorNeutralForeground3 },
   selectedContact: {
     display: 'flex',
     alignItems: 'center',
@@ -189,7 +232,10 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground3,
   },
+  // Task 091 (UAT-2): the chip now stacks name + email (when present) instead of a single text node.
+  selectedContactBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   selectedContactName: { flexGrow: 1, minWidth: 0 },
+  selectedContactMeta: { color: tokens.colorNeutralForeground3 },
   footer: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -210,6 +256,7 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   onCreateTodo,
   onSearchContacts,
   onGoToSave,
+  canOpenRecord = false,
 }) => {
   const styles = useStyles();
   const [name, setName] = useState('');
@@ -219,6 +266,14 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const [effort, setEffort] = useState<string>(DEFAULT_EFFORT_CHOICE);
   const [status, setStatus] = useState<FlowStatus>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Task 091 (UAT-2): a snapshot of what was just created — taken at the moment `onCreateTodo` succeeds,
+  // so the confirmation names the To Do that was actually created even though the form's own fields stay
+  // disabled (and therefore unchanged) for the rest of the 'created' state.
+  const [createdTodo, setCreatedTodo] = useState<{ name: string; todoId?: string } | null>(null);
+  const { announce, liveRegion } = useAnnounce();
+  // NFR-10: same pattern as FindView.openRecordAvailable / SaveFlow.openRecordAvailable — decided from
+  // the capability PLUS config, never rendered as a disabled/dead link.
+  const openRecordAvailable = canOpenRecord && Boolean(process.env.ORG_URL);
 
   // Assigned-To (Contact) lookup state.
   const [assignedTo, setAssignedTo] = useState<ContactOption | null>(null);
@@ -299,13 +354,19 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
       const result = await onCreateTodo(input);
       if (result.ok) {
         setStatus('created');
+        setCreatedTodo({ name: input.name, ...(result.todoId ? { todoId: result.todoId } : {}) });
+        announce(`To Do created: ${input.name}`, 'polite');
       } else {
+        const message = result.error ?? 'Could not create the To Do.';
         setStatus('error');
-        setErrorMsg(result.error ?? 'Could not create the To Do.');
+        setErrorMsg(message);
+        announce(message, 'assertive');
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not create the To Do.';
       setStatus('error');
-      setErrorMsg(err instanceof Error ? err.message : 'Could not create the To Do.');
+      setErrorMsg(message);
+      announce(message, 'assertive');
     }
   };
 
@@ -330,16 +391,48 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     setContactResults([]);
     setStatus('idle');
     setErrorMsg(null);
+    setCreatedTodo(null);
   };
 
   return (
     <div className={styles.container} role="region" aria-label="Create To Do">
+      {liveRegion}
       <div className={styles.header}>
-        <TaskListAddRegular aria-hidden="true" />
+        {/* Task 091 (UAT-2): the blue Microsoft To Do check — the view heading keeps its own text
+            ("Create a To Do"), only the icon changes, per the owner's exact scope. The SVG itself already
+            carries aria-hidden="true" (decorative; the heading text is the accessible label). */}
+        <MicrosoftToDoIcon active />
         <Text size={500} weight="semibold">
           Create a To Do
         </Text>
       </div>
+
+      {/* Task 091 (UAT-2): an unmistakable confirmation after a successful create — a full MessageBar,
+          not the gray "Saved" button alone (which stays, in the footer, matching the Save tab's own
+          precedent for "the form stays visible after a save"). Mirrors SaveFlow's `renderSavedBar`. */}
+      {status === 'created' && createdTodo && (
+        <MessageBar intent="success" layout="multiline" role="status">
+          <MessageBarBody>
+            <MessageBarTitle>To Do created: {createdTodo.name}</MessageBarTitle>
+          </MessageBarBody>
+          <MessageBarActions>
+            {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set AND a real
+                todoId came back — never a disabled/dead link. */}
+            {openRecordAvailable && createdTodo.todoId && (
+              <Button
+                appearance="outline"
+                size="small"
+                icon={<OpenRegular />}
+                onClick={() =>
+                  openRecord({ orgUrl: process.env.ORG_URL, entityType: 'sprk_todo', recordId: createdTodo.todoId! })
+                }
+              >
+                Open in Spaarke
+              </Button>
+            )}
+          </MessageBarActions>
+        </MessageBar>
+      )}
 
       {!isFiled ? (
         <>
@@ -411,7 +504,16 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
             {assignedTo ? (
               <div className={styles.selectedContact}>
                 <PersonSearchRegular aria-hidden="true" />
-                <Text className={styles.selectedContactName}>{assignedTo.name}</Text>
+                {/* Task 091 (UAT-2): the chip shows name AND email, so a Save of this To Do can't be
+                    second-guessed as "assigned to the wrong Jane Cooper". */}
+                <div className={styles.selectedContactBody}>
+                  <Text className={styles.selectedContactName}>{assignedTo.name}</Text>
+                  {assignedTo.email && (
+                    <Text size={200} className={styles.selectedContactMeta}>
+                      {assignedTo.email}
+                    </Text>
+                  )}
+                </div>
                 <Button
                   appearance="subtle"
                   size="small"
@@ -436,27 +538,39 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                 />
                 {contactResults.length > 0 && (
                   <div className={styles.lookupResults} role="listbox" aria-label="Contact results">
-                    {contactResults.map(c => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className={styles.lookupItem}
-                        role="option"
-                        aria-selected="false"
-                        onClick={() => {
-                          setAssignedTo(c);
-                          setContactResults([]);
-                          setContactQuery('');
-                        }}
-                      >
-                        <Text size={300}>{c.name}</Text>
-                        {c.displayInfo && (
-                          <Text size={200} className={styles.lookupMeta}>
-                            {c.displayInfo}
-                          </Text>
-                        )}
-                      </button>
-                    ))}
+                    {/* Task 091 (UAT-2): name, then email (when the contact has one — tells apart two
+                        contacts sharing a name), then job title as a third, quieter line (when present
+                        and not the server's literal "contact" fallback). A contact with neither shows
+                        name only — never the literal "contact". */}
+                    {contactResults.map(c => {
+                      const jobTitle = realJobTitle(c);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={styles.lookupItem}
+                          role="option"
+                          aria-selected="false"
+                          onClick={() => {
+                            setAssignedTo(c);
+                            setContactResults([]);
+                            setContactQuery('');
+                          }}
+                        >
+                          <Text size={300}>{c.name}</Text>
+                          {c.email && (
+                            <Text size={200} className={styles.lookupMeta}>
+                              {c.email}
+                            </Text>
+                          )}
+                          {jobTitle && (
+                            <Text size={100} className={styles.lookupMetaQuiet}>
+                              {jobTitle}
+                            </Text>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </>

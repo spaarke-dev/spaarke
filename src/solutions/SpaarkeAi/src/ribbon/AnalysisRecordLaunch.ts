@@ -54,6 +54,7 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAi } from "../utils/launch-resolver";
+import { cleanGuid } from "@spaarke/ui-components";
 
 /**
  * Opens the SpaarkeAi modal directly into the "Create new analysis" hub, pre-seeded
@@ -103,7 +104,7 @@ export function openNewAnalysisFromRecord(
   }
 
   // Strip braces (matches existing entityId handling in launch-resolver).
-  const normalizedEntityId = entityId.replace(/^\{|\}$/g, "");
+  const normalizedEntityId = cleanGuid(entityId);
   if (!normalizedEntityId) {
     console.warn(
       "[AnalysisRecordLaunch] Record id is empty (likely an unsaved form). Ignoring New Analysis command.",
@@ -155,7 +156,7 @@ export function openNewAnalysisFromRecord(
  *   the same way `entityId` is elsewhere in this module).
  */
 export function openExistingAnalysis(analysisId: string): void {
-  const normalizedAnalysisId = (analysisId ?? "").replace(/^\{|\}$/g, "");
+  const normalizedAnalysisId = cleanGuid(analysisId);
   if (!normalizedAnalysisId) {
     console.warn(
       "[AnalysisRecordLaunch] No analysis id resolved from the subgrid selection. Ignoring Open Analysis command.",

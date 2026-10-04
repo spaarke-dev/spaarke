@@ -25,6 +25,7 @@
  */
 
 import type { XrmContext, XrmUtility } from '@spaarke/ui-components';
+import { cleanGuid } from '@spaarke/ui-components';
 
 // `xrmContext.ts`'s `XrmUtility` (task 010) does not declare `getEntityMetadata`
 // — narrowed locally + cast at the boundary, mirroring the identical pattern in
@@ -76,7 +77,7 @@ export async function resolveViewName(
   viewId: string
 ): Promise<string | null> {
   if (!xrm?.WebApi) return null;
-  const id = viewId.replace(/[{}]/g, '');
+  const id = cleanGuid(viewId);
   if (!id) return null;
 
   for (const entity of ['userquery', 'savedquery'] as const) {

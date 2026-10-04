@@ -44,6 +44,7 @@ import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
+import { cleanGuid } from '../../utils/guid';
 import type { ILookupItem } from '../../types/LookupTypes';
 
 import type { ICreateRecordWizardProps, FollowOnActionId, AssociationResult } from './types';
@@ -586,7 +587,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       const picked = results[0];
       setSelectedExistingRecord({
         entityType: picked.entityType || picker.entityType,
-        recordId: picked.id.replace(/[{}]/g, '').toLowerCase(),
+        recordId: cleanGuid(picked.id),
         recordName: picked.name,
       });
       // Mutually exclusive with uploaded files.

@@ -138,8 +138,12 @@ describe('SaveFlow — bytes captured at the moment of Save, not before (task 04
   });
 
   it('reproduces the fix: pressing Save after an edit uploads B2, never the earlier B1 — capture happens per attempt, never once up front', async () => {
+    // Task 088: the success card and its "Save Another" are gone — the pane stays on the form after a save,
+    // and the next save of the same open document is "Save version" (a version of the document just saved).
+    // The invariant this test exists for is unchanged: that second attempt captures the bytes AGAIN.
+    const DOC_1 = 'd0c00001-0000-4000-8000-000000000001';
     saveResponses.push(accepted(), accepted());
-    pollResponse = () => completedPoll('doc-1');
+    pollResponse = () => completedPoll(DOC_1);
     const captureDocumentContent = jest.fn().mockResolvedValueOnce('Qjk=').mockResolvedValueOnce('QjI=');
     renderWord({ captureDocumentContent });
 
@@ -150,17 +154,17 @@ describe('SaveFlow — bytes captured at the moment of Save, not before (task 04
     await waitFor(() => expect(saveCallCount()).toBe(1));
     expect(sentBodyAt(0).document.contentBase64).toBe('Qjk=');
 
-    // Reach the success card, then "Save Another" — the user keeps the pane open and saves again.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Another' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Save Another' }));
-
-    await waitFor(() => expect(saveButton()).toBeInTheDocument());
-    fireEvent.click(saveButton());
+    // Reach the saved state, then edit the name — the user keeps the pane open and saves again.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Edit document name' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Document name' }), { target: { value: 'Brief v2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
 
     await waitFor(() => expect(saveCallCount()).toBe(2));
     expect(captureDocumentContent).toHaveBeenCalledTimes(2);
     // The SECOND request carries B2 (the document as it is NOW), not B1 replayed.
     expect(sentBodyAt(1).document.contentBase64).toBe('QjI=');
+    expect(sentBodyAt(1).document.existingDocumentId).toBe(DOC_1);
   });
 
   it('a retry after a failed save re-captures fresh bytes, not the bytes from the failed attempt', async () => {

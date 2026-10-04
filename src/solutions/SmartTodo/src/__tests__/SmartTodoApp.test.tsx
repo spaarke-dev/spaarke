@@ -69,6 +69,11 @@ jest.mock('@spaarke/ui-components', () => ({
   getOobModalSize: function () {
     return { width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } };
   },
+  // Real implementation (task 089 / ADR-044): the mock must match it, not just the
+  // signature — `resolveHostRegardingRecord` calls `cleanGuid(ref.id)` inside a
+  // try/catch, so a stub missing this key makes the call throw and silently
+  // return `undefined`, which a shallower mock would miss entirely.
+  cleanGuid: (id: string | null | undefined) => (id ?? '').replace(/[{}]/g, '').trim().toLowerCase(),
 }));
 
 import {

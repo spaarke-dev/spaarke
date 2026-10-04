@@ -157,7 +157,13 @@ const useStyles = makeStyles({
   loadingOverlay: {
     position: 'absolute',
     inset: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    // Semantic-token scrim (C-18 color sweep, 2026-10-04) — was a hardcoded
+    // `rgba(255, 255, 255, 0.6)` white wash, which flashed incorrectly over a
+    // dark-mode surface. Mirrors the DataGrid loadingOverlay precedent
+    // (`DataGrid.tsx` — surface-token background + `opacity`), which is
+    // already theme-correct in both modes (ADR-021).
+    backgroundColor: tokens.colorNeutralBackground1,
+    opacity: 0.85,
     borderRadius: tokens.borderRadiusMedium,
     display: 'flex',
     alignItems: 'center',

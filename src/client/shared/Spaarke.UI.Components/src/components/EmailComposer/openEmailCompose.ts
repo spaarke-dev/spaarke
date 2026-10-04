@@ -28,6 +28,7 @@
 import { getXrm } from '../../services/xrmGlobal';
 import { EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
 
 /** Compose entry points. `new` needs no source; the rest require a source communication. */
 export type OpenEmailComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
@@ -52,7 +53,7 @@ export interface OpenEmailComposeOptions {
  */
 export async function openEmailCompose(options?: OpenEmailComposeOptions): Promise<void> {
   const mode: OpenEmailComposeMode = options?.mode ?? 'new';
-  const sourceId = (options?.sourceCommunicationId ?? '').replace(/[{}]/g, '').trim().toLowerCase();
+  const sourceId = cleanGuid(options?.sourceCommunicationId);
 
   if (mode !== 'new' && !sourceId) {
     console.warn(`[openEmailCompose] mode "${mode}" requires a sourceCommunicationId — nothing to open.`);
