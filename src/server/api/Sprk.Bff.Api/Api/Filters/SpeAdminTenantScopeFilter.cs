@@ -1,13 +1,44 @@
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
 /// <summary>
-/// Extension for applying <see cref="SpeAdminTenantScopeFilter"/> to a route group.
+/// What an SPE environment route does to <c>sprk_speenvironment</c>. Carried as endpoint metadata
+/// (<see cref="SpeAdminTenantScopeFilterExtensions.WithSpeAdminEnvironmentScope{TBuilder}"/>) and decided by
+/// <see cref="SpeAdminTenantScopeFilter"/> (unified-access-control-r2 task 165, round 16 item 4; folded into
+/// the existing filter by round 20 item 4).
+/// </summary>
+public enum SpeAdminEnvironmentOperation
+{
+    /// <summary>Reads one environment named by the route value <c>id</c>.</summary>
+    Read,
+
+    /// <summary>Creates, changes or deletes an environment.</summary>
+    Write
+}
+
+/// <summary>
+/// Extensions for applying <see cref="SpeAdminTenantScopeFilter"/> to a route group, and for marking an
+/// environment route so that filter applies the environment rule to it.
 /// </summary>
 public static class SpeAdminTenantScopeFilterExtensions
 {
+    /// <summary>
+    /// Marks an <c>/api/spe/environments</c> route with what it does to an environment. The group's
+    /// <see cref="SpeAdminTenantScopeFilter"/> reads the mark and applies the environment rule (writes: platform
+    /// operator only; by-id reads: an environment a reachable config links). A route on the group without the
+    /// mark gets only the configId rule — so every environment route MUST carry it (the
+    /// <c>SpeAdminEnvironmentScopeTests</c> drive each one through the real pipeline).
+    /// </summary>
+    public static TBuilder WithSpeAdminEnvironmentScope<TBuilder>(
+        this TBuilder builder,
+        SpeAdminEnvironmentOperation operation) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.WithMetadata(operation);
+    }
+
     /// <summary>
     /// Confines every endpoint on the group to container type configs inside the caller's business
     /// unit. Apply AFTER <c>AddSpeAdminAuthorizationFilter()</c> — that one decides whether the caller
@@ -72,6 +103,21 @@ public static class SpeAdminTenantScopeFilterExtensions
 /// customer-scoped resource. A single present-but-unparseable value also passes through, so the
 /// endpoint's own validation returns its 400.
 /// </para>
+/// <para>
+/// <b>Environment routes</b> (unified-access-control-r2 task 165, round 16 item 4; folded into this filter by
+/// round 20 item 4 — one SPE-admin scope filter, no second class). An environment is not a config and has no
+/// business-unit column: it is shared tenant infrastructure (in Model 1 one environment serves every customer).
+/// A route marked with <see cref="SpeAdminEnvironmentOperation"/> metadata gets the environment rule BEFORE the
+/// configId rule:
+/// <b>Write</b> (POST, PUT, DELETE) is for a platform operator only — an admin whose OWN business unit is the
+/// root; anyone else gets ONE 403 whatever id they name, decided before any environment is read.
+/// <b>Read</b> by id is for an environment linked by a config the caller can reach (a platform operator reads
+/// all); any other id — unreadable or nonexistent — gets ONE 404 (<see cref="EnvironmentNotFound"/>), the same
+/// answer the handlers give for an id that does not exist. The list route trims its own result (the
+/// <c>ListConfigsAsync</c> list precedent) and carries no mark. An unreadable reach is 503
+/// (<see cref="ScopeUnverifiable"/>); a Read mark on a route with no <c>id</c> value is a mis-wiring and is
+/// refused with the same 503.
+/// </para>
 /// </remarks>
 public class SpeAdminTenantScopeFilter : IEndpointFilter
 {
@@ -84,7 +130,14 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     /// <summary>The boundary could not be evaluated.</summary>
     internal const string UnverifiableCode = "spe.admin.deny.scope_unverifiable";
 
+    /// <summary>An environment the caller cannot read, or that does not exist: one 404.</summary>
+    internal const string EnvironmentNotFoundCode = "spe.admin.deny.environment_out_of_scope";
+
+    /// <summary>An environment write by an admin who is not a platform operator.</summary>
+    internal const string EnvironmentWriteDeniedCode = "spe.admin.deny.environment_write_requires_platform_operator";
+
     private const string ConfigIdKey = "configId";
+    private const string EnvironmentRouteIdKey = "id";
 
     private readonly SpeAdminTenantScope _tenantScope;
     private readonly ILogger<SpeAdminTenantScopeFilter>? _logger;
@@ -102,6 +155,16 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
         EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
+
+        if (EnvironmentOperationOf(http) is { } environmentOperation)
+        {
+            var environmentRefusal = await DecideEnvironmentAsync(http, environmentOperation);
+            if (environmentRefusal is not null)
+            {
+                return environmentRefusal;
+            }
+        }
+
         var present = ReadPresentConfigIds(context);
 
         if (present.Count == 0)
@@ -190,6 +253,95 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
             "The configuration's access scope could not be verified. Try again shortly.",
             UnverifiableCode,
             traceId);
+
+    /// <summary>
+    /// THE "environment not found" answer: the environment rule's unreadable/nonexistent denial and the
+    /// environment handlers' own not-found paths. One helper so they are byte-identical apart from the trace id.
+    /// </summary>
+    public static IResult EnvironmentNotFound(Guid environmentId, string traceId) =>
+        Refusal(
+            StatusCodes.Status404NotFound,
+            "Not Found",
+            $"SPE environment '{environmentId}' was not found.",
+            EnvironmentNotFoundCode,
+            traceId);
+
+    /// <summary>
+    /// The environment operation a route is marked with, or null when it is not an environment route. A route
+    /// carrying both marks is treated as a Write (the stricter rule).
+    /// </summary>
+    private static SpeAdminEnvironmentOperation? EnvironmentOperationOf(HttpContext http)
+    {
+        var marks = http.GetEndpoint()?.Metadata.OfType<SpeAdminEnvironmentOperation>().ToList();
+        if (marks is null || marks.Count == 0)
+        {
+            return null;
+        }
+
+        return marks.Contains(SpeAdminEnvironmentOperation.Write)
+            ? SpeAdminEnvironmentOperation.Write
+            : SpeAdminEnvironmentOperation.Read;
+    }
+
+    /// <summary>
+    /// The environment rule (round 16 item 4): the refusal, or null when the request may continue to the
+    /// configId rule.
+    /// </summary>
+    private async Task<IResult?> DecideEnvironmentAsync(HttpContext http, SpeAdminEnvironmentOperation operation)
+    {
+        SpeAdminEnvironmentReach reach;
+        try
+        {
+            reach = await _tenantScope.GetEnvironmentReachAsync(http.User, http.RequestAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex,
+                "SPE Admin environment scope UNVERIFIABLE; refusing. Path={Path} TraceId={TraceId}",
+                http.Request.Path, http.TraceIdentifier);
+            return ScopeUnverifiable(http.TraceIdentifier);
+        }
+
+        if (operation == SpeAdminEnvironmentOperation.Write)
+        {
+            if (reach.CanWrite)
+            {
+                return null;
+            }
+
+            _logger?.LogWarning(
+                "SPE Admin environment write DENIED: the caller's business unit is not the root. Path={Path} TraceId={TraceId}",
+                http.Request.Path, http.TraceIdentifier);
+
+            return ProblemDetailsHelper.Forbidden(
+                EnvironmentWriteDeniedCode,
+                "Only a platform operator (an administrator in the root business unit) may create, change or delete SPE environments.",
+                http.TraceIdentifier);
+        }
+
+        // Read by id. The route constraint is {id:guid}, so an unparseable value never reaches here; a
+        // missing one is a mis-wiring and is refused, never passed through.
+        if (!http.Request.RouteValues.TryGetValue(EnvironmentRouteIdKey, out var raw)
+            || !Guid.TryParse(raw?.ToString(), out var environmentId))
+        {
+            _logger?.LogError(
+                "SPE Admin environment scope: Read mark on a route with no {{id}} value; refusing. Path={Path}",
+                http.Request.Path);
+            return ScopeUnverifiable(http.TraceIdentifier);
+        }
+
+        if (reach.CanRead(environmentId))
+        {
+            return null;
+        }
+
+        _logger?.LogWarning(
+            "SPE Admin environment scope DENIED: environment {EnvironmentId} is not linked by a config the caller reaches " +
+            "(or does not exist). Path={Path} TraceId={TraceId}",
+            environmentId, http.Request.Path, http.TraceIdentifier);
+
+        return EnvironmentNotFound(environmentId, http.TraceIdentifier);
+    }
 
     private static IResult Refusal(int status, string title, string detail, string errorCode, string traceId) =>
         TypedResults.Problem(

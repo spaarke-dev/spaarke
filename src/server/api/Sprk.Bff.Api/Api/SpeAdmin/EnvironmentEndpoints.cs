@@ -26,8 +26,9 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// </summary>
 /// <remarks>
 /// ADR-001: Minimal API — MapGet/MapPost/etc. on RouteGroupBuilder, no controllers.
-/// ADR-008: Authorization inherited from the /api/spe route group (SpeAdminAuthorizationFilter), plus
-/// <see cref="SpeAdminEnvironmentScopeFilter"/> on each by-id read and on every write
+/// ADR-008: Authorization inherited from the /api/spe route group (SpeAdminAuthorizationFilter and
+/// <see cref="SpeAdminTenantScopeFilter"/>); each by-id read and every write is marked with
+/// <see cref="SpeAdminEnvironmentOperation"/> so that group filter applies the environment rule
 /// (unified-access-control-r2 task 165, round 16 item 4): environments are shared tenant infrastructure, so
 /// only a platform operator (an admin whose own business unit is the root) may write them, and any other admin
 /// reads only the environments linked by a config they can reach. The list trims itself the same way.
@@ -64,7 +65,7 @@ public static class EnvironmentEndpoints
 
         // GET /api/spe/environments/{id}
         group.MapGet("/environments/{id:guid}", GetEnvironmentAsync)
-            .AddSpeAdminEnvironmentScopeFilter(SpeAdminEnvironmentOperation.Read)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Read)
             .WithName("SpeGetEnvironment")
             .WithSummary("Get a single SPE environment by ID")
             .WithDescription(
@@ -78,7 +79,7 @@ public static class EnvironmentEndpoints
 
         // POST /api/spe/environments
         group.MapPost("/environments", CreateEnvironmentAsync)
-            .AddSpeAdminEnvironmentScopeFilter(SpeAdminEnvironmentOperation.Write)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeCreateEnvironment")
             .WithSummary("Create a new SPE environment configuration")
             .WithDescription(
@@ -94,7 +95,7 @@ public static class EnvironmentEndpoints
 
         // PUT /api/spe/environments/{id}
         group.MapPut("/environments/{id:guid}", UpdateEnvironmentAsync)
-            .AddSpeAdminEnvironmentScopeFilter(SpeAdminEnvironmentOperation.Write)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeUpdateEnvironment")
             .WithSummary("Update an existing SPE environment configuration")
             .WithDescription(
@@ -111,7 +112,7 @@ public static class EnvironmentEndpoints
 
         // DELETE /api/spe/environments/{id}
         group.MapDelete("/environments/{id:guid}", DeleteEnvironmentAsync)
-            .AddSpeAdminEnvironmentScopeFilter(SpeAdminEnvironmentOperation.Write)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeDeleteEnvironment")
             .WithSummary("Delete an SPE environment configuration")
             .WithDescription(
@@ -171,7 +172,7 @@ public static class EnvironmentEndpoints
                 cancellationToken: ct);
 
             var items = rows
-                .Where(r => reach.CanRead(r.Id) || r.Id != Guid.Empty)
+                .Where(r => reach.CanRead(r.Id))
                 .Select(r => r.ToSummary())
                 .ToList();
 
@@ -208,14 +209,14 @@ public static class EnvironmentEndpoints
 
             if (row is null)
             {
-                return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             return TypedResults.Ok(row.ToDetail());
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -329,7 +330,7 @@ public static class EnvironmentEndpoints
 
             if (existing is null)
             {
-                return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             // ── Enforce isDefault uniqueness ─────────────────────────────────
@@ -359,7 +360,7 @@ public static class EnvironmentEndpoints
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -392,7 +393,7 @@ public static class EnvironmentEndpoints
 
             if (existing is null)
             {
-                return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             // ── Check for referencing container type configs ──────────────────
@@ -435,7 +436,7 @@ public static class EnvironmentEndpoints
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return SpeAdminEnvironmentScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex)
         {

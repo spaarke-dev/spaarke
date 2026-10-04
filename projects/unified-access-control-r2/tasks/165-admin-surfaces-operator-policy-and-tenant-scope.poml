@@ -4,7 +4,7 @@
     <title>Admin surfaces (route sweep, 9 routes): put the record-matching admin routes behind the existing "SystemAdmin" policy, and make the SPE admin tenant-scope boundary actually run on /api/spe/configs CRUD and /api/spe/bulk/delete + /bulk/permissions (route param named "id", configId carried in the body, unscoped business unit and unscoped app identity on create/update, fail-open scope lookup)</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>code-complete-escalated</status>
+    <status>code-complete-round20-followup-owed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live BFF routes (tags bff-api, auth, security). Closes an operator job any signed-in user can trigger, and a cross-business-unit read, rewrite and delete of SPE container-type configs, a cross-business-unit config create that borrows another unit's container type or app identity, and a cross-business-unit bulk container delete and owner grant.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -272,6 +272,31 @@ TESTS: full BFF unit suite 14,315 passed / 3 failed / 54 skipped (the 3 = escala
 STEP 9.5: code-review no Critical (W1 Model-1 shared container type vs identity check = note D5b; W2 refresh projection covered via the shared projection). adr-check clean (ADR-001/002/003/007/008/010/019/038/052).
 
 PENDING MANUAL GATES (main session; exact commands note §9): (a) record-matching 403/200 on dev if the flag is on; (b)-(d) need an SPE admin OUTSIDE the root unit (none exists — owner to grant the Admin app role to a Business Unit 1 test user), write probes on throwaway data only with owner approval; (f) register host 400.
+    </outcome>
+    <outcome date="2026-10-04" branch="task/uac-r2-165-r2">
+FIX ROUNDS r1 + r2 (owner rounds 16 and 20; adversarial verifier re-verification 2026-10-04). Full record: notes/task-165-admin-surfaces.md §10.
+
+BRANCH: task/uac-r2-165-r2 from task/uac-r2-165-r1 (fast-forward to 5c8192f11 = the main session's commit 1712af73b of r1's uncommitted work, minus its coordination note), plus the r2 commit.
+
+ROUND 16 ITEM 4 (environments, option (a)) — DONE: only a platform operator (own business unit = the root) writes sprk_speenvironment (POST/PUT/DELETE: one 403 spe.admin.deny.environment_write_requires_platform_operator before any read); any other admin reads only environments linked by a config they reach (by-id: one 404 spe.admin.deny.environment_out_of_scope, byte-identical to the handler not-found; list trimmed in-handler); reach unreadable or a full 5000-row page: 503; config POST/PUT may link only a readable environment (403 spe.admin.deny.environment_out_of_scope; order BU, environment, identity). No new column.
+ROUND 16 ITEM 5 (SearchItemsTests) — DONE: moved onto AdminSurfaceHostFixture + FakeDataverseTables (no outbound Dataverse call); empty/whitespace assert the handler 400 on an in-scope config; not-found asserts the uniform 404.
+FIRST VERIFIER 6-8 (r1) — DONE: identity values compared in canonical GUID form (N/B/P spellings); dashboard full view only when the caller reaches EVERY config in the table, completeness concern dropped from projections, refresh tested; negative-twin config-scoped route test; SystemAdmin admission proven by the handler's own answer.
+
+r2 CORRECTIONS: (1) removed the fail-open seed residue r1 left in EnvironmentEndpoints.cs:174 (".Where(r =&gt; reach.CanRead(r.Id) || r.Id != Guid.Empty)" restored to ".Where(r =&gt; reach.CanRead(r.Id))"; seed E3 RED proves it). (2) ROUND 20 ITEM 4: the new SpeAdminEnvironmentScopeFilter class is DELETED; the environment rule is folded into the EXISTING SpeAdminTenantScopeFilter on the /api/spe group, applied to routes marked with SpeAdminEnvironmentOperation endpoint metadata (.WithSpeAdminEnvironmentScope: GET-by-id Read; POST/PUT/DELETE Write). Behaviour, codes and tests unchanged. NOTE-FROM-MAIN.md not committed.
+
+PLACEMENT (CLAUDE.md §10): in the BFF; existing routes, existing group filter, existing SpeAdminTenantScope. No new filter class (after r2), policy, service, DI registration, endpoint, option, job, package or column.
+
+JUSTIFICATION (CLAUDE.md §11), new surface — full table with grep evidence in note §10.3: enum SpeAdminEnvironmentOperation (the filter must tell a by-id read from a write; cost: environments stay writable by leaf admins); WithSpeAdminEnvironmentScope on the existing extensions class (named wrapper over WithMetadata, the Compose endpoints' existing pattern); SpeAdminTenantScopeFilter.EnvironmentNotFound + two codes (cost: existence oracle, seed F4); record SpeAdminEnvironmentReach (one shared answer for list, filter and config write; cost: divergent copies); SpeAdminTenantScope.GetEnvironmentReachAsync (extends the existing boundary class); SpeAdminScopeDecision.EnvironmentOutOfScope (member of the existing enum; cost: any environment linkable); CanonicalIdentityValue / CanonicalIdentityColumnValue (cost: N/B/P GUID spellings bypass the identity check, seeds G1/G2); DashboardEndpoints.CompletenessConcern (cost: leaf admin sees the tenant-wide skipped-config count, seed D1).
+
+TESTS (r1, justified one line each in note §10.4): SpeAdminEnvironmentScopeTests (38); non-canonical GUID tests (POST/PUT theories, stored-side, re-send twin); dashboard full-view + refresh tests (3); negative-twin route test; SystemAdmin admission rewrite; SearchItemsTests rewrite. r2 added no test. No ADR-038 banned pattern.
+
+SEEDING (r2, on the final code, note §10.5): 16 seeds, all RED — E1 write check (14), E2 by-id read (2), E3 list untrimmed (1), E4 config env link (4), E5 reach fault allow (7), F1 filter ignores the mark (21), F2 PUT unmarked (7), F3 GET-by-id unmarked (4), F4 404 text (3), G1 non-canonical compare (19), G2 PUT Changed raw (1), D1 completeness kept (3), D2 refresh unprojected (1), D3 full view by names (1), SI unknown permitted (4). Sources restored and MD5-verified. Verifier's own seeds (E3-SI, M1-M6, M8, M12, M13, M15) all RED, recorded.
+
+SUITES (r2): full BFF unit 14,380 passed / 0 failed / 54 skipped; NetArchTest 347 / 0 / 0; Sprk.Bff.Api.IntegrationTests 104 / 0 / 0; Spe.Integration.Tests 403 / 0 / 25 skipped. Affected classes 166 / 0.
+
+CONFLICT-CHECK: clean (no open PR touches the SpeAdmin filter/endpoint/scope files; SpeAdminGraphService.cs not edited). 167 still not landed: amendment 3 (no GovernedFiles/waiver edits; five environment rows in note §6).
+
+NOT CLOSED: (a) publish size — skipped per this round's instruction; pre-merge main-session measurement (note §10.7); no package change, no CVE delta. (b) OWNER ROUND 20 ITEMS 1-3 (per-container business-unit binding: container custom property stamped at creation + backfill script; per-container authorization on container/item/permission/bulk routes; narrowed duplicate check) — OWED BY TASK 165, dedicated follow-up round run by the main session (note §10.8). (c) Two low items for the main session to file as GitHub issues, exact commands in note §10.9 (dashboard per-config storage; bulk status not bound to caller). (d) Manual live gates (note §9, incl. (g) environments).
     </outcome>
   </execution>
 </task>

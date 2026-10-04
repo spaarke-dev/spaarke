@@ -24,8 +24,9 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// BFF pipeline (<see cref="AdminSurfaceHostFixture"/>); Dataverse is the in-memory fake at the
 /// <c>DataverseWebApiClient</c> boundary, so "nothing was read / written" is the absence of a recorded call.
 /// </para>
-/// <para>ADR-038 §2 path #1 (security-auth KEEP). ADR-008: by-id reads and writes are decided by
-/// <c>SpeAdminEnvironmentScopeFilter</c>; the list trims itself (list precedent).</para>
+/// <para>ADR-038 §2 path #1 (security-auth KEEP). ADR-008: by-id reads and writes are decided by the
+/// <c>/api/spe</c> group's <c>SpeAdminTenantScopeFilter</c> from the route's <c>SpeAdminEnvironmentOperation</c>
+/// mark (round 20 item 4: one SPE-admin scope filter); the list trims itself (list precedent).</para>
 /// </remarks>
 public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHostFixture>
 {
