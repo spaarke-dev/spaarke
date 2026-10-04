@@ -198,9 +198,11 @@ public interface IRagService
     // ── Knowledge-base index administration (D-09 §2 B8, task 011 Phase 1b Tier 3) ────
     // Endpoints (KnowledgeBaseEndpoints) used to inject Azure SDK SearchIndexClient directly
     // and call its index/search APIs. Per ADR-007 (facade pattern) endpoints should consume
-    // domain services, not Azure SDK clients. The following 3 methods absorb those direct
-    // SDK calls so the endpoints depend only on IRagService — which has a fail-fast
-    // Null-Object implementation (NullRagService) registered when the kill switch is off.
+    // domain services, not Azure SDK clients. This method absorbs that direct SDK call so the
+    // endpoint depends only on IRagService — which has a fail-fast Null-Object implementation
+    // (NullRagService) registered when the kill switch is off. The list and delete members
+    // that served the retired GET/DELETE /api/ai/knowledge/indexes/{indexName}/documents
+    // routes were removed with them (unified-access-control-r2 task 163, owner round 10 item 1).
 
     /// <summary>
     /// Returns document chunk counts for the knowledge and discovery indexes scoped to the
@@ -210,40 +212,6 @@ public interface IRagService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Health summary with per-index document counts and timestamp.</returns>
     Task<KnowledgeIndexHealth> GetIndexHealthAsync(
-        string tenantId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns a paged list of indexed document summaries for the requesting tenant in the
-    /// specified index. Used by the knowledge-base admin "list documents" endpoint.
-    /// </summary>
-    /// <param name="indexName">Target index name (knowledge or discovery).</param>
-    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
-    /// <param name="page">1-based page number.</param>
-    /// <param name="pageSize">Page size (1-200).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Paged indexed-document listing.</returns>
-    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
-    Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-        string indexName,
-        string tenantId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Deletes all chunks for a source document from the specified index, scoped to tenant.
-    /// Used by the knowledge-base admin "delete document" endpoint.
-    /// </summary>
-    /// <param name="indexName">Target index name (knowledge or discovery).</param>
-    /// <param name="documentId">Source document ID.</param>
-    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Number of chunks deleted (zero when no chunks match).</returns>
-    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
-    Task<int> DeleteIndexedDocumentAsync(
-        string indexName,
-        string documentId,
         string tenantId,
         CancellationToken cancellationToken = default);
 }
@@ -258,28 +226,6 @@ public sealed record KnowledgeIndexHealth(
     DateTimeOffset LastUpdated,
     string KnowledgeIndexName,
     string DiscoveryIndexName);
-
-/// <summary>
-/// Paged list of indexed-document summaries returned by
-/// <see cref="IRagService.GetIndexedDocumentsAsync"/>.
-/// </summary>
-public sealed record IndexedDocumentsPage(
-    string IndexName,
-    IReadOnlyList<IndexedDocumentSummary> Documents,
-    int Page,
-    int PageSize,
-    long TotalCount);
-
-/// <summary>
-/// Summary of a single indexed document chunk; mirrors the previous
-/// <c>KnowledgeDocumentSummary</c> verbatim.
-/// </summary>
-public sealed record IndexedDocumentSummary(
-    string ChunkId,
-    string? DocumentId,
-    string FileName,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Options for RAG search operations.

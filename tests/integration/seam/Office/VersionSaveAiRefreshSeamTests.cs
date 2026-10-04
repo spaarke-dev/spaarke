@@ -566,14 +566,6 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
 
         public Task<KnowledgeIndexHealth> GetIndexHealthAsync(string tenantId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-
-        public Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-            string indexName, string tenantId, int page, int pageSize, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<int> DeleteIndexedDocumentAsync(
-            string indexName, string documentId, string tenantId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
     }
 
     /// <summary>The Redis-backed ADR-004 idempotency store, in memory and shared by both handlers.</summary>

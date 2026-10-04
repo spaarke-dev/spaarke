@@ -86,10 +86,9 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │  ├── GetEmbeddingAsync()        → Retrieve cached embedding     │
 │  └── SetEmbeddingAsync()        → Store embedding with TTL      │
 │                                                                 │
-│  ReferenceIndexingService (ReferenceIndexingService.cs)            │
-│  ├── IndexKnowledgeSourceAsync()   → Index single knowledge source │
-│  ├── DeleteKnowledgeSourceAsync()  → Delete source chunks          │
-│  └── IndexAllReferencesAsync()     → Batch index all sources       │
+│  (golden reference WRITES: operator scripts only —                 │
+│   scripts/ai-search/Add-ReferenceToIndex.ps1 / Index-AllReferences │
+│   .ps1; ReferenceIndexingService was removed by uac-r2 task 163)   │
 │                                                                    │
 │  ReferenceRetrievalService (ReferenceRetrievalService.cs)          │
 │  └── SearchReferencesAsync()  → Hybrid search against references   │
@@ -124,8 +123,12 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | `IOpenAiClient` | Azure OpenAI API calls (embeddings + chat) | Singleton |
 | `RagIndexingJobHandler` | Async job processing with idempotency | Scoped |
 | `IIdempotencyService` | Duplicate detection and processing locks | Singleton |
-| `ReferenceIndexingService` | Index knowledge sources into golden reference index | Singleton |
 | `ReferenceRetrievalService` | Query golden reference index (L1 knowledge) | Singleton |
+
+The golden reference index is WRITTEN only by the operator scripts `scripts/ai-search/Add-ReferenceToIndex.ps1` /
+`Index-AllReferences.ps1`. The BFF writer (`ReferenceIndexingService`, with `ISchemaMapper` /
+`KnowledgeDocumentSchemaMapper`) and its `/api/admin/knowledge/*` routes were removed by unified-access-control-r2
+task 163 (owner round 10 item 1: no caller, in no published API description).
 
 ---
 
