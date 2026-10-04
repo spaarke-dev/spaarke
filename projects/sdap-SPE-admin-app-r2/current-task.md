@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-31 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §1 (the live threads). Everything else is reference.
+> **Last Updated**: 2026-10-04 (by `context-handoff`, before an operator machine restart)
+> **Recovery**: read Quick Recovery, then **§0 (what changed 2026-10-03/04)**, then §1. Everything else is reference.
 
 ---
 
@@ -10,24 +10,89 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
-| **Status** | **All code complete, merged to master, and deployed.** Nothing is unmerged |
+| **Status** | All code merged + deployed. **Container-type create fix now PROVEN live** (§0.1). Model 1 container type **created** |
 | **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX rows, not from memory |
-| **Next Action** | **UAT §1A.2b — create a container type.** The operator has a test ready. This is the ONLY way to verify the create fix (see §1.1) |
-| **Blocked?** | Nothing is code-blocked. Every open thread waits on the operator or on elapsed time |
+| **Next Action** | 🔴 **Give the Model 1 config a real credential** (§0.2) — its Key Vault secret field holds the literal `null`, so **every container operation for that config will fail**. Then the operator's pending decisions in §0.4 |
+| **Blocked?** | Nothing is code-blocked. Open threads wait on operator decisions |
 
 ### ✅ Starting a NEW / REMOTE session? Read this
 
-**You do NOT need the local worktree.** The branch is **0 commits ahead of master** — every line of this
-project's work is on `origin/master`. A fresh clone of master has all of it.
-
 | | |
 |---|---|
-| Branch `work/sdap-SPE-admin-app-r2` | `7a2727620` · **0 ahead / 235 behind** `origin/master` |
-| Open PRs | **0** — #859, #907, #918 all MERGED 2026-08-30/31 |
+| Branch `work/sdap-SPE-admin-app-r2` | `cee118e95` + this handoff · **1–2 ahead / ~1,049 behind** `origin/master` |
+| Unmerged | **docs only** — the topology-doc corrections (§0.3) and this handoff. **No code is unmerged** |
+| Open PRs | **0** — #859, #907, #918, #959 all MERGED |
 | Uncommitted | none |
 
-⚠️ **235 behind.** Master moves fast (other worktrees merge constantly). **Re-merge master before any
-new PR** and re-run the build — do not trust a day-old sync.
+⚠️ **~1,049 behind master.** It moves very fast. **Merge master before any new PR** and rebuild —
+the docs-only delta merges trivially, but a code change on a 1,000-commit-stale base will not.
+
+---
+
+## 0. What changed 2026-10-03/04 — READ THIS
+
+### 0.1 ✅ The container-type create fix is PROVEN
+
+UAT §1A.2b was the one fix shipped as *"reasoned, not proven"* (create is delegated-only; app-only
+probes get 403). The operator's live create returned:
+
+```
+speInvalidOperation: CreateContainerType(Spaarke Model 1,delegated):
+  The owning app id is already used by another container type.
+```
+
+That error is **only reachable if `owningAppId` was sent, well-formed, and looked up by Graph** —
+the previous error was the anonymous `invalidRequest: One of the provided arguments is not acceptable`.
+**§1A.2b: PASS.** The new error itself is rule **R1** (one owning app ↔ one container type): the app
+creates from the config's owning app `170c98e1`, which already owns `Spaarke PAYGO 1`.
+
+### 0.2 🔴 Model 1 container type created — but its config is non-functional
+
+- **Entra app**: `Spaarke SPE Model 1 Owner` · client id `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e` ·
+  tenant `a221a95e-…` · `My organization only` · **0 secrets, 0 certs, 1 federated credential**
+  (`sprk-controlplane-dev-uami-assertion` — trusts the **control-plane UAMI**, NOT the BFF).
+  Granted: application `FileStorageContainer.Selected` + `FileStorageContainerTypeReg.Selected`.
+  *Not granted*: the **delegated** `FileStorageContainer.Selected` (`085ca537-…`) — not needed for the
+  owning-app role; grant for parity if anything will act delegated as this app.
+- **Container type**: created via **SharePoint admin center → SharePoint Embedded → Apps → Create app**,
+  billing type **Owner org** (= `standard`).
+- **Dataverse config**: the operator entered the literal string **`null`** in *Key Vault Secret Name*
+  (the field is required). 🔴 **This does not work.** `SpeAdminGraphService` authenticates as the owning
+  app with `ClientSecretCredential` only (:5698, :5886) — the string `"null"` goes to Key Vault, the
+  lookup fails, and **every app-only operation for that config fails**. Container-type ops (delegated)
+  still work; **listing/creating containers (app-only) does not**.
+- **Fix now**: add a client secret to `Spaarke SPE Model 1 Owner`, store it in Key Vault (e.g.
+  `spe-model1-owning-app-secret`), put that name in the config.
+- **Fix properly (r3, after cpo-r1)**: FIC support in `SpeAdminGraphService` — see topology doc §6B.
+
+### 0.3 Topology doc corrected (commit `cee118e95`, NOT yet on master)
+
+[`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md):
+
+- **Inventory**: **four** container types already exist, not one — Spaarke Demo Documents (Owner org),
+  Spaarke PAYGO 1 (Owner org), Spaarke DMS Dev 1 (**User org**), Spaarke DMS-SPE Trial (**trial**).
+  **4 of 25 used**, and 🔴 **the one permitted trial slot is already taken.**
+- **Admin-center create path is now PREFERRED** (delegated, sidesteps R5). Vocabulary:
+  **Owner org = `standard`**, **User org = `directToCustomer`**.
+- **§6A**: config resolution reads exactly 5 columns. **Storage & Sharing, Permissions, and Consuming
+  App Registration on the config form are collected, stored, and NEVER READ.** "Consuming App
+  Registration" is unwired Phase-3 scaffolding — leave it empty.
+- **§6B**: owning-app credential is secret-only; a `null` placeholder fails silently-looking.
+
+⚠️ The **published artifact** (<https://claude.ai/code/artifact/07b17fb1-a9d1-42bf-8165-758002704f43>)
+is now **stale** against these corrections — refresh it from the markdown.
+
+### 0.4 ⏳ Operator decisions pending (offered, not yet done)
+
+| # | Offer | Notes |
+|---|---|---|
+| a | **Remove the inert config-form fields** | `src/solutions/SpeAdminApp/src/components/settings/ContainerTypeConfig.tsx` — keys `maxStoragePerBytes`, `sharingCapability`, `isItemVersioningEnabled`, `delegatedPermissions`, `applicationPermissions`, consuming-app pair. Leave the Dataverse columns. Needs `node_modules` restored first |
+| b | **Create the Model 2 container type** | Name it **`Spaarke Model 2`** — ONE type for ALL Model 2 customers (R4), **not** per client. Needs a **multi-tenant** (`AzureADMultipleOrgs`) app registration; billing **User org**. Takes budget to 5 of 25 |
+| c | **FIC support in `SpeAdminGraphService`** | Agreed in principle; **after** `customer-provisioning-orchestration-r1` lands MI. Also needs the BFF's MI added as a federated credential on each owning app |
+| d | **Refresh the published artifact** | Stale — see §0.3 |
+
+Also done by the operator: **deleted the duplicate `Paygo` config** (same container type + owning app
+as `Spaarke PAYGO 1`). Verified first: no code references either config.
 
 ⚠️ **If you use the LOCAL worktree**: `node_modules` is **absent everywhere** (0 directories). The
 worktree was wiped and recreated 2026-08-31, and node_modules is gitignored. **Any client build fails
@@ -43,7 +108,7 @@ midnight wipe; **Developer: Reload Window** clears it.
 
 ## 1. The live threads
 
-### 1.1 🔴 UAT §1A.2b — create a container type (THE NEXT ACTION)
+### 1.1 ✅ UAT §1A.2b — create a container type — **PASSED 2026-10-03, see §0.1** (history below)
 
 The operator has a container-type create ready to test. **This is the highest-value open item**, because
 the fix behind it is **reasoned, not proven**.
