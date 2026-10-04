@@ -175,9 +175,14 @@ describe('provisionSecureProject — failure classification', () => {
   //
   // Task 133 r1 (verifier finding 10): `column-missing` — the creator column is not in this environment (a deterministic
   // 400) — is NOT the retryable `unreadable`: a "Try securing again" would fail until an administrator applies the schema.
+  //
+  // Owner round 14 item 3 (task 133 c1-r4): `refused` — Dataverse refused the read (a 401/403: the service's sign-in or
+  // Read privilege) — is deterministic too: not retryable, and the copy names the service's permission to look the
+  // creator up, as the server's detail and guide §7a do.
   it.each([
     ['unreadable', 'not-started', true, /could not be looked up/i],
     ['column-missing', 'needs-administrator', false, /not yet set up to record who created/i],
+    ['refused', 'needs-administrator', false, /check the service's permission to look them up/i],
     ['disabled', 'needs-administrator', false, /administrator needs to finish/i],
     ['application-user', 'needs-administrator', false, /administrator needs to finish/i],
     ['absent', 'needs-administrator', false, /administrator needs to finish/i],
@@ -186,7 +191,7 @@ describe('provisionSecureProject — failure classification', () => {
     'reads creatorState=%s from the problem body for resume_creator_unavailable',
     async (creatorState, kind, retryable, says) => {
       const authFetch = jest.fn().mockResolvedValue(
-        problemResponse(creatorState === 'unreadable' || creatorState === 'column-missing' ? 500 : 409, {
+        problemResponse(['unreadable', 'column-missing', 'refused'].includes(creatorState ?? '') ? 500 : 409, {
           detail: 'operator text',
           reasonCode: 'sdap.provision.resume_creator_unavailable',
           ...(creatorState === undefined ? {} : { creatorState }),
@@ -240,6 +245,73 @@ describe('provisionSecureProject — failure classification', () => {
       } else {
         expect(result.errorMessage).toMatch(/administrator needs to finish securing/i);
         expect(result.errorMessage).not.toMatch(/Manage Access/i);
+      }
+    }
+  );
+
+  // Task 133 c1 (owner round 10 item 4): `cascade_children_unreadable` follows the server's `cascadeChildState`.
+  // `unreadable` (or absent) is a failed read — the same caller may call again; `refused` is Dataverse refusing the read
+  // (or answering it incompletely), deterministic — a "Try securing again" would fail every time. Since round c1-r2 a
+  // 401/403 (the service's sign-in or Read privilege refused) is `refused` too, so the refused copy names the service's
+  // permission to read those records beside the records themselves, as the server's detail and guide §7a do (c1-r3).
+  it.each([
+    ['unreadable', true],
+    [undefined, true],
+    ['refused', false],
+  ])('reads cascadeChildState=%s from the problem body for cascade_children_unreadable', async (state, retryable) => {
+    const authFetch = jest.fn().mockResolvedValue(
+      problemResponse(500, {
+        detail: 'operator text',
+        reasonCode: 'sdap.provision.cascade_children_unreadable',
+        childTable: 'sharepointdocumentlocation',
+        ...(state === undefined ? {} : { cascadeChildState: state }),
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('not-started');
+    expect(result.retryable).toBe(retryable);
+    expect(result.errorMessage).toMatch(/Nothing about the project changed/);
+    expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    if (retryable) {
+      expect(result.errorMessage).not.toMatch(/administrator/i);
+    } else {
+      expect(result.errorMessage).toMatch(/administrator needs to look at those records/i);
+      expect(result.errorMessage).toMatch(/the service's permission to read them/i);
+    }
+  });
+
+  // Owner round 14 item 3 (task 133 c1-r4): `container_ownership_unreadable` follows the server's
+  // `containerOwnershipState` exactly as `cascade_children_unreadable` follows `cascadeChildState`. `unreadable` (or
+  // absent) is a failed read — the same caller may call again; `refused` is Dataverse refusing the read (a 401/403: the
+  // service's sign-in or Read privilege), deterministic — a "Try securing again" would fail every time.
+  it.each([
+    ['unreadable', true],
+    [undefined, true],
+    ['refused', false],
+  ])(
+    'reads containerOwnershipState=%s from the problem body for container_ownership_unreadable',
+    async (state, retryable) => {
+      const authFetch = jest.fn().mockResolvedValue(
+        problemResponse(500, {
+          detail: 'operator text',
+          reasonCode: 'sdap.provision.container_ownership_unreadable',
+          speContainerId: 'b!its-own-container',
+          ...(state === undefined ? {} : { containerOwnershipState: state }),
+        })
+      );
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe('not-started');
+      expect(result.retryable).toBe(retryable);
+      expect(result.errorMessage).toMatch(/Nothing about the project changed/);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+      if (retryable) {
+        expect(result.errorMessage).not.toMatch(/administrator/i);
+      } else {
+        expect(result.errorMessage).toMatch(/administrator needs to look at the service's permission to check it/i);
       }
     }
   );
@@ -302,12 +374,18 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.record_owner_unreadable', 'not-started', false],
     ['sdap.provision.resume_colleagues_not_permitted', 'not-started', false],
     // Task 133 b2: a container already on the project. Recorded on ANOTHER record too — deterministic, an administrator
-    // decides; could not be checked — a read failed, the same caller may call again. Both refused before any change.
+    // decides; could not be checked — a read failed, the same caller may call again (without the extension, or with
+    // `containerOwnershipState: unreadable`; `refused` is pinned above). Both refused before any change.
     ['sdap.provision.container_shared_with_another_record', 'not-started', false],
     ['sdap.provision.container_ownership_unreadable', 'not-started', true],
     // Task 133 r1: a SHARED container is unlinked before the move; that failed, so nothing moved and the same caller may
     // call again.
     ['sdap.provision.shared_container_not_cleared', 'not-started', true],
+    // Task 133 c1: the records that move with the project could not be read before any change. Without the extension
+    // (or with `cascadeChildState: unreadable`) a read failed — the same caller may call again; `refused` is pinned below.
+    ['sdap.provision.cascade_children_unreadable', 'not-started', true],
+    // Task 133 c1: undone, but records that moved with it are not back on their own owners — an administrator first.
+    ['sdap.provision.cascade_children_not_restored', 'needs-administrator', false],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -354,7 +432,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(26);
+    expect(EMITTED).toHaveLength(28);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {
