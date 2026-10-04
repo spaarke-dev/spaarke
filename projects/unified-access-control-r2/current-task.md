@@ -1,5 +1,47 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-04 ~12:00Z (context-handoff, checkpoint #8, before /compact). Read with checkpoint #7 directly below (still accurate); this block only adds the deltas.
+>
+> ## ⚡ CHECKPOINT #8 — deltas since #7
+> - **Running (do NOT relaunch):** batch 4d `wf_64880481-ea0` — 150 fix2 (round 17), 148 reverify2 (148-r2 has rounds 22/24); then 147, 158. Follow-up 1 `wf_2d0a851a-5d5` — 162, 163, 165, 166, 167, 168 fixes; 140 exec on `integ/uac-r2-batch4` (branch `task/uac-r2-140-x1`); 132-f1 (share-change cache eviction); **149-f1 DONE** (`task/uac-r2-149-f1`, verify next). Journals: `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl`.
+> - **Watching after compact:** re-arm the lane monitor: `PYTHONIOENCODING=utf-8 python -u C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/journal_watch.py | grep --line-buffered -E "RESULT|START|EVENT|Error|Traceback"` (RUNS already = both runs). The note-delivery watcher `/c/tmp/notewatch.sh` is no longer needed (no more sweep fix rounds outside follow-up 1).
+> - **Answering a running agent:** append to `NOTE-FROM-MAIN.md` in its worktree (newest `.claude/worktrees/wf_*` holding its `task/uac-r2-<id>*` branch). Never SendMessage a workflow agent. The merge agent for `C:\wt4i` (Agent tool, not a workflow) MAY be resumed with SendMessage.
+> - **Integration branch `integ/uac-r2-batch4`** (`C:\wt4i`) is now pushed to origin as a backup branch (no PR). Next merges: 150 final, 148, 147, 158, 140-x1, 132-f1, 149-f1 (follow-up), then the checklist.
+> - **After follow-up 1 ends:** collect `ownerQuestionsOpen` → decide as round 26 (complete fixes, never accept/defer) → relaunch any lane not ready (continuation script, Opus pinned).
+>
+
+> **Last Updated**: 2026-10-04 ~11:30Z (checkpoint #7). **Supersedes every block below.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #7 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Owner directive (2026-10-03, BINDING)** | "fix it properly — never defer or sideline". On partial-option escalations the main session DECIDES the complete fix itself (memory `fix-root-cause-not-options`) and records it as a round. Rounds **1-25** in `notes/session27-owner-decisions-and-research.md` (12-14 owner; 15 owner directive; 16-25 main-session under it). |
+> | **Model / spawn rules** | Opus pinned in new scripts. Keep session cwd = `C:/code_files/spaarke`; other dirs only in subshells. Answer a running workflow agent ONLY via `NOTE-FROM-MAIN.md` in its worktree (never SendMessage); never commit that file. Resume caching is prefix-ordered → write continuation scripts. |
+> | **Work branch** | `004c42140`+, pushed (rounds 12-25, 034 completed, checklist updates). Master `62277d50a` (#1110). |
+>
+> ### Running
+> | Workflow | Run | What |
+> |---|---|---|
+> | batch 4d | `wf_64880481-ea0` (task `wgmjj421q`, `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-batch4d.js`) | 150 fix2 (round 17 via note), 148 fix2 (rounds 22/24 via note); then 147 (on 148), 158 (on 148+156) |
+> | **follow-up 1** | `wf_2d0a851a-5d5` (task `wsousausj`, `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-followup.js`, plan `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/followup-round-plan.md`) | 162 (r15+r25), 163 (r16, on 164-r1), 165 (r20 1-3 + r25), 166 (r21 i-iii + r25), 167 (r14), 168 (r25), **140** exec on integ, **132-f1** (share-change cache eviction; child-eviction trim), **149-f1** (kept-container fan-out) |
+>
+> ### Sweep state (159-169), final of continuation `wf_9dbaa6e9-894`
+> READY: 159 `task/uac-r2-159`, 160 `task/uac-r2-160`, 161 `task/uac-r2-161-r1`, 164 `task/uac-r2-164-r1`, 169 `task/uac-r2-169`. In follow-up: 162, 163, 165, 166, 167, 168. Killed partial work kept on `wip/uac-r2-162-killed`, `wip/uac-r2-163-killed`; 165's saved WIP on `task/uac-r2-165-r1`.
+>
+> ### Batch 4 integration — `integ/uac-r2-batch4` (`C:\wt4i`, local, NOT pushed)
+> Merged: 143-r2, 137-b2, 156-c1-r2, master, 142-r6 (`7b7bda9c6` + criterion-19 test `6b685f0d4`), 146-c1-r1 (`d457890f9`), 149-r4 (`67d20b393`) + 142x149 wiring `b1443d12a`, 157-c2-r2 (`9ce0de613`), 133 (`1d55e70d2`), 132-r1 (`03e28e28f`). Builds green; affected tests + arch green; external-grid jest 7/7.
+> **To merge:** 150 (final), 148 → 147, 158, 140 (follow-up), 132-f1, 149-f1. Then the checklist (`notes/batch4-integration-steps.md`): schema-script verify fix, `.claude` ADR-034 A4, full suites, publish size, CVE, PR, live steps (146 child-table creator schema BEFORE deploy), deploy, live gates.
+>
+> ### Done since #6
+> 034 COMPLETED (canary live PASS). Issue #1115 (router docs_only). Owner rounds 12-14 + directive 15; main-session rounds 16-25.
+>
+> ### NEXT
+> 1. Watch both runs; merge each ready batch-4 branch into `C:\wt4i` (merge agent pattern for big conflicts).
+> 2. When follow-up 1 ends: decide any remaining open questions as a round (complete fixes), relaunch lanes still not ready.
+> 3. Sweep integration (159-169 + 167 ledger) after batch 4; then task 170; then batch 5 (036 → …; see checkpoint #6 list).
+>
+
 > **Last Updated**: 2026-10-03 ~21:05Z (checkpoint #6). **This block supersedes every block below it.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #6 (READ FIRST)
