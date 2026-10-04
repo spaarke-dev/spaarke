@@ -310,6 +310,12 @@ The cause is that no authoritative container → business-unit binding exists, s
 3. Configs of different customers may then share a `containerTypeId` / owning app (Model 1): the app-identity duplicate check is narrowed accordingly.
 4. 165's round-16 environment scoping is folded into the EXISTING SPE-admin scope filter (CLAUDE.md §11: no new filter class).
 
+## Round 21 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 166's escalations.
+
+1. **F0 second door (trigger 1): BOTH (a) and (b).** Field-level security on `sprk_graphdriveid` and `sprk_graphitemid`, writable only by the BFF identity (the task-150 FLS script pattern, dry run / `-Apply` / `-Verify`, with the rootcomponentbehavior-0 solution check), AND a server-side check before every app-only download that the drive item belongs to the record's own container (fail closed). Defence in depth: neither alone is sufficient (FLS does not cover rows forged before the lock; the check does not stop the write).
+2. **Reporting (trigger 5): option (A), completed.** The catalog row id is the contract, read AS THE CALLER; the Power BI report/workspace ids are derived server-side from the row; the client is fixed to match; the update verb is aligned (the BFF maps the verb the client sends); and the row-level-security effective identity (business unit) is computed server-side from the caller's systemuser and put in the embed token, so the `businessunit`/`bu` RLS claim is actually produced. Tests per route; the seven reporting Pending waivers resolve.
+3. **Field-mapping push (trigger 4): option (a).** Resolve the target's parent lookup from relationship metadata (the lookup on the target that references the source entity), so every profile works — including "Matter to Invoice (Attorney Matrix)" via `sprk_invoice.sprk_matter` — with no per-table naming convention, no schema change and no deactivated profile. Ambiguous metadata (several lookups to the source) fails closed with a clear error.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
