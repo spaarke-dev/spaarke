@@ -2,9 +2,10 @@
  * Document Record Service
  *
  * Creates Document records in Dataverse using an IDataverseClient abstraction.
- * Supports two implementations via strategy pattern:
- * - PcfDataverseClient: wraps ComponentFramework.WebApi (PCF controls)
+ * Current implementation (strategy pattern):
  * - ODataDataverseClient: direct OData fetch calls with token auth (Code Pages)
+ * (The PCF-side PcfDataverseClient had zero instantiation sites and was deleted
+ * 2026-10-03, reuse audit C-26.)
  *
  * Queries navigation property metadata dynamically via NavMapClient -> BFF API -> Dataverse.
  *

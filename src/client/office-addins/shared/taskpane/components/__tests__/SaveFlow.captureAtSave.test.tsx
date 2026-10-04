@@ -137,10 +137,13 @@ describe('SaveFlow — bytes captured at the moment of Save, not before (task 04
     expect(sentBodyAt(0).document.contentBase64).toBe('RkZFU0gtQllURVM=');
   });
 
-  it('reproduces the fix: pressing Save after an edit uploads B2, never the earlier B1 — capture happens per attempt, never once up front', async () => {
+  it('reproduces the fix: pressing Save again uploads B2, never the earlier B1 — capture happens per attempt, never once up front', async () => {
     // Task 088: the success card and its "Save Another" are gone — the pane stays on the form after a save,
-    // and the next save of the same open document is "Save version" (a version of the document just saved).
-    // The invariant this test exists for is unchanged: that second attempt captures the bytes AGAIN.
+    // and the next save of the same open document is a VERSION of the document just saved. The invariant
+    // this test exists for is unchanged: that second attempt captures the bytes AGAIN.
+    // Task 094: this pane is given no content-change-detection capability, so the owner's "never block a
+    // save" rule applies — the button is an enabled "Save" again immediately, with no edit needed to
+    // re-enable it (the removed 088 name-edit trigger is not what this test is pinning).
     const DOC_1 = 'd0c00001-0000-4000-8000-000000000001';
     saveResponses.push(accepted(), accepted());
     pollResponse = () => completedPoll(DOC_1);
@@ -154,11 +157,10 @@ describe('SaveFlow — bytes captured at the moment of Save, not before (task 04
     await waitFor(() => expect(saveCallCount()).toBe(1));
     expect(sentBodyAt(0).document.contentBase64).toBe('Qjk=');
 
-    // Reach the saved state, then edit the name — the user keeps the pane open and saves again.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Edit document name' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Document name' }), { target: { value: 'Brief v2' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    // Reach the saved state — an enabled "Save" immediately (no content-change detection capability was
+    // supplied) — and save again.
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    fireEvent.click(saveButton());
 
     await waitFor(() => expect(saveCallCount()).toBe(2));
     expect(captureDocumentContent).toHaveBeenCalledTimes(2);

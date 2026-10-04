@@ -135,6 +135,21 @@ widgets:
 | 15 | `find-similar-wizard` | FindSimilarWizardWidget | true | Code Page dispatcher (existing sprk_findsimilar) |
 | 16 | **`workspace`** | **WorkspaceLayoutWidget** | true | **Embedded LegalWorkspaceApp — ONE registration covers every Dataverse-defined workspace** |
 
+> **Producer gap — registered but never emitted (reuse audit C-27, verified 2026-10-03).** Of the seven
+> `output_pane` widgets (rows 1–7), **only `SearchResults` has a server producer** —
+> `DocumentSearchHandler.cs` emits `WidgetType: "SearchResults"` (two sites). `BudgetDashboard`,
+> `AnalysisEditor`, `ContractComparison`, `StatusSummary`, `Recommendation` and `ActionPlan` are never
+> emitted by any BFF handler, playbook or tool. The same holds for **`redline-viewer`** (row 8 — its
+> compare-documents tool is retired) and **`matters-dashboard`** (registered in
+> `register-workspace-widgets.ts` from `metricsDashboardConfigs.ts`, but with no menu entry and no
+> `surfaceLaunchRegistry` entry). The only server references to these type strings are the
+> `WidgetContextTypeResolver.cs` context-type map, which *consumes* a type string — it does not emit one.
+>
+> ⚠️ **Do not delete the components on this evidence.** They are **reachable code**: `register-workspace-widgets.ts`
+> lazy-`import()`s each by deep subpath, so a naive dead-export sweep would remove working widgets. What is
+> missing is a **producer**, not a consumer. Before building a feature on one of these widgets, add the
+> server-side emission first; before retiring one, retire its registration and component together.
+
 ---
 
 ## 4. `@spaarke/auth` inventory

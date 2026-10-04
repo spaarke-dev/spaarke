@@ -73,11 +73,10 @@ import {
 } from '../../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
 
 // Maps the chart-def wizard key (or entity fallback) to the wizard Code Page
-// web-resource name opened via navigateTo. Kept LOCAL to Visual Host — NOT
-// imported from the shared `wizardRegistry` — so the cutover does not drag the
-// lazy-loaded wizard components (and their auth/sdap-client deps) back into the
-// bundle. Mirrors `resolveWizard`'s resolution order + `ENTITY_TO_WIZARD_KEY`
-// aliases (single source of truth is small enough to inline; see FR-03).
+// web-resource name opened via navigateTo. This is the SINGLE source of truth
+// for "+" wizard keys: add a new key HERE (see VISUALHOST-SETUP-GUIDE.md "Adding
+// a new '+' wizard target"). The former shared `wizardRegistry`/`resolveWizard`
+// it once mirrored had zero consumers and was deleted 2026-10-03 (reuse audit C-20).
 const WIZARD_KEY_TO_PAGE: Readonly<Record<string, string>> = {
   event: 'sprk_createeventwizard',
   invoice: 'sprk_createinvoicewizard',
@@ -95,7 +94,7 @@ const SPRK_PREFIX = 'sprk_';
 
 /**
  * Resolves the wizard Code Page web-resource name for the "+" button.
- * Resolution order (parity with shared `resolveWizard`):
+ * Resolution order:
  *   1. `createWizardKey` (`sprk_createwizardkey`) verbatim, if non-empty.
  *   2. else `entityLogicalName` (`sprk_entitylogicalname`), normalized via the
  *      alias map, else `sprk_`-prefix strip.

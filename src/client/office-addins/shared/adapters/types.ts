@@ -179,6 +179,37 @@ export interface HostCapabilities {
    * UI on this flag, never on `hostType` (NFR-10).
    */
   canProvideDocumentName: boolean;
+  /**
+   * Whether the host can report when the open document's CONTENT changes — `Word.Document`'s
+   * `onParagraphAdded` / `onParagraphChanged` / `onParagraphDeleted` events, requirement set
+   * **WordApi 1.6** (GA since Word on the web / Windows / Mac build 2308, well below the owner's
+   * "desktop 2501+" floor — verified on Microsoft Learn 2026-10-04, spaarkeai-word-add-in-r1 task
+   * 094). Drives the Save tab's "Re-enable on document edits" rule (owner, 2026-10-04): once a
+   * document is saved, "Saved" turns back into an enabled "Save" on the next change event.
+   *
+   * Word-only — no open document in Outlook, same reasoning as {@link canGetDocumentUrl}. UNLIKE
+   * `canGetDocumentUrl`, this is runtime-gated: a host can satisfy this adapter's `WordApi` 1.3 init
+   * floor and still lack 1.6. Views MUST gate `registerDocumentChangeHandler` on this flag, never on
+   * `hostType` (NFR-10) — **and MUST NOT gray the Save button when it is `false`**: the owner's
+   * binding rule is "never block a save" — without detection, the button stays an enabled "Save".
+   */
+  canDetectDocumentChanges: boolean;
+  /**
+   * Whether this platform can be offered "Open in Word" — a synthetic anchor-click launch of the
+   * `ms-word:` Office URI scheme (spaarkeai-word-add-in-r1 task 094, UAT round 4 trial; owner
+   * 2026-10-04: *"if this is just something to test, then fine"*). **UNSUPPORTED mechanism**: no
+   * documented Office.js call can launch a non-http(s) scheme from a task pane
+   * (`Office.context.ui.openBrowserWindow` only accepts http/https — OfficeDev/office-js#2820,
+   * closed "by design"); this relies on undocumented `<a href="ms-word:...">.click()` behavior
+   * community evidence (OfficeDev/office-js#6926) showed working on Word desktop. Nothing can detect
+   * a failed launch, so "Open in browser" (`canOpenBrowserWindow`/`window.open`) is always offered
+   * alongside it as the real fallback, never a retry target.
+   *
+   * True only on `Office.PlatformType.PC` / `Mac` (desktop Word can register the `ms-word:` protocol
+   * handler; the web and mobile hosts cannot). Decided by PLATFORM, never `hostType` (NFR-10) — the
+   * collision prompt's "Open in Word" button is gated on this flag.
+   */
+  canOpenDesktopWord: boolean;
   /** Minimum required Office.js API version */
   minApiVersion: string;
   /** Currently supported requirement set */
