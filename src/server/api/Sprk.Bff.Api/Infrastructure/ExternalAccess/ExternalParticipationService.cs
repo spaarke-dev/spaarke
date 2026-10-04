@@ -1694,6 +1694,167 @@ public class ExternalParticipationService
         return memberships;
     }
 
+    // ── Colleagues by email (task 140: contact-side Grant Access, owner Q2) ─────────────────────────────
+
+    /// <summary>
+    /// How many organizations one colleague-by-email query names. The grantor's conferring organizations are few; the
+    /// bound keeps the <c>$filter</c> disjunction (and the URL) inside Dataverse's limits for any count, and every chunk
+    /// is read, so no organization is ever left out (the round-18 rule: no deterministic "too many" state).
+    /// </summary>
+    internal const int ColleagueOrganizationChunkSize = 25;
+
+    /// <summary>
+    /// The ACTIVE contacts whose <c>emailaddress1</c> is <paramref name="email"/> AND who hold a CONFERRING membership
+    /// in at least one of <paramref name="organizationIds"/> — "by email among active org members" (task 140 POML step
+    /// 4), never a system-wide email lookup.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why scoped in the query and not after it.</b> A system-wide lookup answers about people outside the
+    /// grantor's organizations: a colleague sharing an email with an outsider read as "ambiguous", and the refusal told the
+    /// grantor a non-colleague with that address exists (task 140 verifier r1, items 3 and 11). Here only memberships of
+    /// the grantor's own organizations are read, so nobody else can be counted, matched or disclosed.</para>
+    /// <para><b>One rule for "member".</b> The junction rows are judged by <see cref="ProjectOrganizationMemberships"/>
+    /// — the same conferring rule (statecode, start/end dates, active organization) the grantee's own membership read
+    /// applies (task 109) — so the email path and the contact-id path can never disagree about who is a colleague.</para>
+    /// <para><b>Faults.</b> A read that could not be completed in ANY chunk answers <see cref="ColleagueEmailMatch.Failed"/>
+    /// — never "nobody": the caller reports a fault (503), not "not a member". The caller's own cancellation
+    /// propagates.</para>
+    /// </remarks>
+    internal async Task<ColleagueEmailMatch> FindConferringMembersByEmailAsync(
+        IReadOnlyCollection<Guid> organizationIds, string email, CancellationToken ct = default)
+    {
+        var organizations = organizationIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var wanted = email?.Trim();
+        if (organizations.Count == 0 || string.IsNullOrEmpty(wanted))
+        {
+            return ColleagueEmailMatch.None;
+        }
+
+        var rows = new List<ColleagueMembershipRow>();
+        try
+        {
+            for (var i = 0; i < organizations.Count; i += ColleagueOrganizationChunkSize)
+            {
+                var chunk = organizations.Skip(i).Take(ColleagueOrganizationChunkSize).ToList();
+                rows.AddRange(await ReadColleagueMembershipRowsAsync(chunk, wanted, ct).ConfigureAwait(false));
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS] The colleague-by-email membership read failed for {Count} organization(s); reporting it as " +
+                "UNREADABLE (never as 'no colleague').", organizations.Count);
+            return ColleagueEmailMatch.Failed;
+        }
+
+        return new ColleagueEmailMatch(ProjectColleaguesByEmail(rows, organizations, wanted, TodayUtc), Unreadable: false);
+    }
+
+    /// <summary>
+    /// Pure: which contacts the junction rows of one colleague-by-email read make colleagues — an expanded, ACTIVE contact
+    /// whose email equals <paramref name="email"/> (trimmed, case-insensitive — Dataverse's own comparison), holding a
+    /// CONFERRING membership (<see cref="ProjectOrganizationMemberships"/>) in one of <paramref name="organizationIds"/>.
+    /// </summary>
+    /// <remarks>The <c>$filter</c> bounds what comes back; this decides what it means (task 117's discipline), so a filter
+    /// that grew too broad costs a read and never adds a colleague. A row whose contact did not come back expanded names
+    /// nobody (fail closed on an additive decision).</remarks>
+    internal static IReadOnlyList<Guid> ProjectColleaguesByEmail(
+        IEnumerable<ColleagueMembershipRow> rows, IReadOnlyCollection<Guid> organizationIds, string email, DateOnly today)
+    {
+        var wanted = email.Trim();
+        return rows
+            .Where(r => r.ContactId is { } id && id != Guid.Empty
+                        && r.OrganizationId is { } org && organizationIds.Contains(org)
+                        && r.Contact is { } contact
+                        && IsActiveState(contact.StateCode)
+                        && string.Equals(contact.Email?.Trim(), wanted, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.ContactId!.Value)
+            .Where(g => ProjectOrganizationMemberships(g.Select(r => r.ToContactOrgRow()), today)
+                .ConferringOrganizationIds.Any(organizationIds.Contains))
+            .Select(g => g.Key)
+            .OrderBy(id => id)
+            .ToList();
+    }
+
+    /// <summary>
+    /// The <c>$filter</c> of one colleague-by-email chunk: memberships of these organizations under the WALL state clause
+    /// (the dates and the organization's state are decided in code), whose contact is active and carries the email.
+    /// The email is an OData string literal — quotes doubled, then URL-encoded (<see cref="DataverseContactIdentityStore.Literal"/>)
+    /// — so no caller value can change the query (session 27 round 16 item 3).
+    /// </summary>
+    internal static string BuildColleagueByEmailFilter(IReadOnlyCollection<Guid> organizationIds, string email)
+        => $"({string.Join(" or ", organizationIds.Select(id => $"_sprk_organization_value eq {id:D}"))})" +
+           $" and {WallMembershipStateClause}" +
+           $" and sprk_Contact/emailaddress1 eq '{DataverseContactIdentityStore.Literal(email.Trim())}'" +
+           " and sprk_Contact/statecode eq 0";
+
+    /// <summary>
+    /// Columns and expansions of the colleague-by-email read: the membership columns the conferring rule needs, the
+    /// parent organization's state (ISS-026) and the contact's state and email (re-decided in code). Navigation
+    /// properties <c>sprk_Contact</c> / <c>sprk_Organization</c> live-verified 2026-10-04 (read-only metadata GET).
+    /// </summary>
+    internal const string ColleagueByEmailSelect =
+        "_sprk_contact_value," + OrganizationMembershipSelect;
+
+    internal const string ColleagueByEmailExpand =
+        OrganizationStateExpand + ",sprk_Contact($select=contactid,statecode,emailaddress1)";
+
+    /// <summary>
+    /// One colleague-by-email chunk, following <c>@odata.nextLink</c> to the end. Throws on any failure (a fault is never
+    /// an empty answer).
+    /// </summary>
+    /// <remarks><c>internal virtual</c>: the test seam this class uses for every read (subclass + override; no HTTP double,
+    /// ADR-038 B1).</remarks>
+    internal virtual async Task<IReadOnlyList<ColleagueMembershipRow>> ReadColleagueMembershipRowsAsync(
+        IReadOnlyCollection<Guid> organizationIds, string email, CancellationToken ct)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        string? next = $"{GetDataverseApiUrl()}/sprk_contactorganizations" +
+                       $"?$filter={BuildColleagueByEmailFilter(organizationIds, email)}" +
+                       $"&$select={ColleagueByEmailSelect}" +
+                       $"&$expand={ColleagueByEmailExpand}";
+
+        var rows = new List<ColleagueMembershipRow>();
+        var pages = 0;
+        while (next is not null)
+        {
+            if (++pages > MaxOrganizationMemberPages)
+            {
+                throw new InvalidOperationException(
+                    $"The colleague-by-email read did not finish within {MaxOrganizationMemberPages} pages.");
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, next);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Add("Prefer", $"odata.maxpagesize={OrganizationMemberPageSize}");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var page = await response.Content.ReadFromJsonAsync<ColleagueMembershipPage>(ct).ConfigureAwait(false);
+            rows.AddRange(page?.Value ?? new List<ColleagueMembershipRow>());
+            next = page?.NextLink;
+        }
+
+        return rows;
+    }
+
+    private sealed class ColleagueMembershipPage
+    {
+        [JsonPropertyName("value")]
+        public List<ColleagueMembershipRow>? Value { get; set; }
+
+        [JsonPropertyName("@odata.nextLink")]
+        public string? NextLink { get; set; }
+    }
+
     /// <summary>
     /// The <c>sprk_contactorganization</c> junction query — the ONE read behind both named membership sets
     /// (<see cref="ProjectOrganizationMemberships"/>), shared by the evaluator entry above and the org-grant
@@ -1913,6 +2074,65 @@ public class ExternalParticipationService
         /// <summary>The parent organization's state; null when the expand did not come back.</summary>
         [JsonPropertyName("sprk_Organization")]
         public OrganizationStateRow? Organization { get; set; }
+    }
+
+    /// <summary>
+    /// One junction row of the colleague-by-email read (task 140): a <see cref="ContactOrgRow"/> plus the member contact
+    /// and its expanded state and email.
+    /// </summary>
+    internal sealed class ColleagueMembershipRow
+    {
+        [JsonPropertyName("_sprk_contact_value")]
+        public Guid? ContactId { get; set; }
+
+        [JsonPropertyName("_sprk_organization_value")]
+        public Guid? OrganizationId { get; set; }
+
+        [JsonPropertyName("sprk_startdate")]
+        public DateOnly? StartDate { get; set; }
+
+        [JsonPropertyName("sprk_enddate")]
+        public DateOnly? EndDate { get; set; }
+
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
+
+        [JsonPropertyName("sprk_Organization")]
+        public OrganizationStateRow? Organization { get; set; }
+
+        [JsonPropertyName("sprk_Contact")]
+        public ColleagueContactRow? Contact { get; set; }
+
+        /// <summary>The membership part, for <see cref="ProjectOrganizationMemberships"/>.</summary>
+        internal ContactOrgRow ToContactOrgRow() => new()
+        {
+            OrganizationId = OrganizationId,
+            StartDate = StartDate,
+            EndDate = EndDate,
+            StateCode = StateCode,
+            Organization = Organization,
+        };
+    }
+
+    /// <summary>The expanded member contact of a <see cref="ColleagueMembershipRow"/>: its state and email only.</summary>
+    internal sealed class ColleagueContactRow
+    {
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
+
+        [JsonPropertyName("emailaddress1")]
+        public string? Email { get; set; }
+    }
+
+    /// <summary>
+    /// The answer of <see cref="FindConferringMembersByEmailAsync"/>: the colleagues the email names (zero, one, or
+    /// several), or <see cref="Unreadable"/> when the read could not be completed.
+    /// </summary>
+    internal sealed record ColleagueEmailMatch(IReadOnlyList<Guid> ContactIds, bool Unreadable)
+    {
+        public static ColleagueEmailMatch None { get; } = new(Array.Empty<Guid>(), Unreadable: false);
+
+        public static ColleagueEmailMatch Failed { get; } = new(Array.Empty<Guid>(), Unreadable: true);
     }
 
     /// <summary>The expanded parent <c>sprk_organization</c> — its state only (task 109 · ISS-026).</summary>

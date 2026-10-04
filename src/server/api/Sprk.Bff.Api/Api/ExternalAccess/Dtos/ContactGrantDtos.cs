@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c>.</param>
 /// <param name="RecordId">The record to grant access to.</param>
 /// <param name="GranteeContactId">The colleague, by contact id. Exactly one of this and <paramref name="GranteeEmail"/>.</param>
-/// <param name="GranteeEmail">The colleague, by email — matched among the active contacts of the grantor's own
-/// organizations only.</param>
+/// <param name="GranteeEmail">The colleague, by email — matched among the active contacts holding a current membership
+/// of one of the grantor's own organizations ONLY (<c>ExternalParticipationService.FindConferringMembersByEmailAsync</c>);
+/// nobody outside those organizations is considered or disclosed. No such colleague → 422; several → 409.</param>
 /// <param name="AccessLevel">The requested level (option-set value). Written at most at the grantor's own level.</param>
 /// <param name="ExpiryDate">Optional. Absent → today + 90 days. Never later than the grantor's own grant on the record
 /// (owner G2 (i)); a past date is refused.</param>

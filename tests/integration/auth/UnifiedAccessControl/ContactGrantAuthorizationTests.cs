@@ -73,6 +73,8 @@ public class ContactGrantAuthorizationTests
         _identities.AddContact(Colleague, email: ColleagueEmail);
         _identities.AddContact(Outsider, email: "outsider@firm-b.example");
         _identities.AddContact(Grantor, email: "grantor@firm-a.example");
+        // The colleague-by-email read expands each member's contact from the same identity rows.
+        _participations.ContactDirectory = id => _identities.Contacts.TryGetValue(id, out var c) ? (c.Email, c.StateCode) : null;
         // The grantor's own grant on the project — dated well beyond +90, so the default expiry is not capped.
         _dataverse.Seed(Grantor, ProjectId, (int)ExternalAccessLevel.FullAccess, Today.AddDays(200), issuedByContact: null);
     }
@@ -557,6 +559,95 @@ public class ContactGrantAuthorizationTests
         var result = await Grant(ByEmail(ColleagueEmail), Ciam(ExternalAccessLevel.Collaborate));
 
         Problem(result).Should().Be((409, ContactGrantEndpoints.GranteeAmbiguousReasonCode));
+        Detail(result).Should().Contain("in your organization");
+        AssertNothingWritten();
+    }
+
+    /// <summary>
+    /// Task 140 verifier r1, items 3 and 11 — "by email among active org members", never system-wide. A colleague and an
+    /// OUTSIDER (another organization) share the address: the colleague is granted; the outsider is never counted, so
+    /// the answer is not "ambiguous" and says nothing about the outsider. The read named only the grantor's organization.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ByEmail_WhenAnOutsiderSharesTheColleaguesAddress_GrantsTheColleague()
+    {
+        _identities.Contacts[Outsider].Email = ColleagueEmail;
+
+        var result = await Grant(ByEmail(ColleagueEmail), Ciam(ExternalAccessLevel.Collaborate));
+
+        Ok<ContactGrantResponse>(result).GranteeContactId.Should().Be(Colleague);
+        _dataverse.RowsFor(Outsider).Should().BeEmpty();
+        _participations.ColleagueByEmailReads.Should().OnlyContain(r => r.Organizations.SequenceEqual(new[] { FirmA }),
+            "only the grantor's own organizations are read");
+    }
+
+    /// <summary>
+    /// The twin with no colleague at the address: an email only an outsider uses is the ordinary 422, worded with the
+    /// address the caller typed — never "more than one person", which would reveal the outsider.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ByEmailOnlyAnOutsiderUses_Is422_AndRevealsNothingAboutTheOutsider()
+    {
+        var byOutsiderEmail = await Grant(ByEmail("outsider@firm-b.example"), Ciam(ExternalAccessLevel.Collaborate));
+        var byUnknownEmail = await Grant(ByEmail("nobody@firm-b.example"), Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(byOutsiderEmail).Should().Be((422, ContactGrantEndpoints.GranteeNotInOrganizationReasonCode));
+        Detail(byOutsiderEmail)!.Replace("outsider@firm-b.example", "{email}").Should().Be(
+            Detail(byUnknownEmail)!.Replace("nobody@firm-b.example", "{email}"),
+            "an address an outsider uses and an address nobody uses are one answer");
+        AssertNothingWritten();
+    }
+
+    /// <summary>
+    /// The production projection (not the double) keeps an INACTIVE contact at the colleague's address out of the
+    /// match: an active colleague plus an inactive one with the same email is the colleague, not "ambiguous".
+    /// </summary>
+    [Fact]
+    public async Task Grant_ByEmail_AnInactiveContactAtTheSameAddress_IsNotCounted()
+    {
+        var former = Guid.Parse("c1400000-0000-0000-0000-000000000098");
+        _identities.AddContact(former, email: ColleagueEmail);
+        _identities.Contacts[former].StateCode = 1;
+        _participations.ContactOrganizations[former] = new[] { FirmA };
+
+        var result = await Grant(ByEmail(ColleagueEmail), Ciam(ExternalAccessLevel.Collaborate));
+
+        Ok<ContactGrantResponse>(result).GranteeContactId.Should().Be(Colleague);
+    }
+
+    /// <summary>
+    /// Task 140 verifier r1, items 2 and 12 — the by-id path is not a contact oracle. Another organization's contact, an
+    /// inactive contact and an id that names nobody are ONE refusal: same status, same code, same words — and the
+    /// stored email of the contact the GUID names never appears.
+    /// </summary>
+    [Theory]
+    [InlineData("other-organization")]
+    [InlineData("inactive")]
+    public async Task Grant_ById_OfANonColleague_IsTheSameAnswerAsAnUnknownId_AndNeverShowsTheirEmail(string shape)
+    {
+        const string secret = "secret.outsider@firm-b.example";
+        Guid target;
+        if (shape == "other-organization")
+        {
+            target = Outsider;
+            _identities.Contacts[Outsider].Email = secret;
+        }
+        else
+        {
+            target = Guid.Parse("c1400000-0000-0000-0000-000000000097");
+            _identities.AddContact(target, email: secret);
+            _identities.Contacts[target].StateCode = 1;
+            _participations.ContactOrganizations[target] = new[] { FirmA };
+        }
+
+        var named = await Grant(Request(ExternalAccessLevel.ViewOnly, grantee: target), Ciam(ExternalAccessLevel.Collaborate));
+        var unknown = await Grant(Request(ExternalAccessLevel.ViewOnly, grantee: Guid.Parse("c1400000-0000-0000-0000-0000000000ff")),
+            Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(named).Should().Be((422, ContactGrantEndpoints.GranteeNotInOrganizationReasonCode));
+        Problem(unknown).Should().Be(Problem(named));
+        Detail(named).Should().Be(Detail(unknown), "the caller cannot tell whether the id names a contact");
+        Detail(named).Should().NotContain(secret).And.Contain(ContactGrantEndpoints.UnnamedGranteeLabel);
         AssertNothingWritten();
     }
 
@@ -580,14 +671,19 @@ public class ContactGrantAuthorizationTests
         _identities.Writes.Should().BeEmpty("no contact is created and no oid is bound");
     }
 
-    [Fact]
-    public async Task Grant_WhenTheGranteeLookupCannotBeRead_Is503()
+    [Theory]
+    [InlineData("email")]
+    [InlineData("id")]
+    public async Task Grant_WhenTheGranteeLookupCannotBeRead_Is503(string by)
     {
-        _identities.EmailLookupStatus = LookupStatus.Failed;
+        if (by == "email") _participations.ColleagueByEmailFaults = true;
+        else _identities.FailGetContact = true;
 
-        var result = await Grant(ByEmail(ColleagueEmail), Ciam(ExternalAccessLevel.Collaborate));
+        var result = await Grant(by == "email" ? ByEmail(ColleagueEmail) : Request(ExternalAccessLevel.ViewOnly),
+            Ciam(ExternalAccessLevel.Collaborate));
 
         Problem(result).Should().Be((503, ContactGrantorAuthorizationFilter.MembershipUnreadableReasonCode));
+        Detail(result).Should().Contain("could not be checked");
         AssertNothingWritten();
     }
 
@@ -781,6 +877,81 @@ public class ContactGrantAuthorizationTests
         Ok<ContactGrantResponse>(onMatter);
         _dataverse.RowsFor(Colleague).Should().ContainSingle().Which.MatterId.Should().Be(MatterId);
         Problem(onProject).Should().Be((403, ContactGrantorAuthorizationFilter.LevelInsufficientReasonCode));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The scoped colleague-by-email read (verifier r1 items 3/11): the pure projection and the query text
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The production projection decides who a colleague is, whatever the query returned: an active contact at the
+    /// address (case-insensitive, trimmed) with a CONFERRING membership of a named organization. Each excluded row
+    /// differs from the included one in exactly one input.
+    /// </summary>
+    [Fact]
+    public void ProjectColleaguesByEmail_KeepsOnlyActiveContactsAtTheAddressWithAConferringMembership()
+    {
+        var today = new DateOnly(2026, 10, 4);
+        var ids = Enumerable.Range(1, 9).Select(i => Guid.Parse($"e1400000-0000-0000-0000-00000000000{i}")).ToArray();
+        ExternalParticipationService.ColleagueMembershipRow Row(Guid contact, Guid org, string? email = ColleagueEmail,
+            int contactState = 0, bool expanded = true, DateOnly? end = null, int orgState = 0) => new()
+        {
+            ContactId = contact,
+            OrganizationId = org,
+            StateCode = 0,
+            EndDate = end,
+            Organization = new ExternalParticipationService.OrganizationStateRow { StateCode = orgState },
+            Contact = expanded ? new ExternalParticipationService.ColleagueContactRow { Email = email, StateCode = contactState } : null,
+        };
+
+        var rows = new[]
+        {
+            Row(ids[0], FirmA),                                        // the colleague
+            Row(ids[1], FirmA, email: " COLLEAGUE@firm-a.example "),   // same address, other case + spaces: Dataverse equality
+            Row(ids[2], FirmA, contactState: 1),                       // inactive contact
+            Row(ids[3], FirmA, email: "someone.else@firm-a.example"),  // another address
+            Row(ids[4], FirmA, expanded: false),                       // contact did not come back
+            Row(ids[5], FirmB),                                        // an organization not named
+            Row(ids[6], FirmA, end: today.AddDays(-1)),                // membership ended
+            Row(ids[7], FirmA, orgState: 1),                           // organization inactive
+            Row(ids[8], FirmA, end: today.AddDays(-1)), Row(ids[8], FirmA), // one ended + one current row: a member
+        };
+
+        ExternalParticipationService.ProjectColleaguesByEmail(rows, new[] { FirmA }, ColleagueEmail, today)
+            .Should().Equal(ids[0], ids[1], ids[8]);
+    }
+
+    /// <summary>
+    /// The query names exactly the organizations given, the wall state clause, the contact's ACTIVE state and the
+    /// email as an escaped OData literal — a quote cannot end the literal (session 27 round 16 item 3).
+    /// </summary>
+    [Fact]
+    public void BuildColleagueByEmailFilter_NamesTheOrganizations_AndEscapesTheEmail()
+    {
+        var filter = ExternalParticipationService.BuildColleagueByEmailFilter(new[] { FirmA, FirmB }, " o'brien@firm-a.example ");
+
+        filter.Should().StartWith($"(_sprk_organization_value eq {FirmA:D} or _sprk_organization_value eq {FirmB:D})");
+        filter.Should().Contain(ExternalParticipationService.WallMembershipStateClause);
+        filter.Should().Contain("sprk_Contact/statecode eq 0");
+        filter.Should().Contain("sprk_Contact/emailaddress1 eq 'o%27%27brien%40firm-a.example'",
+            "the quote is doubled, then URL-encoded; the email is trimmed");
+        filter.Should().NotContain("o'brien");
+    }
+
+    /// <summary>A grantor with more organizations than one query names is read in chunks — every organization is read.</summary>
+    [Fact]
+    public async Task Grant_ByEmail_ForAGrantorInManyOrganizations_ReadsEveryOrganization()
+    {
+        var many = Enumerable.Range(1, ExternalParticipationService.ColleagueOrganizationChunkSize + 3)
+            .Select(i => Guid.Parse($"0a140000-0000-0000-0001-{i:D12}")).ToArray();
+        _participations.ContactOrganizations[Grantor] = many;
+        _participations.ContactOrganizations[Colleague] = new[] { many[^1] };
+
+        var result = await Grant(ByEmail(ColleagueEmail), Ciam(ExternalAccessLevel.Collaborate));
+
+        Ok<ContactGrantResponse>(result).GranteeContactId.Should().Be(Colleague, "the colleague's firm is in the LAST chunk");
+        _participations.ColleagueByEmailReads.SelectMany(r => r.Organizations).Should().BeEquivalentTo(many);
+        _participations.ColleagueByEmailReads.Should().HaveCount(2);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

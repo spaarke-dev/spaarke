@@ -948,7 +948,9 @@ public static class GrantExternalAccessEndpoint
         }
     }
 
-    private sealed class SystemUserRow
+    /// <summary>The <c>systemusers</c> projection of <see cref="ResolveGrantedBySystemUserIdAsync"/>. Internal so a test can
+    /// answer that read at the <see cref="DataverseWebApiClient"/> seam (no HTTP double, ADR-038 B1).</summary>
+    internal sealed class SystemUserRow
     {
         public Guid? systemuserid { get; set; }
     }

@@ -77,7 +77,10 @@ export interface ContactGrantRequest {
   recordId: string;
   /** The colleague, by contact id — exactly one of this and granteeEmail */
   granteeContactId?: string;
-  /** The colleague, by email (matched among active contacts of the caller's organizations) */
+  /**
+   * The colleague, by email — matched among the active members of the caller's own organizations ONLY
+   * (nobody outside them is considered or disclosed). No such colleague → 422; several → 409.
+   */
   granteeEmail?: string;
   /**
    * Requested level (Dataverse sprk_accesslevel option value).

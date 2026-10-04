@@ -32,7 +32,11 @@
                      profile that can create or update it (besides System Administrator) is FAIL. Without the lock, any
                      user with Write on a grant row could name a contact as its issuer, and that contact could then
                      revoke the grant from the external SPA.
-      (d) SOLUTION   the lookup, its relationship and both profiles are in -SolutionUniqueName (SpaarkeCore).
+      (d) SOLUTION   the lookup, its relationship and both profiles are in -SolutionUniqueName (SpaarkeCore), decided
+                     by the shared scripts/common/DataverseSolutionMembership.ps1: paged, and a column or relationship
+                     counts as included when its table is in the solution with rootcomponentbehavior = 0 (as
+                     sprk_externalrecordaccess is in SpaarkeCore on spaarkedev1 -- it then has no row of its own, and
+                     AddSolutionComponent on it is a no-op).
       (e) PUBLISH    sprk_externalrecordaccess.
 
     ⚠️ DEPLOY ORDER. A BFF build carrying task 140 SELECTS this column on every grant-row read (/grant, /revoke,
@@ -75,7 +79,8 @@
 .NOTES
     unified-access-control-r2 task 140 (#1063). Code: src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/
     ExternalGrantLifecycle.cs (GrantedByContactNavigationProperty, RowSelect) — the names are pinned against this script
-    by ContactGrantSchemaAgreementTests. Schema doc: src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/
+    by tests/Spaarke.ArchTests/ContactGrantGuardTests.cs (TheIssuerColumnAgreesWithTheSchemaScript); the solution step
+    by SchemaScriptSolutionMembershipGuardTests. Schema doc: src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/
     entity-schema.md. Shape: scripts/Set-RecordCreatorPersonSchema.ps1 (task 133). Auth: the operator's own az CLI
     identity (System Administrator in the environment). No secrets.
 #>
@@ -95,6 +100,8 @@ if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Ap
 if (($Apply -or $Verify) -and $BffApplicationIds.Count -eq 0) {
     throw '-BffApplicationIds is required for -Apply and -Verify: the writer profile must name the BFF application user(s) explicitly.'
 }
+# A single comma-joined string (pwsh -File) is split, never sent as one id.
+$BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants (the BFF uses these exact names: ExternalGrantLifecycle.GrantedByContactNavigationProperty / RowSelect) ──
@@ -154,6 +161,7 @@ function New-Label([string]$Text) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -329,17 +337,26 @@ Write-Host "`n(d) Solution components"
 $solution = @((Invoke-DvGet "solutions?`$select=solutionid,uniquename&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
 if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found" }
 else {
+    # Membership through the ONE shared helper (scripts/common/DataverseSolutionMembership.ps1): paged, and a column or
+    # relationship of a table in the solution with rootcomponentbehavior = 0 ("include subcomponents") counts as in it.
+    # sprk_externalrecordaccess IS such a table in SpaarkeCore on spaarkedev1 (solutioncomponent
+    # 26217b50-6b28-f111-88b5-7ced8d1dc988, rootcomponentbehavior 0): its new column and relationship get no row of their
+    # own and AddSolutionComponent on them is a no-op, so an own objectid check would report them MISSING forever and
+    # -Verify (gate G-140-1) could never pass (batch-4 live gates 2026-10-03, the 133/143 false negative).
     $components = [System.Collections.Generic.List[object]]::new()
     foreach ($t in $Tables) {
-        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column" }) }
+        $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId
+        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId }) }
         $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')?`$select=MetadataId"
-        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)" }) }
+        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; TableId = $tableId }) }
     }
     foreach ($profileId in $readerId, $writerId) { if ($profileId) { $components.Add(@{ Id = $profileId; Type = 70; Label = "field security profile $profileId" }) } }
 
-    $inSolution = @((Invoke-DvGet "solutioncomponents?`$select=objectid&`$filter=_solutionid_value eq $($solution.solutionid)").value | ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
     foreach ($c in $components) {
-        if ($inSolution -contains $c.Id.ToString().ToLowerInvariant()) { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
         if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
         if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
         Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false } | Out-Null

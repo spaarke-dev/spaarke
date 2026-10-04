@@ -122,6 +122,66 @@ internal static class GrantPolicyTestDoubles
         }
 
         /// <summary>
+        /// Task 140 r2: the contacts the colleague-by-email read sees — id → (email, statecode), e.g. the test's identity
+        /// store. A contact not answered here has no expanded contact on its junction rows (names nobody).
+        /// </summary>
+        public Func<Guid, (string? Email, int StateCode)?>? ContactDirectory { get; set; }
+
+        /// <summary>Task 140 r2: the colleague-by-email read THROWS (the production fault shape of a failed page).</summary>
+        public bool ColleagueByEmailFaults { get; set; }
+
+        /// <summary>Task 140 r2: every colleague-by-email read — the organizations it named and the email.</summary>
+        public ConcurrentBag<(Guid[] Organizations, string Email)> ColleagueByEmailReads { get; } = new();
+
+        /// <summary>
+        /// Task 140 r2: the junction rows a colleague-by-email chunk returns, as Dataverse would for the production
+        /// <c>$filter</c>'s ORGANIZATION and junction-state clauses — every active membership row of the named organizations,
+        /// built from <see cref="MembershipRows"/> / <see cref="ContactOrganizations"/>, each with its contact expanded from
+        /// <see cref="ContactDirectory"/>. The contact's email and state are deliberately NOT filtered here: the PRODUCTION
+        /// projection (<see cref="ExternalParticipationService.ProjectColleaguesByEmail"/>) must decide them, so a test
+        /// proves the code — not the double — keeps an outsider or an inactive contact out.
+        /// </summary>
+        internal override Task<IReadOnlyList<ColleagueMembershipRow>> ReadColleagueMembershipRowsAsync(
+            IReadOnlyCollection<Guid> organizationIds, string email, CancellationToken ct)
+        {
+            ColleagueByEmailReads.Add((organizationIds.ToArray(), email));
+            if (ColleagueByEmailFaults)
+                throw new HttpRequestException("Simulated colleague-by-email read failure.");
+
+            var rows = new List<ColleagueMembershipRow>();
+            foreach (var contactId in ContactOrganizations.Keys.Union(MembershipRows.Keys).Distinct())
+            {
+                var memberships = MembershipRows.TryGetValue(contactId, out var seeded)
+                    ? seeded
+                    : ContactOrganizations[contactId].Select(org => new ContactOrgRow
+                    {
+                        OrganizationId = org,
+                        StateCode = 0,
+                        Organization = new OrganizationStateRow { StateCode = 0 },
+                    }).ToArray();
+
+                var contact = ContactDirectory?.Invoke(contactId) is { } info
+                    ? new ColleagueContactRow { Email = info.Email, StateCode = info.StateCode }
+                    : null;
+
+                rows.AddRange(memberships
+                    .Where(m => m.OrganizationId is { } org && organizationIds.Contains(org) && IsActiveState(m.StateCode))
+                    .Select(m => new ColleagueMembershipRow
+                    {
+                        ContactId = contactId,
+                        OrganizationId = m.OrganizationId,
+                        StartDate = m.StartDate,
+                        EndDate = m.EndDate,
+                        StateCode = m.StateCode,
+                        Organization = m.Organization,
+                        Contact = contact,
+                    }));
+            }
+
+            return Task.FromResult<IReadOnlyList<ColleagueMembershipRow>>(rows);
+        }
+
+        /// <summary>
         /// Task 140: a contact's grant set, for the real CIAM composition. Only a SEEDED contact is answered here; any
         /// other falls through to the production read, exactly as before this seam existed.
         /// </summary>

@@ -208,16 +208,25 @@ public static class ContactGrantEndpoints
     }
 
     /// <summary>
-    /// Resolves the colleague: by contact id, or by email among ACTIVE contacts (the identity store's one email lookup,
-    /// task 141) — then requires a CONFERRING membership in one of the grantor's organizations.
+    /// Resolves the colleague strictly WITHIN the grantor's organizations (task 140 POML step 4): by contact id, or by
+    /// email among the active members of those organizations — never by a system-wide lookup.
     /// </summary>
     /// <remarks>
-    /// <para>An email that names no active contact, or a contact outside the grantor's organizations, is the same 422:
-    /// a person who is not yet a colleague in this system is refused here (owner G1 (a)) — never created, never added to
-    /// the organization, never onboarded.</para>
-    /// <para>An email shared by MORE than one active contact names nobody (409 ambiguous) — the identity store reads two
-    /// rows, so "more than one" is all it can know, and guessing would grant the wrong person.</para>
-    /// <para>A read that could not be completed is 503, never "not a member".</para>
+    /// <para><b>Nothing about a non-colleague is ever disclosed</b> (owner Q2 scoping; the route is not a contact oracle —
+    /// task 140 verifier r1, items 2, 3, 11 and 12):</para>
+    /// <list type="bullet">
+    /// <item><b>By contact id.</b> An id that names no contact, an inactive contact, and an active contact outside the
+    /// grantor's organizations are ONE refusal (422 <c>grantee_not_in_organization</c>) worded with "This person" — the
+    /// contact's stored email is never read into a message, so a known GUID reveals neither whether the contact exists
+    /// nor its address. Only a VERIFIED colleague's email may label a later message (managed_elsewhere).</item>
+    /// <item><b>By email.</b> The ONE scoped read (<see cref="ExternalParticipationService.FindConferringMembersByEmailAsync"/>)
+    /// returns only conferring members of the grantor's organizations who use that email. Zero is 422 worded with the
+    /// address the caller typed; MORE than one colleague is 409 ambiguous ("more than one person in your organization");
+    /// a person outside those organizations is never counted, so a colleague is granted even when an outsider shares the
+    /// address, and the answer never says such an outsider exists.</item>
+    /// </list>
+    /// <para>A person who is not yet a colleague is refused (owner G1 (a)) — never created, never added to an
+    /// organization, never onboarded. A read that could not be completed is 503, never "not a member".</para>
     /// </remarks>
     private static async Task<(Guid Grantee, string Label, IResult? Problem)> ResolveGranteeAsync(
         ContactGrantRequest request,
@@ -228,13 +237,30 @@ public static class ContactGrantEndpoints
         ILogger logger,
         CancellationToken ct)
     {
-        var email = request.GranteeEmail?.Trim();
+        return request.GranteeContactId is { } contactId && contactId != Guid.Empty
+            ? await ResolveGranteeByIdAsync(contactId, grantor, identities, participations, httpContext, logger, ct)
+            : await ResolveGranteeByEmailAsync(request.GranteeEmail!.Trim(), grantor, participations, httpContext, logger, ct);
+    }
+
+    /// <summary>The label every by-id refusal uses: the caller named a GUID, so nothing the store holds is echoed.</summary>
+    internal const string UnnamedGranteeLabel = "This person";
+
+    private static async Task<(Guid Grantee, string Label, IResult? Problem)> ResolveGranteeByIdAsync(
+        Guid contactId,
+        ContactGrantor grantor,
+        IContactIdentityStore identities,
+        ExternalParticipationService participations,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (contactId == grantor.ContactId)
+            return (Guid.Empty, UnnamedGranteeLabel, SelfGrant(httpContext));
+
         ContactLookup lookup;
         try
         {
-            lookup = request.GranteeContactId is { } contactId && contactId != Guid.Empty
-                ? await identities.GetContactAsync(contactId, ct)
-                : await identities.FindActiveContactsByEmailAsync(email!, ct);
+            lookup = await identities.GetContactAsync(contactId, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -243,53 +269,86 @@ public static class ContactGrantEndpoints
         }
 
         if (lookup.Status != LookupStatus.Read)
+            return (Guid.Empty, UnnamedGranteeLabel, ColleagueUnverifiable(httpContext, "this person"));
+
+        var contact = lookup.Rows.FirstOrDefault(r => r.ContactId == contactId && r.IsActive);
+        if (contact is null)
         {
-            return (Guid.Empty, string.Empty, ContactGrantorAuthorizationFilter.MembershipUnreadableDenial(httpContext,
-                "Whether this person is a colleague in your organization could not be checked, so nothing was granted. " +
-                "Try again in a moment."));
+            logger.LogWarning(
+                "[EXT-CONTACT-GRANT] Refused: grantee {GranteeContactId} named by grantor {GrantorContactId} is not an active contact.",
+                contactId, grantor.ContactId);
+            return (Guid.Empty, UnnamedGranteeLabel, NotInOrganization(httpContext, UnnamedGranteeLabel));
         }
 
-        var active = lookup.Rows.Where(r => r.IsActive).ToList();
-        var label = email ?? active.FirstOrDefault()?.Email ?? "This person";
-
-        if (active.Count > 1)
-        {
-            return (Guid.Empty, label, ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status409Conflict,
-                "More than one person matches", GranteeAmbiguousReasonCode,
-                $"More than one person in this system uses {label}, so it does not identify one colleague. Nothing was " +
-                "granted; ask the record's team to grant access."));
-        }
-
-        if (active.Count == 0)
-            return (Guid.Empty, label, NotInOrganization(httpContext, label));
-
-        var grantee = active[0].ContactId;
-        label = active[0].Email ?? label;
-
-        if (grantee == grantor.ContactId)
-        {
-            return (Guid.Empty, label, ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status400BadRequest,
-                "Validation Error", SelfGrantReasonCode, "You cannot grant access to yourself."));
-        }
-
-        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, grantee, logger, ct);
+        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, contactId, logger, ct);
         if (memberships.Unreadable)
-        {
-            return (Guid.Empty, label, ContactGrantorAuthorizationFilter.MembershipUnreadableDenial(httpContext,
-                $"Whether {label} is a colleague in your organization could not be checked, so nothing was granted. Try " +
-                "again in a moment."));
-        }
+            return (Guid.Empty, UnnamedGranteeLabel, ColleagueUnverifiable(httpContext, "this person"));
 
         if (!memberships.ConferringOrganizationIds.Intersect(grantor.OrganizationIds).Any())
         {
             logger.LogWarning(
                 "[EXT-CONTACT-GRANT] Refused: contact {GranteeContactId} shares no active organization with grantor {GrantorContactId}.",
-                grantee, grantor.ContactId);
-            return (Guid.Empty, label, NotInOrganization(httpContext, label));
+                contactId, grantor.ContactId);
+            return (Guid.Empty, UnnamedGranteeLabel, NotInOrganization(httpContext, UnnamedGranteeLabel));
         }
 
-        return (grantee, label, null);
+        // A VERIFIED colleague: their address may name them in a later message (managed_elsewhere).
+        return (contactId, string.IsNullOrWhiteSpace(contact.Email) ? UnnamedGranteeLabel : contact.Email!, null);
     }
+
+    private static async Task<(Guid Grantee, string Label, IResult? Problem)> ResolveGranteeByEmailAsync(
+        string email,
+        ContactGrantor grantor,
+        ExternalParticipationService participations,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ExternalParticipationService.ColleagueEmailMatch match;
+        try
+        {
+            match = await participations.FindConferringMembersByEmailAsync(grantor.OrganizationIds, email, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "[EXT-CONTACT-GRANT] The colleague-by-email read threw; refusing (fail closed).");
+            match = ExternalParticipationService.ColleagueEmailMatch.Failed;
+        }
+
+        if (match.Unreadable)
+            return (Guid.Empty, email, ColleagueUnverifiable(httpContext, email));
+
+        if (match.ContactIds.Count > 1)
+        {
+            return (Guid.Empty, email, ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status409Conflict,
+                "More than one person matches", GranteeAmbiguousReasonCode,
+                $"More than one person in your organization uses {email}, so it does not identify one colleague. Nothing " +
+                "was granted; ask the record's team to grant access."));
+        }
+
+        if (match.ContactIds.Count == 0)
+        {
+            logger.LogWarning(
+                "[EXT-CONTACT-GRANT] Refused: no active colleague of grantor {GrantorContactId} uses the email given.",
+                grantor.ContactId);
+            return (Guid.Empty, email, NotInOrganization(httpContext, email));
+        }
+
+        var grantee = match.ContactIds[0];
+        if (grantee == grantor.ContactId)
+            return (Guid.Empty, email, SelfGrant(httpContext));
+
+        return (grantee, email, null);
+    }
+
+    private static IResult ColleagueUnverifiable(HttpContext httpContext, string who)
+        => ContactGrantorAuthorizationFilter.MembershipUnreadableDenial(httpContext,
+            $"Whether {who} is a colleague in your organization could not be checked, so nothing was granted. Try again " +
+            "in a moment.");
+
+    private static IResult SelfGrant(HttpContext httpContext)
+        => ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status400BadRequest,
+            "Validation Error", SelfGrantReasonCode, "You cannot grant access to yourself.");
 
     private static IResult NotInOrganization(HttpContext httpContext, string label)
         => ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status422UnprocessableEntity,

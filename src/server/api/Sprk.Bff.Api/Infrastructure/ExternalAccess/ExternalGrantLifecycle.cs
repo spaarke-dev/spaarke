@@ -294,6 +294,29 @@ internal static class ExternalGrantLifecycle
     /// <summary>The <c>@odata.bind</c> navigation property of the systemuser issuer lookup <c>sprk_grantedby</c>.</summary>
     internal const string GrantedByNavigationProperty = "sprk_GrantedBy";
 
+    /// <summary>The LOGICAL name of the contact-typed issuer lookup — what an SDK write (<c>IGenericEntityService</c>) addresses.</summary>
+    internal const string GrantedByContactAttribute = "sprk_grantedbycontact";
+
+    /// <summary>The LOGICAL name of the systemuser issuer lookup — what an SDK write addresses.</summary>
+    internal const string GrantedByAttribute = "sprk_grantedby";
+
+    /// <summary>
+    /// The SDK-shaped (logical-name) fields that make an internal user's change of a CONTACT-issued row take it over
+    /// (session 27 round 34 item 3): the contact issuer is CLEARED and <c>sprk_grantedby</c> is stamped with the changing
+    /// systemuser, in the same write — so the contact can no longer revoke, or re-lengthen through its own re-grant, a
+    /// decision an internal user made. The grant core's Web API path does the same with <c>@odata.bind</c>
+    /// (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>, default mode).
+    /// </summary>
+    /// <remarks>The systemuser is stamped when it resolves; an audit field never blocks the write (the core's rule) —
+    /// the contact stamp is cleared either way, because that is what protects the internal decision.</remarks>
+    internal static void AddInternalTakeOverFields(IDictionary<string, object> fields, Guid? changingSystemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        fields[GrantedByContactAttribute] = DBNull.Value; // IGenericEntityService: DBNull.Value CLEARS the column
+        if (changingSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+            fields[GrantedByAttribute] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", systemUserId);
+    }
+
     /// <summary>
     /// Every ACTIVE row for one logical grant, ordered deterministically (ascending id).
     /// </summary>
