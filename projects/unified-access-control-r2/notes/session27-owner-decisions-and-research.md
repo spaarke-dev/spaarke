@@ -437,6 +437,22 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
 4. **R-150-4:** external-spa eslint and vitest come with task 140's merge, which adds their configs and a vitest runner. Re-run lint and vitest after 140 merges into the integration branch.
 5. **R-150-5:** an unknown skipped-principal reason code shows a generic per-person warning ("{name} was not given access to this project.") as well as the log entry. Never silent.
 
+## Round 34 (2026-10-04). BINDING. Main-session decisions under round 15. The follow-up round's verifier questions.
+
+1. **162 F-162-f1-1: deleting a document deletes its AI analyses and their outputs.**
+   - `sprk_document_analysis_document` and `sprk_analysis_analysisoutput` go to `Delete = Cascade`, through a dry-run/-Apply/-Verify schema script that uses the solution-membership helper.
+   - Probe with a non-admin test user that deleting a test document removes its analyses and outputs.
+   - Analyses with no document (personal, round 15) are untouched.
+   - Work for the integration lane after 162 merges; the live `-Apply` is a manual gate.
+2. **162 §14.5: ratified.** A rights-query FAULT on promote's session-document check answers 403 `sdap.access.error.system_failure`, the same body the filter gives for the same fault on a body document. A missing right or a missing row still answers `insufficient_rights`. A fault is not a deny (ADR-003, still fail closed).
+3. **140: an internal Write holder who changes a contact-issued grant row OUTSIDE the grant core takes it over,** exactly as `/grant` does.
+   - This includes `POST set-record-share-expiry`'s bulk expiry update.
+   - "Takes it over" means: clear `sprk_grantedbycontact` and stamp `sprk_grantedby` with the changing systemuser, in the same write, so the contact can no longer revoke an internal decision.
+4. **167 ledger, retired routes:** an entry whose route key is absent passes only when `ResolvedBy` is set AND `ProofTest` names a test that pins the route's absence. This covers the nine routes deleted under round 10 item 1 and 164's deletions. Anything else absent still fails ("do not drop or re-key").
+5. **167 ledger, admin policy:** `Credit.AdminOnly` is accepted for a sweep entry whose route is in a pinned `AdminOnlyRoutes` set, each resolved by `RequireAuthorization("SystemAdmin")` or the SPE admin policy (owner round 9 item 3). It is no longer limited to `/api/spe/`. The set is pinned by a test that fails on a route added to it without that policy.
+6. **163's CreateEventWizard defect** (`sprk_Event@odata.bind` on `sprk_document`, which has no such column; its event lookup is `sprk_relatedevent` / `sprk_RelatedEvent`) is fixed by **task 147**, which moves that writer onto the BFF (round 28). The BFF create binds `sprk_relatedevent`, with a test.
+7. **167 `/healthz/catalog`:** the HealthCheckResult is memoized for 30 seconds (one result shared across callers; a fault is not cached beyond the same 30 s), as well as the `health-probe` rate limit. One anonymous IP can then drive at most one catalog read set per 30 seconds. Tested with a fake TimeProvider.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
