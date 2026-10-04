@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-04 (orchestrator checkpoint) — was: 2026-10-04 03:10Z (main session; tasks 006 + 002 completed)
-> **Recovery**: read "Quick Recovery" first. This file is the MAIN SESSION's orchestrator view: several tasks
-> run as subagents in parallel, so per-task detail lives in each POML's `<completion>` element and in `notes/`.
-> Sub-agents were told not to edit this file.
+> **Last Updated**: 2026-10-04, pre-restart handoff (main session; machine restart requested by the owner)
+> **Recovery**: read "Quick Recovery" first. This is the MAIN SESSION's orchestrator view. Tasks run as subagents;
+> per-task detail lives in each POML's `<completion>` element and in `notes/`. **All subagents were stopped for the
+> restart; none is running.** Sub-agents never edit this file.
 
 ---
 
@@ -11,74 +11,60 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **094 (main session)**: PCF deploy procedures verify the real build result, own PR. Worktree C:\wt094, branch fix/pcf-deploy-verify-build |
-| **Step** | 3 of 5 done: (1) scripts/PcfBuildResult.psm1 + scripts/Invoke-PcfBuildProd.ps1 written and proven (8 synthetic cases; VisualHost real build: npm exit 0, script exit 1; SpaarkeGridCustomizer: exit 0); (2) pcf-deploy + dataverse-deploy SKILL.md edited; (3) PCF-DEPLOYMENT-GUIDE.md corrected (it said NEVER use build:prod) |
-| **Status** | orchestrating |
-| **Next Action** | Step 4: delete scripts/Deploy-PCFWebResources.ps1 (deploys UniversalQuickCreate, deleted 2026-06-22, from a nonexistent path) and remove it from Deploy-AllWebResources.ps1 + references in task-execute/script-aware/project-pipeline skills + docs/procedures/production-release.md; apply Get-PcfBuildResult to the PCF step of Build-AllClientComponents.ps1; fix dataverse-deploy line ~213. Step 5: scripts/README.md, .claude/CHANGELOG.md, PR. Then 9.5 review. Found, not in scope: 4 .claude/patterns files point at deleted UniversalQuickCreate source (msal-client, oauth-scopes, token-cache, control-initialization, dataverse-queries) -> own task |
-| **Running in background** | **task-022** (THIS worktree, BFF) · **task-081** (C:\wt081, branch ontology/081-cleanup) · **task-092** (C:\wt092, PR #1123 follow-up) |
-| **Branch / git** | `docs/ontology-platform-design` @ df54bf4ec (master incl. #1120 merged in), 31 ahead / 0 behind, pushed |
-| **Index** | 52 tasks: **25 ✅ · 0 🔄 · 27 🔲**. Drift check clean |
+| **Task** | No main-session task in progress. Three tasks were stopped mid-flight for the restart: **022** (rework done, WIP-committed, needs re-review + a clean full suite), **081** (WIP on its own branch), **092** (WIP on PR #1123's branch). |
+| **Status** | Orchestrating. Index: **54 tasks: 27 ✅ · 1 🔄 (022) · 26 🔲** (081 is 🔲 in the index but has WIP on its branch; 092 is ✅ in the index because its PR exists, but PR #1123 still needs the follow-up below). Run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1` first; it was clean at handoff. |
+| **Next Action** | In order: **(1)** Resume **092** (C:\wt092, WIP pushed at `e81d65e64`): the 18-PCF tsconfig `extends` fix IS committed and removed every TS5083 on a root-only install, BUT the aggregate root build (`Build-AllClientComponents.ps1 -Component PCF`, i.e. all 18 PCFs in one `pcf-scripts build` process) then **runs out of memory**. Decide how the release build's PCF step should build PCFs (per-PCF via `Invoke-PcfBuildProd.ps1` is the obvious candidate) — #1286 stays blocked until that step passes. Also still to do: read the finished VisualHost isolated-install check, spot-check CommunicationAttachments, rewrite PR #1123's body, dispatch the nightly workflow on the branch and quote all 18 jobs' log markers. **(2)** Re-review **022** (independent code-review + adr-check, as for 030), then one UNCONTENDED full BFF suite; then mark 022 ✅. **(3)** Resume **081** (C:\wt081, branch `ontology/081-cleanup`): read its WIP commit message for what is done; finish, review, merge the branch into `docs/ontology-platform-design`. **(4)** Next ontology task after that: **031** (nightly evaluator) — its POML carries the 022 gate + no-silent-failure constraints. |
+| **Branch / git** | `docs/ontology-platform-design` pushed and in sync (last: `3828ccff2` wip(022)). Master was merged in twice today. |
 
-### Files modified since the last commit
-- none (all committed with this checkpoint)
+### Before running ANY full test suite
+The machine was starved: ~300 `dotnet` processes, **248 of them VS Code C# Dev Kit build hosts** (`visualstudio-projectsystem-buildhost`, >6 h old), ~4 GB free of 61.6 GB. Every full BFF suite today crashed or timed out on unrelated tests. **After the restart, check `Get-Process dotnet | Measure-Object` before trusting any suite result.**
 
-### Live changes made by task 006 (outside git)
-- Azure: UAMI `mi-ontology-writer-dev` (rg-spaarke-dev) created and attached to `spaarke-bff-dev` (additive; app restarted; healthy)
-- Dataverse `spaarkedev1`: app user `# mi-ontology-writer-dev` with ONE role `Spaarke Ontology Service`; two negative-test Decision Records created and deleted (0 rows remain)
-- Seen, not caused: `/healthz/catalog` 503 = AI catalog drift, logged since 2026-09-29 (owned outside this project)
-
-### Owner decisions made 2026-10-03 (all recorded in task files)
-| Item | Decision |
-|---|---|
-| 002 writer principal | **Option A**: dedicated least-privileged identity, task **006** (002 and 030 now depend on 006) |
-| 022 invalid rule bodies | **Validate at evaluation time**, fail closed; authoring in the Spaarke Platform app stays |
-| C-21 Pillar-9 privacy shim | **Delete** (done in PR #1120) |
-| C-17 due-date tiers | **3/7/10 days** (task 081) |
-| Cleanup placement | Fix everything now, never defer to issues; cleanup unrelated to ontology goes to **its own PR** (see `notes/cleanup-placement-plan.md`) |
-| CalendarSidePane | **Not currently in use** but may return: fixed, not deleted (PR #1114) |
-| Task 005 spend snapshots | **Keep** |
-
-### Open PRs (merging is the owner's call; I do not merge)
-| PR | Content | Note |
+### Worktrees (all other work is committed and pushed)
+| Worktree | Branch | State at handoff |
 |---|---|---|
-| #1111 (draft) | This branch | |
-| #1118 | C-10 To-Do scorer, **live bug** | **Merge first**: task 081 (C-13) reuses its `dateLocal.ts`; it also turns a guard test green that has been red on master since 2026-08-17 |
-| #1114 | C-23 Calendar | Overlaps #1119 in `Spaarke.Events.Components/src/components/index.ts` (separate blocks) |
-| #1116 | C-22 InsightSummaryCard | Web resource: needs a deploy after merge |
-| #1117 | C-5, C-16 Compose | 7 edited test suites only run in CI |
-| #1119 | C-2, C-24, C-25 Events leftovers | |
-| #1120 | C-19, C-21, C-14, C-20, C-26, C-6, C-27; closes #1112, #1113 | Conflicts with this branch in `Spaarke.Visuals/src/components/index.ts`: keep `VisualMetricCard`, drop TrendCard lines. Reviewer to confirm ADR-020 SemVer path-A exception |
-| #1121 | C-7, C-12, C-15 | 089 follow-up in progress |
+| this one | `docs/ontology-platform-design` | clean, pushed |
+| `C:\wt081` | `ontology/081-cleanup` | **see below: WIP commit requested from the agent** |
+| `C:\wt092` | `fix/master-build-test-baseline` (PR #1123) | WIP committed + pushed `e81d65e64`, clean |
+| `C:\wt094` | `fix/pcf-deploy-verify-build` (PR #1286) | clean, pushed |
+| `C:\wt095` | `fix/email-attachment-regex-timeout` (PR #1287) | clean, pushed |
+| `C:\wt093b`, `C:\wt091`, `C:\wt086`, `C:\wt089` | merged/PR branches | clean, pushed (removable) |
+| `C:\wt111m` | detached old master (publish-size baseline) | throwaway; re-measure master fresh instead |
 
-### Held, and why
-- **081** waits for **#1118 AND #1121** to merge (C-13 needs `dateLocal.ts`; C-8 starts in `DailyBriefingApp.tsx`, which #1121 edits), then merge master into this branch
-- **091** (C-18 sweeps) after 089 finishes, so it does not compete for CPU
-- **022** can start any time (decision made); not dispatched yet to keep 021 alone in this worktree
-- **030** needs 021 + 006
+### Open PRs — merge order matters
+| PR | What | Merge |
+|---|---|---|
+| **#1123** | Master build/test repair: 9 PCFs (pdfjs stub, missing deps, flat-control webpack), 17 failing suites, **one user-visible fix** (FR-02 dashboard section height), 18 tsconfig `extends` fixes (WIP `e81d65e64`) | **after 092 finishes** |
+| **#1286** | Deploy procedures verify the REAL PCF build result (task 094) | **after #1123 AND after the release build's PCF step passes** (it now fails: first TS5083, fixed in #1123; then an out-of-memory building all 18 PCFs in one process, open) |
+| **#1287** | Flaky email-attachment test now tests production (task 095) | ready |
+| #1111 (draft) | This branch | at project end |
 
-### Still with the owner
-- **Task 010 criterion 5**: Daily Briefing widget render check (needs a browser)
+Merged today: #1118, #1121, #1114, #1116, #1117, #1119, #1122, #1120, #1282, #1285. #1116 changes a Dataverse web resource and needs a deploy to take effect in dev.
 
-### Verified this session (do not redo)
-- Full BFF suite uncontended at wave close: **Test Run Successful, 14,356 total / 14,302 passed / 54 skipped / 0 failed**. The 83/124-failure runs earlier were agent contention.
-- Publish size: master `62277d50a` 45.66 MB / 212 files vs branch 45.67 MB / 212 files (+0.01 MB, Compress-Archive). Master worktree `C:\wt111m` kept for re-measurement.
-- Shared git stash stack: 3 entries, all owned by other sessions, untouched. Sub-agents were told not to use bare `git stash`.
+### Waiting on the owner
+1. **Writer privileges** (task 030 findings; owner leaned "the role should carry it"): add **AppendTo on `sprk_matter` and `sprk_communication` (Global)** and **Write on `sprk_signal` (Global)** to `Spaarke Ontology Service`; and move the writer app user (`3121bf1b-9fbf-f111-aaaf-0022482913fc`) into the **customer BU** (`Spaarke Business Unit 1` in dev), mirroring production (#1094). Until then communication-subject Signals fail (F26) and the matter path works only via the root default team's over-grant.
+2. **Prototype round-2 review** (`c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\`) before task **051** (worklist row) starts.
+3. **VS Code build hosts**: reload/close old worktree windows (the restart clears them).
+4. Merges in the order above.
 
----
+### Owner decisions made 2026-10-04 (all recorded in task files / spec)
+| Decision | Where |
+|---|---|
+| ADR-028 path A for the writer's `ManagedIdentityCredential` — **approved** | spec.md §6 ADR Tensions |
+| No silent failure: writer refusals log EventId 50300 + metric; evaluator emits a per-run metric + last-success diagnostic; two alert rules at deploy | 030 code; 031 + 035 POMLs |
+| Nightly CI production PCF build (advisory) | done: #1282 + #1285 |
+| Merge the cleanup PRs | done except #1123/#1286/#1287 |
+| #1120 ADR-020 no-version-bump exception — approved, merged | — |
+| Fix the flaky email test in its own PR | #1287 |
 
-### Do NOT re-litigate
-
-`design.md` §10 holds **29 settled decisions** and §8 has **no open items** — D-1..D-8, CM-2, CM-4, CM-6..CM-11,
-BR-1..BR-6 are all closed, several of them twice (BR-1 and §5.1 were each reversed once). The schema is **built**.
-If something feels unsettled, read §8.0 / §8.0a / §8.0b before reopening it.
+### Verified today (do not redo)
+- Ledger append-only for the writer, re-checked with the CORRECT method (`RetrieveUserPrivileges` ∪ `RetrieveTeamPrivileges`, plus live 403 on update/delete). `RetrieveUserPrivileges` alone understates team-inherited depth — see security-roles.md §9.2.
+- Signal ownership settled live: writer owns, `owningbusinessunit` = matter's BU (needs `EnableOwnershipAcrossBusinessUnits`, true in dev). A BU default team cannot own a Signal (403).
+- The root default team's `Spaarke Office Add In User` grants Deep Write/Assign/Share on every matter to all ~150 root-BU principals (known dev artifact, #1094).
+- `pcf-scripts build` exits 0 when webpack fails; the nightly workflow and #1286 judge from output.
+- `Json.Schema.Net` `Evaluate` is not thread-safe on a shared schema (022 locked it).
 
 ### Critical context in three sentences
-
-R1 builds the **intelligence layer from the Spaarke data model forward** — no connector, no LEDES; the data is
-assumed present. The differentiated claim is one predicate: *a communication classified **fee or scope change**
-in the window **AND** no **budget revision** in that window* — two sources, which no incumbent can evaluate. A
-**Signal** is a condition that held; a **Work Item** is the actionable unit it produces; every human resolution
-writes a **Decision Record**.
+Tasks 021 (predicate compiler) and 030 (Signal writer) are done and committed; 022 (the fail-closed validation gate 031 must use) is done but awaits re-review. Every substantial task this project has had an independent review find something real (030 twice, 022, 094), so keep that gate. Several master-wide build defects surfaced along the way and are being fixed in their own PRs, not on this branch.
 
 ---
 
