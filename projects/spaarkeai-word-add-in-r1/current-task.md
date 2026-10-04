@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04. PR #1124 MERGED `fb8280aee`; BFF deployed + hash-verified; add-in site deployed (run 37208025253). Waiting on the owner: re-upload package 1.1.1, then UAT round 4
+> **Last Updated**: 2026-10-04. 094 merged (PR #1284, `6932582b1`) and the add-in site redeployed (run 37220301006). BFF = `fb8280aee` (unchanged by 094). Waiting on the owner: re-upload package 1.1.1 (if not yet), then UAT round 4
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -24,7 +24,7 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 |---|---|
 | **State** | PR #1124 merged `fb8280aee`. BFF on `spaarke-bff-dev` = `fb8280aee` (4/4 hashes, healthz, CORS; 9 route probes, 0 × 404). Add-in site = `fb8280aee` (run 37208025253); hosted Word manifest 1.0.10.0 with Open Spaarke |
 | **Owner** | Admin center → Integrated apps → update Spaarke with `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`, run 37208025253). Then UAT round 4: live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning. Record results in `notes/042-uat-round3-2026-10-03.md` (or a round-4 note) |
-| **Open owner questions** | (1) collision Open → desktop Word (anchor-click, needs live test)? (2) version save keeps the old name — rename the record? (3) Saved state lost on tab switch — follow-up in `App.tsx`? |
+| **Owner answers (2026-10-04) → task 094 ✅** | button only ever "Save"/"Saved"; name locked once in Spaarke (Save as new to rename); Save re-enables on Word content edits; saved state survives tab switch; collision Open = Open in Word (desktop trial) + Open in browser. Add to UAT round 4 |
 | **Then** | 042 → ✅ when UAT passes; 090 wrap-up with `/test-diet`. 083 still blocked on UAC-r2 141 |
 | **Caution** | `spaarke-bff-dev` is shared; another project's deploy can overwrite this build before UAT — re-check Kudu deployments if behaviour looks old |
 
