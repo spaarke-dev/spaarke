@@ -1,5 +1,5 @@
 import { cleanGuid } from '../utils/cleanGuid';
-import { buildOpenRecordUrl } from './openRecordLauncher';
+import { buildOpenRecordUrl, configuredSpaarkeAppName } from './openRecordLauncher';
 import { mintDocumentShareLink } from './shareLinkService';
 
 /**
@@ -141,7 +141,9 @@ function buildRecordLink(
       : `${typeLabel}: ${record.displayName}`
     : `${typeLabel} record`;
 
-  return { url: buildOpenRecordUrl(orgUrl, record.entityType, id), label };
+  // Task 088: the record link names the Spaarke app (`SPAARKE_APP_NAME`), like every other record link the
+  // add-in builds, so a recipient lands in Spaarke rather than in their own default app.
+  return { url: buildOpenRecordUrl(orgUrl, record.entityType, id, configuredSpaarkeAppName()), label };
 }
 
 function escapeHtml(text: string): string {

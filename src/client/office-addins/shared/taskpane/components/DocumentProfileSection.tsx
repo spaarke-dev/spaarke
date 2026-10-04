@@ -116,6 +116,12 @@ export interface DocumentProfileSectionProps {
    * is a no-op — this section behaves exactly as before task 027 when no signal is threaded in.
    */
   refreshSignal?: number;
+  /**
+   * Task 088 (UAT-6): called once each time a Generate Profile request is ACCEPTED by the server (202 — the
+   * profile job is queued; the hook does not poll for the job's end, #1090). `SaveFlow` uses it to turn its
+   * gray "Saved" button back into an enabled "Save" (task 094). Not called when the request is refused or fails.
+   */
+  onProfileGenerated?: () => void;
 }
 
 /** Splits the comma-separated `sprk_filekeywords` value into individual chip labels. */
@@ -126,7 +132,11 @@ function splitKeywords(keywords: string): string[] {
     .filter(k => k.length > 0);
 }
 
-export function DocumentProfileSection({ documentId, refreshSignal }: DocumentProfileSectionProps): React.ReactElement {
+export function DocumentProfileSection({
+  documentId,
+  refreshSignal,
+  onProfileGenerated,
+}: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
   const { outcome, generateProfile, isGenerating, generateError, refetch } = useDocumentProfile(documentId);
 
@@ -176,7 +186,9 @@ export function DocumentProfileSection({ documentId, refreshSignal }: DocumentPr
           icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
           disabled={isDisabled}
           onClick={() => {
-            void generateProfile();
+            void generateProfile().then(accepted => {
+              if (accepted) onProfileGenerated?.();
+            });
           }}
         >
           {isGenerating ? 'Generating…' : 'Generate Profile'}

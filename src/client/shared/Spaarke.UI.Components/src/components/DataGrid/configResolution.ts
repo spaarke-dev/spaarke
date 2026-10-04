@@ -31,6 +31,7 @@ import type {
   SecondaryAction,
 } from '../../types/DataGridConfiguration';
 import type { EntityMetadata, SavedQuerySummary } from '../../services/IDataverseClient';
+import { cleanGuid } from '../../utils/guid';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Overrides shape (from props.overrides on <DataGrid />)
@@ -432,11 +433,7 @@ export function filterAvailableViews(
   if (!allowlist || allowlist.length === 0) {
     return views;
   }
-  const normalize = (g: string): string =>
-    g
-      .trim()
-      .toLowerCase()
-      .replace(/^\{|\}$/g, '');
+  const normalize = (g: string): string => cleanGuid(g);
   const allowed = new Set<string>(allowlist.map(normalize));
   return views.filter(v => allowed.has(normalize(v.id)));
 }

@@ -12,6 +12,7 @@
 
 import * as React from "react";
 import { getXrm } from "../utils/xrmAccess";
+import { cleanGuid } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -86,7 +87,7 @@ export function useRelatedRecord(
       }
 
       try {
-        const normalizedParentId = parentId!.replace(/[{}]/g, "").toLowerCase();
+        const normalizedParentId = cleanGuid(parentId);
         const filter = `_${parentLookupField}_value eq ${normalizedParentId}`;
         const order = orderBy ?? "createdon desc";
         const query = `?$select=${selectFields}&$filter=${filter}&$orderby=${order}&$top=1`;
@@ -138,7 +139,7 @@ export function useRelatedRecord(
       }
 
       try {
-        const normalizedParentId = parentId.replace(/[{}]/g, "").toLowerCase();
+        const normalizedParentId = cleanGuid(parentId);
 
         // Set the parent lookup using @odata.bind
         const createData = {
@@ -152,7 +153,7 @@ export function useRelatedRecord(
         if (newId) {
           // Refresh to get the full record
           setRefreshCounter((c) => c + 1);
-          return newId.replace(/[{}]/g, "").toLowerCase();
+          return cleanGuid(newId);
         }
         return null;
       } catch (err) {

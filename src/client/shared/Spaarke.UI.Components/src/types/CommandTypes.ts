@@ -1,62 +1,12 @@
 /**
- * Command system types
+ * Privilege + field-security types (consumed by PrivilegeService / FieldSecurityService).
+ *
+ * The command-system types that used to live here (ICommand, ICommandContext,
+ * CommandHandler, ICustomCommandConfig) were DELETED with the rest of the dead
+ * UniversalDatasetGrid command cluster (C-19 + #1113, 2026-10-03): their only
+ * consumers were CommandRegistry / CommandToolbar / PageChrome CommandBar /
+ * useKeyboardShortcuts / CommandExecutor, all deleted in the same change.
  */
-
-import { IDatasetRecord } from './DatasetTypes';
-
-/**
- * Command context provided to command handlers
- */
-export interface ICommandContext {
-  selectedRecords: IDatasetRecord[];
-  entityName: string;
-  webAPI: ComponentFramework.WebApi;
-  navigation: ComponentFramework.Navigation;
-  refresh?: () => void;
-  parentRecord?: ComponentFramework.EntityReference;
-  emitLastAction?: (action: string) => void;
-}
-
-/**
- * Command handler function signature
- */
-export type CommandHandler = (context: ICommandContext) => Promise<void>;
-
-/**
- * Command definition
- */
-export interface ICommand {
-  key: string;
-  label: string;
-  icon?: React.ReactElement;
-  handler: CommandHandler;
-  requiresSelection?: boolean;
-  multiSelectSupport?: boolean;
-  confirmationMessage?: string;
-
-  // UI Enhancements
-  group?: 'primary' | 'secondary' | 'overflow'; // Command group for toolbar organization
-  description?: string; // For tooltips and screen readers
-  keyboardShortcut?: string; // e.g., "Ctrl+N", "F5", "Delete"
-  iconOnly?: boolean; // Show only icon with tooltip
-  dividerAfter?: boolean; // Add visual divider after this command
-
-  // Behavior
-  refresh?: boolean; // Refresh grid after execution
-  successMessage?: string; // Success notification message
-}
-
-/**
- * Custom command configuration (from manifest)
- */
-export interface ICustomCommandConfig {
-  key: string;
-  label: string;
-  actionType: 'workflow' | 'customapi' | 'action' | 'function';
-  actionName: string;
-  icon?: string;
-  requiresSelection?: boolean;
-}
 
 /**
  * Entity privilege types from Dataverse AccessRights enum

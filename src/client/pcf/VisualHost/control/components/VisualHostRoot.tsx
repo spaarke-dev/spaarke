@@ -38,7 +38,7 @@ import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
 import { CardChrome } from './CardChrome';
-import type { MatrixJustification } from '../../../../shared/Spaarke.Visuals/src/components/MetricCardMatrix';
+import type { MatrixJustification } from '@spaarke/visuals';
 import { logger } from '../utils/logger';
 import {
   loadChartDefinition as loadChartDefinitionFromDataverse,
@@ -73,11 +73,10 @@ import {
 } from '../../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
 
 // Maps the chart-def wizard key (or entity fallback) to the wizard Code Page
-// web-resource name opened via navigateTo. Kept LOCAL to Visual Host — NOT
-// imported from the shared `wizardRegistry` — so the cutover does not drag the
-// lazy-loaded wizard components (and their auth/sdap-client deps) back into the
-// bundle. Mirrors `resolveWizard`'s resolution order + `ENTITY_TO_WIZARD_KEY`
-// aliases (single source of truth is small enough to inline; see FR-03).
+// web-resource name opened via navigateTo. This is the SINGLE source of truth
+// for "+" wizard keys: add a new key HERE (see VISUALHOST-SETUP-GUIDE.md "Adding
+// a new '+' wizard target"). The former shared `wizardRegistry`/`resolveWizard`
+// it once mirrored had zero consumers and was deleted 2026-10-03 (reuse audit C-20).
 const WIZARD_KEY_TO_PAGE: Readonly<Record<string, string>> = {
   event: 'sprk_createeventwizard',
   invoice: 'sprk_createinvoicewizard',
@@ -95,7 +94,7 @@ const SPRK_PREFIX = 'sprk_';
 
 /**
  * Resolves the wizard Code Page web-resource name for the "+" button.
- * Resolution order (parity with shared `resolveWizard`):
+ * Resolution order:
  *   1. `createWizardKey` (`sprk_createwizardkey`) verbatim, if non-empty.
  *   2. else `entityLogicalName` (`sprk_entitylogicalname`), normalized via the
  *      alias map, else `sprk_`-prefix strip.
@@ -317,7 +316,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     }
     try {
       const entityName = chartDefinition.sprk_entitylogicalname;
-      const recordId = contextRecordId.replace(/[{}]/g, '');
+      const recordId = cleanGuid(contextRecordId);
       const record = await context.webAPI.retrieveRecord(entityName, recordId, `?$select=${aiSummaryField}`);
       const summaryText = record[aiSummaryField] as string | null;
       return { summary: summaryText || null, tldr: null };
@@ -626,7 +625,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     let filterValue: string | null = null;
     if (ctxField && contextRecordId) {
       filterField = ctxField.replace(/^_/, '').replace(/_value$/, '');
-      filterValue = contextRecordId.replace(/[{}]/g, '');
+      filterValue = cleanGuid(contextRecordId);
       logger.info('VisualHostRoot', 'Context filter for drill-through', {
         filterField,
         filterValue,
@@ -659,13 +658,13 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           if (entityName) params.set('entityName', entityName);
           if (filterField) params.set('filterField', filterField);
           if (filterValue) params.set('filterValue', filterValue);
-          if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          if (viewId) params.set('viewId', cleanGuid(viewId));
           // Drill-through view allowlist (operator-configured on the chart def,
           // delimited by `;` or `,`). Forwarded so the DataGrid page shell can
           // restrict its view-switcher without editing the grid config record.
           const allowedViews = (chartDefinition.sprk_drillthroughviews ?? '')
             .split(/[;,]/)
-            .map(g => g.trim().replace(/[{}]/g, ''))
+            .map(g => cleanGuid(g))
             .filter(g => g.length > 0);
           if (allowedViews.length > 0) params.set('availableViews', allowedViews.join(';'));
           params.set('mode', 'dialog');
@@ -704,7 +703,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
             pageType: 'entitylist',
             entityName: drillThroughTarget,
           };
-          if (viewId) pageInput.viewId = viewId.replace(/[{}]/g, '');
+          if (viewId) pageInput.viewId = cleanGuid(viewId);
 
           try {
             await xrm.Navigation.navigateTo(pageInput, {

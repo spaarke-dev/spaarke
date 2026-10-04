@@ -51,6 +51,7 @@ import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../service
 import type { AssociationResult } from '../AssociateToStep/types';
 import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -107,8 +108,8 @@ export async function associateToRecord(
     // Dataverse `Xrm.Utility.lookupObjects` returns GUIDs wrapped in curly braces
     // (e.g. `{39CDE3E3-9D15-...}`). OData `@odata.bind` and `$ref` URLs reject
     // braced GUIDs with HTTP 400 "Error in query syntax". Normalize once here.
-    const recordId = association.recordId.replace(/[{}]/g, '').toLowerCase();
-    const cleanMatterId = matterId.replace(/[{}]/g, '').toLowerCase();
+    const recordId = cleanGuid(association.recordId);
+    const cleanMatterId = cleanGuid(matterId);
 
     if (entityType === 'sprk_project') {
       // N:N association via the relationship collection navigation property.

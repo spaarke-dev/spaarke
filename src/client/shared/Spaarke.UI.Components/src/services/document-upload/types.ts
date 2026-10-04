@@ -31,9 +31,9 @@ export type ITokenProvider = () => Promise<string>;
 /**
  * Dataverse record creation/update abstraction.
  *
- * Two implementations:
- * - PcfDataverseClient: wraps ComponentFramework.WebApi (PCF controls)
+ * Implementation:
  * - ODataDataverseClient: direct OData fetch calls with token auth (Code Pages)
+ * (PcfDataverseClient deleted 2026-10-03, reuse audit C-26 — zero instantiation sites.)
  */
 export interface IDataverseClient {
   /**

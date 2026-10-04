@@ -28,6 +28,7 @@
 
 import type { ResolvedColumn } from '../configResolution';
 import { exportCsv, csvFilename } from './csvExport';
+import { cleanGuid } from '../../../utils/guid';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Handler context — what every default handler receives
@@ -124,11 +125,6 @@ function getXrm(): any {
     return null;
   }
   return null;
-}
-
-/** Strip `{` / `}` from a GUID (mirrors lifted EventsPage delete pattern). */
-function cleanGuid(id: string): string {
-  return id.replace(/[{}]/g, '');
 }
 
 /** Trigger a browser download from a `Blob`. SSR-safe (no-op if `document` is unavailable). */

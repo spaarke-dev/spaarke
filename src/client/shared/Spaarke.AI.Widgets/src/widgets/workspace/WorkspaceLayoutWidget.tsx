@@ -17,8 +17,9 @@
  *   This widget no longer imports `LegalWorkspaceApp` directly. It accepts an
  *   optional injected `renderer?: WorkspaceRenderer` prop OR consults the
  *   default-renderer slot exposed by `@spaarke/ui-components`. The host
- *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`
- *   at bootstrap, so default behaviour is unchanged from pre-C-4. Future
+ *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`
+ *   at bootstrap — a wrapper around `LegalWorkspaceApp` that injects SpaarkeAi's
+ *   section registry + a tab-scoped ComposeLaunchContext. Future
  *   hosts can register an alternate renderer without modifying this widget.
  *
  * Embedded mode:
@@ -46,7 +47,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { getDefaultWorkspaceRenderer, type WorkspaceRenderer } from '@spaarke/ui-components';
+import { getDefaultWorkspaceRenderer, cleanGuid, type WorkspaceRenderer } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -215,10 +216,10 @@ function getUserIdSafe(): string {
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';
-    return String(raw).replace(/[{}]/g, '');
+    return cleanGuid(String(raw));
   }
   if (xrm?.userSettings?.userId) {
-    return String(xrm.userSettings.userId).replace(/[{}]/g, '');
+    return cleanGuid(String(xrm.userSettings.userId));
   }
   return '';
 }
@@ -254,7 +255,7 @@ export const WorkspaceLayoutWidget: React.FC<
 
   // Resolve the renderer: injected prop wins; otherwise consult the default slot.
   // The slot is populated by the host at bootstrap (e.g. SpaarkeAi `main.tsx`
-  // calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`).
+  // calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`, a LegalWorkspaceApp wrapper).
   const Renderer: WorkspaceRenderer | null = React.useMemo(() => renderer ?? getDefaultWorkspaceRenderer(), [renderer]);
 
   // Dev fallback: when Xrm isn't available (e.g. `npm run dev` in Vite),

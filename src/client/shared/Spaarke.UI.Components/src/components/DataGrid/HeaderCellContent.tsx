@@ -250,7 +250,11 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
     borderRadius: tokens.borderRadiusMedium,
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.16)',
+    // Semantic shadow tokens (C-18 color sweep, 2026-10-04) — were hardcoded
+    // `rgba(0, 0, 0, x)` literals, which do not strengthen for dark mode the
+    // way `colorNeutralShadowAmbient`/`Key` do (ADR-021). Offsets/blur kept
+    // as-is; only the color is tokenized.
+    boxShadow: `0 8px 24px ${tokens.colorNeutralShadowAmbient}, 0 2px 8px ${tokens.colorNeutralShadowKey}`,
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalS,
@@ -762,7 +766,9 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
           // applied to the popover surface itself (a transparent layer), so
           // its drop-shadow follows the rounded `menuCard` silhouette.
           style={{
-            filter: 'drop-shadow(0 6px 12px rgba(0,0,0,0.18)) drop-shadow(0 2px 4px rgba(0,0,0,0.12))',
+            // Semantic shadow tokens (C-18 color sweep, 2026-10-04) — see the
+            // matching `menuCard.boxShadow` note above.
+            filter: `drop-shadow(0 6px 12px ${tokens.colorNeutralShadowAmbient}) drop-shadow(0 2px 4px ${tokens.colorNeutralShadowKey})`,
           }}
         >
           {/* PORTAL FIX (NFR-03): re-wrap popover body in FluentProvider so

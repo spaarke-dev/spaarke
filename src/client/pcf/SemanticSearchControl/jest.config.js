@@ -14,6 +14,18 @@ module.exports = {
     moduleNameMapper: {
         // Handle CSS imports (if any)
         "\\.(css|less|scss|sass)$": "identity-obj-proxy",
+        // Deep shared-lib imports (e.g. `@spaarke/ui-components/dist/services/PolymorphicResolverService`
+        // for `cleanGuid`, task 089) resolve to compiled ESM `dist/*.js` files that ts-jest's default
+        // transformIgnorePatterns skips (node_modules). Map the deep specifier onto the shared TS SOURCE
+        // instead so ts-jest can transform it — mirrors the identical, previously-diagnosed fix in
+        // `RegardingResolver/jest.config.js` (unified-access-control-r2 task 051, 2026-09-04).
+        "^@spaarke/ui-components/dist/(.*)$": "<rootDir>/../../shared/Spaarke.UI.Components/src/$1",
+        // The shared lib carries its OWN node_modules with React 19 (it also targets Code Pages).
+        // Left unmapped, a deep-imported shared source file would resolve `react`/`react-dom` against
+        // THAT copy — a second React instance alongside this PCF's React 16 — breaking hooks.
+        "^react$": "<rootDir>/node_modules/react",
+        "^react-dom$": "<rootDir>/node_modules/react-dom",
+        "^react/jsx-runtime$": "<rootDir>/node_modules/react/jsx-runtime",
     },
     setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
     transform: {

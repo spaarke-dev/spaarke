@@ -32,8 +32,9 @@ export interface ProblemDetails {
   fileName?: string;
   /**
    * Task 025 (OFFICE_020 name-collision only): the `sprk_document` that already holds `fileName` in the
-   * target drive, when the server could resolve it (Document saves only). Absent when the collision has
-   * no owning document, or the lookup was unavailable — in which case only "Keep both" is offered.
+   * target drive. Present only when the server resolved it AND the caller holds Read on it (task 055).
+   * Task 088: its presence means the pane may offer **Open**; it no longer means "a version retry is
+   * offered" — that is {@link canSaveAsVersion}'s alone.
    */
   existingDocumentId?: string;
   /**
@@ -43,6 +44,13 @@ export interface ProblemDetails {
    * description of a document, and materially more disclosive than an opaque id (#1005 / ISS-006).
    */
   existingDocumentName?: string;
+  /**
+   * Task 088 (OFFICE_020 name-collision only; UAT-5): whether "Save as new version" of `existingDocumentId`
+   * may be offered — `true` only when that document is editable content filed to the record this save
+   * targets (task 055's #1005 rule). Written by the server only alongside an id; absent and `false` both
+   * mean "do not offer it".
+   */
+  canSaveAsVersion?: boolean;
 }
 
 /**
@@ -68,24 +76,30 @@ export interface ErrorMessage {
   offerSaveAsNew?: boolean;
   /**
    * Task 025: the failed save was a CREATE refused on a filename collision (OFFICE_020) — the pane offers
-   * the two-option choice ("Keep both" always; "Save as new version" only when `collisionExistingDocumentId`
-   * is present) instead of the generic error actions.
+   * its collision choices ("Keep both" always; "Open" when `collisionExistingDocumentId` is present; "Save as
+   * new version" only when `collisionCanSaveAsVersion` is true) instead of the generic error actions.
    */
   offerCollisionChoice?: boolean;
   /** Task 025: the file name that collided — set only when `offerCollisionChoice` is true. */
   collisionFileName?: string;
   /**
-   * Task 025: the existing document to retry as a version save of, when the server could resolve one.
-   * Absent → only "Keep both" is offered.
+   * Task 025 / 088: the readable document that already holds the name. Present → the pane offers "Open"
+   * (task 088, UAT-5). Absent (no owning document, or the caller cannot read it) → no "Open" and no version
+   * retry: only "Keep both".
    */
   collisionExistingDocumentId?: string;
   /**
-   * Task 055: the name of the document "Save as new version" would write into, so the pane can say WHICH
-   * document that is instead of offering the retry against an opaque id. Absent when the server withheld
-   * it (the caller cannot read that document) — in which case `collisionExistingDocumentId` is absent too
-   * and only "Keep both" is offered.
+   * Task 055: the name of the document that already holds the name, so the pane can say WHICH document it
+   * is instead of an opaque id. Absent when the server withheld it (the caller cannot read that document) —
+   * in which case `collisionExistingDocumentId` is absent too.
    */
   collisionExistingDocumentName?: string;
+  /**
+   * Task 088 (UAT-5): "Save as new version" of `collisionExistingDocumentId` may be offered. The ONLY signal
+   * for that offer — never inferred from the id's presence (the id now also travels for a document filed to
+   * another record, which must never be versioned from here: #1005).
+   */
+  collisionCanSaveAsVersion?: boolean;
 }
 
 /**
@@ -378,10 +392,11 @@ export function describeVersionSaveFailure(problem: ProblemDetails): ErrorMessag
  * Maps a refused CREATE save's filename collision (task 025, OFFICE_020) to a message the pane can act on.
  *
  * Mirrors {@link describeVersionSaveFailure}'s shape, for the create-path's own refusal: the catalog message
- * gains `offerCollisionChoice` plus the collision's `fileName`, and `collisionExistingDocumentId` when the
- * server could resolve which document already holds that name (Document saves only — the only content type
- * FR-11's version-save can target). Any OTHER error code on a create attempt falls through to the ordinary
- * mapping unchanged, so this is safe to call unconditionally on every create-path failure.
+ * gains `offerCollisionChoice` plus the collision's `fileName`, `collisionExistingDocumentId` /
+ * `collisionExistingDocumentName` when the server identified a document the caller can read, and
+ * `collisionCanSaveAsVersion` ONLY when the server said so (task 088 — `canSaveAsVersion: true`; an id alone
+ * never implies it). Any OTHER error code on a create attempt falls through to the ordinary mapping unchanged,
+ * so this is safe to call unconditionally on every create-path failure.
  */
 export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage {
   const mapped = mapProblemDetailsToMessage(problem);
@@ -389,14 +404,19 @@ export function describeCollisionFailure(problem: ProblemDetails): ErrorMessage 
     return mapped;
   }
 
+  // A null JSON value arrives as `null`, not `undefined` — the server writes the withheld fields as nulls.
+  const existingDocumentId = typeof problem.existingDocumentId === 'string' ? problem.existingDocumentId : undefined;
+  const existingDocumentName =
+    typeof problem.existingDocumentName === 'string' ? problem.existingDocumentName : undefined;
+
   return {
     ...mapped,
     offerCollisionChoice: true,
     ...(problem.fileName !== undefined ? { collisionFileName: problem.fileName } : {}),
-    ...(problem.existingDocumentId !== undefined ? { collisionExistingDocumentId: problem.existingDocumentId } : {}),
-    ...(problem.existingDocumentName !== undefined
-      ? { collisionExistingDocumentName: problem.existingDocumentName }
-      : {}),
+    ...(existingDocumentId ? { collisionExistingDocumentId: existingDocumentId } : {}),
+    ...(existingDocumentId && existingDocumentName ? { collisionExistingDocumentName: existingDocumentName } : {}),
+    // The flag means nothing without the document it names: an id is required for the offer.
+    ...(existingDocumentId && problem.canSaveAsVersion === true ? { collisionCanSaveAsVersion: true } : {}),
   };
 }
 

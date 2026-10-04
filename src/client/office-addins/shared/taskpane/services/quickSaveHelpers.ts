@@ -1,4 +1,7 @@
 import type { EntitySearchResult } from '../hooks/useEntitySearch';
+import { stripDocumentExtension, toDocxFileName } from '../utils/documentFileName';
+import { mapProblemDetailsToMessage, type ProblemDetails } from '../utils/errorMessages';
+import type { DocumentIdentityOutcome } from './documentIdentityService';
 
 /**
  * quickSaveHelpers.ts
@@ -119,11 +122,24 @@ export function buildEmailSaveRequest(
  */
 export type QuickSaveIdempotencySource =
   | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult }
-  | { readonly kind: 'document'; readonly title: string; readonly contentBase64: string };
+  | {
+      readonly kind: 'document';
+      readonly title: string;
+      readonly contentBase64: string;
+      /**
+       * Task 089: set on a VERSION Quick Save (the open document resolved to this `sprk_document`). It is part of
+       * the key so a version save and a create of the same bytes are never one operation; a create's key is
+       * byte-for-byte what it was before task 089.
+       */
+      readonly existingDocumentId?: string;
+    };
 
 function canonicalQuickSaveKey(source: QuickSaveIdempotencySource): string {
-  return source.kind === 'email'
-    ? `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`
+  if (source.kind === 'email') {
+    return `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`;
+  }
+  return source.existingDocumentId
+    ? `document-version:${source.existingDocumentId}|${source.title}|${source.contentBase64}`
     : `document:${source.title}|${source.contentBase64}`;
 }
 
@@ -154,6 +170,21 @@ export interface QuickSaveDocumentContext {
   title: string;
 }
 
+/**
+ * Where a Word Quick Save goes (task 089, owner 2026-10-03):
+ * - `create` — the open document is not a Spaarke document (identity `new`): a new, unfiled `sprk_document`, with
+ *   `allowRename` so a name that already belongs to a DIFFERENT document is kept-both by the server instead of
+ *   refused (409 `OFFICE_020`, the UAT-9 failure);
+ * - `version` — the open document resolved (by URL or by its identity stamp) to `existingDocumentId`: a new version
+ *   of it, the FR-11 path (`existingDocumentId` + `isNewVersion`), which the server's
+ *   `OfficeVersionSaveAuthorizationFilter` gates on write access.
+ *
+ * A file NAME is never identity (#1005): nothing here turns a name match into a version save.
+ */
+export type QuickSaveTarget =
+  | { readonly mode: 'create' }
+  | { readonly mode: 'version'; readonly existingDocumentId: string };
+
 /** The server request body for POST /api/office/save (Document content, Word quick-save path). */
 export interface OfficeDocumentSaveRequestBody {
   contentType: 'Document';
@@ -164,6 +195,11 @@ export interface OfficeDocumentSaveRequestBody {
     title: string;
     contentType: string;
     contentBase64: string;
+    /** `create` only: keep both on a name collision (task 025's `AllowRename`). */
+    allowRename?: true;
+    /** `version` only, always with `isNewVersion` — the server refuses one without the other (OFFICE_018). */
+    existingDocumentId?: string;
+    isNewVersion?: true;
   };
   idempotencyKey: string;
 }
@@ -172,20 +208,27 @@ export interface OfficeDocumentSaveRequestBody {
 const DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /**
- * Build the `POST /api/office/save` body for a Word ribbon quick-save. Always a CREATE of a new,
- * unfiled `sprk_document` — no `targetEntity` (association is optional for a Document save, matching
- * the pane's own `useSaveFlow` behavior) and no `existingDocumentId`/`isNewVersion` (a one-click quick
- * save never attempts the pane's identity-resolved version-save path; the user can associate/file the
- * document later from the pane). Mirrors `buildEmailSaveRequest`'s shape for the Document branch of
- * the same server contract (`useSaveFlow.ts`'s `startSave`, `contentType === 'Document'`).
+ * The name a Quick Save gives the document — the pane's own rule (task 089 calls it rather than keeping a second
+ * copy): the Document Name the pane would default to (`stripDocumentExtension` of the document's title, task 020),
+ * uploaded under `toDocxFileName` of that name (`useSaveFlow`'s rule).
+ */
+export function quickSaveDocumentNames(title: string): { documentName: string; fileName: string } {
+  const documentName = stripDocumentExtension((title || '').trim());
+  return { documentName: documentName || 'document', fileName: toDocxFileName(documentName) };
+}
+
+/**
+ * Build the `POST /api/office/save` body for a Word ribbon Quick Save (task 037; task 089 adds `target`). Never
+ * filed to a record — no `targetEntity`; association is optional for a Document save, and the user files it from
+ * the pane. Mirrors the Document branch `useSaveFlow.startSave` builds for the same server contract.
  */
 export function buildDocumentSaveRequest(
   context: QuickSaveDocumentContext,
   contentBase64: string,
-  idempotencyKey: string
+  idempotencyKey: string,
+  target: QuickSaveTarget = { mode: 'create' }
 ): OfficeDocumentSaveRequestBody {
-  const rawName = (context.title || 'Document').trim() || 'Document';
-  const fileName = /\.docx$/i.test(rawName) ? rawName : `${rawName}.docx`;
+  const { documentName, fileName } = quickSaveDocumentNames(context.title);
 
   return {
     contentType: 'Document',
@@ -194,12 +237,148 @@ export function buildDocumentSaveRequest(
     aiOptions: { ...DEFAULT_AI_OPTIONS },
     document: {
       fileName,
-      title: context.title || 'Document',
+      title: documentName,
       contentType: DOCX_CONTENT_TYPE,
       contentBase64,
+      ...(target.mode === 'version'
+        ? { existingDocumentId: target.existingDocumentId, isNewVersion: true as const }
+        : { allowRename: true as const }),
     },
     idempotencyKey,
   };
+}
+
+/**
+ * The file name a stored document's SPE `webUrl` names, or `null` when it names none. SharePoint Embedded returns
+ * an Office web URL of the documented shape `…/_layouts/15/doc2.aspx?sourcedoc={guid}&file=Name.docx&…` (Microsoft
+ * Learn, "Open Office files"); a direct file URL (`…/Document%20Library/Name.docx`) names it in its last segment.
+ * Used to tell the user the name the server ACTUALLY stored, which differs from the requested one when it kept both.
+ */
+export function fileNameFromWebUrl(webUrl: string | null | undefined): string | null {
+  if (!webUrl) return null;
+  let url: URL;
+  try {
+    url = new URL(webUrl);
+  } catch {
+    return null;
+  }
+
+  const fromQuery = url.searchParams.get('file')?.trim();
+  if (fromQuery) return fromQuery;
+
+  const lastSegment = url.pathname.split('/').pop() ?? '';
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(lastSegment).trim();
+  } catch {
+    return null;
+  }
+  // A viewer page (`Doc.aspx`) without a `file` parameter names no document.
+  return /\.docx?$/i.test(decoded) ? decoded : null;
+}
+
+/** The job outcome a Quick Save reads after the save: the document it landed on and where it is stored. */
+export interface QuickSaveSavedDocument {
+  documentId: string;
+  webUrl?: string | null;
+}
+
+/**
+ * The notification for a successful Quick Save — always says what happened, in words (task 089, UAT-9):
+ * - version → "Saved a new version of '{name}'."
+ * - create → "Saved to Spaarke as '{stored file name}'." — and when the server kept both under another name, says so.
+ * - duplicate (the server had already saved exactly these bytes) → says nothing changed.
+ * When the stored name cannot be read from the job, the create message names no file rather than a guessed one.
+ */
+export function describeQuickSaveSuccess(input: {
+  target: QuickSaveTarget;
+  requestedFileName: string;
+  /** For a version: the resolved document's label (its name or file name), when identity resolution gave one. */
+  documentLabel?: string | null;
+  saved: QuickSaveSavedDocument | null;
+  duplicate: boolean;
+}): string {
+  const storedFileName = fileNameFromWebUrl(input.saved?.webUrl);
+
+  if (input.target.mode === 'version') {
+    const name = input.documentLabel || storedFileName || input.requestedFileName;
+    return input.duplicate
+      ? `'${name}' has not changed since it was last saved to Spaarke. Nothing new was saved.`
+      : `Saved a new version of '${name}'.`;
+  }
+
+  if (input.duplicate) {
+    return storedFileName
+      ? `This document is already saved in Spaarke as '${storedFileName}'. Nothing new was saved.`
+      : 'This document is already saved in Spaarke. Nothing new was saved.';
+  }
+  if (!storedFileName) {
+    return 'Saved to Spaarke.';
+  }
+  if (storedFileName.toLowerCase() !== input.requestedFileName.toLowerCase()) {
+    return `Saved to Spaarke as '${storedFileName}'. A different document is already named '${input.requestedFileName}', so both were kept.`;
+  }
+  return `Saved to Spaarke as '${storedFileName}'.`;
+}
+
+/**
+ * Why a Quick Save did NOT save when the open document's identity is neither "new" nor resolved — the same outcomes
+ * on which the pane refuses to save without the user's explicit choice (task 024: conflict / indeterminate /
+ * denied / error never create silently). A one-click command has no way to ask, so it says why and saves nothing.
+ * Returns `null` for `new` and `resolved`, which Quick Save handles itself.
+ */
+export function describeUnsavableIdentity(identity: DocumentIdentityOutcome): string | null {
+  switch (identity.kind) {
+    case 'conflict':
+      return 'Quick Save did not save this document: Spaarke has conflicting records for it. Open Save to Spaarke to choose what to do.';
+    case 'indeterminate':
+      return 'Quick Save did not save this document: Spaarke could not check whether it is already saved. Try again in a moment.';
+    case 'denied':
+      return "Quick Save did not save this document: you can't add a version to its Spaarke document. Open Save to Spaarke to save your copy as a new document.";
+    case 'error':
+      return `Quick Save did not save this document: Spaarke could not check whether it is already saved (${identity.message}).`;
+    default:
+      return null;
+  }
+}
+
+/** The step of a Quick Save that failed — decides how a failure WITHOUT a server reason is worded. */
+export type QuickSaveStage = 'connect' | 'read' | 'save';
+
+/** A thrown `ApiClientError` carries the server's ProblemDetails on `.error` (duck-typed: no runtime import here). */
+function serverProblemOf(error: unknown): (ProblemDetails & { status: number }) | null {
+  const candidate = (error as { error?: unknown } | null)?.error as Partial<ProblemDetails> | undefined;
+  return candidate && typeof candidate === 'object' && typeof candidate.status === 'number'
+    ? (candidate as ProblemDetails & { status: number })
+    : null;
+}
+
+/**
+ * The notification for a Quick Save that failed — never the fixed "Failed to save" text (UAT-9, task 089):
+ * - the server refused (403, 409, 413, 429, …) → the server's own message (its `detail`, else the catalog message
+ *   for its `errorCode`, else its title), with the HTTP status;
+ * - no server reason → what failed, in words: reading the document from Word, or reaching Spaarke.
+ */
+export function describeQuickSaveFailure(error: unknown, stage: QuickSaveStage): string {
+  const problem = serverProblemOf(error);
+  if (problem) {
+    const known = problem.errorCode ? mapProblemDetailsToMessage(problem).message : '';
+    const reason = (problem.detail || known || problem.title || '').trim();
+    return reason
+      ? `Spaarke did not save this document: ${reason} (${problem.status})`
+      : `Spaarke did not save this document (HTTP ${problem.status}).`;
+  }
+
+  const raw = (error as { message?: unknown } | null)?.message;
+  const detail = typeof raw === 'string' && raw.trim() ? ` (${raw.trim()})` : '';
+  switch (stage) {
+    case 'read':
+      return `Couldn't read this document from Word, so nothing was saved${detail}.`;
+    case 'connect':
+      return `Couldn't connect to Spaarke, so nothing was saved${detail}.`;
+    default:
+      return `Couldn't reach Spaarke, so the document may not have been saved${detail}. Check your connection and try again.`;
+  }
 }
 
 /**

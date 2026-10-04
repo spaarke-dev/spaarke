@@ -119,7 +119,10 @@ public class UploadSessionManager
         ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093 (#1084 follow-on): tags go on the CALLER's request Activity, as always — `using` here
+        // disposed it the moment this method returned, ending the request's own trace span early (resultCode
+        // 0, success false, a truncated duration). This method did not start the Activity and must not end it.
+        var activity = Activity.Current;
         activity?.SetTag("operation", "UploadSmall");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("filePath", path);

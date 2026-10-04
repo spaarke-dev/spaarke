@@ -36,6 +36,7 @@ import {
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
 // React 16's resolution (PCF target per ADR-022). Matches SemanticSearchControl.
 import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { IInputs } from './generated/ManifestTypes';
 // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
 // presentational core now live in `@spaarke/communication-components` — the
@@ -129,11 +130,11 @@ function getXrm(): any {
 /** Resolve the host communication record GUID from the page context / Xrm.Page. */
 function resolveCommunicationId(context: ComponentFramework.Context<IInputs>): string | undefined {
   const page = (context as unknown as { page?: { entityId?: string } }).page;
-  if (page?.entityId && page.entityId.length > 0) return page.entityId.replace(/[{}]/g, '');
+  if (page?.entityId && page.entityId.length > 0) return cleanGuid(page.entityId);
   const xrm = getXrm();
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }

@@ -259,3 +259,55 @@ shared/taskpane/components/views/__tests__/SaveView.test.tsx
 shared/taskpane/components/views/__tests__/ShareView.test.tsx
 shared/taskpane/hooks/__tests__/useEntitySearch.test.ts
 shared/taskpane/hooks/__tests__/useSaveFlow.test.ts
+# --- Save tab after a save + Open on the collision prompt (task 088, UAT round 3: UAT-1/5/6/7) ------
+# Pins: the form STAYS after a save (confirmation bar naming the record or "not filed", View Document +
+# Copy Link; Open Document immediately left of a gray disabled "Saved"); an edited name or an accepted
+# Generate Profile -> "Save version" = a version of THE SAVED document, reverting -> "Saved"; View
+# Document / Open Document / View Existing Document open the Spaarke RECORD with appname= (none when
+# SPAARKE_APP_NAME is empty), never the Graph webUrl; no capability or no ORG_URL -> not rendered; an
+# Outlook save reaches the same state (read-only name, stays "Saved"). Changed suites already listed
+# above: SaveFlowCollision (Open + the canSaveAsVersion flag), errorMessages.collision,
+# openRecordLauncher (appname + openFileUrl), sendEmailService, DocumentProfileSection
+# (onProfileGenerated), SaveFlow.openRecord, SaveFlow.captureAtSave, SaveView.
+shared/taskpane/components/__tests__/SaveFlow.savedState.test.tsx
+# --- identity mark, Quick Save, Open Spaarke (task 089, UAT round 3: UAT-9/10) - green from creation ---
+# Pins: after a successful save the OPEN document carries exactly one stamp part with the saved id (an
+# already-stamped document is not written to: no addAsync/deleteAsync; a different id ends with only the new
+# one; unsupported CustomXmlParts or Outlook attempts nothing and the save still reports success) and the
+# reader then resolves it (round trip); the client stamp constants equal the server's OfficeDocumentStamp
+# (the test reads the C# file); Quick Save versions a RESOLVED document (existingDocumentId + isNewVersion),
+# keep-both-creates an unresolved one with the pane's name rule + allowRename, saves nothing on
+# conflict/indeterminate/denied/error, shows the SERVER's message on a refusal and says what failed in
+# words otherwise; error notifications stay 8 s; the ribbon's Share is "Open Spaarke" everywhere and opens
+# the Console URL from the build settings. Changed suites already listed above: commands.test.ts,
+# quickSaveHelpers, openRecordLauncher, mergeUnifiedManifest, SaveView, SaveView.captureAtSave.
+shared/adapters/__tests__/WordAdapter.writeDocumentStamp.test.ts
+shared/adapters/__tests__/documentStampContract.test.ts
+shared/taskpane/services/__tests__/documentIdentityService.stampWrite.test.ts
+shared/taskpane/components/views/__tests__/SaveView.identityStamp.test.tsx
+shared/taskpane/utils/__tests__/documentFileName.test.ts
+word/commands/__tests__/notify.test.ts
+# --- To Do tab label/icon/spacing, contact email, create confirmation (task 091, UAT round 3: UAT-2/4) ---
+# Pins: the Assigned-To picker shows a contact's email (additive) alongside name, with job title as a
+# quieter third line and never the server's literal "contact" fallback; the selected chip shows name +
+# email; a successful create shows a success MessageBar naming the To Do with an "Open in Spaarke" link
+# gated on canOpenRecord + ORG_URL (NFR-10, never rendered dead); a failed create shows the server's own
+# reason, never a generic message, and no success confirmation. Tab label/icon changes ("To Do" + the
+# Microsoft To Do blue check) are pinned by the two suites already listed above:
+# TaskPaneNavigation.test.tsx and TaskPaneShell.test.tsx (both updated by this task).
+shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
+# --- name lock/Save-as-new, "Save" wording, content-change re-enable, two-button Open (task 094, owner --
+# 2026-10-04, UAT round 3 follow-up) -----------------------------------------------------------------
+# Pins: once a document is in Spaarke (pre-save identity-resolved, or this pane already saved it this
+# session) the name box is LOCKED (read-only, with a hint) and "Save as new document" is the only unlock;
+# the save button is "Save" whenever enabled -- NEVER "Save version", anywhere in the pane; with content-
+# change detection supported "Saved" (gray) turns into an enabled "Save" on a Word content-change event,
+# and the pane's own identity-mark write (writeDocumentStamp) never fires it; without detection the
+# button is an enabled "Save" immediately after saving, never gray; an accepted Generate Profile still
+# re-enables it (088 kept); the saved-state bundle, lifted to the caller (App.tsx), survives a Save-tab
+# remount (switching to To Do/Find and back); "Name Already Exists" offers "Open in Word" (PC/Mac,
+# unsupported anchor-click trial) alongside "Open in browser" (always). Changed suites already listed
+# above: SaveFlow.savedState, SaveFlow.versionMode, SaveFlowCollision, openRecordLauncher, capabilities,
+# OutlookAdapter.
+shared/adapters/__tests__/WordAdapter.documentChangeDetection.test.ts
+shared/taskpane/components/views/__tests__/SaveView.documentChangeDetection.test.tsx

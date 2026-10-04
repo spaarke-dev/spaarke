@@ -11,9 +11,6 @@ export * from './SprkButton';
 // Only ViewSelector remains; the new DataGrid framework lives under './DataGrid'.
 export * from './DatasetGrid/ViewSelector';
 
-// Toolbar components
-export * from './Toolbar';
-
 // Page Chrome components (OOB parity)
 export * from './PageChrome';
 
@@ -141,6 +138,9 @@ export * from './ThreePaneLayout';
 // PaneHeader - Canonical pane-header primitive (icon + title + rightSlot) for SpaarkeAi three-pane shell (FR-01, task 010)
 export * from './PaneHeader';
 
+// PaneHeaderToolsMenu - Shared pane-header "⋮ tools" trigger + dropdown (C-12, spaarke-ontology-platform-r1 reuse audit D5)
+export * from './PaneHeaderToolsMenu';
+
 // TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
 export * from './TagFilter';
 
@@ -181,10 +181,9 @@ export * from './HeaderToolbar';
 // (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
 export * from './RecordHeader';
 
-// WizardRegistry - Central dispatch table mapping a maker-configured key to a
-// lazy-loaded Create wizard component + the shared WizardHostProps injection
-// contract (visual-host-create-button-r1 FR-03/FR-04, task 011)
-export * from './WizardRegistry';
+// (WizardRegistry / resolveWizard DELETED 2026-10-03 — reuse audit C-20: zero consumers; its own
+// header instructed edits that were silent no-ops. The ONE live wizard-key resolver is
+// VisualHost's local WIZARD_KEY_TO_PAGE / resolveWizardPage in VisualHostRoot.tsx.)
 
 // WizardFollowOns - Shared, config-driven "Next Steps" follow-on card grid +
 // reusable follow-on steps (incl. net-new AddTodoFollowOnStep), the generalized

@@ -22,6 +22,7 @@ import type { IPlaybook, AuthenticatedFetchFn } from '../Playbook';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -88,7 +89,7 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (frame as any).Xrm;
       if (xrm?.Utility?.getUserId) {
-        userId = (xrm.Utility.getUserId() as string).replace(/^\{|\}$/g, '');
+        userId = cleanGuid(xrm.Utility.getUserId() as string);
         if (userId) break;
       }
     } catch {

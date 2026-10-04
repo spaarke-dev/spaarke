@@ -35,6 +35,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { DatePicker } from "@fluentui/react-datepicker-compat";
+import { cleanGuid } from '@spaarke/ui-components';
 import {
   CheckmarkCircleRegular,
   AddRegular,
@@ -225,7 +226,7 @@ export const TodoSection: React.FC<TodoSectionProps> = ({
 
       if (result && result.length > 0) {
         const selected: ILookupValue = {
-          id: result[0].id.replace(/[{}]/g, "").toLowerCase(),
+          id: cleanGuid(result[0].id),
           name: result[0].name,
           entityType: result[0].entityType,
         };

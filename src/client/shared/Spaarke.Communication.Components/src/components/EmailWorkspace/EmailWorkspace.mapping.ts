@@ -13,7 +13,7 @@
  * No React import (this file is safe to unit-test without a DOM/provider).
  */
 import type { IDataService } from '@spaarke/ui-components';
-import { sanitizeEmailHtml } from '@spaarke/ui-components';
+import { sanitizeEmailHtml, cleanGuid } from '@spaarke/ui-components';
 import {
   COMMUNICATION_REGARDING_FIELDS,
   derivePrimaryReview,
@@ -170,8 +170,8 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
       const nm = raw[`_${field}_value@OData.Community.Display.V1.FormattedValue`];
       filed.push({
         entityType,
-        recordId: val.replace(/[{}]/g, '').toLowerCase(),
-        recordName: typeof nm === 'string' && nm ? nm : val.replace(/[{}]/g, '').toLowerCase(),
+        recordId: cleanGuid(val),
+        recordName: typeof nm === 'string' && nm ? nm : cleanGuid(val),
       });
     }
   }
@@ -245,11 +245,11 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
 // ---------------------------------------------------------------------------
 
 /**
- * Char cap for the derived body snippet. Mirrors the agent-visible
- * `EMAIL_SNIPPET_CAP_CHARS` (200, `pillar9-visibility.ts`) so a pre-capped
- * snippet never surprises the downstream `emailWidgetVisibility` derivation
- * (which re-caps at 200 anyway — being consistent keeps the persisted carrier
- * and the derived agent-visible state the same length).
+ * Char cap for the derived body snippet. Mirrors the server-side agent-visible
+ * cap (200, `SprkChatAgentFactory.TruncateEmailSnippet`) so a pre-capped
+ * snippet never surprises the downstream derivation (which re-caps at 200
+ * anyway — being consistent keeps the persisted carrier and the derived
+ * agent-visible state the same length).
  */
 export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
 
@@ -258,11 +258,10 @@ export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
  * per-selection record read (`useEmailWorkspaceRecord`). This is the shape the
  * SpaarkeAi `email` workspace tab persists into its `WorkspaceTab.widgetData`
  * as an `EmailTabWidgetData` (task 042b, FR-C1). The server's
- * `TryDeriveVisibleState` and the client registry `getVisibleState('email')`
- * both read the compact shape from `widgetData`.
+ * `TryDeriveVisibleState` reads the compact shape from `widgetData`.
  *
  * `emlDocumentId` is a FETCH HANDLE ONLY (on-demand `eml-render`, FR-C4) — it
- * is never projected into the agent-visible `SerializedEmailState`; only
+ * is never projected into the server-derived agent-visible Email state; only
  * `subject`/`from`/`date`/`threadId`/`snippet` are agent-visible (ADR-015 data
  * minimization). `threadId` is intentionally absent: `sprk_communication`
  * surfaces no conversation/thread column today (verified against
@@ -298,9 +297,9 @@ function deriveBodySnippet(rawBody: string): string | undefined {
  * `null` when nothing is selected, the read is loading/failed
  * (`recordState === null`), `communicationId` is absent, or the identity
  * minimum (`subject`/`from`/`date`) is not fully present — mirroring the
- * required-field gate in the agent-visible `emailWidgetVisibility`
- * derivation so we never persist a carrier the derivation would reject
- * anyway. `date` prefers the received timestamp, falling back to the sent
+ * required-field gate of the former client-side `emailWidgetVisibility`
+ * derivation (deleted 2026-10-03, C-21) so the persisted carrier always has
+ * an identity to label the tab with. `date` prefers the received timestamp, falling back to the sent
  * timestamp (matching `mapRowToEmailCardItem`'s date precedence). Pure — no
  * React, no I/O.
  *

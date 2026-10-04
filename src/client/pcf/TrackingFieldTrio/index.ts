@@ -190,6 +190,7 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/compo
 // instead of blanking the whole PCF (defense-in-depth alongside the
 // react/jsx-runtime dedupe in ../webpack.config.js).
 import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { initializeAuth } from './authInit';
 // Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
 // SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
@@ -283,12 +284,7 @@ const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
  * ASKED about with the id the server ANSWERED about. That comparison fails closed, so a purely cosmetic
  * disagreement would hide the Manage Access affordance rather than merely log something. Normalizing is
  * the cheap end of that trade. */
-function normalizeRecordId(id: string): string {
-  return id
-    .trim()
-    .replace(/^\{|\}$/g, '')
-    .toLowerCase();
-}
+const normalizeRecordId = cleanGuid;
 
 /** Resolves the Dataverse org URL for the MSAL redirect URI, mirroring the
  * `Xrm.Utility.getGlobalContext().getClientUrl()` pattern used by every other

@@ -71,6 +71,9 @@ describe('WordAdapter.getCapabilities()', () => {
     // task 020 / FR-06 (converted from a hostType gate per this task's coordinator follow-up):
     // Word can supply the open document's own name as the Document Name field's default.
     expect(capabilities.canProvideDocumentName).toBe(true);
+
+    // task 094: GA (not preview) requirement set WordApi 1.6 — isSetSupported stubbed true by beforeEach.
+    expect(capabilities.canDetectDocumentChanges).toBe(true);
   });
 
   it('canOpenBrowserWindow follows the runtime requirement-set check (task 027), not a hardcoded value', () => {
@@ -79,6 +82,31 @@ describe('WordAdapter.getCapabilities()', () => {
     );
 
     expect(adapter.getCapabilities().canOpenBrowserWindow).toBe(false);
+  });
+
+  // task 094: WordApi 1.6 is a genuinely conditional requirement set (same shape as OpenBrowserWindowApi
+  // above) — a host can satisfy this adapter's WordApi 1.3 init floor and still lack 1.6.
+  it('canDetectDocumentChanges is false when WordApi 1.6 is not supported, without affecting the other flags', () => {
+    (global.Office.context.requirements.isSetSupported as jest.Mock).mockImplementation(
+      (set: string, version?: string) => !(set === 'WordApi' && version === '1.6')
+    );
+
+    const capabilities = adapter.getCapabilities();
+    expect(capabilities.canDetectDocumentChanges).toBe(false);
+    expect(capabilities.canGetDocumentContent).toBe(true);
+    expect(capabilities.canInsertLink).toBe(true);
+  });
+
+  // task 094: platform, never hostType — Office.context.platform is not part of the requirements mock,
+  // so it is set directly on context for these two tests.
+  it.each([
+    ['PC', Office.PlatformType.PC, true],
+    ['Mac', Office.PlatformType.Mac, true],
+    ['OfficeOnline', Office.PlatformType.OfficeOnline, false],
+  ])('canOpenDesktopWord is %s on platform %s', (_label, platform, expected) => {
+    (global.Office.context as unknown as { platform?: Office.PlatformType }).platform = platform;
+
+    expect(adapter.getCapabilities().canOpenDesktopWord).toBe(expected);
   });
 });
 
@@ -173,5 +201,21 @@ describe('OutlookAdapter.getCapabilities()', () => {
     // but because the Document Name box already overrides that subject under a different contract
     // (task 046 (b)'s isNameSystemDerived). See the capability's doc comment in types.ts.
     expect(capabilities.canProvideDocumentName).toBe(false);
+
+    // task 094: no open document in Outlook — content-change detection is Word-only.
+    expect(capabilities.canDetectDocumentChanges).toBe(false);
+  });
+
+  // task 094: canOpenDesktopWord is PLATFORM, not hostType — it can be true on an Outlook-hosted pane too
+  // (the collision prompt's "Open in Word" opens the COLLIDING FILE, always a Word document).
+  it.each([
+    ['PC', Office.PlatformType.PC, true],
+    ['OfficeOnline', Office.PlatformType.OfficeOnline, false],
+  ])('canOpenDesktopWord is %s on platform %s, independent of hostType', async (_label, platform, expected) => {
+    (global.Office.context.mailbox as unknown as { item: unknown }).item = mockReadItem;
+    (global.Office.context as unknown as { platform?: Office.PlatformType }).platform = platform;
+    await adapter.initialize();
+
+    expect(adapter.getCapabilities().canOpenDesktopWord).toBe(expected);
   });
 });
