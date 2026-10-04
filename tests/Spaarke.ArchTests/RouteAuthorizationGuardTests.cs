@@ -32,11 +32,14 @@ namespace Spaarke.ArchTests;
 ///   (<see cref="Waivers"/>).</item>
 /// </list>
 ///
-/// <para><b>Sign-in is declared, never implied</b> (task 167 r2). Credit says which record a caller may act on; it
+/// <para><b>Sign-in is declared, never implied</b> (task 167 r2, f1). Credit says which record a caller may act on; it
 /// presumes a signed-in caller. So every live route also carries <c>.RequireAuthorization(...)</c> on its route or
-/// group chain, or a declared <c>.AllowAnonymous()</c> that Rule A then sends to an AnonymousByDesign or Pending
-/// waiver. The BFF sets no FallbackPolicy, so a route with neither is public, and no waiver excuses that
-/// (<see cref="NoRouteIsAnonymousByOmission"/>).</para>
+/// group chain — with a policy the guard PROVES requires an authenticated user — or a declared
+/// <c>.AllowAnonymous()</c> that Rule A then sends to an AnonymousByDesign or Pending waiver; no waiver excuses a
+/// route with neither (<see cref="NoRouteIsAnonymousByOmission"/>). Since owner round 14 the RUNTIME fails closed as
+/// well: the authorization FallbackPolicy requires an authenticated user for any endpoint that declares nothing
+/// (<see cref="TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser"/>), and the public surface is a pinned set
+/// (<see cref="TheExplicitlyAnonymousSurfaceIsPinned"/>).</para>
 ///
 /// <para><b>The attachment-form census.</b> Every authorization-shaped call on any route chain — any
 /// <c>.Add*Filter</c>, <c>.AddEndpointFilter</c>, <c>.Require*</c>, <c>.WithMetadata</c> — must sit in exactly
@@ -1605,12 +1608,15 @@ public partial class RouteAuthorizationGuardTests
     //     call hidden in a wrapper extension. Such a route would scan as signed-in and could carry any Permanent
     //     basis, escaping the AnonymousByDesign rule. (AnonymityIsDeclaredOnlyOnAScannedChain)
     //   - Anonymity by OMISSION (r2): a route with neither .RequireAuthorization(...) nor .AllowAnonymous() on its
-    //     route or group chain. The BFF sets no FallbackPolicy or DefaultPolicy (AuthorizationModule.cs registers
-    //     neither; Api/Office/CommunicationsEndpoints.cs:55 and Api/SpeAdmin/ContainerItemEndpoints.cs:37-38 say
-    //     so), so such a route is callable WITHOUT SIGNING IN — yet it carries no
-    //     AllowAnonymous, so it scanned as signed-in and passed under a ReferenceData waiver with no mandatory
-    //     control (the r2 verifier seeded exactly that, GET /api/zzref, and the guard stayed green).
-    //     (NoRouteIsAnonymousByOmission — no waiver exempts it)
+    //     route or group chain. Until owner round 14 the BFF set no FallbackPolicy, so such a route was callable
+    //     WITHOUT SIGNING IN — yet it carried no AllowAnonymous, so it scanned as signed-in and passed under a
+    //     ReferenceData waiver with no mandatory control (the r2 verifier seeded exactly that, GET /api/zzref, and
+    //     the guard stayed green). (NoRouteIsAnonymousByOmission — no waiver exempts it.) Since f1 the runtime is
+    //     closed too (AuthorizationModule.ApplyFallbackPolicy: an authenticated user; pinned by
+    //     TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser), and the build rule is KEPT (owner round 14
+    //     item 2): it keeps every route's intent declared, and a RequireAuthorization counts only when its policy is
+    //     PROVEN to require an authenticated user (SignInVerdict) — a permissive named policy defeats the fallback,
+    //     which never applies to an endpoint that declares authorization.
     //   - A registration API outside the vocabulary: .Map(...) (all verbs), MapFallback*, MapHub<T>,
     //     MapControllers and the like, or any Map* call that is not a method declared under src/server/**.
     //     (NoRouteIsRegisteredInAFormTheScannerCannotRead)
@@ -1731,7 +1737,8 @@ public partial class RouteAuthorizationGuardTests
             + "rule, and can carry any Permanent basis. Write .AllowAnonymous() on the registration (or its MapGroup) chain, "
             + "or teach the scanner the new shape with a control.\n\n  " + string.Join("\n  ", violations));
 
-        Assert.Equal(16, Real.Live.Count(r => r.Anonymous));   // non-vacuous: the 16 anonymous routes ARE seen
+        // Non-vacuous: the anonymous routes ARE seen — exactly the pinned explicit surface (16 today).
+        Assert.Equal(ExplicitlyAnonymousRoutes.Count, Real.Live.Count(r => r.Anonymous));
     }
 
     [Fact(DisplayName = "Task 167 r1: no route is registered in a form the scanner and the census cannot read")]
@@ -1746,44 +1753,697 @@ public partial class RouteAuthorizationGuardTests
             + string.Join("\n  ", violations));
     }
 
+    // =============================================================================================
+    // SIGN-IN IS VERIFIED, NOT ASSUMED (task 167 f1 — the r2 verifier's items 6 and 2)
+    // ---------------------------------------------------------------------------------------------
+    // Until f1, ANY .RequireAuthorization(...) on the chain counted as "this route requires sign-in". That rested
+    // on census review: a reviewer who classified a new, PERMISSIVE policy (one with no RequireAuthenticatedUser)
+    // as NotAuthorization would have made a public route count as signed-in. The FallbackPolicy cannot catch that
+    // either — ASP.NET Core applies the fallback only to an endpoint that declares NO authorization metadata.
+    //
+    // Now a RequireAuthorization form counts as sign-in only when the guard PROVES, from source, that its policy
+    // requires an authenticated user:
+    //   - bare .RequireAuthorization()        — the DEFAULT policy: the framework's (an authenticated user) when no
+    //                                           DefaultPolicy override exists; otherwise every override must call
+    //                                           RequireAuthenticatedUser();
+    //   - .RequireAuthorization("X")          — "X" (a string literal, or an AuthPolicies constant resolved from
+    //     / (AuthPolicies.X)                   Infrastructure/Authentication/AuthPolicies.cs) must be registered
+    //                                           EXACTLY ONCE by an AddPolicy(...) call inside AddAuthorization(...),
+    //                                           and that registration must call RequireAuthenticatedUser(). Requirements
+    //                                           AND together, so one such policy among several arguments suffices;
+    //                                           every argument must still resolve.
+    //   - anything else — an inline lambda, a policy object, an unresolvable name — is NOT sign-in, whatever the
+    //     census says about the form.
+    // The runtime half is the FallbackPolicy (AuthorizationModule.ApplyFallbackPolicy, owner round 14 item 2),
+    // pinned by TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser and proven over HTTP by
+    // tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs.
+    // =============================================================================================
+
+    private sealed record PolicyRegistration(string Name, string File, int Line, bool RequiresAuthenticatedUser);
+
+    /// <summary>The authorization policies the BFF registers, read from source.</summary>
+    private sealed record PolicyCatalog(
+        IReadOnlyDictionary<string, List<PolicyRegistration>> Named,
+        IReadOnlyList<PolicyRegistration> DefaultOverrides,
+        IReadOnlyList<PolicyRegistration> FallbackAssignments,
+        IReadOnlyDictionary<string, string> AuthPolicyConstants);
+
+    private static readonly Regex AddAuthorizationCall = new(@"(?<![\w.])(?:\w+\s*\.\s*)?AddAuthorization\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex AddPolicyCall = new(@"\.\s*AddPolicy\s*\(", RegexOptions.Compiled);
+
+    private static readonly Regex RequireAuthenticatedUserCall = new(@"(?<![\w])RequireAuthenticatedUser\s*\(\s*\)", RegexOptions.Compiled);
+
+    /// <summary><c>DefaultPolicy = …</c> / <c>FallbackPolicy = …</c> (an assignment, not <c>==</c> or <c>=&gt;</c>), and the
+    /// AuthorizationBuilder forms <c>SetDefaultPolicy(…)</c> / <c>SetFallbackPolicy(…)</c>.</summary>
+    private static readonly Regex PolicySlotAssignment = new(
+        @"(?<![\w])(?:(?<which>Default|Fallback)Policy\s*=(?![=>])|Set(?<setwhich>Default|Fallback)Policy\s*\()",
+        RegexOptions.Compiled);
+
+    private static readonly Regex AuthPolicyConstant = new("const\\s+string\\s+(?<name>\\w+)\\s*=\\s*\"(?<value>[^\"]*)\"\\s*;", RegexOptions.Compiled);
+
+    private static PolicyCatalog PolicyCatalogOf(IEnumerable<SourceUnit> units)
+    {
+        var list = units.ToList();
+
+        var constants = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var unit in list)
+        {
+            foreach (var type in unit.Types.Where(t => t.Name == "AuthPolicies"))
+            {
+                foreach (Match c in AuthPolicyConstant.Matches(unit.Text[type.BodyStart..type.BodyEnd]))
+                {
+                    constants[c.Groups["name"].Value] = c.Groups["value"].Value;
+                }
+            }
+        }
+
+        var named = new Dictionary<string, List<PolicyRegistration>>(StringComparer.Ordinal);
+        var defaults = new List<PolicyRegistration>();
+        var fallbacks = new List<PolicyRegistration>();
+
+        foreach (var unit in list)
+        {
+            var code = unit.Code;
+
+            var authorizationSpans = new List<(int Open, int Close)>();
+            foreach (Match a in AddAuthorizationCall.Matches(code))
+            {
+                var open = a.Index + a.Length - 1;
+                var close = MatchClose(code, open);
+                if (close > open)
+                {
+                    authorizationSpans.Add((open, close));
+                }
+            }
+
+            foreach (Match p in AddPolicyCall.Matches(code))
+            {
+                if (!authorizationSpans.Any(s => s.Open < p.Index && p.Index < s.Close))
+                {
+                    continue;   // e.g. the rate limiter's options.AddPolicy("anonymous", ...) — not an authorization policy
+                }
+
+                var open = p.Index + p.Length - 1;
+                var close = MatchClose(code, open);
+                var args = close < 0 ? new List<(int Start, int End)>() : SplitTopLevel(code, open + 1, close);
+                if (args.Count < 2)
+                {
+                    continue;
+                }
+
+                var name = ResolvePolicyName(unit.Text[args[0].Start..args[0].End], constants)
+                           ?? $"<unresolved {Squash(unit.Text[args[0].Start..args[0].End])}>";
+                var requires = RequireAuthenticatedUserCall.IsMatch(code[args[0].End..close]);
+                if (!named.TryGetValue(name, out var registrations))
+                {
+                    named[name] = registrations = new List<PolicyRegistration>();
+                }
+
+                registrations.Add(new PolicyRegistration(name, unit.Path, unit.LineOf(p.Index), requires));
+            }
+
+            foreach (Match s in PolicySlotAssignment.Matches(code))
+            {
+                int end;
+                if (s.Groups["setwhich"].Success)
+                {
+                    end = MatchClose(code, s.Index + s.Length - 1);
+                }
+                else
+                {
+                    end = StatementEnd(code, s.Index + s.Length);
+                }
+
+                var rhs = end < 0 ? string.Empty : code[(s.Index + s.Length)..end];
+                var which = s.Groups["which"].Success ? s.Groups["which"].Value : s.Groups["setwhich"].Value;
+                var registration = new PolicyRegistration(which, unit.Path, unit.LineOf(s.Index), RequireAuthenticatedUserCall.IsMatch(rhs));
+                (which == "Default" ? defaults : fallbacks).Add(registration);
+            }
+        }
+
+        return new PolicyCatalog(named, defaults, fallbacks, constants);
+    }
+
+    /// <summary>A string literal, or an <c>AuthPolicies.X</c> constant (optionally namespace-qualified); else null.</summary>
+    private static string? ResolvePolicyName(string expression, IReadOnlyDictionary<string, string> constants)
+    {
+        var e = expression.Trim();
+        var literal = Regex.Match(e, "^\"([^\"\\\\]*)\"$");
+        if (literal.Success)
+        {
+            return literal.Groups[1].Value;
+        }
+
+        var constant = Regex.Match(e, @"^(?:[A-Za-z_][\w.]*\.)?AuthPolicies\.(?<name>[A-Za-z_]\w*)$");
+        return constant.Success && constants.TryGetValue(constant.Groups["name"].Value, out var value) ? value : null;
+    }
+
+    /// <summary>Whether one <c>.RequireAuthorization(...)</c> call provably requires an authenticated user, and why not.</summary>
+    private static (bool Verified, string Why) SignInVerdict(ChainCall call, PolicyCatalog catalog)
+    {
+        var args = SplitTopLevel(call.Args, 0, call.Args.Length).Select(s => call.Args[s.Start..s.End].Trim()).ToList();
+        if (args.Count == 0)
+        {
+            var permissive = catalog.DefaultOverrides.Where(d => !d.RequiresAuthenticatedUser).ToList();
+            return permissive.Count == 0
+                ? (true, "the default policy (an authenticated user)")
+                : (false, "bare RequireAuthorization() uses the DefaultPolicy, and the override at "
+                          + string.Join(", ", permissive.Select(d => $"{d.File}:{d.Line}")) + " does not call RequireAuthenticatedUser()");
+        }
+
+        var anyRequires = false;
+        foreach (var arg in args)
+        {
+            var name = ResolvePolicyName(arg, catalog.AuthPolicyConstants);
+            if (name is null)
+            {
+                return (false, $"'{Squash(arg)}' is not a policy NAME the guard can resolve (a string literal or an AuthPolicies "
+                               + "constant) — an inline lambda or a policy object is never read as sign-in");
+            }
+
+            var registrations = catalog.Named.GetValueOrDefault(name) ?? new List<PolicyRegistration>();
+            if (registrations.Count != 1)
+            {
+                return (false, registrations.Count == 0
+                    ? $"no AddPolicy(\"{name}\", ...) registration inside AddAuthorization(...) was found"
+                    : $"policy '{name}' is registered {registrations.Count} times ({string.Join(", ", registrations.Select(r => $"{r.File}:{r.Line}"))})");
+            }
+
+            anyRequires |= registrations[0].RequiresAuthenticatedUser;
+        }
+
+        return anyRequires
+            ? (true, "a named policy that calls RequireAuthenticatedUser()")
+            : (false, $"none of the policies {string.Join(", ", args)} calls RequireAuthenticatedUser() in its registration — a "
+                      + "permissive policy is public, whatever list its form is classified in");
+    }
+
+    private static readonly Lazy<PolicyCatalog> RealPolicyCatalog = new(
+        () => PolicyCatalogOf(BffAndSharedUnits()), LazyThreadSafetyMode.ExecutionAndPublication);
+
     /// <summary>
     /// True when the route's EFFECTIVE chain — its own fluent calls plus every enclosing group's, aggregator groups
-    /// and group-continuation statements included — carries <c>.RequireAuthorization(...)</c> in any form. Every
-    /// policy that form can name requires a signed-in caller today: the bare call uses the framework default
-    /// (an authenticated user — the BFF overrides no DefaultPolicy), the named policies call RequireAuthenticatedUser
-    /// (AuthorizationModule.cs:331, :342, :358, :364) or fail without a user id (ResourceAccessHandler.cs:39), and a
-    /// NEW policy name is an unclassified attachment form until a reviewer classifies it.
+    /// and UNCONDITIONAL group-continuation statements included — carries a <c>.RequireAuthorization(...)</c> whose
+    /// policy the guard PROVES requires an authenticated user (<see cref="SignInVerdict"/>).
     /// </summary>
-    private static bool RequiresSignIn(RouteRegistration route) => route.Chain.Any(c => c.Name == "RequireAuthorization");
+    private static bool RequiresSignIn(RouteRegistration route, PolicyCatalog? catalog = null)
+    {
+        catalog ??= RealPolicyCatalog.Value;
+        return route.Chain.Any(c => c.Name == "RequireAuthorization" && SignInVerdict(c, catalog).Verified);
+    }
 
-    /// <summary>Live routes that are anonymous by OMISSION: neither .RequireAuthorization(...) nor .AllowAnonymous()
-    /// anywhere on the effective chain (task 167 r2, verifier finding 2).</summary>
-    private static List<string> AnonymousByOmissionViolations(IEnumerable<RouteRegistration> routes)
-        => routes
-            .Where(r => !r.Anonymous && !RequiresSignIn(r))
-            .Select(r => $"{r.Key}\n      at {r.File}:{r.Line} — neither .RequireAuthorization(...) nor .AllowAnonymous() on its "
-                         + $"route or group chain [{string.Join(", ", r.Forms)}]: it is callable WITHOUT SIGNING IN")
+    /// <summary>Live routes that are anonymous by OMISSION: no .AllowAnonymous() and no PROVEN sign-in requirement
+    /// anywhere on the effective chain (task 167 r2, verifier finding 2; f1, verifier item 6).</summary>
+    private static List<string> AnonymousByOmissionViolations(IEnumerable<RouteRegistration> routes, PolicyCatalog? catalog = null)
+    {
+        catalog ??= RealPolicyCatalog.Value;
+        return routes
+            .Where(r => !r.Anonymous && !RequiresSignIn(r, catalog))
+            .Select(r =>
+            {
+                var unproven = r.Chain.Where(c => c.Name == "RequireAuthorization")
+                    .Select(c => $"{c.Form}: {SignInVerdict(c, catalog).Why}")
+                    .ToList();
+                var detail = unproven.Count == 0
+                    ? "neither .RequireAuthorization(...) nor .AllowAnonymous() on its route or group chain"
+                    : "its .RequireAuthorization(...) is not shown to require an authenticated user ("
+                      + string.Join("; ", unproven) + ")";
+                return $"{r.Key}\n      at {r.File}:{r.Line} — {detail} [{string.Join(", ", r.Forms)}]: it is callable "
+                       + "WITHOUT SIGNING IN";
+            })
             .OrderBy(v => v, StringComparer.Ordinal)
             .ToList();
+    }
 
-    [Fact(DisplayName = "Task 167 r2: no route is anonymous by omission — each carries .RequireAuthorization(...) or a declared .AllowAnonymous()")]
+    [Fact(DisplayName = "Task 167 r2/f1: no route is anonymous by omission — each carries a PROVEN sign-in requirement or a declared .AllowAnonymous()")]
     public void NoRouteIsAnonymousByOmission()
     {
         var violations = AnonymousByOmissionViolations(Real.Live);
         Assert.True(
             violations.Count == 0,
-            "The BFF sets no FallbackPolicy or DefaultPolicy, so a route with neither .RequireAuthorization(...) nor "
-            + ".AllowAnonymous() on its route or group chain can be called WITHOUT SIGNING IN. It does not scan as "
-            + "anonymous, so it could pass under any Permanent basis with no AnonymousByDesign waiver and no mandatory "
-            + "control. No waiver exempts this rule. Add .RequireAuthorization() to the route or its MapGroup (an "
-            + "[Authorize] attribute is not read — declare it on the chain); if the route is public BY DESIGN, write "
-            + ".AllowAnonymous() on the chain and give it an AnonymousByDesign waiver naming its MANDATORY control.\n\n  "
+            "A route with neither a sign-in requirement nor .AllowAnonymous() on its route or group chain declares no "
+            + "intent. At runtime the authorization FallbackPolicy now answers it 401 (owner round 14 item 2), but the "
+            + "BUILD still refuses it: the intent must be written where a reviewer reads it, and a route that does not "
+            + "scan as anonymous could otherwise pass under any Permanent basis with no AnonymousByDesign waiver and no "
+            + "mandatory control. No waiver exempts this rule. Add .RequireAuthorization() — bare, or naming a policy whose "
+            + "AddPolicy registration calls RequireAuthenticatedUser() — to the route or its MapGroup (an [Authorize] "
+            + "attribute is not read — declare it on the chain); if the route is public BY DESIGN, write .AllowAnonymous() "
+            + "on the chain and give it an AnonymousByDesign waiver naming its MANDATORY control.\n\n  "
             + string.Join("\n  ", violations));
 
         // Non-vacuous: the real code has routes the predicate WOULD catch were their anonymity not declared — the
         // explicitly anonymous probes carry no RequireAuthorization — and they are exempt only because they say so.
         Assert.Contains(Real.Live, r => r.Anonymous && !RequiresSignIn(r));
         Assert.Contains(Real.Live, r => !r.Anonymous && RequiresSignIn(r));
+    }
+
+    [Fact(DisplayName = "Task 167 f1: every RequireAuthorization form on a live route is PROVEN to require an authenticated user")]
+    public void EveryRequireAuthorizationFormOnALiveRouteRequiresAnAuthenticatedUser()
+    {
+        var catalog = RealPolicyCatalog.Value;
+        var forms = Real.Live.SelectMany(r => r.Chain).Where(c => c.Name == "RequireAuthorization")
+            .GroupBy(c => c.Form, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var unproven = forms
+            .Select(f => (f.Key, Verdict: SignInVerdict(f.Value, catalog)))
+            .Where(f => !f.Verdict.Verified)
+            .Select(f => $"{f.Key}: {f.Verdict.Why}")
+            .ToList();
+        Assert.True(
+            unproven.Count == 0,
+            "Each of these RequireAuthorization forms is used on a live route but is not PROVEN to require an "
+            + "authenticated user. A permissive policy makes a route public even though it declares authorization, and "
+            + "the FallbackPolicy does not reach an endpoint that declares any. Give the policy's AddPolicy registration "
+            + "p.RequireAuthenticatedUser(), or name a policy that has it.\n\n  " + string.Join("\n  ", unproven));
+
+        // Non-vacuous, and the four forms in use today, each proven from its own registration.
+        Assert.Equal(
+            new[]
+            {
+                "RequireAuthorization()",
+                "RequireAuthorization(\"SystemAdmin\")",
+                "RequireAuthorization(AuthPolicies.ExternalCollaboration)",
+                "RequireAuthorization(AuthPolicies.RagApiKey)",
+            }.OrderBy(k => k, StringComparer.Ordinal),
+            forms.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Empty(catalog.DefaultOverrides);   // so bare RequireAuthorization() is the framework default: an authenticated user
+        foreach (var name in new[] { "SystemAdmin", "RagApiKey", "ExternalCollaboration", "CiamExternal" })
+        {
+            var registration = Assert.Single(catalog.Named[name]);
+            Assert.True(registration.RequiresAuthenticatedUser, $"{name} ({registration.File}:{registration.Line})");
+            Assert.Equal("Infrastructure/DI/AuthorizationModule.cs", registration.File);
+        }
+
+        // The resource policies rely on ResourceAccessHandler failing without a user id; they are NOT proven sign-in, so
+        // a future route naming one fails this rule (and the PolicyOnlyRoutes pin) until its registration says so.
+        Assert.False(Assert.Single(catalog.Named["canpreviewfiles"]).RequiresAuthenticatedUser);
+        Assert.DoesNotContain("anonymous", catalog.Named.Keys);   // the rate limiter's AddPolicy is not an authorization policy
+    }
+
+    [Fact(DisplayName = "Task 167 f1 controls: a permissive or unresolvable policy is not sign-in, whatever its census list; proven forms are")]
+    public void SignInVerdict_NegativeControl_PermissivePoliciesAreNotSignIn()
+    {
+        const string module =
+            "public static class AuthPolicies { public const string Open = \"Open\"; public const string Locked = \"Locked\"; }\n"
+            + "public static class M\n{\n    public static void Add(IServiceCollection services)\n    {\n"
+            + "        services.AddAuthorization(options =>\n        {\n"
+            + "            options.AddPolicy(\"Open\", p => p.RequireAssertion(_ => true));\n"
+            + "            options.AddPolicy(AuthPolicies.Locked, p => { p.AuthenticationSchemes = new[] { \"X\" }; p.RequireAuthenticatedUser(); });\n"
+            + "            options.AddPolicy(\"Twice\", p => p.RequireAuthenticatedUser());\n"
+            + "            options.AddPolicy(\"Twice\", p => p.RequireAuthenticatedUser());\n"
+            + "        });\n"
+            + "        services.AddRateLimiter(o => o.AddPolicy(\"Limiter\", c => RateLimitPartition.GetNoLimiter(\"x\")));\n"
+            + "    }\n}";
+        var catalog = PolicyCatalogOf(new[] { new SourceUnit("Infrastructure/DI/M.cs", module) });
+
+        List<string> Omission(string chain) => AnonymousByOmissionViolations(
+            ScanText("Api/Fake/Policy.cs", new[] { $"        app.MapGet(\"/api/zz/{{id}}\", Get){chain};" }), catalog);
+
+        // NEGATIVE: each of these declares RequireAuthorization, and none is proven sign-in — the route is named.
+        foreach (var chain in new[]
+                 {
+                     ".RequireAuthorization(\"Open\")",                       // permissive: no RequireAuthenticatedUser
+                     ".RequireAuthorization(AuthPolicies.Open)",              // the same, through the constant
+                     ".RequireAuthorization(\"Limiter\")",                    // a RATE-LIMIT policy name, not an authorization one
+                     ".RequireAuthorization(\"Unregistered\")",               // registered nowhere
+                     ".RequireAuthorization(\"Twice\")",                      // ambiguous: registered twice
+                     ".RequireAuthorization(p => p.RequireAssertion(_ => true))", // inline lambda — never read as sign-in
+                     ".RequireAuthorization(somePolicyObject)",               // a variable — never read as sign-in
+                     ".RequireAuthorization(\"Locked\", someOther)",          // one argument unresolvable
+                 })
+        {
+            var violation = Assert.Single(Omission(chain));
+            Assert.Contains("is not shown to require an authenticated user", violation);
+        }
+
+        // A DefaultPolicy override that does not require a user makes the BARE form unproven too.
+        var permissiveDefault = PolicyCatalogOf(new[] { new SourceUnit("Infrastructure/DI/D.cs",
+            "public static class D { public static void A(IServiceCollection s) { s.AddAuthorization(o => { "
+            + "o.DefaultPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build(); }); } }") });
+        Assert.Single(AnonymousByOmissionViolations(
+            ScanText("Api/Fake/Default.cs", new[] { "        app.MapGet(\"/api/zz\", Get).RequireAuthorization();" }), permissiveDefault));
+
+        // POSITIVE: the proven forms — bare (no override), a literal name, a constant, a qualified constant, and a
+        // permissive policy combined with a proven one (requirements AND together).
+        foreach (var chain in new[]
+                 {
+                     ".RequireAuthorization()",
+                     ".RequireAuthorization(\"Locked\")",
+                     ".RequireAuthorization(AuthPolicies.Locked)",
+                     ".RequireAuthorization(Sprk.Bff.Api.Infrastructure.Authentication.AuthPolicies.Locked)",
+                     ".RequireAuthorization(\"Open\", \"Locked\")",
+                 })
+        {
+            Assert.Empty(Omission(chain));
+        }
+
+        // The rate limiter's AddPolicy is outside AddAuthorization(...), so it is not catalogued as an authorization policy.
+        Assert.False(catalog.Named.ContainsKey("Limiter"));
+        Assert.True(Assert.Single(catalog.Named["Locked"]).RequiresAuthenticatedUser);
+    }
+
+    // =============================================================================================
+    // THE RUNTIME HALF — the authorization FallbackPolicy (owner round 14 item 2)
+    // ---------------------------------------------------------------------------------------------
+    // The build-time rule above keeps every route's intent declared. The FallbackPolicy keeps the RUNTIME closed if
+    // a route ever slips past it: ASP.NET Core applies the fallback to an endpoint with no authorization metadata
+    // (and to a request that matches no endpoint), so the omission answers 401 instead of serving anyone. This rule
+    // pins its SOURCE — exactly one assignment, exactly the authenticated-user policy, applied inside
+    // AddAuthorization(...). tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs proves
+    // its BEHAVIOUR over HTTP in the real app and in a host built on AuthorizationModule.ApplyFallbackPolicy.
+    // MAINTENANCE: a deliberate change to the fallback (a scheme list, say) changes RequiredFallbackPolicy here in the
+    // same diff, and must still call RequireAuthenticatedUser().
+    // =============================================================================================
+
+    private const string RequiredFallbackPolicy = "new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()";
+
+    private static List<string> FallbackPolicyViolations(IReadOnlyList<SourceUnit> units)
+    {
+        var violations = new List<string>();
+        var assignments = new List<(SourceUnit Unit, int Index, string Rhs)>();
+
+        foreach (var unit in units)
+        {
+            var code = unit.Code;
+            foreach (Match s in PolicySlotAssignment.Matches(code))
+            {
+                var isSetter = s.Groups["setwhich"].Success;
+                var which = isSetter ? s.Groups["setwhich"].Value : s.Groups["which"].Value;
+                if (which != "Fallback")
+                {
+                    continue;
+                }
+
+                var end = isSetter ? MatchClose(code, s.Index + s.Length - 1) : StatementEnd(code, s.Index + s.Length);
+                assignments.Add((unit, s.Index, end < 0 ? "<unreadable>" : Squash(code[(s.Index + s.Length)..end])));
+            }
+        }
+
+        if (assignments.Count == 0)
+        {
+            violations.Add("no authorization FallbackPolicy is set: an endpoint that declares neither RequireAuthorization nor "
+                           + "AllowAnonymous is callable by ANYONE at runtime (owner round 14 item 2 requires a FallbackPolicy "
+                           + "requiring an authenticated user)");
+            return violations;
+        }
+
+        if (assignments.Count > 1)
+        {
+            violations.Add($"the FallbackPolicy is set {assignments.Count} times ("
+                           + string.Join(", ", assignments.Select(a => $"{a.Unit.Path}:{a.Unit.LineOf(a.Index)}"))
+                           + ") — the last one wins, so one of them is unreviewed; keep exactly one");
+        }
+
+        foreach (var (unit, index, rhs) in assignments)
+        {
+            var at = $"{unit.Path}:{unit.LineOf(index)}";
+            if (rhs != RequiredFallbackPolicy)
+            {
+                violations.Add($"{at}: FallbackPolicy = {rhs} — it must be exactly {RequiredFallbackPolicy}");
+            }
+
+            // Applied, not merely written: the assignment sits inside AddAuthorization(...), or in a method that is
+            // called from inside AddAuthorization(...).
+            bool InsideAddAuthorization(SourceUnit u, int i) => AddAuthorizationCall.Matches(u.Code).Cast<Match>().Any(a =>
+            {
+                var open = a.Index + a.Length - 1;
+                var close = MatchClose(u.Code, open);
+                return open < i && i < close;
+            });
+
+            if (InsideAddAuthorization(unit, index))
+            {
+                continue;
+            }
+
+            var method = unit.MethodAt(index);
+            var applied = method is not null && units.Any(u => Regex.Matches(u.Code, $@"(?<![\w]){Regex.Escape(method.Name)}\s*\(")
+                .Cast<Match>()
+                .Any(c => !(ReferenceEquals(u, method.Unit) && c.Index == method.NameIndex) && InsideAddAuthorization(u, c.Index)));
+            if (!applied)
+            {
+                violations.Add($"{at}: the FallbackPolicy is assigned{(method is null ? string.Empty : $" in {method.Name}")}, but "
+                               + "nothing applies it inside AddAuthorization(...) — the runtime would stay open");
+            }
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 167 f1: the authorization FallbackPolicy requires an authenticated user and is applied (owner round 14 item 2)")]
+    public void TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser()
+    {
+        var units = BffAndSharedUnits().ToList();
+        var violations = FallbackPolicyViolations(units);
+        Assert.True(
+            violations.Count == 0,
+            "The runtime half of 'no route is anonymous by omission' is the authorization FallbackPolicy (owner round 14 item "
+            + "2): an endpoint that declares no authorization metadata must answer 401, not serve anyone. Set it once, in "
+            + "AuthorizationModule.ApplyFallbackPolicy, to an authenticated-user policy, and apply it inside "
+            + "AddAuthorization(...).\n\n  " + string.Join("\n  ", violations));
+
+        // Non-vacuous: it is THE one in AuthorizationModule.
+        var assignment = Assert.Single(RealPolicyCatalog.Value.FallbackAssignments);
+        Assert.Equal("Infrastructure/DI/AuthorizationModule.cs", assignment.File);
+        Assert.True(assignment.RequiresAuthenticatedUser);
+    }
+
+    [Fact(DisplayName = "Task 167 f1 controls: a missing, permissive, doubled or unapplied FallbackPolicy fails; the applied authenticated one passes")]
+    public void FallbackPolicy_NegativeControl_EachUnsafeShapeFails()
+    {
+        static IReadOnlyList<SourceUnit> Module(string body, string extra = "")
+            => new[] { new SourceUnit("Infrastructure/DI/AuthorizationModule.cs",
+                "public static class AuthorizationModule\n{\n    public static IServiceCollection Add(IServiceCollection services)\n    {\n"
+                + "        services.AddAuthorization(options =>\n        {\n" + body + "\n            options.AddPolicy(\"SystemAdmin\", p => p.RequireAuthenticatedUser());\n"
+                + "        });\n        return services;\n    }\n" + extra + "}") };
+
+        const string helper = "    public static void ApplyFallbackPolicy(AuthorizationOptions options)\n    {\n"
+                              + "        options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();\n    }\n";
+
+        // NEGATIVE: none at all (the state before owner round 14).
+        Assert.Contains(FallbackPolicyViolations(Module(string.Empty)), v => v.StartsWith("no authorization FallbackPolicy", StringComparison.Ordinal));
+
+        // NEGATIVE: permissive, null, and the default policy passed through by reference (not provably authenticated).
+        foreach (var rhs in new[]
+                 {
+                     "new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build()",
+                     "null",
+                     "options.DefaultPolicy",
+                 })
+        {
+            Assert.Contains(FallbackPolicyViolations(Module($"            options.FallbackPolicy = {rhs};")),
+                v => v.Contains("it must be exactly", StringComparison.Ordinal));
+        }
+
+        // NEGATIVE: written in a helper nothing applies; and set twice.
+        Assert.Contains(FallbackPolicyViolations(Module(string.Empty, helper)), v => v.Contains("nothing applies it", StringComparison.Ordinal));
+        Assert.Contains(FallbackPolicyViolations(Module(
+                "            ApplyFallbackPolicy(options);\n            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();",
+                helper)),
+            v => v.Contains("is set 2 times", StringComparison.Ordinal));
+
+        // NEGATIVE: the AuthorizationBuilder setter form is read too.
+        Assert.Contains(FallbackPolicyViolations(new[] { new SourceUnit("Infrastructure/DI/B.cs",
+                "public static class B { public static void A(IServiceCollection s) { s.AddAuthorizationBuilder()"
+                + ".SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build()); } }") }),
+            v => v.Contains("it must be exactly", StringComparison.Ordinal));
+
+        // POSITIVE: inline in AddAuthorization, and through a helper called from inside it (the real shape).
+        Assert.Empty(FallbackPolicyViolations(Module(
+            "            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();")));
+        Assert.Empty(FallbackPolicyViolations(Module("            ApplyFallbackPolicy(options);", helper)));
+    }
+
+    // =============================================================================================
+    // THE EXPLICITLY ANONYMOUS SURFACE AND THE PROBE POLICY — pinned sets (task 167 f1, owner round 14)
+    // =============================================================================================
+
+    /// <summary>"added" / "removed" lines between a computed set and its pinned set.</summary>
+    private static List<string> PinnedSetDifferences(IEnumerable<string> computed, IEnumerable<string> pinned)
+    {
+        var actual = computed.ToHashSet(StringComparer.Ordinal);
+        var expected = pinned.ToHashSet(StringComparer.Ordinal);
+        return actual.Except(expected).Select(k => $"added: {k}")
+            .Concat(expected.Except(actual).Select(k => $"removed: {k}"))
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static IEnumerable<string> AnonymousKeys(IEnumerable<RouteRegistration> routes)
+        => routes.Where(r => r.Anonymous).Select(r => r.Key);
+
+    private static bool CarriesHealthProbePolicy(RouteRegistration route)
+        => route.Chain.Any(c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"health-probe\"");
+
+    private static List<string> HealthProbePolicyViolations(IEnumerable<RouteRegistration> routes)
+    {
+        var list = routes.ToList();
+        var violations = PinnedSetDifferences(list.Where(CarriesHealthProbePolicy).Select(r => r.Key), HealthProbeRoutes);
+        violations.AddRange(list.Where(r => CarriesHealthProbePolicy(r) && !r.Anonymous)
+            .Select(r => $"not anonymous: {r.Key} carries the probe policy but is not a public liveness probe"));
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 167 f1: the explicitly anonymous surface is pinned — every public route says .AllowAnonymous() and is listed")]
+    public void TheExplicitlyAnonymousSurfaceIsPinned()
+    {
+        Assert.Equal(ExplicitlyAnonymousRoutes.Count, ExplicitlyAnonymousRoutes.Select(a => a.Route).Distinct(StringComparer.Ordinal).Count());
+        var differences = PinnedSetDifferences(AnonymousKeys(Real.Live), ExplicitlyAnonymousRoutes.Select(a => a.Route));
+        Assert.True(
+            differences.Count == 0,
+            "The set of routes reachable WITHOUT SIGNING IN changed. Since owner round 14 a route is public only by an "
+            + "explicit .AllowAnonymous(); the set is pinned so it changes only in a reviewed diff. An ADDED route needs a "
+            + "line in ExplicitlyAnonymousRoutes AND an AnonymousByDesign waiver naming its mandatory control (or a Pending "
+            + "waiver); a REMOVED one is deleted from the list in the diff that gates it.\n\n  " + string.Join("\n  ", differences));
+
+        // Each listed route is declared on a chain the scanner reads (AnonymityIsDeclaredOnlyOnAScannedChain refuses
+        // every other form), and Rule A sends each to an AnonymousByDesign or Pending waiver.
+        foreach (var route in ExplicitlyAnonymousRoutes)
+        {
+            var waiver = Assert.Single(Waivers, w => w.Route == route.Route);
+            Assert.True(waiver.Kind == WaiverKind.Pending || waiver.Basis == PermanentBasis.AnonymousByDesign, route.Route);
+        }
+    }
+
+    [Fact(DisplayName = "Task 167 f1: the health-probe rate-limit policy covers exactly the three liveness probes (owner round 14 item 1)")]
+    public void TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes()
+    {
+        var violations = HealthProbePolicyViolations(Real.Live);
+        Assert.True(
+            violations.Count == 0,
+            "\"health-probe\" (120/min per client IP) is LOOSER than \"anonymous\" (10/min). It exists so the App Service "
+            + "health check, the slot-swap warm-up ping and the 5-second deploy pollers never see a 429 on GET /healthz, "
+            + "/healthz/catalog and /ping (owner round 14 item 1). Any other route keeps its own policy; a probe that "
+            + "loses it goes back to the 10/min budget a deploy poller can exhaust.\n\n  " + string.Join("\n  ", violations));
+
+        // Round 12 item 1 still holds: every probe carries exactly ONE rate limit, and it is this one.
+        foreach (var key in HealthProbeRoutes)
+        {
+            var route = Real.Live.Single(r => r.Key == key);
+            Assert.Single(route.Chain, c => c.Name == "RequireRateLimiting");
+            Assert.True(route.Anonymous, key);
+        }
+    }
+
+    [Fact(DisplayName = "Task 167 f1 controls: the anonymous-surface and probe-policy pins fail on added, removed and misplaced routes")]
+    public void AnonymousSurfaceAndProbePolicy_NegativeControl_PinsBite()
+    {
+        static List<RouteRegistration> Probes(params string[] lines) => ScanText("Infrastructure/DI/EndpointMappingExtensions.cs", lines);
+
+        var real = new[]
+        {
+            "        app.MapHealthChecks(\"/healthz\", new HealthCheckOptions()).AllowAnonymous().RequireRateLimiting(\"health-probe\");",
+            "        app.MapHealthChecks(\"/healthz/catalog\", new HealthCheckOptions()).AllowAnonymous().RequireRateLimiting(\"health-probe\");",
+            "        app.MapGet(\"/ping\", () => Results.Text(\"pong\")).AllowAnonymous().RequireRateLimiting(\"health-probe\");",
+            "        app.MapGet(\"/status\", () => Results.Ok()).AllowAnonymous().RequireRateLimiting(\"anonymous\");",
+        };
+
+        // POSITIVE: the sanctioned shape.
+        Assert.Empty(HealthProbePolicyViolations(Probes(real)));
+
+        // NEGATIVE: the looser policy spreads to /status (added), a probe goes back to "anonymous" (removed), and a
+        // signed-in route borrows it (added + not anonymous).
+        Assert.Contains("added: GET /status", HealthProbePolicyViolations(Probes(real[0], real[1], real[2],
+            "        app.MapGet(\"/status\", () => Results.Ok()).AllowAnonymous().RequireRateLimiting(\"health-probe\");")));
+        Assert.Contains("removed: GET /ping", HealthProbePolicyViolations(Probes(real[0], real[1],
+            "        app.MapGet(\"/ping\", () => Results.Text(\"pong\")).AllowAnonymous().RequireRateLimiting(\"anonymous\");", real[3])));
+        var borrowed = HealthProbePolicyViolations(Probes(real.Append(
+            "        app.MapGet(\"/api/me\", Get).RequireAuthorization().RequireRateLimiting(\"health-probe\");").ToArray()));
+        Assert.Contains("added: GET /api/me", borrowed);
+        Assert.Contains(borrowed, v => v.StartsWith("not anonymous: GET /api/me", StringComparison.Ordinal));
+
+        // The anonymous surface: a new public route is "added", a gated one "removed"; the declared set is "equal".
+        var pinned = new[] { "GET /healthz", "GET /healthz/catalog", "GET /ping", "GET /status" };
+        Assert.Empty(PinnedSetDifferences(AnonymousKeys(Probes(real)), pinned));
+        Assert.Equal(new[] { "added: POST /api/zz/public" }, PinnedSetDifferences(AnonymousKeys(Probes(real.Append(
+            "        app.MapPost(\"/api/zz/public\", Post).AllowAnonymous();").ToArray())), pinned));
+        Assert.Equal(new[] { "removed: GET /status" }, PinnedSetDifferences(AnonymousKeys(Probes(real[0], real[1], real[2],
+            "        app.MapGet(\"/status\", () => Results.Ok()).RequireAuthorization();")), pinned));
+    }
+
+    // =============================================================================================
+    // GROUP CONTINUATIONS — only an UNCONDITIONAL one is credited (task 167 f1, the r2 verifier's item 5)
+    // =============================================================================================
+
+    [Fact(DisplayName = "Task 167 f1 controls: a conditional or skippable group continuation is a problem and earns nothing; an unbroken run is credited")]
+    public void GroupContinuation_NegativeControl_OnlyAnUnconditionalRunIsCredited()
+    {
+        static (List<RouteRegistration> Routes, List<string> Problems) Scan(params string[] lines)
+        {
+            var all = ScanText("Api/Fake/Continuation.cs", lines);
+            return (all.Where(r => !r.Unparseable).ToList(), all.Where(r => r.Unparseable).Select(r => r.Problem!).ToList());
+        }
+
+        // NEGATIVE — the r2 verifier's own seed, as a fixture: the continuation sits in a braced if-block. Before f1 it
+        // was credited (AtStatementStart took '{' as a statement start) and the guard stayed green.
+        var seed = Scan(
+            "        var docs = app.MapGroup(\"/api/documents\");",
+            "        if (DateTime.UtcNow.Year < 0) { docs.RequireAuthorization(); }",
+            "        docs.MapGet(\"/{documentId}/versions\", ListVersions);",
+            "        docs.MapGet(\"/{documentId}/versions/{versionId}/content\", GetVersionContent);");
+        Assert.Contains(seed.Problems, p => p.Contains("'docs.RequireAuthorization()' adds to group 'docs' outside the unbroken run",
+            StringComparison.Ordinal));
+        Assert.Equal(2, seed.Routes.Count);
+        Assert.All(seed.Routes, r => Assert.DoesNotContain(r.Chain, c => c.Name == "RequireAuthorization"));
+        Assert.Equal(
+            new[] { "GET /api/documents/{documentId}/versions", "GET /api/documents/{documentId}/versions/{versionId}/content" },
+            AnonymousByOmissionViolations(seed.Routes).Select(v => v[..v.IndexOf('\n')]).ToArray());
+
+        // NEGATIVE — every other way a continuation can be conditional or skipped. Each is a problem, and the chain the
+        // routes inherit gains nothing from it.
+        foreach (var lines in new[]
+                 {
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        if (flag) docs.RequireAuthorization();", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        if (flag) { } else { docs.RequireAuthorization(); }", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        docs.MapGet(\"/x\", H);", "        if (flag) return;", "        docs.RequireAuthorization();" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        Log(\"x\");", "        docs.RequireAuthorization();", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        foreach (var x in xs) { docs.AddDocumentAuthorizationFilter(\"read\"); }", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        Action secure = () => docs.RequireAuthorization();", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        var secured = docs.RequireAuthorization();", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        try { docs.RequireAuthorization(); } catch { }", "        docs.MapGet(\"/x\", H);" },
+                 })
+        {
+            var (routes, problems) = Scan(lines);
+            Assert.Single(problems);
+            var route = Assert.Single(routes);
+            Assert.DoesNotContain(route.Chain, c => c.Name is "RequireAuthorization" or "AddDocumentAuthorizationFilter");
+            Assert.Equal(Credit.None, CreditOf(route));
+        }
+
+        // NEGATIVE — a group RECEIVED as a parameter, continued inside an if-block of the receiving method.
+        const string received =
+            "public static class E\n{\n    public static void MapAll(this IEndpointRouteBuilder app)\n    {\n"
+            + "        var g = app.MapGroup(\"/api/e\");\n        MapChildren(g, true);\n    }\n\n"
+            + "    private static void MapChildren(RouteGroupBuilder group, bool flag)\n    {\n"
+            + "        if (flag) { group.RequireAuthorization(); }\n        group.MapGet(\"/x\", H);\n    }\n}";
+        var parameterCase = ScanFixtures(new[] { ("Api/Fake/E.cs", received), ("Program.cs", "var app = builder.Build();\napp.MapAll();") }, "Api/Fake/E.cs");
+        Assert.Contains(parameterCase, r => r.Unparseable && r.Problem!.Contains("adds to group 'group'", StringComparison.Ordinal));
+        Assert.DoesNotContain(parameterCase.Single(r => !r.Unparseable).Chain, c => c.Name == "RequireAuthorization");
+
+        // POSITIVE — the unbroken run: directly after the declaration (comments between are fine), after other
+        // statements on the SAME group, several in a row, inside the block that declares the group, and as the first
+        // statements of a method that receives the group.
+        foreach (var lines in new[]
+                 {
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        // sign-in for every route below", "        docs.RequireAuthorization();", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        docs.MapGet(\"/x\", H);", "        docs.RequireAuthorization();" },
+                     new[] { "        var docs = app.MapGroup(\"/api/d\");", "        docs.RequireAuthorization();", "        docs.AddDocumentAuthorizationFilter(\"read\");", "        docs.MapGet(\"/x\", H);" },
+                     new[] { "        if (enabled)", "        {", "            var docs = app.MapGroup(\"/api/d\");", "            docs.RequireAuthorization();", "            docs.MapGet(\"/x\", H);", "        }" },
+                 })
+        {
+            var (routes, problems) = Scan(lines);
+            Assert.Empty(problems);
+            var route = Assert.Single(routes);
+            Assert.Contains(route.Chain, c => c.Name == "RequireAuthorization");
+            Assert.Empty(AnonymousByOmissionViolations(routes));
+        }
+
+        var receivedOk = received.Replace("        if (flag) { group.RequireAuthorization(); }\n", "        group.RequireAuthorization();\n", StringComparison.Ordinal);
+        var parameterOk = ScanFixtures(new[] { ("Api/Fake/E.cs", receivedOk), ("Program.cs", "var app = builder.Build();\napp.MapAll();") }, "Api/Fake/E.cs");
+        Assert.DoesNotContain(parameterOk, r => r.Unparseable);
+        Assert.Contains(Assert.Single(parameterOk).Chain, c => c.Name == "RequireAuthorization");
     }
 
     [Fact(DisplayName = "Task 167 r1 controls: attribute anonymity, wrapper anonymity and unread registration forms each fail")]
@@ -2757,11 +3417,14 @@ public partial class RouteAuthorizationGuardTests
         }
 
         // Owner round 12 item 1: the three probes that relied on "a response fixed in source" now carry the
-        // mandatory rate limit their AnonymousByDesign waiver names.
+        // mandatory rate limit their AnonymousByDesign waiver names — and owner round 14 item 1 makes it the dedicated
+        // per-IP "health-probe" policy, not the shared 10/min "anonymous" one.
         foreach (var key in new[] { "GET /healthz", "GET /healthz/catalog", "GET /ping" })
         {
             Assert.Equal(PermanentBasis.AnonymousByDesign, WaiverOf(key)!.Basis);
-            Assert.Contains(byKey[key].Route.Chain, c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"anonymous\"");
+            Assert.Contains(byKey[key].Route.Chain, c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"health-probe\"");
+            Assert.DoesNotContain(byKey[key].Route.Chain, c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"anonymous\"");
+            Assert.Contains("RequireRateLimiting(\"health-probe\")", WaiverOf(key)!.Reason);
         }
 
         // Owner round 12 item 4: OWNER-COMPARISON — heartbeat meets it (one uniform 404); DELETE pin does not yet

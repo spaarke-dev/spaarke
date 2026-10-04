@@ -52,7 +52,8 @@ namespace Sprk.Bff.Api.Api.Office;
 /// </para>
 /// <para>
 /// The group's bare <c>.RequireAuthorization()</c> means "any authenticated caller" and nothing more:
-/// there is no <c>DefaultPolicy</c>/<c>FallbackPolicy</c> override anywhere in the BFF. Authorization
+/// there is no <c>DefaultPolicy</c> override, and the <c>FallbackPolicy</c> (UAC-r2 task 167) also asks only
+/// for an authenticated user. Authorization
 /// on these routes is therefore the DELEGATED QUERY ITSELF — there is no per-record filter because the
 /// record is not known until the query resolves it. Denial is deliberately indistinguishable from
 /// absence (a 404, never a 403): answering 403 would confirm the record exists, trading an IDOR for an

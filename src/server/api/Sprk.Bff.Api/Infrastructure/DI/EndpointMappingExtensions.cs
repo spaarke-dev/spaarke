@@ -59,13 +59,16 @@ public static class EndpointMappingExtensions
         //
         // Rate-limited like every other anonymous route (owner round 12 item 1, unified-access-control-r2
         // task 167): an anonymous route's control must be MANDATORY, and each call runs every non-catalog
-        // health check (Redis, the Service Bus processor, the Compose identity key). "anonymous" is 10/min
-        // per client IP; the App Service health check probes once a minute per instance.
+        // health check (Redis, the Service Bus processor, the Compose identity key). The three liveness
+        // probes (/healthz, /healthz/catalog, /ping) use the DEDICATED "health-probe" policy — 120/min per
+        // client IP, sliding window, no queue (owner round 14 item 1) — not the shared 10/min "anonymous"
+        // one, so the App Service health check, the slot-swap warm-up ping and the 5-second deploy pollers
+        // never see a 429. See RateLimitingModule "health-probe".
         app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
             Predicate = registration => !registration.Tags.Contains("catalog")
         }).AllowAnonymous()
-            .RequireRateLimiting("anonymous");
+            .RequireRateLimiting("health-probe");
 
         // FR-P0-04 catalog-reconciliation probe: Unhealthy on constants↔rows drift or
         // tool↔handler bijection violation. Verified green at gate task 014 after seeding.
@@ -73,7 +76,7 @@ public static class EndpointMappingExtensions
         {
             Predicate = registration => registration.Tags.Contains("catalog")
         }).AllowAnonymous()
-            .RequireRateLimiting("anonymous");   // owner round 12 item 1 (see /healthz above)
+            .RequireRateLimiting("health-probe");   // owner rounds 12 item 1 + 14 item 1 (see /healthz above)
 
         // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse
         // (mirrors the /healthz/dataverse/doc/{id} sibling below). Task 023 (B-2): added
@@ -121,7 +124,7 @@ public static class EndpointMappingExtensions
 
         app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
-            .RequireRateLimiting("anonymous") // owner round 12 item 1 (UAC-r2 task 167) — 10/min per IP
+            .RequireRateLimiting("health-probe") // owner rounds 12 item 1 + 14 item 1 (UAC-r2 task 167) — 120/min per IP
             .WithTags("Health")
             .WithDescription("Lightweight health check for warm-up agents. Returns 'pong' without authentication.");
 

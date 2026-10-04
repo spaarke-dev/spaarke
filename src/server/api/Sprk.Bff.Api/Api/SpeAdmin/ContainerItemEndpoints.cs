@@ -34,8 +34,8 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// that sentence was the defect.</b> Until task 091 these nine routes were registered on the ROOT app
 /// (<c>EndpointMappingExtensions</c>) while spelling out absolute <c>/api/spe/...</c> paths — so they
 /// sat at admin URLs, looked like admin routes, and carried neither filter. A bare
-/// <c>RequireAuthorization()</c> means <i>authenticated</i>, and no <c>DefaultPolicy</c> /
-/// <c>FallbackPolicy</c> override exists to raise that bar. Any signed-in caller could enumerate,
+/// <c>RequireAuthorization()</c> means <i>authenticated</i>, and neither the <c>DefaultPolicy</c> nor the
+/// <c>FallbackPolicy</c> (an authenticated user since UAC-r2 task 167) raises that bar. Any signed-in caller could enumerate,
 /// download, preview, mint a sharing link for, delete, and upload into any container id they named,
 /// with the client-supplied <c>configId</c> unchecked across tenants. Proven empirically before the
 /// fix — the nine routes answered 500/400 from inside the handler, never 403. The lesson is in the

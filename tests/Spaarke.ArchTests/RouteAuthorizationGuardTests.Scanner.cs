@@ -31,9 +31,11 @@ namespace Spaarke.ArchTests;
 /// <c>[AllowAnonymous]</c> attribute on a lambda or a handler method, <c>WithMetadata(new
 /// AllowAnonymousAttribute())</c>, or an <c>.AllowAnonymous()</c> hidden in a wrapper — would fail OPEN, so
 /// <c>AnonymityIsDeclaredOnlyOnAScannedChain</c> refuses every one (task 167 r1). So would an anonymity by
-/// OMISSION — no <c>.RequireAuthorization(...)</c> and no <c>.AllowAnonymous()</c> on the effective chain, which with
-/// no FallbackPolicy is a public route that scans as signed-in — so <c>NoRouteIsAnonymousByOmission</c> refuses it,
-/// whatever its waiver (task 167 r2). (3) A registration API outside
+/// OMISSION — no proven sign-in requirement and no <c>.AllowAnonymous()</c> on the effective chain, a route that scans
+/// as signed-in — so <c>NoRouteIsAnonymousByOmission</c> refuses it, whatever its waiver (task 167 r2/f1; the runtime
+/// FallbackPolicy answers it 401 since owner round 14). A group CONTINUATION statement counts only in the unbroken
+/// run right after the group's declaration; anywhere else — a nested or conditional block, after an intervening
+/// statement — it is a problem, never credited (task 167 f1). (3) A registration API outside
 /// the vocabulary — <c>.Map(...)</c>, <c>MapFallback*</c>, <c>MapHub&lt;T&gt;</c>, <c>MapControllers</c>, or any
 /// undeclared <c>Map*</c> call — would put routes beside the census, so
 /// <c>NoRouteIsRegisteredInAFormTheScannerCannotRead</c> refuses it (task 167 r1). What remains unseen is request
@@ -839,7 +841,7 @@ public partial class RouteAuthorizationGuardTests
     private sealed class GroupNode
     {
         public GroupNode(SourceUnit unit, MethodDecl? method, string variable, string parentReceiver, int index,
-            string? segment, string? problem, List<ChainCall> chain)
+            string? segment, string? problem, List<ChainCall> chain, int statementEnd)
         {
             Unit = unit;
             Method = method;
@@ -849,6 +851,7 @@ public partial class RouteAuthorizationGuardTests
             Segment = segment;
             Problem = problem;
             Chain = chain;
+            StatementEnd = statementEnd;
         }
 
         public SourceUnit Unit { get; }
@@ -858,6 +861,11 @@ public partial class RouteAuthorizationGuardTests
         public int Index { get; }
         public string? Segment { get; }
         public string? Problem { get; }
+
+        /// <summary>The index of the <c>;</c> that ends the declaration statement, or -1 when the statement could
+        /// not be read (then <see cref="Problem"/> is set). Continuation statements are credited only in the
+        /// unbroken run that starts right after it (task 167 f1).</summary>
+        public int StatementEnd { get; }
 
         /// <summary>The declaration's own chain PLUS any continuation statements (<c>group.AddX();</c>).</summary>
         public List<ChainCall> Chain { get; }
@@ -1053,6 +1061,7 @@ public partial class RouteAuthorizationGuardTests
             string? segment = null;
             string? problem = null;
             var chain = new List<ChainCall>();
+            var statementEnd = -1;
 
             if (close < 0)
             {
@@ -1080,10 +1089,15 @@ public partial class RouteAuthorizationGuardTests
                 {
                     problem = "the MapGroup statement does not end where its chain ends";
                 }
+
+                if (end < code.Length && code[end] == ';')
+                {
+                    statementEnd = end;
+                }
             }
 
             groups.Add(new GroupNode(unit, method, m.Groups["var"].Value, m.Groups["recv"].Value, m.Index, segment,
-                problem, chain));
+                problem, chain, statementEnd));
         }
 
         foreach (Match m in AnyMapGroup.Matches(code))
@@ -1196,23 +1210,41 @@ public partial class RouteAuthorizationGuardTests
         /// <summary>
         /// Statements such as <c>group.RequireAuthorization();</c> that add to a group AFTER its declaration.
         /// None exist today; reading them anyway is what keeps "the group's chain" honest if one is written.
+        ///
+        /// <para><b>Only an UNCONDITIONAL continuation is credited</b> (task 167 f1, closing the r2 verifier's
+        /// residual). A statement counts as part of the group's chain only when it sits in the unbroken run of
+        /// <c>group.…;</c> statements that starts IMMEDIATELY after the group's declaration statement — or, for a
+        /// group the method RECEIVES as a parameter, immediately after the method body's opening brace. Nothing but
+        /// whitespace and comments may separate the statements of that run, so no <c>if</c>, <c>else</c>, loop,
+        /// <c>switch</c>, lambda, <c>try</c>, <c>return</c>, <c>throw</c>, <c>break</c>, <c>continue</c> or
+        /// <c>goto</c> can stand between the group and the call: the call runs whenever the group exists. Before
+        /// f1, <c>AtStatementStart</c> treated a <c>{</c> as a statement start, so
+        /// <c>if (cond) { group.RequireAuthorization(); }</c> was credited as if unconditional — a FAIL-OPEN for
+        /// the sign-in rule and for any credited filter.</para>
+        ///
+        /// <para>Every other authorization-shaped call on a group variable or parameter — a nested block, a
+        /// brace-less <c>if (cond) group.X();</c>, <c>var y = group.X();</c>, <c>return group.X();</c>, a call
+        /// after an intervening statement — is a PROBLEM, never silently ignored: the remedy is to declare it on the
+        /// <c>MapGroup(...)</c> chain (or directly after the declaration).</para>
         /// </summary>
         private void AttachContinuations()
         {
             foreach (var unit in Units)
             {
+                var runStatements = UnconditionalContinuationStarts(unit);
+
                 foreach (Match m in MemberCall.Matches(unit.Code))
                 {
                     var receiver = m.Groups["recv"].Value;
                     var name = m.Groups["name"].Value;
-                    if (name.StartsWith("Map", StringComparison.Ordinal) || !AtStatementStart(unit.Code, m.Index))
+                    if (name.StartsWith("Map", StringComparison.Ordinal))
                     {
                         continue;
                     }
 
                     var method = unit.MethodAt(m.Index);
                     var isGroupVariable = GroupIn(unit, method, receiver) is not null;
-                    var isGroupParameter = method?.Params.Any(p => p.Name == receiver && p.Type.Contains("RouteGroupBuilder", StringComparison.Ordinal)) == true;
+                    var isGroupParameter = IsGroupParameter(method, receiver);
                     if (!isGroupVariable && !isGroupParameter)
                     {
                         continue;
@@ -1233,6 +1265,16 @@ public partial class RouteAuthorizationGuardTests
                         continue;
                     }
 
+                    if (!runStatements.Contains(m.Index))
+                    {
+                        Problems.Add($"{unit.Path}:{unit.LineOf(m.Index)}: '{receiver}.{string.Join("().", shaped.Select(c => c.Name))}()' "
+                                     + $"adds to group '{receiver}' outside the unbroken run of statements that directly follows "
+                                     + "the group's declaration (or opens the method that receives it), so it may be "
+                                     + "conditional or skipped — an if/else, a loop, a lambda, an early return. It is NOT "
+                                     + "credited. Declare it on the MapGroup(...) chain, or as a statement directly after it.");
+                        continue;
+                    }
+
                     foreach (var context in Resolve(unit, method, receiver, 0, m.Index))
                     {
                         if (context.Problem is not null || context.Nodes.Count == 0)
@@ -1246,6 +1288,68 @@ public partial class RouteAuthorizationGuardTests
                     }
                 }
             }
+        }
+
+        private static bool IsGroupParameter(MethodDecl? method, string identifier)
+            => method?.Params.Any(p => p.Name == identifier && p.Type.Contains("RouteGroupBuilder", StringComparison.Ordinal)) == true;
+
+        /// <summary>
+        /// The start index of every statement in an UNCONDITIONAL continuation run of <paramref name="unit"/>: for each
+        /// group declared here, the consecutive <c>variable.…;</c> statements that begin right after the declaration's
+        /// <c>;</c>; for each block-bodied method with a <c>RouteGroupBuilder</c> parameter, the consecutive
+        /// <c>parameter.…;</c> statements that begin right after the body's <c>{</c>. A run ends at the first token that
+        /// does not start another such statement on the SAME receiver.
+        /// </summary>
+        private HashSet<int> UnconditionalContinuationStarts(SourceUnit unit)
+        {
+            var starts = new HashSet<int>();
+            var code = unit.Code;
+
+            void Walk(int from, string receiver)
+            {
+                var p = from;
+                while (true)
+                {
+                    p = SkipWs(code, p);
+                    var afterName = p + receiver.Length;
+                    if (afterName > code.Length
+                        || string.CompareOrdinal(code, p, receiver, 0, receiver.Length) != 0
+                        || (afterName < code.Length && IsIdentChar(code[afterName])))
+                    {
+                        return;
+                    }
+
+                    var dot = SkipWs(code, afterName);
+                    if (dot >= code.Length || code[dot] != '.')
+                    {
+                        return;
+                    }
+
+                    var (_, end, problem) = ParseChain(unit, dot);
+                    if (problem is not null || end >= code.Length || code[end] != ';')
+                    {
+                        return;
+                    }
+
+                    starts.Add(p);
+                    p = end + 1;
+                }
+            }
+
+            foreach (var group in Groups.Where(g => ReferenceEquals(g.Unit, unit) && g.StatementEnd >= 0))
+            {
+                Walk(group.StatementEnd + 1, group.Variable);
+            }
+
+            foreach (var method in unit.Methods.Where(m => code[m.BodyStart] == '{'))
+            {
+                foreach (var parameter in method.Params.Where(p => p.Type.Contains("RouteGroupBuilder", StringComparison.Ordinal)))
+                {
+                    Walk(method.BodyStart + 1, parameter.Name);
+                }
+            }
+
+            return starts;
         }
 
         /// <summary>Every call site of <paramref name="method"/> in this set.</summary>
