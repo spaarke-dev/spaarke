@@ -786,3 +786,86 @@ newer 133 is kept and only 150's own changes are re-applied on top of it.
 - **Guide:** this task's FLS section is §7d (148 took §7c); every 150 reference was renumbered.
 - **`Set-SecureFlagFieldSecurity.ps1` (p1)** decides solution membership through `scripts/common/DataverseSolutionMembership.ps1`
   (profiles are root components: no `TableMetadataId`).
+
+## 21. Integration round (2026-10-04, `task/uac-r2-150-integ` from `integ/uac-r2-batch4` @ `f54b5b29b`) — rounds 26, 27, 29
+
+Round 26 item 2(b) (`RecordOwnershipResolver.ReadParentAsync` empty flag fails closed) was already applied at the batch 4
+merge (§20). This round closes the rest.
+
+| Item | Disposition |
+|---|---|
+| **A — round 26 item 2(a)** wire-path test | **Done.** `OrganizationMembershipReadTests` (its in-memory TestServer answering `sprk_projects`) gains `EmptySecureFlags` — a project's `sprk_issecure` served OMITTED (property absent) or NULL, the two shapes a masked field-secured column arrives in. `GetRootRecordFlagsAsync_TheRealReadOfAnEmptySecureFlag_IsUnreadable` (×2 shapes): the REAL `ExternalParticipationService.GetRootRecordFlagsAsync` returns `RootRecordFlags.Unreadable` for it, a `false` row beside it is mapped as stored (control), and the flag was asked for on the wire. `ComposeAsync_ARecordWhoseSecureFlagReadsEmptyOnTheWire_IsSuppressed` (×2 shapes × CIAM / workforce planes): with the flag readable the directly granted project is accessible (control); masked, `AccessibleRecordSetService` drops it and keeps the other. **Seed SA1** — the reader's call site `FlagsFrom(row.sprk_issecure ?? false, …)`: **6 fail** (all six new cases; every `EmptySecureFlagFailsClosedTests` mapping case still passes, which is why this test was owed) |
+| **B — round 26 item 2(c)** full effect of the BFF before G-0 | **Done.** Guide §7d step 0 now points at a new paragraph "Shipping the task 150 BFF before step 0 — the full effect": every NULL-flag root (and everything below it) is Unreadable — secure AND Restricted AND inactive — so external participants lose EVERY contact-sourced right on it, grants answer 503 `policy_unreadable`, the last-reader rule applies, uploads answer 503 `secure_flag_unreadable`; the SPA labels it secure; unsecure and the child-ownership pass refuse; provisioning alone writes the flag itself. The guide's masked-window paragraph, §9 G-0 row and §4's masked-window bullet state the same full effect (the BFF identity reads EMPTY during the window too unless it holds System Administrator) |
+| **C — round 26 item 2(d) + owner round 27** the ribbon | **Done (code, scripts, tests, ui-test specs); live = G-11.** In task 142's ONE template (`access-group.template.xml`: Make Secure Sequence 20, Remove Secure 30, their commands, enable rules and labels — label text only, no new tooltip copy), ONE generator (`Merge-AccessRibbon.ps1`) and ONE script (`sprk_access_ribbon.js` **1.1.0**); same three-library order, no second group/file/script/MSAL chain. See "The ribbon" below |
+| **D — round 29** 143's five provisioning codes | **Done.** `provisioningService.ts`: `creator_no_access` (403, not retryable), `creator_no_access_unverifiable` (500, retryable), `resume_creator_no_access` classified BY STATUS — 409 → `needs-administrator`, not retryable; 500 → `not-started`, retryable; any other status → the generic state, never a retry (`classifyProvisioningFailure` gains an optional `httpStatus`, passed by `provisionSecureProject`). The two `principal_*` codes are per-person WARNINGS on a success, surfaced the way the wizard already surfaces per-person warnings (a `warnings` string list): the response mirror gains `skippedPrincipals`, `describeSkippedPrincipal(code, name)` holds round 29's copy, `provisionSecureProject` returns `warnings` (names from an optional `principalNames` map — the response carries only ids; an unnamed id shows as the id), and `CreateProjectWizard` pushes them into its warnings. Every string pinned verbatim; `EMITTED` **32 → 37** (rows gained an optional status; warning rows are checked through `describeSkippedPrincipal`). **Seed SD1** — `creator_no_access` copy "cannot" → "may not": **1 fail** |
+| **E** external-spa `tsc --noEmit` | **Done: 6 → 0.** (1) `mock-data.ts`: the three event mocks named `_sprk_projectid_value`, which `sprk_event` does not have — now `_sprk_regardingproject_value` (the `ODataEvent` contract). (2) `OutsideCounselDashboard.tsx`: it selected `_sprk_projectid_value` on events and showed it AS the project name (a GUID or "Unknown Project"); the events are now kept tagged with their project and `recentActivity` / `upcomingItems` are derived (`useMemo`) with the project NAME from the project read, whichever read finishes last. (3) `EntityCreationService.ts` (`DriveItem` missing): the cause was external-spa's `any`-typed ambient shim `src/types/sdap-client.d.ts`, which shadowed the real package; the shim is deleted and `tsconfig.json` maps `@spaarke/sdap-client` to `../shared/Spaarke.SdapClient/src/index.ts` (type-check only — the module is type-only in the bundle; Vite ignores tsconfig paths). Also pinned in `tsconfig.json`: `react` / `react-dom` types to external-spa's own `@types` — with the shared library's `node_modules` installed (React 19 types) tsc otherwise reported 19 more errors (duplicate `ReactNode` types) that CI (which does not install them) never sees. No `any`, no `ts-ignore` |
+
+### The ribbon (item C)
+
+- **Enable logic (acceptance (e), (f)).** `canMakeSecure` / `canRemoveSecure` = 142's cached can-manage-access verdict
+  (Write — the same rule as Update Access) AND the stored flag: Make Secure needs `false`, Remove Secure `true`. The flag
+  is read with `Xrm.WebApi.retrieveRecord(<table>, id, "?$select=sprk_issecure")` (cached 30 s per record; forgotten by
+  the commands before they refresh). Anything but a stored true/false — a failed read, a throw, an absent or null value
+  (masked) — is unknown, and unknown is never equal: BOTH hidden. The flyout keeps 142's rule (both commands need the
+  same Write verdict, so "any item available" is Update Access's rule; no flag read for the flyout).
+- **Make Secure.** Confirms with `MAKE_SECURE_CONFIRMATION` — owner round 27's copy, ONE frozen constant, `{record}` =
+  project / matter / work assignment by table; buttons Make Secure (confirm, primary) · Cancel. Cancel calls nothing.
+  Confirmed → `POST /api/v1/external-access/provision-project` `{recordType, recordId}` (144's generalized endpoint;
+  148's child pass; round 26 item 3's file relocation is the BFF's — not built here).
+- **Remove Secure.** `POST /api/v1/external-access/unsecure-project` `{recordType, recordId}`. No client-side F3: a
+  refusal shows the endpoint's ProblemDetails `detail` verbatim (a status-only line when none was sent).
+- **Both** go through `Spaarke.BffAuth.authenticatedFetch` (ADR-028: the helper attaches the token; no token = no call
+  and a sign-in message), re-read the form (`data.refresh(false)` then `ui.refreshRibbon()`) after any completed call —
+  a 500 may follow a partial pass — and show the outcome as Update Access does (global notification on success, alert
+  on refusal). Success lines: "This {record} is now secure." / "This {record} is no longer secure."
+- **Acceptance (b) — release rule.** Make Secure ships only where task 148's transition is deployed, in the same
+  release: `Merge-AccessRibbon.ps1 -SecureTransitionDeployed` keeps it; without the switch the generator removes its five
+  nodes (and throws if it does not find exactly five). Tasks 148 + 150 are on this branch, so this release carries both:
+  G-11 passes the switch. Documented in the AccessRibbons README, guide §7d.1 and here.
+- **`Set-AccessRibbon.ps1`** (new, beside the generator). Dry run (default): merges into 142's checked-in exports
+  (project, matter; the work assignment's is not checked in — reported, and `-Apply` checks it in, UX (f)), prints
+  before/after commands and the Access menu, fails on a lost command or a wrong menu. `-Apply` (live; main session):
+  records the live form command lists (`before.json`), exports the dedicated ribbon solution (never SpaarkeCore),
+  checks in the work-assignment export, merges, packs, imports with publish, then verifies. `-Verify` (read-only):
+  `RetrieveEntityRibbon` (Form) per table — the before-list intact, Update Access / Remove Secure (and Make Secure exactly
+  when the switch is given) present and calling `access_ribbon.js`. Runs: dry run with and without the switch — PASS
+  (project + matter); idempotent merge (same hash on a re-run); `-Verify` read-only against spaarkedev1 — **FAIL on all
+  three forms (76 / 79 / 74 commands read, no `sprk.Access.*`)**, the correct pre-import verdict. No live write.
+- **Tests.** `src/client/shared/Spaarke.UI.Components/src/__tests__/accessRibbon.secureCommands.test.ts` (25): injects the
+  REAL `sprk_assignedaccess_postsave.js` and `sprk_access_ribbon.js` into jsdom as classic scripts, replacing only `Xrm`
+  and `Spaarke.BffAuth`. Copy verbatim ×3 tables + the frozen constant; enable rules (not secure / secure ×3 tables,
+  Read-only ×2, failed read, throwing read, masked absent / null, the flyout); Make Secure (dialog strings, request,
+  refresh, notification; Cancel; refusal message; no token); Remove Secure (F3 refusal message verbatim and no confirm;
+  success; status-only fallback; state re-read after the command). Seeds: **SC1** an unknown flag read as "not secure"
+  → **4 fail**; **SC2** one word of paragraph 2 changed → **5 fail**; **SC3** the ProblemDetails `detail` ignored →
+  **2 fail**. Each restored and touched.
+- **ui-tests.** The POML `<ui-tests>` now carry the amendment's four (Access group, Make Secure after 148, F3 refusal,
+  Read-only user), and the superseded "read-only on the form" check is replaced as the amendment directs.
+
+### Residuals (proposed complete fixes; not decided here)
+
+- **R-150-1 — Make Secure is creator-only on the server today.** `/provision-project` still applies owner round 10 item
+  10 to every UNFLAGGED record: a Write holder who did not create it gets 403 `not_record_creator` (shown verbatim by the
+  ribbon). Round 10 item 10 placed "secure an existing record" on task 148's surface — which is this ribbon, calling the
+  same endpoint — and R3b keeps securing open to Write holders. As shipped, the ribbon offers Make Secure to every Write
+  holder and the server refuses all but the creator; the amendment's ui-test 2 therefore passes only as the creator.
+  **Proposed complete fix (main session / owner):** now that 148's transition is in the endpoint, lift the creator rule for
+  the ribbon path — the request names the Make Secure transition (e.g. `transition: "make-secure"`) and the endpoint
+  holds it to the Write gate (R3b), keeping the creator rule for the wizard's create-then-secure path; or, if the owner
+  keeps creator-only, the enable rule adds "the caller created it" from the same server verdict. Either way the
+  confirmation copy (round 27) is unchanged.
+- **R-150-2 — Remove Secure has no confirmation.** The amendment and acceptance (c) ask for none, and a confirmation
+  would be new user-facing copy (owner-authored). Proposed: owner-authored confirmation copy in the next round, wired
+  the same way as Make Secure's.
+- **R-150-3 — success lines and the status-only fallback** ("This {record} is now secure." / "… no longer secure." /
+  "{command} did not complete (status). Reload the record to see its current state.") are implementer copy, adjustable
+  in UAT per owner round 27's stance.
+- **R-150-4 — external-spa `npm run lint` cannot run**: `eslint` is not a dependency of `src/client/external-spa` and
+  there is no ESLint config there (pre-existing; `'eslint' is not recognized`). There is no vitest suite in external-spa
+  either. Proposed: add `eslint` + a flat config matching the shared library's, in its own change.
+- **R-150-5 — an unknown `skippedPrincipals` reason code** produces no warning (logged): only the two task-143 codes
+  exist server-side and both are pinned.
+
+### Tests (this round)
+
+BFF unit (full, twice under concurrent agent load): run 1 15555 passed, 48 failed, 54 skipped (15657); run 2 15565 passed, 38 failed, 54 skipped (15657) - every failure a TaskCanceledException in 25 unrelated contract/seam classes (Office*, Compose*, Insight*, Workspace*, DocumentProfile*, DocumentIdentity*, SearchItems, PlaybookRun, PinnedMemory, Phase1Smoke); those 25 classes isolated: 288 passed, 0 failed - contention, not regressions. OrganizationMembershipReadTests 46/46; EmptySecureFlag* 13/13. Spaarke.ArchTests 600/600. Sprk.Bff.Api.IntegrationTests 104/104. Spe.Integration.Tests 403 passed, 25 skipped, 0 failed (428). Jest (CreateProjectWizard 9 suites + SummarizeFilesDialog.provisioningHost + accessRibbon.secureCommands): 10 suites 179/179 (provisioningService.test.ts 88; ribbon 25). ui-components tsc exit 0. external-spa: tsc --noEmit 0 errors (CI layout and with the shared library's node_modules installed), vite build OK; lint and vitest cannot run (R-150-4). Seeds SA1 6 fail, SC1 4, SC2 5, SC3 2, SD1 1; each restored and touched. Set-AccessRibbon.ps1: dry runs PASS; -Verify read-only on spaarkedev1 FAIL x3 (pre-import, correct).
