@@ -484,6 +484,19 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
 - `Graph__ManagedIdentity__ClientId={uami-client-id}`
 - `ManagedIdentity__ClientId={uami-client-id}`
 - `Dataverse:ClientSecret` = KV reference (BFF `/health` fails fast per r3 task 061 `ValidateOnStart` if unresolved — **NFR-05**)
+- ⚠️ **Every application identity the BFF authenticates as must be NAMED in configuration** (unified-access-control-r2
+  task 166): the document-pointer check recognises the rows and files the BFF itself created only by the client ids in
+  `AzureAd__ClientId`, `API_APP_ID`, `Graph__ManagedIdentity__ClientId`, `ManagedIdentity__ClientId` and
+  `Dataverse__ClientId`. A stamp whose app-only Graph or Dataverse identity is under none of these keys (for example a
+  **system-assigned** managed identity with no client-id setting) cannot verify any BFF-created document, and every
+  download of one is refused (409 `document_storage_unverified`, fail closed). Set the user-assigned identity's client id
+  in `Graph__ManagedIdentity__ClientId` / `ManagedIdentity__ClientId` as above.
+- `DocumentPointer__StrictDerivedContainer` — **leave unset (false) at deployment.** It switches the download check to the
+  strict derived-container rule, and is set to `true` only after `scripts/Invoke-DocumentContainerMigration.ps1 -Verify`
+  passes on that environment (task 166 note §20). `DocumentContainerMigration__WritesEnabled` is set only by that
+  script's `-Apply`, for the run.
+- `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
+  enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
 
 #### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
 

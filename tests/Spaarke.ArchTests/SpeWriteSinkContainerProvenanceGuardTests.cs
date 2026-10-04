@@ -755,6 +755,38 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "Deliberately NOT the container derived from SaveRequest.TargetEntity: the destination is an "
             + "item that already exists, and a derived container could only disagree with it."),
 
+        // ── ADDED 2026-10-04 by unified-access-control-r2 task 166 f1 (round 21 item 1 (ii), round 26 item 3) ──
+        // The ONE BFF relocator that moves a document's file into the container its record derives (the
+        // legacy migration job, and task 150's Make Secure). Traced backwards: targetDrive <-
+        // RelocateIfMisplacedAsync <- RecordContainerResolver.DeriveDocumentContainersAsync(documentId) — the
+        // container set the DOCUMENT ROW's own links derive (owning record -> its container; a secure owner
+        // dominates; an undecided derivation REFUSES rather than guessing). The caller supplies only document
+        // ids (job: a keyset scan of sprk_document; Make Secure: the authorized record's documents) and, for
+        // Make Secure, an expected container that must be one the document's derivation ALLOWS, or the document
+        // is refused (reported Undecidable) and nothing moves.
+        new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedRecord, "166",
+            "targetDrive <- DocumentContainerDerivation.PrimaryContainer (or a caller-expected container only "
+            + "when derivation.Allows it) <- RecordContainerResolver.DeriveDocumentContainersAsync(documentId) "
+            + "(the sprk_document row's own link columns resolved through ResolveForRecordAsync / the "
+            + "communication archive fallback)",
+            "The relocation COPY: writes the document's bytes app-only into the container its record derives, "
+            + "so a misplaced legacy file lands where the strict pointer rule will look for it (ADR-003 "
+            + "fail-closed: an undecided derivation is refused, never defaulted; ADR-002 WP-1: the server owns "
+            + "the invariant). ConflictBehavior.Rename so a flat container never overwrites another document's "
+            + "file. The copy is verified (size, and quickXorHash where Graph returns one) BEFORE anything "
+            + "points at it."),
+
+        new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "DeleteFileAsync", 1,
+            Provenance.ServerDerivedRecord, "166",
+            "(drive, item) of either the copy THIS relocation just created (a failed verify / re-point) or the "
+            + "source named by the sprk_document row's own sprk_graphdriveid / sprk_graphitemid",
+            "The relocation's two deletes share one helper: the unverified/unattached COPY this same call "
+            + "created, or the SOURCE after the row was re-pointed — and the source only when no OTHER "
+            + "sprk_document still points at it (an unreadable answer keeps it), so a delete can never break "
+            + "another row (ADR-003; ADR-007). The drive is never caller-named: it is the row's recorded "
+            + "pointer, whose legitimacy IsRelocationSourceVerifiedAsync established before the copy began."),
+
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
         // before the folder-removal change touched anything: task 076 added the record-keyed upload pair

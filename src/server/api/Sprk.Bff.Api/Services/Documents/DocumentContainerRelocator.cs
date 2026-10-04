@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <para><b>Placement</b> (CLAUDE.md §10; <c>.claude/constraints/bff-extensions.md</c>): in the BFF — it composes the
 /// BFF's own container decisions (<see cref="RecordContainerResolver"/>), its app-only SPE facade and its Dataverse
 /// application identity, and the pointer columns are written by that identity alone. Scoped, registered unconditionally
-/// beside the resolver (Program.cs): the route that calls it is mapped unconditionally (§F.1).</para>
+/// in <c>DocumentsModule</c>: the route that calls it is mapped unconditionally (§F.1).</para>
 /// </remarks>
 public sealed class DocumentContainerRelocator
 {
@@ -75,8 +75,10 @@ public sealed class DocumentContainerRelocator
     /// <list type="number">
     /// <item>the row carries no file yet — the same file again is idempotent; ANY other file is refused (re-pointing a
     /// file is the relocator's job, never a client's);</item>
-    /// <item>the caller CREATED the row (a person; compared by Entra object id) — only the creator attaches its first
-    /// file, so the round-23 item check (item creator = row creator) holds for every row this route touches;</item>
+    /// <item>the caller is the row's CREATOR — <c>createdby</c> when a person, else the person the BFF recorded in
+    /// <c>sprk_createdbyperson</c>; compared by Entra object id, through the resolver's ONE definition
+    /// (<see cref="RecordContainerResolver.ReadDocumentCreatorObjectIdAsync"/>) — so the round-23 item check (item
+    /// creator = row creator) holds for every row this route touches;</item>
     /// <item>the file's drive is the container DERIVED for the row (<see cref="RecordContainerResolver.DeriveDocumentContainersAsync"/>)
     /// — the same answer the record-keyed upload route placed the bytes by;</item>
     /// <item>the item exists in that drive and the CALLER uploaded it (Graph <c>createdBy.user.id</c>).</item>
@@ -125,7 +127,7 @@ public sealed class DocumentContainerRelocator
                 "This document already has a file. Its file can only be changed by uploading a new version.");
         }
 
-        if (!await CallerCreatedTheRowAsync(row, caller, ct).ConfigureAwait(false))
+        if (await _resolver.ReadDocumentCreatorObjectIdAsync(documentId, row, ct).ConfigureAwait(false) != caller)
         {
             _logger.LogWarning(
                 "[DOCUMENT-ATTACH] REFUSED: the caller {Caller} did not create document {DocumentId}.", caller, documentId);
@@ -167,20 +169,6 @@ public sealed class DocumentContainerRelocator
             "[DOCUMENT-ATTACH] document {DocumentId} -> {Drive}/{Item} (uploaded by its creator, in its derived container).",
             documentId, drive, item);
         return PointerAttachResult.Attached(drive, item, alreadyAttached: false);
-    }
-
-    private async Task<bool> CallerCreatedTheRowAsync(Entity row, Guid caller, CancellationToken ct)
-    {
-        if (row.GetAttributeValue<EntityReference>(CreatedByColumn) is not { Id: var createdBy } || createdBy == Guid.Empty)
-        {
-            return false;
-        }
-
-        var user = await _dataverse.RetrieveAsync(
-            "systemuser", createdBy, ["azureactivedirectoryobjectid", "applicationid"], ct).ConfigureAwait(false);
-        return user is not null
-               && user.GetAttributeValue<Guid>("applicationid") == Guid.Empty
-               && user.GetAttributeValue<Guid>("azureactivedirectoryobjectid") == caller;
     }
 
     /// <summary>
@@ -342,7 +330,7 @@ public sealed class DocumentContainerRelocator
         Guid documentId, string sourceDrive, string sourceItem, string targetDrive, SpeItemCreator sourceFacts, Entity row,
         CancellationToken ct)
     {
-        var name = SpeUploadPath.SanitizeFileName(sourceFacts.Name ?? row.GetAttributeValue<string>(FileNameColumn));
+        var uploadPath = SpeUploadPath.SanitizeFileName(sourceFacts.Name ?? row.GetAttributeValue<string>(FileNameColumn));
 
         // 1. COPY through the BFF identity. Rename on a name collision: a flat container must never overwrite another
         //    document's file.
@@ -356,7 +344,7 @@ public sealed class DocumentContainerRelocator
                     "the source file could not be downloaded");
             }
 
-            copy = await _spe.UploadSmallAsync(targetDrive, name, bytes, ConflictBehavior.Rename, ct).ConfigureAwait(false);
+            copy = await _spe.UploadSmallAsync(targetDrive, uploadPath, bytes, ConflictBehavior.Rename, ct).ConfigureAwait(false);
         }
 
         if (copy is null || string.IsNullOrWhiteSpace(copy.Id))

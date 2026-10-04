@@ -217,6 +217,9 @@ export async function orchestrateUpload(
         dataverseClient: config.dataverseClient,
         navMapClient,
         getEntityConfig: config.entityConfigResolver,
+        // unified-access-control-r2 task 166 f1: the row is created WITHOUT its SPE pointer; the BFF attaches the
+        // uploaded file (POST /api/v1/documents/{id}/file) and stamps the pointer after verifying it.
+        attachFile: (documentId, file) => sdapClient.attachDocumentFile(documentId, file),
         logger,
     });
 

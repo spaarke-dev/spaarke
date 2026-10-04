@@ -52,7 +52,7 @@ export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationRe
 
 // Document Record Service (Dataverse CRUD)
 export { DocumentRecordService } from './DocumentRecordService';
-export type { DocumentRecordServiceOptions, EntityConfigResolver } from './DocumentRecordService';
+export type { DocumentRecordServiceOptions, EntityConfigResolver, DocumentFileAttacher } from './DocumentRecordService';
 
 // IDataverseClient implementations
 export { PcfDataverseClient } from './PcfDataverseClient';

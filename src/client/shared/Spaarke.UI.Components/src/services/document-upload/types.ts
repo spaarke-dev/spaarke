@@ -53,6 +53,12 @@ export interface IDataverseClient {
    * @param data - Fields to update
    */
   updateRecord(entityLogicalName: string, id: string, data: Record<string, unknown>): Promise<void>;
+
+  /**
+   * Delete a record (optional). Used only to remove a `sprk_document` whose file the BFF refused to
+   * attach (unified-access-control-r2 task 166 f1), so no "document" is left without its file.
+   */
+  deleteRecord?(entityLogicalName: string, id: string): Promise<void>;
 }
 
 /**

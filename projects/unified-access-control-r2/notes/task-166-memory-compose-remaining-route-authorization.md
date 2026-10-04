@@ -2,8 +2,17 @@
 
 > **Task**: `tasks/166-memory-compose-and-remaining-route-authorization.poml` (GitHub #1105)
 > **Branch**: `task/uac-r2-166` from `work/unified-access-control-r2` @ `e6dd48b43`; **r1**: `task/uac-r2-166-r1` (§18);
-> **r2**: `task/uac-r2-166-r2` (§19)
+> **r2**: `task/uac-r2-166-r2` (§19); **f1**: `task/uac-r2-166-f1` (§20)
 > **Rigor**: FULL (bff-api, auth, security; TEST-MODIFYING override applies)
+> **Outcome (f1, 2026-10-04)**: round 21 item 1 (i)–(iii) and round 25 item 6 are BUILT (§20): the BFF pointer-attach
+> route and every client pointer writer moved to it (7 PCF bundles rebuilt with `npm run build:prod`); the ONE
+> `DocumentContainerRelocator` (round 26 item 3) and the legacy migration job + its dry-run / `-Apply` / `-Verify`
+> driver; the strict derived-container rule behind `DocumentPointer:StrictDerivedContainer` (default = the round-23
+> interim rule); the FLS script's `-ClientNoLongerWritesPointers` precondition made satisfiable (deployed-web-resource
+> scan); the `sprk_report` pointer FLS target + the server-side allowed-workspace check; root-owned rows confined to the
+> root's own containers; the real export request builder under test. What remains of the items is the live writes,
+> each a script with a pending manual gate (§20.11). Status `completed-with-escalation` for ONE found consequence: a
+> relocated file's RAG index entries keep the old item id, and the complete fix is new AI-facade surface (§20.12 🔔).
 > **Outcome (r2, 2026-10-04)**: the 20-item verification of `582a4b42a` is closed and owner round 23 is implemented
 > (§19): the interim document-pointer check verifies the ITEM and the owner's customer subtree; reporting export carries
 > the RLS identity; the Save-As registration path is removed and DELETE is guarded; Create checks the caller's privilege
@@ -611,9 +620,12 @@ waivers owned by 166**, the `PUT` key becoming the `PATCH` key. `RouteAuthorizat
     row → 403; active-document with a document the user cannot read → 404.
 14. Revoke a contact grant on a secure test project where the same contact is also a member of an organization still
     granted that project → the container permission is kept (`RetainedByOtherGrant` / `NotAttempted`).
-15. Pointer check: a download of any existing dev document still works (0 of 530 refused, §18.4); a test row whose
-    `sprk_graphdriveid` is set (by an administrator, in a scratch row) to a drive id no business unit owns → 409
-    `document_storage_unverified`, no bytes.
+15. ~~Pointer check: a download of any existing dev document still works (0 of 530 refused, §18.4);~~ **STALE —
+    corrected in f1 (§20.2 item 11).** "0 of 530 refused" was true of the r1 rule only; r2's round-23 rule refuses
+    whole classes of dev documents by design (§19.3 "Expected effect"), and f1's root-owned rule (round 25 item 6)
+    refuses more (§20.5). The expected counts are now gate 17 (§19.12) and gate 22 (§20.11), not zero. The second half
+    stands: a test row whose `sprk_graphdriveid` is set (by an administrator, in a scratch row) to a drive id no business
+    unit owns → 409 `document_storage_unverified`, no bytes.
 16. Round 21 item 1 (a) — ONLY after the owed steps (i) and (ii) (§18.3):
     `pwsh scripts/Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -ClientNoLongerWritesPointers -Apply`,
     then the same with `-Verify` (exit 0).
@@ -706,6 +718,9 @@ whose item is not named for its communication; the 494 root-owned and 5 BU-1-in-
 item half additionally refuses any document whose item was uploaded by someone other than its creator — notably BFF-created
 rows whose item a PERSON uploaded (OBO), while `sprk_createdbyperson` is absent on `sprk_document` (task 146's child
 schema is not yet applied on dev). These refusals are the decided behaviour until the owed migration (§19.10).
+**This supersedes §18.12 gate 15's "0 of 530 refused"** (that figure described the r1 rule). **f1 update:** round 25
+item 6 narrows a ROOT-owned row's subtree to the root unit's own containers, so the "494 root-owned … pass it" above
+no longer holds for root-owned rows in another unit's container — the full census by class is §20.5.
 
 Tests: `AccessControl.DocumentPointerContainerCheckTests` (rewritten, 33 methods / 39 cases: container — own unit,
 same customer, another customer refused, root-owned, foreign, unknown unit, Ensure 409, archive path / unlinked /
@@ -870,3 +885,385 @@ Restored: no `SEED-166R2` marker remains in `src/` or `tests/` (Grep).
   rows with person-uploaded items pass this check; until it is applied and stamped, those rows are refused (decided).
 - `NOTE-FROM-MAIN.md` (round 23) was deleted, not committed.
 - No `.claude` edit is needed for this round (§12's edit stands).
+
+# f1 (2026-10-04): round 21 item 1 (i)–(iii) and round 25 item 6 built; the follow-up list closed
+
+> **Branch**: `task/uac-r2-166-f1` from `task/uac-r2-166-r2` @ `8e0c89f33`
+> **Inputs (BINDING)**: owner/main-session rounds 1–27 (`work/unified-access-control-r2`,
+> `notes/session27-owner-decisions-and-research.md`) — chiefly round 21 item 1 (i)–(iii), round 23 item 1 (the interim
+> rule, kept as the default), round 25 item 6 (report-catalog FLS + allowed-workspace check; root-owned rows; the real
+> export builder under test) and round 26 item 3 (ONE `DocumentContainerRelocator`, two callers); the main session's
+> `NOTE-FROM-MAIN.md` (round 26 item 3 restated; read first, deleted, NOT committed); the 21-item follow-up list for this
+> round (items 1–21 below).
+> **Outcome**: every item is closed in code, tests, scripts and docs (§20.2). What is left of them is LIVE writes only —
+> each a dry-run / `-Apply` / `-Verify` script or a deploy, with its exact command in §20.11 for the main session. One
+> consequence FOUND while building item 1 (ii) is escalated, not silently fixed (§20.12 🔔: a relocated file's RAG index
+> entries keep the old item id; the complete fix is new AI-facade surface, CLAUDE.md §10 bullet 3 / §6). Status
+> `completed-with-escalation` for that one decision.
+
+## 20.1 Binding inputs as applied
+
+| Decision | Implemented |
+|---|---|
+| Round 21 item 1 (i) — BFF pointer-attach endpoint; every client pointer writer moved to it; the client creates the row WITHOUT the pointer and the BFF stamps it after verifying the derived container (ADR-002 WP-3) | §20.3 |
+| Round 21 item 1 (ii) + round 26 item 3 — the legacy migration as ONE BFF service (`DocumentContainerRelocator`), copy → verify → re-point through the attach path → delete source; the script only triggers the BFF and reads its reports | §20.4 |
+| Round 21 item 1 (iii) — the FLS script's `-ClientNoLongerWritesPointers` precondition made satisfiable; the strict derived-container rule behind a flag, default = the round-23 interim rule | §20.5 |
+| Round 25 item 6 — `sprk_report` pointer columns FLS (BFF-only writable) + a server-side allowed-workspace check before embed, export and delete; a ROOT-owned document accepts only containers the root unit itself stamps; a test that executes the REAL export request builder | §20.6 |
+| Round 26 item 3 "do not build the Make Secure caller" | Not built. Task 150's lane calls `DocumentContainerRelocator.RelocateDocumentsAsync(ids, recordContainer, RelocationPurpose.MakeSecure, apply: true)` (§20.12) |
+
+## 20.2 The 21 items — what changed per item
+
+| # | Item | Closure |
+|---|---|---|
+| 1 (i) | BFF pointer-attach endpoint; client writers (`DocumentRecordService.ts` ×2, `EntityCreationService.ts` ×1, the seven Create*Wizards, the upload PCFs) moved to it; PCF builds with `npm run build:prod` | NEW `POST /api/v1/documents/{id}/file` (§20.3). Every client writer now creates the row with no `sprk_graphdriveid` / `sprk_graphitemid` / `sprk_hasfile` / `sprk_filepath` and calls `SdapApiClient.attachDocumentFile`; a refused attach deletes the just-created row (best effort) so no file-less "document" is left. The seven Create*Wizards write through `EntityCreationService`, so they are covered by its change; the form-script `DocumentOperations.js` pointer writes are removed. NEW arch guard `ClientDocumentPointerWriteGuardTests` scans every `.ts/.tsx/.js` under `src/client`, `src/solutions`, `src/dataverse` AND the committed PCF `Solution/Controls/**/bundle.js` (what a PCF solution import deploys); it went red on the seven stale committed bundles until they were rebuilt (`npm run build:prod`, all seven `Succeeded`) and copied into `Solution/Controls/sprk_Spaarke.Controls.<X>/bundle.js` |
+| 1 (ii) | Legacy migration (dry run / `-Apply` / `-Verify`, NOT run) moving misplaced dev files via the BFF identity; ONE BFF `DocumentContainerRelocator` | §20.4: the relocator (copy → verify size + quickXorHash → re-point through the attach path's one writer → delete source only when no other row points at it; every step logged with before/after ids); the ADR-036 job `document-container-migration` (registered DISABLED, report-only unless `DocumentContainerMigration:WritesEnabled`); `scripts/Invoke-DocumentContainerMigration.ps1` drives it through the existing `/api/admin/jobs` trigger/history routes. Not run (§20.11 gate 24) |
+| 1 (iii) | Make the FLS script's `-ClientNoLongerWritesPointers` precondition satisfiable; strict rule behind a flag (default interim) | `Set-DocumentPointerFieldSecurity.ps1` p4 is now EVIDENCE + confirmation: (p4a) scans every deployed JavaScript / HTML web resource for a client pointer write (it found ~30 on dev 2026-10-04 — the bundles predating this round, incl. the retired `UniversalDatasetGrid` PCF still deployed); (p4b) the operator's `-ClientNoLongerWritesPointers`. Strict rule: `DocumentPointer:StrictDerivedContainer` (§20.5) |
+| 2 | `sprk_report` FLS (`sprk_pbi_reportid`, `sprk_workspaceid`, `sprk_datasetid`, `sprk_iscustom`) + allowed-workspace check before embed, export, delete; root-owned rule; real `ExportReportAsync` test | §20.6 |
+| 3–6, 15 | Verifier context / positives | No action (recorded). |
+| 7 / 16 | Export RLS: no test executed the real request builder | `ExportReportAsync_TheRealRequestItSends_CarriesTheCallersRlsIdentity_OnTheReportsDataset` runs the REAL `ReportingEmbedService.ExportReportAsync` (a `CallBase` mock whose only override is the new `protected internal virtual GetPowerBIClientAsync` seam) against a strict `IPowerBIClient` / `IReportsOperations` double and captures the `ExportReportRequest` it sends: `Identities` = one `EffectiveIdentity { Username = caller's business unit, Roles = [BusinessUnitFilter], Datasets = [the report's dataset read from Power BI] }`. `ExportReportAsync_WithoutAnRlsUsername_RefusesBeforeAnyPowerBiCall` ("" / "   "). Seed S20 (identity removed from the real request) → red |
+| 8 | `sprk_report` native-write second door (any Write holder could re-point a catalog row) | Both controls of round 25 item 6: FLS target `-Target ReportCatalog` (`Set-ReportCatalogFieldSecurity.ps1` wrapper) AND the allowed-workspace check, which also catches rows forged before the lock. `POST /api/reporting/reports` now creates the row AS THE CALLER with only `sprk_name` / `sprk_embedurl` / `sprk_category` and stamps the four pointer columns APP-ONLY (the identity the FLS admits); a failed stamp deletes the half-made row and the clone (502) |
+| 9 | Root-owned widening (a root-owned row's subtree was the whole environment) | `RecordContainerResolver.CustomerSubtree`: a root-owned row's subtree is `[root]` only — the root's OWN stamped containers. Test renamed `ARootOwnedDocument_MayUseOnlyAContainerTheRootItselfStamps`; `CustomerSubtree_IsTheOwnersTopLevelUnitAndEverythingBeneathIt` pins `CustomerSubtree(root) = {root}`. Seed S1 → red. Census effect §20.5 |
+| 10 | Census: Secure Record owner-team documents and BFF-created rows with person-uploaded items (Compose / chat saves, outbound attachments) are EXPECTED refusals; add them | §20.5 census table (both classes + the root-owned class item 9 adds). The migration job's dry-run report is the census instrument: per document, its state and the interim / strict answers |
+| 11 | §18.12 gate 15 "0 of 530 refused" is stale (contradicts §19.3) | §18.12 gate 15 struck through and corrected in place; §19.3 now names the supersession |
+| 12 | The BFF identity config keys are documented nowhere an operator reads | `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5: one line naming the five keys (`AzureAd__ClientId`, `API_APP_ID`, `Graph__ManagedIdentity__ClientId`, `ManagedIdentity__ClientId`, `Dataverse__ClientId`) and the fail-closed consequence; plus `DocumentPointer__StrictDerivedContainer` and `PowerBi__AllowedWorkspaces__{n}__*` |
+| 13 | Performance: uncached repeated reads; bulk download | Per-SCOPE memo in `RecordContainerResolver` (Scoped = one request or one job run): the business-unit hierarchy is read once, each container's claimants once; only SUCCESSFUL answers are kept (a faulted read is dropped, so the next check asks again); nothing crosses requests. A bulk download of N documents now makes 1 hierarchy read instead of N. The Graph item read stays uncached by design (an authorization input — r2 §19.7). Tests `OneScope_ReadsTheHierarchyAndEachContainersClaimantsOnce_ForManyChecks`, `AFailedHierarchyRead_IsNotRemembered_TheNextCheckAsksAgain`. Seeds S22a / S22b → red |
+| 14 | Dead code / stale docs | DELETED `ReportingEmbedService.GetReportAsync` (no caller since r2) and its `ReportingProfileManagerTests` InlineData; DELETED `SpeContainerMembershipService.ListExternalMembersAsync` (+ `ReadExternalMembersAsync`, `ToContainerMember`, `SpeContainerMember`; no caller) with its two tests retargeted to the live `RemoveMembershipsAsync` / `RevokeMembershipAsync` paths and `ExternalAccessQueryIntegrityGuardTests` reduced to the surviving signature; `reporting-admin.md` endpoint table (PUT → PATCH, the verb the client sends), catalog contract + FLS paragraph, token flow, env vars, and the RLS section (the stale "client sends bu" line ~387); `reporting-module.md` Save As (= server clone); `Spaarke.AI.Widgets/src/types/WorkspaceTab.ts` stale doc (lines 5 and 337). `.claude/skills/bff-deploy/SKILL.md:50` is main-session-only (§20.12) |
+| 17–21 | Record criteria status | Publish size: the verifier's r2 measurement is recorded (`e6dd48b43` 45.657 MB vs `8e0c89f33` 45.684 MB = +0.027 MB, 212 / 212 files) and f1 is measured here (§20.9). F0 / F7 / F13 superseded by deletion (their routes were deleted in the first run; the rows stay struck in §9). F10 uniform 404 accepted (round 12 item 4). Manual gates pending: §17, §18.12 (gate 15 corrected), §19.12, §20.11 |
+
+## 20.3 Round 21 item 1 (i): the pointer-attach route and the client writers
+
+**Route.** `POST /api/v1/documents/{id}/file` with body `{ driveId, itemId }` (`AttachDocumentFileRequest`), on the
+existing documents group: `.AddDocumentAuthorizationFilter("write")` (WRITE on `{id}` as the caller, the same filter as
+the group's other writes) + `.RequireAuthorization()`. Handler → `DocumentContainerRelocator.AttachFileAsync`, which, in
+order and with each failure leaving the row untouched:
+
+1. **first file only** — a row that already carries a pointer accepts the SAME file again (200, `alreadyAttached`) and
+   refuses any other (409 `AlreadyAttached`): re-pointing a file is the relocator's job, never a client's;
+2. **the caller is the row's creator** — `createdby` when a person, else the person the BFF recorded in
+   `sprk_createdbyperson`, compared by Entra object id through the resolver's ONE definition
+   (`RecordContainerResolver.ReadDocumentCreatorObjectIdAsync`, the same reader the round-23 item check uses) — else
+   403 `NotTheCreator`;
+3. **the drive is the row's DERIVED container** (`DeriveDocumentContainersAsync`, §20.5) — undecidable → 409
+   `ContainerUndetermined`; another container → 409 `WrongContainer`;
+4. **the item exists there and the CALLER uploaded it** (Graph `createdBy.user.id`) — else 403 `NotTheUploader`;
+5. stamp APP-ONLY: `sprk_graphdriveid`, `sprk_graphitemid`, `sprk_hasfile = true`, `sprk_filepath` = the item's
+   `webUrl` read from Graph (never the client's).
+
+Problem details carry `errorCode = document_file_attach_refused` and `reasonCode` = the outcome; 400 for a missing id.
+Because the attach admits exactly the rows the interim check then honours, a freshly attached pointer passes both rules.
+
+**Clients.** `Spaarke.SdapClient`: `SdapApiClient.attachDocumentFile(documentId, { id, driveId? })` (+
+`AttachDocumentFileResult`, exported). `Spaarke.UI.Components`: `EntityCreationService` (payload without pointer
+columns; `attachUploadedFile`; `_deleteUnattachedDocument` on a refused attach), `DocumentRecordService`
+(`attachFile: DocumentFileAttacher` REQUIRED option; `createAndAttach` for both create paths),
+`createXrmEmailComposeHandlers` (attach, delete on failure), `IDataverseClient` / `WebApiLike` optional `deleteRecord`
+(+ `ODataDataverseClient`; `PcfDataverseClient` deliberately untouched — zero instantiation sites, and master deletes it, reuse audit C-26). `DocumentUploadWizard/uploadOrchestrator.ts` passes
+`attachFile: (documentId, file) => sdapClient.attachDocumentFile(documentId, file)` (the only `new DocumentRecordService`
+in `src/`). `spaarke_documents/DocumentOperations.js`: `updateDocumentAfterUpload` throws (the form script can no longer
+stamp a pointer); `processFileDelete` no longer clears the pointer columns (the BFF owns them).
+
+**PCF bundles rebuilt** (`npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod`; every log
+`[build] Succeeded`; lock-file churn reverted): CommunicationActions, CommunicationConnections,
+CommunicationConversationPanel, CommunicationMessageActions, CommunicationTimeline, CommunicationTimelineRegarding,
+TrackingFieldTrio. **Pre-existing build break fixed to make this possible:** since the 2026-08-14 `pdfjs-dist` 6.x CVE
+bump, pcf-scripts' babel-loader (no `node_modules` exclude) crashes on `pdfjs-dist/build/pdf.mjs` ("Cannot read
+properties of null (reading 'declarations')") for every single-chunk PCF whose bundle reaches SprkChat's
+`import('pdfjs-dist')` through the `@spaarke/ui-components` barrel — and pcf-scripts still exits 0, so the failure was
+silent. **Open PR #1123 (task 092, master build/test baseline repair) fixes the same six Communication* configs**, so
+this branch adopts its files BYTE-IDENTICALLY (`git show ec247e9dc:…` — the six `webpack.config.js` and the two LOUD
+stubs `src/client/pcf/shared/stubs/pdfjsDistUnreachable.js` / `mammothUnreachable.js`, which throw if ever reached):
+identical changes on both sides merge without conflict, whichever lands first. TrackingFieldTrio (not in #1123) gets a
+`webpack.config.js` aliasing the same two stubs (its `featureconfig.json` already allowed a custom config). The
+Communication.Components shared package needed `npm install` in this worktree for CommunicationConnections to resolve.
+`ControlManifest.xml` versions are NOT bumped here (the `pcf-deploy` skill bumps at deploy, §20.11 gate 21).
+
+## 20.4 Round 21 item 1 (ii) / round 26 item 3: `DocumentContainerRelocator` and the legacy migration
+
+`Services/Documents/DocumentContainerRelocator.cs` (sealed, Scoped, `DocumentsModule`). The ONE writer of a document's
+pointer outside a path that uploads the bytes itself; both of its writes go through one private `WritePointerAsync`.
+
+- **`RelocateIfMisplacedAsync(documentId, apply, purpose, ct, expectedTargetContainer)`** → `DocumentRelocationOutcome`
+  (`NoFile`, `InPlace`, `WouldRelocate`, `Relocated`, `RelocatedSourceKept`, `Undecidable`, `FileMissing`,
+  `SourceUnverified`, `Failed`). Derivation undecided → `Undecidable`, nothing moves. An `expectedTargetContainer` (Make
+  Secure) must be one the derivation ALLOWS, else `Undecidable`. **Legitimacy:** `LegacyMigration` moves only a file
+  that is verifiably the row's own (`RecordContainerResolver.IsRelocationSourceVerifiedAsync`: the item exists, was
+  uploaded by the row's creator under the round-23 item rule, and sits in an environment container — a unit's, the
+  archive, or the own container of a secure record the document hangs off); a forged pointer is reported
+  `SourceUnverified` and NEVER copied into the document's container. `MakeSecure` skips that check only when the derived
+  container IS the secure one (the move only narrows who can reach the bytes). Files over 250 MB → `Failed`, reported,
+  never half-copied.
+- **Order (NOTE-FROM-MAIN, round 26 item 3):** (1) download → `UploadSmallAsync(target, sanitized name, bytes,
+  ConflictBehavior.Rename)` as the BFF identity; (2) VERIFY the copy against the source — size must match, and
+  `quickXorHash` when Graph returns both (`CopyMismatch`); a mismatch deletes the copy, the row and source untouched;
+  (3) RE-POINT through the attach path's writer; a failure deletes the copy, the row still names the source; (4) DELETE
+  the source only when no OTHER `sprk_document` points at it (an unreadable answer keeps it → `RelocatedSourceKept`).
+  Every step logs `[DOCUMENT-RELOCATE] copied: / re-pointed: / source deleted: / source KEPT:` with both id pairs.
+- **`RelocateDocumentsAsync(ids, targetContainerId, purpose, apply)`** → `DocumentRelocationBatchResult(Outcomes,
+  Counts, Incomplete, Complete)`: the reusable entry point for task 150 (inputs: document ids + the target container;
+  outputs: per-file outcomes, counts, and the incomplete ids). Resumable: a moved file is `InPlace` next time.
+  `RelocatedSourceKept` is settled for the migration and NOT for Make Secure (a secure record's bytes must not stay in
+  the shared container).
+
+**The job** `DocumentContainerMigrationJob` (`IScheduledJob` `document-container-migration`, ADR-036; ADR-052: a
+bounded batch inside the BFF that composes BFF-only services). Registered DISABLED (`AddScheduledJob(…, enabled:
+false)`); runs only on `POST /api/admin/jobs/document-container-migration/trigger` (SystemAdmin). Report-only unless
+`DocumentContainerMigration:WritesEnabled` is true; `DocumentContainerMigration:MaxDocumentsPerRun` (default 100). Each
+run reads a keyset batch of pointered documents after its cursor, relocates (or plans), then evaluates BOTH rules on the
+final pointer; its `ResultJson` report: mode, startAfter / endAt, passComplete, examined, `wouldNewlyRefuse` (interim
+serves, strict would refuse — exactly what flipping the flag would break), `refusedByBoth`, counts by state, and up to
+200 listed rows. Success = no `wouldNewlyRefuse`, no `Failed`, no `WouldRelocate`. An enumeration fault throws (the
+attempt fails; the scheduler's history shows it).
+
+**The driver** `scripts/Invoke-DocumentContainerMigration.ps1` (148's `Invoke-SecureChildBackfill.ps1` precedent):
+triggers, polls `/history`, repeats until `passComplete`, proves the pass contiguous (each run starts where the previous
+ended, from the first document), saves every report, prints totals. `-Apply` turns `DocumentContainerMigration__WritesEnabled`
+on for the pass and OFF in a `finally`. `-Verify` exits 0 only on a full pass with `WouldRelocate = 0`, `Failed = 0`,
+`wouldNewlyRefuse = 0`. No Graph or Dataverse logic in PowerShell.
+
+## 20.5 Round 21 item 1 (iii): the strict rule, the flag, and the census (item 10)
+
+**Derivation** (`RecordContainerResolver.DeriveDocumentContainersAsync` → `DocumentContainerDerivation(Decided,
+AllowedContainers, PrimaryContainer, IsSecure, Reason)`), over the document's 17 canonical link columns
+(`DocumentLinkFields`): a `sprk_communication` link → where that communication archives
+(`ResolveForRecordWithFixedFallbackAsync`, the archive container); a Root / Intermediate link → `ResolveForRecordAsync`
+(a secure record's own container, else its business unit's); Party and email links own no content and are skipped; an
+attachment (`sprk_parentdocument`) → its parent's answer, one level; unfiled → the owner's business-unit container, else
+`EmailProcessing:DefaultContainerId` (exactly the Office save's choice), else undecided. A secure answer DOMINATES (only
+that container); two different secure records → undecided; any fault → undecided.
+
+**Strict rule** (`DocumentPointer:StrictDerivedContainer = true`): the pointer's drive is in the derived set AND the item
+exists in that drive. Container-only, as round 21 decided (the uploader no longer matters once the container is the
+record's own). **Default `false` = the round-23 interim rule, unchanged.** The flag is flipped only after the
+migration's `-Verify` (§20.11 gate 25).
+
+**Census — what the INTERIM rule (in force after deploy) refuses by design, and what the strict rule does** (item 10;
+dev counts from §19.6 where known; the exact per-class numbers are the migration dry run's report, gate 24):
+
+| Class | Interim (round 23 + round 25 item 6) | Strict (after the flag) |
+|---|---|---|
+| Person-created row, that person's upload, in a container of the owner's customer subtree | served | served only in its derived container; the migration moves the rest |
+| BFF-created row, BFF (app-only) upload — Office saves, archive writers | served | served in its derived container |
+| **BFF-created row whose item a PERSON uploaded (OBO): Compose saves, chat "save to document", outbound communication attachments** | **REFUSED (expected)** until task 146's `sprk_createdbyperson` is applied and stamped on `sprk_document` (absent on dev, §19.6) | served in its derived container |
+| **Secure Record owner-team document (149's isolation) whose file is still in a shared business-unit container** | **REFUSED (expected)**: the "Secure Record" unit stamps no container, so only the secure record's own container passes | refused until moved: task 150's Make Secure relocation moves it (`RelocationPurpose.MakeSecure`), and the legacy migration moves it when the file is verifiably the row's own |
+| **Root-owned row in another unit's container (round 25 item 6)** — dev: up to 416 root-owned rows in `b!yLRd…` (Spaarke Demo's, which is also the archive) | **REFUSED (expected)** unless on the archive path (the row's communication's own `{C:N}_…` item) | served in its derived container; the migration moves the rest |
+| BU-1-owned row in Spaarke Demo's container (21, + some of 10, §19.3) | refused (as r2) | as its derivation says; moved if verifiable |
+| Another person's upload / a container of no unit (forged) | refused | refused; the migration reports `SourceUnverified`, never copies |
+
+Tests: `DocumentContainerStrictRuleTests` (23 methods, 29 cases: derivation per link kind, secure dominance, undecidable
+cases, unfiled default, party links, strict allow / refuse incl. "another container of the same customer the interim
+rule allows", the flag default, relocation-source verification, the memo, `IsBusinessUnitInSubtreeAsync`).
+
+## 20.6 Round 25 item 6: the report catalog and root-owned rows
+
+- **FLS:** `scripts/Set-DocumentPointerFieldSecurity.ps1 -Target ReportCatalog` (same two task-133 profiles, same
+  p1–p6 preconditions; p4 = `-BffWritesCatalogPointers`, the operator's confirmation that the f1 BFF — which stamps the
+  four columns app-only — is deployed), with `scripts/Set-ReportCatalogFieldSecurity.ps1` as the named entry point.
+- **Allowed workspaces:** `PowerBiOptions.AllowedWorkspaces` (`PowerBi:AllowedWorkspaces:{n}:WorkspaceId` and optional
+  `…:CustomerBusinessUnitId`). Every catalog route answers 503 `sdap.reporting.config.workspaces_unconfigured` BEFORE any
+  read when the list is empty (fail closed: an empty allow-list is never "any workspace"). Embed-token, export, GET,
+  PATCH, DELETE and create-from-source treat a row whose workspace is not listed as "not in your catalog" (the uniform
+  404; Power BI never asked; nothing written); `GET /reports` omits such rows. A workspace bound to a customer admits
+  only callers whose business unit is in that customer's subtree, read through the ONE hierarchy reader
+  (`RecordContainerResolver.IsBusinessUnitInSubtreeAsync`); no reader → refused.
+- **Create:** the caller's create carries no pointer column; the BFF stamps them app-only; a failed stamp removes the
+  row and the clone (502).
+- **Root-owned documents:** §20.2 item 9.
+- **Tests** (`ReportingCatalogBindingContractTests`, +9 methods / 21 cases): `AnAction_OnARowWhoseWorkspaceThisDeploymentDoesNotAllow_IsTheUniform404_AndActsOnNothing` (6 routes),
+  `WithNoAllowedWorkspaceConfigured_EveryActionIs503_AndReadsNothing` (6), `GetReports_WithNoAllowedWorkspaceConfigured_Is503`,
+  `GetReports_OmitsARowWhoseWorkspaceThisDeploymentDoesNotAllow`, `EmbedToken_ForACustomerBoundWorkspace_AdmitsOnlyThatCustomersBusinessUnits` (2),
+  `ACustomerBoundWorkspace_WithNoHierarchyReader_IsRefused_FailClosed`, `Create_WhenThePointerStampFails_TheRowAndTheCloneAreRemoved_AndNothingIsLeftHalfMade`,
+  the two real-export tests (§20.2 item 7); `Create_FromAReadableSource_…` now asserts the caller payload has no pointer
+  column and the app-only stamp carries all four.
+
+## 20.7 Placement (CLAUDE.md §10) and component justification (§11)
+
+**Placement: in BFF.** Every new piece composes BFF-only things — `RecordContainerResolver`'s container decisions, the
+app-only SPE facade (`SpeFileStore`), the BFF's Dataverse application identity (the only identity the pointer FLS
+admits) — so no other host could own it (ADR-052: the job is a bounded, operator-triggered batch over those services;
+in-BFF `IScheduledJob` per ADR-036, no new hand-rolled timer). ADR-002: no plugin — the invariant (a pointer names the
+record's own container, written by the BFF) has ONE server owner (WP-1) and clients only request it (WP-3). ADR-003: every
+new decision fails closed (undecidable derivation, unreadable creator, unverified copy, unknown reference, empty
+allow-list, missing hierarchy reader). ADR-007: Graph returns DTOs (`SpeItemCreator` gains `Size`, `QuickXorHash`,
+`WebUrl`). ADR-038: no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests. Publish size §20.9.
+
+Three questions per NEW surface:
+- **`POST /api/v1/documents/{id}/file` + `AttachDocumentFileRequest` / `Response`** — Existing: the record-keyed upload
+  route places bytes but stamps no row; the deleted `PUT /api/v1/documents/{id}` was the old client write door.
+  Extension: the upload route cannot stamp — the row is created by the client AFTER (or independently of) the upload,
+  and record-less uploads exist; one attach call is the smallest server write. Cost of nothing: under the FLS the
+  client cannot write the pointer at all, so every client upload would produce a file-less document (round 21 item 1 (i)).
+- **`DocumentContainerRelocator` (Scoped, `DocumentsModule`, unconditional — its route maps unconditionally, §F.1)** —
+  Existing: `RecordContainerResolver` decides containers but writes nothing; `SpeFileStore` moves no bytes between
+  containers; 148's backfill re-owns rows, not files. Extension: putting byte copies and pointer writes into the
+  resolver would mix a write service into a read-only decision type (§11.5); round 26 item 3 names this one service.
+  Cost of nothing: 447 dev files stay outside their derived container, so the strict rule can never be switched on, and
+  Make Secure leaves secure bytes in a container whose access cannot be narrowed.
+- **`DocumentContainerMigrationJob` + `DocumentContainerMigration:WritesEnabled` / `:MaxDocumentsPerRun`** — Existing:
+  ADR-036's job host + `/api/admin/jobs` trigger/history (reused, no new route). Extension: it IS the extension (one job
+  class). Cost of nothing: no auditable, resumable, BFF-identity way to run (ii); the -Verify gate would have no report.
+- **`DocumentPointer:StrictDerivedContainer`** — Existing: the interim rule. Extension: a flag on the same check, not a
+  second check. Cost of nothing: the strict rule could only ship by refusing every unmigrated file at deploy.
+- **`PowerBi:AllowedWorkspaces` (+ `AllowedPowerBiWorkspace`) and `ReportingEndpoints.IsWorkspaceAllowedAsync` /
+  `ReadActionableRowAsync` / `CatalogPointerColumns` / `CatalogPointerFields` / `WorkspacesUnconfiguredCode`** —
+  Existing: `PowerBiOptions` (extended, not a new options class); the catalog read as the caller. Cost of nothing: a
+  forged or seeded row could aim embed / export / delete at any workspace the service principal can reach (item 8).
+- **`RecordContainerResolver` members** — `DeriveDocumentContainersAsync` + `DocumentContainerDerivation`,
+  `IsAllowedUnderStrictRuleAsync`, `IsRelocationSourceVerifiedAsync`, `ReadDocumentCreatorObjectIdAsync` (the one
+  "row's creator" reader the attach and the item check share), `IsBusinessUnitInSubtreeAsync`, `IsSameContainerId`,
+  the per-scope memo: extensions of the one owner of container decisions in its existing partial file; no new type.
+- **`ReportingEmbedService.GetPowerBIClientAsync` made `protected internal virtual`** — the test seam item 7 requires
+  (the codebase's virtual-facade idiom); no behaviour change.
+- **Scripts** `Invoke-DocumentContainerMigration.ps1` (NEW: the round-26 driver), `Set-ReportCatalogFieldSecurity.ps1`
+  (NEW: a 20-line named entry point over the extended `Set-DocumentPointerFieldSecurity.ps1`; one mechanism).
+- **`ClientDocumentPointerWriteGuardTests`** (NEW arch guard) — Existing: none scans client code or committed bundles for
+  pointer writes; the FLS script's p4a scans only what is DEPLOYED. Cost of nothing: a reintroduced client write (or a
+  stale committed bundle) ships unnoticed until FLS refuses it in production.
+- **PCF `webpack.config.js` aliases (6 edited byte-identical to open PR #1123, TrackingFieldTrio NEW) and #1123's two
+  stub files** — Existing: #1123 is the same fix, adopted rather than re-invented (one mechanism); the stubs are its
+  files. Cost of nothing: the seven controls cannot be rebuilt, so their committed bundles keep writing the pointer.
+- No new package, column, PCF, plugin or Dataverse schema.
+
+## 20.8 Seeding (three seeded builds, 2026-10-04; restored from byte copies, files touched)
+
+Build A: 17 seeds in disjoint code → **29 of 253** targeted tests red. Build B: 7 seeds whose code overlaps A's →
+**24 of 253** red. Build C (after the attach creator change): 2 seeds → **5 of 111** red. Every seed bit; S16 (A) was
+too weak (its fallback also refused) and was replaced by S16b in B. No `SEED-166F1` marker remains (Grep).
+
+| Seed | Red tests (examples) |
+|---|---|
+| S1 root-owned subtree = whole environment | `ARootOwnedDocument_MayUseOnlyAContainerTheRootItselfStamps`, `CustomerSubtree_IsTheOwnersTopLevelUnitAndEverythingBeneathIt` |
+| S2 (B) strict flag ignored | `Strict_RefusesAnotherContainerOfTheSameCustomer_ThatTheInterimRuleAllows`, `Strict_AnUndecidableDocument_IsRefused`, `Strict_DecidesByContainer_NotByUploader_…` |
+| S3 secure answer does not dominate | `ASecureAnswer_Dominates_ANonSecureLinkAddsNoContainer` |
+| S4 party links consulted | `APartyLink_OwnsNoContent_TheDocumentIsPlacedAsUnfiled` |
+| S5 strict: item existence not checked | `Strict_AnItemNotInTheDerivedDrive_IsRefused` |
+| S6 attach: creator not checked | `Attach_ByAWriterWhoDidNotCreateTheRow_IsRefused`, `Attach_ToARowTheBffCreated_…` |
+| S7 (B) attach: derived container not checked | `Attach_AFileOutsideTheDerivedContainer_IsRefused` (3), `…_Is409_WithTheAttachReasonCode` |
+| S8 attach: uploader not checked | `Attach_AFileSomeoneElseUploaded_IsRefused`, `…_Is403` |
+| S9 attach: an existing file is replaced | `Attach_ToARowThatAlreadyHasAnotherFile_IsRefused_…`, `Attach_TheSameFileAgain_IsIdempotent_…` |
+| S10 relocate: copy not verified | `Relocate_WhenTheCopyDoesNotVerify_…`, `Relocate_WhenTheHashDiffers_…` |
+| S11 (B) source deleted before the re-point | `Relocate_CopiesThenVerifiesThenRepoints_AndOnlyThenDeletesTheSource`, `Relocate_WhenTheRepointFails_…` |
+| S12 other references ignored | `Relocate_WhenAnotherDocumentStillPointsAtTheSource_KeepsTheSource`, `RelocateDocuments_CountsEveryOutcome_…` |
+| S13 (B) legacy legitimacy not checked | `Relocate_AFileThatIsNotVerifiablyTheRowsOwn_IsNeverCopied`, `AFileBothRulesRefuse_IsListedForAnAdministrator_…` |
+| S14 Make Secure exemption for any target | `Relocate_MakeSecure_DoesNotWidenToANonSecureTarget` |
+| S15 migration: newly-refused not counted | `AReportOnlyRun_PlansTheMoves_CountsTheFlipBlockers_AndWritesNothing` |
+| S16b (B) an unlisted workspace is allowed | `AnAction_OnARowWhoseWorkspaceThisDeploymentDoesNotAllow_…` (6), `GetReports_OmitsARowWhose…` |
+| S17 unconfigured allow-list not refused | `WithNoAllowedWorkspaceConfigured_EveryActionIs503_AndReadsNothing` (6), `GetReports_WithNoAllowedWorkspaceConfigured_Is503` |
+| S18 (B) customer binding ignored | `EmbedToken_ForACustomerBoundWorkspace_…(False)`, `ACustomerBoundWorkspace_WithNoHierarchyReader_…` |
+| S19 create writes the pointer as the caller | `Create_FromAReadableSource_ClonesInTheSourcesWorkspace_AndRegistersTheRowAsTheCaller` |
+| S20 no RLS identity in the real export request | `ExportReportAsync_TheRealRequestItSends_CarriesTheCallersRlsIdentity_OnTheReportsDataset` |
+| S21 attach route without the Write filter | `Attach_WithoutWriteOnTheDocument_Is403_AndNothingIsReadOrStamped` (None / Read) |
+| S22a memo off / S22b (B) memo remembers a failure | `OneScope_ReadsTheHierarchyAndEachContainersClaimantsOnce_ForManyChecks` / `AFailedHierarchyRead_IsNotRemembered_…` |
+| S23 (C) the row's creator ignores `sprk_createdbyperson` | `Attach_ToARowTheBffCreated_FollowsTheRecordedPerson_…(True)`, `ABffRow_WhoseItemItsRecordedPersonUploaded_IsAllowed` |
+| S24 (C) attach skips the creator check | `Attach_ByAWriterWhoDidNotCreateTheRow_IsRefused`, `Attach_ToARowTheBffCreated_WithNoRecordedPerson_IsRefused`, `…FollowsTheRecordedPerson_…(False)` |
+| natural: stale committed PCF bundles | `ClientDocumentPointerWriteGuardTests.NoClientWritesADocumentPointer` (7 bundles) until rebuilt |
+
+## 20.9 Gates (this round, final code)
+
+| Gate | Result |
+|---|---|
+| Affected tests (before the final runs) | relocator + migration + strict + pointer-check + attach contract: 117 passed, 0 failed (after the row-creator change); reporting set: Spe.Integration reporting 40 passed; arch guards (provenance, flat upload path, client pointer writes): 30 passed |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **Run 1: ABORTED** — the test host crashed with `Internal CLR error (0x80131506)` inside `DocumentFormat.OpenXml … WalkRelationships` during a Compose create-on-save test (code this round does not touch); the partial tally was 14,368 total / 14,321 passed / 47 skipped / 0 failed. **Run 2 (same build, `--no-build`): 14,606 total: 14,552 passed, 54 skipped, 0 failed** (25 m 27 s; +97 cases vs r2's 14,509). Both results reported per the rule. |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **359 passed, 0 failed** (r2: 346; + `ClientDocumentPointerWriteGuardTests`) |
+| Sprk.Bff.Api.IntegrationTests (full) | **104 passed, 0 failed** |
+| Spe.Integration.Tests (full) | **405 total: 380 passed, 25 skipped (environment-gated `SkippableFact`s), 0 failed** |
+| BFF build | Debug (tests) and **Release** succeeded, 0 errors (warnings as errors) |
+| `dotnet list package --vulnerable --include-transitive` | `Sprk.Bff.Api` has no vulnerable packages |
+| `dotnet format whitespace --verify-no-changes` on the changed C# files | only end-of-line findings on files written with LF; normalized to CRLF (`.gitattributes` `*.cs eol=crlf`; storage stays LF) — no content change |
+| Client: `Spaarke.SdapClient` jest | **30 passed** (2 suites) |
+| Client: `Spaarke.UI.Components` jest (full) | 236 suites: 227 passed, 9 failed; 3,376 tests: 3,362 passed, 14 failed. **8 of the 9 failing suites (13 tests) fail identically on the base `8e0c89f33`** (WorkspaceShell `buildDynamicWorkspaceConfig`, `todoScoreMappings`, `surfaceLaunchRegistry`, RecordHeader `configResolution`, `RichFilePreview`, `TimelineComposeBox`, ConversationView `emailInFlow` / `forward`; pre-existing — open PR #1123 is the master-side repair of UI.Components suite failures); the 9th, `AccessGrantModal.userShare` (untouched), is a load-timing flake: 77 / 77 pass when the `AccessGrantModal` folder is re-run. Every suite this round changed passes (`DocumentRecordService.payload` 15, `EntityCreationService.multibind` 10, `todoService.upload` + `invoiceService.resolver` 22) |
+| Client: `DocumentUploadWizard` | `npm run build` (vite) **green**; jest **11 passed**; `tsc --noEmit` 15 errors, none in `uploadOrchestrator.ts` (all in untouched wizard files, plus the pre-existing `ComponentFramework` namespace error on `PcfDataverseClient.ts` line 25, which this round no longer changes) |
+| PCF `npm run build:prod` (7 controls) | all seven **`[build] Succeeded`**, 0 `ERROR in` (final build with #1123's loud stubs, after a fresh `Spaarke.UI.Components` `tsc` build of `dist`); each new bundle has 0 `sprk_graphitemid` occurrences and is copied to `Solution/Controls/sprk_Spaarke.Controls.<X>/bundle.js`; NetArchTest re-run on the rebuilt bundles: 359 passed. (The first rebuild attempt showed the trap: CommunicationActions / CommunicationConnections logged `[build] Failed` while `npm run build:prod` exited 0.) |
+| Publish size (CLAUDE.md §10; fresh short-path worktrees, `dotnet publish -c Release`, PowerShell `Compress-Archive -CompressionLevel Optimal`, PDBs included) | base `8e0c89f33` **45.684 MB** (47,903,114 bytes, 212 files — equal to the verifier's r2 figure); branch: measured after the commit (see the POML `publish-size` element and the follow-up commit on this branch) |
+| /conflict-check (2026-10-04) | 20 open PRs: one overlap, **#1123** (task 092, master build/test baseline repair) on the six Communication* `webpack.config.js` — resolved by adopting #1123's files byte-identically (+ its two stub files). Master since the merge base (`b8026dfa8`, master @ `6932582b1`): **11 overlapping files**, textual merges at integration — `cleanGuid` refactors in `DocumentRecordService.ts`, `ODataDataverseClient.ts`, `EntityCreationService.ts`, `createXrmEmailComposeHandlers.ts`, `document-upload/index.ts` / `types.ts`, `uploadOrchestrator.ts`; `DriveItemOperations.cs`; `WorkspaceTab.ts`; the deployment guide; and master DELETES `PcfDataverseClient.ts` (reuse audit C-26), so this round leaves that file unchanged (no modify/delete conflict). BFF hot path shared with other active worktrees: soft warn, no hard conflict. |
+
+## 20.10 Route authorization ledger input — f1 rows (route key as the guard spells it)
+
+| Route key | Mechanism that now decides | Deny test (FQN) |
+|---|---|---|
+| `POST /api/v1/documents/{id}/file` (NEW) | `DocumentAuthorizationFilter("write")` on `{id}` + `DocumentContainerRelocator.AttachFileAsync` (first file only; the row's creator; derived container; the caller's own upload) | `Sprk.Bff.Api.Tests.Api.Documents.DocumentFileAttachContractTests.Attach_WithoutWriteOnTheDocument_Is403_AndNothingIsReadOrStamped` |
+| `GET /api/reporting/embed-token`, `POST /api/reporting/export`, `GET /api/reporting/reports/{reportId:guid}`, `PATCH /api/reporting/reports/{reportId:guid}`, `DELETE /api/reporting/reports/{reportId:guid}`, `POST /api/reporting/reports` | r1/r2 mechanisms + the allowed-workspace check (503 unconfigured; uniform 404 for an unlisted / customer-foreign workspace) | `Sprk.Bff.Api.Tests.Api.Reporting.ReportingCatalogBindingContractTests.AnAction_OnARowWhoseWorkspaceThisDeploymentDoesNotAllow_IsTheUniform404_AndActsOnNothing` |
+| `GET /api/reporting/reports` | rows of unlisted workspaces omitted; 503 unconfigured | `…ReportingCatalogBindingContractTests.GetReports_OmitsARowWhoseWorkspaceThisDeploymentDoesNotAllow` |
+| `POST /api/admin/jobs/{jobId}/trigger`, `GET /api/admin/jobs/{jobId}/history` | unchanged (`SystemAdmin` group policy); f1 adds only a job id | existing jobs-endpoint tests |
+| download routes of §18.3 | unchanged call sites; the check is now interim OR strict per the flag, root-owned rows confined | `Sprk.Bff.Api.Tests.AccessControl.DocumentContainerStrictRuleTests.Strict_RefusesAnotherContainerOfTheSameCustomer_ThatTheInterimRuleAllows`; `…DocumentPointerContainerCheckTests.ARootOwnedDocument_MayUseOnlyAContainerTheRootItselfStamps` |
+
+## 20.11 Manual live gates — f1 (main session, dev; in THIS order; ids redacted to 8 chars where not config)
+
+20. **Deploy the BFF** from the integrated branch (`bff-deploy`). Then set the allowed workspaces (an app-setting change
+    restarts the app): `az webapp config appsettings set -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz --settings
+    PowerBi__AllowedWorkspaces__0__WorkspaceId=<the dev Power BI workspace id>` (add `__CustomerBusinessUnitId` only for
+    a customer-bound workspace). Until set, every reporting route answers 503 `sdap.reporting.config.workspaces_unconfigured` — by design.
+21. **Redeploy every client** that bundles the shared library, from the same branch: the code pages (`sprk_*wizard`,
+    `sprk_spaarkeai`, `sprk_emailpage`, `sprk_externalworkspace`, `sprk_documentuploadwizard`, … — the FLS dry run below
+    prints the exact list), the form script `spaarke_documents/DocumentOperations.js`, and the seven PCFs of §20.3 via
+    the `pcf-deploy` skill (it bumps `ControlManifest.xml` versions). **Remove the retired `UniversalDatasetGrid` PCF**
+    still deployed on dev (its source is gone from the repo; its bundle writes the pointer).
+22. **Pointer-check census** (supersedes §18.12 gate 15; extends gate 17): download one document of each §20.5 class and
+    read `[DOCUMENT-POINTER] REFUSED` in the BFF log; the refusals must be exactly the classes marked expected.
+23. **Document pointers FLS**: `pwsh scripts/Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+    (dry run: p4a must list NO web resource) → the same with `-ClientNoLongerWritesPointers -Apply` → the same with
+    `-Verify` (exit 0).
+24. **Legacy migration**: `pwsh scripts/Invoke-DocumentContainerMigration.ps1 -BffBaseUrl https://spe-api-dev-67e2xz.azurewebsites.net -ApiScope api://1e40baad-e065-4aea-a8d4-4b7ab273458c/.default`
+    (dry run; the reports are the census of gate 22 — review `SourceUnverified` / `Undecidable` rows) → the same with
+    `-Apply -ResourceGroup spe-infrastructure-westus2 -AppName spe-api-dev-67e2xz` (FIRST decide §20.12's RAG item —
+    or re-index the relocated ids afterwards) → the same with `-Verify` (exit 0 only when nothing would move, nothing
+    failed and the strict rule would newly refuse nothing). Single instance only.
+25. **Strict rule ON** (only after gate 24's `-Verify` exits 0): `az webapp config appsettings set -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz --settings DocumentPointer__StrictDerivedContainer=true`;
+    re-download one document per class (all served from their derived containers).
+26. **Report catalog FLS** (after gate 20): `pwsh scripts/Set-ReportCatalogFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+    (dry run) → `-BffWritesCatalogPointers -Apply` → `-Verify` (exit 0). Then a Save As from the Reporting page creates
+    a row whose four pointer columns the BFF stamped, and an MDA edit of `sprk_workspaceid` by a non-admin is refused.
+27. **Attach**: upload through the DocumentUploadWizard and one Create*Wizard as a non-admin → the row gets its pointer
+    via `POST /api/v1/documents/{id}/file` (BFF log `[DOCUMENT-ATTACH]`); a scratch attempt to attach another person's
+    item → 403, row unchanged.
+
+## 20.12 Found gaps, `.claude` edit, integration notes
+
+**Found, not owned by 166 (round 15: never dropped):**
+- **🔔 RAG index entries of a relocated file keep the OLD item id — needs a main-session decision before gate 24's
+  `-Apply`.** `FileIndexingService` keys chunks `{speFileId}_{index}` and stores `SpeFileId`; after a move the
+  document's chunks still name the deleted source item, and `SemanticSearchService` (line ~591) returns
+  `SpeFileId = result.SpeFileId ?? doc.GraphItemId` — the stale index value — next to the row's NEW `DriveId`, so a
+  per-result AI action on a relocated document asks for an item that is not in that drive (the pointer check refuses
+  it, 409) until the document is re-indexed; a plain re-index would ADD `{newItem}_{i}` chunks beside the stale
+  `{oldItem}_{i}` ones (duplicates). NOT fixed here: the complete fix reaches into the AI indexing pipeline, and CRUD code
+  may only reach AI capability through a `Services/Ai/PublicContracts/` facade (CLAUDE.md §10 bullet 3) — there is no
+  indexing facade yet, so the fix is NEW AI-hot-path surface (CLAUDE.md §6 scope expansion). **Proposed complete fix:**
+  a PublicContracts facade (e.g. `IDocumentIndexRelocation.ReindexMovedFileAsync(documentId, oldItemId, newDriveId,
+  newItemId)`) that enqueues the existing app-only `RagIndexing` job for the new item (`ReplaceStaleChunks = true`; the
+  copy IS BFF-written, which is that path's precondition) and deletes the old item's chunks
+  (`IRagService.DeleteChunksBeyondCountAsync(tenant, oldItemId, 0, index)` in the document's index, and the discovery
+  index); `DocumentContainerRelocator.RelocateAsync` calls it after a successful re-point (best effort, logged). Interim
+  alternative if the decision lags: run gate 24's `-Apply`, then re-index every `Relocated` / `RelocatedSourceKept` id the
+  run reports through the existing "send to index" path. The same stale-chunk gap already exists for a document DELETE
+  (pre-existing, not 166's).
+- **SPE version history is not carried by a relocation copy** (Graph has no cross-container move for SPE; the copy is
+  the current version). Recorded as the documented residual of round 26 item 3.
+- **The Communication* PCFs stub `@spaarke/sdap-client`** (pre-existing `false` alias), so any local-upload path inside
+  those controls cannot work; they never call `attachDocumentFile`. No pointer write remains in them.
+
+**`.claude` edit (main session only):** §12's `bff-deploy/SKILL.md:50` edit still stands; none new.
+
+**Integration notes:**
+- Task 150's lane: Make Secure calls `DocumentContainerRelocator.RelocateDocumentsAsync(documentIds, recordContainerId,
+  RelocationPurpose.MakeSecure, apply: true)`; `Complete == false` → 500 `sdap.provision.files_incomplete` with
+  `Counts` / `Incomplete` (round 26 item 3).
+- `RecordContainerResolver.CreatedByPersonColumn` → task 146's `Spaarke.Dataverse.RecordCreatorPersonColumn.LogicalName`
+  at integration (unchanged note, §19.13). Round 28 (E1: browser-initiated child creates through G5 with
+  `sprk_createdbyperson`) is compatible with the attach route: the row's creator is that recorded person.
+- Task 167's guard: add the §20.10 rows.
+- **PR #1123 (task 092):** the six Communication* `webpack.config.js` and `src/client/pcf/shared/stubs/*` are
+  byte-identical to its head `ec247e9dc`; if #1123 changes before it merges, take #1123's version and rebuild the seven
+  bundles (`npm run build:prod`). Its stub comments say "six Communication* PCFs"; TrackingFieldTrio is a seventh user.
+- **Master overlap:** 11 files, textual merges (§20.9 conflict-check row); `PcfDataverseClient.ts` is deliberately left
+  unchanged here because master deletes it.
+- `NOTE-FROM-MAIN.md` (round 26 item 3) was read first and deleted, not committed.
+
+## 20.13 Not closed
+
+- **Live writes (by design, main session):** gates 20–27 (§20.11) — deploys, app settings, the two FLS `-Apply` /
+  `-Verify` runs, the migration `-Apply` / `-Verify`, the strict-rule flag. Nothing was written live; the only live
+  access this round was the read-only FLS dry run against dev (p4a evidence, §20.2 item 1 (iii)).
+- **🔔 Escalated (found, not one of the 21 items):** the RAG re-key of a relocated file (§20.12) — the complete fix is new
+  AI-hot-path surface (a `Services/Ai/PublicContracts/` facade), so it needs the main session's decision; proposed
+  in full above. Decide before gate 24's `-Apply`, or re-index the relocated ids afterwards.
+- Nothing else is owed by task 166.

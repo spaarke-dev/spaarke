@@ -476,8 +476,10 @@ describe('InvoiceService.createInvoice', () => {
       const docPayload = ds._captured['sprk_document']?.[0];
       expect(docPayload).toBeDefined();
       expect(docPayload!['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${NEW_INVOICE_GUID})`);
-      // 'drive-1' is what stubAuthenticatedFetch's upload response reports.
-      expect(docPayload!['sprk_graphdriveid']).toBe('drive-1');
+      // The SPE pointer is not the client's to write (unified-access-control-r2 task 166 f1): the row is created
+      // without it and the BFF attaches the uploaded file ('drive-1' is what stubAuthenticatedFetch's upload reports).
+      expect('sprk_graphdriveid' in docPayload!).toBe(false);
+      expect('sprk_graphitemid' in docPayload!).toBe(false);
     });
   });
 

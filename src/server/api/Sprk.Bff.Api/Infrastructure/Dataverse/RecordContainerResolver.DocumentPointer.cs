@@ -599,37 +599,64 @@ public sealed partial class RecordContainerResolver
     private async Task<bool> ItemWasCreatedByTheRowsCreatorAsync(
         Guid documentId, Entity row, SpeItemCreator creator, CancellationToken ct)
     {
-        if (row.GetAttributeValue<EntityReference>(CreatedByColumn) is not { Id: var createdById } || createdById == Guid.Empty)
+        if (await ReadRowCreatorAsync(documentId, row, ct).ConfigureAwait(false) is not { } rowCreator)
         {
             return false;
+        }
+
+        if (Guid.TryParse(creator.UserObjectId, out var itemUser) && itemUser != Guid.Empty)
+        {
+            // Uploaded BY A PERSON: it must be the row's person.
+            return rowCreator.PersonObjectId is { } person && person == itemUser;
+        }
+
+        // Uploaded app-only: only the BFF's own rows, and only by the BFF identity.
+        return rowCreator.CreatedByTheBff
+               && Guid.TryParse(creator.ApplicationId, out var itemApplication)
+               && _bffApplicationIds.Contains(itemApplication);
+    }
+
+    /// <summary>
+    /// The Entra object id of the PERSON who created this document row — <c>createdby</c> when that is a person, else the
+    /// person recorded in <see cref="CreatedByPersonColumn"/> — or <see langword="null"/> when there is none or it cannot
+    /// be read. <paramref name="row"/> must carry <c>createdby</c>.
+    /// </summary>
+    /// <remarks>
+    /// The ONE definition of "the row's creator" (owner round 23 item 1): the ITEM half of the pointer check and the
+    /// pointer attach (<c>DocumentContainerRelocator.AttachFileAsync</c>, task 166 f1) both ask it, so a row whose file
+    /// the check would accept is a row whose creator may attach that file, and no other.
+    /// </remarks>
+    internal async Task<Guid?> ReadDocumentCreatorObjectIdAsync(Guid documentId, Entity row, CancellationToken ct = default)
+        => (await ReadRowCreatorAsync(documentId, row, ct).ConfigureAwait(false))?.PersonObjectId;
+
+    /// <summary>
+    /// Who created the row: the person (see <see cref="ReadDocumentCreatorObjectIdAsync"/>), and whether the row's
+    /// <c>createdby</c> is the BFF identity. <see langword="null"/> = no readable <c>createdby</c>.
+    /// </summary>
+    private async Task<RowCreator?> ReadRowCreatorAsync(Guid documentId, Entity row, CancellationToken ct)
+    {
+        if (row.GetAttributeValue<EntityReference>(CreatedByColumn) is not { Id: var createdById } || createdById == Guid.Empty)
+        {
+            return null;
         }
 
         var createdBy = await _entityService.RetrieveAsync(
             SystemUserEntity, createdById, [AzureAdObjectIdColumn, ApplicationIdColumn], ct).ConfigureAwait(false);
         if (createdBy is null)
         {
-            return false;
+            return null;
         }
 
         var createdByApplication = createdBy.GetAttributeValue<Guid>(ApplicationIdColumn);
         var rowCreatedByPerson = createdByApplication == Guid.Empty;
-        var rowCreatedByTheBff = !rowCreatedByPerson && _bffApplicationIds.Contains(createdByApplication);
-
         var personObjectId = rowCreatedByPerson
             ? NonEmpty(createdBy.GetAttributeValue<Guid>(AzureAdObjectIdColumn))
             : await ReadCreatedByPersonObjectIdAsync(documentId, ct).ConfigureAwait(false);
 
-        if (Guid.TryParse(creator.UserObjectId, out var itemUser) && itemUser != Guid.Empty)
-        {
-            // Uploaded BY A PERSON: it must be the row's person.
-            return personObjectId is { } person && person == itemUser;
-        }
-
-        // Uploaded app-only: only the BFF's own rows, and only by the BFF identity.
-        return rowCreatedByTheBff
-               && Guid.TryParse(creator.ApplicationId, out var itemApplication)
-               && _bffApplicationIds.Contains(itemApplication);
+        return new RowCreator(personObjectId, !rowCreatedByPerson && _bffApplicationIds.Contains(createdByApplication));
     }
+
+    private readonly record struct RowCreator(Guid? PersonObjectId, bool CreatedByTheBff);
 
     /// <summary>
     /// The Entra object id of the person in <see cref="CreatedByPersonColumn"/>, or <see langword="null"/> — no person, a

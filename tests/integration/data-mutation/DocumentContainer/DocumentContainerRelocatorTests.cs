@@ -208,7 +208,7 @@ public class DocumentContainerRelocatorTests
     }
 
     [Fact]
-    public async Task Attach_ToARowTheBffCreated_IsRefused_OnlyAPersonsOwnRowTakesAClientFile()
+    public async Task Attach_ToARowTheBffCreated_WithNoRecordedPerson_IsRefused()
     {
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(createdBy: TestRecordContainerResolver.PointerWorldBffUser);
@@ -218,6 +218,36 @@ public class DocumentContainerRelocatorTests
 
         result.Outcome.Should().Be(PointerAttachOutcome.NotTheCreator);
         world.Updates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]    // the recorded person is the caller
+    [InlineData(false)]   // the recorded person is someone else
+    public async Task Attach_ToARowTheBffCreated_FollowsTheRecordedPerson_TheSameCreatorTheItemCheckReads(bool callerIsRecorded)
+    {
+        // createdby is the BFF, so the row's creator is sprk_createdbyperson (the round-23 definition, one reader).
+        var world = Environment();
+        var row = Doc(createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        row[Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.CreatedByPersonColumn] =
+            new EntityReference("systemuser", callerIsRecorded ? TestRecordContainerResolver.PointerWorldCreator : OtherPerson);
+        world.Rows[("sprk_document", DocumentId)] = row;
+        world.Items[(CustomerA1Container, Item)] = new SpeItemCreator("brief.docx", Creator, null, 10);
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.AttachFileAsync(DocumentId, Creator, CustomerA1Container, Item);
+
+        if (callerIsRecorded)
+        {
+            result.Outcome.Should().Be(PointerAttachOutcome.Attached);
+            world.Updates.Should().ContainSingle();
+            (await rig.Resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item))
+                .Should().BeTrue("the attached pointer is one the pointer check then honours");
+        }
+        else
+        {
+            result.Outcome.Should().Be(PointerAttachOutcome.NotTheCreator);
+            world.Updates.Should().BeEmpty();
+        }
     }
 
     [Theory]
