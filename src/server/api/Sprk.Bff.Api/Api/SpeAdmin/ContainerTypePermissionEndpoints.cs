@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
@@ -33,6 +34,8 @@ public static class ContainerTypePermissionEndpoints
     {
         // GET /api/spe/containertypes/{typeId}/permissions?configId={id}
         group.MapGet("/containertypes/{typeId}/permissions", GetContainerTypePermissionsAsync)
+            // App-only as the config's owning app: the type must be the config's own (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope(SpeAdminContainerTypeOperation.Read)
             .WithName("SpeGetContainerTypePermissions")
             .WithSummary("List application permissions for an SPE container type")
             .WithDescription(

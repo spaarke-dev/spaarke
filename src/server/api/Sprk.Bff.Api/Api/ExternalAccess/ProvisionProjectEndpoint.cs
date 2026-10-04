@@ -415,8 +415,10 @@ public static class ProvisionProjectEndpoint
             return shareOutcome.Error;
 
         // ── Step 6: Create the record's own SPE container ────────────────────
+        // Bound to the Secure Record business unit — the unit that now owns the record (step 5) — so the SPE admin
+        // plane's per-container rule (task 165, owner round 20) keeps it out of every customer administrator's reach.
         var containerResult = await CreateSpeContainerAsync(
-            speFileStore, configuration, root, recordName, recordId, logger, traceId, ct);
+            speFileStore, configuration, root, recordName, recordId, secureBuId, logger, traceId, ct);
 
         if (containerResult.Error != null)
             return containerResult.Error;
@@ -807,6 +809,7 @@ public static class ProvisionProjectEndpoint
         SecureRecordRoot root,
         string recordName,
         Guid recordId,
+        Guid owningBusinessUnitId,
         ILogger logger,
         string traceId,
         CancellationToken ct)
@@ -831,7 +834,7 @@ public static class ProvisionProjectEndpoint
             var containerDescription = root.ContainerDescription(recordName);
 
             var container = await speFileStore.CreateContainerAsync(
-                containerTypeId, containerDisplayName, containerDescription, ct);
+                containerTypeId, containerDisplayName, owningBusinessUnitId, containerDescription, ct);
 
             if (container == null)
             {

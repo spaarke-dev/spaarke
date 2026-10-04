@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
@@ -47,14 +48,24 @@ public class SpeAdminTenantScope
     /// <summary>Row cap for the whole-table reads; a full page means the read may be truncated.</summary>
     internal const int WholeTableReadLimit = 5000;
 
+    /// <summary>
+    /// How many single-container binding reads a list trim runs at once. Graph returns a container's custom
+    /// properties only on a single-container GET (see <see cref="SpeContainerBusinessUnitStamp"/>), so a page of N
+    /// containers costs N reads; bounded so one admin page cannot flood the owning app's Graph throttling budget.
+    /// </summary>
+    internal const int BindingReadConcurrency = 8;
+
     private readonly DataverseWebApiClient _dataverseClient;
+    private readonly SpeAdminGraphService _graphService;
     private readonly ILogger<SpeAdminTenantScope> _logger;
 
     public SpeAdminTenantScope(
         DataverseWebApiClient dataverseClient,
+        SpeAdminGraphService graphService,
         ILogger<SpeAdminTenantScope> logger)
     {
         _dataverseClient = dataverseClient ?? throw new ArgumentNullException(nameof(dataverseClient));
+        _graphService = graphService ?? throw new ArgumentNullException(nameof(graphService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -75,7 +86,31 @@ public class SpeAdminTenantScope
     public async Task<IReadOnlyCollection<Guid>> GetAccessibleBusinessUnitsAsync(
         ClaimsPrincipal? user,
         CancellationToken ct = default) =>
-        (await LoadCallerScopeAsync(user, ct).ConfigureAwait(false)).Accessible;
+        (await GetCallerScopeAsync(user, ct).ConfigureAwait(false)).AccessibleBusinessUnits;
+
+    /// <summary>
+    /// The caller's reach, resolved once: the accessible business units (own unit + descendants; EMPTY when the caller
+    /// cannot be resolved to a Dataverse user) and whether the own unit is the ROOT (a platform operator).
+    /// </summary>
+    /// <exception cref="Exception">THROWS when the business-unit hierarchy cannot be read. Refuse (503), never widen.</exception>
+    public async Task<SpeAdminCallerScope> GetCallerScopeAsync(
+        ClaimsPrincipal? user,
+        CancellationToken ct = default)
+    {
+        var callerBusinessUnit = await ResolveCallerBusinessUnitAsync(user, ct).ConfigureAwait(false);
+        if (callerBusinessUnit is null)
+        {
+            return SpeAdminCallerScope.Nobody;
+        }
+
+        var hierarchy = await LoadBusinessUnitHierarchyAsync(_dataverseClient, ct).ConfigureAwait(false);
+        var isRoot = hierarchy.TryGetValue(callerBusinessUnit.Value, out var parent) && parent is null;
+
+        return new SpeAdminCallerScope(
+            CallerBusinessUnitId: callerBusinessUnit.Value,
+            IsPlatformOperator: isRoot,
+            AccessibleBusinessUnits: CollectSelfAndDescendants(callerBusinessUnit.Value, hierarchy));
+    }
 
     /// <summary>
     /// Which SPE environments (<c>sprk_speenvironment</c>) the caller may read and whether they may write
@@ -102,13 +137,13 @@ public class SpeAdminTenantScope
         ClaimsPrincipal? user,
         CancellationToken ct = default)
     {
-        var scope = await LoadCallerScopeAsync(user, ct).ConfigureAwait(false);
+        var scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
         if (scope.IsPlatformOperator)
         {
             return SpeAdminEnvironmentReach.PlatformOperator;
         }
 
-        if (scope.Accessible.Count == 0)
+        if (scope.AccessibleBusinessUnits.Count == 0)
         {
             return SpeAdminEnvironmentReach.Nothing;
         }
@@ -122,7 +157,7 @@ public class SpeAdminTenantScope
 
         return new SpeAdminEnvironmentReach(
             IsPlatformOperator: false,
-            LinkedEnvironmentIds: LinkedEnvironmentIds(rows, scope.Accessible));
+            LinkedEnvironmentIds: LinkedEnvironmentIds(rows, scope.AccessibleBusinessUnits));
     }
 
     /// <summary>
@@ -224,15 +259,23 @@ public class SpeAdminTenantScope
     /// <b>Why identity is checked, not only the business unit</b> (sweep finding #74). A config is the
     /// credential selector: <c>SpeAdminGraphService.ResolveConfigAsync</c> reads the owning app and its Key
     /// Vault secret name from it, and <c>GetClientForConfigAsync</c> builds an app-only Graph client from
-    /// them. An admin in unit A could create a config IN THEIR OWN UNIT naming unit B's container type, or
-    /// B's app and secret; every config-scoped route then passes the filter for it while acting app-only on
-    /// B's containers. Business-unit intersection alone does not stop that.
+    /// them.
     /// </para>
     /// <para>
-    /// <b>Values are compared within a kind, across columns</b>: an app id against both app-id columns, a
-    /// secret name against both secret-name columns, because naming B's owning app as one's CONSUMING app is
-    /// the same borrowing. A row with no business unit does not block (the compatibility rule in
-    /// <see cref="DecideConfigAccessAsync"/>).
+    /// <b>Narrowed for Model 1 (owner round 20 item 3).</b> Configs of different customers may share a container
+    /// type and its owning app — that is Model 1 (one container type, one owning app, one container per customer;
+    /// container-type topology §3). Sharing them no longer opens another customer's containers: every container,
+    /// item, permission and bulk route authorizes PER CONTAINER against the container's business-unit stamp
+    /// (<see cref="DecideContainerAccessAsync"/>), and the app-only container-TYPE routes refuse a write to a type a
+    /// config the caller cannot reach also carries (<see cref="DecideContainerTypeAccessAsync"/>). So the SHARED
+    /// identity — <see cref="IdentityColumns.ContainerTypeId"/>, <see cref="IdentityColumns.OwningAppId"/> and
+    /// its secret <see cref="IdentityColumns.KeyVaultSecretName"/> — may be named by any config. The PER-CUSTOMER
+    /// identity — the consuming app (<see cref="IdentityColumns.ConsumingAppId"/>,
+    /// <see cref="IdentityColumns.ConsumingAppKvSecret"/>; one per customer in both models, topology §3A) — stays
+    /// exclusive: a value another unreachable config carries in a per-customer column may not be named in ANY
+    /// column, within its kind (an app id against app ids, a secret name against secret names) — naming B's
+    /// consuming app as one's OWNING app is the same borrowing. A row with no business unit does not block (the
+    /// compatibility rule in <see cref="DecideConfigAccessAsync"/>).
     /// </para>
     /// <para>
     /// <b>Values are compared in a canonical form</b> (<see cref="CanonicalIdentityValue"/>). A container type
@@ -268,10 +311,10 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.Permitted;
         }
 
-        CallerScope scope;
+        SpeAdminCallerScope scope;
         try
         {
-            scope = await LoadCallerScopeAsync(user, ct).ConfigureAwait(false);
+            scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -280,7 +323,7 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.Unverifiable;
         }
 
-        var accessible = scope.Accessible;
+        var accessible = scope.AccessibleBusinessUnits;
 
         if (businessUnitId is { } unit && !accessible.Contains(unit))
         {
@@ -336,13 +379,14 @@ public class SpeAdminTenantScope
 
             foreach (var (kind, value) in candidates)
             {
-                if (row.ValuesOfKind(kind).Any(v =>
+                // Only the other config's PER-CUSTOMER values are exclusive (owner round 20 item 3).
+                if (row.ExclusiveValuesOfKind(kind).Any(v =>
                         !string.IsNullOrWhiteSpace(v)
                         && string.Equals(CanonicalIdentityValue(kind, v), value, StringComparison.OrdinalIgnoreCase)))
                 {
                     _logger.LogWarning(
                         "SpeAdmin tenant scope: a config write names a {Kind} value that a config in an unreachable " +
-                        "business unit already carries — refusing.",
+                        "business unit carries as its own per-customer identity — refusing.",
                         kind);
                     return SpeAdminScopeDecision.IdentityOutOfScope;
                 }
@@ -353,8 +397,8 @@ public class SpeAdminTenantScope
     }
 
     /// <summary>
-    /// The ids of every config the caller may see: those in an accessible business unit, plus those with no
-    /// business unit (the compatibility rule). Used to project the cross-config dashboard aggregate.
+    /// The configs the caller may see: those in an accessible business unit, plus those with no business unit (the
+    /// compatibility rule). Used to project the cross-config dashboard aggregate.
     /// </summary>
     /// <remarks>
     /// "Every config" is judged over the WHOLE table, not over the configs a cached aggregate happens to
@@ -363,18 +407,14 @@ public class SpeAdminTenantScope
     /// </remarks>
     /// <exception cref="Exception">
     /// THROWS on any read fault, and when the config read returns <see cref="WholeTableReadLimit"/> rows
-    /// (possible truncation). The caller must refuse, never fall back to the unprojected aggregate.
+    /// (possible truncation): a truncated read could make a leaf admin look as if they reached every config and hand
+    /// them the unprojected cross-customer aggregate. The caller must refuse, never fall back to the aggregate.
     /// </exception>
-    /// <returns>
-    /// The reachable config ids, and whether they are EVERY config in the table — only then may a caller see
-    /// tenant-wide figures that cannot be attributed to a config (e.g. how many config records were skipped
-    /// as incomplete).
-    /// </returns>
-    public async Task<(IReadOnlySet<Guid> ConfigIds, bool ReachesEveryConfig)> GetReachableConfigIdsAsync(
+    public async Task<SpeAdminConfigReach> GetReachableConfigIdsAsync(
         ClaimsPrincipal? user,
         CancellationToken ct = default)
     {
-        var accessible = await GetAccessibleBusinessUnitsAsync(user, ct).ConfigureAwait(false);
+        var scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
         var rows = await LoadConfigScopeRowsAsync(ct).ConfigureAwait(false);
 
         if (rows.Count >= WholeTableReadLimit)
@@ -383,13 +423,304 @@ public class SpeAdminTenantScope
                 $"The config table read returned {rows.Count} rows (the read limit); the reachable set cannot be proven complete.");
         }
 
+        var accessible = scope.AccessibleBusinessUnits;
         var reachable = rows
             .Where(r => r.ConfigId.HasValue && IsReachable(r, accessible))
             .Select(r => r.ConfigId!.Value)
             .ToHashSet();
 
-        return (reachable, rows.All(r => IsReachable(r, accessible)));
+        return new SpeAdminConfigReach(
+            ConfigIds: reachable,
+            ReachesEveryConfig: rows.All(r => IsReachable(r, accessible)),
+            IsPlatformOperator: scope.IsPlatformOperator);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Per-container authorization (owner round 20 items 1-2)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether the caller may act on ONE container through <paramref name="configId"/> (the container, item,
+    /// permission, column, custom-property and recycle-bin routes): <see cref="SpeAdminScopeDecision.Permitted"/>,
+    /// <see cref="SpeAdminScopeDecision.NotFoundOrOutOfScope"/> (ONE answer for a container that does not exist,
+    /// one of another container type, and one bound outside the caller's reach), or
+    /// <see cref="SpeAdminScopeDecision.Unverifiable"/> when the caller's scope, the config or the container's
+    /// binding cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rule (owner round 20 item 2, <see cref="SpeAdminCallerScope.CanReach"/>): a container bound to a unit the
+    /// caller reaches (their own unit or a descendant); an unbound container only for a ROOT-unit admin; an unreadable
+    /// binding fails closed. The config itself was already confined by the filter's configId rule — this adds the
+    /// container, because one container type can serve several customers (Model 1).
+    /// </para>
+    /// <para>
+    /// The binding is read from the container itself with the config's own client (<see cref="SpeContainerBusinessUnitStamp"/>
+    /// explains why a list read cannot carry it). <paramref name="deleted"/> reads it from the recycle bin
+    /// (<c>/deletedContainers/{id}</c>) for the routes that act on a soft-deleted container.
+    /// </para>
+    /// </remarks>
+    public async Task<SpeAdminScopeDecision> DecideContainerAccessAsync(
+        ClaimsPrincipal? user,
+        Guid configId,
+        string containerId,
+        bool deleted,
+        CancellationToken ct = default)
+    {
+        SpeAdminCallerScope scope;
+        try
+        {
+            scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "SpeAdmin tenant scope: could not read the business-unit hierarchy — refusing container {ContainerId} (unverifiable).",
+                containerId);
+            return SpeAdminScopeDecision.Unverifiable;
+        }
+
+        if (scope.AccessibleBusinessUnits.Count == 0)
+        {
+            // An unresolvable caller reaches no container; nothing is read.
+            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        }
+
+        SpeAdminGraphService.ContainerTypeConfig? config;
+        SpeContainerBindingRead? read;
+        try
+        {
+            config = await _graphService.ResolveConfigAsync(configId, ct).ConfigureAwait(false);
+            if (config is null)
+            {
+                return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+            }
+
+            read = await _graphService.GetContainerBindingForConfigAsync(config, containerId, deleted, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "SpeAdmin tenant scope: could not read the business-unit binding of container {ContainerId} — refusing (unverifiable).",
+                containerId);
+            return SpeAdminScopeDecision.Unverifiable;
+        }
+
+        var decision = DecideContainer(scope, config.ContainerTypeId, read);
+        if (decision != SpeAdminScopeDecision.Permitted)
+        {
+            _logger.LogWarning(
+                "SpeAdmin tenant scope: container {ContainerId} is not one the caller may act on through config {ConfigId} " +
+                "(absent, of another container type, or bound outside the caller's business units).",
+                containerId, configId);
+        }
+
+        return decision;
+    }
+
+    /// <summary>
+    /// The per-container rule on one binding read: absent → not found; a container type Graph REPORTS that differs from
+    /// the config's → not found; otherwise <see cref="SpeAdminCallerScope.CanReach"/>.
+    /// </summary>
+    internal static SpeAdminScopeDecision DecideContainer(
+        SpeAdminCallerScope scope,
+        string? configContainerTypeId,
+        SpeContainerBindingRead? read)
+    {
+        if (read is null)
+        {
+            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        }
+
+        if (!string.IsNullOrWhiteSpace(read.ContainerTypeId) && !SameGuid(read.ContainerTypeId, configContainerTypeId))
+        {
+            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        }
+
+        return scope.CanReach(read.Binding)
+            ? SpeAdminScopeDecision.Permitted
+            : SpeAdminScopeDecision.NotFoundOrOutOfScope;
+    }
+
+    /// <summary>
+    /// The containers in <paramref name="containerIds"/> the caller may see through <paramref name="config"/> — the
+    /// list trim for <c>GET /containers</c>, <c>GET /recyclebin</c> and the two search routes. Each container's binding
+    /// is read (bounded concurrency); a container Graph no longer finds is simply not returned.
+    /// </summary>
+    /// <exception cref="Exception">THROWS when any binding read faults — the caller refuses (503), never shows an
+    /// unverified container and never silently drops one it could not judge.</exception>
+    public async Task<IReadOnlySet<string>> FilterReachableContainersAsync(
+        SpeAdminCallerScope scope,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        IEnumerable<string> containerIds,
+        bool deleted,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(config);
+
+        var ids = containerIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+        var reachable = new HashSet<string>(StringComparer.Ordinal);
+        if (ids.Count == 0 || scope.AccessibleBusinessUnits.Count == 0)
+        {
+            return reachable;
+        }
+
+        using var gate = new SemaphoreSlim(BindingReadConcurrency);
+        var reads = ids.Select(async id =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return (Id: id, Read: await _graphService.GetContainerBindingForConfigAsync(config, id, deleted, ct).ConfigureAwait(false));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+
+        foreach (var (id, read) in await Task.WhenAll(reads).ConfigureAwait(false))
+        {
+            if (DecideContainer(scope, config.ContainerTypeId, read) == SpeAdminScopeDecision.Permitted)
+            {
+                reachable.Add(id);
+            }
+        }
+
+        return reachable;
+    }
+
+    /// <summary>
+    /// The list trim every container-listing handler applies (<c>GET /containers</c>, <c>GET /recyclebin</c>,
+    /// <c>POST /search/containers</c>, <c>POST /search/items</c>): the caller's scope, then
+    /// <see cref="FilterReachableContainersAsync"/>. Null when either cannot be read — the handler answers 503 and
+    /// shows nothing (never the untrimmed list).
+    /// </summary>
+    public async Task<SpeAdminContainerTrim?> TrimToReachableContainersAsync(
+        ClaimsPrincipal? user,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        IEnumerable<string> containerIds,
+        bool deleted,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
+            var reachable = await FilterReachableContainersAsync(scope, config, containerIds, deleted, ct).ConfigureAwait(false);
+            return new SpeAdminContainerTrim(reachable, scope.IsPlatformOperator);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "SpeAdmin tenant scope: could not read the caller's scope or a container binding for config {ConfigId} — " +
+                "refusing the list (unverifiable).", config.ConfigId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The business unit a container created through <paramref name="configId"/> is bound to (owner round 20 item 1):
+    /// the config's own unit; for a config with no unit (the compatibility rule) the creating admin's own unit. Null
+    /// when neither can be determined (the caller is not a Dataverse user) — the create must then be refused.
+    /// </summary>
+    /// <exception cref="Exception">THROWS when a read fails — refuse (503), never create unbound.</exception>
+    public async Task<Guid?> ResolveContainerOwnerAsync(
+        ClaimsPrincipal? user,
+        Guid configId,
+        CancellationToken ct = default)
+    {
+        var lookup = await ResolveConfigBusinessUnitAsync(configId, ct).ConfigureAwait(false);
+        if (lookup.Exists && lookup.BusinessUnitId is { } configUnit && configUnit != Guid.Empty)
+        {
+            return configUnit;
+        }
+
+        var scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
+        return scope.CallerBusinessUnitId;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // App-only container-TYPE routes (the consequence of owner round 20 item 3)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether the caller may act on container type <paramref name="typeId"/> through <paramref name="configId"/> on an
+    /// app-only container-type route (type permissions, consuming-app registrations, register).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why</b>. Narrowing the identity check (round 20 item 3) lets configs of different customers carry ONE
+    /// container type and owning app. The container-type routes act app-only, as that shared owning app, on settings
+    /// every customer of the type shares — a consuming-app registration grants an app every container of the type. So:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>the route's type must BE the config's type (compared as GUIDs) — a config is not a credential for some
+    ///   other type its owning app can reach; otherwise <see cref="SpeAdminScopeDecision.NotFoundOrOutOfScope"/>;</item>
+    ///   <item>a WRITE needs the caller to reach EVERY config that carries the type — a type shared with a customer the
+    ///   caller cannot reach is shared infrastructure, changed only by an admin who reaches all of its customers (a
+    ///   root-unit admin reaches every config); otherwise <see cref="SpeAdminScopeDecision.ContainerTypeShared"/>.</item>
+    /// </list>
+    /// <para>A read fault, or a full page of the config table, is <see cref="SpeAdminScopeDecision.Unverifiable"/>.</para>
+    /// </remarks>
+    public async Task<SpeAdminScopeDecision> DecideContainerTypeAccessAsync(
+        ClaimsPrincipal? user,
+        Guid configId,
+        string? typeId,
+        bool write,
+        CancellationToken ct = default)
+    {
+        SpeAdminCallerScope scope;
+        List<ConfigScopeRow> rows;
+        try
+        {
+            scope = await GetCallerScopeAsync(user, ct).ConfigureAwait(false);
+            rows = await LoadConfigScopeRowsAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "SpeAdmin tenant scope: could not read the scope for a container-type route — refusing (unverifiable).");
+            return SpeAdminScopeDecision.Unverifiable;
+        }
+
+        if (rows.Count >= WholeTableReadLimit)
+        {
+            _logger.LogError(
+                "SpeAdmin tenant scope: the config table read returned {Count} rows (the read limit) — refusing a " +
+                "container-type route (unverifiable).", rows.Count);
+            return SpeAdminScopeDecision.Unverifiable;
+        }
+
+        var config = rows.FirstOrDefault(r => r.ConfigId == configId);
+        if (config is null || !SameGuid(config.ContainerTypeId, typeId))
+        {
+            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        }
+
+        if (!write)
+        {
+            return SpeAdminScopeDecision.Permitted;
+        }
+
+        var accessible = scope.AccessibleBusinessUnits;
+        var sharedWithAnUnreachableConfig = rows.Any(r =>
+            SameGuid(r.ContainerTypeId, typeId) && !IsReachable(r, accessible));
+
+        if (sharedWithAnUnreachableConfig)
+        {
+            _logger.LogWarning(
+                "SpeAdmin tenant scope: a write to container type {TypeId} through config {ConfigId} refused — a config " +
+                "the caller cannot reach also carries that type.", typeId, configId);
+            return SpeAdminScopeDecision.ContainerTypeShared;
+        }
+
+        return SpeAdminScopeDecision.Permitted;
+    }
+
+    /// <summary>Two values naming the same GUID (any spelling); false when either is not a GUID.</summary>
+    internal static bool SameGuid(string? left, string? right) =>
+        Guid.TryParse(left?.Trim(), out var l) && Guid.TryParse(right?.Trim(), out var r) && l == r;
 
     /// <summary>
     /// The form an app-identity value is compared in: a container type id or app id that parses as a GUID is
@@ -451,27 +782,6 @@ public class SpeAdminTenantScope
     // ─────────────────────────────────────────────────────────────────────────
     // Resolution
     // ─────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// The caller's business unit resolved once: the accessible set (own unit + descendants; EMPTY when the
-    /// caller cannot be resolved) and whether the own unit is the root (no parent) — a platform operator.
-    /// THROWS when the hierarchy cannot be read; an unresolvable caller reads no hierarchy.
-    /// </summary>
-    private async Task<CallerScope> LoadCallerScopeAsync(ClaimsPrincipal? user, CancellationToken ct)
-    {
-        var callerBusinessUnit = await ResolveCallerBusinessUnitAsync(user, ct).ConfigureAwait(false);
-        if (callerBusinessUnit is null)
-        {
-            return new CallerScope(IsPlatformOperator: false, Accessible: Array.Empty<Guid>());
-        }
-
-        var hierarchy = await LoadBusinessUnitHierarchyAsync(ct).ConfigureAwait(false);
-        var isRoot = hierarchy.TryGetValue(callerBusinessUnit.Value, out var parent) && parent is null;
-
-        return new CallerScope(isRoot, CollectSelfAndDescendants(callerBusinessUnit.Value, hierarchy));
-    }
-
-    private readonly record struct CallerScope(bool IsPlatformOperator, IReadOnlyCollection<Guid> Accessible);
 
     /// <summary>
     /// Resolves the caller's business unit from Dataverse via their Entra object id.
@@ -559,9 +869,11 @@ public class SpeAdminTenantScope
     /// One query rather than a walk: business-unit counts are small (tens, not thousands), and a
     /// single read is both cheaper and race-free compared with recursing parent by parent.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<Guid, Guid?>> LoadBusinessUnitHierarchyAsync(CancellationToken ct)
+    internal static async Task<IReadOnlyDictionary<Guid, Guid?>> LoadBusinessUnitHierarchyAsync(
+        DataverseWebApiClient dataverseClient,
+        CancellationToken ct)
     {
-        var rows = await _dataverseClient.QueryAsync<BusinessUnitRow>(
+        var rows = await dataverseClient.QueryAsync<BusinessUnitRow>(
             "businessunits",
             filter: null,
             select: "businessunitid,_parentbusinessunitid_value",
@@ -581,7 +893,7 @@ public class SpeAdminTenantScope
     }
 
     /// <summary>Returns <paramref name="root"/> plus every business unit beneath it.</summary>
-    internal static IReadOnlyCollection<Guid> CollectSelfAndDescendants(
+    internal static IReadOnlySet<Guid> CollectSelfAndDescendants(
         Guid root,
         IReadOnlyDictionary<Guid, Guid?> childToParent)
     {
@@ -657,11 +969,14 @@ public class SpeAdminTenantScope
         [JsonPropertyName(IdentityColumns.ConsumingAppKvSecret)]
         public string? ConsumingAppKvSecret { get; set; }
 
-        public IEnumerable<string?> ValuesOfKind(string kind) => kind switch
+        /// <summary>
+        /// This config's PER-CUSTOMER values of a kind — the ones no other customer's config may name (owner round 20
+        /// item 3). The container type, owning app and its secret are shared by Model 1 configs and are not listed.
+        /// </summary>
+        public IEnumerable<string?> ExclusiveValuesOfKind(string kind) => kind switch
         {
-            ContainerTypeKind => new[] { ContainerTypeId },
-            AppIdKind => new[] { OwningAppId, ConsumingAppId },
-            SecretNameKind => new[] { KeyVaultSecretName, ConsumingAppKvSecret },
+            AppIdKind => new[] { ConsumingAppId },
+            SecretNameKind => new[] { ConsumingAppKvSecret },
             _ => Array.Empty<string?>()
         };
     }
@@ -704,9 +1019,61 @@ public enum SpeAdminScopeDecision
     /// </summary>
     EnvironmentOutOfScope,
 
-    /// <summary>A Dataverse read the decision depends on failed: 503, never allow.</summary>
+    /// <summary>
+    /// A write to a container type that a config the caller cannot reach also carries (owner round 20 item 3's
+    /// consequence: a Model 1 type is shared infrastructure): 403.
+    /// </summary>
+    ContainerTypeShared,
+
+    /// <summary>A read the decision depends on failed: 503, never allow.</summary>
     Unverifiable
 }
+
+/// <summary>
+/// The caller's reach on the SPE admin plane, resolved once per decision (unified-access-control-r2 task 165) — the
+/// answer of <see cref="SpeAdminTenantScope.GetCallerScopeAsync"/>.
+/// </summary>
+/// <param name="CallerBusinessUnitId">The caller's own business unit, or null when the caller is not a Dataverse user.</param>
+/// <param name="IsPlatformOperator">The caller's own business unit is the ROOT (it has no parent).</param>
+/// <param name="AccessibleBusinessUnits">
+/// The caller's own unit plus every descendant; EMPTY when the caller cannot be resolved (reaches nothing).
+/// </param>
+public sealed record SpeAdminCallerScope(
+    Guid? CallerBusinessUnitId,
+    bool IsPlatformOperator,
+    IReadOnlySet<Guid> AccessibleBusinessUnits)
+{
+    /// <summary>A caller who cannot be resolved to a Dataverse user: reaches nothing.</summary>
+    public static SpeAdminCallerScope Nobody { get; } = new(null, false, new HashSet<Guid>());
+
+    /// <summary>
+    /// THE per-container rule (owner round 20 item 2): a container bound to a business unit the caller reaches; an
+    /// unbound (or malformed) container only for a ROOT-unit admin. A binding that could not be READ never gets here —
+    /// that is a refusal (fail closed) before this is asked.
+    /// </summary>
+    public bool CanReach(SpeContainerBinding binding) =>
+        binding.BusinessUnitId is { } unit
+            ? AccessibleBusinessUnits.Contains(unit)
+            : IsPlatformOperator;
+}
+
+/// <summary>
+/// The answer of <see cref="SpeAdminTenantScope.TrimToReachableContainersAsync"/>.
+/// </summary>
+/// <param name="Reachable">The container ids (of those asked about) the caller may see.</param>
+/// <param name="IsPlatformOperator">The caller's own unit is the root.</param>
+public sealed record SpeAdminContainerTrim(IReadOnlySet<string> Reachable, bool IsPlatformOperator);
+
+/// <summary>
+/// The configs a caller reaches — the answer of <see cref="SpeAdminTenantScope.GetReachableConfigIdsAsync"/>.
+/// </summary>
+/// <param name="ConfigIds">The reachable config ids (in an accessible unit, or with no unit).</param>
+/// <param name="ReachesEveryConfig">The caller reaches every config in the table.</param>
+/// <param name="IsPlatformOperator">The caller's own unit is the root — the only caller who sees unbound containers.</param>
+public sealed record SpeAdminConfigReach(
+    IReadOnlySet<Guid> ConfigIds,
+    bool ReachesEveryConfig,
+    bool IsPlatformOperator);
 
 /// <summary>
 /// What a caller may do with SPE environments (<c>sprk_speenvironment</c>) — the answer of

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -9,7 +10,7 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// Dashboard metrics endpoints for the SPE Admin application.
 ///
 /// Provides read-only access to cached container metrics and an on-demand refresh trigger.
-/// Metrics are populated by <see cref="SpeDashboardSyncService"/> on a configurable interval
+/// Metrics are populated by the <see cref="SpeDashboardSyncService"/> scheduled job on a configurable interval
 /// (default 15 minutes) and cached in IDistributedCache.
 ///
 /// ADR-001: Minimal API — MapGroup() + static handler methods (no controllers).
@@ -21,13 +22,17 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// config. Until task 165 both routes returned it whole, so an admin scoped to one customer's business
 /// unit saw every customer's container counts, the per-config breakdown (config ids included) and each
 /// config's sync failure reason. Both routes now return the aggregate PROJECTED onto the configs the
-/// caller can reach (<see cref="SpeAdminTenantScope.GetReachableConfigIdsAsync"/>): an admin who reaches
-/// every config sees it unchanged; anyone else sees only their configs' counts and concerns, with totals
-/// and health recomputed from those. When the scope cannot be read the answer is 503, never the
-/// unprojected aggregate (ADR-003 fail closed).
+/// caller can reach (<see cref="SpeAdminTenantScope.GetReachableConfigIdsAsync"/>): a platform operator who
+/// reaches every config sees it unchanged; anyone else sees only their configs' counts, storage and concerns,
+/// with totals and health recomputed from those (owner round 25 item 5: the job attributes every container to
+/// its owning config, so a partial view's storage is its own configs' storage, not 0). When the scope cannot be
+/// read the answer is 503, never the unprojected aggregate (ADR-003 fail closed).
 /// </remarks>
 public static class DashboardEndpoints
 {
+    /// <summary>How long a refresh waits for the triggered run to publish newer metrics.</summary>
+    private static readonly TimeSpan RefreshWait = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// Registers dashboard metric endpoints on the provided /api/spe route group.
     /// Called from SpeAdminEndpoints.MapSpeAdminEndpoints() during startup.
@@ -42,9 +47,9 @@ public static class DashboardEndpoints
             .WithName("GetDashboardMetrics")
             .WithSummary("Get cached SPE dashboard metrics")
             .WithDescription(
-                "Returns the most recently cached container metrics from the SpeDashboardSyncService, " +
+                "Returns the most recently cached container metrics from the SpeDashboardSyncService job, " +
                 "limited to the configs in the caller's business units. " +
-                "If no metrics are cached yet (first startup), returns 204 No Content. " +
+                "If no metrics are cached yet (first startup), starts a sync and returns 204 No Content. " +
                 "Metrics are refreshed automatically every 15 minutes (configurable). " +
                 "Use POST /refresh to trigger an immediate sync.");
 
@@ -53,10 +58,9 @@ public static class DashboardEndpoints
             .WithName("RefreshDashboardMetrics")
             .WithSummary("Trigger an immediate dashboard metrics sync")
             .WithDescription(
-                "Signals the SpeDashboardSyncService to perform an immediate sync from Graph API. " +
+                "Runs the SpeDashboardSyncService job now (or joins the run already in progress). " +
                 "Waits up to 30 seconds for the sync to complete, then returns the updated metrics, " +
-                "limited to the configs in the caller's business units. " +
-                "Multiple concurrent refresh requests coalesce into a single sync run.");
+                "limited to the configs in the caller's business units.");
 
         return group;
     }
@@ -73,18 +77,19 @@ public static class DashboardEndpoints
     ///
     /// Responses:
     ///   200 OK    — Metrics available; returns DashboardMetrics JSON.
-    ///   204 No Content — No metrics cached yet (service just started, hasn't completed first sync).
+    ///   204 No Content — No metrics cached yet; a sync has been started.
     ///   503 Service Unavailable — Cache read error, or the caller's scope could not be read.
     /// </summary>
     private static async Task<IResult> GetDashboardMetricsAsync(
         SpeDashboardSyncService syncService,
+        ScheduledJobHost jobHost,
         SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
-        var reachable = await TryGetReachableConfigIdsAsync(tenantScope, logger, context, ct);
-        if (reachable is null)
+        var reach = await TryGetReachableConfigIdsAsync(tenantScope, logger, context, ct);
+        if (reach is null)
         {
             return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
         }
@@ -95,8 +100,11 @@ public static class DashboardEndpoints
 
             if (metrics == null)
             {
+                // The job runs on its schedule, not at startup: warm the cache on first view instead of leaving the
+                // dashboard empty until the next tick.
                 logger.LogInformation(
-                    "GET /api/spe/dashboard/metrics — no metrics cached yet (first sync pending).");
+                    "GET /api/spe/dashboard/metrics — no metrics cached yet; starting a sync.");
+                await TryStartSyncAsync(jobHost, logger, ct);
                 return Results.NoContent();
             }
 
@@ -104,7 +112,7 @@ public static class DashboardEndpoints
                 "GET /api/spe/dashboard/metrics — returning cached metrics. LastSyncedAt={LastSyncedAt}",
                 metrics.LastSyncedAt);
 
-            return Results.Ok(ProjectToReachableConfigs(metrics, reachable.Value.ConfigIds, reachable.Value.ReachesEveryConfig));
+            return Results.Ok(ProjectToReachableConfigs(metrics, reach));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -131,24 +139,26 @@ public static class DashboardEndpoints
     /// <summary>
     /// POST /api/spe/dashboard/refresh
     ///
-    /// Triggers an immediate sync via <see cref="SpeDashboardSyncService.TriggerRefreshAsync"/>.
-    /// Waits up to 30 seconds for the sync to complete, then returns the updated metrics, projected onto
-    /// the caller's configs.
+    /// Runs the <see cref="SpeDashboardSyncService"/> job now through <see cref="ScheduledJobHost.TriggerNowAsync"/>
+    /// (or joins a run already in progress), waits up to 30 seconds for it to publish newer metrics, then returns them,
+    /// projected onto the caller's configs.
     ///
     /// Responses:
     ///   200 OK    — Sync completed (or was already in progress); returns updated DashboardMetrics.
     ///   204 No Content — Sync triggered but no metrics available yet (very first sync, slow response).
-    ///   503 Service Unavailable — Sync failed or timed out, or the caller's scope could not be read.
+    ///   503 Service Unavailable — The scheduler cannot run the job, the sync failed, or the caller's scope could not
+    ///                             be read.
     /// </summary>
     private static async Task<IResult> RefreshDashboardMetricsAsync(
         SpeDashboardSyncService syncService,
+        ScheduledJobHost jobHost,
         SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
-        var reachable = await TryGetReachableConfigIdsAsync(tenantScope, logger, context, ct);
-        if (reachable is null)
+        var reach = await TryGetReachableConfigIdsAsync(tenantScope, logger, context, ct);
+        if (reach is null)
         {
             return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
         }
@@ -157,7 +167,19 @@ public static class DashboardEndpoints
 
         try
         {
-            var metrics = await syncService.TriggerRefreshAsync(ct);
+            var previous = await syncService.ReadCachedMetricsAsync(ct);
+
+            try
+            {
+                await jobHost.TriggerNowAsync(SpeDashboardSyncService.JobIdConstant, parameters: null, ct);
+            }
+            catch (ScheduledJobBusyException)
+            {
+                // A run (scheduled or another refresh) is already in progress — wait for it instead.
+                logger.LogInformation("Dashboard refresh: a sync is already running; waiting for it.");
+            }
+
+            var metrics = await syncService.WaitForMetricsNewerThanAsync(previous?.LastSyncedAt, RefreshWait, ct);
 
             if (metrics == null)
             {
@@ -170,7 +192,7 @@ public static class DashboardEndpoints
                 "Dashboard refresh complete. Containers: {Total}, SyncSucceeded: {SyncSucceeded}",
                 metrics.TotalContainerCount, metrics.SyncSucceeded);
 
-            return Results.Ok(ProjectToReachableConfigs(metrics, reachable.Value.ConfigIds, reachable.Value.ReachesEveryConfig));
+            return Results.Ok(ProjectToReachableConfigs(metrics, reach));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -194,12 +216,26 @@ public static class DashboardEndpoints
         }
     }
 
+    /// <summary>Starts a sync run if none is running; never throws (the caller answers 204 either way).</summary>
+    private static async Task TryStartSyncAsync(ScheduledJobHost jobHost, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            await jobHost.TriggerNowAsync(SpeDashboardSyncService.JobIdConstant, parameters: null, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Busy (already running) or the scheduler's lease store is unreachable — the next tick fills the cache.
+            logger.LogInformation(ex, "Dashboard: could not start a warm-up sync now.");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Business-unit projection (task 165)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The caller's reachable config ids, or null when they cannot be read (refuse).</summary>
-    private static async Task<(IReadOnlySet<Guid> ConfigIds, bool ReachesEveryConfig)?> TryGetReachableConfigIdsAsync(
+    /// <summary>The caller's reachable configs, or null when they cannot be read (refuse).</summary>
+    private static async Task<SpeAdminConfigReach?> TryGetReachableConfigIdsAsync(
         SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
@@ -224,69 +260,73 @@ public static class DashboardEndpoints
     /// </summary>
     internal const string CompletenessConcern = "Dataverse config completeness";
 
-    /// <summary>Matches the per-config concern name <see cref="SpeDashboardSyncService"/> records.</summary>
-    private static readonly Regex GraphConcernConfigId = new(
-        @"^Graph containers \(config (?<id>[0-9a-fA-F-]{36})\)$",
+    /// <summary>Matches the per-config concern names <see cref="SpeDashboardSyncService"/> records.</summary>
+    private static readonly Regex PerConfigConcern = new(
+        @"^(Graph containers|Container business-unit bindings) \(config (?<id>[0-9a-fA-F-]{36})\)$",
         RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
 
     /// <summary>
-    /// The cached aggregate as the caller may see it: only reachable configs' counts and per-config
+    /// The cached aggregate as the caller may see it: only reachable configs' counts, storage and per-config
     /// concerns, with totals and health recomputed from them.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A caller who reaches EVERY config in the table (<paramref name="reachesEveryConfig"/>) gets the
-    /// aggregate unchanged — the root operator's view. Anyone else gets a projection, even when every config
-    /// the aggregate happens to NAME is theirs: a config the sync skipped as incomplete is named nowhere, yet
-    /// it is counted in the completeness concern.
+    /// A PLATFORM OPERATOR (own unit = the root) who reaches EVERY config gets the aggregate unchanged — including
+    /// the unattributed containers (unbound ones, which only a root-unit administrator reaches: owner round 20 item 2).
+    /// Anyone else gets a projection, even when every config the aggregate happens to NAME is theirs: a config the
+    /// sync skipped as incomplete is named nowhere, yet it is counted in the completeness concern.
     /// </para>
     /// <para>
-    /// <b>Storage in a partial view is reported as not reported</b> (0 bytes from 0 reporting containers),
-    /// because the cached aggregate holds only a cross-config storage SUM and no per-config split; the
-    /// metrics contract already treats a reporting count below the total as "a floor, not a total". The
-    /// per-config split belongs in <see cref="SpeDashboardSyncService"/>, which is an ADR-052
-    /// ratchet-listed timer that migrates when next touched — recorded in the task 165 note as follow-up.
+    /// <b>Storage is per config</b> (owner round 25 item 5): the job attributes every container to the config whose
+    /// business unit owns it, so a projection's storage is the sum over the caller's own configs. The unattributed
+    /// figures are never part of a projection.
     /// </para>
     /// <para>
-    /// The Dataverse config-load concern names no config and is platform health: it stays. The
-    /// <see cref="CompletenessConcern"/> is dropped from a projection — its reason is a count of skipped
-    /// config records across every customer, which a leaf admin may not see. A per-config concern whose
-    /// config id cannot be read is dropped (fail closed).
-    /// </para>
-    /// <para>
-    /// Storage is kept only when every config the aggregate counts is reachable (no other customer
-    /// contributed to the sum); otherwise it is reported as not reported (see above).
+    /// The Dataverse config-load and business-unit concerns name no config and are platform health: they stay. The
+    /// <see cref="CompletenessConcern"/> is kept only for a caller who reaches every config — its reason is a count of
+    /// skipped config records across every customer. A per-config concern whose config the caller cannot reach, or
+    /// whose config id cannot be read, is dropped (fail closed).
     /// </para>
     /// </remarks>
     internal static SpeDashboardSyncService.DashboardMetrics ProjectToReachableConfigs(
         SpeDashboardSyncService.DashboardMetrics metrics,
-        IReadOnlySet<Guid> reachable,
-        bool reachesEveryConfig)
+        SpeAdminConfigReach reach)
     {
         bool IsReachable(string configKey) =>
-            Guid.TryParse(configKey, out var id) && reachable.Contains(id);
+            Guid.TryParse(configKey, out var id) && reach.ConfigIds.Contains(id);
 
         string? ConcernConfigKey(SpeDashboardSyncService.ConcernOutcome concern)
         {
-            var match = GraphConcernConfigId.Match(concern.Concern);
+            var match = PerConfigConcern.Match(concern.Concern);
             if (match.Success) return match.Groups["id"].Value;
-            return concern.Concern.StartsWith("Graph containers", StringComparison.Ordinal) ? string.Empty : null;
+            return concern.Concern.StartsWith("Graph containers", StringComparison.Ordinal)
+                   || concern.Concern.StartsWith("Container business-unit bindings", StringComparison.Ordinal)
+                ? string.Empty
+                : null;
         }
 
-        if (reachesEveryConfig)
+        if (reach.IsPlatformOperator && reach.ReachesEveryConfig)
         {
             return metrics;
         }
-
-        var everyCountReachable = metrics.ContainerCountByConfig.Keys.All(IsReachable);
 
         var counts = metrics.ContainerCountByConfig
             .Where(kv => IsReachable(kv.Key))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
 
+        var counted = counts.Where(kv => kv.Value >= 0).Select(kv => kv.Key).ToHashSet();
+
+        var storage = metrics.StorageUsedInBytesByConfig
+            .Where(kv => counted.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        var reporting = metrics.StorageReportingContainerCountByConfig
+            .Where(kv => counted.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+
         var concerns = metrics.Concerns
-            .Where(c => !string.Equals(c.Concern, CompletenessConcern, StringComparison.Ordinal))
+            .Where(c => reach.ReachesEveryConfig || !string.Equals(c.Concern, CompletenessConcern, StringComparison.Ordinal))
             .Where(c => ConcernConfigKey(c) is not { } key || IsReachable(key))
             .ToList();
 
@@ -296,9 +336,14 @@ public static class DashboardEndpoints
         return metrics with
         {
             ContainerCountByConfig = counts,
-            TotalContainerCount = counts.Values.Where(v => v > 0).Sum(),
-            TotalStorageUsedInBytes = everyCountReachable ? metrics.TotalStorageUsedInBytes : 0,
-            StorageReportingContainerCount = everyCountReachable ? metrics.StorageReportingContainerCount : 0,
+            StorageUsedInBytesByConfig = storage,
+            StorageReportingContainerCountByConfig = reporting,
+            TotalContainerCount = counted.Sum(k => counts[k]),
+            TotalStorageUsedInBytes = storage.Values.Sum(),
+            StorageReportingContainerCount = reporting.Values.Sum(),
+            UnattributedContainerCount = 0,
+            UnattributedStorageUsedInBytes = 0,
+            UnattributedStorageReportingContainerCount = 0,
             Concerns = concerns,
             SyncHealth = health,
             SyncSucceeded = health == SpeDashboardSyncService.SyncHealth.Healthy,

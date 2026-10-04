@@ -17,8 +17,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.RecordMatching;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Tests.Contract.SpeAdmin;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -54,6 +56,9 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
 {
     internal const string RolesHeader = "X-Test-App-Roles";
     internal const string ScopesHeader = "X-Test-Scopes";
+
+    /// <summary>Overrides the caller's <c>oid</c> (default <see cref="CallerOid"/>) — a second administrator.</summary>
+    internal const string OidHeader = "X-Test-Oid";
     internal const string NoRoles = "(none)";
     internal const string ScopeClaimType = "http://schemas.microsoft.com/identity/claims/scope";
 
@@ -63,6 +68,23 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
     public FakeDataverseTables Dataverse { get; } = new();
 
     public RecordingIndexSyncService IndexSync { get; } = new();
+
+    /// <summary>
+    /// A fake Microsoft Graph (WireMock) for the SPE admin plane (task 165, owner round 20). Bind a config to it with
+    /// <see cref="UseGraphForConfig"/>: the REAL <see cref="SpeAdminGraphService"/> then sends that config's requests
+    /// here — real requests, real response mapping, no credentials (ADR-038 §4 HTTP-fake boundary).
+    /// </summary>
+    public GraphWireMockFixture Graph { get; } = new();
+
+    /// <summary>Points each config's app-only Graph client at <see cref="Graph"/>.</summary>
+    public void UseGraphForConfig(params Guid[] configIds)
+    {
+        var graphService = Services.GetRequiredService<SpeAdminGraphService>();
+        foreach (var configId in configIds)
+        {
+            graphService.UseClientForConfig(configId, Graph.CreateGraphClient());
+        }
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -108,11 +130,38 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
     /// <summary>The live singleton the bulk endpoints enqueue into (hosted loop removed by the base host).</summary>
     public BulkOperationService BulkOperations => Services.GetRequiredService<BulkOperationService>();
 
-    /// <summary>Clears every row, fault, recorded call and sync-service behaviour.</summary>
+    private int _bulkProcessorStarted;
+
+    /// <summary>
+    /// Starts the bulk processing loop the base host removed (once per host), so a test can drive a bulk request end to
+    /// end — enqueue, the job's per-container decisions, the status a caller polls.
+    /// </summary>
+    public Task StartBulkProcessorOnceAsync() =>
+        Interlocked.Exchange(ref _bulkProcessorStarted, 1) == 0
+            ? BulkOperations.StartAsync(CancellationToken.None)
+            : Task.CompletedTask;
+
+    /// <summary>Clears every row, fault, recorded call, Graph stub and sync-service behaviour.</summary>
     public void Reset()
     {
         Dataverse.Reset();
         IndexSync.Reset();
+        Graph.Reset();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (Volatile.Read(ref _bulkProcessorStarted) == 1)
+            {
+                BulkOperations.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+
+            Graph.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }
 
@@ -136,7 +185,9 @@ internal sealed class AdminSurfaceAuthHandler : AuthenticationHandler<Authentica
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        var oid = AdminSurfaceHostFixture.CallerOid.ToString("D");
+        var oid = Request.Headers.TryGetValue(AdminSurfaceHostFixture.OidHeader, out var oidOverride)
+            ? oidOverride.ToString()
+            : AdminSurfaceHostFixture.CallerOid.ToString("D");
         var claims = new List<Claim>
         {
             new("oid", oid),
@@ -179,11 +230,19 @@ public sealed class FakeDataverseTables
     /// <summary>Entity sets whose QueryAsync throws (a simulated Dataverse fault).</summary>
     public ConcurrentDictionary<string, bool> FaultingQueries { get; } = new();
 
+    /// <summary>
+    /// Ids a RetrieveAsync does not find although QueryAsync still returns the row — a record deleted between the
+    /// tenant-scope filter's read and the handler's own read (the race the handlers' not-found paths answer). The value
+    /// chooses HOW it is missing: false = the client returns null; true = it throws the Web API's 404.
+    /// </summary>
+    public ConcurrentDictionary<Guid, bool> RetrieveMisses { get; } = new();
+
     public void Reset()
     {
         _tables.Clear();
         Calls.Clear();
         FaultingQueries.Clear();
+        RetrieveMisses.Clear();
     }
 
     public void Add(string entitySet, Dictionary<string, object?> row) =>
@@ -278,6 +337,16 @@ public sealed class FakeDataverseTables
         Calls.Enqueue(new DataverseCall("Retrieve", entitySet, id, null));
 
         var key = PrimaryKey(entitySet);
+        if (RetrieveMisses.TryGetValue(id, out var throwsNotFound))
+        {
+            if (throwsNotFound)
+            {
+                throw new HttpRequestException($"Simulated 404 retrieving {entitySet}({id}).", null, HttpStatusCode.NotFound);
+            }
+
+            return FromResult(rowType, null);
+        }
+
         var row = Rows(entitySet).FirstOrDefault(r =>
             r.TryGetValue(key, out var value) && string.Equals(value?.ToString(), id.ToString("D"), StringComparison.OrdinalIgnoreCase));
 

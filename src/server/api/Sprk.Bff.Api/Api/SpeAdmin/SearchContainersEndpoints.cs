@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
@@ -61,6 +63,7 @@ public static class SearchContainersEndpoints
         [FromQuery] string? configId,
         [FromBody] SearchContainersRequest request,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -109,11 +112,23 @@ public static class SearchContainersEndpoints
                 request.SkipToken,
                 ct);
 
+            // Task 165, owner round 20 item 2: the search spans every container the owning app can see — in Model 1
+            // other customers' too. Only containers the caller reaches are returned, and Graph's total (which counts
+            // the others) is reported only to a platform operator from whose page nothing was removed.
+            var trim = await tenantScope.TrimToReachableContainersAsync(
+                context.User, config, searchPage.Items.Select(r => r.Id), deleted: false, ct);
+            if (trim is null)
+            {
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
+            var visible = searchPage.Items.Where(r => trim.Reachable.Contains(r.Id)).ToList();
+
             var response = new SearchContainersResponse(
-                Items: searchPage.Items
+                Items: visible
                     .Select(r => new SearchContainerDto(r.Id, r.DisplayName, r.Description, r.ContainerTypeId))
                     .ToList(),
-                TotalCount: searchPage.TotalCount,
+                TotalCount: trim.IsPlatformOperator && visible.Count == searchPage.Items.Count ? searchPage.TotalCount : null,
                 NextSkipToken: searchPage.NextSkipToken);
 
             logger.LogInformation(

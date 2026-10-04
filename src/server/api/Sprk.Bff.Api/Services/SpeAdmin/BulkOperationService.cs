@@ -77,9 +77,15 @@ public sealed class BulkOperationService : BackgroundService
     /// The caller should return 202 Accepted with the operation ID to the HTTP client.
     /// </summary>
     /// <param name="request">Validated bulk delete request.</param>
+    /// <param name="scope">
+    /// The caller's reach, captured when the request is accepted (owner round 20 item 2): the job acts only on
+    /// containers bound inside it. The job runs with no caller context, so this snapshot is the caller's authority.
+    /// </param>
+    /// <param name="startedBy">The caller's Entra object id; only that caller may read the operation's status.</param>
     /// <returns>Operation ID for status polling.</returns>
-    public Guid EnqueueDelete(BulkDeleteRequest request)
+    public Guid EnqueueDelete(BulkDeleteRequest request, SpeAdminCallerScope scope, string? startedBy)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         var operationId = Guid.NewGuid();
 
         _statuses[operationId] = new MutableOperationStatus
@@ -88,9 +94,10 @@ public sealed class BulkOperationService : BackgroundService
             OperationType = BulkOperationType.Delete,
             Total = request.ContainerIds.Count,
             StartedAt = DateTimeOffset.UtcNow,
+            StartedBy = startedBy,
         };
 
-        _queue.Writer.TryWrite(new BulkOperationJob(operationId, BulkOperationType.Delete, request, null));
+        _queue.Writer.TryWrite(new BulkOperationJob(operationId, BulkOperationType.Delete, request, null, scope));
 
         _logger.LogInformation(
             "BulkOperationService: enqueued Delete job {OperationId} for {Count} containers, configId={ConfigId}",
@@ -104,9 +111,12 @@ public sealed class BulkOperationService : BackgroundService
     /// The caller should return 202 Accepted with the operation ID to the HTTP client.
     /// </summary>
     /// <param name="request">Validated bulk permissions request.</param>
+    /// <param name="scope">The caller's reach, captured at acceptance (see <see cref="EnqueueDelete"/>).</param>
+    /// <param name="startedBy">The caller's Entra object id; only that caller may read the operation's status.</param>
     /// <returns>Operation ID for status polling.</returns>
-    public Guid EnqueuePermissions(BulkPermissionsRequest request)
+    public Guid EnqueuePermissions(BulkPermissionsRequest request, SpeAdminCallerScope scope, string? startedBy)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         var operationId = Guid.NewGuid();
 
         _statuses[operationId] = new MutableOperationStatus
@@ -115,9 +125,10 @@ public sealed class BulkOperationService : BackgroundService
             OperationType = BulkOperationType.AssignPermissions,
             Total = request.ContainerIds.Count,
             StartedAt = DateTimeOffset.UtcNow,
+            StartedBy = startedBy,
         };
 
-        _queue.Writer.TryWrite(new BulkOperationJob(operationId, BulkOperationType.AssignPermissions, null, request));
+        _queue.Writer.TryWrite(new BulkOperationJob(operationId, BulkOperationType.AssignPermissions, null, request, scope));
 
         _logger.LogInformation(
             "BulkOperationService: enqueued AssignPermissions job {OperationId} for {Count} containers, configId={ConfigId}",
@@ -127,13 +138,20 @@ public sealed class BulkOperationService : BackgroundService
     }
 
     /// <summary>
-    /// Returns the current status of a bulk operation, or <c>null</c> if the operation ID
-    /// is unknown or has expired from the in-memory store.
+    /// Returns the current status of a bulk operation, or <c>null</c> if the operation ID is unknown, has expired
+    /// from the in-memory store, or was started by someone else (task 165: ONE answer for all three, so the status
+    /// route is not an oracle for — or a window into — another administrator's operation and its container ids).
     /// </summary>
     /// <param name="operationId">Operation ID returned by the enqueue endpoint.</param>
-    public BulkOperationStatus? GetStatus(Guid operationId)
+    /// <param name="callerObjectId">The Entra object id of the caller asking.</param>
+    public BulkOperationStatus? GetStatus(Guid operationId, string? callerObjectId)
     {
         if (!_statuses.TryGetValue(operationId, out var mutable))
+            return null;
+
+        if (string.IsNullOrWhiteSpace(mutable.StartedBy)
+            || string.IsNullOrWhiteSpace(callerObjectId)
+            || !string.Equals(mutable.StartedBy, callerObjectId.Trim(), StringComparison.OrdinalIgnoreCase))
             return null;
 
         return mutable.ToImmutable();
@@ -198,11 +216,11 @@ public sealed class BulkOperationService : BackgroundService
         switch (job.OperationType)
         {
             case BulkOperationType.Delete when job.DeleteRequest is not null:
-                await ProcessDeleteJobAsync(job.OperationId, job.DeleteRequest, status, ct);
+                await ProcessDeleteJobAsync(job.OperationId, job.DeleteRequest, job.Scope, status, ct);
                 break;
 
             case BulkOperationType.AssignPermissions when job.PermissionsRequest is not null:
-                await ProcessPermissionsJobAsync(job.OperationId, job.PermissionsRequest, status, ct);
+                await ProcessPermissionsJobAsync(job.OperationId, job.PermissionsRequest, job.Scope, status, ct);
                 break;
 
             default:
@@ -225,6 +243,7 @@ public sealed class BulkOperationService : BackgroundService
     private async Task ProcessDeleteJobAsync(
         Guid operationId,
         BulkDeleteRequest request,
+        SpeAdminCallerScope scope,
         MutableOperationStatus status,
         CancellationToken ct)
     {
@@ -267,13 +286,13 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         // Process each container sequentially — error per item does not stop the batch.
-        // Every write goes through DeleteContainerOfConfigTypeAsync, which refuses a container that is
-        // not of the config's container type (task 165).
+        // Every write goes through DeleteContainerInScopeAsync, which refuses a container that is not of the
+        // config's container type or is bound outside the caller's business units (task 165, owner round 20).
         foreach (var containerId in request.ContainerIds)
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await DeleteContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct);
+            var error = await DeleteContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -300,6 +319,7 @@ public sealed class BulkOperationService : BackgroundService
     private async Task ProcessPermissionsJobAsync(
         Guid operationId,
         BulkPermissionsRequest request,
+        SpeAdminCallerScope scope,
         MutableOperationStatus status,
         CancellationToken ct)
     {
@@ -342,13 +362,13 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         // Process each container sequentially — error per item does not stop the batch.
-        // Every grant goes through GrantOnContainerOfConfigTypeAsync (task 165).
+        // Every grant goes through GrantOnContainerInScopeAsync (task 165, owner round 20).
         foreach (var containerId in request.ContainerIds)
         {
             ct.ThrowIfCancellationRequested();
 
-            var error = await GrantOnContainerOfConfigTypeAsync(
-                graphClient, config, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
+            var error = await GrantOnContainerInScopeAsync(
+                graphClient, config, scope, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
             if (error is null)
             {
                 status.Completed++;
@@ -374,39 +394,37 @@ public sealed class BulkOperationService : BackgroundService
 
     /// <summary>
     /// The per-item error for a container this job will not touch. ONE text for "not found", "of another
-    /// container type", "unparseable type id" and "the read failed", so a refused item's status does not
-    /// tell the caller which of those it was.
+    /// container type", "bound to a business unit the caller does not administer", "unbound" (for a non-root
+    /// caller) and "the read failed", so a refused item's status does not tell the caller which of those it was.
     /// </summary>
-    internal const string ContainerNotOfConfigTypeError =
-        "The container was not found under this configuration's container type; it was not changed.";
+    internal const string ContainerNotInScopeError =
+        "The container was not found among the containers you administer under this configuration; it was not changed.";
 
     /// <summary>
-    /// Soft-deletes <paramref name="containerId"/> ONLY if it is of <paramref name="config"/>'s container
-    /// type. Returns null on success, or the item's error.
+    /// Soft-deletes <paramref name="containerId"/> ONLY if it is of <paramref name="config"/>'s container type AND
+    /// bound to a business unit <paramref name="scope"/> reaches. Returns null on success, or the item's error.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why</b> (unified-access-control-r2 task 165, sweep finding #44). The job runs with no caller
-    /// context and an app-only Graph client for the config's owning app. The tenant-scope filter confines
-    /// the CONFIG to the caller's business units, but the container ids are caller-chosen, and the owning
-    /// app may be registered on other container types too. Read first, compare, then write — or refuse.
-    /// </para>
-    /// <para>
-    /// The check binds a container to the config's container TYPE, not to a business unit: one type can
-    /// serve several customers (container-type topology §3, Model 1) and no authoritative container →
-    /// business-unit map exists. See the task 165 note, escalation 4.
+    /// <b>Why</b> (unified-access-control-r2 task 165, sweep finding #44; owner round 20 item 2). The job runs with no
+    /// caller context and an app-only Graph client for the config's owning app. The tenant-scope filter confines the
+    /// CONFIG a request names to the caller's business units, but the container ids are caller-chosen, and one
+    /// container type serves several customers (Model 1). Each container is read first — its type and its
+    /// business-unit stamp (<see cref="SpeContainerBusinessUnitStamp"/>) — and written only when the caller's scope
+    /// captured at acceptance reaches it (<see cref="SpeAdminCallerScope.CanReach"/>), or refused.
     /// </para>
     /// </remarks>
-    internal async Task<BulkOperationItemError?> DeleteContainerOfConfigTypeAsync(
+    internal async Task<BulkOperationItemError?> DeleteContainerInScopeAsync(
         Microsoft.Graph.GraphServiceClient graphClient,
         SpeAdminGraphService.ContainerTypeConfig config,
+        SpeAdminCallerScope scope,
         string containerId,
         Guid operationId,
         CancellationToken ct)
     {
-        if (!await IsContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct))
+        if (!await IsContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct))
         {
-            return new BulkOperationItemError(containerId, ContainerNotOfConfigTypeError);
+            return new BulkOperationItemError(containerId, ContainerNotInScopeError);
         }
 
         try
@@ -447,13 +465,14 @@ public sealed class BulkOperationService : BackgroundService
     }
 
     /// <summary>
-    /// Grants <paramref name="role"/> on <paramref name="containerId"/> ONLY if it is of
-    /// <paramref name="config"/>'s container type (sweep finding #72). Returns null on success, or the
-    /// item's error. See <see cref="DeleteContainerOfConfigTypeAsync"/> for why.
+    /// Grants <paramref name="role"/> on <paramref name="containerId"/> ONLY if it is of <paramref name="config"/>'s
+    /// container type AND bound inside <paramref name="scope"/> (sweep finding #72; owner round 20 item 2). Returns
+    /// null on success, or the item's error. See <see cref="DeleteContainerInScopeAsync"/> for why.
     /// </summary>
-    internal async Task<BulkOperationItemError?> GrantOnContainerOfConfigTypeAsync(
+    internal async Task<BulkOperationItemError?> GrantOnContainerInScopeAsync(
         Microsoft.Graph.GraphServiceClient graphClient,
         SpeAdminGraphService.ContainerTypeConfig config,
+        SpeAdminCallerScope scope,
         string containerId,
         string? userId,
         string? groupId,
@@ -461,9 +480,9 @@ public sealed class BulkOperationService : BackgroundService
         Guid operationId,
         CancellationToken ct)
     {
-        if (!await IsContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct))
+        if (!await IsContainerInScopeAsync(graphClient, config, scope, containerId, operationId, ct))
         {
-            return new BulkOperationItemError(containerId, ContainerNotOfConfigTypeError);
+            return new BulkOperationItemError(containerId, ContainerNotInScopeError);
         }
 
         try
@@ -504,37 +523,38 @@ public sealed class BulkOperationService : BackgroundService
     }
 
     /// <summary>
-    /// True only when the container can be read AND both its container type id and the config's parse as
-    /// GUIDs AND they are equal. Every other outcome — not found, another type, an unparseable id on either
-    /// side, a read fault — is false (fail closed, ADR-003).
+    /// True only when the container can be read AND its container type (as Graph reports it) is the config's AND
+    /// <paramref name="scope"/> reaches its business-unit binding. Every other outcome — not found, another type, an
+    /// unparseable type on either side, a binding outside the scope, a read fault — is false (fail closed, ADR-003).
     /// </summary>
-    private async Task<bool> IsContainerOfConfigTypeAsync(
+    private async Task<bool> IsContainerInScopeAsync(
         Microsoft.Graph.GraphServiceClient graphClient,
         SpeAdminGraphService.ContainerTypeConfig config,
+        SpeAdminCallerScope scope,
         string containerId,
         Guid operationId,
         CancellationToken ct)
     {
         try
         {
-            var container = await GraphCallScope.Run(
-                () => _graphService.GetContainerAsync(graphClient, containerId, ct),
-                $"GetContainer({containerId})");
+            var read = await GraphCallScope.Run(
+                () => _graphService.GetContainerBindingAsync(graphClient, containerId, deleted: false, ct),
+                $"GetContainerBinding({containerId})");
 
-            var matches = container is not null
-                && Guid.TryParse(container.ContainerTypeId, out var actualType)
-                && Guid.TryParse(config.ContainerTypeId, out var expectedType)
-                && actualType == expectedType;
+            // Bulk requires the type to be REPORTED and equal: a container whose type Graph does not report is refused.
+            var permitted = read is not null
+                && SpeAdminTenantScope.SameGuid(read.ContainerTypeId, config.ContainerTypeId)
+                && SpeAdminTenantScope.DecideContainer(scope, config.ContainerTypeId, read) == SpeAdminScopeDecision.Permitted;
 
-            if (!matches)
+            if (!permitted)
             {
                 _logger.LogWarning(
                     "BulkOperationService: job {OperationId} — container '{ContainerId}' is not of config {ConfigId}'s " +
-                    "container type (or was not found); refused without a write.",
+                    "container type, is bound outside the caller's business units, or was not found; refused without a write.",
                     operationId, containerId, config.ConfigId);
             }
 
-            return matches;
+            return permitted;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -544,7 +564,7 @@ public sealed class BulkOperationService : BackgroundService
         {
             _logger.LogWarning(ex,
                 "BulkOperationService: job {OperationId} — could not read container '{ContainerId}' to verify its " +
-                "container type; refused without a write.",
+                "container type and business-unit binding; refused without a write.",
                 operationId, containerId);
             return false;
         }
@@ -586,6 +606,10 @@ public sealed class BulkOperationService : BackgroundService
         public int Failed;
         public bool IsFinished;
         public DateTimeOffset StartedAt { get; init; }
+
+        /// <summary>The Entra object id of the caller who started the operation (task 165).</summary>
+        public string? StartedBy { get; init; }
+
         public DateTimeOffset? CompletedAt;
         public List<BulkOperationItemError> Errors { get; } = [];
 
@@ -608,5 +632,6 @@ public sealed class BulkOperationService : BackgroundService
         Guid OperationId,
         BulkOperationType OperationType,
         BulkDeleteRequest? DeleteRequest,
-        BulkPermissionsRequest? PermissionsRequest);
+        BulkPermissionsRequest? PermissionsRequest,
+        SpeAdminCallerScope Scope);
 }

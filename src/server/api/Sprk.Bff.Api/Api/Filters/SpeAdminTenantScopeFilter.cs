@@ -20,6 +20,34 @@ public enum SpeAdminEnvironmentOperation
 }
 
 /// <summary>
+/// Where the container a <c>{containerId}</c> route names lives — read by <see cref="SpeAdminTenantScopeFilter"/> to
+/// read its business-unit binding from the right place (unified-access-control-r2 task 165, owner round 20 item 2).
+/// Default (no mark): <see cref="Active"/>.
+/// </summary>
+public enum SpeAdminContainerLocation
+{
+    /// <summary>An active container: <c>/storage/fileStorage/containers/{id}</c>.</summary>
+    Active,
+
+    /// <summary>A soft-deleted container in the recycle bin: <c>/storage/fileStorage/deletedContainers/{id}</c>.</summary>
+    RecycleBin
+}
+
+/// <summary>
+/// What an APP-ONLY container-type route does to the container type its <c>{typeId}</c> names (type permissions,
+/// consuming-app registrations, register) — read by <see cref="SpeAdminTenantScopeFilter"/> (owner round 20 item 3's
+/// consequence). Container-type routes that act with the CALLER's own delegated token carry no mark: Graph decides those.
+/// </summary>
+public enum SpeAdminContainerTypeOperation
+{
+    /// <summary>Reads the type's app-only state.</summary>
+    Read,
+
+    /// <summary>Changes state every customer of the type shares.</summary>
+    Write
+}
+
+/// <summary>
 /// Extensions for applying <see cref="SpeAdminTenantScopeFilter"/> to a route group, and for marking an
 /// environment route so that filter applies the environment rule to it.
 /// </summary>
@@ -35,6 +63,32 @@ public static class SpeAdminTenantScopeFilterExtensions
     public static TBuilder WithSpeAdminEnvironmentScope<TBuilder>(
         this TBuilder builder,
         SpeAdminEnvironmentOperation operation) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.WithMetadata(operation);
+    }
+
+    /// <summary>
+    /// Marks a <c>{containerId}</c> route that acts on a container in the RECYCLE BIN, so the group's
+    /// <see cref="SpeAdminTenantScopeFilter"/> reads the container's business-unit binding from
+    /// <c>deletedContainers</c>. Every <c>{containerId}</c> route is judged per container; an unmarked one reads the
+    /// active container (a recycle-bin route left unmarked therefore answers the uniform 404 — it fails closed).
+    /// </summary>
+    public static TBuilder WithSpeAdminContainerLocation<TBuilder>(
+        this TBuilder builder,
+        SpeAdminContainerLocation location) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.WithMetadata(location);
+    }
+
+    /// <summary>
+    /// Marks an APP-ONLY <c>/containertypes/{typeId}/...</c> route with what it does to the type, so the group's
+    /// <see cref="SpeAdminTenantScopeFilter"/> applies the container-type rule (the type must be the config's own; a
+    /// write needs every config carrying the type to be reachable). <c>SpeAdminContainerTypeRouteGuardTests</c> fails the
+    /// build when an app-only type route lacks the mark.
+    /// </summary>
+    public static TBuilder WithSpeAdminContainerTypeScope<TBuilder>(
+        this TBuilder builder,
+        SpeAdminContainerTypeOperation operation) where TBuilder : IEndpointConventionBuilder
     {
         return builder.WithMetadata(operation);
     }
@@ -136,7 +190,21 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     /// <summary>An environment write by an admin who is not a platform operator.</summary>
     internal const string EnvironmentWriteDeniedCode = "spe.admin.deny.environment_write_requires_platform_operator";
 
+    /// <summary>A container the caller may not act on, or that does not exist: one 404 (owner round 20 item 2).</summary>
+    internal const string ContainerNotFoundCode = "spe.admin.deny.container_out_of_scope";
+
+    /// <summary>Two containerId sources (route value, body) disagree.</summary>
+    internal const string ContainerAmbiguousCode = "spe.admin.deny.container_id_ambiguous";
+
+    /// <summary>An app-only container-type route naming a type that is not the config's own: one 404.</summary>
+    internal const string ContainerTypeNotFoundCode = "spe.admin.deny.container_type_out_of_scope";
+
+    /// <summary>A write to a container type another unreachable config also carries (shared, Model 1).</summary>
+    internal const string ContainerTypeSharedCode = "spe.admin.deny.container_type_shared";
+
     private const string ConfigIdKey = "configId";
+    private const string ContainerIdKey = "containerId";
+    private const string TypeIdKey = "typeId";
     private const string EnvironmentRouteIdKey = "id";
 
     private readonly SpeAdminTenantScope _tenantScope;
@@ -210,7 +278,7 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
         switch (decision)
         {
             case SpeAdminScopeDecision.Permitted:
-                return await next(context);
+                break;
 
             case SpeAdminScopeDecision.Unverifiable:
                 _logger?.LogError(
@@ -226,6 +294,117 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
                     configId, http.Request.Path, http.TraceIdentifier);
 
                 return ConfigNotFound(configId, http.TraceIdentifier);
+        }
+
+        var containerRefusal = await DecideContainerAsync(context, configId);
+        if (containerRefusal is not null)
+        {
+            return containerRefusal;
+        }
+
+        var typeRefusal = await DecideContainerTypeAsync(http, configId);
+        if (typeRefusal is not null)
+        {
+            return typeRefusal;
+        }
+
+        return await next(context);
+    }
+
+    /// <summary>
+    /// The per-container rule (owner round 20 item 2): when the request names a container — the route value
+    /// <c>containerId</c> or a bound body implementing <see cref="ISpeAdminContainerScopedRequest"/> — the container's
+    /// business-unit binding decides, through the config already confined above. The refusal, or null to continue.
+    /// </summary>
+    /// <remarks>
+    /// A route that names a container but NO usable configId never reaches here: the configId rule passes it to the
+    /// handler, whose own 400 ("configId is required") answers before any Graph call — no handler can reach a container
+    /// without a config's client.
+    /// </remarks>
+    private async Task<IResult?> DecideContainerAsync(EndpointFilterInvocationContext context, Guid configId)
+    {
+        var http = context.HttpContext;
+        var present = ReadPresentContainerIds(context);
+        if (present.Count == 0)
+        {
+            return null;
+        }
+
+        if (present.Distinct(StringComparer.Ordinal).Count() != 1)
+        {
+            _logger?.LogWarning(
+                "SPE Admin tenant scope REFUSED: the request names {Count} containerId values that do not agree. " +
+                "Path={Path} TraceId={TraceId}",
+                present.Count, http.Request.Path, http.TraceIdentifier);
+
+            return Refusal(
+                StatusCodes.Status400BadRequest,
+                "Bad Request",
+                "The request names more than one containerId (route, body) and they do not agree.",
+                ContainerAmbiguousCode,
+                http.TraceIdentifier);
+        }
+
+        var containerId = present[0];
+        var inRecycleBin = ContainerLocationOf(http) == SpeAdminContainerLocation.RecycleBin;
+        var decision = await _tenantScope.DecideContainerAccessAsync(
+            http.User, configId, containerId, inRecycleBin, http.RequestAborted);
+
+        switch (decision)
+        {
+            case SpeAdminScopeDecision.Permitted:
+                return null;
+
+            case SpeAdminScopeDecision.Unverifiable:
+                _logger?.LogError(
+                    "SPE Admin container scope UNVERIFIABLE for container {ContainerId}; refusing. Path={Path} TraceId={TraceId}",
+                    containerId, http.Request.Path, http.TraceIdentifier);
+                return ScopeUnverifiable(http.TraceIdentifier);
+
+            default:
+                _logger?.LogWarning(
+                    "SPE Admin container scope DENIED: container {ContainerId} does not exist, is not of config {ConfigId}'s " +
+                    "type, or is bound outside the caller's business units. Path={Path} TraceId={TraceId}",
+                    containerId, configId, http.Request.Path, http.TraceIdentifier);
+                return inRecycleBin
+                    ? RecycleBinContainerNotFound(containerId, http.TraceIdentifier)
+                    : ContainerNotFound(containerId, http.TraceIdentifier);
+        }
+    }
+
+    /// <summary>
+    /// The container-type rule for a route marked <see cref="SpeAdminContainerTypeOperation"/>: the route's
+    /// <c>typeId</c> must be the config's own type; a write needs every config carrying it to be reachable. The refusal,
+    /// or null to continue.
+    /// </summary>
+    private async Task<IResult?> DecideContainerTypeAsync(HttpContext http, Guid configId)
+    {
+        if (ContainerTypeOperationOf(http) is not { } operation)
+        {
+            return null;
+        }
+
+        var typeId = http.Request.RouteValues.TryGetValue(TypeIdKey, out var raw) ? raw?.ToString() : null;
+        var decision = await _tenantScope.DecideContainerTypeAccessAsync(
+            http.User, configId, typeId, operation == SpeAdminContainerTypeOperation.Write, http.RequestAborted);
+
+        switch (decision)
+        {
+            case SpeAdminScopeDecision.Permitted:
+                return null;
+
+            case SpeAdminScopeDecision.Unverifiable:
+                return ScopeUnverifiable(http.TraceIdentifier);
+
+            case SpeAdminScopeDecision.ContainerTypeShared:
+                return ProblemDetailsHelper.Forbidden(
+                    ContainerTypeSharedCode,
+                    "This container type is shared with a customer you do not administer. Only an administrator who " +
+                    "reaches every configuration of the type may change it.",
+                    http.TraceIdentifier);
+
+            default:
+                return ContainerTypeNotFound(typeId ?? string.Empty, http.TraceIdentifier);
         }
     }
 
@@ -265,6 +444,84 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
             $"SPE environment '{environmentId}' was not found.",
             EnvironmentNotFoundCode,
             traceId);
+
+    /// <summary>
+    /// THE "container not found" answer for every SPE admin route that names an ACTIVE container: the per-container
+    /// rule's denial (absent, another type, bound outside the caller's reach) and the container handlers' own not-found
+    /// paths. One helper so they are byte-identical apart from the trace id (owner round 20 item 2).
+    /// </summary>
+    public static IResult ContainerNotFound(string containerId, string traceId) =>
+        Refusal(
+            StatusCodes.Status404NotFound,
+            "Not Found",
+            $"Container '{containerId}' was not found.",
+            ContainerNotFoundCode,
+            traceId);
+
+    /// <summary>
+    /// THE "container not found" answer for the routes that act on a container in the RECYCLE BIN — the rule's denial
+    /// and the recycle-bin handlers' own not-found paths.
+    /// </summary>
+    public static IResult RecycleBinContainerNotFound(string containerId, string traceId) =>
+        Refusal(
+            StatusCodes.Status404NotFound,
+            "Not Found",
+            $"Container '{containerId}' was not found in the recycle bin.",
+            ContainerNotFoundCode,
+            traceId);
+
+    /// <summary>THE "container type not found" answer of the app-only container-type rule.</summary>
+    public static IResult ContainerTypeNotFound(string typeId, string traceId) =>
+        Refusal(
+            StatusCodes.Status404NotFound,
+            "Not Found",
+            $"Container type '{typeId}' was not found.",
+            ContainerTypeNotFoundCode,
+            traceId);
+
+    private static SpeAdminContainerLocation ContainerLocationOf(HttpContext http) =>
+        http.GetEndpoint()?.Metadata.OfType<SpeAdminContainerLocation>().Contains(SpeAdminContainerLocation.RecycleBin) == true
+            ? SpeAdminContainerLocation.RecycleBin
+            : SpeAdminContainerLocation.Active;
+
+    /// <summary>The container-type operation a route is marked with (a Write mark wins), or null.</summary>
+    private static SpeAdminContainerTypeOperation? ContainerTypeOperationOf(HttpContext http)
+    {
+        var marks = http.GetEndpoint()?.Metadata.OfType<SpeAdminContainerTypeOperation>().ToList();
+        if (marks is null || marks.Count == 0)
+        {
+            return null;
+        }
+
+        return marks.Contains(SpeAdminContainerTypeOperation.Write)
+            ? SpeAdminContainerTypeOperation.Write
+            : SpeAdminContainerTypeOperation.Read;
+    }
+
+    /// <summary>
+    /// Every non-empty containerId the request carries: the route value and the
+    /// <see cref="ISpeAdminContainerScopedRequest.ContainerId"/> of each bound body argument.
+    /// </summary>
+    private static List<string> ReadPresentContainerIds(EndpointFilterInvocationContext context)
+    {
+        var present = new List<string>();
+
+        if (context.HttpContext.Request.RouteValues.TryGetValue(ContainerIdKey, out var routeValue)
+            && routeValue?.ToString() is { Length: > 0 } routeRaw)
+        {
+            present.Add(routeRaw);
+        }
+
+        foreach (var argument in context.Arguments)
+        {
+            if (argument is ISpeAdminContainerScopedRequest { ContainerId: { } bodyRaw } && !string.IsNullOrWhiteSpace(bodyRaw))
+            {
+                present.Add(bodyRaw.Trim());
+            }
+        }
+
+        return present;
+    }
 
     /// <summary>
     /// The environment operation a route is marked with, or null when it is not an environment route. A route

@@ -1,5 +1,6 @@
 using Azure.Security.KeyVault.Secrets;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -19,8 +20,8 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   4.  SpeAdminTokenProvider   — Singleton  (Phase 3: OBO token acquisition and per-app caching)
 ///   5.  SpeAdminGraphService    — Singleton  (multi-config Graph client; app-only + OBO via TokenProvider)
 ///   6.  SpeAuditService         — Scoped     (per-request, writes to sprk_speauditlog)
-///   7.  SpeDashboardSyncService — Singleton  (shared instance injected into dashboard endpoints)
-///   8.  SpeDashboardSyncService — Hosted     (delegates to singleton instance for background execution)
+///   7.  SpeDashboardSyncService — Singleton + scheduled job (AddScheduledJob — ScheduledJobHost dispatches it;
+///       ADR-036 / ADR-052; migrated from a hosted timer loop by unified-access-control-r2 task 165)
 ///   9.  BulkOperationService    — Singleton  (shared instance injected into bulk endpoints)
 ///   10. BulkOperationService    — Hosted     (delegates to singleton instance for background execution)
 /// </summary>
@@ -92,16 +93,14 @@ public static class SpeAdminModule
         // the caller's identity and must never be shared across requests.
         services.AddScoped<SpeAdminTenantScope>();
 
-        // Background service: syncs dashboard metrics (container counts, storage usage)
-        // from Graph API into IDistributedCache on a configurable interval (default 15 min).
-        // Runs in the BFF as a BackgroundService, governed by ADR-052 (legacy hand-rolled timer, ratchet-listed — migrates when next touched).
-        //
-        // Registered as Singleton first so the same instance can be injected into dashboard
-        // endpoints (for ReadCachedMetricsAsync and TriggerRefreshAsync). The hosted service
-        // registration delegates to the singleton instance via factory lambda — ensuring both
-        // the endpoint injection and the background runner share the same object.
-        services.AddSingleton<SpeDashboardSyncService>();
-        services.AddHostedService(sp => sp.GetRequiredService<SpeDashboardSyncService>());
+        // Scheduled job: syncs dashboard metrics (container counts, storage usage per config) from Graph API into
+        // IDistributedCache on a configurable interval (default 15 min).
+        // Migrated to an IScheduledJob on ScheduledJobHost (ADR-036) by unified-access-control-r2 task 165, which changed
+        // its behaviour (per-config storage, per-container attribution — owner round 25 item 5); ADR-052 §1 migrates a
+        // timer service when it is next touched. One run per schedule across instances (distributed lease). The
+        // singleton AddScheduledJob registers is the instance the dashboard endpoints read the cache through.
+        var speAdminOptions = configuration.GetSection(SpeAdminOptions.SectionName).Get<SpeAdminOptions>() ?? new SpeAdminOptions();
+        services.AddScheduledJob<SpeDashboardSyncService>(SpeDashboardSyncService.BuildCronSchedule(speAdminOptions));
 
         // Background service: processes bulk container operations (delete, permission assignment).
         // Runs in the BFF as a BackgroundService, governed by ADR-052.

@@ -19,6 +19,23 @@ public interface ISpeAdminConfigScopedRequest
 }
 
 /// <summary>
+/// Implemented by every SPE admin request BODY that names ONE container the request acts on. The tenant-scope
+/// filter reads <see cref="ContainerId"/> from any bound argument that implements this and applies the
+/// per-container business-unit rule to it (unified-access-control-r2 task 165, owner round 20 item 2), exactly as
+/// it does for a <c>{containerId}</c> route value.
+/// </summary>
+/// <remarks>
+/// <c>SpeAdminConfigScopedBodyGuardTests</c> fails the build when a body bound by any <c>/api/spe</c> handler carries
+/// a <c>ContainerId</c> without implementing this. A body that names MANY containers (the bulk requests) does not:
+/// those are authorized per item in the job.
+/// </remarks>
+public interface ISpeAdminContainerScopedRequest
+{
+    /// <summary>The container the request acts on, or null/empty when it names none.</summary>
+    string? ContainerId { get; }
+}
+
+/// <summary>
 /// Specifies the type of bulk operation to perform on a set of SPE containers.
 /// </summary>
 public enum BulkOperationType
