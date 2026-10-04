@@ -7,8 +7,11 @@
 > **Status: code complete, NOT deployed.** Live steps are manual gates for the main session (§8). Ships with (after) 146 +
 > 149; it is the **ship gate** for unsecuring in shared environments (owner round 11 item 3).
 > **Owner decisions that bind this task:** round 13 item 1 (unsecure re-owns the SharePoint cascade rows by the 146 rule);
-> C10 part 2; round 6 / R6 (secured child roots stay secure, no unsecure cascade); round 10 item 4 (reuse task 133's
-> snapshot-and-restore primitive, do not fork it); round 11 item 3 (148 re-owns the children, then calls `SyncRootAsync`;
+> C10 part 2; round 6 / R6 (secured child roots stay secure, no unsecure cascade); round 10 item 4 (verbatim: "133,
+> compensation's reverse Assign cascade: coordinate with task 148's child-ownership logic, then snapshot and restore each
+> re-owned child's own owner" — 148 reuses 133's primitive for the rows a root's Assign cascades to; r2 §13 item 4 corrects
+> the broader paraphrase this line first carried); round 22 (unsecure removes only mirror shares); round 24 (r2: exact dry
+> run; no rule-driven widening without F3); round 11 item 3 (148 re-owns the children, then calls `SyncRootAsync`;
 > the one-time backfill is a script with dry run / verify, `-Apply` not run live by the executor). Tasks 156 and 158 are
 > separate and were not touched.
 
@@ -284,7 +287,7 @@ child is kept; the set is snapshotted before any re-own). No escalation trigger 
 | 6 | LOW — re-own → mirror justified by the wrong source | **Fixed** — §2 Deviation 1 cites owner round 11 item 3 as the authority (the constraint's fallback is conditional on unrun probe (g)); the reconciler remarks cite it too |
 | 7 | LOW — doc / comment drift | **Fixed** — `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-2: "resumable through a per-instance cursor in the job (never the scheduler's store — ADR-052 §5), each run reporting where it began and where the next continues" (+ the fixpoint and round 22); `SecureChildReconciliationJob` remarks cite §7c.1 |
 | 8 | LOW (design) — unsecure strips root sharees' shares from never-isolated children | **Fixed per owner round 22**: mirror removal only for a row owned by the Secure team when the pass began (`start` snapshot, before any re-own; `RowResult.LeftIsolation = written && IsIsolated(start) && !IsIsolated(current)`); `RemoveMirrorAsync` always revokes every direct share and is only ever given such a row. Consequence handled: a released row whose mirror removal fails is PUT BACK on the Secure team (read back) — left out, the next pass would read it as never isolated and keep its former sharees for good. Tests: `Unsecure_KeepsTheSharesOfAChildThatWasNeverIsolated_EvenOneOfTheRecordsSharees` (mirror removed from the isolated child; a Colleague's manual share on a user-owned child kept — both seeded, R22a/R22b); `Unsecure_WhenAChildsMirrorCannotBeRemoved_IsIncomplete_PutsItBack_AndTheSecondCallRemovesIt` (renamed; writes GeneralTeam then SecureTeam; second call completes) |
-| 9 | LOW — a row released by a sweep of an isolated root keeps its mirror | **Fixed** — the mirror removal runs for every row that left isolation, whatever the trigger (before `SyncRootAsync`, so a row put back is re-synced). Test: `TheSweep_RemovesTheMirrorOfARowItTakesOutOfIsolation` |
+| 9 | LOW — a row released by a sweep of an isolated root keeps its mirror | **Fixed** — the mirror removal runs for every row that left isolation, whatever the trigger (before `SyncRootAsync`, so a row put back is re-synced). Test: `TheSweep_RemovesTheMirrorOfARowItTakesOutOfIsolation`. **[Superseded by r2 — owner round 24 item 2: the sweep no longer releases any row; that row is held isolated and reported `NeedsF3`; the test is now `TheSweep_NeverReleasesAnIsolatedRow_ItReportsItNeedsF3_AndKeepsItsShares`. The mirror removal still runs for every row an UNSECURE releases.]** |
 | 10 | INFO — the already-not-secure branch now writes; task 150's F3 gate must cover it | **Handoff recorded** (below and POML): when task 150's F3 gate (Full Access + creator; owner round 3b F3 / round 10 item 7) is integrated into `UnsecureProjectEndpoint`, it must sit BEFORE the `record.sprk_issecure != true` early return, not only on the transition path — that branch re-owns children out of isolation. Not changed here (150 is not in this base) |
 | 11 | VERIFIED OK | No change |
 | 12 | AC2 not met | **Met** — item 1 |
@@ -333,14 +336,16 @@ under a NEW census kind `Restore` in `RecordOwnerAssignmentCensusTests`, with it
 (`EveryRestoreOwnerWriteWritesBackOnlyTheStartOwnerItsPassRecorded`): the value comes from the member's single `start…`
 parameter (never a literal), and every same-file call passes the pass's snapshot (`start[key]` / `left.Previous`) —
 seeds A3/A4. `AssignAsync` now takes the `RecordOwnerResolution` itself, so the Routed value check sees the resolution.
-CLAUDE.md §11 for the new member: (1) existing — `AssignAsync` writes only a resolution (census), task 133's
-`RestoreOneAsync` restores only platform-cascade rows; (2) extension — folding it into `AssignAsync` would let the Routed
+CLAUDE.md §11 for the new member [**corrected in r2, §13 item 4** — the clause on `RestoreOneAsync` below is inaccurate:
+the primitive is table-generic in shape; the real reasons are given there]: (1) existing — `AssignAsync` writes only a
+resolution (census), task 133's `RestoreOneAsync` restores only platform-cascade rows; (2) extension — folding it into `AssignAsync` would let the Routed
 member write a non-resolution value, which the census exists to forbid; (3) cost of doing nothing — a released child whose
 mirror removal fails keeps its former sharees permanently once the record's shares go (round 22 makes the next pass treat
 it as never isolated), and a row pulled into isolation would be handed to the BU team instead of its own user. No new
 service, registration, endpoint, option, job, column or package; the job's `ResultJson` gains one additive member
 (`startPosition`).
 
+**[Superseded by r2 — §13 item 1, owner round 24 item 1: the dry run now plans to the same fixpoint over planned owners.]**
 **Observation (not a verifier item, not changed): the report-only plan is a lower bound for grandchildren.** A report-only
 pass writes nothing, so it decides each row once against the owners it reads: a grandchild whose ONLY route into isolation
 is a parent the same pass would move (e.g. a to-do filed only under an ordinary-team document of a secure record) is
@@ -358,3 +363,126 @@ restore → share → report); the fixpoint loop and its helpers share the pass'
 measured (instruction). `dotnet format` on the changed C# files: no change.
 
 **Handoffs added by r1:** task 150 F3 gate must cover the already-not-secure branch of `/unsecure-project` (item 10).
+
+## 13. r2 fix round — verifier items 1-13 + owner round 24 (2026-10-04, branch `task/uac-r2-148-r2`, base `b2bcc5f3b`)
+
+Owner decisions applied: rounds 1-13, 22 and **round 24** (2026-10-04, main session under the round-15 directive, read
+from `work/unified-access-control-r2` `a178a2689`): **item 1** — exact dry run through a planned-owner overlay on the ONE
+`IRecordOwnershipResolver` (dry-run plan == applied result, three-level tree tested); **item 2** — no rule-driven widening:
+the sweep job and Write-gated provisioning never release an isolated child to its business unit; such rows are reported
+`needs-f3` and stay isolated (round 6 "never auto-unsecure", round 10 item 7). Round 22 still binds.
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | MEDIUM — report-only plans only the first level (wouldChange 1, then changed 2) | **Fixed (round 24 item 1).** `RecordOwnershipContext.PlannedOwningTeams` (one property on the existing context — owner D-1, extend the one resolver in place): a parent named there is read as owned by its planned team (its business unit read from the team row; its existence and `sprk_issecure` still read from its own row; a planned team that cannot be found REFUSES, never falls back to the stored owner). `SecureChildReconciler` report-only now runs the SAME fixpoint rounds: each move is planned (`_planned`, a `plan:` log line per row) instead of written, the rows resting on it are decided again against the planned owner, a put-back drops the plan. Tests: `TheSweep_ReportOnly_PlansEveryLevelOfATreeReachedOnlyThroughRowsItWouldMove` (secure work assignment → ordinary document → analysis → to-do: plan 3 == apply 3, same ids, previous owners and teams — the verifier's probe shape plus one level); `TheReportOnlyPlan_IsExactlyWhatTheApplyChanges_ThroughAPutBack` (an IN, an OUT made only once certain, a row pulled in and put back, ITS child pulled in and put back, a refusal — plan set == apply set); `RecordOwnershipResolverTests` +2 (planned IN, planned OUT, stored owner without a plan; unfound planned team refuses). Guide §7c.1 step 1 and the script help now describe the plan as the apply's (assuming each write lands) |
+| 2 | MEDIUM — the already-provisioned branch's incomplete-pass guard untested (seed K2 survived) | **Fixed.** `Provisioning_RepeatedOnAProvisionedRecord_WhoseChildPassIsIncomplete_IsNeverASuccess` × (nothing else written → would have been 409; another child moved → would have been 200 `childrenOnly`): 500 `children_incomplete` with counts, the refused child keeps its owner and gets no share, a third call completes it. **K2 re-seeded: 2 fail** |
+| 3 | LOW — double fault (mirror revoke fails AND put-back fails) leaves no persisted trace | **NOT CLOSED — escalated (first-class stop; no owner decision covers it).** See "Item 3 escalation" below. No code changed for it |
+| 4 | LOW — `RestoreStartOwnerAsync` vs 133's `RestoreAsync`; the §11 justification is wrong | **Justification corrected; the reading of round 10 item 4 is proven too broad from the owner's text.** Round 10 item 4 verbatim: "133, compensation's reverse Assign cascade: coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned child's own owner (options (c) then (a))" — it binds the restore of the rows a ROOT's reverse Assign cascades to, and 148 DOES reuse 133's primitive for exactly those (`PlaceCascadeRowsAsync` → `AssignCascadeChildOwners.RestoreAsync`). The put-back restores a `sprk_*` child the pass itself moved, which no Assign cascade touches. The note header's paraphrase ("reuse … do not fork it") was broader than the decision and is corrected. The r1 §11 clause "RestoreOneAsync restores only platform-cascade rows" was false (the primitive is table-generic: `CascadeChild` carries LogicalName / EntitySet / IdColumn / Id / Owner) and is marked corrected. The real reasons, now in the member's remarks: (a) the scope of round 10 item 4 above; (b) the census classifies `RestoreOneAsync` as kind `Root` (rows a root's cascade owns, never a `sprk_*` child) — routing children through it would make that false, and it cannot take kind `Restore` instead, whose assertion requires the written value to be the pass's start-owner snapshot, because the reconciler also calls it with the resolver's owner for the cascade rows (round 13 item 1); (c) every other read and write of these rows in the pass is on `IGenericEntityService` (the resolver's client) and the put-back shares the pass's `ReadBackAsync` with `AssignAsync` — a put-back on the Web API client would be a second path for the same rows |
+| 5 | LOW — "prints every planned change" vs a 200-change sample with no warning; step 2's "every change moves INTO" vs OUT moves | **Fixed.** The run's `ResultJson` counts every change (`changesTotal`) beside the listed ones (`changesListed`); `Invoke-SecureChildBackfill.ps1` refuses a report without the counts (a BFF older than the script) and WARNS per run and in the summary when a list is shorter than the count, naming the complete list (the BFF's per-row `plan:` / `reassign:` lines — report-only now logs a `plan:` line for every planned row, cascade rows included). Step 2's sentence is TRUE again under round 24 item 2: the sweep never moves a row out; a row the rule would release is listed with outcome `NeedsF3`, counted (`needsF3`), and warned about. Guide §7c.1 steps 1, 2 and 4 rewritten to match. Tests: `TheSweepReport_CountsEveryChange_EvenBeyondTheListedOnes` (201 + 1 changes: total 202, listed 200, needsF3 still counted); offline: `scratchpad/t148r2/verify-pass.ps1` 9/9 over the script's own `Invoke-Pass` (the 6 r1 cases + truncated-list warning, needs-f3 counted, pre-r2 BFF refused) — script seeds S1 (no truncation warning), S2 (needsF3 not summed), S3 (counts not required) each turn one case red |
+| 6-9 | VERIFIED OK | No change |
+| 10 | AC7 not met | **Met** — item 1 (and round 24 item 2: nothing the sweep plans moves a row out) |
+| 11 | AC3 partially not met | **Met** — item 2 |
+| 12 | AC9 live gate | **PENDING** — G148-1..4 (§8), main session; G148-3 now also records `needsF3` and `changesTotal` vs `changesListed` |
+| 13 | AC11 publish size not reported by the executor | Verifier's measurement at `b2bcc5f3b`: base `e94a8bc2d` **45.85 MB** (48,080,695 B, 212 files) → **45.89 MB** (48,119,081 B, 212 files), **+0.04 MB**, PowerShell `Compress-Archive` Optimal, PDBs included, fresh short-path worktrees. r2 adds no package and no file; **not re-measured** (instruction). Carry the verifier's number into the PR. CVE scan below |
+
+**Round 24 item 2 — no rule-driven widening (implemented).** `SecureChildReconciler.ReconcileAsync` takes a
+`SecureChildPassTrigger` (replacing the `bool unsecuring`): `Provisioning`, `Sweep`, `Unsecure` (mid-transition — the
+`UnsecuringRoot` exemption, as before) and `UnsecureCompletion` (the already-not-secure branch — releases, no exemption, its
+cascade rows move only across the boundary, as before). Only the two unsecure triggers may release. In a `Provisioning` or
+`Sweep` pass a row that was isolated when the pass BEGAN (round 22's snapshot) and that the rule would hand an ordinary
+team is not moved: outcome `NeedsF3` (new `SecureChildRowOutcome` member), never written, its shares untouched, listed with
+its owner and the team an unsecure would give it, counted per table (`SecureChildTableCounts.NeedsF3`), in the endpoint
+responses (`children.needsF3`, `children.tables[].needsF3` — additive) and in the run's `ResultJson` (`needsF3`). A row the
+pass itself pulled in and whose support then leaves is still put back on its own start owner (undoing the pass's own move
+is not a release of an isolated child). A held row does not make the pass `Incomplete`: no call of the same trigger could
+ever move it, so `Incomplete` would make provisioning answer 500 forever and the sweep fail every run; it is reported
+instead (the "needs-f3" state round 24 names), and `-Verify` passes over it while listing it. The platform-cascade rows
+need no hold: a non-releasing pass only runs over an isolated root (the rule puts them ON the Secure team) or a
+flagged-not-isolated one (the rule refuses) — a hold written there could not be reached through the real resolver (seeded:
+N6 survived, so it was removed rather than shipped unprovable). Tests: `TheSweep_NeverReleasesAnIsolatedRow_ItReportsItNeedsF3_AndKeepsItsShares`
+(replaces r1's `TheSweep_RemovesTheMirrorOfARowItTakesOutOfIsolation`: writes on, the to-do stays on the Secure team with its
+share, needsF3 1, changed 0, mirrorsRevoked 0, run successful; the dry run reports the same), `Provisioning_NeverReleasesAnIsolatedRow_ItReportsItNeedsF3`
+(200 Completed, the record's own document still goes in, the held to-do keeps its owner and its share, `needsF3` 1 overall
+and on `sprk_todo`), and the counts test above. The unsecure tests (release allowed) are unchanged and green.
+
+**Item 3 escalation (first-class stop — no owner decision answers it).**
+
+> 🔔 **Human Input Required — task 148 r2, verifier item 3 (LOW): a double-fault stranded mirror leaves no persisted trace**
+>
+> - **Situation.** On unsecure, a child released from isolation whose mirror revoke fails is put back on the Secure team
+>   (r1). If that put-back ALSO fails, the child stays on its business unit's team carrying some of the record's former
+>   sharees' shares; this is logged Critical once and the call answers 500 `children_incomplete` (flag and record shares
+>   kept — no over-share yet: the sharees still hold the record). A SECOND `/unsecure-project` call snapshots that child as
+>   never isolated (round 22), keeps its shares, completes, revokes the record's shares and clears the flag. From then on
+>   nothing reports the stranded mirror, and the former sharees keep a child of a record they no longer hold.
+> - **Why it is not fixable in code alone.** Any fix needs state that survives between the two calls, and the only state
+>   is Dataverse's: the child's owner (the failed write) and its shares (indistinguishable, by round 22, from a user's own
+>   share on a never-isolated child). A trace written AFTER the double fault is written when writes are failing; a trace
+>   that survives must be written AHEAD of the release — which changes round 22's definition of "was isolated", a binding
+>   owner decision.
+> - **Options.**
+>   (A) **Write-ahead release marker (recommended).** Before re-owning a child OUT, grant a Read share on it to a
+>   memberless principal — the Secure Record BU's DEFAULT team (memberless by the same invariant provisioning enforces: the
+>   BU holds no users) — and have `RemoveMirrorAsync` revoke it LAST, only after every other share is confirmed gone. A pass
+>   treats an ordinary child that still carries the marker as "was isolated" (round 22 extended: owned by the Secure team
+>   when the pass began, OR carrying the release marker). The second call then removes the stranded mirror and does not
+>   complete until it can. Costs: one extra grant + revoke per released child; a live probe that the BFF identity may share
+>   to that team and that the team stays memberless in every environment (a pending manual gate); round 22 amended.
+>   (B) **A schema column** on every child table (e.g. `sprk_isolationreleasepending`, set before the release, cleared
+>   after the mirror is gone): explicit, but a schema step on ~20 tables with dry run / apply / verify and FLS.
+>   (C) **Accept the residual** (LOW: a triple-fault-class event — revoke failure + owner-write failure on the same row —
+>   bounded to the record's own former sharees, logged Critical with the row id and the manual revoke). Document it in the
+>   guide's §8 "must NOT" table and the residual-risk section.
+> - **Recommendation.** (A) — it closes the hole without schema, keeps round 22's intent (a share the secure team's mirror
+>   wrote is the only kind removed) and fails closed (no marker can be written → the child is not released).
+> - **Impact if (A) or (B) is chosen.** Amends round 22's snapshot rule; adds one owner-approved live gate; touches
+>   `SecureChildShareSynchronizer.RemoveMirrorAsync` and the reconciler's release path only.
+
+**New surface (CLAUDE.md §10 / §11).** No new service, DI registration, endpoint, option, job, column or package; no
+plugin (ADR-002). Placement unchanged (BFF; ADR-052 "BFF, schedule").
+
+| New surface | Existing (grep) | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `RecordOwnershipContext.PlannedOwningTeams` (one property on the existing context) + a branch in the resolver's `ReadParentAsync` | The resolver's `ReadParentAsync` reads a parent's STORED owner; nothing lets a caller ask "which owner if this parent were moved" (grep `PlannedOwning`: none before r2) | Extends the ONE resolver in place (owner D-1; round 24 item 1 names it), exactly as `UnsecuringRoot` did; the rule is unchanged — only a planned row's facts are the planned ones | the dry run under-reports grandchildren (verifier item 1); the owner's pre-apply review — including trigger 1, documents in shared SPE containers — is a lower bound |
+| `SecureChildPassTrigger` (enum replacing `ReconcileAsync`'s `bool unsecuring`) | `bool unsecuring` carried one fact (mid-transition) and could not carry the second (may this pass release?) — the already-not-secure branch releases but is not mid-transition | Replaces the parameter (5 call sites: 2 provisioning, 2 unsecure, 1 job); two bools would allow the meaningless "mid-unsecure but may not release" | round 24 item 2 could not be told apart from the unsecure completion branch, which must still release (owner round 11 item 3) |
+| `SecureChildRowOutcome.NeedsF3`, `SecureChildTableCounts.NeedsF3`, `SecureChildPassSummary.NeedsF3` / `SecureChildPassTable.NeedsF3`, `ResultJson.needsF3` (additive JSON) | the outcomes had no "held for another actor" state; `Refused` means the rule could not decide | extend the existing enum / records / DTOs (one member each) | a held row would be reported as untouched (invisible) or refused (wrong cause, and Incomplete forever) — round 24 requires it reported as needs-f3 |
+| `ResultJson.changesTotal` / `changesListed` (additive) | `changes` was capped at 200 with no count | one counter in the existing loop | a truncated list reads as the whole plan (verifier item 5) |
+
+**Seed-and-bite (r2)** — each seeded in production code by `scratchpad/t148r2/seed.ps1` (one regex replacement, build,
+the transitions + resolver suites, file restored from its bytes and touched; `git diff --stat` unchanged after every
+batch):
+
+| Seed | Mutation | Failed |
+|---|---|---|
+| K2 | the already-provisioned branch ignores an incomplete pass (condition never true) | 2 — the new item-2 theory |
+| P1 | the resolver ignores `PlannedOwningTeams` | 4 — both resolver tests, the 3-level and put-back plan tests |
+| P2 | an unfound planned team falls back to the stored owner | 1 — `…WhenAPlannedTeamCannotBeFound_Refuses…` |
+| P3 | report-only stops after round 1 (the r1 behaviour) | 6 |
+| P4 | the reconciler never passes its plan to the resolver | 2 — the 3-level and put-back plan tests |
+| P5 | a report-only put-back keeps its plan | 1 — the put-back plan test |
+| P6 | `changesTotal` counts only the listed changes | 1 — the counts test |
+| P8 | a planned change reported `Changed` | 6 |
+| P9 | report-only assigns for real | 6 |
+| P10 | report-only puts back for real | 1 — the put-back plan test |
+| N1 | no hold: a non-releasing pass releases | 3 — sweep needs-f3, provisioning needs-f3, counts |
+| N2 | every trigger may release | 3 (same) |
+| N3 | no trigger may release | 16 — every unsecure release test |
+| N4 | the unsecure completion branch may not release | 2 — both already-unsecured-record tests |
+| N5 | the endpoint passes `Sweep` on the completion branch | 2 (same) |
+| N6 | the cascade-row hold disabled | **0 — unreachable through the real resolver; the hold was removed** (reason above) |
+| (P7 — direction field) | — | moot: the direction field was dropped once round 24 item 2 made every sweep move an IN |
+
+**Results (r2, 2026-10-04):** transition + resolver suites **107/107** (transitions 42 → 48, resolver +2); affected
+suites **774/774**; full BFF unit suite **14,836 = 14,782 passed + 54 skipped (pre-existing), 0 failed** (+8 vs 14,828);
+ArchTests **373/373**; `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **428 = 403 passed + 25
+skipped, 0 failed**; offline script harness 9/9. CVE: `dotnet list package --vulnerable --include-transitive` on
+`Sprk.Bff.Api` — no vulnerable packages. `dotnet format whitespace --verify-no-changes` on the changed BFF files: clean.
+Every seed above was re-run on the final code (after the source was restored the test project was rebuilt before the
+final runs). No client change: the response fields are additive.
+
+**`.claude/**` edits needed:** none.
+
+**Handoffs added by r2:** item 3 escalation (above) — the owner chooses A / B / C. Task 150's F3 gate (r1 handoff) now
+covers BOTH releasing triggers: the transition (`SecureChildPassTrigger.Unsecure`) and the already-not-secure branch
+(`UnsecureCompletion`). Task 147 (scheduling the sweep): the sweep releases nothing; `needsF3` rows are a standing report
+for an F3 holder, not a failure.

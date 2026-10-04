@@ -1066,7 +1066,9 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Command:**
 ```powershell
-# Dry run (default, report-only): every planned change with each row's current owner.
+# Dry run (default, report-only): the planned changes with each row's current owner — the same plan the apply carries
+# out (grandchildren included). A report lists 200 changes per run and counts all; the script warns when it lists fewer,
+# and on NeedsF3 rows (isolated rows only Unsecure may release — the sweep never does, owner round 24).
 .\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default
 # Apply: SecureChild__Reconciliation__WritesEnabled=true for the run, removed again afterwards (restarts the app).
 .\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Apply -ResourceGroup <rg> -AppName <app>

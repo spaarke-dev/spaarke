@@ -183,7 +183,7 @@ public static class UnsecureProjectEndpoint
             // call's job ("re-invoking unsecure ... completes the pass instead of returning 200-no-op"). Only children the
             // Secure team owns are moved; nothing about the record itself changes.
             var completing = await secureChildren.ReconcileAsync(
-                root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: false, ct);
+                root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.UnsecureCompletion, ct);
             if (!completing.IsComplete)
                 return ChildrenIncomplete(completing, root, recordId, flagStillSet: false, logger, traceId);
 
@@ -332,7 +332,7 @@ public static class UnsecureProjectEndpoint
         // related records that are still isolated) and sprk_issecure stays set — the flag keeps meaning "related records
         // may still be isolated". The ownership move above stands. Calling again completes the pass.
         var childPass = await secureChildren.ReconcileAsync(
-            root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: true, ct);
+            root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, ct);
         if (!childPass.IsComplete)
             return ChildrenIncomplete(childPass, root, recordId, flagStillSet: true, logger, traceId,
                 ("newOwnerSystemUserId", newOwnerId));

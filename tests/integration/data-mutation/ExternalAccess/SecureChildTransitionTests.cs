@@ -331,6 +331,55 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.SharesOn(late).Keys.Should().Equal(DataversePrincipalRef.User(Creator));
     }
 
+    /// <summary>
+    /// AC 3 + ADR-003 on the already-provisioned branch (task 148 r2, verifier item 2): a repeat call on a PROVISIONED record
+    /// whose child pass cannot complete answers <c>children_incomplete</c> with counts — never 409 <c>already_provisioned</c>
+    /// (nothing written) and never 200 <c>childrenOnly</c> (something written), both of which a client reads as "done".
+    /// The refused child keeps its owner and gets no share; a third call, the fault cleared, completes it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Provisioning_RepeatedOnAProvisionedRecord_WhoseChildPassIsIncomplete_IsNeverASuccess(bool anotherChildMoves)
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        SeedFamily("sprk_project", rootId, childrenIsolated: false);
+        var client = _fixture.CreateAuthenticatedClient();
+        (await client.PostAsJsonAsync(ProvisionRoute, new { projectId = rootId })).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Children filed after provisioning by a writer that did not secure them; Dataverse refuses one re-own.
+        var stuck = Guid.NewGuid();
+        _fixture.ChildWorld.OrdinaryChild("sprk_event", stuck, ("sprk_regardingproject", "sprk_project", rootId))
+            .RefusingOwnerWritesOf(stuck);
+        var moves = Guid.NewGuid();
+        if (anotherChildMoves)
+            _fixture.ChildWorld.OrdinaryChild("sprk_memo", moves, ("sprk_regardingproject", "sprk_project", rootId));
+
+        var again = await client.PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        again.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await again.Content.ReadAsStringAsync());
+        var problem = await JsonOf(again);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete,
+            anotherChildMoves
+                ? "a pass that wrote something but did not finish is not '200 childrenOnly'"
+                : "a pass that wrote nothing because it could not is not '409 already provisioned'");
+        problem.GetProperty("childrenReowned").GetInt32().Should().Be(anotherChildMoves ? 1 : 0);
+        problem.GetProperty("childrenRemaining").GetInt32().Should().BeGreaterThan(0);
+        _fixture.ChildWorld.OwnerOf("sprk_event", stuck).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _fixture.SharesOn(stuck).Should().BeEmpty("a child that did not move is not mirrored");
+        if (anotherChildMoves)
+            _fixture.ChildWorld.OwnerOf("sprk_memo", moves).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+
+        _fixture.ChildWorld.ClearOwnerWriteFaults();
+        var completing = await client.PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        completing.StatusCode.Should().Be(HttpStatusCode.OK, await completing.Content.ReadAsStringAsync());
+        (await JsonOf(completing)).GetProperty("childrenOnly").GetBoolean().Should().BeTrue();
+        _fixture.ChildWorld.OwnerOf("sprk_event", stuck).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
     // ── UNSECURE: children leave isolation before the record's shares go ──────────────────────────────────────────────
 
     /// <summary>
@@ -867,7 +916,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         shares.Seed("sprk_event", child, DataversePrincipalRef.User(Creator), 23);
 
         var report = await SecureChildShareWorld.ReconcilerOver(() => world, shares, webApi: null!)
-            .ReconcileAsync("sprk_workassignment", root, SecureChildReconcileMode.Apply, unsecuring: true, CancellationToken.None);
+            .ReconcileAsync("sprk_workassignment", root, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
 
         report.Status.Should().Be(SecureChildReconcileStatus.Failed);
         report.IsComplete.Should().BeFalse();
@@ -1134,13 +1183,14 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
-    /// Verifier item 9: a sweep over an isolated record that takes one row OUT of isolation (the rule gives it an ordinary
-    /// team — here a to-do filed only under a document of an ordinary project, reached from the record through that
-    /// document's current version) also removes that row's mirrored shares — it does not carry the record's sharees into
-    /// its business unit.
+    /// Owner round 24 item 2 (task 148 r2; supersedes r1 verifier item 9): the sweep NEVER releases an isolated row to its
+    /// business unit. A to-do of a secure record that the rule would hand an ordinary team (it is filed only under a document
+    /// of an ordinary project, reached from the record through that document's current version) stays on the Secure team
+    /// with its shares; it is reported needs-f3 — only an unsecure, an F3 holder's act, releases it — and the run is still a
+    /// success (no repeat of the sweep could ever move it, so it is not work left undone).
     /// </summary>
     [Fact]
-    public async Task TheSweep_RemovesTheMirrorOfARowItTakesOutOfIsolation()
+    public async Task TheSweep_NeverReleasesAnIsolatedRow_ItReportsItNeedsF3_AndKeepsItsShares()
     {
         var sweep = new SweepHarness();
         var (root, recordsDocument, version, ordinaryProject, ordinaryDocument, todo) =
@@ -1156,12 +1206,199 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
 
         var report = await sweep.RunAsync(writesEnabled: "true");
 
-        sweep.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
-            "the rule's answer for a row filed only under an ordinary document");
-        (sweep.Shares.MaskOf("sprk_todo", todo, DataversePrincipalRef.User(Creator)) ?? 0).Should().Be(0,
-            "a row taken out of isolation does not keep the record's sharee");
-        report.GetProperty("mirrorsRevoked").GetInt32().Should().Be(1);
+        sweep.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "only an unsecure releases an isolated child (owner round 24)");
+        sweep.World.OwnerWrites.Should().NotContain(w => w.Id == todo);
+        sweep.Shares.MaskOf("sprk_todo", todo, DataversePrincipalRef.User(Creator)).Should().Be(23, "held as it was");
+        report.GetProperty("needsF3").GetInt32().Should().Be(1);
+        report.GetProperty("changed").GetInt32().Should().Be(0);
+        report.GetProperty("mirrorsRevoked").GetInt32().Should().Be(0);
+        var listed = report.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == todo);
+        listed.GetProperty("outcome").GetString().Should().Be(nameof(SecureChildRowOutcome.NeedsF3));
+        listed.GetProperty("previousOwner").GetString().Should().Be($"teams({SecureChildShareWorld.SecureTeam:D})");
+        listed.GetProperty("targetTeam").GetGuid().Should().Be(GeneralTeam, "the team an unsecure would give it");
         sweep.LastResult!.Success.Should().BeTrue();
+
+        // The dry run reports it the same way and plans no move for it.
+        var plan = await sweep.RunAsync(writesEnabled: null);
+        plan.GetProperty("needsF3").GetInt32().Should().Be(1);
+        plan.GetProperty("wouldChange").GetInt32().Should().Be(0);
+    }
+
+    /// <summary>
+    /// Owner round 24 item 2 for provisioning (Write-gated): provisioning a record never releases an isolated row it reaches
+    /// either — a to-do on the Secure team that the rule would hand an ordinary team (filed only under another, ordinary
+    /// record's document, reached through the record's document's version) stays isolated with its shares, the record is
+    /// provisioned (200), and the response counts it under <c>needsF3</c>.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_NeverReleasesAnIsolatedRow_ItReportsItNeedsF3()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var (recordsDocument, version, ordinaryProject, ordinaryDocument, todo) =
+            (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _fixture.ChildWorld.OrdinaryRoot("sprk_project", ordinaryProject)
+            .OrdinaryChild("sprk_document", recordsDocument, ("sprk_project", "sprk_project", rootId))
+            .OrdinaryChild("sprk_fileversion", version, ("sprk_document", "sprk_document", recordsDocument))
+            .OrdinaryChild("sprk_document", ordinaryDocument,
+                ("sprk_currentversionid", "sprk_fileversion", version), ("sprk_project", "sprk_project", ordinaryProject))
+            .SecureChild("sprk_todo", todo, ("sprk_regardingdocument", "sprk_document", ordinaryDocument));
+        _fixture.SeedShare(todo, DataversePrincipalRef.User(Outsider), RecordShareLevels.ViewOnlyRights);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ChildWorld.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "provisioning never releases an isolated child to its business unit (owner round 24)");
+        _fixture.ChildWorld.OwnerWrites.Should().NotContain(w => w.Id == todo);
+        _fixture.ShareMaskOf(todo, Outsider).Should().NotBe(0, "held as it was");
+        _fixture.ChildWorld.OwnerOf("sprk_document", recordsDocument).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the record's own document still goes into isolation");
+        var children = (await JsonOf(response)).GetProperty("children");
+        children.GetProperty("status").GetString().Should().Be("Completed");
+        children.GetProperty("needsF3").GetInt32().Should().Be(1);
+        children.GetProperty("tables").EnumerateArray()
+            .Single(t => t.GetProperty("table").GetString() == "sprk_todo")
+            .GetProperty("needsF3").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>
+    /// AC 7 + owner round 24 item 1 (task 148 r2, verifier item 1): the report-only sweep reports EVERY change the writing
+    /// sweep makes, on a three-level tree whose lower levels are reached only through rows the same pass moves: a secure
+    /// work assignment's ordinary document, an analysis of that document, and a to-do filed only under the analysis. None
+    /// of the lower two is isolated by anything the dry run READS; each is isolated by what the pass WILL do to its parent.
+    /// Decided once against stored owners, the dry run planned the document only (then the apply changed all three). It now
+    /// plans to the same fixpoint over planned owners, and the plan equals the applied result.
+    /// </summary>
+    [Fact]
+    public async Task TheSweep_ReportOnly_PlansEveryLevelOfATreeReachedOnlyThroughRowsItWouldMove()
+    {
+        var sweep = new SweepHarness();
+        var (root, document, analysis, todo) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        sweep.World.SecureRoot("sprk_workassignment", root)
+            .OrdinaryChild("sprk_document", document, ("sprk_workassignment", "sprk_workassignment", root))
+            .OrdinaryChild("sprk_analysis", analysis, ("sprk_documentid", "sprk_document", document))
+            .OrdinaryChild("sprk_todo", todo, ("sprk_regardinganalysis", "sprk_analysis", analysis));
+
+        var plan = await sweep.RunAsync(writesEnabled: null);
+
+        plan.GetProperty("wouldChange").GetInt32().Should().Be(3, "the document, the analysis under it and the to-do under that");
+        var planned = plan.GetProperty("changes").EnumerateArray().ToList();
+        planned.Select(c => c.GetProperty("id").GetGuid()).Should().BeEquivalentTo(new[] { document, analysis, todo });
+        var plannedTodo = planned.Single(c => c.GetProperty("id").GetGuid() == todo);
+        plannedTodo.GetProperty("outcome").GetString().Should().Be(nameof(SecureChildRowOutcome.WouldChange));
+        plannedTodo.GetProperty("previousOwner").GetString().Should().Be($"teams({GeneralTeam:D})");
+        sweep.World.OwnerWrites.Should().BeEmpty("report-only writes nothing");
+        sweep.Shares.WriteLog.Should().BeEmpty();
+
+        var applied = await sweep.RunAsync(writesEnabled: "true");
+
+        applied.GetProperty("changed").GetInt32().Should().Be(3);
+        applied.GetProperty("changes").EnumerateArray()
+            .Select(c => (c.GetProperty("id").GetGuid(), c.GetProperty("previousOwner").GetString(), c.GetProperty("targetTeam").GetGuid()))
+            .Should().BeEquivalentTo(
+                planned.Select(c => (c.GetProperty("id").GetGuid(), c.GetProperty("previousOwner").GetString(), c.GetProperty("targetTeam").GetGuid())),
+                "the dry run lists exactly the changes the writing run makes");
+        foreach (var (table, id) in new[] { ("sprk_document", document), ("sprk_analysis", analysis), ("sprk_todo", todo) })
+            sweep.World.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+    }
+
+    /// <summary>
+    /// AC 7 (task 148 r2, verifier item 1): the plan equals the apply on the hardest shape the fixpoint handles — a row moving
+    /// IN (also filed under a second secure record), a row moving OUT only once that move is certain, a row the pass pulls
+    /// into isolation and puts back when its support leaves, a grandchild of THAT row pulled in and put back with it, and a
+    /// refused row. The report-only pass plans every move against the owners its earlier plans give (the put-back drops its
+    /// plan); the apply over the same state then changes exactly the rows planned, to the same teams. (An unsecure — the one
+    /// trigger that may release — so the OUT move is made.)
+    /// </summary>
+    [Fact]
+    public async Task TheReportOnlyPlan_IsExactlyWhatTheApplyChanges_ThroughAPutBack()
+    {
+        var world = SecureChildShareWorld.Standard();
+        var shares = new FakeRecordShareTable();
+        var (root, otherSecure, halfProvisioned) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (document, analysis, @event, message, todo) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        // Mid-unsecure: the record is off the Secure team (moved, read back) and still flagged.
+        world.FlaggedNotIsolatedRoot("sprk_workassignment", root)
+            .SecureRoot("sprk_matter", otherSecure)
+            .FlaggedNotIsolatedRoot("sprk_project", halfProvisioned)
+            .UserOwnedChild("sprk_document", document,
+                ("sprk_workassignment", "sprk_workassignment", root), ("sprk_matter", "sprk_matter", otherSecure))
+            .OrdinaryChild("sprk_analysis", analysis,
+                ("sprk_documentid", "sprk_document", document), ("sprk_regardingproject", "sprk_project", halfProvisioned))
+            .SecureChild("sprk_event", @event, ("sprk_regardinganalysis", "sprk_analysis", analysis))
+            .UserOwnedChild("sprk_communication", message, ("sprk_regardingevent", "sprk_event", @event))
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingcommunication", "sprk_communication", message));
+        var reconciler = SecureChildShareWorld.ReconcilerOver(() => world, shares, webApi: null!);
+
+        var plan = await reconciler.ReconcileAsync(
+            "sprk_workassignment", root, SecureChildReconcileMode.ReportOnly, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        world.OwnerWrites.Should().BeEmpty("report-only writes nothing");
+        shares.WriteLog.Should().BeEmpty();
+        var planned = plan.Changes.Where(c => c.Outcome == SecureChildRowOutcome.WouldChange)
+            .Select(c => (c.Table, c.Id, c.TargetTeamId)).ToList();
+        planned.Should().BeEquivalentTo(new[]
+        {
+            ("sprk_document", document, (Guid?)SecureChildShareWorld.SecureTeam),
+            ("sprk_event", @event, (Guid?)GeneralTeam),
+        }, "the message and its to-do are pulled in and put back — no net change — and the analysis is refused");
+        plan.Changes.Single(c => c.Id == analysis).Outcome.Should().Be(SecureChildRowOutcome.Refused);
+
+        var applied = await reconciler.ReconcileAsync(
+            "sprk_workassignment", root, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        applied.Changes.Where(c => c.Outcome == SecureChildRowOutcome.Changed)
+            .Select(c => (c.Table, c.Id, c.TargetTeamId))
+            .Should().BeEquivalentTo(planned, "the apply changes exactly what the dry run planned");
+        world.OwnerOf("sprk_communication", message).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        world.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        world.OwnerWrites.Should().Contain(w => w.Id == todo, "the apply did pull the to-do in and put it back");
+    }
+
+    /// <summary>
+    /// Verifier item 5: a run's report COUNTS every change and lists at most <see cref="SecureChildReconciliationJob.MaxSampledChanges"/>
+    /// of them — so a run that plans more than it lists says so (changesTotal &gt; changesListed) and a shortened list never
+    /// passes for the whole plan. A row held for an F3 holder is listed (outcome NeedsF3) and counted in needsF3, even once
+    /// the list no longer reaches it.
+    /// </summary>
+    [Fact]
+    public async Task TheSweepReport_CountsEveryChange_EvenBeyondTheListedOnes()
+    {
+        var sweep = new SweepHarness();
+        var (root, recordsDocument, version, ordinaryProject, ordinaryDocument, todo) =
+            (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        sweep.World.SecureRoot("sprk_workassignment", root).OrdinaryRoot("sprk_project", ordinaryProject)
+            .SecureChild("sprk_document", recordsDocument, ("sprk_workassignment", "sprk_workassignment", root))
+            .SecureChild("sprk_fileversion", version, ("sprk_document", "sprk_document", recordsDocument))
+            .OrdinaryChild("sprk_document", ordinaryDocument,
+                ("sprk_currentversionid", "sprk_fileversion", version), ("sprk_project", "sprk_project", ordinaryProject))
+            .SecureChild("sprk_todo", todo, ("sprk_regardingdocument", "sprk_document", ordinaryDocument));
+
+        var held = await sweep.RunAsync(writesEnabled: null);
+
+        held.GetProperty("changesTotal").GetInt32().Should().Be(1);
+        held.GetProperty("changesListed").GetInt32().Should().Be(1);
+        held.GetProperty("needsF3").GetInt32().Should().Be(1);
+
+        // More planned changes than a report lists.
+        var extra = SecureChildReconciliationJob.MaxSampledChanges + 1;
+        for (var i = 0; i < extra; i++)
+        {
+            sweep.World.OrdinaryChild("sprk_event", Guid.NewGuid(),
+                ("sprk_regardingworkassignment", "sprk_workassignment", root));
+        }
+
+        var plan = await sweep.RunAsync(writesEnabled: null);
+
+        plan.GetProperty("wouldChange").GetInt32().Should().Be(extra);
+        plan.GetProperty("needsF3").GetInt32().Should().Be(1, "counted even though the list no longer reaches it");
+        plan.GetProperty("changesTotal").GetInt32().Should().Be(extra + 1);
+        plan.GetProperty("changesListed").GetInt32().Should().Be(SecureChildReconciliationJob.MaxSampledChanges);
+        plan.GetProperty("changes").GetArrayLength().Should().Be(SecureChildReconciliationJob.MaxSampledChanges);
+        sweep.World.OwnerWrites.Should().BeEmpty();
     }
 
     /// <summary>

@@ -42,10 +42,43 @@ public enum SecureChildReconcileMode
     ReportOnly,
 }
 
+/// <summary>
+/// What started a pass — which decides whether it may take a child OUT of isolation (owner round 24 item 2, task 148 r2):
+/// only an unsecure, the act of a Full Access holder or the creator (F3 — owner round 10 item 7), releases an isolated
+/// child to its business unit. Provisioning (Write-gated) and the sweep never do: a child they find isolated that the rule
+/// would hand an ordinary team stays isolated and is reported <see cref="SecureChildRowOutcome.NeedsF3"/> (round 6, "never
+/// auto-unsecure").
+/// </summary>
+public enum SecureChildPassTrigger
+{
+    /// <summary><c>/provision-project</c> (Step 8, or the already-provisioned branch): into isolation only.</summary>
+    Provisioning,
+
+    /// <summary>The <c>secure-child-reconciliation</c> sweep: into isolation only.</summary>
+    Sweep,
+
+    /// <summary>
+    /// <c>/unsecure-project</c> mid-transition: the root has been moved off the Secure team and read back, its flag is still
+    /// set (cleared last) — the resolver is told so (<see cref="RecordOwnershipContext.UnsecuringRoot"/>). Releases.
+    /// </summary>
+    Unsecure,
+
+    /// <summary>
+    /// <c>/unsecure-project</c> on a record already not secure: completes the children an earlier unsecure left isolated.
+    /// Releases; the root is not mid-transition, so no exemption and its platform-cascade rows move only across the
+    /// boundary.
+    /// </summary>
+    UnsecureCompletion,
+}
+
 /// <summary>How a reconcile pass of one root ended.</summary>
 public enum SecureChildReconcileStatus
 {
-    /// <summary>Every child in scope is (or, report-only, could be decided to be) in its invariant state.</summary>
+    /// <summary>
+    /// Every child in scope is (or, report-only, could be decided to be) in its invariant state — or is held isolated for an
+    /// F3 holder's act (<see cref="SecureChildRowOutcome.NeedsF3"/>, counted: this pass may not release it, and no call of
+    /// the same trigger ever will, so it is not work this pass left undone).
+    /// </summary>
     Completed,
 
     /// <summary>At least one child is not in its invariant state: refused, failed, or its shares not in line (counts say which).</summary>
@@ -81,6 +114,13 @@ public enum SecureChildRowOutcome
 
     /// <summary>A read or the write failed, or the write did not read back: the row is not in its invariant state.</summary>
     Failed,
+
+    /// <summary>
+    /// Isolated, and the rule would hand it an ordinary team (every record it is filed under is ordinary), but this pass may
+    /// not release it (owner round 24 item 2): only <c>/unsecure-project</c> — an F3 holder's act — takes a child out of
+    /// isolation. Left isolated (an under-share, never an over-share) with its shares, never written, and reported.
+    /// </summary>
+    NeedsF3,
 }
 
 /// <summary>One row the pass re-owned, would re-own, or could not — with the owner it had BEFORE (reversal evidence).</summary>
@@ -95,7 +135,8 @@ public sealed record SecureChildRowChange(
 
 /// <summary>Per-table counts of one pass.</summary>
 public sealed record SecureChildTableCounts(
-    string Table, int Examined, int AlreadyCorrect, int Changed, int WouldChange, int Untouched, int Refused, int Failed);
+    string Table, int Examined, int AlreadyCorrect, int Changed, int WouldChange, int Untouched, int Refused, int Failed,
+    int NeedsF3);
 
 /// <summary>What one reconcile pass of one root did.</summary>
 /// <param name="Status">How it ended.</param>
@@ -128,6 +169,9 @@ public sealed record SecureChildReconcileReport(
 
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
+
+    /// <summary>Isolated rows the rule would release but this pass may not (owner round 24 item 2): only unsecure does.</summary>
+    public int ChildrenNeedingF3 => Tables.Sum(t => t.NeedsF3);
 
     /// <summary>
     /// Rows NOT in their invariant state after this pass: refused + failed (+ planned, report-only) — a child whose mirrored
@@ -166,8 +210,8 @@ public sealed record SecureChildReconcileReport(
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
 /// its record thread's filing (S6, as <c>AssignToThreadReconcilingOwnerAsync</c> passes it); a row that names no parent keeps
-/// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and, when the pass writes,
-/// REPEATED TO A FIXPOINT (task 148 r1): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
+/// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and
+/// REPEATED TO A FIXPOINT (task 148 r1; report-only too since r2, over planned owners): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
 /// stamped communication regarding an event) may be decided before that parent moves, so every row a move could change —
 /// through any chain of rows of the pass — is decided again until nothing is left to move. Each round applies one kind of
 /// move: OUT of isolation first, and only for rows that do not rest on a row still waiting to move IN (a move out widens
@@ -175,10 +219,14 @@ public sealed record SecureChildReconcileReport(
 /// parent that left after it, never pulled into isolation behind a parent about to leave, and never released and pulled
 /// back; a row the pass did pull in whose support then left goes back to its start owner. A row is moved only when the
 /// move crosses the isolation boundary — INTO the Secure team, or OUT of it; an ordinary row the rule would hand another
-/// ordinary team is not this transition's (<see cref="SecureChildRowOutcome.Untouched"/>). The
+/// ordinary team is not this transition's (<see cref="SecureChildRowOutcome.Untouched"/>). OUT of it only when an unsecure
+/// asked (owner round 24 item 2, <see cref="SecureChildPassTrigger"/>): provisioning and the sweep never release a child
+/// that was isolated — they hold it and report it <see cref="SecureChildRowOutcome.NeedsF3"/>. The
 /// platform-cascade rows belong to the root alone and always take the rule's owner (owner round 13 item 1). A report-only
-/// pass writes nothing, so it decides each row once against the owners it reads: a grandchild whose only route to
-/// isolation is a parent the same pass would move is planned only once that parent has moved.</para>
+/// pass runs the SAME rounds and writes nothing (task 148 r2): each move is planned instead, and the resolver reads a
+/// planned row as owned by its planned team (<see cref="RecordOwnershipContext.PlannedOwningTeams"/>), so a grandchild
+/// whose only route into isolation is a parent the same pass would move is planned too — the dry run lists every owner
+/// change the writing pass would make (assuming each write lands; a write Dataverse refuses is the apply's to report).</para>
 /// <para><b>Ordering.</b> INTO isolation: every child re-owned, then <see cref="SecureChildShareSynchronizer.SyncRootAsync"/>
 /// mirrors the root's sharees (149 mirrors only Secure-team-owned rows, so the mirror follows the re-own — the transient is an
 /// UNDER-share of the root's sharees for the length of the pass, never an over-share: no principal that could not read a
@@ -230,15 +278,22 @@ public sealed class SecureChildReconciler
     }
 
     /// <summary>
-    /// Reconciles every existing child of one root. <paramref name="unsecuring"/> is set ONLY by the unsecure endpoint, after
-    /// it moved the root off the Secure team and read the move back: the root's <c>sprk_issecure</c> is still <c>true</c>
-    /// (cleared last), so the resolver is told this one root is mid-transition (<see cref="RecordOwnershipContext.UnsecuringRoot"/>).
-    /// A root that still reads as Secure-team-owned is refused that exemption (Failed).
+    /// Reconciles every existing child of one root. <paramref name="trigger"/> says who asked (owner round 24 item 2): only the
+    /// unsecure endpoint (<see cref="SecureChildPassTrigger.Unsecure"/> / <see cref="SecureChildPassTrigger.UnsecureCompletion"/>)
+    /// may release an isolated child; provisioning and the sweep report such a child <see cref="SecureChildRowOutcome.NeedsF3"/>
+    /// and leave it isolated. <see cref="SecureChildPassTrigger.Unsecure"/> is passed ONLY after the endpoint moved the root
+    /// off the Secure team and read the move back: the root's <c>sprk_issecure</c> is still <c>true</c> (cleared last), so the
+    /// resolver is told this one root is mid-transition (<see cref="RecordOwnershipContext.UnsecuringRoot"/>). A root that
+    /// still reads as Secure-team-owned is refused that exemption (Failed).
     /// </summary>
     public async Task<SecureChildReconcileReport> ReconcileAsync(
-        string rootLogicalName, Guid rootId, SecureChildReconcileMode mode, bool unsecuring, CancellationToken ct)
+        string rootLogicalName, Guid rootId, SecureChildReconcileMode mode, SecureChildPassTrigger trigger, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootLogicalName);
+        if (!Enum.IsDefined(trigger))
+            throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown pass trigger.");
+        var unsecuring = trigger == SecureChildPassTrigger.Unsecure;
+        var mayRelease = trigger is SecureChildPassTrigger.Unsecure or SecureChildPassTrigger.UnsecureCompletion;
         var rootTable = rootLogicalName.Trim().ToLowerInvariant();
         if (!SecureChildLineage.IsRoot(rootTable))
             throw new ArgumentOutOfRangeException(nameof(rootLogicalName), rootLogicalName, "Not a secure-root table.");
@@ -287,7 +342,7 @@ public sealed class SecureChildReconciler
         }
 
         var rootRef = new RecordOwnershipParent(rootTable, rootId);
-        var pass = new Pass(this, mode, rootRef, rootIsolated, unsecuring, secureTeamId, ct);
+        var pass = new Pass(this, mode, rootRef, rootIsolated, unsecuring, mayRelease, secureTeamId, ct);
 
         // ── The descendants ─────────────────────────────────────────────────────────────────────────────────────────
         try
@@ -313,6 +368,9 @@ public sealed class SecureChildReconciler
         private readonly RecordOwnershipParent _root;
         private readonly bool _rootIsolated;
         private readonly bool _unsecuring;
+
+        // Owner round 24 item 2: only an unsecure (an F3 holder's act) takes a child out of isolation.
+        private readonly bool _mayRelease;
         private readonly Guid _secureTeamId;
         private readonly CancellationToken _ct;
 
@@ -321,15 +379,20 @@ public sealed class SecureChildReconciler
         private readonly Dictionary<string, int[]> _counts = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SecureChildRowChange> _changes = new();
 
+        // Report-only (task 148 r2): the owning team each planned move would give its row — what the resolver reads for
+        // that row instead of its stored owner (RecordOwnershipContext.PlannedOwningTeams). Always empty when the pass writes.
+        private readonly Dictionary<RecordOwnershipParent, Guid> _planned = new();
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
-            bool unsecuring, Guid secureTeamId, CancellationToken ct)
+            bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct)
         {
             _owner = owner;
             _mode = mode;
             _root = root;
             _rootIsolated = rootIsolated;
             _unsecuring = unsecuring;
+            _mayRelease = mayRelease;
             _secureTeamId = secureTeamId;
             _ct = ct;
         }
@@ -337,14 +400,19 @@ public sealed class SecureChildReconciler
         private ILogger Log => _owner._logger;
 
         // Indexes into a table's counter array.
-        private const int Examined = 0, AlreadyCorrect = 1, Changed = 2, WouldChange = 3, Untouched = 4, Refused = 5, Failed = 6;
+        private const int Examined = 0, AlreadyCorrect = 1, Changed = 2, WouldChange = 3, Untouched = 4, Refused = 5, Failed = 6,
+            NeedsF3 = 7;
 
         private void Count(string table, int slot)
         {
             if (!_counts.TryGetValue(table, out var c))
-                _counts[table] = c = new int[7];
+                _counts[table] = c = new int[8];
             c[slot]++;
         }
+
+        private const string NeedsF3Detail =
+            "isolated, and every record it is filed under is ordinary: only Unsecure (a Full Access holder or the record's " +
+            "creator) takes it out of isolation — left isolated (owner round 24)";
 
         /// <summary>
         /// Every descendant of the root through the lineage lookups, level by level, through rows of ANY owner, at most
@@ -420,8 +488,8 @@ public sealed class SecureChildReconciler
             // 1. The rows the root's own Assign cascades to: the rule's owner for a child of the root (owner round 13 item 1).
             await PlaceCascadeRowsAsync().ConfigureAwait(false);
 
-            // 2. Every descendant, decided by the rule against the owners its parents have NOW — repeated, when this pass
-            //    writes, until nothing is left to move (a fixpoint). One ordered sweep is not enough: a row's parents can sit
+            // 2. Every descendant, decided by the rule against the owners its parents have NOW (report-only: would have) —
+            //    repeated until nothing is left to move (a fixpoint). One ordered sweep is not enough: a row's parents can sit
             //    at its OWN level (an FR-26-stamped analysis of a document, a stamped communication regarding an event), so a
             //    row decided before such a parent reads that parent's OLD owner. Leaving isolation, that kept a row on the
             //    Secure team (secure-if-any) — left isolated, with its mirror, by a pass that reported Completed — and pulled
@@ -460,12 +528,14 @@ public sealed class SecureChildReconciler
             for (var round = 1; ; round++)
             {
                 foreach (var key in keys.Where(toDecide.Contains))
-                    decisions[key] = await DecideRowAsync(rows[key], current[key]).ConfigureAwait(false);
+                    decisions[key] = await DecideRowAsync(rows[key], current[key], start[key]).ConfigureAwait(false);
 
-                // Report-only writes nothing, so a second round would read the same owners.
-                if (_mode != SecureChildReconcileMode.Apply)
-                    break;
-
+                // Report-only runs the SAME rounds (task 148 r2): it writes nothing, so each move is PLANNED instead — kept
+                // in _planned, which the resolver reads as that row's owner (RecordOwnershipContext.PlannedOwningTeams) —
+                // and the rows resting on it are decided again against the planned owner. A grandchild whose only route
+                // into isolation is a parent the pass would move is therefore planned too: the dry run lists every change
+                // the writing pass makes (it assumes each write succeeds — a write Dataverse refuses is the apply's to
+                // report).
                 bool Open((string Table, Guid Id) k) => !failures.ContainsKey(k);
                 var ins = keys.Where(k => Open(k) && decisions[k].Move == RowMove.In).ToHashSet();
                 var outs = keys.Where(k => Open(k) && decisions[k].Move == RowMove.Out).ToList();
@@ -498,8 +568,12 @@ public sealed class SecureChildReconciler
                         // Moved INTO isolation by this pass, now ruled out of it: the isolated row it rested on has since
                         // left. It was NOT isolated when the pass began, so it goes back to the owner it had then (never to
                         // a team the rule picks for an ordinary row — that is not this transition's), and keeps every share
-                        // it had (owner round 22).
-                        var back = await RestoreStartOwnerAsync(key.Table, key.Id, start[key]).ConfigureAwait(false);
+                        // it had (owner round 22). Report-only: the plan drops its move IN (it reads as its stored owner).
+                        string? back = null;
+                        if (_mode == SecureChildReconcileMode.Apply)
+                            back = await RestoreStartOwnerAsync(key.Table, key.Id, start[key]).ConfigureAwait(false);
+                        else
+                            _planned.Remove(PlannedKey(key));
                         if (back is not null)
                         {
                             failures[key] = $"this pass moved it into isolation, its support has since left, and it could not " +
@@ -519,14 +593,25 @@ public sealed class SecureChildReconciler
                         continue;
                     }
 
-                    // Reversal evidence BEFORE the write (constraint "every assign").
-                    Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
-                        key.Table, key.Id, Describe(current[key]), target);
-                    var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!).ConfigureAwait(false);
-                    if (fault is not null)
+                    if (_mode == SecureChildReconcileMode.Apply)
                     {
-                        failures[key] = fault;
-                        continue;
+                        // Reversal evidence BEFORE the write (constraint "every assign").
+                        Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
+                            key.Table, key.Id, Describe(current[key]), target);
+                        var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!).ConfigureAwait(false);
+                        if (fault is not null)
+                        {
+                            failures[key] = fault;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // Report-only: planned, not written — every planned change is a log line, the complete list.
+                        Log.LogInformation(
+                            "[SECURE-CHILD-RECONCILE] plan: {Table} {Id} owner {Previous} -> team {Target} (report-only).",
+                            key.Table, key.Id, Describe(current[key]), target);
+                        _planned[PlannedKey(key)] = target;
                     }
 
                     current[key] = DataversePrincipalRef.Team(target);
@@ -613,6 +698,7 @@ public sealed class SecureChildReconciler
                     SecureChildRowOutcome.WouldChange => WouldChange,
                     SecureChildRowOutcome.Untouched => Untouched,
                     SecureChildRowOutcome.Refused => Refused,
+                    SecureChildRowOutcome.NeedsF3 => NeedsF3,
                     _ => Failed,
                 });
                 if (d.Outcome is not (SecureChildRowOutcome.AlreadyCorrect or SecureChildRowOutcome.Untouched))
@@ -623,9 +709,11 @@ public sealed class SecureChildReconciler
                 .OrderBy(c => c.Key, StringComparer.Ordinal)
                 .Select(c => new SecureChildTableCounts(
                     c.Key, c.Value[Examined], c.Value[AlreadyCorrect], c.Value[Changed], c.Value[WouldChange],
-                    c.Value[Untouched], c.Value[Refused], c.Value[Failed]))
+                    c.Value[Untouched], c.Value[Refused], c.Value[Failed], c.Value[NeedsF3]))
                 .ToList();
 
+            // A row held for an F3 holder (NeedsF3) is reported, and is not work this pass left undone: no call of the same
+            // trigger may ever release it (owner round 24 item 2), so it does not make the pass Incomplete.
             var rowsOk = tables.All(t => t.Refused == 0 && t.Failed == 0);
             var complete = rowsOk && mirrorIncomplete == 0 && shares is not { IsComplete: false };
             var status = complete ? SecureChildReconcileStatus.Completed : SecureChildReconcileStatus.Incomplete;
@@ -633,13 +721,14 @@ public sealed class SecureChildReconciler
             Log.Log(
                 complete ? LogLevel.Information : LogLevel.Warning,
                 "[SECURE-CHILD-RECONCILE] root={Table} {RootId} mode={Mode} isolated={Isolated} unsecuring={Unsecuring} " +
-                "status={Status} examined={Examined} alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} " +
-                "untouched={Untouched} refused={Refused} failed={Failed} shares={Shares} mirrorRevoked={MirrorRevoked} " +
-                "mirrorIncomplete={MirrorIncomplete}",
-                _root.EntityLogicalName, _root.RecordId, _mode, _rootIsolated, _unsecuring, status,
+                "mayRelease={MayRelease} status={Status} examined={Examined} alreadyCorrect={AlreadyCorrect} changed={Changed} " +
+                "wouldChange={WouldChange} untouched={Untouched} refused={Refused} failed={Failed} needsF3={NeedsF3} " +
+                "shares={Shares} mirrorRevoked={MirrorRevoked} mirrorIncomplete={MirrorIncomplete}",
+                _root.EntityLogicalName, _root.RecordId, _mode, _rootIsolated, _unsecuring, _mayRelease, status,
                 tables.Sum(t => t.Examined), tables.Sum(t => t.AlreadyCorrect), tables.Sum(t => t.Changed),
                 tables.Sum(t => t.WouldChange), tables.Sum(t => t.Untouched), tables.Sum(t => t.Refused),
-                tables.Sum(t => t.Failed), shares?.Status.ToString() ?? "-", mirrorRevoked, mirrorIncomplete);
+                tables.Sum(t => t.Failed), tables.Sum(t => t.NeedsF3), shares?.Status.ToString() ?? "-", mirrorRevoked,
+                mirrorIncomplete);
 
             return new SecureChildReconcileReport(
                 status, _mode, _root.EntityLogicalName, _root.RecordId, _rootIsolated, tables, _changes, shares,
@@ -687,9 +776,13 @@ public sealed class SecureChildReconciler
         /// The rule's answer for one row against the owner it has NOW (<paramref name="current"/>) — no write. A move is
         /// proposed only across the isolation boundary: IN (the rule gives the Secure team, the row is not on it) or OUT (the
         /// row is on it, the rule gives an ordinary team); an ordinary row the rule would hand another ordinary team is not
-        /// this transition's (<see cref="SecureChildRowOutcome.Untouched"/>).
+        /// this transition's (<see cref="SecureChildRowOutcome.Untouched"/>). A move OUT of a row that was isolated when the
+        /// pass began (<paramref name="start"/>) is made only by a pass that may release one (owner round 24 item 2); any
+        /// other pass holds the row isolated and reports it <see cref="SecureChildRowOutcome.NeedsF3"/>. (A row this pass
+        /// itself moved IN and whose support then left is not held: it goes back to its own start owner — the pass undoing
+        /// its own move, never a release of a child that was isolated.)
         /// </summary>
-        private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current)
+        private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current, DataversePrincipalRef? start)
         {
             var table = row.LogicalName;
             RecordOwnerResolution resolution;
@@ -723,10 +816,11 @@ public sealed class SecureChildReconciler
                 _ => RowMove.Stay,
             };
 
-            if (move != RowMove.Stay && _mode == SecureChildReconcileMode.ReportOnly)
+            if (move == RowMove.Out && !_mayRelease && IsIsolated(start))
             {
-                Log.LogInformation("[SECURE-CHILD-RECONCILE] plan: {Table} {Id} owner {Previous} -> team {Target} (report-only).",
-                    table, row.Id, Describe(current), target);
+                Log.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id}: the rule gives it team {Target}, out of isolation, but " +
+                    "only Unsecure releases an isolated child (owner round 24); it stays isolated (needs-f3).", table, row.Id, target);
+                return new(RowMove.Stay, SecureChildRowOutcome.NeedsF3, resolution, NeedsF3Detail);
             }
 
             var kind = current == DataversePrincipalRef.Team(target)
@@ -743,15 +837,21 @@ public sealed class SecureChildReconciler
         private RowResult Outcome(
             RowDecision decision, DataversePrincipalRef? start, DataversePrincipalRef? current, string? failure, bool written)
         {
-            var left = written && IsIsolated(start) && !IsIsolated(current);
+            // In report-only nothing was written: `written` means planned, and nothing left isolation for real.
+            var applied = _mode == SecureChildReconcileMode.Apply;
+            var left = applied && written && IsIsolated(start) && !IsIsolated(current);
             if (failure is not null)
                 return new(SecureChildRowOutcome.Failed, start, decision.Target, failure, left);
-            if (decision.Kind is SecureChildRowOutcome.Refused or SecureChildRowOutcome.Failed)
+            if (decision.Kind is SecureChildRowOutcome.Refused or SecureChildRowOutcome.Failed or SecureChildRowOutcome.NeedsF3)
                 return new(decision.Kind, start, decision.Target, decision.Detail, left);
             if (written && current != start)
-                return new(SecureChildRowOutcome.Changed, start, current?.Id, null, left);
+                return new(applied ? SecureChildRowOutcome.Changed : SecureChildRowOutcome.WouldChange, start, current?.Id, null, left);
             if (decision.Move is RowMove.In or RowMove.Out)
-                return new(SecureChildRowOutcome.WouldChange, start, decision.Target, null, false); // report-only
+            {
+                // Not reached: the rounds end only when no open row has a move left. Fail closed if it ever is.
+                return new(SecureChildRowOutcome.Failed, start, decision.Target, "its move was not made in this pass", false);
+            }
+
             return new(decision.Kind, start, decision.Target, null, false);
         }
 
@@ -815,6 +915,20 @@ public sealed class SecureChildReconciler
         /// the Secure Record owner team; a row this pass moved INTO isolation whose support then left goes back to its
         /// ordinary owner. Its own update, read back; <c>null</c> on success, else what went wrong.
         /// </summary>
+        /// <remarks>
+        /// Why not task 133's <see cref="AssignCascadeChildOwners.RestoreAsync"/> (task 148 r2, verifier item 4)? That primitive
+        /// is table-generic in shape (<see cref="CascadeChild"/> carries the table, entity set, id column, id and owner), so
+        /// the shape is not the reason. The reasons: (1) owner round 10 item 4 binds the restore of the rows a ROOT's reverse
+        /// Assign cascades to — this pass does reuse it for exactly those (<c>PlaceCascadeRowsAsync</c>); this member puts back
+        /// a <c>sprk_*</c> child the pass itself moved, which no Assign cascade touches. (2) The owner-write census classifies
+        /// <c>RestoreOneAsync</c> as kind <c>Root</c> (its rows are a root's cascade rows — never a <c>sprk_*</c> child); routing
+        /// children through it would make that classification false, and it cannot take the <c>Restore</c> kind instead,
+        /// whose assertion requires the written value to be the pass's start-owner snapshot — while this pass also calls it
+        /// with the resolver's owner for the cascade rows (owner round 13 item 1). (3) Every other read and write of these rows
+        /// in the pass goes through <see cref="IGenericEntityService"/> (the resolver's own client), and this member shares the
+        /// pass's read-back (<c>ReadBackAsync</c>) with <c>AssignAsync</c>; the put-back on the Web API client would be a second
+        /// path for the same rows. It is census kind <c>Restore</c>, asserted to write only the start owner its pass recorded.
+        /// </remarks>
         private async Task<string?> RestoreStartOwnerAsync(string table, Guid id, DataversePrincipalRef? startOwner)
         {
             if (startOwner is not { } owner)
@@ -886,8 +1000,13 @@ public sealed class SecureChildReconciler
                 Parents = parents.Distinct().ToArray(),
                 WhenUnfiled = UnfiledOwnership.KeepCreator,
                 UnsecuringRoot = _unsecuring ? _root : null,
+                PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,
             };
         }
+
+        /// <summary>A row of the pass as the resolver names a parent (lower-case table).</summary>
+        private static RecordOwnershipParent PlannedKey((string Table, Guid Id) key) =>
+            new(key.Table.ToLowerInvariant(), key.Id);
 
         /// <summary>
         /// The rows the root's own Assign cascades to (task 133's primitive — snapshot, then put each on an owner, read
@@ -955,6 +1074,9 @@ public sealed class SecureChildReconciler
                 // Only a transition moves these rows: into isolation, out of it, or — mid-unsecure — off the owning USER
                 // the root's own Assign just cascaded them to (owner round 13 item 1). An ordinary record's rows on another
                 // ordinary owner are not this pass's (a repeat unsecure on a record that was never secure changes nothing).
+                // Owner round 24 item 2 needs no hold here: these rows are decided for the ROOT alone, and a pass that may
+                // not release (provisioning, the sweep) only ever runs over an isolated root — whose rows the rule puts ON
+                // the Secure team — or a flagged-not-isolated one, which the rule refuses. Only an unsecure moves them out.
                 var crossing = target == _secureTeamId
                     || child.Owner == DataversePrincipalRef.Team(_secureTeamId)
                     || _unsecuring;
@@ -966,6 +1088,9 @@ public sealed class SecureChildReconciler
 
                 if (_mode == SecureChildReconcileMode.ReportOnly)
                 {
+                    Log.LogInformation(
+                        "[SECURE-CHILD-RECONCILE] plan: {Table} {Id} owner {Previous} -> team {Target} (report-only).",
+                        child.LogicalName, child.Id, Describe(child.Owner), target);
                     Count(child.LogicalName, WouldChange);
                     _changes.Add(new(child.LogicalName, child.Id, child.Owner, target, SecureChildRowOutcome.WouldChange, null));
                     continue;

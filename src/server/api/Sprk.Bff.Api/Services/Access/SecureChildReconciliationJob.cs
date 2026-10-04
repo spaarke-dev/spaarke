@@ -53,7 +53,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
     internal const int DefaultMaxRootsPerRun = 50;
 
-    /// <summary>Planned / applied row changes listed in <c>ResultJson</c> (the complete list is in the per-row log lines).</summary>
+    /// <summary>
+    /// Planned / applied row changes listed in <c>ResultJson</c>; <c>changesTotal</c> counts all of them, and the complete
+    /// list is the per-row log lines (<c>plan:</c> report-only, <c>reassign:</c> with writes).
+    /// </summary>
     internal const int MaxSampledChanges = 200;
 
     internal const string ModeReportOnly = "report-only";
@@ -123,9 +126,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             start = 0;
         var batch = roots.Skip(start).Take(cap).ToList();
 
-        var totals = new int[7];
+        var totals = new int[8];
         var incompleteRoots = new List<string>();
         var sampled = new List<object>();
+        var changesTotal = 0;
         var sharesWritten = 0;
         var mirrorsRevoked = 0;
 
@@ -137,13 +141,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 "(of {All} secure records).",
                 context.RunId, mode, key, start + i + 1, start + batch.Count, roots.Count);
 
-            var report = await reconciler.ReconcileAsync(table, id, mode, unsecuring: false, cancellationToken)
+            var report = await reconciler.ReconcileAsync(table, id, mode, SecureChildPassTrigger.Sweep, cancellationToken)
                 .ConfigureAwait(false);
 
             foreach (var t in report.Tables)
             {
                 totals[0] += t.Examined; totals[1] += t.AlreadyCorrect; totals[2] += t.Changed; totals[3] += t.WouldChange;
-                totals[4] += t.Untouched; totals[5] += t.Refused; totals[6] += t.Failed;
+                totals[4] += t.Untouched; totals[5] += t.Refused; totals[6] += t.Failed; totals[7] += t.NeedsF3;
             }
 
             if (report.Shares is { } s)
@@ -155,8 +159,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
             foreach (var change in report.Changes)
             {
+                // Counted in full (task 148 r2): the listed sample is capped, the total is not — so a reader can tell
+                // when the list is incomplete (changesTotal > changesListed).
+                changesTotal++;
                 if (sampled.Count >= MaxSampledChanges)
-                    break;
+                    continue;
                 sampled.Add(new
                 {
                     root = key,
@@ -182,11 +189,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             success ? LogLevel.Information : LogLevel.Warning,
             "[SECURE-CHILD-RECONCILE] heartbeat mode={Mode} roots={Roots}/{All} passComplete={PassComplete} " +
             "resumeAfter={ResumeAfter} examined={Examined} alreadyCorrect={AlreadyCorrect} changed={Changed} " +
-            "wouldChange={WouldChange} untouched={Untouched} refused={Refused} failed={Failed} sharesWritten={SharesWritten} " +
-            "mirrorsRevoked={MirrorsRevoked} incompleteRoots={IncompleteRoots} attempt={Attempt} durationMs={DurationMs} " +
+            "wouldChange={WouldChange} untouched={Untouched} refused={Refused} failed={Failed} needsF3={NeedsF3} " +
+            "sharesWritten={SharesWritten} mirrorsRevoked={MirrorsRevoked} incompleteRoots={IncompleteRoots} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             mode, batch.Count, roots.Count, passComplete, passComplete ? null : lastKey, totals[0], totals[1], totals[2],
-            totals[3], totals[4], totals[5], totals[6], sharesWritten, mirrorsRevoked, incompleteRoots.Count,
+            totals[3], totals[4], totals[5], totals[6], totals[7], sharesWritten, mirrorsRevoked, incompleteRoots.Count,
             context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(
@@ -216,9 +223,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 untouched = totals[4],
                 refused = totals[5],
                 failed = totals[6],
+                // Isolated rows the rule would release, held for an F3 holder's act (owner round 24 item 2): only
+                // /unsecure-project releases one. Listed in `changes` with outcome NeedsF3.
+                needsF3 = totals[7],
                 sharesWritten,
                 mirrorsRevoked,
                 incompleteRoots = incompleteRoots.Take(50).ToArray(),
+                // Every row change of the run (planned, made, refused or failed) — `changes` lists the first
+                // MaxSampledChanges of them; the complete list is the per-row "plan:" / "reassign:" log lines.
+                changesTotal,
+                changesListed = sampled.Count,
                 changes = sampled,
                 attempt = context.Attempt,
             }, ResultJsonOptions));

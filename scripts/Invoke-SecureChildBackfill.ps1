@@ -16,7 +16,13 @@
     as the inline path (DATAVERSE-WRITE-PATH-ARCHITECTURE.md §3). The script only:
       - triggers the job through POST /api/admin/jobs/secure-child-reconciliation/trigger (SystemAdmin policy),
       - polls /history for the run's ResultJson, and repeats until a run reports passComplete,
-      - saves each run's report, and prints the planned / applied changes with each row's PREVIOUS owner,
+      - saves each run's report, and prints the planned / applied changes with each row's PREVIOUS owner. A report lists at
+        most 200 changes per run and counts all of them (changesTotal): when a run made or planned more, the script WARNS
+        and names the complete list (the BFF's per-row '[SECURE-CHILD-RECONCILE] plan:' / 'reassign:' log lines). The plan
+        includes grandchildren reached only through a row the same pass would move (the dry run plans to a fixpoint over
+        planned owners, as the apply writes to one). Every move the sweep plans or makes is INTO the Secure team: it never
+        takes a row out of isolation (owner round 24) — such a row is listed as NeedsF3, counted, and warned about; only
+        /unsecure-project (a Full Access holder or the record's creator) releases it,
       - for -Apply only: turns the App Service setting SecureChild__Reconciliation__WritesEnabled on for the run and OFF
         again afterwards (an app-setting change restarts the app; the script waits for /healthz).
 
@@ -33,7 +39,7 @@
         completes the work and changes nothing already done.
       - The reversal record: every re-own the BFF makes is logged BEFORE it is written
         ("[SECURE-CHILD-RECONCILE] reassign: <table> <id> owner <previous> -> team <target>"), and the saved reports carry
-        the first 200 changes per run with the previous owner.
+        the first 200 changes per run with the previous owner (with a warning when a run had more).
 
     ⚠️ The job runs on the App Service instance that serves the trigger, and its run history AND its place in the list (a
     cursor) are per instance. Run this against a single-instance app (dev), or scale to one instance for the backfill; and
@@ -147,7 +153,8 @@ function Invoke-Pass([string] $ExpectedMode) {
     # on to the next run, which begins at 1. Then every run must begin exactly where the previous one ended, the number of
     # secure records must not change, and the runs must add up to all of them — otherwise the pass is refused, never
     # reported as a clean pass over part of the list.
-    $totals = [ordered]@{ roots = 0; examined = 0; alreadyCorrect = 0; changed = 0; wouldChange = 0; refused = 0; failed = 0 }
+    $totals = [ordered]@{ roots = 0; examined = 0; alreadyCorrect = 0; changed = 0; wouldChange = 0; refused = 0; failed = 0;
+        needsF3 = 0; changesTotal = 0; changesListed = 0 }
     $incomplete = New-Object System.Collections.Generic.List[string]
     $covering = $false
     $total = $null
@@ -157,15 +164,25 @@ function Invoke-Pass([string] $ExpectedMode) {
         if ($r.mode -ne $ExpectedMode) {
             throw "The job ran in mode '$($r.mode)', expected '$ExpectedMode'. Check $WritesSetting on the App Service."
         }
-        if ($null -eq $r.PSObject.Properties['startPosition']) {
-            throw "Run $n's report has no startPosition: the deployed BFF predates this script. Deploy it first."
+        foreach ($required in 'startPosition', 'changesTotal', 'changesListed', 'needsF3') {
+            if ($null -eq $r.PSObject.Properties[$required]) {
+                throw "Run $n's report has no $($required): the deployed BFF predates this script. Deploy it first."
+            }
+        }
+        # The report LISTS at most 200 changes per run; changesTotal counts them all. Never let a shortened list pass for
+        # the whole plan: say how many are missing and where the complete list is.
+        if ($r.changesTotal -gt $r.changesListed) {
+            $message = ("Run {0} made or planned {1} row changes; its report lists only the first {2}. The complete list " +
+                "is the BFF log ('[SECURE-CHILD-RECONCILE] plan:' report-only, 'reassign:' with writes), or lower " +
+                "SecureChild__Reconciliation__MaxRootsPerRun so each run plans fewer.") -f $n, $r.changesTotal, $r.changesListed
+            Write-Warning $message
         }
         if (-not $covering) {
             if ($r.startPosition -ne 1) {
                 foreach ($c in @($r.changes)) {
                     if ($c) {
-                        Write-Host ("  (tail) {0,-12} {1} {2} {3}  previous={4} target={5} {6}" -f $c.outcome, $c.root, $c.table,
-                            $c.id, $c.previousOwner, $c.targetTeam, $c.detail)
+                        Write-Host ("  (tail) {0,-12} {1} {2} {3}  previous={4} target={5} {6}" -f $c.outcome, $c.root,
+                            $c.table, $c.id, $c.previousOwner, $c.targetTeam, $c.detail)
                     }
                 }
                 Write-Host ("Run {0}: began at secure record {1} of {2} — the tail of an earlier pass; not counted." -f $n,
@@ -186,7 +203,8 @@ function Invoke-Pass([string] $ExpectedMode) {
             throw $message
         }
         $totals.roots += $r.rootsInRun
-        foreach ($k in 'examined', 'alreadyCorrect', 'changed', 'wouldChange', 'refused', 'failed') { $totals[$k] += $r.$k }
+        foreach ($k in 'examined', 'alreadyCorrect', 'changed', 'wouldChange', 'refused', 'failed', 'needsF3',
+                'changesTotal', 'changesListed') { $totals[$k] += $r.$k }
         foreach ($i in @($r.incompleteRoots)) { if ($i) { $incomplete.Add($i) } }
         foreach ($c in @($r.changes)) {
             if ($c) {
@@ -228,6 +246,17 @@ $t = $pass.Totals
 Write-Host ""
 Write-Host ("Secure records: {0}  examined: {1}  already correct: {2}  changed: {3}  would change: {4}  refused: {5}  failed: {6}" -f `
     $t.roots, $t.examined, $t.alreadyCorrect, $t.changed, $t.wouldChange, $t.refused, $t.failed)
+if ($t.needsF3 -gt 0) {
+    $message = ("{0} related record(s) are NeedsF3: isolated, but every record they are filed under is ordinary. The " +
+        "sweep never takes a row out of isolation (owner round 24); they stay isolated until a Full Access holder or the " +
+        "record's creator unsecures it. Listed above with outcome NeedsF3.") -f $t.needsF3
+    Write-Warning $message
+}
+if ($t.changesTotal -gt $t.changesListed) {
+    $message = ("The reports list {0} of {1} row changes; the complete list is the BFF log ('[SECURE-CHILD-RECONCILE] plan:' / " +
+        "'reassign:' lines).") -f $t.changesListed, $t.changesTotal
+    Write-Warning $message
+}
 foreach ($i in $pass.Incomplete) { Write-Warning "Not fully reconciled: $i" }
 Write-Host "Reports: $OutputDirectory"
 

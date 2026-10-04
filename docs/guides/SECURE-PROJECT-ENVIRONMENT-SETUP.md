@@ -703,7 +703,10 @@ AND `sprk_relatedproject`, the `sprk_regarding{project|matter|workassignment}` l
 under a document of the record). **Never**: a row filed under nothing; a row of another record only; a per-user Direct or
 master thread; a work assignment or project filed under the record — it is a ROOT of its own (owner round 6; task 158),
 and neither it nor its own children are moved. A row is moved only across the isolation boundary: an ordinary row the
-rule would give another ordinary team is left alone. A row also filed under a SECOND secure record stays isolated
+rule would give another ordinary team is left alone. A row is taken OUT of isolation only by `/unsecure-project` (an
+F3 holder's act): provisioning and the sweep never release a child they find isolated — one the rule would hand an
+ordinary team stays isolated and is reported `needsF3` (owner round 24 item 2; round 6, "never auto-unsecure"). A row
+also filed under a SECOND secure record stays isolated
 (secure-if-any). A row filed under the record AND under one of its other children (an analysis of a document that also
 carries `sprk_regardingproject`; a communication regarding an event, stamped) is decided again after that child moves,
 until nothing moves — it never stays isolated because it was looked at before its parent.
@@ -739,13 +742,24 @@ BFF's `SystemAdmin` policy (the `/api/admin/jobs` routes), and for `-Apply` righ
   disabling the schedule.
 
 ```powershell
-# 1. DRY RUN (report-only; the default). Repeats until the pass completes, prints every planned change with the row's
-#    current owner, and saves each run's report to .\secure-child-backfill-<timestamp>\ .
+# 1. DRY RUN (report-only; the default). Repeats until the pass completes, prints the planned owner changes with each
+#    row's current owner, and saves each run's report to .\secure-child-backfill-<timestamp>\ .
+#    The plan is the apply's: it is decided to the same fixpoint over PLANNED owners, so a grandchild reached only
+#    through a row the pass would move (a to-do filed under an ordinary document of the record) is planned too. It
+#    assumes each write lands — a write Dataverse refuses shows up in the apply's report, not here. A run's report LISTS
+#    at most 200 changes (it COUNTS all of them, changesTotal); when a run planned more, the script warns, and the
+#    complete list is the BFF log's '[SECURE-CHILD-RECONCILE] plan:' lines (or lower MaxRootsPerRun and run again).
+#    The share changes follow the owner changes and are not listed per principal: a row moving in gets the record's
+#    sharees mirrored.
 .\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default
 
-# 2. Review the reports: every planned change is a related record of a secure record moving INTO the Secure team.
-#    A 'refused' row names a parent flagged secure but not isolated (fix that record first). A planned change of a
-#    document whose content sits in a SHARED SPE container is an escalation (task 148 trigger 1) — present it to the owner.
+# 2. Review the reports: every planned change is a related record of a secure record moving INTO the Secure team —
+#    the sweep never moves a row OUT (owner round 24 item 2). A 'NeedsF3' row (counted in needsF3; the script warns)
+#    is isolated but the rule would give it an ordinary team, because every record it is filed under is ordinary (for
+#    example a to-do filed only under another, ordinary record's document): it stays isolated, and only Unsecure — a
+#    Full Access holder or the record's creator — releases it. A 'refused' row names a parent flagged secure but not
+#    isolated (fix that record first). A planned change of a document whose content sits in a SHARED SPE container is
+#    an escalation (task 148 trigger 1) — present it to the owner.
 
 # 3. APPLY (writes): turns SecureChild__Reconciliation__WritesEnabled on (an app-setting change restarts the app), runs the
 #    pass to its end, then turns the setting OFF again.
@@ -753,14 +767,15 @@ BFF's `SystemAdmin` policy (the `/api/admin/jobs` routes), and for `-Apply` righ
   -Apply -ResourceGroup <rg> -AppName <bff-app-service>
 
 # 4. VERIFY (report-only): exit 0 only when a FULL pass — runs contiguous from the first secure record (startPosition 1),
-#    adding up to all of them — plans ZERO changes and refuses / fails nothing. A first run that begins mid-list (the tail
+#    adding up to all of them — plans ZERO changes and refuses / fails nothing (NeedsF3 rows are listed, and do not fail
+#    it: no sweep may move them). A first run that begins mid-list (the tail
 #    of an earlier pass) is printed but not counted; the script carries on to a pass that starts at the first record.
 .\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Verify
 ```
 
 Every re-own is logged before it is written (`[SECURE-CHILD-RECONCILE] reassign: <table> <id> owner <previous> -> team
-<target>`) — the reversal record: assign the row back to `<previous>` to undo it. A run's `ResultJson` samples the first
-200 changes with the same fields.
+<target>`) — the reversal record: assign the row back to `<previous>` to undo it. A run's `ResultJson` lists the first
+200 changes with the same fields and counts all of them (`changesTotal`, `changesListed`; `needsF3` for the held rows).
 
 **Manual live gate (dev, after deploy; owner-approved round 11, run by the main session).** Seed probe children under
 an ordinary project, matter and work assignment owned by an existing non-admin test user — a document via

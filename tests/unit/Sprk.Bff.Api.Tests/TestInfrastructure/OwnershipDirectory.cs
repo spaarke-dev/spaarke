@@ -257,11 +257,16 @@ internal sealed class OwnershipDirectory
         {
             "systemuser" => UsersMatching(conditions),
             "team" => _teams
-                .Where(t => Matches(conditions, "businessunitid", t.BusinessUnit)
+                .Where(t => Matches(conditions, "teamid", t.TeamId)
+                            && Matches(conditions, "businessunitid", t.BusinessUnit)
                             && Matches(conditions, "isdefault", t.IsDefault)
                             && Matches(conditions, "teamtype", t.TeamType)
                             && MatchesName(conditions, t.Name))
-                .Select(t => new Entity("team", t.TeamId)),
+                .Select(t => new Entity("team", t.TeamId)
+                {
+                    // Task 148 r2: a planned owner's business unit is read from its team row.
+                    ["businessunitid"] = new EntityReference("businessunit", t.BusinessUnit),
+                }),
             "businessunit" => _businessUnits
                 .Where(b => MatchesName(conditions, b.Name))
                 .Select(b => new Entity("businessunit", b.BusinessUnitId)),

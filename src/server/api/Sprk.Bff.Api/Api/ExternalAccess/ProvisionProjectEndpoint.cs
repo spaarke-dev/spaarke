@@ -554,7 +554,7 @@ public static class ProvisionProjectEndpoint
                 // whose child pass is incomplete completes the pass instead of returning 409") — nothing about the record
                 // itself is changed, and no share is written to it.
                 var pending = await secureChildren.ReconcileAsync(
-                    root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: false, ct);
+                    root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, ct);
                 if (!pending.IsComplete)
                     return ChildrenIncomplete(pending, root, recordId, logger, traceId);
 
@@ -816,7 +816,7 @@ public static class ProvisionProjectEndpoint
         async Task<(SecureChildPassSummary? Summary, IResult? Error)> ChildrenFollowAsync()
         {
             var pass = await secureChildren.ReconcileAsync(
-                root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: false, ct);
+                root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, ct);
             return pass.IsComplete
                 ? (SecureChildPassSummary.From(pass), null)
                 : (null, ChildrenIncomplete(pass, root, recordId, logger, traceId));
