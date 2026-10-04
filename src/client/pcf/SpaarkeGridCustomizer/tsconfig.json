@@ -25,5 +25,5 @@
     "outDir": "./out"
   },
   "include": ["./**/*.ts", "./**/*.tsx"],
-  "exclude": ["node_modules", "out", "generated"]
+  "exclude": ["node_modules", "out", "generated", "__tests__", "**/*.test.ts", "**/*.test.tsx", "jest.config.js"]
 }

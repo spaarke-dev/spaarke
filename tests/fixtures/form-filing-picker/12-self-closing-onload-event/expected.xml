@@ -27,13 +27,13 @@
                   </cell>
                 </row>
                 <row>
-                  <cell id="{30000000-0000-0000-0000-000000000004}">
+                  <cell id="{30000000-0000-0000-0000-000000000004}" visible="false">
                     <labels><label description="Regarding Record Type" languagecode="1033" /></labels>
                     <control id="sprk_regardingrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingrecordtype" />
                   </cell>
                 </row>
                 <row>
-                  <cell id="{30000000-0000-0000-0000-000000000005}">
+                  <cell id="{30000000-0000-0000-0000-000000000005}" visible="false">
                     <labels><label description="Regarding Record Name" languagecode="1033" /></labels>
                     <control id="sprk_regardingrecordname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordname" />
                   </cell>

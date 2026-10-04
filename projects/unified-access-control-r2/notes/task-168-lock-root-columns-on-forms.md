@@ -3,7 +3,8 @@
 > **Task**: 168 (#1107) · owner round 8 item 3 · amendments: owner rounds 9-10 (round 10 item 2 = add the picker to the analysis form, then lock)
 > **Branch**: `task/uac-r2-168`, from `task/uac-r2-156-c1-r2` with `work/unified-access-control-r2` merged in (clean merge, no conflicts). Base `144b36b51`.
 > **Rigor**: FULL (security edge, live form definitions, TEST-MODIFYING). Model tier sonnet @ high (run on Opus).
-> **Status (r2, 2026-10-04, branch `task/uac-r2-168-r2`)**: **completed-with-escalation.** The r1 verifier's two surviving seeds are pinned (picker fixture 14, inline "foreign section" case), the stale §3 line numbers, I-1 row, grid REPORT pointer and §10.7 jest wording are corrected, and a third first-class stop is raised: the raw pair and intermediate lookup controls that stay visible and editable after the picker (§11.2). Trigger 9 is unchanged: merge 156 first. See **§11**.
+> **Status (f1, 2026-10-04, branch `task/uac-r2-168-f1`)**: **completed-with-escalation.** Owner/main-session round 25 item 8 is built: the picker script hides every raw pair / non-root `sprk_regarding*` lookup control on its target forms and gives the To Do main form its missing hidden cells; the grid lock extends the existing `SpaarkeGridCustomizer` (v1.1.0) and is set on the two editable grids by the new `Set-SpaarkeGridCustomizerOnChildGrids.ps1`; the lock script's `PICKER_WITHOUT_PRESAVE` reads the form-level OnLoad only, and an unread in-scope form is `FORM_UNREADABLE`. §10.5's escalation text is corrected. Trigger 9 is unchanged (merge 156 first). One new first-class stop: the raw filing columns in the grids (§12.6). See **§12**.
+> **Status (r2, 2026-10-04, branch `task/uac-r2-168-r2`, superseded)**: **completed-with-escalation.** The r1 verifier's two surviving seeds are pinned (picker fixture 14, inline "foreign section" case), the stale §3 line numbers, I-1 row, grid REPORT pointer and §10.7 jest wording are corrected, and a third first-class stop is raised: the raw pair and intermediate lookup controls that stay visible and editable after the picker (§11.2). Trigger 9 is unchanged: merge 156 first. See **§11**.
 > **Status (r1, 2026-10-04, superseded)**: **completed-with-escalation.** The verifier's findings are closed in code, and owner round 19 items 1, 2 and 4 are delivered as two new operator scripts. Two first-class stops are reported: **trigger 9** (built on 156's unmerged branch; merge 156 first) and **round 19 item 3** (the grid has no OnRowLoad event). Live runs are the main session's gate, §10.4. See **§10**.
 > **Status (2026-10-03, superseded)**: **completed-with-escalation.** The code, fixtures, presave, tests and docs are done and green. Three escalation triggers fired on live dev and one blocker was found in the analysis amendment (below). The live `-Apply` is the main session's manual gate. As the script stands it REFUSES the full four-table apply until the owner decides on trigger 1.
 
@@ -20,11 +21,12 @@
 | I-1 row + 156 note "Resolved" line | ✅ |
 | **Trigger 1 FIRED**: three forms show the roots as visible, editable controls and host no filing picker | ✅ decided (round 19 item 1); `Add-RegardingFilingPickerToForms.ps1` adds the picker first (§10). Live gate pending. |
 | **Trigger 3 FIRED (literally)**: the Event main form hosts the RegardingResolver without the presave | ✅ decided (round 19 item 2); the same picker script adds the presave and hidden cells (§10). Live gate pending. |
-| **Trigger 5 FIRED**: the `sprk_event` and `sprk_analysis` home grids are EDITABLE Power Apps grids | 🔔 round 19 item 3 chose an OnRowLoad handler, but the grid has no OnRowLoad event, and such a handler would breach ADR-006. Stopped with an ADR-conflict report (§10.5); the script still reports the grids. |
+| **Trigger 5 FIRED**: the `sprk_event` and `sprk_analysis` home grids are EDITABLE Power Apps grids | ✅ decided (round 25 item 8): the existing `SpaarkeGridCustomizer` PCF (v1.1.0) cancels editing of the four roots, set on both grids by `Set-SpaarkeGridCustomizerOnChildGrids.ps1` (§12). Live gate pending. (r1 had stopped round 19 item 3: the grid has no OnRowLoad event.) |
 | **Round 10 item 2 (add the RegardingResolver to the analysis form) BLOCKED**: `sprk_analysis` has no `sprk_regardingrecordurl`, and the picker writes it unconditionally | ✅ decided (round 19 item 4): `Add-AnalysisRegardingRecordUrlColumn.ps1`, then the picker script, then the lock (§10). Live gate pending. |
 | **Trigger 9** (r1): built on task 156's unmerged branch | 🔔 reported (§10.5): merge 156 first, then 168. Re-checked r2: still unmerged; both trial merges conflict-free. |
-| **r2 stop**: raw pair / intermediate lookup controls stay visible and editable on event `90d2eff7` / `835b8ee8` and message `b58ec3d8` after the picker | 🔔 raised (§11.2): recommended fix (a), hide their cells through the picker script; not built (beyond round 19's text). |
-| Live `-Apply` | ⏳ manual gate (**§10.4**, which supersedes §8): presave → schema script → picker script → lock → checks. |
+| **r2 stop**: raw pair / intermediate lookup controls stay visible and editable on event `90d2eff7` / `835b8ee8` and message `b58ec3d8` after the picker | ✅ decided (round 25 item 8 (a)) and built in f1: the picker script hides them (picker host excepted); its `-Verify` fails on a visible one (§12). Live gate pending. |
+| **f1 stop**: the raw pair / non-root lookup COLUMNS stay inline-editable in the two editable grids (round 25 item 8 names the four roots for the grid) | 🔔 raised (§12.6) with the complete fix: the same customizer's locked set widens to the raw filing columns. |
+| Live `-Apply` | ⏳ manual gate (**§12.5**, which supersedes §10.4 and §8): presave → schema script → picker script → lock → customizer PCF deploy → grid script → checks. |
 
 ---
 
@@ -399,17 +401,18 @@ Live gate results: _pending (main session)_.
      - a practitioner write-up (Diana Birkelbach, "Power Apps Grid API: disabling", 2025-01) reports that the Power Apps grid lets a user move between cells by keyboard and edit them without OnRecordSelect firing;
      - grid OnSave cancellation is not documented.
   2. **A handler of that kind is a new framework-free JS web resource**, which ADR-006 forbids.
-- **Proposed path: C (pivot to comply), with a new component.** The ADR-006-compliant and documented mechanism is a **Power Apps grid customizer control**: a PCF named in the grid's "Customizer control" property (Microsoft Learn, "Customize the editable grid control").
+- **Proposed path: C (pivot to comply), by EXTENDING an existing component** *(corrected in f1, verifier item 4: the r1 text proposed "one new PCF" and never mentioned that the component already exists)*. The ADR-006-compliant and documented mechanism is a **Power Apps grid customizer control**: a PCF named in the grid's "Customizer control" property (Microsoft Learn, "Customize the editable grid control"). The repo already has one: **`src/client/pcf/SpaarkeGridCustomizer`** (`sprk_Spaarke.Controls.SpaarkeGridCustomizer`, a general-purpose grid customizer with a per-column renderer registry; until f1 it had only renderer overrides, and a read-only check of the live `customcontroldefaultconfigs` shows it set on neither the `sprk_event` nor the `sprk_analysis` grid). The option is to extend it with `cellEditorOverrides` and a renderer override, and set it on the two grids by a dry-run / apply / verify script (CLAUDE.md §11: extend, do not add).
   - Its `cellEditorOverrides` cancel editing for the four root columns, the documented `stopEditing(true)` pattern. That pattern is per cell, so it also covers keyboard navigation.
   - Its `cellRendererOverrides` mark those cells read-only.
   - Every other column keeps inline editing, which is round 19's intent.
   - It is set on the `sprk_event` and `sprk_analysis` grid control configuration (`customcontroldefaultconfig`, property `GridCustomizerControlFullName`) by a dry run / `-Apply` / `-Verify` script.
 - **Rationale**: it is the only documented grid hook that acts on the editor itself. The same practitioner thread reports one residual for the `stopEditing` pattern: the Delete key clearing a cell. It must be checked on dev, with a renderer-side guard if it reproduces. The server's reconciliation job still repairs any root changed outside the forms, as the owner accepted in round 8 item 3.
-- **Impact if accepted**: one new PCF under `src/client/pcf/` (React 16 platform library, build:prod, jest), one grid-configuration script, and a deploy gate. No BFF change.
+- **Impact if accepted**: no new PCF; the existing `SpaarkeGridCustomizer` gains the editor and renderer overrides (version bump, build:prod, jest), plus one grid-configuration script and a deploy gate. No BFF change. *(Corrected in f1; the r1 text said "one new PCF under `src/client/pcf/`".)*
 - **Alternatives considered and rejected**:
   - an OnRecordSelect web resource: keyboard bypass, and it breaks ADR-006 (path A would document a known-bypassable lock);
   - turning off grid editing: round 19 rejected it.
-- **Why this part is STOPPED, not built**: the decided mechanism cannot exist, and the replacement is a new component that changes the decision's substance (a PCF in place of a handler). CLAUDE.md §6.5 and the round-12 rule make that a first-class stop for the decision-maker. Item 3 is also not among this round's 16 verifier findings. The lock script keeps REPORTING the two grids until it is built.
+- **Why this part is STOPPED, not built**: the decided mechanism cannot exist, and the replacement changes the decision's mechanism (a grid customizer PCF in place of a handler) *(corrected in f1: the r1 text called it "a new component"; it is an extension of the existing `SpaarkeGridCustomizer`)*. CLAUDE.md §6.5 and the round-12 rule make that a first-class stop for the decision-maker. Item 3 is also not among this round's 16 verifier findings. The lock script keeps REPORTING the two grids until it is built.
+- **DECIDED (owner/main-session round 25 item 8, 2026-10-04):** exactly the corrected option: extend `SpaarkeGridCustomizer` (cellEditorOverrides cancel editing of the four roots; cellRendererOverrides mark them read-only), set on the two grids by a dry-run / `-Apply` / `-Verify` script; no new PCF, no web-resource handler. Built in f1 (§12).
 
 **Not a trigger, recorded:** §5.5 (the To Do main form has no `sprk_regardingservicerequest` cell) is still open, because round 19 does not name the to-do form. The picker script already closes it if pointed at that form. `Add-RegardingFilingPickerToForms.ps1 -Forms eca59df4-1364-f111-ab0c-7ced8ddc4cc6` would add only the missing hidden cell(s). It is not in the default target list; that is the main session's call.
 
@@ -538,3 +541,141 @@ Branch `task/uac-r2-168-r2`, from `task/uac-r2-168-r1` (`0dccaaed8`). Input: the
 Working-tree SHA-256 (CRLF) after r2: `Lock-CoreAncestorStampColumnsOnForms.ps1` `8940e905…`; `Add-RegardingFilingPickerToForms.ps1` `2eda6187…`; `Add-AnalysisRegardingRecordUrlColumn.ps1` `0323532f…` (unchanged since r1; the committed r1 bytes hash to `0323532f…` in CRLF, so the `8fc0f591…` recorded in §10.7 was not the committed file's hash); `sprk_todo_regarding_presave.js` unchanged.
 
 Scope against `0dccaaed8` (r1): one new fixture folder, one inline case and one REPORT string in the scripts, the I-1 row's task-168 parenthetical, this note and the POML. No change under `src/**`, under `tests/**` other than the new fixture, or under `.claude/**`; no new web resource, waiver, column or component.
+
+## 12. Round f1 (2026-10-04): owner/main-session round 25 item 8 and the r2 verifier's findings
+
+Branch `task/uac-r2-168-f1`, from `task/uac-r2-168-r2` (`4ef3ca04e`). Binding inputs: **round 25 item 8** (`notes/session27-owner-decisions-and-research.md` on `work/unified-access-control-r2` @ `73296ce14`, read in full; rounds 26-29 decide tasks 143/147/150/166 and name no 168 item), the r2 verifier's 15 items, and `NOTE-FROM-MAIN.md` (rounds 15/16/19/21: re-read; 15/16/21 decide tasks 162-167, round 19 was built in r1; nothing new for 168). Round 25 item 8, verbatim in substance: (a) hide every raw pair / non-root `sprk_regarding*` lookup control on the round-19 target forms (the picker's host excepted; `-Verify` fails on a visible one); the grid lock EXTENDS the existing `src/client/pcf/SpaarkeGridCustomizer` (cellEditorOverrides cancel editing for the four roots; cellRendererOverrides mark them read-only), set on the `sprk_event` / `sprk_analysis` grid configuration by a dry-run/apply/verify script, no new PCF, no web-resource handler (ADR-006); the To Do main form gets its missing `sprk_regardingservicerequest` hidden cell via the picker script; the `PICKER_WITHOUT_PRESAVE` fail-open probe is closed and seeded.
+
+### 12.1 What changed, per verifier item
+
+| # | Item | Closure |
+|---|---|---|
+| 1 | Round 25 (a): hide the raw pair / non-root lookup controls | **Built.** `Add-RegardingFilingPickerToForms.ps1` sets `visible="false"` on the `<cell>` of every VISIBLE control bound to a pair column (`sprk_regardingrecordtype`, `…id`, `…name`, `…url`, `…number`) or a `sprk_regarding*` LOOKUP of the table (live metadata) that is not one of the four roots. The picker's host control (the control whose `uniqueid` a RegardingResolver `controlDescription` names) is excepted; the four roots stay visible and are DISABLED by the lock script. A pure start-tag text edit at XmlReader positions (`Hide-CellsByIndex`, `Set-CellTagHidden`); the parse check allows exactly one change on an original node — `visible` becoming exactly `"false"` on a cell that holds a raw filing control (`Test-AllowedCellHide`) — and its post-condition fails on any raw control still visible. `-Verify` names each visible one (`GAP … raw filing control '…' (…) is VISIBLE`). New refusals: `RAW_CONTROL_HOSTS_PCF` (hiding would hide another PCF), `RAW_CONTROL_NOT_IN_CELL`, and, live, `LIBRARY_SHOWS` (a library on the form, or the presave, names a raw filing column AND calls `setVisible`; the mirror of the lock script's `LIBRARY_UNLOCKS`). `MANAGED_FORM` now also counts a visible raw control as "needs a change". Hidden controls stay ENABLED, so the RegardingResolver's `setValue` writes on a re-file and a clear are submitted as before. |
+| 2 | Round 25: the grid lock extends `SpaarkeGridCustomizer` | **Built.** PCF v1.0.0 → **v1.1.0**. v1.0.0 did not implement the grid's customizer contract at all (a class with `getRendererOverrides()` and no `init`, a `data-set` instead of the `EventName` property), so the existing renderer registry never ran; v1.1.0 implements the documented contract (`ReactControl`; `init` fires `context.factory.fireEvent(EventName, { cellRendererOverrides, cellEditorOverrides })`). New `customizers/RootColumnLock.ts`: for the four roots (whole name, case-insensitive) the editor override calls `stopEditing(true)` and marks the column definition `editable = false`; the renderer override sets `columnEditable = false` and keeps the default renderer; registered for EVERY column data type. `customizers/GridCustomizer.ts` builds the customizer (a PCF entry module may export only the control class, pcf-1023). The existing regarding-link registry is kept, ported to the documented `(props, rendererParams)` signature; where it cannot resolve the target it now returns null (the default renderer) instead of replacing the cell with a plain span. Version bumped in ControlManifest.Input.xml, `CUSTOMIZER_VERSION` / the index.ts header, `Solution/solution.xml`, `Solution/Controls/…/ControlManifest.xml` (copied from the build output with `bundle.js` and `styles.css`), plus `Solution/pack.ps1` and `package.json`. `npm run build:prod` succeeded (bundle 13.4 KB). New jest suite (26 tests; the package had none — code-quality-r3 D7-05). New script **`scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1`** (dry run / `-Apply` / `-Verify` / `-RestoreFrom` / `-SelfTest`) adds `<GridCustomizerControlFullName static="true" type="SingleLine.Text">sprk_Spaarke.Controls.SpaarkeGridCustomizer</GridCustomizerControlFullName>` to every `Microsoft.PowerApps.PowerAppsOneGrid` control (form factors 0, 1, 2) of the two grids' `customcontroldefaultconfig.controldescriptionxml` — the shape a live, maker-configured grid carries (read-only check of the dev `mailbox` grid). `controldescriptionjson` is platform-derived (47 parameters, including manifest defaults, vs 28 in the XML), so it is not written; the read-back and `-Verify` require it to carry the customizer too, which fails loudly if the platform does not regenerate it. Refusals: `NO_CONFIG`, `MANAGED_CONFIG`, `NO_POWERAPPS_GRID`, `OTHER_CUSTOMIZER`, `TRANSFORM_PARSE`, `PREREQ_MISSING` (customcontrol absent or below v1.1.0), `CONFIG_CHANGED`. `-Apply` also adds the customcontrol to SpaarkeMaster (`AddSolutionComponent`, componenttype 66, the body `Assemble-SpaarkeMasterSolution.ps1` uses) when absent, and `-Verify` requires it: the grid configuration ships with the tables, so the customizer must ship too. `docs/procedures/production-release.md` listed SpaarkeGridCustomizer under **Excluded PCFs**; it now ships (row added, exclusion removed). |
+| 3 | Round 25: the To Do main form's missing hidden cell; close and seed the PICKER_WITHOUT_PRESAVE probe | **Built.** `eca59df4` is in the picker script's default `-Forms`. On the live XML it gains exactly two hidden cells: `sprk_regardingservicerequest` and `sprk_regardingagreement` (also a regarding lookup of `sprk_todo` with no control; the script adds every missing one, by design). It already hosts the picker and the presave, and every raw control on it is already hidden, so nothing else changes. The probe: items 5 and 6 below. |
+| 4 | §10.5's escalation proposed "one new PCF" and never mentioned SpaarkeGridCustomizer | **Corrected in place** in §10.5 and in the POML r1 `<escalations>` (each correction marked "corrected in f1"); round 25 then decided exactly the corrected option. |
+| 5 | Fail-open: `//events/event` at any depth | **Fixed.** `Get-FormRefusals` reads `/form/events/event` (the path the picker script uses). New fixture **15-refuse-presave-only-in-nested-cell-events** (fixture 12 plus a web-resource cell whose own nested `<events>` holds the presave) expects `PICKER_WITHOUT_PRESAVE`; seed L1 (back to `//events/event`) fails exactly it with the verifier's message ("expected refusal PICKER_WITHOUT_PRESAVE, got []"). |
+| 6 | Handler-name and enabled filters unpinned | **Pinned.** Fixtures **16-refuse-only-another-onload-handler** (only `Spaarke.SmartTodo.HideTabNav.onLoad` registered), **17-refuse-presave-handler-disabled** (`enabled="false"`) and, for the event-name filter, **18-refuse-presave-on-form-onsave-only** (the presave on the form-level `onsave` event). Seeds L2 / L3 / L4 (the verifier's two mutations, and the `onload` filter replaced by `$true`) each fail exactly one of them. |
+| 7 | Fail-open: an empty in-scope formxml was skipped | **Fixed.** New pure `Get-FormReadRefusal`: an in-scope form (type 2, 7, 12) with no formxml is `FORM_UNREADABLE` (a refusal: `-Verify` exit 1, dry run / `-Apply` exit 2); another type is reported only. Five inline cases (types 2, 7, 12, a Quick View 6, and a positive control). Seeds L5 / L6 go red. |
+| 8 | Merge order (trigger 9) | **Not closable on this branch.** Re-checked 2026-10-04: `9544c3b01` is still not an ancestor of `work/unified-access-control-r2` (now `73296ce14`); TASK-INDEX shows 156 `[open]`. Merge 156 first, then 168; the trial merge result is in §12.4. |
+| 9-12 | Verifications of r2 | Recorded; no change needed. |
+| 13 | Criterion 10 only against base `144b36b51` | Unchanged until 156 merges (§12.4). f1's own diff touches no `src/server/**`, no RegardingResolver or CommunicationConnections source, no `src/client/shared/**`, no web resource and no ArchTests file; it changes one existing PCF (SpaarkeGridCustomizer), which round 25 decided. |
+| 14 | ADR-038: the presave guard's filters and nested lookup | Closed by items 5 and 6 (seeds L1-L4). |
+| 15 | Live gate | Pending (main session): §12.5, which supersedes §10.4. |
+
+**Placement / reuse (CLAUDE.md §10/§11).** No BFF change. No Dataverse plugin (ADR-002). No new web resource or form script, and no new PCF: the grid lock extends the existing customizer (ADR-006, round 25). New surface, with the three questions:
+- `scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1` — *existing*: no script in `scripts/` touches `customcontroldefaultconfigs` or `GridCustomizerControlFullName` (Grep); the lock script edits form XML only. *Extension*: folding it into the lock script would mix an attribute-only form transform with a grid-configuration insertion and a solution-membership write, each with its own snapshot and restore. *Cost of nothing*: the two editable grids keep letting a person type a secure root onto a filed row inline (round 25 item 8 unmet).
+- jest + ts-jest + jest-environment-jsdom + @types/jest + scheduler as devDependencies of SpaarkeGridCustomizer — test-only (React and Fluent are platform libraries at runtime, ADR-022); without them the lock cannot be tested or seeded (ADR-038).
+- `AddSolutionComponent` in `-Apply` — the same call and body the assembler uses; without it the grid configuration ships in SpaarkeMaster naming a customizer that was on the release's exclusion list.
+
+### 12.2 Live runs (spaarkedev1, read-only, 2026-10-04)
+
+- Picker dry run: prerequisites present; PLAN for `eaf22dcb`, `90d2eff7`, `835b8ee8`, `b58ec3d8` and the To Do `eca59df4` (two hidden cells); `PAIR_INCOMPLETE` for the Analysis form until the schema apply → **exit 2** (expected). No `LIBRARY_SHOWS` (the To Do form's four libraries were read: none calls `setVisible`).
+- Picker `-Verify`: **75 gaps + 1 refusal → exit 1**; 30 of the gaps are VISIBLE raw filing controls (14 on `90d2eff7`, 10 on `835b8ee8`, 6 on `b58ec3d8`), and 2 are the To Do form's missing cells.
+- Lock dry run → exit 2 (the three `NO_FILING_PICKER`); lock `-Verify` → **exit 1, 16 unlocked controls, 3 refusals** (no `FORM_UNREADABLE`: every form returned XML); its grid REPORT now names the grid script.
+- Grid dry run: PLAN on form factors 0/1/2 of both grids and SpaarkeMaster membership; `PREREQ_MISSING` (dev holds customcontrol v1.0.0) → **exit 2** (expected until the PCF is deployed). Grid `-Verify`: **13 gaps + 1 refusal → exit 1** (6 XML and 6 JSON form-factor gaps, and SpaarkeMaster membership).
+- **Offline end-state proof on the live XML of all six target forms** (read-only GET; the analysis specs given `sprk_regardingrecordurl` as after the schema apply): picker transform → lock refusals → lock transform → parse checks.
+
+| Form | Picker adds | Raw cells hidden | Picker parse | Lock refusals | Roots locked | Complete after lock | Idempotent |
+|---|---|---|---|---|---|---|---|
+| event main `eaf22dcb` | 18 | 0 | ok | none | 4 | yes | yes |
+| event modal `90d2eff7` | 22 | 14 | ok | none | 4 | yes | yes |
+| Assign Work `835b8ee8` | 18 | 10 | ok | none | 4 | yes | yes |
+| Message `b58ec3d8` | 15 | 6 | ok | none | 4 | yes | yes |
+| Analysis main `d408a721` | 15 | 0 | ok | none | 4 | yes | yes |
+| To Do main `eca59df4` | 2 | 0 | ok | none | 4 | yes | yes |
+
+- **What can re-show a hidden control at runtime.** Form libraries: guarded by `LIBRARY_SHOWS`. EventFormController (on `90d2eff7` / `835b8ee8`, customcontrol v1.0.6, no source in the repo; its bundle read from `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/…EventFormControllerSolution…zip`, manifest v1.0.6): `FieldVisibilityHandler` resets only the fields in `DEFAULT_FIELD_STATES` (no regarding column) and shows the fields an event type marks required, which it reads with `?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields` — columns that do not exist on dev `sprk_eventtype_ref` (only `sprk_fieldconfigjson` exists; 1 of 17 event types has one, holding only `sectionDefaults`). No regarding column is named anywhere in the bundle. So no live path re-shows a hidden raw control.
+
+### 12.3 Seeds (f1): each red, then restored
+
+Script seeds ran on scratch copies (the repo files were never modified; SHA-256 compared before and after each); jest seeds edited the file in place and restored it byte-identical (SHA-256 compared, file touched).
+
+| Seed | Mutation | Red |
+|---|---|---|
+| L1 | `/form/events/event` → `//events/event` | only fixture 15 ("expected refusal PICKER_WITHOUT_PRESAVE, got []") |
+| L2 | drop `-and $_.GetAttribute('enabled') -ine 'false'` | only fixture 17 |
+| L3 | `functionName -ceq $PresaveOnLoad` → `-ne ''` | only fixture 16 |
+| L4 | the `onload` name filter → `$true` | only fixture 18 |
+| L5 | `Get-FormReadRefusal` always `$null` | the three in-scope read cases |
+| L6 | the in-scope type gate removed | inline "Quick View (6) only reported" |
+| P14 | the hide step skipped | fixtures 01, 04, 05, 11, 12, 13, 15 and four inline cases |
+| P15 | roots treated as raw filing columns | 01, 03, 04, 05, 11, 12, 13, 15 |
+| P16 | any `sprk_regarding*` spec (not only lookups) raw | only fixture 15 (its Text column `sprk_regardingsummary`) |
+| P17 | the picker-host exception removed | 01-05, 11-13, 15 and the inline positive control |
+| P19 | `visible="true"` added to rather than rewritten | only fixture 15 (duplicate attribute, reported per case) |
+| P20 | `RAW_CONTROL_HOSTS_PCF` removed | only fixture 16 |
+| P21 | `RAW_CONTROL_NOT_IN_CELL` removed | only fixture 17 |
+| P22 | `Test-AllowedCellHide` allows any cell | inline "a non-raw cell hidden" |
+| P23 | the exact `"false"` comparison loosened | inline "raw cell visible set to a non-false value" |
+| P24 | the "still visible" post-condition removed | inline "a raw filing cell left visible" |
+| P25 | `Test-LibraryShows` without the `setVisible` test | inline "raw column, no setVisible" |
+| P26 | `Test-LibraryShows` by substring | inline "setVisible, near-miss column only" |
+| P27 | `Test-FilingComplete` ignores visible raw controls | only fixture 18 (managed form whose only change is the hide) |
+| G1 | `OTHER_CUSTOMIZER` removed | only grid fixture 05 |
+| G2 | `NO_POWERAPPS_GRID` removed | only 06 |
+| G3 | `MANAGED_CONFIG` removed | only 07 |
+| G4 | any extra child accepted | inline "customizer added to a non-grid control" |
+| G5 | the exact-parameter check removed | inline "customizer added with other attributes" |
+| G6 | the post-condition removed | inline "one form factor left without it" |
+| G7 | the already-set tracking removed (always insert) | 01-04 |
+| G8 | the JSON half of the verify predicate removed | the two JSON inline cases |
+| G9 | `-Verify` read fault exits 0 | live, unreachable URL: guarded exit 1, seeded exit 0 |
+| G10 | the v1.1.0 prerequisite removed | live dry run (read-only): guarded exit 2, seeded exit 0 |
+| J1 | `stopEditing(true)` removed | jest: 7 failed |
+| J2 | case-sensitive match | jest: 1 failed (the mixed-case test) |
+| J3 | prefix/suffix match | jest: 3 failed (the near-miss negatives) |
+| J4 | `columnEditable = false` removed | jest: 7 failed |
+| J5 | `fireEvent` removed from `init` | jest: 1 failed |
+| J6 | the editor override registered for Lookup only | jest: 1 failed ("every data type …") |
+| J7 | the renderer root check removed | jest: 7 failed |
+| J8 / J9 | `column.editable = false` removed (renderer / editor) | jest: 4 failed each |
+
+Mode exclusivity of the new script: `-Apply -Verify`, `-Verify -SelfTest`, `-SelfTest -Apply` and `-RestoreFrom -Apply` each throw "separate modes", exit 1, before any read.
+
+### 12.4 Tests (f1) and merge order
+
+See the execution record in the POML for the final counts (filled in after the full runs).
+
+### 12.5 Manual live gate (main session, dev, in this order; supersedes §10.4)
+
+1. **(a)** No other formxml / grid-configuration writer is running (task 138's retirement script, `Deploy-TodoSubgridsToElevenParentForms.ps1`).
+2. **(b)** Presave v1.4.0 to the EXISTING web resource `sprk_todo_regarding_presave` and publish (as §10.4 (b)).
+3. **(c)** Schema script: dry run, `-Apply`, `-Verify` (exit 0).
+4. **(d)** Picker script: dry run (no refusal), `-Apply -SnapshotPath .\filing-picker-snapshot-dev.json`, `-Verify` (exit 0). It now also hides the raw controls and covers the To Do main form.
+5. **(e)** Lock script: dry run (exit 0, no refusal), `-Apply -SnapshotPath .\form-lock-snapshot-dev.json`, `-Verify` (exit 0).
+6. **(f)** Deploy SpaarkeGridCustomizer **v1.1.0** (pcf-deploy: `Solution/pack.ps1`, import `SpaarkeGridCustomizerSolution_v1.1.0.zip`, publish). Confirm the customcontrol reads version 1.1.0.
+7. **(g)** Grid script: dry run (exit 0), `-Apply -SnapshotPath .\grid-customizer-snapshot-dev.json`, `-Verify` (exit 0 — this also proves the platform regenerated `controldescriptionjson`).
+8. **(h)** Checks with `uac.child.user@demo.spaarke.com`: §10.4 (f) (b)-(l), plus:
+   - **(m)** on the Event main, modal, Assign Work, Message and Analysis main forms no pair column and no non-root regarding lookup is visible; the picker shows the filing; a re-file through the picker (UPDATE) writes the new pair and stamps (the hidden controls are enabled);
+   - **(n)** in the `sprk_event` and `sprk_analysis` home grids (add the four root columns with "Edit columns"): double-click, Enter, F2, typing, Delete, Backspace, Ctrl+V and a range paste on a root cell each leave its value unchanged on read-back; another column still edits inline; the console shows `[SpaarkeGridCustomizer v1.1.0] customizer registered`; a regarding name cell still renders.
+9. **(i)** On any failure, restore in REVERSE order — grid `-RestoreFrom`, lock `-RestoreFrom`, picker `-RestoreFrom` (each refuses if a later change touched its rows) — and STOP (trigger 7). A root changed through any grid path in (n) is a failure of (n).
+
+```
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1 -Apply
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1 -Verify
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1 -Apply -SnapshotPath .\filing-picker-snapshot-dev.json
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1 -Verify
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 -Apply -SnapshotPath .\form-lock-snapshot-dev.json
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 -Verify
+pwsh src/client/pcf/SpaarkeGridCustomizer/Solution/pack.ps1
+pac solution import --path src/client/pcf/SpaarkeGridCustomizer/Solution/bin/SpaarkeGridCustomizerSolution_v1.1.0.zip --publish-changes
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1 -Apply -SnapshotPath .\grid-customizer-snapshot-dev.json
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1 -Verify
+```
+
+Live gate results: _pending (main session)_.
+
+### 12.6 🔔 First-class stop (f1): the raw filing COLUMNS stay inline-editable in the two grids
+
+- **Fact.** Round 25 item 8 locks the four ROOT columns in the `sprk_event` / `sprk_analysis` grids. The same grids let a person add `sprk_regardingrecordtype` / `sprk_regardingrecordid` (the pair) or a non-root `sprk_regarding*` lookup with "Edit columns" and edit it inline (no system view shows them today, §2.4). Typing a pair onto a filed row re-files it under a root on the job's next pass — the shape item 8 (a) closes on the forms.
+- **Why stopped.** Item 8 names the four roots for the grid in the same sentence that names the raw pair for the forms; widening the grid lock is a scope change to a decided item (CLAUDE.md §6), and no decision answers it.
+- **Complete fix (recommended).** The grid lock covers the same column set the forms hide: `RootColumnLock` gains the raw filing columns (the pair columns and every non-root `sprk_regarding*` lookup of the grid's table), by name, with the same editor/renderer overrides; jest cases and seeds as for the roots; v1.1.1, build:prod, the same grid script (no change). No new component.
+
+### 12.7 `.claude/**` edits needed
+
+None.

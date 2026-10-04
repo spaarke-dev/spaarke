@@ -1,0 +1,34 @@
+{
+  "CustomControls": [
+    {
+      "FormFactor": 0,
+      "Name": "Microsoft.PowerApps.PowerAppsOneGrid",
+      "Parameters": [
+        {
+          "Name": "GridCustomizerControlFullName",
+          "Value": {
+            "Usage": "Input",
+            "Static": true,
+            "Type": "SingleLine.Text",
+            "Value": "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
+          }
+        }
+      ]
+    },
+    {
+      "FormFactor": 2,
+      "Name": "Microsoft.PowerApps.PowerAppsOneGrid",
+      "Parameters": [
+        {
+          "Name": "GridCustomizerControlFullName",
+          "Value": {
+            "Usage": "Input",
+            "Static": true,
+            "Type": "SingleLine.Text",
+            "Value": "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -39,7 +39,10 @@
                               locking it would remove the only form input that files the record under a root.
                               Owner round 19 item 1: Add-RegardingFilingPickerToForms.ps1 adds the picker first;
       PICKER_WITHOUT_PRESAVE  (trigger 3) a form that hosts the RegardingResolver AND a locked-column control
-                              but does not register Spaarke.SmartTodo.RegardingPreSave.onLoad;
+                              but does not register Spaarke.SmartTodo.RegardingPreSave.onLoad as an ENABLED
+                              handler of the FORM-LEVEL OnLoad event (/form/events; a cell's own nested
+                              <events>, another OnLoad handler, or the handler on another event does not count);
+      FORM_UNREADABLE         an in-scope form (type 2, 7 or 12) whose formxml comes back empty;
       WORKFLOW_REFERENCE      a business rule (workflow category 2) or business process flow (category 4)
                               whose xaml or clientdata references a locked column;
       LIBRARY_UNLOCKS         a form library whose content names a locked column AND calls setDisabled;
@@ -307,7 +310,10 @@ function Get-FormRefusals([string]$FormXml, [string[]]$Columns, [int]$FormType =
             $refusals += @{ Code = 'NO_FILING_PICKER'; Detail = "visible editable control(s) $(($openVisible | ForEach-Object { $_.Id }) -join ', ') and no RegardingResolver or CommunicationConnections on the form (task 168 trigger 1; owner round 19 item 1: run Add-RegardingFilingPickerToForms.ps1 first)" }
         }
         if ($resolvers.Count -gt 0 -and $controls.Count -gt 0) {
-            $presave = @($doc.SelectNodes('//events/event') | Where-Object { $_.GetAttribute('name') -ieq 'onload' } |
+            # FORM-LEVEL OnLoad only (/form/events, the path Add-RegardingFilingPickerToForms.ps1 uses): a cell may
+            # carry its own nested <events> (the live Analysis main form's web-resource cell does), and a handler
+            # there is not a form OnLoad registration (task 168 f1, verifier item 5; fixture 15 pins it).
+            $presave = @($doc.SelectNodes('/form/events/event') | Where-Object { $_.GetAttribute('name') -ieq 'onload' } |
                 ForEach-Object { $_.SelectNodes('.//Handler') } |
                 Where-Object { $_.GetAttribute('functionName') -ceq $PresaveOnLoad -and $_.GetAttribute('enabled') -ine 'false' })
             if ($presave.Count -eq 0) {
@@ -376,6 +382,18 @@ function Get-TransformRefusals([string]$Before, [string]$After, [string[]]$Colum
         $out += @{ Code = $code; Detail = $p }
     }
     return $out
+}
+
+<#
+    A form the scan cannot read. An in-scope form (type 2, 7 or 12) whose formxml comes back empty is a refusal
+    (FORM_UNREADABLE), so -Verify fails and -Apply refuses: an unread form proves nothing about its controls
+    (ADR-003; POML: "any fault while reading forms ... is a FAILED check"). A form of another type is only
+    reported, as it would be with XML. Returns @{ Code; Detail } or $null. Pure; -SelfTest pins it.
+#>
+function Get-FormReadRefusal([string]$FormXml, [int]$FormType) {
+    if (-not [string]::IsNullOrWhiteSpace($FormXml)) { return $null }
+    if ($InScopeFormTypes -notcontains $FormType) { return $null }
+    return @{ Code = 'FORM_UNREADABLE'; Detail = "type $FormType form returned no formxml; an unread form proves nothing (task 168 f1, verifier item 7)" }
 }
 
 function Test-WorkflowReferencesLocked([string]$Xaml, [string]$ClientData, [string[]]$Columns) {
@@ -482,6 +500,22 @@ if ($SelfTest) {
         else { $failures++; Write-Host ("  FAIL  {0,-44} {1} (want [{2}], got [{3}])" -f 'inline', $t.Name, $t.Want, $got) -ForegroundColor Red }
     }
     $inline += $pairs
+    # An in-scope form returned with no formxml (task 168 f1, verifier item 7): FORM_UNREADABLE for types 2, 7 and
+    # 12, so -Verify cannot pass on a form it never read; another type is only reported.
+    $reads = @(
+        @{ Name = 'read: empty formxml, Main (2)'; Xml = ''; Type = 2; Want = 'FORM_UNREADABLE' },
+        @{ Name = 'read: empty formxml, Quick Create (7)'; Xml = $null; Type = 7; Want = 'FORM_UNREADABLE' },
+        @{ Name = 'read: blank formxml, Main - Interactive (12)'; Xml = "  `r`n"; Type = 12; Want = 'FORM_UNREADABLE' },
+        @{ Name = 'read: empty formxml, Quick View (6) only reported'; Xml = ''; Type = 6; Want = '' },
+        @{ Name = 'read: a Main form with XML (positive control)'; Xml = $pb; Type = 2; Want = '' }
+    )
+    foreach ($t in $reads) {
+        $r = Get-FormReadRefusal $t.Xml $t.Type
+        $got = if ($null -eq $r) { '' } else { $r.Code }
+        if ($got -ceq $t.Want) { Write-Host ("  PASS  {0,-44} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-44} {1} (want [{2}], got [{3}])" -f 'inline', $t.Name, $t.Want, $got) -ForegroundColor Red }
+    }
+    $inline += $reads
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
     Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($inline.Count) inline check(s)." -ForegroundColor Green
     exit 0
@@ -673,7 +707,9 @@ try {
         foreach ($f in $forms.value) {
             $xml = [string]$f.formxml
             $where = "$table form '$($f.name)' ($($f.formid)) type $($f.type)"
-            if ([string]::IsNullOrEmpty($xml)) { continue }
+            $unreadable = Get-FormReadRefusal $xml ([int]$f.type)
+            if ($null -ne $unreadable) { $refusals.Add(@{ Code = $unreadable.Code; Where = $where; Detail = $unreadable.Detail }); continue }
+            if ([string]::IsNullOrWhiteSpace($xml)) { Write-Info "REPORT ONLY (type $($f.type) is out of scope): $where returned no formxml"; continue }
             try { $doc = ConvertTo-FormDocument $xml }
             catch { $refusals.Add(@{ Code = 'TRANSFORM_PARSE'; Where = $where; Detail = "live form XML is not well-formed: $($_.Exception.Message)" }); continue }
             $controls = @(Get-LockedControls $doc $present)
@@ -720,7 +756,7 @@ try {
         $grid = Invoke-Dv -Endpoint "customcontroldefaultconfigs?`$select=controldescriptionxml&`$filter=primaryentitytypecode eq '$table'"
         foreach ($g in $grid.value) {
             if ("$($g.controldescriptionxml)" -match '<EnableEditing[^>]*>\s*yes\s*</EnableEditing>') {
-                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 19 item 3 is escalated (the grid has no OnRowLoad event; task 168 note section 10.5); not changed by this script"
+                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 25 item 8: Set-SpaarkeGridCustomizerOnChildGrids.ps1 sets the SpaarkeGridCustomizer (root columns not editable) on it, and its -Verify checks it; not changed by this script"
             }
         }
     }

@@ -31,9 +31,19 @@
         ...url, ...number) and every sprk_regarding* lookup of the table that has NO control on the form — the
         presave stages values only onto attributes that are on the form (presave header, SRFR-043);
       - the form library sprk_todo_regarding_presave and the OnLoad handler
-        Spaarke.SmartTodo.RegardingPreSave.onLoad (pass execution context), as on the To Do main form.
+        Spaarke.SmartTodo.RegardingPreSave.onLoad (pass execution context), as on the To Do main form;
+      - (owner round 25 item 8 (a)) visible="false" on the <cell> of every VISIBLE control bound to a raw filing
+        column: a pair column (sprk_regardingrecordtype, ...id, ...name, ...url, ...number) or a sprk_regarding*
+        lookup of the table that is not one of the four roots. The picker's own host control is excepted; the four
+        roots are left to Lock-CoreAncestorStampColumnsOnForms.ps1 (disabled, still visible). A typed pair, or an
+        intermediate on a row with no pair, would otherwise re-file the row without the picker. Hidden controls stay
+        enabled, so the RegardingResolver's setValue writes on a re-file and a clear are submitted as before. This
+        is the ONE attribute change the parse check allows on an original node.
     New ids are derived from the form id (a stable hash), so a re-run produces identical bytes, and a form that is
     already complete is left byte-identical ("nothing to do").
+
+    The To Do main form (round 25 item 8) is a target too: it already hosts the picker and the presave, and gains
+    only its missing hidden sprk_regardingservicerequest cell.
 
     Fail closed (ADR-003). Each of these REFUSES (exit 2), names the form, and writes nothing:
       FORM_NOT_FOUND          a target form id is not in the environment, or belongs to another table;
@@ -45,6 +55,11 @@
       PRESAVE_DISABLED        the presave OnLoad handler is registered but disabled (a maker's choice this script
                               does not override);
       NO_VISIBLE_TAB          no visible tab with a <sections> element to place the picker in;
+      RAW_CONTROL_HOSTS_PCF   a visible raw filing control hosts another named custom control (hiding its cell
+                              would hide that control too);
+      RAW_CONTROL_NOT_IN_CELL a visible raw filing control whose parent is not a <cell>;
+      LIBRARY_SHOWS           (live) a library on the form (or the presave) names a raw filing column of the table
+                              AND calls setVisible, so it could re-show a hidden control at runtime;
       PREREQ_MISSING          (live) the web resource sprk_todo_regarding_presave or the customcontrol
                               sprk_Spaarke.Controls.RegardingResolver is not in the environment;
       TRANSFORM_PARSE         the result is not well-formed, removed or changed an original node, added anything
@@ -66,9 +81,10 @@
 
 .PARAMETER Verify
     Read-only. Exit 0 only when every target form hosts the RegardingResolver for its table, registers the
-    enabled presave OnLoad handler and its library, and carries a control for every pair column and every
-    sprk_regarding* lookup of its table, and no refusal case is present. Otherwise exit 1 naming each gap. Any read
-    fault is a FAILED check (exit 1).
+    enabled presave OnLoad handler and its library, carries a control for every pair column and every
+    sprk_regarding* lookup of its table, shows NO raw filing control (each one's cell, section or tab is hidden; the
+    picker's host excepted), and no refusal case is present. Otherwise exit 1 naming each gap. Any read fault is a
+    FAILED check (exit 1).
 
 .PARAMETER RestoreFrom
     Path to a snapshot written by -Apply. Refuses (exit 2) if the snapshot's environment differs from
@@ -136,7 +152,9 @@ param(
         '90d2eff7-6703-f111-8407-7ced8d1dc988',   # sprk_event         Event modal form            (round 19 item 1)
         '835b8ee8-ba1d-f111-88b3-7ced8d1dc988',   # sprk_event         Event Assign Work main form (round 19 item 1)
         'b58ec3d8-0982-f111-8076-7ced8ddc4cc6',   # sprk_communication Message main form          (round 19 item 1)
-        'd408a721-77d7-f011-8406-7c1e525abd8b'    # sprk_analysis      Analysis main form          (round 19 item 4)
+        'd408a721-77d7-f011-8406-7c1e525abd8b',   # sprk_analysis      Analysis main form          (round 19 item 4)
+        'eca59df4-1364-f111-ab0c-7ced8ddc4cc6'    # sprk_todo          To Do main form             (round 25 item 8: its missing
+                                                  #                    sprk_regardingservicerequest hidden cell)
     ),
 
     [Parameter(Mandatory = $false)]
@@ -160,6 +178,11 @@ $RecordTypeColumn = 'sprk_regardingrecordtype'
 # The ADR-024 pair the RegardingResolver writes on every pick and clear: a table missing any of these cannot host it.
 $RequiredPairColumns = @('sprk_regardingrecordtype', 'sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl')
 $PairTextColumns = @('sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl', 'sprk_regardingrecordnumber')
+# CoreAncestorResolver.CoreAncestorLookups: the four roots. Lock-CoreAncestorStampColumnsOnForms.ps1 DISABLES their
+# controls; this script never touches them. Every OTHER sprk_regarding* lookup and every pair column is a raw filing
+# input: typing a pair (or an intermediate on a row with no pair) re-files the row without the picker, so its
+# controls are HIDDEN (owner round 25 item 8 (a)), the picker's own host control excepted.
+$RootColumns = @('sprk_regardingproject', 'sprk_regardingmatter', 'sprk_regardingworkassignment', 'sprk_regardingservicerequest')
 $PickerName = 'sprk_Spaarke.Controls.RegardingResolver'
 $PickerPattern = '(?i)(^|_)Spaarke\.Controls\.RegardingResolver$'
 $PresaveLibrary = 'sprk_todo_regarding_presave'
@@ -205,6 +228,130 @@ function Get-NeededColumns([object[]]$ColumnSpecs) {
 }
 
 <#
+    A raw filing column of this table (owner round 25 item 8 (a)): a pair column (sprk_regardingrecordtype and the
+    four pair text columns), or a sprk_regarding* LOOKUP of the table that is not one of the four roots. Compared
+    case-insensitively and as a whole value; a lookup counts only when the table's live metadata says it is one.
+#>
+function Test-IsRawFilingColumn([string]$Name, [object[]]$ColumnSpecs) {
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    $n = $Name.Trim().ToLowerInvariant()
+    if ($n -ceq $RecordTypeColumn -or $PairTextColumns -contains $n) { return $true }
+    if ($RootColumns -contains $n) { return $false }
+    return @($ColumnSpecs | Where-Object { $_.Kind -eq 'Lookup' -and $_.Name.ToLowerInvariant() -ceq $n -and $n.StartsWith('sprk_regarding', [System.StringComparison]::Ordinal) }).Count -gt 0
+}
+
+function Test-ElementHidden([System.Xml.XmlNode]$Node) {
+    # Accessor methods, not properties (PowerShell's XML adapter shadows .Name with a name="" attribute).
+    $n = $Node.get_ParentNode()
+    while ($null -ne $n -and $n.get_NodeType() -eq [System.Xml.XmlNodeType]::Element) {
+        $v = $n.GetAttribute('visible')
+        if ($v -and $v.Trim() -ieq 'false') { return $true }
+        $n = $n.get_ParentNode()
+    }
+    return $false
+}
+
+<#
+    The raw filing controls on a parsed form, the picker's host control(s) excepted: @{ Node; Id; Column; Hidden;
+    CellIndex (document-order index among all <cell> elements, or -1 when the parent is not a <cell>);
+    HostsPcf (the named custom controls it hosts, if any) }.
+#>
+function Get-RawFilingControls([System.Xml.XmlDocument]$Doc, [object[]]$ColumnSpecs) {
+    $hostUids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $hosted = @{}
+    foreach ($cd in $Doc.SelectNodes('//controlDescription')) {
+        $for = $cd.GetAttribute('forControl')
+        $named = @($cd.SelectNodes('.//customControl') | ForEach-Object { $_.GetAttribute('name') } | Where-Object { $_ } | Sort-Object -Unique)
+        if ($named.Count -eq 0 -or [string]::IsNullOrEmpty($for)) { continue }
+        if (@($named | Where-Object { $_ -match $PickerPattern }).Count -gt 0) { [void]$hostUids.Add($for) }
+        $hosted[$for.ToLowerInvariant()] = $named
+    }
+    $cells = @($Doc.SelectNodes('//cell'))
+    $cellIndex = [System.Collections.Generic.Dictionary[object, int]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+    for ($i = 0; $i -lt $cells.Count; $i++) { $cellIndex[[object]$cells[$i]] = $i }
+    $out = @()
+    foreach ($c in $Doc.SelectNodes('//control')) {
+        if (-not (Test-IsRawFilingColumn $c.GetAttribute('datafieldname') $ColumnSpecs)) { continue }
+        $uid = $c.GetAttribute('uniqueid')
+        if ($uid -and $hostUids.Contains($uid)) { continue }   # the picker's host: never hidden
+        $parent = $c.get_ParentNode()
+        $idx = if ($parent.get_LocalName() -ceq 'cell' -and $cellIndex.ContainsKey([object]$parent)) { $cellIndex[[object]$parent] } else { -1 }
+        $out += [pscustomobject]@{
+            Node      = $c
+            Id        = $c.GetAttribute('id')
+            Column    = $c.GetAttribute('datafieldname')
+            Hidden    = (Test-ElementHidden $c)
+            CellIndex = $idx
+            HostsPcf  = if ($uid -and $hosted.ContainsKey($uid.ToLowerInvariant())) { @($hosted[$uid.ToLowerInvariant()]) } else { @() }
+        }
+    }
+    return $out
+}
+
+<#
+    A form library that could re-show a hidden raw control at runtime: its content names one of the form's raw
+    filing columns (case-insensitive) AND calls setVisible. The mirror of the lock script's LIBRARY_UNLOCKS.
+#>
+function Test-LibraryShows([string]$Content, [string[]]$Columns) {
+    if ([string]::IsNullOrEmpty($Content) -or $Content -notmatch 'setVisible') { return $false }
+    foreach ($c in $Columns) {
+        if ([regex]::IsMatch($Content, "(?<![A-Za-z0-9_])$([regex]::Escape($c))(?![A-Za-z0-9_])", 'IgnoreCase')) { return $true }
+    }
+    return $false
+}
+
+<#
+    Edit one <cell ...> start tag so the cell is hidden: rewrite an existing visible value (for example "true") to
+    "false", else add visible="false". Only cells of VISIBLE raw controls reach here, so an existing value is never
+    "false" (a cell with visible="false" hides its control); the transform is idempotent because a second run finds
+    no visible raw control.
+#>
+function Set-CellTagHidden([string]$Tag) {
+    $m = [regex]::Match($Tag, '(?<=\s)visible\s*=\s*(?:"([^"]*)"|''([^'']*)'')', 'IgnoreCase')
+    if ($m.Success) {
+        return $Tag.Substring(0, $m.Index) + 'visible="false"' + $Tag.Substring($m.Index + $m.Length)
+    }
+    $close = [regex]::Match($Tag, '\s*/?>$')
+    return $Tag.Substring(0, $close.Index) + ' visible="false"' + $Tag.Substring($close.Index)
+}
+
+<#
+    Hide the <cell> elements at the given document-order indexes, as start-tag text edits (never a
+    re-serialization). Positions come from an XmlReader (line/column), as in Get-TopLevelElementSpan; edits run
+    from the last offset to the first so the earlier offsets stay valid.
+#>
+function Hide-CellsByIndex([string]$Xml, [int[]]$Indexes) {
+    if (@($Indexes).Count -eq 0) { return $Xml }
+    $want = [System.Collections.Generic.HashSet[int]]::new([int[]]@($Indexes))
+    $lineStarts = [System.Collections.Generic.List[int]]::new(); $lineStarts.Add(0)
+    for ($i = 0; $i -lt $Xml.Length; $i++) { if ($Xml[$i] -eq "`n") { $lineStarts.Add($i + 1) } }
+    $settings = [System.Xml.XmlReaderSettings]::new()
+    $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
+    $offsets = [System.Collections.Generic.List[int]]::new()
+    $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($Xml), $settings)
+    try {
+        $n = -1
+        while ($reader.Read()) {
+            if ($reader.NodeType -ne [System.Xml.XmlNodeType]::Element -or $reader.LocalName -cne 'cell') { continue }
+            $n++
+            if (-not $want.Contains($n)) { continue }
+            $li = [System.Xml.IXmlLineInfo]$reader
+            $offsets.Add($lineStarts[$li.LineNumber - 1] + $li.LinePosition - 2)
+        }
+    }
+    finally { $reader.Dispose() }
+    if ($offsets.Count -ne $want.Count) { throw "TRANSFORM_PARSE: found $($offsets.Count) of $($want.Count) cells to hide" }
+    $tagPattern = [regex]::new('\G<cell\b(?:[^>"'']|"[^"]*"|''[^'']*'')*?/?>')
+    foreach ($at in ($offsets | Sort-Object -Descending)) {
+        $m = $tagPattern.Match($Xml, $at)
+        if (-not $m.Success) { throw "TRANSFORM_PARSE: no <cell> start tag at offset $at" }
+        $Xml = $Xml.Substring(0, $at) + (Set-CellTagHidden $m.Value) + $Xml.Substring($at + $m.Length)
+    }
+    return $Xml
+}
+
+<#
     What the form carries today. Pickers: each RegardingResolver controlDescription with its forControl, the entity
     parameter values and the datafieldname of the control it is hosted by.
 #>
@@ -232,13 +379,20 @@ function Get-FilingState([System.Xml.XmlDocument]$Doc, [object[]]$ColumnSpecs) {
         $d = $c.GetAttribute('datafieldname'); if ($d) { $bound[$d.ToLowerInvariant()] = $true }
     }
     $missing = @(Get-NeededColumns $ColumnSpecs | Where-Object { -not $bound.ContainsKey($_.Name.ToLowerInvariant()) })
+    $rawVisible = @(Get-RawFilingControls $Doc $ColumnSpecs | Where-Object { -not $_.Hidden })
     return [pscustomobject]@{
         Pickers         = $pickers
         HandlerCount    = $handlers.Count
         HandlerDisabled = @($handlers | Where-Object { $_.GetAttribute('enabled') -ieq 'false' }).Count -gt 0
         HasLibrary      = $library
         Missing         = $missing
+        RawVisible      = $rawVisible
     }
+}
+
+function Test-FilingComplete([object]$State) {
+    return ($State.Pickers.Count -gt 0) -and ($State.HandlerCount -gt 0) -and $State.HasLibrary -and
+        ($State.Missing.Count -eq 0) -and ($State.RawVisible.Count -eq 0)
 }
 
 <#
@@ -266,9 +420,18 @@ function Get-PickerRefusals([string]$FormXml, [string]$Table, [object[]]$ColumnS
     if ($state.HandlerDisabled) {
         $out += @{ Code = 'PRESAVE_DISABLED'; Detail = "$PresaveOnLoad is registered but disabled; a maker disabled it, so this script does not re-enable it (owner decision)" }
     }
-    $complete = ($state.Pickers.Count -gt 0) -and ($state.HandlerCount -gt 0) -and $state.HasLibrary -and ($state.Missing.Count -eq 0)
+    foreach ($r in $state.RawVisible) {
+        # Hiding a cell that hosts another PCF would hide that PCF too: an owner decision, never a silent edit.
+        if (@($r.HostsPcf).Count -gt 0) {
+            $out += @{ Code = 'RAW_CONTROL_HOSTS_PCF'; Detail = "visible raw filing control '$($r.Id)' ($($r.Column)) hosts $(@($r.HostsPcf) -join ', '); hiding it would hide that control too" }
+        }
+        if ($r.CellIndex -lt 0) {
+            $out += @{ Code = 'RAW_CONTROL_NOT_IN_CELL'; Detail = "visible raw filing control '$($r.Id)' ($($r.Column)) is not inside a <cell>, so it cannot be hidden by its cell" }
+        }
+    }
+    $complete = Test-FilingComplete $state
     if ($IsManaged -and -not $complete) {
-        $out += @{ Code = 'MANAGED_FORM'; Detail = 'managed form that needs the picker, cells or presave; change it in its owning solution' }
+        $out += @{ Code = 'MANAGED_FORM'; Detail = 'managed form that needs the picker, cells, presave or hidden raw controls; change it in its owning solution' }
     }
     if ($state.Pickers.Count -eq 0 -or $state.Missing.Count -gt 0) {
         $tab = @($doc.SelectNodes('/form/tabs/tab') | Where-Object { $_.GetAttribute('visible') -ine 'false' -and $_.SelectSingleNode('./columns/column/sections') })
@@ -375,6 +538,16 @@ function Add-FilingPicker([string]$FormXml, [string]$Table, [string]$FormId, [ob
     $taken = [System.Collections.Generic.HashSet[string]]::new()
     $fid = $FormId.Trim('{', '}').ToLowerInvariant()
 
+    # 0. Hide the cell of every VISIBLE raw filing control (owner round 25 item 8 (a)): the pair columns and the
+    #    non-root sprk_regarding* lookups, the picker's host excepted. Done first, on the original text; the steps
+    #    below re-find their positions in the edited text. Hidden controls stay ENABLED, so the RegardingResolver's
+    #    setValue writes on a re-file and a clear are submitted exactly as today.
+    $hideIdx = @($state.RawVisible | ForEach-Object { [int]$_.CellIndex } | Sort-Object -Unique)
+    if ($hideIdx.Count -gt 0) {
+        $xml = Hide-CellsByIndex $xml $hideIdx
+        foreach ($r in $state.RawVisible) { $added.Add("hidden cell of control '$($r.Id)' ($($r.Column))") }
+    }
+
     # 1. Sections: the picker (only when none is hosted) and the hidden cells, first in the first visible tab.
     $sections = ''
     if ($state.Pickers.Count -eq 0) {
@@ -472,16 +645,31 @@ function Add-FilingPicker([string]$FormXml, [string]$Table, [string]$FormId, [ob
     same value. An original node is paired with a result node only when they match this way, so a changed original
     shows up as "missing" plus "unexpected", never as a silent pairing.
 #>
-function Test-ShallowMatch([System.Xml.XmlNode]$X, [System.Xml.XmlNode]$Y) {
+function Test-ShallowMatch([System.Xml.XmlNode]$X, [System.Xml.XmlNode]$Y, [object[]]$ColumnSpecs = @()) {
     if ($X.get_NodeType() -ne $Y.get_NodeType() -or $X.get_LocalName() -cne $Y.get_LocalName()) { return $false }
     if ($X.get_NodeType() -ne [System.Xml.XmlNodeType]::Element) { return ($X.get_Value() -ceq $Y.get_Value()) }
-    $xa = @($X.get_Attributes()); $ya = @($Y.get_Attributes())
+    $hideOk = Test-AllowedCellHide $X $Y $ColumnSpecs
+    $xa = @($X.get_Attributes() | Where-Object { -not ($hideOk -and $_.get_Name() -ceq 'visible') })
+    $ya = @($Y.get_Attributes() | Where-Object { -not ($hideOk -and $_.get_Name() -ceq 'visible') })
     if ($xa.Count -ne $ya.Count) { return $false }
     foreach ($at in $xa) {
         $other = $Y.GetAttributeNode($at.get_Name())
         if ($null -eq $other -or $other.get_Value() -cne $at.get_Value()) { return $false }
     }
     return $true
+}
+
+<#
+    The ONE attribute change the parse check allows on an original node (owner round 25 item 8 (a)): a <cell> that
+    holds a raw filing control (not the picker's host) whose visible became exactly "false". Every other attribute
+    of that cell must still match (Test-ShallowMatch compares them).
+#>
+function Test-AllowedCellHide([System.Xml.XmlNode]$X, [System.Xml.XmlNode]$Y, [object[]]$ColumnSpecs) {
+    if ($X.get_LocalName() -cne 'cell' -or $Y.get_LocalName() -cne 'cell') { return $false }
+    if ($Y.GetAttribute('visible') -cne 'false' -or $X.GetAttribute('visible') -ceq 'false') { return $false }
+    $ownerDoc = $Y.get_OwnerDocument()
+    $raw = @(Get-RawFilingControls $ownerDoc $ColumnSpecs | Where-Object { [object]::ReferenceEquals($_.Node.get_ParentNode(), $Y) })
+    return $raw.Count -gt 0
 }
 
 function Test-PickerTransform([string]$Before, [string]$After, [string]$Table, [string]$FormId, [object[]]$ColumnSpecs) {
@@ -524,7 +712,9 @@ function Test-PickerTransform([string]$Before, [string]$After, [string]$Table, [
         $ay = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
         foreach ($at in $x.get_Attributes()) { $ax[$at.get_Name()] = $at.get_Value() }
         foreach ($at in $y.get_Attributes()) { $ay[$at.get_Name()] = $at.get_Value() }
+        $hideOk = Test-AllowedCellHide $x $y $ColumnSpecs
         foreach ($k in (@($ax.Keys) + @($ay.Keys) | Sort-Object -Unique -CaseSensitive)) {
+            if ($hideOk -and $k -ceq 'visible') { continue }   # the one allowed change: a raw filing cell hidden
             if (-not $ax.ContainsKey($k) -or -not $ay.ContainsKey($k) -or $ax[$k] -cne $ay[$k]) {
                 $problems.Add("TRANSFORM_PARSE: attribute '$k' changed on <$xName>")
             }
@@ -533,7 +723,7 @@ function Test-PickerTransform([string]$Before, [string]$After, [string]$Table, [
         $xc = @($x.get_ChildNodes()); $yc = @($y.get_ChildNodes())
         $i = 0
         foreach ($c in $yc) {
-            if ($i -lt $xc.Count -and (Test-ShallowMatch $xc[$i] $c)) {
+            if ($i -lt $xc.Count -and (Test-ShallowMatch $xc[$i] $c $ColumnSpecs)) {
                 $stack.Push(@($xc[$i], $c)); $i++
             }
             elseif (& $isAllowed $c) { continue }
@@ -548,6 +738,7 @@ function Test-PickerTransform([string]$Before, [string]$After, [string]$Table, [
         if ($state.HandlerCount -eq 0) { $problems.Add("TRANSFORM_PARSE: no $PresaveOnLoad handler after the transform") }
         if (-not $state.HasLibrary) { $problems.Add("TRANSFORM_PARSE: no $PresaveLibrary library after the transform") }
         if ($state.Missing.Count -gt 0) { $problems.Add("TRANSFORM_PARSE: still no control for $(($state.Missing | ForEach-Object { $_.Name }) -join ', ')") }
+        if ($state.RawVisible.Count -gt 0) { $problems.Add("TRANSFORM_PARSE: raw filing control(s) still visible: $(($state.RawVisible | ForEach-Object { "$($_.Id) ($($_.Column))" }) -join ', ')") }
     }
     return @($problems)
 }
@@ -585,15 +776,17 @@ if ($SelfTest) {
         }
         elseif ($refusals.Count -gt 0) { $ok = $false; $why = "unexpected refusal(s): $(($refusals | ForEach-Object { $_.Code }) -join ',')" }
         else {
-            $result = Add-FilingPicker $in $meta.table $meta.formId $specs
-            $expected = [System.IO.File]::ReadAllText((Join-Path $case.FullName 'expected.xml'))
-            $again = (Add-FilingPicker $result.Xml $meta.table $meta.formId $specs).Xml
-            $problems = if ($result.Xml -ceq $in) { @() } else { @(Test-PickerTransform $in $result.Xml $meta.table $meta.formId $specs) }
-            if ($problems.Count -gt 0) { $ok = $false; $why = "parse check: $($problems -join '; ')" }
-            elseif ($result.Xml -cne $expected) { $ok = $false; $why = 'output differs from expected.xml' }
-            elseif ($again -cne $result.Xml) { $ok = $false; $why = 'not idempotent: a second transform changed the output' }
-            elseif ($result.Added.Count -eq 0) { $why = 'nothing to do (unchanged)' }
-            else { $why = "added $($result.Added.Count): $($result.Added -join '; ')" }
+            try {
+                $result = Add-FilingPicker $in $meta.table $meta.formId $specs
+                $expected = [System.IO.File]::ReadAllText((Join-Path $case.FullName 'expected.xml'))
+                $problems = if ($result.Xml -ceq $in) { @() } else { @(Test-PickerTransform $in $result.Xml $meta.table $meta.formId $specs) }
+                if ($problems.Count -gt 0) { $ok = $false; $why = "parse check: $($problems -join '; ')" }
+                elseif ($result.Xml -cne $expected) { $ok = $false; $why = 'output differs from expected.xml' }
+                elseif ((Add-FilingPicker $result.Xml $meta.table $meta.formId $specs).Xml -cne $result.Xml) { $ok = $false; $why = 'not idempotent: a second transform changed the output' }
+                elseif ($result.Added.Count -eq 0) { $why = 'nothing to do (unchanged)' }
+                else { $why = "added $($result.Added.Count): $($result.Added -join '; ')" }
+            }
+            catch { $ok = $false; $why = "transform threw: $($_.Exception.Message)" }
         }
         if ($ok) { Write-Host ("  PASS  {0,-40} {1}" -f $case.Name, $why) -ForegroundColor Green }
         else { $failures++; Write-Host ("  FAIL  {0,-40} {1}" -f $case.Name, $why) -ForegroundColor Red }
@@ -609,8 +802,11 @@ if ($SelfTest) {
         [pscustomobject]@{ Name = 'sprk_regardingrecordurl'; Kind = 'Url'; Label = 'Regarding Record URL' },
         [pscustomobject]@{ Name = 'sprk_regardingmatter'; Kind = 'Lookup'; Label = 'Regarding Matter' }
     )
+    # Cell c2 holds a VISIBLE raw filing control (sprk_regardingrecordid), so the real transform also hides it
+    # (owner round 25 item 8 (a)) and the cases below can prove the one allowed attribute change is held tight.
     $base = '<form><tabs><tab name="general"><columns><column><sections><section name="main" id="s1"><rows><row><cell id="c1">' +
-            '<control id="sprk_name" datafieldname="sprk_name" /></cell></row></rows></section></sections></column></columns></tab></tabs>' +
+            '<control id="sprk_name" datafieldname="sprk_name" /></cell></row><row><cell id="c2">' +
+            '<control id="sprk_regardingrecordid" datafieldname="sprk_regardingrecordid" /></cell></row></rows></section></sections></column></columns></tab></tabs>' +
             '<controlDescriptions /></form>'
     $good = (Add-FilingPicker $base 'sprk_event' $fid $specs).Xml
     $pairs = @(
@@ -623,7 +819,12 @@ if ($SelfTest) {
         @{ Name = 'parse: picker names another entity'; After = $good.Replace('>sprk_event</entity>', '>sprk_todo</entity>'); Want = $true },
         @{ Name = 'parse: a needed hidden cell dropped'; After = [regex]::Replace($good, '<row><cell id="[^"]*" locklevel="0" colspan="1" rowspan="1"><labels><label description="Regarding Matter"[^/]*/></labels><control[^>]*/></cell></row>', ''); Want = $true },
         @{ Name = 'parse: presave handler dropped'; After = [regex]::Replace($good, '<events>.*</events>', ''); Want = $true },
-        @{ Name = 'parse: result not well-formed'; After = $good.Replace('</form>', ''); Want = $true }
+        @{ Name = 'parse: result not well-formed'; After = $good.Replace('</form>', ''); Want = $true },
+        # The hide (owner round 25 item 8 (a)): exactly visible="false", only on a raw filing control's cell.
+        @{ Name = 'parse: a raw filing cell left visible'; After = $good.Replace('<cell id="c2" visible="false">', '<cell id="c2">'); Want = $true },
+        @{ Name = 'parse: a non-raw cell hidden'; After = $good.Replace('<cell id="c1">', '<cell id="c1" visible="false">'); Want = $true },
+        @{ Name = 'parse: raw cell hidden + another attribute'; After = $good.Replace('<cell id="c2" visible="false">', '<cell id="c2" visible="false" colspan="2">'); Want = $true },
+        @{ Name = 'parse: raw cell visible set to a non-false value'; After = $good.Replace('<cell id="c2" visible="false">', '<cell id="c2" visible="False">'); Want = $true }
     )
     foreach ($t in $pairs) {
         $problems = @(Test-PickerTransform $base $t.After 'sprk_event' $fid $specs)
@@ -632,8 +833,18 @@ if ($SelfTest) {
         if ($bit -eq $t.Want) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
         else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (problems: {2})" -f 'inline', $t.Name, ($problems -join '; ')) -ForegroundColor Red }
     }
+    # LIBRARY_SHOWS (live check, pure predicate): a library naming a raw filing column AND calling setVisible.
+    $libs = @(
+        @{ Name = 'library: setVisible + raw column'; Got = (Test-LibraryShows 'formContext.getControl("sprk_regardingRecordName").setVisible(true);' @('sprk_regardingrecordname')); Want = $true },
+        @{ Name = 'library: raw column, no setVisible'; Got = (Test-LibraryShows 'getAttribute("sprk_regardingrecordname").getValue();' @('sprk_regardingrecordname')); Want = $false },
+        @{ Name = 'library: setVisible, near-miss column only'; Got = (Test-LibraryShows 'getControl("sprk_regardingrecordnamex").setVisible(true);' @('sprk_regardingrecordname')); Want = $false }
+    )
+    foreach ($t in $libs) {
+        if ($t.Got -eq $t.Want) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got {2})" -f 'inline', $t.Name, $t.Got) -ForegroundColor Red }
+    }
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
-    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count) inline check(s)." -ForegroundColor Green
+    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $libs.Count) inline check(s)." -ForegroundColor Green
     exit 0
 }
 
@@ -775,6 +986,7 @@ try {
     else { Write-Info "customcontrol $PickerName present" }
 
     $specCache = @{}
+    $libCache = @{}
     foreach ($formId in $Forms) {
         $f = Invoke-Dv -Endpoint "systemforms($formId)?`$select=formid,name,type,objecttypecode,ismanaged,formxml" -AllowNotFound
         if ($null -eq $f) { $refusals.Add(@{ Code = 'FORM_NOT_FOUND'; Where = $formId; Detail = 'no such systemform in this environment' }); continue }
@@ -795,6 +1007,22 @@ try {
         if ($state.HandlerCount -eq 0) { $gaps.Add("$where : $PresaveOnLoad not registered") }
         if (-not $state.HasLibrary) { $gaps.Add("$where : library $PresaveLibrary not on the form") }
         foreach ($m in $state.Missing) { $gaps.Add("$where : no control for $($m.Name)") }
+        foreach ($r in $state.RawVisible) { $gaps.Add("$where : raw filing control '$($r.Id)' ($($r.Column)) is VISIBLE") }
+
+        # Form libraries that could re-show a hidden raw control at runtime (the presave is scanned too: it is
+        # added to every target form). The raw columns are this table's, whether or not the form has them yet.
+        $rawColumns = @(@($RecordTypeColumn) + $PairTextColumns + @($specs | Where-Object { Test-IsRawFilingColumn $_.Name $specs } | ForEach-Object { $_.Name }) | Sort-Object -Unique)
+        $libNames = @(@($doc.SelectNodes('/form/formLibraries/Library') | ForEach-Object { $_.GetAttribute('name') }) + @($PresaveLibrary) | Where-Object { $_ } | Sort-Object -Unique)
+        foreach ($ln in $libNames) {
+            if (-not $libCache.ContainsKey($ln)) {
+                $lw = Invoke-Dv -Endpoint "webresourceset?`$select=name,content&`$filter=name eq '$($ln -replace "'", "''")'"
+                if (@($lw.value).Count -eq 0) { throw "form library '$ln' (used by $where) was not found" }
+                $libCache[$ln] = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String([string]$lw.value[0].content))
+            }
+            if (Test-LibraryShows $libCache[$ln] $rawColumns) {
+                $refusals.Add(@{ Code = 'LIBRARY_SHOWS'; Where = "$where library '$ln'"; Detail = 'names a raw filing column and calls setVisible, so it could re-show a hidden raw control (owner decision)' })
+            }
+        }
 
         $result = Add-FilingPicker $xml $table ([string]$f.formid) $specs
         if ($result.Added.Count -eq 0) { Write-Info "complete — nothing to do"; continue }
@@ -819,7 +1047,7 @@ foreach ($r in $refusals) { Write-Host ("   REFUSAL {0}: {1} — {2}" -f $r.Code
 
 if ($Verify) {
     if ($gaps.Count -eq 0 -and $refusals.Count -eq 0) {
-        Write-Host "`nVERIFY PASS: every target form hosts the RegardingResolver for its table, registers the presave, and carries every pair and lookup column." -ForegroundColor Green
+        Write-Host "`nVERIFY PASS: every target form hosts the RegardingResolver for its table, registers the presave, carries every pair and lookup column, and shows no raw filing control." -ForegroundColor Green
         exit 0
     }
     foreach ($g in $gaps) { Write-Host "   GAP $g" -ForegroundColor Red }
@@ -885,7 +1113,7 @@ foreach ($sf in $snapshot.forms) {
     $sf['formXmlStored'] = $stored
     $sf['sha256Stored'] = Get-Sha256 $stored
     $state = Get-FilingState (ConvertTo-FormDocument $stored) $specCache[$sf.table]
-    if ($state.Pickers.Count -eq 0 -or $state.HandlerCount -eq 0 -or -not $state.HasLibrary -or $state.Missing.Count -gt 0) { $incomplete += "form '$($sf.name)' ($($sf.formid))" }
+    if (-not (Test-FilingComplete $state)) { $incomplete += "form '$($sf.name)' ($($sf.formid))" }
 }
 $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $SnapshotPath -Encoding utf8
 Write-Done "snapshot updated with the stored form XML: $SnapshotPath"

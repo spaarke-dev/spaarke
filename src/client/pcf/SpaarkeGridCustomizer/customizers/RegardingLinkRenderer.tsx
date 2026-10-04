@@ -1,8 +1,12 @@
 /**
  * RegardingLinkRenderer - Custom cell renderer for Regarding Record links
  *
- * Renders a clickable link that navigates to the parent record.
- * Works with Event entities to show links to Projects, Matters, etc.
+ * Renders a clickable link that navigates to the parent record when the row says which record
+ * that is; otherwise the grid's DEFAULT renderer is kept (the override returns null).
+ *
+ * v1.1.0 (unified-access-control-r2 task 168 f1): ported to the documented grid customizer
+ * signature `(props, rendererParams)`. Earlier it rendered a plain span when it could not resolve
+ * the target, replacing the default renderer; it now leaves such cells to the default renderer.
  *
  * ADR Compliance:
  * - ADR-021: Fluent UI v9 with dark mode support
@@ -11,7 +15,7 @@
 import * as React from 'react';
 import { Link } from '@fluentui/react-components';
 import { OpenRegular } from '@fluentui/react-icons';
-import { GetRendererParams } from '../types/PAGridCustomizer';
+import type { CellRendererProps, GetRendererParams, RowData } from '../types/PAGridCustomizer';
 
 /**
  * Entity type to entity logical name mapping
@@ -28,10 +32,9 @@ const REGARDING_TYPE_TO_ENTITY: Record<number, string> = {
 /**
  * Extracts the regarding record ID from the row data
  */
-function getRegardingRecordId(rowData: Record<string, unknown> | undefined): string | null {
+export function getRegardingRecordId(rowData: RowData | undefined): string | null {
   if (!rowData) return null;
 
-  // Check common field names for regarding record ID
   const idFields = ['sprk_regardingrecordid', '_sprk_regardingrecordid_value', 'regardingrecordid'];
 
   for (const field of idFields) {
@@ -47,10 +50,9 @@ function getRegardingRecordId(rowData: Record<string, unknown> | undefined): str
 /**
  * Extracts the regarding record type from the row data
  */
-function getRegardingRecordType(rowData: Record<string, unknown> | undefined): string | null {
+export function getRegardingRecordType(rowData: RowData | undefined): string | null {
   if (!rowData) return null;
 
-  // Check for type field
   const typeFields = ['sprk_regardingrecordtype', 'regardingrecordtype'];
 
   for (const field of typeFields) {
@@ -59,7 +61,6 @@ function getRegardingRecordType(rowData: Record<string, unknown> | undefined): s
       return REGARDING_TYPE_TO_ENTITY[value] || null;
     }
     if (typeof value === 'string' && value) {
-      // Try to parse as number
       const numValue = parseInt(value, 10);
       if (!isNaN(numValue)) {
         return REGARDING_TYPE_TO_ENTITY[numValue] || null;
@@ -72,72 +73,47 @@ function getRegardingRecordType(rowData: Record<string, unknown> | undefined): s
   return null;
 }
 
-/**
- * Opens a record in a new window/tab
- */
-function openRecord(entityName: string, recordId: string, context?: ComponentFramework.Context<unknown>): void {
-  if (context?.navigation?.openForm) {
-    context.navigation.openForm({
-      entityName: entityName,
-      entityId: recordId,
-      openInNewWindow: false,
-    });
-  } else {
-    // Fallback: construct Dynamics URL
-    const baseUrl = window.location.origin;
-    const url = `${baseUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`;
-    window.open(url, '_blank');
-  }
+interface XrmNavigationLike {
+  Navigation?: { openForm?: (options: { entityName: string; entityId: string; openInNewWindow?: boolean }) => unknown };
 }
 
 /**
- * RegardingLinkRenderer Component
- *
- * Renders a clickable link to navigate to the regarding (parent) record.
+ * Opens a record: the model-driven app's navigation when present, else a record URL.
  */
-export const RegardingLinkRenderer: React.FC<GetRendererParams> = props => {
-  const { value, rowInfo, context } = props;
-
-  // Extract display name from value
-  const displayName = typeof value === 'string' ? value : '';
-
-  // If no display name, show empty state
-  if (!displayName) {
-    return React.createElement(
-      'span',
-      {
-        className: 'sprk-cell-empty',
-      },
-      '—'
-    );
+function openRecord(entityName: string, recordId: string): void {
+  const xrm = (globalThis as unknown as { Xrm?: XrmNavigationLike }).Xrm;
+  if (xrm?.Navigation?.openForm) {
+    void xrm.Navigation.openForm({ entityName, entityId: recordId, openInNewWindow: false });
+    return;
   }
+  const baseUrl = window.location.origin;
+  window.open(`${baseUrl}/main.aspx?etn=${entityName}&id=${recordId}&pagetype=entityrecord`, '_blank');
+}
 
-  // Extract regarding record info from row data
-  const recordId = getRegardingRecordId(rowInfo?.data);
-  const entityName = getRegardingRecordType(rowInfo?.data);
+interface RegardingLinkProps {
+  displayName: string;
+  entityName: string;
+  recordId: string;
+}
 
-  // If we can't determine the record to navigate to, just show text
-  if (!recordId || !entityName) {
-    return React.createElement('span', null, displayName);
-  }
-
-  // Handle click to navigate
+/**
+ * RegardingLinkRenderer Component: a clickable link to the regarding (parent) record.
+ */
+export const RegardingLinkRenderer: React.FC<RegardingLinkProps> = ({ displayName, entityName, recordId }) => {
   const handleClick = (event: React.MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    openRecord(entityName, recordId, context);
+    openRecord(entityName, recordId);
   };
 
-  // Handle keyboard navigation
   const handleKeyDown = (event: React.KeyboardEvent): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       event.stopPropagation();
-      openRecord(entityName, recordId, context);
+      openRecord(entityName, recordId);
     }
   };
 
-  // Render as clickable link with icon
   return React.createElement(
     Link,
     {
@@ -162,5 +138,23 @@ export const RegardingLinkRenderer: React.FC<GetRendererParams> = props => {
     )
   );
 };
+
+/**
+ * The renderer override for a regarding name/id cell: a link when the row names its target,
+ * else null (the grid's default renderer).
+ */
+export function renderRegardingLink(props: CellRendererProps, params: GetRendererParams): React.ReactElement | null {
+  const raw = typeof props.formattedValue === 'string' && props.formattedValue ? props.formattedValue : props.value;
+  const displayName = typeof raw === 'string' ? raw : '';
+  if (!displayName) {
+    return null;
+  }
+  const recordId = getRegardingRecordId(params.rowData);
+  const entityName = getRegardingRecordType(params.rowData);
+  if (!recordId || !entityName) {
+    return null;
+  }
+  return React.createElement(RegardingLinkRenderer, { displayName, entityName, recordId });
+}
 
 export default RegardingLinkRenderer;
