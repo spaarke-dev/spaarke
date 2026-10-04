@@ -212,6 +212,16 @@ public static class OperationAccessPolicy
         // Recorded as an explicit obligation on task 005.
         ["entity.associate_document"] = AccessRights.AppendTo,
 
+        // "event.attach_regarding" — AppendTo on the REGARDING record an sprk_event is filed under: the body
+        // RegardingRecordType/RegardingRecordId of POST /api/v1/events. Added by unified-access-control-r2 task 159
+        // (#1098). The event HOLDS the typed lookup; the record it points AT is the one being attached to, and
+        // Dataverse asks AppendTo of that record ("other records can be attached to this record") — the
+        // "finance.attach_invoice" reasoning. Not Write: filing an event under a matter does not modify the matter.
+        // A separate key rather than "entity.associate_document" (which names an Office DOCUMENT being filed) or
+        // "finance.attach_invoice" (which names an invoice): reusing either would misdescribe the act in every deny
+        // log. Resource = the regarding record, in the entity set Dataverse's own metadata names for its type.
+        ["event.attach_regarding"] = AccessRights.AppendTo,
+
         // ========================================================================
         // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
         // ========================================================================

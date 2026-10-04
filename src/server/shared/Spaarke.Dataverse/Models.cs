@@ -967,14 +967,34 @@ public class CreateEventRequest
     /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
+    //    THE BFF (this library cannot reach CoreAncestorResolver or the record-type catalog) and passed here as
+    //    plain values; DataverseWebApiService.BuildCreateEventPayload only shapes them. Set all of them together
+    //    with RegardingRecordType/RegardingRecordId, or none.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>; names the typed lookup).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The regarding record's entity SET, from live metadata — the same set the caller's AppendTo was asked of.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> — the relative model-driven record URL.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> — the business-key number (matter/project), or null.</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps to bind besides the target's own lookup (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
 
     /// <summary>
     /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
@@ -1003,80 +1023,6 @@ public class CreateEventRequest
 }
 
 /// <summary>
-/// Request model for updating an Event
-/// </summary>
-public class UpdateEventRequest
-{
-    /// <summary>Event name</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Description</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Event Type ID</summary>
-    public Guid? EventTypeId { get; set; }
-
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
-
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
-
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
-    public int? Priority { get; set; }
-
-    /// <summary>Status code</summary>
-    public int? StatusCode { get; set; }
-
-    /// <summary>Regarding record type</summary>
-    public int? RegardingRecordType { get; set; }
-
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
-
-    /// <summary>Regarding record name</summary>
-    public string? RegardingRecordName { get; set; }
-
-    /// <summary>
-    /// The event's regarding type BEFORE this update, as the caller read it. When the update names a DIFFERENT type, that
-    /// type's entity-specific lookup is cleared, so the event stays filed under one regarding — the one this update
-    /// names. Never bound from a request body.
-    /// </summary>
-    [JsonIgnore]
-    public int? PreviousRegardingRecordType { get; set; }
-
-    /// <summary>
-    /// The entity-specific regarding LOOKUPS this update writes (unified-access-control-r2 task 146 r1, verifier item 2):
-    /// the new regarding (<c>RecordId</c> null when the update names a type with no record — a clear), plus a clear of the
-    /// previous type's lookup when the type changes. Empty when the update does not touch the regarding.
-    /// </summary>
-    /// <remarks>
-    /// The ONE derivation of the lookups: <c>DataverseWebApiService.UpdateEventAsync</c> writes exactly these, and the
-    /// BFF re-derives the event's owner from exactly these (a reparent). Before this, the update wrote only the regarding
-    /// TEXT fields while the owner was re-derived from a lookup that was never written — so an event moved from a secure
-    /// project to an ordinary one was re-owned by the ordinary team while its lookup still named the secure project.
-    /// </remarks>
-    public IReadOnlyList<(int RecordType, Guid? RecordId)> RegardingLookupWrites()
-    {
-        if (RegardingRecordType is not { } type || global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(type) is null)
-            return Array.Empty<(int, Guid?)>();
-
-        var writes = new List<(int RecordType, Guid? RecordId)>
-        {
-            (type, Guid.TryParse(RegardingRecordId, out var id) && id != Guid.Empty ? id : null),
-        };
-
-        if (PreviousRegardingRecordType is { } previous && previous != type
-            && global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(previous) is not null)
-        {
-            writes.Add((previous, null));
-        }
-
-        return writes;
-    }
-}
-
-/// <summary>
 /// Event Type entity model (sprk_eventtype)
 /// </summary>
 public class EventTypeEntity
@@ -1101,36 +1047,6 @@ public class EventTypeEntity
 
     /// <summary>Requires base date: No (0), Yes (1)</summary>
     public int? RequiresBaseDate { get; set; }
-}
-
-/// <summary>
-/// Event Log entity model (sprk_eventlog)
-/// </summary>
-public class EventLogEntity
-{
-    /// <summary>Event Log ID (sprk_eventlogid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Event lookup ID (_sprk_event_value)</summary>
-    public Guid EventId { get; set; }
-
-    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
-    public int Action { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Created date/time</summary>
-    public DateTime CreatedOn { get; set; }
-
-    /// <summary>Created by user ID</summary>
-    public Guid? CreatedById { get; set; }
-
-    /// <summary>Created by user name</summary>
-    public string? CreatedByName { get; set; }
 }
 
 /// <summary>
@@ -1322,41 +1238,41 @@ public static class RegardingRecordType
         _ => null
     };
 
-    /// <summary>
-    /// The <c>sprk_event</c> single-valued navigation property for a regarding record type — the CASE-SENSITIVE name a
-    /// Web API <c>@odata.bind</c> must use (the lookup's schema name). Read from live metadata, spaarkedev1 2026-10-02:
-    /// <c>EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships</c> →
-    /// <c>ReferencingEntityNavigationPropertyName</c> (unified-access-control-r2 task 146 r1, verifier item 2).
-    /// </summary>
-    public static string? GetEventNavigationPropertyName(int recordType) => recordType switch
-    {
-        Project => "sprk_RegardingProject",
-        Matter => "sprk_RegardingMatter",
-        Invoice => "sprk_RegardingInvoice",
-        Analysis => "sprk_RegardingAnalysis",
-        Account => "sprk_RegardingAccount",
-        Contact => "sprk_RegardingContact",
-        WorkAssignment => "sprk_RegardingWorkAssignment",
-        Budget => "sprk_RegardingBudget",
-        _ => null
-    };
+    // ── sprk_event's Web API write names (unified-access-control-r2 task 159, #1098) ──
+    // Read from live metadata (spaarkedev1 EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships,
+    // 2026-10-03; projects/unified-access-control-r2/notes/task-159-events-authorization.md §0.2) and pinned by
+    // EventRegardingPayloadTests. A lookup is WRITTEN only as "{navigationProperty}@odata.bind" — never as the
+    // logical name (the Web API rejects it) and never as a "_x_value" key. Every navigation property here is
+    // PascalCase; none equals its logical name.
+
+    /// <summary>The navigation property of <c>sprk_event.sprk_regardingrecordtype</c> (lookup → <c>sprk_recordtype_ref</c>).</summary>
+    public const string EventRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+
+    /// <summary><c>sprk_recordtype_ref</c>'s entity SET (live metadata), the target of <see cref="EventRecordTypeNavigationProperty"/>.</summary>
+    public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
 
     /// <summary>
-    /// The Dataverse entity SET for a regarding record type, as live metadata names it (spaarkedev1 2026-10-02,
-    /// <c>EntityDefinitions</c> → <c>EntitySetName</c>). Never derived by appending "s": <c>sprk_analysis</c>'s set is
-    /// <c>sprk_analysises</c>.
+    /// The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown. Covers
+    /// the full live typed-lookup family (14) plus <c>sprk_regardingrecordtype</c>.
     /// </summary>
-    public static string? GetEntitySetName(int recordType) => recordType switch
+    public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
     {
-        Project => "sprk_projects",
-        Matter => "sprk_matters",
-        Invoice => "sprk_invoices",
-        Analysis => "sprk_analysises",
-        Account => "accounts",
-        Contact => "contacts",
-        WorkAssignment => "sprk_workassignments",
-        Budget => "sprk_budgets",
-        _ => null
+        "sprk_regardingaccount" => "sprk_RegardingAccount",
+        "sprk_regardingagreement" => "sprk_RegardingAgreement",
+        "sprk_regardinganalysis" => "sprk_RegardingAnalysis",
+        "sprk_regardingbudget" => "sprk_RegardingBudget",
+        "sprk_regardingcommunication" => "sprk_RegardingCommunication",
+        "sprk_regardingcontact" => "sprk_RegardingContact",
+        "sprk_regardingevent" => "sprk_RegardingEvent",
+        "sprk_regardinginvoice" => "sprk_RegardingInvoice",
+        "sprk_regardingmatter" => "sprk_RegardingMatter",
+        "sprk_regardingorganization" => "sprk_RegardingOrganization",
+        "sprk_regardingproject" => "sprk_RegardingProject",
+        "sprk_regardingreportcard" => "sprk_RegardingReportCard",
+        "sprk_regardingservicerequest" => "sprk_RegardingServiceRequest",
+        "sprk_regardingworkassignment" => "sprk_RegardingWorkAssignment",
+        "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty,
+        _ => null,
     };
 
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──

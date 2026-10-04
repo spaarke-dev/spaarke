@@ -34,6 +34,92 @@ public static class RecordRouteAccessAuthorizationFilterExtensions
             return await filter.InvokeAsync(context, next);
         });
     }
+
+    /// <summary>
+    /// Authorize the CALLER for <paramref name="operation"/> on the record of the FIXED entity set
+    /// <paramref name="entitySetName"/> whose id is the route value <paramref name="routeKey"/>, before the handler
+    /// runs (unified-access-control-r2 task 159, the events <c>/{id}</c> routes).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Denial shape — not the upload overload's.</b> A caller whose rights on the record do not include
+    /// Read (this covers <see cref="AccessRights.None"/>, an absent record and every probe fault) gets
+    /// <see cref="ProblemDetailsHelper.UniformRecordNotFound"/>, byte-identical to the handler's own "not found":
+    /// the route is not an existence oracle. A caller who holds Read but not the operation's rights gets a 403 with
+    /// <see cref="RecordRouteAccessAuthorizationFilter.InsufficientRightsReasonCode"/> — they can already see the
+    /// record, so the 403 discloses nothing. Neither body contains the id.</para>
+    /// <para>The entity set is a constant of the route (never request input, never pluralized), so this overload
+    /// needs no logical-name → set table.</para>
+    /// </remarks>
+    /// <param name="builder">The endpoint convention builder.</param>
+    /// <param name="operation">The <see cref="OperationAccessPolicy"/> key naming the rights the route needs.</param>
+    /// <param name="entitySetName">A constant Dataverse entity SET name, read from live metadata.</param>
+    /// <param name="routeKey">The route parameter the handler binds (e.g. "id").</param>
+    public static TBuilder AddRecordRouteAccessAuthorizationFilter<TBuilder>(
+        this TBuilder builder,
+        string operation,
+        string entitySetName,
+        string routeKey) where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(routeKey);
+
+        // An unregistered key would deny every caller at request time; refuse it at mapping time instead.
+        _ = OperationAccessPolicy.GetRequiredRights(operation);
+
+        return builder.AddEndpointFilter(async (context, next) =>
+        {
+            var services = context.HttpContext.RequestServices;
+            var probe = services.GetRequiredService<CallerRecordAccessProbe>();
+            var logger = services.GetService<ILogger<RecordRouteAccessAuthorizationFilter>>();
+            return await RecordRouteAccessAuthorizationFilter.AuthorizeRouteRecordAsync(
+                context, next, probe, operation, entitySetName, routeKey, logger);
+        });
+    }
+
+    /// <summary>
+    /// Authorize the CALLER for <paramref name="operation"/> on the ONE record the already-bound request names —
+    /// and, when <paramref name="requiredPrivilege"/> is given, for that Dataverse table privilege — before the
+    /// handler runs (task 159: the events create and re-parent).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Exactly "(entity set, id, operation) plus one optional table privilege".</b>
+    /// <paramref name="resolveTarget"/> reads the request argument from
+    /// <see cref="EndpointFilterInvocationContext.Arguments"/> (it never re-reads the body) and returns the record
+    /// as (entity set, id), or <c>null</c> when the request names no record of this kind. A throw from it DENIES.
+    /// </para>
+    /// <para><b>Fail closed, one denial body.</b> A missing privilege is a 403 with
+    /// <see cref="RecordRouteAccessAuthorizationFilter.InsufficientPrivilegeReasonCode"/>. A record the caller
+    /// lacks the rights on, a record that does not exist, a resolver fault and a probe fault are ALL the same 403
+    /// with <see cref="RecordRouteAccessAuthorizationFilter.InsufficientRightsReasonCode"/> and the same detail, so
+    /// an unknown id and a denied one cannot be told apart. The try covers the decision only, never next().</para>
+    /// </remarks>
+    /// <param name="builder">The endpoint convention builder.</param>
+    /// <param name="operation">The <see cref="OperationAccessPolicy"/> key naming the rights the record needs.</param>
+    /// <param name="resolveTarget">The request's record, or <c>null</c> when it names none.</param>
+    /// <param name="requiredPrivilege">
+    /// Optional Dataverse table privilege, by its live name (e.g. <c>prvCreatesprk_Event</c>), asked of the caller
+    /// through <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> before the record check.
+    /// </param>
+    public static TBuilder AddRecordRouteAccessAuthorizationFilter<TBuilder>(
+        this TBuilder builder,
+        string operation,
+        Func<EndpointFilterInvocationContext, ValueTask<(string EntitySet, Guid RecordId)?>> resolveTarget,
+        string? requiredPrivilege = null) where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentNullException.ThrowIfNull(resolveTarget);
+        _ = OperationAccessPolicy.GetRequiredRights(operation);
+
+        return builder.AddEndpointFilter(async (context, next) =>
+        {
+            var services = context.HttpContext.RequestServices;
+            var probe = services.GetRequiredService<CallerRecordAccessProbe>();
+            var logger = services.GetService<ILogger<RecordRouteAccessAuthorizationFilter>>();
+            return await RecordRouteAccessAuthorizationFilter.AuthorizeDeclaredTargetAsync(
+                context, next, probe, operation, resolveTarget, requiredPrivilege, logger);
+        });
+    }
 }
 
 /// <summary>
@@ -227,6 +313,172 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
         _logger?.LogInformation(
             "[RECORD-ROUTE-AUTH] Allowed: caller may '{Operation}' on {EntitySet}({RecordId}).",
             _operation, entitySet, recordId);
+
+        return await next(context);
+    }
+
+    // ── Task 159: the fixed-entity-set and declared-target overloads ─────────────────────────────────────────
+    // The upload overload above keeps its own short reasonCodes and detail text, unchanged. The two shapes below
+    // use the sdap.access.deny.* codes the rest of the per-record surface (FinanceAuthorizationFilter,
+    // OperationAccessRule) already returns.
+
+    /// <summary>The caller lacks the rights the operation needs on a record (task 159 overloads).</summary>
+    public const string InsufficientRightsReasonCode = "sdap.access.deny.insufficient_rights";
+
+    /// <summary>The caller lacks a Dataverse TABLE privilege the operation needs (task 159 overloads).</summary>
+    public const string InsufficientPrivilegeReasonCode = "sdap.access.deny.insufficient_privilege";
+
+    /// <summary>The ONE detail of every record-rights 403 the task 159 overloads return. It names no record.</summary>
+    internal const string InsufficientRightsDetail =
+        "You do not have the rights this operation requires on a record it names.";
+
+    /// <summary>The ONE detail of the table-privilege 403.</summary>
+    internal const string InsufficientPrivilegeDetail =
+        "You do not have the Dataverse privilege this operation requires.";
+
+    /// <summary>The fixed-entity-set, route-keyed decision (see the extension's remarks for the denial shape).</summary>
+    internal static async ValueTask<object?> AuthorizeRouteRecordAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next,
+        CallerRecordAccessProbe probe,
+        string operation,
+        string entitySetName,
+        string routeKey,
+        ILogger? logger)
+    {
+        var httpContext = context.HttpContext;
+
+        // Unreachable through a {routeKey:guid} route; a hit means the filter sits on a route without its key,
+        // which must deny rather than proceed. Uniform 404: the same answer as an absent record.
+        if (!httpContext.Request.RouteValues.TryGetValue(routeKey, out var raw)
+            || !Guid.TryParse(raw?.ToString(), out var recordId)
+            || recordId == Guid.Empty)
+        {
+            logger?.LogWarning(
+                "[RECORD-ROUTE-AUTH] Denying: the route carries no usable '{RouteKey}' value for {EntitySet}. "
+                + "CorrelationId: {CorrelationId}",
+                routeKey, entitySetName, httpContext.TraceIdentifier);
+            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        AccessRights rights;
+        try
+        {
+            rights = await probe.GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                entitySetName,
+                recordId,
+                httpContext.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            // The decision only — never next(). A fault is "could not answer", which is "not authorized".
+            logger?.LogError(ex,
+                "[RECORD-ROUTE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}); denying. "
+                + "CorrelationId: {CorrelationId}",
+                entitySetName, recordId, httpContext.TraceIdentifier);
+            rights = AccessRights.None;
+        }
+
+        if ((rights & AccessRights.Read) != AccessRights.Read)
+        {
+            logger?.LogWarning(
+                "[RECORD-ROUTE-AUTH] Denied (uniform 404): caller holds no Read on {EntitySet}({RecordId}) for "
+                + "'{Operation}'. Holds {Rights}. CorrelationId: {CorrelationId}",
+                entitySetName, recordId, operation, rights, httpContext.TraceIdentifier);
+            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        if (!OperationAccessPolicy.HasRequiredRights(rights, operation))
+        {
+            logger?.LogWarning(
+                "[RECORD-ROUTE-AUTH] Denied: caller may not '{Operation}' on {EntitySet}({RecordId}). Holds {Rights}; "
+                + "requires {Required}. CorrelationId: {CorrelationId}",
+                operation, entitySetName, recordId, rights,
+                OperationAccessPolicy.GetRequiredRights(operation), httpContext.TraceIdentifier);
+            return ProblemDetailsHelper.Forbidden(
+                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+        }
+
+        return await next(context);
+    }
+
+    /// <summary>The declared-target decision (see the extension's remarks for the denial shape).</summary>
+    internal static async ValueTask<object?> AuthorizeDeclaredTargetAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next,
+        CallerRecordAccessProbe probe,
+        string operation,
+        Func<EndpointFilterInvocationContext, ValueTask<(string EntitySet, Guid RecordId)?>> resolveTarget,
+        string? requiredPrivilege,
+        ILogger? logger)
+    {
+        var httpContext = context.HttpContext;
+        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var ct = httpContext.RequestAborted;
+
+        if (!string.IsNullOrWhiteSpace(requiredPrivilege))
+        {
+            bool holds;
+            try
+            {
+                holds = await probe.CallerHoldsPrivilegeAsync(callerToken, requiredPrivilege, ct);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex,
+                    "[RECORD-ROUTE-AUTH] The privilege check {Privilege} threw; denying. CorrelationId: {CorrelationId}",
+                    requiredPrivilege, httpContext.TraceIdentifier);
+                holds = false;
+            }
+
+            if (!holds)
+            {
+                logger?.LogWarning(
+                    "[RECORD-ROUTE-AUTH] Denied: caller does not hold {Privilege}. CorrelationId: {CorrelationId}",
+                    requiredPrivilege, httpContext.TraceIdentifier);
+                return ProblemDetailsHelper.Forbidden(
+                    InsufficientPrivilegeReasonCode, InsufficientPrivilegeDetail, httpContext.TraceIdentifier);
+            }
+        }
+
+        (string EntitySet, Guid RecordId)? target;
+        AccessRights rights = AccessRights.None;
+        try
+        {
+            target = await resolveTarget(context);
+            if (target is { } named)
+            {
+                if (string.IsNullOrWhiteSpace(named.EntitySet) || named.RecordId == Guid.Empty)
+                {
+                    throw new InvalidOperationException("The declared target has no entity set or an empty id.");
+                }
+
+                rights = await probe.GetCallerRightsAsync(callerToken, named.EntitySet, named.RecordId, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Resolver fault, entity-set lookup fault, probe fault: all "could not answer" — the SAME denial as a
+            // denied record, so a fault is not distinguishable from a refusal either.
+            logger?.LogError(ex,
+                "[RECORD-ROUTE-AUTH] The declared-target check for '{Operation}' faulted; denying. "
+                + "CorrelationId: {CorrelationId}",
+                operation, httpContext.TraceIdentifier);
+            return ProblemDetailsHelper.Forbidden(
+                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+        }
+
+        if (target is { } checkedTarget && !OperationAccessPolicy.HasRequiredRights(rights, operation))
+        {
+            logger?.LogWarning(
+                "[RECORD-ROUTE-AUTH] Denied: caller may not '{Operation}' on {EntitySet}({RecordId}). Holds {Rights}; "
+                + "requires {Required}. CorrelationId: {CorrelationId}",
+                operation, checkedTarget.EntitySet, checkedTarget.RecordId, rights,
+                OperationAccessPolicy.GetRequiredRights(operation), httpContext.TraceIdentifier);
+            return ProblemDetailsHelper.Forbidden(
+                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+        }
 
         return await next(context);
     }

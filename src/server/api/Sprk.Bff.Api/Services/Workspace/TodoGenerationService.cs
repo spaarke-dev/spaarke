@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
+using EventStatusCode = Sprk.Bff.Api.Api.Events.Dtos.EventStatusCode;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -414,8 +415,9 @@ public sealed class TodoGenerationService : IScheduledJob
                 top: 100,
                 ct: ct);
 
-            // Exclude completed/cancelled events.
-            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Exclude completed/cancelled events — by the LIVE sprk_event statuscodes (task 159: the old 5/6 are not
+            // values of this table, so nothing was ever excluded).
+            overdueEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled);
         }
         catch (Exception ex)
         {
@@ -582,8 +584,8 @@ public sealed class TodoGenerationService : IScheduledJob
                 top: 100,
                 ct: ct);
 
-            // Exclude completed/cancelled events.
-            upcomingEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Exclude completed/cancelled events — by the LIVE sprk_event statuscodes (task 159).
+            upcomingEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled);
         }
         catch (Exception ex)
         {
