@@ -106,21 +106,6 @@ export const PlaybookLibraryPage: React.FC = () => {
 
   const intent = searchParams.get('intent') ?? undefined;
 
-  // Validate required route params
-  if (!entityType || !entityId) {
-    return (
-      <PageContainer>
-        <div className={styles.centered}>
-          <MessageBar intent="error">
-            <MessageBarBody>
-              Missing required route parameters. Expected: /playbooks/:entityType/:entityId
-            </MessageBarBody>
-          </MessageBar>
-        </div>
-      </PageContainer>
-    );
-  }
-
   // Memoize the authenticated fetch and data service so they remain stable
   // across re-renders (no dependency on changing values).
   const authenticatedFetch = React.useMemo(() => createAuthenticatedFetch(), []);
@@ -159,6 +144,23 @@ export const PlaybookLibraryPage: React.FC = () => {
     },
     [navigate]
   );
+
+  // Validate required route params — AFTER every hook (react-hooks/rules-of-hooks; moved below them by
+  // unified-access-control-r2 task 140 when the package's lint gate was made runnable; none of the hooks above reads
+  // the params, so the behaviour is unchanged).
+  if (!entityType || !entityId) {
+    return (
+      <PageContainer>
+        <div className={styles.centered}>
+          <MessageBar intent="error">
+            <MessageBarBody>
+              Missing required route parameters. Expected: /playbooks/:entityType/:entityId
+            </MessageBarBody>
+          </MessageBar>
+        </div>
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer>

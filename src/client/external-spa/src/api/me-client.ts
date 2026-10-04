@@ -110,7 +110,6 @@ export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitle
     // Rollout fallback (NFR-06 — client is not the security boundary): degrade to plane-derived defaults
     // so a transient live-auth failure never leaves the workspace tab-less. The mock displayName is the
     // UAT tell that this fired.
-    // eslint-disable-next-line no-console
     console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
     return MOCK_BY_PLANE[basePlane];
   }

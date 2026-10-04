@@ -375,8 +375,17 @@ public static class ContactGrantEndpoints
                 if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
                     && !grantor.OrganizationIds.Contains(firm))
                 {
-                    var organization = await dataverseClient.RetrieveAsync<OrganizationStateRow>(
-                        "sprk_organizations", firm, "statecode", ct);
+                    OrganizationStateRow? organization;
+                    try
+                    {
+                        organization = await dataverseClient.RetrieveAsync<OrganizationStateRow>(
+                            "sprk_organizations", firm, "statecode", ct);
+                    }
+                    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    {
+                        organization = null; // a deleted firm confers nothing — the row does not count
+                    }
+
                     if (organization is null || organization.StateCode is not (null or 0))
                         continue;
                 }

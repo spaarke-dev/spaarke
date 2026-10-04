@@ -1819,7 +1819,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                       ? 'Organization grant — all organization contacts have access'
                                       : autoSourceFor(grant.contactId)
                                         ? `Automatic — ${autoSourceFor(grant.contactId)!.sourceFieldLabel} · granted ${formatGrantDate(grant.grantedDate)}`
-                                        : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                                        : grant.grantedByContactName
+                                          ? // Task 140: issued by a contact from the external SPA (sprk_grantedbycontact).
+                                            `Granted by ${grant.grantedByContactName} (external contact) on ${formatGrantDate(grant.grantedDate)}`
+                                          : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                               </Text>
                             </div>
                             <div className={styles.rowActions}>

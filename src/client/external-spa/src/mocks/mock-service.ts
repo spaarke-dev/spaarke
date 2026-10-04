@@ -14,6 +14,16 @@ import {
 } from './mock-data';
 import { ApiError } from '../types';
 
+/** The grants the mock user issued this session (task 140's contact-side Grant Access). */
+const MOCK_ISSUED_GRANTS: Array<{
+  accessRecordId: string;
+  contactId: string;
+  fullName: string | null;
+  email: string | null;
+  accessLevel: number;
+  expiryDate: string;
+}> = [];
+
 /** Simulate realistic API latency */
 function delay<T>(value: T, ms = 400): Promise<T> {
   return new Promise(resolve => setTimeout(() => resolve(value), ms));
@@ -130,15 +140,47 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(undefined as unknown as T, 300);
   }
 
-  // POST /api/v1/external-access/* (grant, revoke, invite)
-  if (method === 'POST' && path.startsWith('/api/v1/external-access/')) {
-    if (path.endsWith('/invite')) {
-      return delay(
-        { contactId: 'mock-contact-new', inviteRedeemUrl: '#mock', status: 'PendingAcceptance' } as unknown as T,
-        800
-      );
-    }
-    return delay(undefined as unknown as T, 500);
+  // Contact-side Grant Access (task 140) — POST/GET /api/v1/external/contact-grants, POST …/contact-grants/revoke.
+  // The mock keeps the issued grants in memory for the session, mirroring the server's response shapes.
+  if (method === 'POST' && path === '/api/v1/external/contact-grants') {
+    const body = options.body ? JSON.parse(options.body as string) : {};
+    const today = new Date();
+    const expiry = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 90));
+    const grant = {
+      accessRecordId: `grant-mock-${Date.now()}`,
+      contactId: body.granteeContactId ?? `contact-mock-${Date.now()}`,
+      fullName: null,
+      email: body.granteeEmail ?? null,
+      accessLevel: body.accessLevel ?? 100000000,
+      expiryDate: expiry.toISOString().slice(0, 10),
+    };
+    MOCK_ISSUED_GRANTS.push(grant);
+    return delay(
+      {
+        accessRecordId: grant.accessRecordId,
+        granteeContactId: grant.contactId,
+        grantedAccessLevel: grant.accessLevel,
+        narrowed: false,
+        expiryDate: grant.expiryDate,
+        expiryNarrowed: false,
+      } as unknown as T,
+      600
+    );
+  }
+
+  if (method === 'GET' && path.startsWith('/api/v1/external/contact-grants?')) {
+    return delay({ grants: [...MOCK_ISSUED_GRANTS] } as unknown as T);
+  }
+
+  if (method === 'POST' && path === '/api/v1/external/contact-grants/revoke') {
+    const body = options.body ? JSON.parse(options.body as string) : {};
+    const index = MOCK_ISSUED_GRANTS.findIndex(g => g.accessRecordId === body.accessRecordId);
+    if (index < 0) throw new ApiError(404, 'Mock: no access that you granted was found with this id.');
+    MOCK_ISSUED_GRANTS.splice(index, 1);
+    return delay(
+      { accessRecordId: body.accessRecordId, deactivatedCount: 1, accessRemainsFromOthers: false } as unknown as T,
+      400
+    );
   }
 
   console.warn(`[MockService] Unhandled mock path: ${method} ${path}`);

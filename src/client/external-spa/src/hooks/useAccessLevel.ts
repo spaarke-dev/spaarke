@@ -10,7 +10,7 @@
  *
  * Capability matrix:
  *   ViewOnly    — canUpload=false, canDownload=false, canCreate=false, canUseAi=false, canInvite=false
- *   Collaborate — canUpload=true,  canDownload=true,  canCreate=true,  canUseAi=true,  canInvite=false
+ *   Collaborate — canUpload=true,  canDownload=true,  canCreate=true,  canUseAi=true,  canInvite=true
  *   FullAccess  — canUpload=true,  canDownload=true,  canCreate=true,  canUseAi=true,  canInvite=true
  *
  * Note: Client-side enforcement is UX only. Server-side enforcement via endpoint
@@ -72,9 +72,24 @@ export function canUseAi(accessLevel: AccessLevel): boolean {
   return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
 }
 
-/** Returns true when the access level allows inviting other external users. */
+/**
+ * Returns true when the access level allows granting colleagues access (the Contacts tab "Invite User").
+ *
+ * Owner C4 (unified-access-control-r2 session 27, task 140): a contact holding Collaborate OR Full Access may grant
+ * colleagues of their own organization, at or below their own level; View Only may not. The server enforces the same
+ * rule on its effective, post-veto level (ContactGrantorAuthorizationFilter) — this only decides what is SHOWN.
+ */
 export function canInvite(accessLevel: AccessLevel): boolean {
-  return accessLevel === AccessLevel.FullAccess;
+  return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+}
+
+/**
+ * The levels a caller may grant: every level at or below their own (owner Q1: a grant is capped at the grantor's
+ * level). Empty for anyone who may not grant at all.
+ */
+export function grantableLevels(accessLevel: AccessLevel): AccessLevel[] {
+  if (!canInvite(accessLevel)) return [];
+  return [AccessLevel.ViewOnly, AccessLevel.Collaborate, AccessLevel.FullAccess].filter(level => level <= accessLevel);
 }
 
 // ---------------------------------------------------------------------------

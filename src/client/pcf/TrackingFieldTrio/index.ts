@@ -120,6 +120,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.35 (task 140, unified-access-control-r2 — contact-side Grant Access, owner C4 / Q2):
+ * `fetchExistingGrants` also reads `_sprk_grantedbycontact_value` (the new contact-typed issuer lookup), and the
+ * bundled `AccessGrantModal` shows a contact-issued grant as "Granted by {contact} (external contact)". Revoking it
+ * from Current Access is unchanged (`/revoke`, Write on the record).
+ *
  * v1.0.34 (task 142, unified-access-control-r2 — Assigned-To auto-grants, owner Q5 / A3 / A2):
  * no change in this file's logic; the bundled `AccessGrantModal` now reads the record's Assigned-To ledger from the
  * BFF (`GET /api/v1/external-access/assigned-access`) and shows SERVER-derived suggestions on a secure record
@@ -920,7 +925,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
       `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+      // v1.0.35 (task 140): + _sprk_grantedbycontact_value — the CONTACT who issued the grant from the external SPA.
+      // ⚠️ Deploy order: the column (scripts/Deploy-ExternalRecordAccessContactGrantor.ps1) must exist first, or this
+      // read 400s and Current Access shows nothing.
+      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,_sprk_grantedbycontact_value,sprk_accesslevel,sprk_granteddate`;
 
     let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
     try {
@@ -949,6 +957,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
         grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
+        grantedByContactName: (row[`_sprk_grantedbycontact_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
@@ -1195,7 +1204,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.34 • Built 2026-10-03',
+      versionText: 'v1.0.35 • Built 2026-10-04',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
