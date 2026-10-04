@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -6,6 +5,8 @@ using System.Text.Json;
 using Azure.Core;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 
@@ -22,6 +23,12 @@ public class DocumentCheckoutService
     private readonly ILogger<DocumentCheckoutService> _logger;
     private readonly string _dataverseApiUrl;
     private readonly TokenCredential _credential;
+
+    /// <summary>
+    /// Verifies a row's pointer before an app-only preview/edit URL is minted from it (unified-access-control-r2
+    /// task 166 r1, owner round 21 item 1b): such a URL hands out the file's content, exactly like a download.
+    /// </summary>
+    private readonly RecordContainerResolver _containerResolver;
     private AccessToken? _currentToken;
 
     // Dataverse entity set names
@@ -42,12 +49,14 @@ public class DocumentCheckoutService
         SpeFileStore speFileStore,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<DocumentCheckoutService> logger)
+        ILogger<DocumentCheckoutService> logger,
+        RecordContainerResolver containerResolver)
     {
         _httpClient = httpClient;
         _speFileStore = speFileStore;
         _logger = logger;
         _credential = credential;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? configuration["Dataverse:EnvironmentUrl"]
@@ -130,7 +139,7 @@ public class DocumentCheckoutService
                 string existingEditUrl = "";
                 try
                 {
-                    existingEditUrl = await GetEditUrlAsync(document.DriveId, document.ItemId, ct);
+                    existingEditUrl = await GetEditUrlAsync(documentId, document.DriveId, document.ItemId, ct);
                 }
                 catch (Exception ex)
                 {
@@ -198,7 +207,7 @@ public class DocumentCheckoutService
         string editUrl = "";
         try
         {
-            editUrl = await GetEditUrlAsync(document.DriveId, document.ItemId, ct);
+            editUrl = await GetEditUrlAsync(documentId, document.DriveId, document.ItemId, ct);
         }
         catch (Exception ex)
         {
@@ -286,7 +295,7 @@ public class DocumentCheckoutService
         string previewUrl = "";
         try
         {
-            previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+            previewUrl = await GetPreviewUrlAsync(documentId, document.DriveId, document.ItemId, ct);
         }
         catch (Exception ex)
         {
@@ -402,7 +411,7 @@ public class DocumentCheckoutService
         string previewUrl = "";
         try
         {
-            previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+            previewUrl = await GetPreviewUrlAsync(documentId, document.DriveId, document.ItemId, ct);
         }
         catch (Exception ex)
         {
@@ -1121,7 +1130,7 @@ public class DocumentCheckoutService
         }
     }
 
-    private async Task<string> GetEditUrlAsync(string driveId, string itemId, CancellationToken ct)
+    private async Task<string> GetEditUrlAsync(Guid documentId, string driveId, string itemId, CancellationToken ct)
     {
         // Validate DriveId and ItemId before calling Graph API
         if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
@@ -1130,6 +1139,9 @@ public class DocumentCheckoutService
                 driveId, itemId);
             return "";
         }
+
+        // task 166 r1: the URL is minted AS THE APPLICATION from the row's pointer — verified first (fail closed).
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, ct);
 
         _logger.LogDebug("Getting edit URL for DriveId='{DriveId}', ItemId='{ItemId}'", driveId, itemId);
 
@@ -1152,8 +1164,11 @@ public class DocumentCheckoutService
         }
     }
 
-    private async Task<string> GetPreviewUrlAsync(string driveId, string itemId, CancellationToken ct)
+    private async Task<string> GetPreviewUrlAsync(Guid documentId, string driveId, string itemId, CancellationToken ct)
     {
+        // task 166 r1: the URL is minted AS THE APPLICATION from the row's pointer — verified first (fail closed).
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, ct);
+
         var preview = await _speFileStore.GetPreviewUrlAsync(driveId, itemId, null, ct);
         return preview.PreviewUrl ?? "";
     }

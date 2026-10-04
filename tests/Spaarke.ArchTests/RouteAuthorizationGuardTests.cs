@@ -306,7 +306,11 @@ public class RouteAuthorizationGuardTests
         // loudly until someone classifies it.
         new GovernedFile("Api/ComposeDocumentEndpoints.cs", Scope.HandlerAuthorized,
             "GET /documents/{documentSpeId} (load) and refresh-profile. Load reads the SPE bytes AS THE CALLER "
-            + "(OBO) under the claim tenant and resumes only a session the caller owns (#863). POST "
+            + "(OBO) under the claim tenant and resumes only a session the caller owns (#863); since task 166 r1 its "
+            + "documentRecordId is honoured only when that row's sprk_graphitemid IS the OBO-read item. "
+            + "refresh-profile (task 166 r1) is gated route-level by DocumentAuthorizationFilter(\"write\") on "
+            + "{documentId:guid}, takes the tenant from the CLAIM and stamps only when the row's item is the "
+            + "posted item. POST "
             + "/documents/{documentSpeId}/promote was DELETED by task 166 (S-63): it took tenant and session from "
             + "the BODY, never resolved the caller, created app-only rows for any drive item and rebound any "
             + "session — and had no client."),
@@ -359,7 +363,9 @@ public class RouteAuthorizationGuardTests
 
         new GovernedFile("Api/ComposeActiveDocumentEndpoints.cs", Scope.HandlerAuthorized,
             "POST /active-document. Takes sessionId in the BODY, so no route-level filter can see it — the "
-            + "handler checks the parent session's owner directly (#863). Also enumerated in "
+            + "handler checks the parent session's owner directly (#863). A STORED document is recorded only when "
+            + "the caller can read its row (read AS THE CALLER, IDataverseUserClient), and the SPE pointer recorded "
+            + "is that row's, never the body's (task 166 r1). Also enumerated in "
             + "SessionOwnershipGuardTests.BodyScopedSessionRoutes; the two lists answer different questions "
             + "and both need the entry."),
     };

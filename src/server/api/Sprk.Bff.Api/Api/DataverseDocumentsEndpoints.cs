@@ -3,11 +3,13 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -186,6 +188,8 @@ public static class DataverseDocumentsEndpoints
             string id,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            // uac-r2 task 166 r1 (round 21 item 1b): the pointer's container is verified before the app-only download.
+            RecordContainerResolver containerResolver,
             DocumentTelemetry documentTelemetry,
             ILogger<Program> logger,
             HttpContext context,
@@ -257,6 +261,11 @@ public static class DataverseDocumentsEndpoints
                     "Downloading file for document {DocumentId}: DriveId={DriveId}, ItemId={ItemId}",
                     id, document.GraphDriveId, document.GraphItemId);
 
+                // Step 3b (uac-r2 task 166 r1, owner round 21 item 1b): the row's pointer is followed AS THE APPLICATION,
+                // so it must point into a container this document may use — refused (409) otherwise, before any read.
+                await containerResolver.EnsureDocumentPointerContainerAsync(
+                    Guid.TryParse(id, out var pointerDocumentId) ? pointerDocumentId : Guid.Empty, document.GraphDriveId, ct);
+
                 // Step 4: Download file stream from SPE using app-only auth
                 var fileStream = await GraphCallScope.Run(
                     () => speFileStore.DownloadFileAsync(
@@ -303,6 +312,13 @@ public static class DataverseDocumentsEndpoints
                     fileDownloadName: fileName,
                     enableRangeProcessing: true); // Support partial downloads for large files
             }
+            catch (SdapProblemException ex) when (ex.Code == RecordContainerResolver.DocumentStorageUnverifiedCode)
+            {
+                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, "storage_unverified");
+                return TypedResults.Problem(
+                    statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                    extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = traceId });
+            }
             catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Graph API error downloading file for document {DocumentId}", id);
@@ -327,6 +343,7 @@ public static class DataverseDocumentsEndpoints
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict) // uac-r2 task 166 r1: the file pointer's container is not verified
         .Produces(StatusCodes.Status500InternalServerError)
         .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();

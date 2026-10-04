@@ -187,7 +187,7 @@ export const ReportingToolbar: React.FC<ReportingToolbarProps> = ({
 
           {/* New Report — create a blank report and open in edit mode */}
           <NewReportButton
-            datasetId={selectedReport?.datasetId ?? null}
+            sourceReport={selectedReport}
             disabled={tokenLoading}
             onReportCreated={onReportCreated}
           />

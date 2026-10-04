@@ -72,6 +72,7 @@ public static class FieldMappingEndpoints
             .ProducesValidationProblem()
             .Produces(401)  // Unauthorized
             .Produces(404)  // Profile Not Found
+            .Produces(409)  // Parent lookup missing or ambiguous in relationship metadata (task 166 r1)
             .Produces(500); // Internal Server Error
     }
 
@@ -536,12 +537,27 @@ public static class FieldMappingEndpoints
                 return SourceRecordNotFound();
             }
 
+            // Step 3a (task 166 r1, owner round 21 item 3): WHICH lookup on the target names the source is read from
+            // relationship metadata — the target's many-to-one relationships whose referenced entity is the source —
+            // instead of the `sprk_regarding{base}` naming convention, which sprk_invoice (it carries sprk_matter) does
+            // not follow. Exactly one lookup is required; none or several fail closed before any child is read.
+            var (parentLookup, parentLookupCount) = await ResolveParentLookupAsync(
+                impersonatedQuery, request.SourceEntity, request.TargetEntity, callerSystemUserId.Value, ct);
+            if (parentLookup is null)
+            {
+                logger.LogWarning(
+                    "Push refused: {TargetEntity} has {Count} lookup(s) to {SourceEntity} in relationship metadata; exactly "
+                    + "one is required to find the children. Nothing was read or updated.",
+                    request.TargetEntity, parentLookupCount, request.SourceEntity);
+                return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, parentLookupCount);
+            }
+
             // Step 3: Query the child records related to source (limit 500) — AS THE CALLER (task 166), so a child
             // they cannot read never enters the set, the counts, the errors or the field results.
             var childRecords = await QueryChildRecordsAsync(
                 impersonatedQuery,
                 entityService,
-                request.SourceEntity,
+                parentLookup,
                 request.SourceRecordId,
                 request.TargetEntity,
                 callerSystemUserId.Value,
@@ -631,6 +647,11 @@ public static class FieldMappingEndpoints
         {
             errors["sourceEntity"] = ["Source entity is required."];
         }
+        else if (!IsLogicalName(request.SourceEntity))
+        {
+            // Task 166 r1: entity names are interpolated into Dataverse queries and metadata paths.
+            errors["sourceEntity"] = ["Source entity must be a Dataverse logical name (letters, digits and underscores)."];
+        }
 
         if (request.SourceRecordId == Guid.Empty)
         {
@@ -640,6 +661,10 @@ public static class FieldMappingEndpoints
         if (string.IsNullOrWhiteSpace(request.TargetEntity))
         {
             errors["targetEntity"] = ["Target entity is required."];
+        }
+        else if (!IsLogicalName(request.TargetEntity))
+        {
+            errors["targetEntity"] = ["Target entity must be a Dataverse logical name (letters, digits and underscores)."];
         }
 
         return errors;
@@ -745,15 +770,92 @@ public static class FieldMappingEndpoints
     private const string ReadOperation = "read";
 
     /// <summary>
-    /// Builds the child-record query issued AS THE CALLER (task 166). The <c>_…_value</c> wrap is applied EXACTLY
-    /// ONCE: <see cref="DetermineParentLookupField"/> already returns the <c>_sprk_regarding{base}_value</c> form,
-    /// and the old path handed it to <c>QueryChildRecordIdsAsync</c>, which wrapped it a second time
+    /// Builds the child-record query issued AS THE CALLER (task 166). <paramref name="parentLookupAttribute"/> is the
+    /// target's lookup LOGICAL name (from <see cref="ResolveParentLookupAsync"/>), and the <c>_…_value</c> wrap is
+    /// applied EXACTLY ONCE, here. The old path wrapped an already-wrapped name a second time
     /// (<c>__sprk_regardingmatter_value_value</c>) — Dataverse answered 400 and the route always 500ed.
     /// </summary>
     /// <remarks><c>internal</c> so a test can pin the exact string — the double prefix must not come back.</remarks>
-    internal static string BuildChildRecordQuery(string sourceEntity, Guid sourceRecordId, string targetEntity, int top)
-        => $"$filter={DetermineParentLookupField(sourceEntity)} eq {sourceRecordId:D}"
+    internal static string BuildChildRecordQuery(string parentLookupAttribute, Guid sourceRecordId, string targetEntity, int top)
+        => $"$filter=_{parentLookupAttribute}_value eq {sourceRecordId:D}"
            + $"&$select={targetEntity}id&$top={top}";
+
+    /// <summary>
+    /// The relationship-metadata collection the parent lookup is resolved from: the TARGET's many-to-one
+    /// relationships (task 166 r1, owner round 21 item 3). <paramref name="targetEntity"/> has passed
+    /// <see cref="IsLogicalName"/>, so it cannot break out of the quoted key.
+    /// </summary>
+    internal static string ParentLookupMetadataPath(string targetEntity)
+        => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
+
+    /// <summary>The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed).</summary>
+    internal const string ParentLookupMetadataQuery = "$select=ReferencingAttribute,ReferencedEntity";
+
+    /// <summary>
+    /// Task 166 r1 (owner round 21 item 3): the target's ONE lookup that references the source entity, from
+    /// relationship metadata read AS THE CALLER (the same impersonated seam the child query uses). Returns the lookup's
+    /// logical name, or <see langword="null"/> with the number of matching lookups found (0 = none, &gt;1 = ambiguous) —
+    /// both fail closed: with no lookup the children cannot be found, and with several the route cannot know which
+    /// one names the parent, so it must not guess and write to children it may have chosen wrongly.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the <c>sprk_regarding{base}</c> naming convention (<c>DetermineParentLookupField</c>, deleted), which the
+    /// live "Matter to Invoice (Attorney Matrix)" profile broke: <c>sprk_invoice</c> carries <c>sprk_matter</c>, not
+    /// <c>sprk_regardingmatter</c>. Live metadata 2026-10-04 (read-only): sprk_workassignment, sprk_event and
+    /// sprk_reportcard each have exactly one lookup to sprk_matter (sprk_regardingmatter); sprk_invoice has exactly one
+    /// (sprk_matter). No schema change, no per-table convention, no deactivated profile. A metadata fault propagates
+    /// to the route's 500 — never to a guessed lookup.
+    /// </remarks>
+    internal static async Task<(string? Attribute, int Matches)> ResolveParentLookupAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        string sourceEntity,
+        string targetEntity,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var relationships = await impersonatedQuery.QueryAsync(
+            ParentLookupMetadataPath(targetEntity), ParentLookupMetadataQuery, callerSystemUserId, ct);
+
+        var matches = relationships
+            .Where(r => r.TryGetValue("ReferencedEntity", out var referenced)
+                        && referenced.ValueKind == System.Text.Json.JsonValueKind.String
+                        && string.Equals(referenced.GetString(), sourceEntity, StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.TryGetValue("ReferencingAttribute", out var attribute)
+                         && attribute.ValueKind == System.Text.Json.JsonValueKind.String
+                ? attribute.GetString()
+                : null)
+            .Where(a => !string.IsNullOrWhiteSpace(a) && IsLogicalName(a!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return matches.Length == 1 ? (matches[0], 1) : (null, matches.Length);
+    }
+
+    /// <summary>A Dataverse logical name: letters, digits and underscores only (it is interpolated into OData).</summary>
+    internal static bool IsLogicalName(string value)
+        => value.Length is > 0 and <= 128 && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    /// <summary>Stable reason codes for the two parent-lookup refusals (task 166 r1).</summary>
+    internal const string ParentLookupMissingReasonCode = "field_mapping_parent_lookup_missing";
+    internal const string ParentLookupAmbiguousReasonCode = "field_mapping_parent_lookup_ambiguous";
+
+    /// <summary>
+    /// 409: the profile's target table has no lookup — or more than one — to the source in relationship metadata, so
+    /// the push cannot tell which children belong to this record. Nothing was read or updated. The source was already
+    /// authorized for the caller, so naming the two tables discloses nothing they could not see.
+    /// </summary>
+    private static IResult ParentLookupNotResolvable(string sourceEntity, string targetEntity, int matches) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Parent Lookup Not Resolvable",
+            detail: matches == 0
+                ? $"'{targetEntity}' has no lookup to '{sourceEntity}', so its records related to this one cannot be found. Nothing was updated."
+                : $"'{targetEntity}' has {matches} lookups to '{sourceEntity}', so which one names the parent is ambiguous. Nothing was updated.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.8",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = matches == 0 ? ParentLookupMissingReasonCode : ParentLookupAmbiguousReasonCode,
+            });
 
     /// <summary>
     /// Queries child records related to the source record, AS THE CALLER (task 166): Dataverse returns only the
@@ -767,7 +869,7 @@ public static class FieldMappingEndpoints
     private static async Task<(Guid[] RecordIds, int TotalCount)> QueryChildRecordsAsync(
         IImpersonatedCommunicationQuery impersonatedQuery,
         IGenericEntityService entityService,
-        string sourceEntity,
+        string parentLookupAttribute,
         Guid sourceRecordId,
         string targetEntity,
         Guid callerSystemUserId,
@@ -775,7 +877,7 @@ public static class FieldMappingEndpoints
         CancellationToken ct)
     {
         var entitySet = await entityService.GetEntitySetNameAsync(targetEntity, ct);
-        var odataQuery = BuildChildRecordQuery(sourceEntity, sourceRecordId, targetEntity, maxRecords + 1);
+        var odataQuery = BuildChildRecordQuery(parentLookupAttribute, sourceRecordId, targetEntity, maxRecords + 1);
 
         var rows = await impersonatedQuery.QueryAsync(entitySet, odataQuery, callerSystemUserId, ct);
 
@@ -793,18 +895,6 @@ public static class FieldMappingEndpoints
         // Return with count (limit to maxRecords + 1 for checking if more exist)
         var limitedRecordIds = recordIds.Take(maxRecords + 1).ToArray();
         return (limitedRecordIds.Take(maxRecords).ToArray(), limitedRecordIds.Length);
-    }
-
-    /// <summary>
-    /// Determines the parent lookup field name based on the source entity.
-    /// </summary>
-    private static string DetermineParentLookupField(string sourceEntity)
-    {
-        // For standard regarding records, use the convention: _sprk_regarding{entitybasename}_value
-        // For example: sprk_matter -> _sprk_regardingmatter_value
-        //              account -> _sprk_regardingaccount_value
-        var entityBaseName = sourceEntity.Replace("sprk_", "");
-        return $"_sprk_regarding{entityBaseName}_value";
     }
 
     /// <summary>

@@ -107,6 +107,13 @@ public static class ComposeSaveTelemetry
     public const string CauseRecordPromotion = "record-promotion";
     /// <summary>An unclassified fault reaching the endpoint's final catch.</summary>
     public const string CauseUnhandled = "unhandled";
+    /// <summary>
+    /// unified-access-control-r2 task 166 r1: the chat-session store FAULTED while the save route checked that the
+    /// body's session is the caller's, so the save was refused (503) before any write. Paired with
+    /// <c>storage-failed</c>: the request was fine and a retry will succeed. Its own cause so a session-store outage
+    /// is not hidden in <see cref="CauseUnhandled"/>.
+    /// </summary>
+    public const string CauseSessionUnavailable = "session-unavailable";
 
     /// <summary>
     /// Record one terminal save outcome. Called at the endpoint — the single choke point that sees BOTH

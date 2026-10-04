@@ -20,7 +20,10 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// access token. Embed tokens are cached in Redis with the key format
 /// <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c> to reduce Power BI API round-trips.
 /// </summary>
-public sealed class ReportingEmbedService
+// unified-access-control-r2 task 166 r1: UNSEALED and the five methods the endpoints call are VIRTUAL — a permitted
+// ADR-010 test seam (POML constraint), so the endpoint contract tests can substitute the Power BI boundary. No behaviour
+// change; nothing derives from it in production.
+public class ReportingEmbedService
 {
     /// <summary>
     /// Power BI OAuth 2.0 scope for client-credentials / App Owns Data.
@@ -116,7 +119,7 @@ public sealed class ReportingEmbedService
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><see cref="EmbedConfig"/> containing the embed token, URL, report ID, expiry, and refresh hint.</returns>
-    public async Task<EmbedConfig> GetEmbedConfigAsync(
+    public virtual async Task<EmbedConfig> GetEmbedConfigAsync(
         Guid workspaceId,
         Guid reportId,
         string? username,
@@ -353,7 +356,7 @@ public sealed class ReportingEmbedService
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The matching <see cref="PowerBiReport"/> DTO.</returns>
-    public async Task<PowerBiReport> GetReportAsync(
+    public virtual async Task<PowerBiReport> GetReportAsync(
         Guid workspaceId,
         Guid reportId,
         Guid? profileId = null,
@@ -398,7 +401,7 @@ public sealed class ReportingEmbedService
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The newly created <see cref="PowerBiReport"/> DTO.</returns>
-    public async Task<PowerBiReport> CreateReportAsync(
+    public virtual async Task<PowerBiReport> CreateReportAsync(
         Guid workspaceId,
         string name,
         Guid datasetId,
@@ -442,7 +445,7 @@ public sealed class ReportingEmbedService
     /// <param name="reportId">Report GUID to delete.</param>
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task DeleteReportAsync(
+    public virtual async Task DeleteReportAsync(
         Guid workspaceId,
         Guid reportId,
         Guid? profileId = null,
@@ -488,7 +491,7 @@ public sealed class ReportingEmbedService
     ///   Thrown when the export job does not complete within the polling timeout
     ///   (<see cref="ExportMaxPolls"/> × <see cref="ExportPollInterval"/>).
     /// </exception>
-    public async Task<Stream> ExportReportAsync(
+    public virtual async Task<Stream> ExportReportAsync(
         Guid workspaceId,
         Guid reportId,
         ExportFormat format,

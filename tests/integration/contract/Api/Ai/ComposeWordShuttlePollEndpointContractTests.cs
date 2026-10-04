@@ -373,6 +373,73 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 3b. uac-r2 task 166 r1 (S-80 family, F6) — pull-annotations and reanchor-annotations take the tenant from
+    //     the CALLER's claim. The body's tenantId is obsolete: a body without it is accepted, and a token without a
+    //     tid claim is refused with 401 BEFORE any SPE download. (The verifier seeded the 401's removal and nothing
+    //     went red — these are the tests that now notice.)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string> AnnotationRoutes => new() { "pull-annotations", "reanchor-annotations" };
+
+    private static object AnnotationBodyWithoutTenant(string route, string driveId) => route == "pull-annotations"
+        ? (object)new { driveId }
+        : new
+        {
+            driveId,
+            priorAnchors = new[]
+            {
+                new { id = "anchor-1", type = "comment", textPattern = PriorAnchorText, paragraphHint = 1, preview = "Reviewer note" },
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(AnnotationRoutes))]
+    public async Task AnnotationRoute_ABodyWithNoTenantId_IsAccepted(string route)
+    {
+        const string driveId = "b!word-shuttle-annotations-166";
+        const string documentSpeId = "spe-item-annotations-166";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, documentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(BuildDocx(UpdatedParagraphs)));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/{route}", AnnotationBodyWithoutTenant(route, driveId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "tenantId is obsolete on the body — no longer required, never read (the tenant is the tid claim)");
+    }
+
+    [Theory]
+    [MemberData(nameof(AnnotationRoutes))]
+    public async Task AnnotationRoute_ATokenWithNoTidClaim_Is401_AndDownloadsNothing(string route)
+    {
+        const string driveId = "b!word-shuttle-annotations-notid";
+        const string documentSpeId = "spe-item-annotations-notid";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(BuildDocx(UpdatedParagraphs)));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        client.DefaultRequestHeaders.Add(WordShuttlePollFakeAuthHandler.OmitTidHeader, "1");
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/{route}",
+            new
+            {
+                driveId,
+                tenantId = TenantId, // a body tenant does NOT stand in for the missing claim
+                priorAnchors = Array.Empty<object>(),
+            });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _fixture.SpeMock.Verify(
+            s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no SPE download happens for a caller whose tenant cannot be established");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 4. Auth — the poll route inherits RequireAuthorization() from the /api/compose group.
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -565,6 +632,10 @@ internal sealed class WordShuttlePollFakeAuthHandler : AuthenticationHandler<Aut
 {
     public const string SchemeName = "WordShuttlePollFakeAuth";
 
+    /// <summary>uac-r2 task 166 r1: a request carrying this header authenticates WITHOUT a tid claim — an Entra
+    /// principal whose tenant cannot be established.</summary>
+    public const string OmitTidHeader = "X-Test-Omit-Tid";
+
     public WordShuttlePollFakeAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
@@ -587,10 +658,13 @@ internal sealed class WordShuttlePollFakeAuthHandler : AuthenticationHandler<Aut
         var claims = new List<Claim>
         {
             new("oid", oid),
-            new("tid", "tenant-word-shuttle-001"),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Word-Shuttle Test User {oid}"),
         };
+        if (!Request.Headers.ContainsKey(OmitTidHeader))
+        {
+            claims.Add(new("tid", "tenant-word-shuttle-001"));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);

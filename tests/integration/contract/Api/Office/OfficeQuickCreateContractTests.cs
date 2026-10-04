@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.ServiceModel;
@@ -567,6 +568,78 @@ public class OfficeQuickCreateContractTests
 
         await AssertSourceDeniedAsync(factory, response, "insufficient_rights");
         factory.PrivilegeQuestions.Should().BeEmpty("the source half (task 030) runs first and is unchanged");
+    }
+
+    /// <summary>
+    /// uac-r2 task 166 r1 (verifier item 22): a caller with NO bearer token is refused at the route. The factory's
+    /// default seam ignores the token, so here the privilege question is answered by the REAL probe (CallBase), whose
+    /// rule is "no token, no privilege" — proving the filter hands the probe the caller's own (absent) token rather
+    /// than anything that could stand in for it, and that the absence denies.
+    /// </summary>
+    [Theory]
+    [InlineData("matter")]
+    [InlineData("project")]
+    [InlineData("invoice")]
+    public async Task Post_QuickCreate_WithNoBearerToken_Returns403_AndCreatesNothing(string entityType)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        var tokensSeen = new List<string?>();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string? token, string _, CancellationToken _) => tokensSeen.Add(token))
+            .CallBase();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+
+        var client = factory.CreateClient(); // TestAuthHandler authenticates WITHOUT a bearer token
+        var response = await client.PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "No token" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_009");
+        problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        tokensSeen.Should().ContainSingle().Which.Should().BeNull("the filter forwards the CALLER's token, and there is none");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_ForwardsTheCallersOwnBearerTokenToThePrivilegeQuestion()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        var tokensSeen = new List<string?>();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string? token, string _, CancellationToken _) => tokensSeen.Add(token))
+            .ReturnsAsync(false);
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token-166");
+        var response = await client.PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Token forwarded" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        tokensSeen.Should().Equal(new[] { "caller-token-166" }, "the question is asked AS THE CALLER");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_OfAnInvalidEntityType_AsksNoPrivilege_AndKeepsTheHandlers400()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Clear();
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/quickcreate/notatype", new QuickCreateRequest { Name = "Not a type" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the handler's existing answer is unchanged");
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_002");
+        factory.PrivilegeQuestions.Should().BeEmpty("an unparseable type names no table, so no privilege is asked");
+        AssertNothingCreated(factory);
     }
 
     [Theory]

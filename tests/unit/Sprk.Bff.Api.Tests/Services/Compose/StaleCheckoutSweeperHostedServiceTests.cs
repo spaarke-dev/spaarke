@@ -71,7 +71,8 @@ public class StaleCheckoutSweeperHostedServiceTests
             null!, // SpeFileStore - not touched by virtual seams under test
             config,
             credential,
-            loggerMock)
+            loggerMock,
+            TestRecordContainerResolver.ForBusinessUnitContainers()) // no URL is minted on the paths under test
         {
             CallBase = false, // override all virtuals; we drive observation through .Setup
         };

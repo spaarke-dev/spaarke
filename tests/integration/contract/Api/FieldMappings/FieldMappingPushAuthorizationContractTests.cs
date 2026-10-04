@@ -57,7 +57,7 @@ public class FieldMappingPushAuthorizationContractTests
     [Fact]
     public void BuildChildRecordQuery_WrapsTheLookupExactlyOnce()
     {
-        var query = FieldMappingEndpoints.BuildChildRecordQuery("sprk_matter", MatterId, "sprk_event", 501);
+        var query = FieldMappingEndpoints.BuildChildRecordQuery("sprk_regardingmatter", MatterId, "sprk_event", 501);
 
         query.Should().Be($"$filter=_sprk_regardingmatter_value eq {MatterId:D}&$select=sprk_eventid&$top=501");
         query.Should().NotContain("__sprk_", "the old path produced __sprk_regardingmatter_value_value and always 400ed");
@@ -163,6 +163,80 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     // =========================================================================================
+    // Task 166 r1 (owner round 21 item 3): the parent lookup comes from RELATIONSHIP METADATA
+    // =========================================================================================
+
+    [Fact]
+    public async Task Push_ToATargetWhoseLookupIsNotTheRegardingConvention_FindsItFromMetadata_MatterToInvoice()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_invoice")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the live 'Matter to Invoice (Attorney Matrix)' profile works: sprk_invoice names its matter in sprk_matter");
+        host.MetadataQueries.Should().Equal(new[]
+        {
+            ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
+             (string?)"$select=ReferencingAttribute,ReferencedEntity", CallerSystemUserId),
+        }, "the metadata is read through the same impersonated seam, as the caller");
+        host.ChildQueries.Should().ContainSingle().Which.Should().Be(
+            ("sprk_invoices", $"$filter=_sprk_matter_value eq {MatterId:D}&$select=sprk_invoiceid&$top=501", CallerSystemUserId));
+    }
+
+    [Fact]
+    public async Task Push_ToTheConventionalTarget_ResolvesTheSameLookupFromMetadata()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(lookupsToSource: ["sprk_regardingmatter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.ChildQueries.Should().ContainSingle().Which.Query.Should().StartWith("$filter=_sprk_regardingmatter_value eq ");
+    }
+
+    [Theory]
+    [InlineData(0, FieldMappingEndpoints.ParentLookupMissingReasonCode)]
+    [InlineData(2, FieldMappingEndpoints.ParentLookupAmbiguousReasonCode)]
+    public async Task Push_WhenMetadataNamesNoneOrSeveralLookupsToTheSource_Is409_AndReadsAndWritesNoChild(
+        int lookups, string reasonCode)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(lookupsToSource: lookups == 0 ? [] : ["sprk_regardingmatter", "sprk_secondmatter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be(reasonCode);
+        host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
+        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("sprk_event')/x?$filter=('")]
+    [InlineData("sprk event")]
+    public async Task Push_WithANonLogicalNameEntity_Is400_AndNothingIsAsked(string targetEntity)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "an entity name is interpolated into OData and metadata paths");
+        host.ProbedSources.Should().BeEmpty();
+        host.VerifyNothingReadOrWritten();
+        host.MetadataQueries.Should().BeEmpty();
+    }
+
+    // =========================================================================================
     // Helpers
     // =========================================================================================
 
@@ -227,6 +301,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         public List<(string EntitySet, string? Query, Guid Caller)> ChildQueries { get; } = new();
 
+        /// <summary>Every relationship-metadata read (task 166 r1), with the caller it impersonated.</summary>
+        public List<(string Path, string? Query, Guid Caller)> MetadataQueries { get; } = new();
+
         public SeamProbe Probe { get; }
 
         public Mock<IFieldMappingDataverseService> FieldMappings { get; } = new(MockBehavior.Loose);
@@ -244,17 +321,22 @@ public class FieldMappingPushAuthorizationContractTests
             return host;
         }
 
-        /// <summary>A one-rule matter→event profile, a source row, and the children the CALLER can see.</summary>
-        public void ArrangeHappyPathData(Guid[]? visibleChildren = null)
+        /// <summary>A one-rule matter→target profile, a source row, the target's lookups to sprk_matter in relationship
+        /// metadata (task 166 r1; default: the one sprk_regardingmatter), and the children the CALLER can see.</summary>
+        public void ArrangeHappyPathData(
+            Guid[]? visibleChildren = null,
+            string targetEntity = "sprk_event",
+            string targetSet = "sprk_events",
+            string[]? lookupsToSource = null)
         {
             FieldMappings
-                .Setup(f => f.GetFieldMappingProfileWithRulesAsync("sprk_matter", "sprk_event", true, It.IsAny<CancellationToken>()))
+                .Setup(f => f.GetFieldMappingProfileWithRulesAsync("sprk_matter", targetEntity, true, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FieldMappingProfileEntity
                 {
                     Id = Guid.NewGuid(),
-                    Name = "Matter to Event",
+                    Name = "Matter to " + targetEntity,
                     SourceEntity = "sprk_matter",
-                    TargetEntity = "sprk_event",
+                    TargetEntity = targetEntity,
                     IsActive = true,
                     Rules =
                     [
@@ -269,19 +351,42 @@ public class FieldMappingPushAuthorizationContractTests
                 .Setup(f => f.RetrieveRecordFieldsAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" });
 
-            Entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_events");
+            Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
 
             var children = visibleChildren ?? new[] { ChildA, ChildB };
             Impersonated
-                .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Setup(q => q.QueryAsync(
+                    It.Is<string>(set => !set.StartsWith("EntityDefinitions", StringComparison.Ordinal)),
+                    It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string set, string? query, Guid caller, CancellationToken _) =>
                 {
                     ChildQueries.Add((set, query, caller));
                     return children
-                        .Select(id => new Dictionary<string, JsonElement> { ["sprk_eventid"] = JsonSerializer.SerializeToElement(id.ToString()) })
+                        .Select(id => new Dictionary<string, JsonElement> { [$"{targetEntity}id"] = JsonSerializer.SerializeToElement(id.ToString()) })
                         .ToList();
                 });
+
+            // Relationship metadata: the target's lookups to sprk_matter, plus an unrelated lookup that must be ignored.
+            var relationships = (lookupsToSource ?? ["sprk_regardingmatter"])
+                .Select(attribute => Relationship(attribute, "sprk_matter"))
+                .Append(Relationship("sprk_assignedto", "contact"))
+                .ToList();
+            Impersonated
+                .Setup(q => q.QueryAsync(
+                    It.Is<string>(set => set.StartsWith("EntityDefinitions", StringComparison.Ordinal)),
+                    It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string path, string? query, Guid caller, CancellationToken _) =>
+                {
+                    MetadataQueries.Add((path, query, caller));
+                    return relationships;
+                });
         }
+
+        private static Dictionary<string, JsonElement> Relationship(string referencingAttribute, string referencedEntity) => new()
+        {
+            ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
+            ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
+        };
 
         public void VerifyNothingReadOrWritten()
         {

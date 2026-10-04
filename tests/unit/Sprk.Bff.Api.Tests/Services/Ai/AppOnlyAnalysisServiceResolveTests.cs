@@ -55,7 +55,8 @@ public class AppOnlyAnalysisServiceResolveTests
             toolHandlerRegistry: Mock.Of<IToolHandlerRegistry>(),
             nodeService: Mock.Of<INodeService>(),
             playbookOrchestrator: Mock.Of<IPlaybookOrchestrationService>(),
-            logger: Mock.Of<ILogger<AppOnlyAnalysisService>>());
+            logger: Mock.Of<ILogger<AppOnlyAnalysisService>>(),
+            containerResolver: TestRecordContainerResolver.ForBusinessUnitContainers());
     }
 
     private static async Task<PlaybookResponse> InvokeResolvePlaybookAsync(

@@ -713,6 +713,32 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
+    /// Task 166 r1 (verifier item 8): a NON-secure project filed under a SECURE matter. The resolver's CONTENT answer
+    /// for it is the matter's own container (task 155), and task 166 swept that — removing the revoked grantees from
+    /// the MATTER's container, where a grant on the matter may still entitle them. The closure now cleans only a
+    /// container the project ITSELF owns, so here it touches none and still revokes every grant.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_ANonSecureProjectUnderASecureMatter_NeverTouchesTheMattersContainer()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForNonSecureRecordUnderSecureMatter(
+                "sprk_project", ProjectId, Guid.Parse("66666666-1660-4000-8000-000000000001")));
+
+        OkBody(result).AccessRecordsRevoked.Should().Be(1);
+        calls.Should().BeEmpty("the secure matter's container belongs to the matter, not to this project");
+        table.ActiveRows.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// "We could not tell which container" is not "nothing to clean": a SECURE project with no container
     /// (the resolver's FailClosed refusal) and a resolver fault both report container_not_cleared — and the grant
     /// deactivation still ran.
@@ -721,11 +747,13 @@ public class ProjectClosureCascadeTests
     [InlineData("secure-without-container")]
     [InlineData("resolver-problem")]
     [InlineData("resolver-fault")]
+    [InlineData("secure-flag-absent")] // task 166 r1: an unreadable flag is never read as "not secure"
     public async Task CloseProject_WhenTheContainerCannotBeDetermined_ReportsIncompleteAndStillRevokes(string shape)
     {
         var resolver = shape switch
         {
             "secure-without-container" => TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, ownContainerId: null),
+            "secure-flag-absent" => TestRecordContainerResolver.ForRecordWithNoSecureFlag("sprk_project", ProjectId),
             "resolver-problem" => TestRecordContainerResolver.Throwing(new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
                 "container_ownership_indeterminate", "Indeterminate", "test", 409)),
             _ => TestRecordContainerResolver.Throwing(new TimeoutException("metadata timed out")),

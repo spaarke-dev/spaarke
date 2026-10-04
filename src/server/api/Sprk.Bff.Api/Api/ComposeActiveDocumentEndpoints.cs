@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using static Sprk.Bff.Api.Api.ComposeEndpoints;
@@ -60,6 +61,7 @@ internal static class ComposeActiveDocumentEndpoints
     private static async Task<IResult> RegisterActiveDocument(
         [FromBody] ComposeActiveDocumentRequest? body,
         ChatSessionManager sessionManager,
+        IDataverseUserClient dataverseUser,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -141,14 +143,40 @@ internal static class ComposeActiveDocumentEndpoints
                     RegisteredAt: DateTimeOffset.UtcNow,
                     DocumentSessionId: body.DocumentSessionId);
             }
-            else
+            else if (body.Visible == false)
             {
+                // A WITHDRAW only clears a pointer that is already recorded (below); it reads no document.
                 identity = new ActiveDocumentIdentity(
                     Source: ActiveDocumentIdentity.SourceStored,
                     SprkDocumentId: body.DocumentId,
-                    SpeDriveItemId: body.SpeDriveItemId,
-                    SpeDriveId: body.SpeDriveId,
                     FileName: body.FileName,
+                    RegisteredAt: DateTimeOffset.UtcNow,
+                    DocumentSessionId: body.DocumentSessionId);
+            }
+            else
+            {
+                // unified-access-control-r2 task 166 r1 (verifier items 10/21; amendment (d), "any other Compose
+                // session route with the same flaw"): a stored document is recorded only when the CALLER can read
+                // it — the row is read AS THE CALLER — and the recorded SPE pointer is that row's, never the body's.
+                // Unknown, unreadable and an unanswerable read are ONE answer, so the route reveals nothing.
+                var readable = Guid.TryParse(body.DocumentId, out var documentGuid)
+                    ? await ReadCallerReadableDocumentAsync(dataverseUser, documentGuid, ct).ConfigureAwait(false)
+                    : null;
+                if (readable is null)
+                {
+                    logger.LogWarning(
+                        "Compose active-document DENIED: the caller cannot read the stored document (or it does not exist). "
+                        + "Answered 404, session unchanged. TraceId={TraceId}",
+                        httpContext.TraceIdentifier);
+                    return DocumentNotFound();
+                }
+
+                identity = new ActiveDocumentIdentity(
+                    Source: ActiveDocumentIdentity.SourceStored,
+                    SprkDocumentId: body.DocumentId,
+                    SpeDriveItemId: readable.Value.ItemId,
+                    SpeDriveId: readable.Value.DriveId,
+                    FileName: body.FileName ?? readable.Value.Name,
                     RegisteredAt: DateTimeOffset.UtcNow,
                     DocumentSessionId: body.DocumentSessionId);
             }
@@ -231,6 +259,48 @@ internal static class ComposeActiveDocumentEndpoints
                 detail: "An unexpected error occurred while registering the active document.");
         }
     }
+
+    /// <summary>The <c>sprk_document</c> columns the active-document registration reads AS THE CALLER.</summary>
+    internal static string CallerDocumentReadPath(Guid documentId)
+        => $"sprk_documents({documentId:D})?$select=sprk_documentid,sprk_documentname,sprk_graphitemid,sprk_graphdriveid";
+
+    /// <summary>
+    /// Reads the stored document AS THE CALLER (OBO, <see cref="IDataverseUserClient"/>): the row when the caller can
+    /// read it, otherwise null — not found, no Read and a failed read are deliberately one answer (task 166 r1).
+    /// </summary>
+    internal static async Task<(string? ItemId, string? DriveId, string? Name)?> ReadCallerReadableDocumentAsync(
+        IDataverseUserClient dataverseUser, Guid documentId, CancellationToken ct)
+    {
+        DataverseUserResponse response;
+        try
+        {
+            response = await dataverseUser.GetAsync(CallerDocumentReadPath(documentId), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (!response.IsSuccess || response.Body is not { ValueKind: System.Text.Json.JsonValueKind.Object } row)
+        {
+            return null;
+        }
+
+        static string? Str(System.Text.Json.JsonElement el, string name)
+            => el.TryGetProperty(name, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String ? p.GetString() : null;
+
+        return (Str(row, "sprk_graphitemid"), Str(row, "sprk_graphdriveid"), Str(row, "sprk_documentname"));
+    }
+
+    private static IResult DocumentNotFound() => Results.Problem(
+        statusCode: StatusCodes.Status404NotFound,
+        title: "Document Not Found",
+        detail: "The document was not found or you do not have access to it.",
+        type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
 
     /// <summary>
     /// DEF-11 (spaarkeai-compose-r2): idempotently ensures a resolvable <see cref="ChatSession"/>
@@ -386,6 +456,8 @@ public sealed record ComposeActiveDocumentRequest(
     [property: JsonPropertyName("documentId")] string? DocumentId = null,
     [property: JsonPropertyName("source")] string? Source = null,
     [property: JsonPropertyName("fileName")] string? FileName = null,
+    // OBSOLETE (unified-access-control-r2 task 166 r1): still bound so shipped clients keep working, never read —
+    // the recorded pointer comes from the row the caller can read.
     [property: JsonPropertyName("speDriveItemId")] string? SpeDriveItemId = null,
     [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null,
     [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null,

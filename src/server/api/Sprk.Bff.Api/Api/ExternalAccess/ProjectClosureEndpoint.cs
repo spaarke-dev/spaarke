@@ -316,10 +316,19 @@ public static class ProjectClosureEndpoint
     /// reports <see cref="ClosureContainerNotClearedReason"/>, because "we could not tell which container" is not
     /// "nothing to clean".
     /// </returns>
-    /// <remarks>The <see cref="DelegationRuleFilter"/> Write gate on the record has already run (close: the
+    /// <remarks>
+    /// <para>The <see cref="DelegationRuleFilter"/> Write gate on the record has already run (close: the
     /// <c>ProjectId</c>; revoke: the grant row's root), so the record named here is one the caller may act on; the
     /// container follows from it by construction, and the client cannot name a different one (a sent
-    /// <c>containerId</c> is an unknown JSON member, ignored).</remarks>
+    /// <c>containerId</c> is an unknown JSON member, ignored).</para>
+    /// <para><b>OWN container, never an ancestor's (task 166 r1).</b> This asks
+    /// <see cref="RecordContainerResolver.ResolveOwnContainerAsync"/>, not the content-placement question
+    /// <see cref="RecordContainerResolver.ResolveForRecordAsync(string, Guid, CancellationToken)"/>: since task 155 the
+    /// latter answers a NON-secure project or work assignment filed under a secure root with the ROOT's container,
+    /// and stripping this record's revoked grantees from there would remove permissions that a grant on the root
+    /// itself may still justify. A record that is not itself secure owns no isolated container, so its step is
+    /// skipped; a record whose secure flag is unreadable is "could not be determined".</para>
+    /// </remarks>
     internal static async Task<(string? ContainerId, bool Decided)> DeriveRecordOwnContainerAsync(
         RecordContainerResolver containerResolver,
         string entityLogicalName,
@@ -330,7 +339,7 @@ public static class ProjectClosureEndpoint
         ContainerDecision decision;
         try
         {
-            decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
+            decision = await containerResolver.ResolveOwnContainerAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -354,13 +363,14 @@ public static class ProjectClosureEndpoint
             case ContainerDecisionOutcome.Unresolved:
                 logger.LogInformation(
                     "[CONTAINER-DERIVE] {Entity} {RecordId} is not a secure record with its own container (outcome "
-                    + "{Outcome}); the container step is SKIPPED — a non-secure record's derived container is the "
-                    + "shared business-unit container, which must never be swept on its behalf.",
+                    + "{Outcome}); the container step is SKIPPED — it owns no isolated container, and neither the "
+                    + "shared business-unit container nor a secure ancestor's container is ever swept on its behalf.",
                     entityLogicalName, recordId, decision.Outcome);
                 return (null, true);
 
             default:
-                // FailClosed, or ResolvedSecure with a blank container id.
+                // FailClosed (secure with no container, or an unreadable secure flag), or ResolvedSecure with a
+                // blank container id.
                 logger.LogError(
                     "[CONTAINER-DERIVE] {Entity} {RecordId}'s container decision is {Outcome} (container id present: "
                     + "{HasContainer}); the container step cannot run and will be reported as not cleared.",

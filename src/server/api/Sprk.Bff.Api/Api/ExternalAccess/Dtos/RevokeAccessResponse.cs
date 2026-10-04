@@ -82,11 +82,17 @@ public enum SpeContainerRevokeOutcome
 /// "3 of 12 removed", so a caller that treats any completed call as success reports a revoked grant while
 /// nine people keep file access. The failure count is what makes the incomplete case sayable.
 /// </remarks>
+/// <param name="RetainedByOtherGrant">
+/// unified-access-control-r2 task 166 r1: members whose permission was deliberately NOT swept because another
+/// active, unexpired grant on the same root (their own contact grant, or another organization's) still entitles
+/// them. Additive (defaults to 0), so a client that predates it is unaffected.
+/// </param>
 public sealed record SpeOrgMemberCleanupSummary(
     int? MembersEnumerated,
     int PermissionsRemoved,
     int PermissionsNotFound,
-    int Failed);
+    int Failed,
+    int RetainedByOtherGrant = 0);
 
 /// <summary>
 /// Response returned after revoking external access from a Contact.

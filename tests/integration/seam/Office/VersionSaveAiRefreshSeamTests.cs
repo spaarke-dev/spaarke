@@ -381,7 +381,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             resolver.Setup(r => r.GetDefaultIndexName()).Returns(DefaultIndex);
 
             _indexHandler = new RagIndexingJobHandler(
-                new FileIndexingService(spe.Object, extractor.Object, chunker.Object, Index, NullLogger<FileIndexingService>.Instance),
+                new FileIndexingService(
+                    spe.Object, extractor.Object, chunker.Object, Index, NullLogger<FileIndexingService>.Instance,
+                    // The saved document's pointer names its business unit's container (task 166 r1 pointer check).
+                    TestRecordContainerResolver.ForBusinessUnitContainers(Drive)),
                 Idempotency,
                 Mock.Of<IDocumentDataverseService>(),
                 resolver.Object,

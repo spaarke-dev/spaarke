@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -6,6 +5,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -2198,7 +2199,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             var query = new QueryExpression("sprk_communicationattachment")
             {
-                ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid"),
+                ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid", "sprk_document"),
                 Criteria =
                 {
                     Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
@@ -2235,6 +2236,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
                     "IServiceScopeFactory is required to resolve SpeFileStore for .eml embed download.")).CreateScope();
                 var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
+                // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the row's pointer is followed as the
+                // application, so it is verified against the document it belongs to first. A row naming no document
+                // cannot be verified and is skipped (fail closed; the embed is best-effort by design).
+                var containerResolver = speScope.ServiceProvider.GetRequiredService<RecordContainerResolver>();
+                var linkedDocument = att.GetAttributeValue<EntityReference>("sprk_document");
+                if (linkedDocument is null
+                    || !await containerResolver.IsDocumentPointerContainerAllowedAsync(linkedDocument.Id, driveId, ct))
+                {
+                    _logger.LogWarning(
+                        "Attachment '{FileName}' skipped for .eml embedding: its storage pointer could not be verified | CommunicationId: {CommunicationId}",
+                        fileName, communicationId);
+                    continue;
+                }
+
                 await using var content = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
                 if (content is null)
                 {
@@ -2455,6 +2471,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
             "IServiceScopeFactory is required to resolve SpeFileStore for attachment download.")).CreateScope();
         var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): every read below follows a sprk_document
+        // row's pointer as the application, so each pointer's container is verified first (fail closed).
+        var containerResolver = speScope.ServiceProvider.GetRequiredService<RecordContainerResolver>();
 
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
@@ -2523,6 +2542,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             _logger.LogDebug(
                 "Downloading attachment {Index}/{Total} | SprkDocId: {SprkDocumentId}, DriveId: {DriveId}, ItemId: {ItemId}, CorrelationId: {CorrelationId}",
                 i + 1, attachmentDocumentIds.Length, sprkDocumentId, driveId, itemId, correlationId);
+
+            if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(sprkDocumentId, driveId, ct))
+            {
+                throw new SdapProblemException(
+                    code: RecordContainerResolver.DocumentStorageUnverifiedCode,
+                    title: "Document storage could not be verified",
+                    detail: $"The file of document '{sprkDocumentId}' is not in a storage container its record may use, "
+                            + "so it is not attached. An administrator must repair the document's storage location.",
+                    statusCode: 409,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["failedDocumentId"] = sprkDocumentId,
+                        ["attachmentIndex"] = i
+                    });
+            }
 
             // Get file metadata for name and size
             FileHandleDto? metadata;

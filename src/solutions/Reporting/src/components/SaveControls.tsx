@@ -5,8 +5,9 @@
  * - "Save" calls report.save() then PATCHes the sprk_report catalog entry
  *   via PATCH /api/reporting/reports/{id} to keep modified date in sync.
  * - "Save As" opens a Fluent v9 Dialog for the new report name, calls
- *   report.saveAs({name, targetWorkspaceId}), then POSTs a new sprk_report
- *   record with is_custom=true via POST /api/reporting/reports.
+ *   report.saveAs({name, targetWorkspaceId}) (keeping the user's unsaved edits), captures the new Power BI report id
+ *   from the SDK's "saved" event, then POSTs it to /api/reporting/reports with the SOURCE catalog row id. The BFF
+ *   verifies the copy is in the source row's workspace before registering it (unified-access-control-r2 task 166 r1).
  *
  * Both buttons are only shown in edit mode for Author / Admin users.
  * Results are communicated via toast notifications (Fluent v9 Toast).
@@ -93,6 +94,9 @@ export interface SaveableReport {
 // Props
 // ---------------------------------------------------------------------------
 
+/** How long Save As waits for the SDK's "saved" event that carries the new report id (task 166 r1). */
+const SAVED_EVENT_TIMEOUT_MS = 30_000;
+
 /** Toaster ID to dispatch toasts to. Must match the id on the <Toaster> element. */
 export const REPORTING_TOASTER_ID = "reporting-toaster";
 
@@ -140,6 +144,12 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
   // -- Save state --
   const [saving, setSaving] = React.useState(false);
 
+  // -- The most recent "saved" event's new report id (Save As) — task 166 r1 --
+  const savedAsReportIdRef = React.useRef<{ id: string | null; waiters: Array<(id: string | null) => void> }>({
+    id: null,
+    waiters: [],
+  });
+
   // -- Save As dialog state --
   const [saveAsOpen, setSaveAsOpen] = React.useState(false);
   const [saveAsName, setSaveAsName] = React.useState("");
@@ -170,11 +180,17 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
   React.useEffect(() => {
     if (!report) return;
 
-    const handleSaved = () => {
+    const handleSaved = (event: CustomEvent<{ reportObjectId?: string; saveAs?: boolean }>) => {
       console.info("[SaveControls] Power BI 'saved' event received");
+      // A Save As reports the NEW report's id; hand it to the waiting Save As handler (task 166 r1).
+      if (event?.detail?.saveAs && event.detail.reportObjectId) {
+        const state = savedAsReportIdRef.current;
+        state.id = event.detail.reportObjectId;
+        state.waiters.splice(0).forEach((resolve) => resolve(state.id));
+      }
     };
 
-    report.on("saved", handleSaved);
+    report.on<{ reportObjectId?: string; saveAs?: boolean }>("saved", handleSaved);
 
     return () => {
       report.off("saved");
@@ -252,15 +268,31 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
     setSaveAsError(null);
 
     try {
-      // Step 1: Call report.saveAs() via the PBI SDK
+      // Step 1: Call report.saveAs() via the PBI SDK, and wait for the "saved" event that names the new report.
+      const state = savedAsReportIdRef.current;
+      state.id = null;
+      const newReportId = new Promise<string | null>((resolve) => {
+        state.waiters.push(resolve);
+        setTimeout(() => resolve(state.id), SAVED_EVENT_TIMEOUT_MS);
+      });
       await report.saveAs({ name: trimmedName, targetWorkspaceId: workspaceId });
+      const pbiReportId = await newReportId;
 
-      // Step 2: Create a new sprk_report Dataverse record via the BFF
+      if (!pbiReportId) {
+        showToast(
+          "Report copied",
+          "Report saved in Power BI but its id was not reported, so it could not be registered in the catalog.",
+          "warning"
+        );
+        setSaveAsOpen(false);
+        return;
+      }
+
+      // Step 2: Register the copy as a new sprk_report catalog row via the BFF (by its SOURCE catalog row).
       const result = await saveAsReport({
         name: trimmedName,
         sourceReportId: selectedReport.id,
-        targetWorkspaceId: workspaceId,
-        isCustom: true,
+        pbiReportId,
       });
 
       if (!result.ok) {
