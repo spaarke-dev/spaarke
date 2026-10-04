@@ -12,11 +12,13 @@
  *   record now, in ONE BFF call: POST /api/v1/external-access/assigned-access/sync. Shows both outcomes, then refreshes.
  * - "Make Secure" (task 150, UX amendment; owner round 27 copy) - on a record that is NOT secure, for a caller with
  *   Write: confirms with the owner-authored copy (MAKE_SECURE_CONFIRMATION, the ONE constant), then calls the
- *   provisioning endpoint POST /api/v1/external-access/provision-project (task 144, generalized to the three roots;
+ *   provisioning endpoint POST /api/v1/external-access/provision-project with transition "make-secure" (round 33 item 1:
+ *   the server holds that path to the Write gate and shares the record to its creator too) (task 144, generalized to the three roots;
  *   task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the outcome.
  *   Shipped only where task 148's transition is deployed - an import/packaging rule, not a runtime check
  *   (infrastructure/dataverse/ribbon/AccessRibbons/README.md).
- * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: calls the unsecure endpoint
+ * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: confirms with
+ *   REMOVE_SECURE_CONFIRMATION (round 33 item 2, the ONE constant), then calls the unsecure endpoint
  *   POST /api/v1/external-access/unsecure-project. The SERVER decides who may remove the designation (owner F3: Full
  *   Access holders and the record's creator); a refusal shows the endpoint's ProblemDetails message. This script
  *   decides nothing about who may unsecure - its enable rule only hides the command from callers without Write.
@@ -49,7 +51,7 @@ Spaarke.Access = Spaarke.Access || {};
 Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.1.0"; // 1.1.0 - task 150: Make Secure / Remove Secure
+    ns.VERSION = "1.2.0"; // 1.1.0 - task 150: Make Secure / Remove Secure; 1.2.0 - round 33: make-secure transition, Remove Secure confirmation
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -144,6 +146,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // =========================================================================================================
 
     var PROVISION_PATH = "/api/v1/external-access/provision-project";
+    var MAKE_SECURE_TRANSITION = "make-secure"; // ProvisionProjectEndpoint.TransitionMakeSecure
     var UNSECURE_PATH = "/api/v1/external-access/unsecure-project";
     var SECURE_STATE_TTL_MS = 30000;
 
@@ -173,24 +176,63 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     });
 
     /**
-     * The confirmation for one table, {record} filled in - the strings openConfirmDialog shows. Null for a table that is
-     * not one of the three roots (no dialog, no call).
+     * The Remove Secure confirmation - round 33 item 2 (2026-10-04; owner round 27's stance: the recommended wording,
+     * adjustable in UAT). The ONE constant: change it only with the owner. {record} is project, matter or work assignment.
      */
-    ns.makeSecureConfirmationFor = function (entityName) {
+    ns.REMOVE_SECURE_CONFIRMATION = Object.freeze({
+        title: "Remove the secure designation from this {record}?",
+        paragraphs: Object.freeze([
+            "The {record} and its related records return to normal access: people who can see records in its business " +
+                "unit will be able to see them, and the individual sharing set up while it was secure is removed.",
+            "To secure it again later, use Make Secure."
+        ]),
+        confirmButtonLabel: "Remove Secure",
+        cancelButtonLabel: "Cancel"
+    });
+
+    /** One confirmation constant for one table, {record} filled in - the strings openConfirmDialog shows. */
+    function confirmationFor(copy, entityName) {
         var word = ns.RECORD_WORDS[entityName];
         if (!word) {
             return null;
         }
 
         var fill = function (text) { return text.split("{record}").join(word); };
-        var copy = ns.MAKE_SECURE_CONFIRMATION;
         return {
             title: fill(copy.title),
             text: copy.paragraphs.map(fill).join("\n\n"),
             confirmButtonLabel: copy.confirmButtonLabel,
             cancelButtonLabel: copy.cancelButtonLabel
         };
+    }
+
+    /**
+     * The Make Secure confirmation for one table. Null for a table that is not one of the three roots (no dialog, no
+     * call).
+     */
+    ns.makeSecureConfirmationFor = function (entityName) {
+        return confirmationFor(ns.MAKE_SECURE_CONFIRMATION, entityName);
     };
+
+    /** The Remove Secure confirmation for one table (null for any other table). */
+    ns.removeSecureConfirmationFor = function (entityName) {
+        return confirmationFor(ns.REMOVE_SECURE_CONFIRMATION, entityName);
+    };
+
+    /** Shows one confirmation; resolves true only when the user chose its confirm (primary) button. */
+    function confirmFirst(confirmation) {
+        return Promise.resolve(Xrm.Navigation.openConfirmDialog(
+            {
+                title: confirmation.title,
+                text: confirmation.text,
+                confirmButtonLabel: confirmation.confirmButtonLabel,
+                cancelButtonLabel: confirmation.cancelButtonLabel
+            },
+            { height: 360, width: 560 }
+        )).then(function (answer) {
+            return !!answer && answer.confirmed === true;
+        });
+    }
 
     var secureStates = {};
 
@@ -293,15 +335,18 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     };
 
     /**
-     * POSTs { recordType, recordId } to a secure-designation endpoint through Spaarke.BffAuth.authenticatedFetch (no
-     * token: no call). Resolves - never rejects - with { ok, status, body } or { skipped, reason }.
+     * POSTs { recordType, recordId } (plus `extra`, e.g. the make-secure transition) to a secure-designation endpoint
+     * through Spaarke.BffAuth.authenticatedFetch (no token: no call). Resolves - never rejects - with
+     * { ok, status, body } or { skipped, reason }.
      */
-    function postDesignation(path, record) {
+    function postDesignation(path, record, extra) {
+        var body = { recordType: record.recordType, recordId: record.recordId };
+        Object.keys(extra || {}).forEach(function (key) { body[key] = extra[key]; });
         return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
             return Spaarke.BffAuth.authenticatedFetch(baseUrl + path, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                body: JSON.stringify({ recordType: record.recordType, recordId: record.recordId })
+                body: JSON.stringify(body)
             }, baseUrl);
         }).then(function (response) {
             if (!response) {
@@ -343,8 +388,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     }
 
     /** Runs one designation call and shows its outcome as Update Access does (a notification, or an alert). */
-    function runDesignation(primaryControl, record, commandName, path, successText) {
-        return postDesignation(path, record).then(function (result) {
+    function runDesignation(primaryControl, record, commandName, path, successText, extra) {
+        return postDesignation(path, record, extra).then(function (result) {
             if (result.skipped && result.reason === "no-token") {
                 alert(commandName, "Sign-in needed - reload the page and retry. Nothing was changed.");
                 return result;
@@ -393,22 +438,15 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return Promise.resolve();
             }
 
-            var confirmation = ns.makeSecureConfirmationFor(start.entityName);
-            return Promise.resolve(Xrm.Navigation.openConfirmDialog(
-                {
-                    title: confirmation.title,
-                    text: confirmation.text,
-                    confirmButtonLabel: confirmation.confirmButtonLabel,
-                    cancelButtonLabel: confirmation.cancelButtonLabel
-                },
-                { height: 360, width: 560 }
-            )).then(function (answer) {
-                if (!answer || answer.confirmed !== true) {
+            return confirmFirst(ns.makeSecureConfirmationFor(start.entityName)).then(function (confirmed) {
+                if (!confirmed) {
                     return null;
                 }
 
+                // Round 33 item 1: the transition tells the server this is Make Secure (the Write gate), not the
+                // wizards' create-then-secure path (the creator rule).
                 return runDesignation(primaryControl, start.record, "Make Secure", PROVISION_PATH,
-                    "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.");
+                    "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.", { transition: MAKE_SECURE_TRANSITION });
             });
         } catch (error) {
             console.error(LOG, "makeSecure failed:", error);
@@ -418,8 +456,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     };
 
     /**
-     * "Remove Secure": calls the unsecure endpoint. Who may remove the designation is the server's decision (F3); its
-     * refusal message is shown as sent.
+     * "Remove Secure": confirms with REMOVE_SECURE_CONFIRMATION (round 33 item 2), then calls the unsecure endpoint. Cancel
+     * calls nothing. Who may remove the designation is the server's decision (F3); its refusal message is shown as sent.
      * @param {object} primaryControl - the form context
      * @returns {Promise} settles when the command has finished (a test seam; the ribbon ignores it)
      */
@@ -430,8 +468,14 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return Promise.resolve();
             }
 
-            return runDesignation(primaryControl, start.record, "Remove Secure", UNSECURE_PATH,
-                "This " + ns.RECORD_WORDS[start.entityName] + " is no longer secure.");
+            return confirmFirst(ns.removeSecureConfirmationFor(start.entityName)).then(function (confirmed) {
+                if (!confirmed) {
+                    return null;
+                }
+
+                return runDesignation(primaryControl, start.record, "Remove Secure", UNSECURE_PATH,
+                    "This " + ns.RECORD_WORDS[start.entityName] + " is no longer secure.");
+            });
         } catch (error) {
             console.error(LOG, "removeSecure failed:", error);
             alert("Remove Secure", "This command could not run now. Reload the page and try again.");

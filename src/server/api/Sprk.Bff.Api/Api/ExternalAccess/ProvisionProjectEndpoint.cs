@@ -365,6 +365,15 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonNotRecordCreator = "sdap.provision.not_record_creator";
 
     /// <summary>
+    /// Task 150 (round 33 item 1): <see cref="ProvisionProjectRequest.Transition"/> for the form's Make Secure command —
+    /// securing an EXISTING record (task 148's surface). That path is held to the route's Write gate only (owner R3b):
+    /// the creator rule of owner round 10 item 10 (<see cref="ReasonNotRecordCreator"/>) belongs to the wizards'
+    /// create-then-secure path, which sends no transition. On it the record's creator is shared to as well
+    /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27).
+    /// </summary>
+    internal const string TransitionMakeSecure = "make-secure";
+
+    /// <summary>
     /// Task 150 (owner round 10 item 10): whether the caller created the unflagged record could not be checked — its
     /// <c>createdby</c> user or its <c>sprk_createdbyperson</c> could not be read. Refused before any write (500); the
     /// same caller may call again once the read works. A column this environment lacks (<c>sprk_createdbyperson</c>
@@ -495,6 +504,17 @@ public static class ProvisionProjectEndpoint
         var target = ResolveRoot(request);
         if (!target.Ok)
             return ProblemDetailsHelper.ValidationError(target.Error ?? "A record to provision is required.");
+
+        // Task 150 (round 33 item 1): which surface asks. Omitted = the wizards' create-then-secure path (creator rule);
+        // make-secure = the form's Make Secure command (Write gate). Anything else is refused: an unrecognised value never
+        // falls back to either rule.
+        bool makeSecure;
+        if (string.IsNullOrWhiteSpace(request.Transition))
+            makeSecure = false;
+        else if (string.Equals(request.Transition.Trim(), TransitionMakeSecure, StringComparison.OrdinalIgnoreCase))
+            makeSecure = true;
+        else
+            return ProblemDetailsHelper.ValidationError($"Transition must be '{TransitionMakeSecure}' or omitted.");
 
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
@@ -777,6 +797,7 @@ public static class ProvisionProjectEndpoint
         }
 
         Guid creatorId;
+        Guid? recordCreatorToShare = null;
         if (resume)
         {
             // ── RESUME of an UNFLAGGED record: only its creator (owner round 10 item 10; task 150 verifier c1 item 4) ──
@@ -787,7 +808,8 @@ public static class ProvisionProjectEndpoint
             // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
             // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
             // on the route's Write gate.
-            if (!alreadyFlagged)
+            // Make Secure (round 33 item 1) is held to the Write gate on a resume too; a resume shares to the creator anyway.
+            if (!alreadyFlagged && !makeSecure)
             {
                 var unflaggedResumeRefusal = await RefuseUnflaggedResumeUnlessCreatorAsync(
                     dataverseClient, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId, logger, traceId, ct);
@@ -852,11 +874,24 @@ public static class ProvisionProjectEndpoint
         }
         else
         {
+            // ── FORWARD, Make Secure (round 33 item 1): who created the record, read BEFORE any write ──
+            // The caller is shared to as on every forward run; the creator, when a usable person other than the caller,
+            // is shared to as well (owner round 27: "the person who created this record … will keep access"). A creator
+            // that cannot be read refuses — never secured with its creator possibly locked out (ADR-003).
+            if (makeSecure)
+            {
+                var creatorRead = await ResolveMakeSecureCreatorAsync(dataverseClient, root, recordId, row, logger, traceId, ct);
+                if (creatorRead.Error != null)
+                    return creatorRead.Error;
+
+                recordCreatorToShare = creatorRead.CreatorId;
+            }
+
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
                 dataverseClient, recordShare, callerAccessProbe, noAccessGuard, accessCacheInvalidator, httpContext, root,
-                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger,
-                traceId, ct);
+                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink,
+                makeSecure, logger, traceId, ct);
 
             if (forward.Error != null)
                 return forward.Error;
@@ -870,7 +905,7 @@ public static class ProvisionProjectEndpoint
         try
         {
             (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
-                recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
+                recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger, traceId, ct);
         }
         finally
         {
@@ -1305,6 +1340,7 @@ public static class ProvisionProjectEndpoint
         Guid ownerTeamId,
         bool keepsOwnContainer,
         string? sharedContainerToUnlink,
+        bool makeSecure,
         ILogger logger,
         string traceId,
         CancellationToken ct)
@@ -1332,7 +1368,8 @@ public static class ProvisionProjectEndpoint
         //
         // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
         // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
-        if (row.sprk_issecure != true)
+        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the Write gate (owner R3b).
+        if (row.sprk_issecure != true && !makeSecure)
         {
             var notCreator = await RefuseUnlessRecordCreatorAsync(
                 dataverseClient, root, recordId, row, creatorId, logger, traceId, ct);
@@ -2020,6 +2057,95 @@ public static class ProvisionProjectEndpoint
         return person == callerId
             ? null
             : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
+    }
+
+    /// <summary>
+    /// Make Secure (task 150, round 33 item 1): the person who created the record — shared to alongside the caller, so the
+    /// confirmation copy's "the person who created this record … will keep access" holds. Read-only, before any write.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which person</b> — the creator rule's columns: <c>createdby</c> when it is a PERSON; when it is an
+    /// application user (an app-only create) or absent, the BFF-stamped <c>sprk_createdbyperson</c>. A person who cannot
+    /// use the record (disabled, an application user, none recorded) is not shared to: nobody is left to keep access
+    /// through that clause.</para>
+    /// <para><b>Fail closed</b> (ADR-003). A read that fails refuses <see cref="ReasonRecordCreatorUnverifiable"/> (500,
+    /// the same caller may retry); a <c>sprk_createdbyperson</c> column this environment lacks, needed because
+    /// <c>createdby</c> names no person, refuses as the creator rule does (403, <c>creatorState: column-missing</c>) —
+    /// never secured with its creator possibly locked out. The same codes, and so the same client copy, as the creator
+    /// rule.</para>
+    /// </remarks>
+    private static async Task<(Guid? CreatorId, IResult? Error)> ResolveMakeSecureCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
+        if (createdBy is { } createdById)
+        {
+            string? state;
+            try
+            {
+                state = await UnusablePersonStateAsync(dataverseClient, createdById, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] Make Secure: the creator (createdby {CreatorId}) of {RecordType} {RecordId} could not be " +
+                    "read. Refusing before any change. TraceId={TraceId}", createdById, root.WireToken, recordId, traceId);
+                return (null, RecordCreatorUnverifiable(root, traceId));
+            }
+
+            if (state is null)
+                return (createdById, null);         // a usable person created it
+
+            if (state == UnusableDisabled)
+                return (null, null);                // a person created it and cannot use it now: no share
+        }
+
+        // createdby is an application user (an app-only create) or absent: the person the BFF stamped.
+        Guid? person;
+        try
+        {
+            person = await ReadCreatorPersonAsync(dataverseClient, root, recordId, ct);
+        }
+        catch (Exception ex) when (IsColumnMissing(ex))
+        {
+            logger.LogWarning(
+                "[PROVISION] Make Secure: {Column} is not in this environment (400), so who created {RecordType} " +
+                "{RecordId} cannot be checked. Refusing before any change. TraceId={TraceId}",
+                RecordCreatorPerson.Column, root.WireToken, recordId, traceId);
+            return (null, RecordCreatorColumnMissing(root, traceId));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] Make Secure: the person recorded as creating {RecordType} {RecordId} ({Column}) could not be " +
+                "read. Refusing before any change. TraceId={TraceId}",
+                root.WireToken, recordId, RecordCreatorPerson.Column, traceId);
+            return (null, RecordCreatorUnverifiable(root, traceId));
+        }
+
+        if (person is not { } personId)
+            return (null, null);                    // nobody recorded
+
+        string? personState;
+        try
+        {
+            personState = await UnusablePersonStateAsync(dataverseClient, personId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] Make Secure: the person recorded as creating {RecordType} {RecordId} ({PersonId}) could not " +
+                "be read. Refusing before any change. TraceId={TraceId}", root.WireToken, recordId, personId, traceId);
+            return (null, RecordCreatorUnverifiable(root, traceId));
+        }
+
+        return personState is null ? (personId, null) : (null, null);
     }
 
     // F6 row 9 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
@@ -2785,11 +2911,15 @@ public static class ProvisionProjectEndpoint
         SecureRecordRoot root,
         Guid recordId,
         Guid creatorId,
+        Guid? recordCreator,
         ILogger logger,
         string traceId,
         CancellationToken ct)
     {
+        // Make Secure (round 33 item 1): the record's creator joins the colleagues — the same No Access check, the same
+        // Collaborate level, the same per-person warning when skipped.
         var colleagues = (request.SharePrincipalIds ?? Array.Empty<Guid>())
+            .Concat(recordCreator is { } person ? new[] { person } : Array.Empty<Guid>())
             .Where(id => id != Guid.Empty && id != creatorId)
             .Distinct()
             .ToList();

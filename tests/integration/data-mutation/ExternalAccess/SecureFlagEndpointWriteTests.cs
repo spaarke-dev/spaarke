@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Xunit;
 
@@ -692,6 +693,119 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
         _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
         FlagWrites(recordId).Should().BeEmpty("a record that already reads true is not written again");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Provision — round 33 item 1: Make Secure (transition "make-secure") is held to the Write gate
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The form's Make Secure command secures an EXISTING record (task 148's surface): a Write holder who did not create it
+    /// succeeds (owner R3b). The caller is shared to as on every forward run, and so is the record's creator (owner round
+    /// 27: "the person who created this record … will keep access").
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_MakeSecure_ByAWriteHolderWhoDidNotCreateIt_SecuresItAndSharesItToTheCreator(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);   // a person created it
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.Grants.Where(g => g.RecordId == recordId).Select(g => g.Principal)
+            .Should().Contain(DataversePrincipalRef.User(Colleague), "the creator keeps access, as the confirmation says")
+            .And.Contain(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+    }
+
+    /// <summary>The same caller and record WITHOUT the transition — the wizards' path — is refused by the creator rule.</summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_WithoutTheMakeSecureTransition_TheSameNonCreator_IsRefusedBeforeAnyWrite(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertNothingWritten(recordId);
+    }
+
+    [Theory]
+    [InlineData("make_secure")]
+    [InlineData("secure")]
+    [InlineData("anything-else")]
+    public async Task Provision_WithAnUnrecognisedTransition_IsRefused400BeforeAnyWrite(string transition)
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "an unknown surface never falls back to either rule");
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>Who created the record could not be read: refused before any write — never secured with its creator locked out.</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_WhenTheCreatorCannotBeRead_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.SystemUserReadFailsFor = Colleague;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable);
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>An app-only create: the person the BFF recorded in <c>sprk_createdbyperson</c> is the creator shared to.</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_OfAnAppCreatedRecord_SharesItToThePersonRecordedAsItsCreator()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("workassignment", recordId, isSecure: false, createdBy: BffApplicationUser, createdByPerson: Colleague);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Where(g => g.RecordId == recordId).Select(g => g.Principal)
+            .Should().Contain(DataversePrincipalRef.User(Colleague))
+            .And.NotContain(DataversePrincipalRef.User(BffApplicationUser), "an application user is never shared to");
+    }
+
+    /// <summary>A creator who can no longer use the record (disabled) is not shared to; securing still succeeds.</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_WithADisabledCreator_SecuresItWithoutSharingToThem()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (true, false);   // disabled
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+        _fixture.Grants.Where(g => g.RecordId == recordId).Select(g => g.Principal)
+            .Should().NotContain(DataversePrincipalRef.User(Colleague));
     }
 
     // ═════════════════════════════════════════════════════════════════════════

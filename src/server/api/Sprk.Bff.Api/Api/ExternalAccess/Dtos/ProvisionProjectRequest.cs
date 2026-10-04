@@ -42,9 +42,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// supplied, <paramref name="RecordId"/> is required.
 /// </param>
 /// <param name="RecordId">The GUID of the record named by <paramref name="RecordType"/>.</param>
+/// <param name="Transition">
+/// Task 150 (round 33 item 1): which surface asks. Omitted — the wizards' create-then-secure path, where an UNFLAGGED
+/// record is secured only for its creator (owner round 10 item 10). <c>make-secure</c>
+/// (<c>ProvisionProjectEndpoint.TransitionMakeSecure</c>) — the form's Make Secure command, securing an EXISTING record (task
+/// 148's surface): held to the route's Write gate only (owner R3b), and the record's creator is shared to as well, so the
+/// confirmation copy's "the person who created this record … will keep access" holds (owner round 27). Any other value is
+/// refused 400 — an unrecognised surface never falls back to either rule.
+/// </param>
 public record ProvisionProjectRequest(
     Guid ProjectId,
     string? ProjectRef,
     IReadOnlyList<Guid>? SharePrincipalIds = null,
     string? RecordType = null,
-    Guid? RecordId = null);
+    Guid? RecordId = null,
+    string? Transition = null);

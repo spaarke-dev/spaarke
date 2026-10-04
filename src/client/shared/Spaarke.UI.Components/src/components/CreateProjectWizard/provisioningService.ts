@@ -520,8 +520,14 @@ const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>>
 };
 
 /**
+ * Round 33 item 5: the per-person warning for a skipped colleague whose reason code this client does not know. Never
+ * silent — the person is named, and the code is logged for support. The server's own `message` is still never shown.
+ */
+const SKIPPED_PRINCIPAL_GENERIC = (name: string) => `${name} was not given access to this project.`;
+
+/**
  * The authored per-person warning for one skipped colleague, or `undefined` for a reason code this client does not know
- * (the caller logs it; the server's own `message` is never shown).
+ * (the caller then shows the generic warning, `SKIPPED_PRINCIPAL_GENERIC`, and logs the code).
  */
 export function describeSkippedPrincipal(reasonCode: string, name: string): string | undefined {
   return Object.prototype.hasOwnProperty.call(SKIPPED_PRINCIPAL_COPY, reasonCode)
@@ -910,6 +916,8 @@ export async function provisionSecureProject(
       if (warning) {
         warnings.push(warning);
       } else {
+        // Round 33 item 5: an unknown reason is never silent — the generic per-person warning, and the code logged.
+        warnings.push(SKIPPED_PRINCIPAL_GENERIC(name));
         console.error('[ProvisioningService] A colleague was not shared to, for a reason this client does not know:', {
           systemUserId: skipped.systemUserId,
           reasonCode: skipped.reasonCode,

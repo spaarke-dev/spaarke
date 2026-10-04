@@ -189,21 +189,21 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
     <test name="Make Secure (after 148)">
       <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={non-secure-matter-id}</url>
       <steps>
-        <step>In an environment whose BFF carries task 148 and whose ribbon was imported with -SecureTransitionDeployed, as a Write-holder (the matter's creator - see note section 21, residual R-150-1) open a NON-secure matter</step>
+        <step>In an environment whose BFF carries task 148 and whose ribbon was imported with -SecureTransitionDeployed, as a Write-holder who did NOT create it (round 33 item 1: Make Secure is held to the Write gate) open a NON-secure matter</step>
         <step>Open Access and choose Make Secure</step>
         <step>Read the confirmation dialog, then choose Make Secure</step>
         <step>Wait for the refresh; read sprk_issecure (Web API) and reopen Access</step>
       </steps>
-      <expected>The dialog shows exactly the owner round 27 copy: title "Make this matter secure?", the three paragraphs with {record} = matter, buttons "Make Secure" (primary) and "Cancel". After confirming, the record reads secure after the refresh and Access lists Remove Secure, not Make Secure.</expected>
+      <expected>The dialog shows exactly the owner round 27 copy: title "Make this matter secure?", the three paragraphs with {record} = matter, buttons "Make Secure" (primary) and "Cancel". After confirming, the record reads secure after the refresh and Access lists Remove Secure, not Make Secure; the matter's creator still opens it (shared to by the call).</expected>
     </test>
     <test name="F3 refusal">
       <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={secure-matter-id}</url>
       <steps>
         <step>As a Collaborate holder who is NOT the record's creator (and not a Full Access holder), open a SECURE matter</step>
-        <step>Open Access and choose Remove Secure</step>
+        <step>Open Access and choose Remove Secure; read the confirmation dialog, then choose Remove Secure</step>
         <step>Read sprk_issecure (Web API) after the refresh</step>
       </steps>
-      <expected>An alert titled "Remove Secure" shows the endpoint's refusal message (sdap.unsecure.not_permitted ProblemDetails detail, verbatim); the record stays secure. Repeated by the creator and by a Full Access holder: both succeed.</expected>
+      <expected>The dialog shows exactly the round 33 copy: title "Remove the secure designation from this matter?", its two paragraphs with {record} = matter, buttons "Remove Secure" (primary) and "Cancel". Then an alert titled "Remove Secure" shows the endpoint's refusal message (sdap.unsecure.not_permitted ProblemDetails detail, verbatim); the record stays secure. Repeated by the creator and by a Full Access holder: both succeed.</expected>
     </test>
     <test name="Read-only user">
       <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_workassignment&amp;id={work-assignment-id}</url>

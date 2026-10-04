@@ -1,5 +1,5 @@
 /**
- * `sprk_access_ribbon.js` 1.1.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
+ * `sprk_access_ribbon.js` 1.2.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -11,7 +11,9 @@
  * PCF suite tests `sprk_todo_regarding_presave.js` the same way (a web resource exercised from a package's jest).
  *
  * Pinned (task 150 UX amendment, closed acceptance (a)–(f); owner round 27):
- *  - the Make Secure confirmation copy, verbatim, as ONE constant, for each of the three tables;
+ *  - the Make Secure confirmation copy (owner round 27) and the Remove Secure confirmation copy (round 33 item 2),
+ *    verbatim, each ONE constant, for each of the three tables;
+ *  - Make Secure sends transition "make-secure" (round 33 item 1: the server's Write-gate path);
  *  - enable logic: Make Secure only when NOT secure and the caller may manage access; Remove Secure only when secure and
  *    the caller may; a Read-only caller sees neither (e); a failed or masked read of sprk_issecure hides BOTH (f);
  *  - the calls: Make Secure confirms first and calls the provisioning endpoint (Cancel calls nothing); Remove Secure
@@ -30,6 +32,12 @@ const BFF = 'https://bff.example.test';
 const RECORD_ID = 'aaaaaaaa-1111-2222-3333-444444444444';
 
 /** Owner round 27, verbatim — the copy the user must see. {record} filled per table. */
+/** Round 33 item 2, verbatim — the Remove Secure confirmation. */
+const REMOVE_PARAGRAPHS = (record: string) => [
+  `The ${record} and its related records return to normal access: people who can see records in its business unit will be able to see them, and the individual sharing set up while it was secure is removed.`,
+  'To secure it again later, use Make Secure.',
+];
+
 const PARAGRAPHS = (record: string) => [
   `Only the person who created this ${record} and the people it is shared with will keep access. Everyone else in your organization loses access, and external contacts keep only access granted to them directly.`,
   `Its existing documents, events, to-dos and other related records become secure too, for the same people, and its files move to the ${record}'s own secure storage. This can take a few minutes.`,
@@ -76,7 +84,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.1.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.2.0'); // the real script ran
   return { ribbon, retrieveRecord, openConfirmDialog, openAlertDialog, addGlobalNotification, authenticatedFetch };
 }
 
@@ -148,6 +156,32 @@ describe('Make Secure confirmation copy (owner round 27) — ONE constant, verba
     expect(ribbon.MAKE_SECURE_CONFIRMATION.title).toBe('Make this {record} secure?');
     expect(ribbon.MAKE_SECURE_CONFIRMATION.paragraphs).toEqual(PARAGRAPHS('{record}'));
     expect(ribbon.makeSecureConfirmationFor('sprk_invoice')).toBeNull();
+  });
+});
+
+describe('Remove Secure confirmation copy (round 33 item 2) — ONE constant, verbatim', () => {
+  it.each([
+    ['sprk_project', 'project'],
+    ['sprk_matter', 'matter'],
+    ['sprk_workassignment', 'work assignment'],
+  ])('fills {record} for %s with "%s"', (entityName, record) => {
+    const { ribbon } = load();
+
+    expect(ribbon.removeSecureConfirmationFor(entityName)).toEqual({
+      title: `Remove the secure designation from this ${record}?`,
+      text: REMOVE_PARAGRAPHS(record).join('\n\n'),
+      confirmButtonLabel: 'Remove Secure',
+      cancelButtonLabel: 'Cancel',
+    });
+  });
+
+  it('is the one frozen constant the dialog is built from', () => {
+    const { ribbon } = load();
+
+    expect(Object.isFrozen(ribbon.REMOVE_SECURE_CONFIRMATION)).toBe(true);
+    expect(ribbon.REMOVE_SECURE_CONFIRMATION.title).toBe('Remove the secure designation from this {record}?');
+    expect(ribbon.REMOVE_SECURE_CONFIRMATION.paragraphs).toEqual(REMOVE_PARAGRAPHS('{record}'));
+    expect(ribbon.removeSecureConfirmationFor('sprk_invoice')).toBeNull();
   });
 });
 
@@ -249,7 +283,8 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
     const [url, init, baseUrl] = authenticatedFetch.mock.calls[0];
     expect(url).toBe(`${BFF}/api/v1/external-access/provision-project`);
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body)).toEqual({ recordType: 'matter', recordId: RECORD_ID });
+    // Round 33 item 1: the transition names the Make Secure path (the server's Write gate, not the creator rule).
+    expect(JSON.parse(init.body)).toEqual({ recordType: 'matter', recordId: RECORD_ID, transition: 'make-secure' });
     expect(init.headers.Authorization).toBeUndefined(); // the token is the helper's (ADR-028), never built here
     expect(baseUrl).toBe(BFF);
 
@@ -306,8 +341,28 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
 });
 
 describe('Remove Secure — the server decides who may (F3), the client shows its answer', () => {
+  it('confirms first with the round 33 copy; Cancel calls nothing', async () => {
+    const { ribbon, authenticatedFetch, openConfirmDialog } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: false });
+    const project = form('sprk_project');
+
+    await ribbon.removeSecure(project);
+    await settle();
+
+    expect(openConfirmDialog).toHaveBeenCalledTimes(1);
+    expect(openConfirmDialog.mock.calls[0][0]).toEqual({
+      title: 'Remove the secure designation from this project?',
+      text: REMOVE_PARAGRAPHS('project').join('\n\n'),
+      confirmButtonLabel: 'Remove Secure',
+      cancelButtonLabel: 'Cancel',
+    });
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+    expect(project.data.refresh).not.toHaveBeenCalled();
+  });
+
   it("a Collaborate holder who is not the creator is refused: the endpoint's F3 message is shown and the form re-read", async () => {
     const { ribbon, authenticatedFetch, openAlertDialog, openConfirmDialog, addGlobalNotification } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
     const detail =
       'Only someone with Full Access to this matter, or the person who created it, can remove its secure designation. Nothing was changed.';
     authenticatedFetch.mockResolvedValue(response(403, { detail, reasonCode: 'sdap.unsecure.not_permitted' }));
@@ -319,14 +374,15 @@ describe('Remove Secure — the server decides who may (F3), the client shows it
     const [url, init] = authenticatedFetch.mock.calls[0];
     expect(url).toBe(`${BFF}/api/v1/external-access/unsecure-project`);
     expect(JSON.parse(init.body)).toEqual({ recordType: 'matter', recordId: RECORD_ID });
-    expect(openConfirmDialog).not.toHaveBeenCalled();
+    expect(openConfirmDialog).toHaveBeenCalledTimes(1);
     expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Remove Secure', text: detail });
     expect(addGlobalNotification).not.toHaveBeenCalled();
     expect(matter.data.refresh).toHaveBeenCalledWith(false);
   });
 
   it('the creator or a Full Access holder succeeds: the outcome is shown and the form refreshed', async () => {
-    const { ribbon, authenticatedFetch, addGlobalNotification, openAlertDialog } = load();
+    const { ribbon, authenticatedFetch, addGlobalNotification, openAlertDialog, openConfirmDialog } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
     authenticatedFetch.mockResolvedValue(response(200, { recordType: 'workassignment' }));
     const assignment = form('sprk_workassignment');
 
@@ -350,7 +406,8 @@ describe('Remove Secure — the server decides who may (F3), the client shows it
   });
 
   it('after a command the secure state is read again, so the rules follow the new state', async () => {
-    const { ribbon, authenticatedFetch, retrieveRecord } = load();
+    const { ribbon, authenticatedFetch, retrieveRecord, openConfirmDialog } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
     canManage('sprk_matter', true);
     retrieveRecord.mockResolvedValueOnce({ sprk_issecure: true }).mockResolvedValueOnce({ sprk_issecure: false });
     authenticatedFetch.mockResolvedValue(response(200, {}));

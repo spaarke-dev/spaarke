@@ -30,7 +30,9 @@ same rule as Update Access). Make Secure needs the record NOT secure, Remove Sec
 read with `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) read hides both. Who may REMOVE the designation is
 the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
 ProblemDetails message. Make Secure confirms first with the owner-authored copy (owner round 27, the
-`MAKE_SECURE_CONFIRMATION` constant in the script).
+`MAKE_SECURE_CONFIRMATION` constant in the script) and sends `transition: "make-secure"`, which the server holds to the
+Write gate (round 33 item 1; the creator rule belongs to the wizards' create-then-secure path) while sharing the record to
+its creator too. Remove Secure confirms first too (round 33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in

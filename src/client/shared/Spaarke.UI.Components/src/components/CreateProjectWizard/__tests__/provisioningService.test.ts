@@ -686,6 +686,33 @@ describe('provisionSecureProject — failure classification', () => {
     expect(result.warnings).toBeUndefined();
   });
 
+  // Round 33 item 5: an unknown skipped-principal reason is never silent — the generic per-person warning, and a log.
+  it('shows the generic per-person warning, and logs the code, for a skipped colleague whose reason it does not know', async () => {
+    const someone = '77777777-7777-7777-7777-777777777777';
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [
+          { systemUserId: someone, reasonCode: 'sdap.provision.principal_invented_later', message: 'server prose' },
+        ],
+      })
+    );
+
+    const result = await provisionSecureProject(
+      { projectId: PROJECT_ID, sharePrincipalIds: [someone] },
+      authFetch as never,
+      BFF,
+      { [someone]: 'Rui Tanaka' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual(['Rui Tanaka was not given access to this project.']);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('for a reason this client does not know'),
+      expect.objectContaining({ reasonCode: 'sdap.provision.principal_invented_later' })
+    );
+  });
+
   it('falls back to a generic error for an unknown or absent reason code', () => {
     expect(classifyProvisioningFailure(undefined).failureKind).toBe('error');
     expect(classifyProvisioningFailure('sdap.provision.something_invented_later').failureKind).toBe('error');
