@@ -21,8 +21,10 @@
   <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
   <!-- Bumped 1.0.8.0 -> 1.0.9.0 by task 037 (FR-17): adds the FunctionFile + two ExecuteFunction
        ribbon controls below. A manifest version bump requires M365 Admin Center re-registration —
-       see projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md (task 042 owns it). -->
-  <Version>1.0.9.0</Version>
+       see projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md (task 042 owns it).
+       Bumped 1.0.9.0 -> 1.0.10.0 by task 089 (UAT-10): Share is replaced by "Open Spaarke". Kept in step
+       with word/manifest.json's 1.0.10 (XML is 4-part, the unified manifest 3-part). -->
+  <Version>1.0.10.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Word"/>
@@ -57,12 +59,12 @@
       AND Office 2021 LTSC.
     - CustomXmlParts (Common API set; all Common sets are version 1.1) - gates
       `Office.context.document.customXmlParts`, the FR-02 identity-stamp READ
-      (task 014). Chosen over `Word.Document.customXmlParts` precisely to avoid
+      (task 014/051) and, since task 089, its WRITE into the open document. Chosen over `Word.Document.customXmlParts` precisely to avoid
       the WordApi 1.4 bump. Its floor (Word web / Windows M365 sub + perpetual
       Office 2016 / Mac / iPad) is BELOW the WordApi 1.3 floor already declared,
       so this line excludes no host the add-in could otherwise reach.
     - DialogApi (Common API set, version 1.1) - added by task 037 (FR-17), gates
-      `Office.context.ui.displayDialogAsync`, the quickSave/shareDocument
+      `Office.context.ui.displayDialogAsync`, the ribbon commands'
       notification surface (word/commands/notify.html). Per Microsoft's
       requirement-set documentation DialogApi 1.1 is available on the SAME
       floor as the other Common 1.1 sets already declared here (Word web /
@@ -95,7 +97,7 @@
     <Hosts>
       <Host xsi:type="Document">
         <DesktopFormFactor>
-          <!-- task 037 (FR-17): the function file hosting quickSave/shareDocument. Webpack already
+          <!-- task 037 (FR-17): the function file hosting quickSave/openSpaarke. Webpack already
                emits `word/commands.html` (webpack.config.js:161-165) from `word/commands/index.ts`;
                this is the FIRST manifest reference to it — before this, the compiled commands were
                unreachable from the ribbon (the defect this task fixes). -->
@@ -145,14 +147,14 @@
                   </Action>
                 </Control>
 
-                <!-- task 037 (FR-17): completes without opening the pane EXCEPT the one deliberate,
-                     documented exception (no resolved Spaarke identity yet -> open the pane so the
-                     user can save first) — see word/commands/index.ts's shareDocument doc comment. -->
-                <Control xsi:type="Button" id="ShareButton">
-                  <Label resid="ShareButton.Label"/>
+                <!-- task 089 (UAT-10, owner 2026-10-03): "Open Spaarke" replaces Share, in the same
+                     place. Opens the Spaarke app at its Workspace (the Console) in the browser — see
+                     word/commands/index.ts's openSpaarke doc comment. -->
+                <Control xsi:type="Button" id="OpenSpaarkeButton">
+                  <Label resid="OpenSpaarkeButton.Label"/>
                   <Supertip>
-                    <Title resid="ShareButton.SupertipTitle"/>
-                    <Description resid="ShareButton.SupertipText"/>
+                    <Title resid="OpenSpaarkeButton.SupertipTitle"/>
+                    <Description resid="OpenSpaarkeButton.SupertipText"/>
                   </Supertip>
                   <Icon>
                     <bt:Image size="16" resid="Icon.16x16"/>
@@ -160,7 +162,7 @@
                     <bt:Image size="80" resid="Icon.80x80"/>
                   </Icon>
                   <Action xsi:type="ExecuteFunction">
-                    <FunctionName>shareDocument</FunctionName>
+                    <FunctionName>openSpaarke</FunctionName>
                   </Action>
                 </Control>
               </Group>
@@ -188,13 +190,13 @@
         <bt:String id="SaveButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
         <bt:String id="QuickSaveButton.Label" DefaultValue="Quick Save"/>
         <bt:String id="QuickSaveButton.SupertipTitle" DefaultValue="Quick Save to Spaarke"/>
-        <bt:String id="ShareButton.Label" DefaultValue="Share"/>
-        <bt:String id="ShareButton.SupertipTitle" DefaultValue="Share via Spaarke"/>
+        <bt:String id="OpenSpaarkeButton.Label" DefaultValue="Open Spaarke"/>
+        <bt:String id="OpenSpaarkeButton.SupertipTitle" DefaultValue="Open Spaarke"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="SaveButton.SupertipText" DefaultValue="Save this document to Spaarke DMS"/>
         <bt:String id="QuickSaveButton.SupertipText" DefaultValue="Save this document to Spaarke DMS in one click, without opening the pane"/>
-        <bt:String id="ShareButton.SupertipText" DefaultValue="Create a Spaarke share link for this document and copy it to the clipboard"/>
+        <bt:String id="OpenSpaarkeButton.SupertipText" DefaultValue="Open Spaarke in your browser, on the Workspace"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

@@ -1343,12 +1343,16 @@ public class OfficeService : IOfficeService
     /// another document's file is not. Same direction as task 046's cleanup guard.</para>
     /// <para><b>Document saves are unchanged by task 054.</b> Two Word drafts that are byte-identical right
     /// now are still two distinct drafts (NFR-08), so an editable collision is refused on the NAME alone,
-    /// exactly as task 025 left it. Only an editable refusal carries <c>ExistingDocumentId</c>: FR-11's
+    /// exactly as task 025 left it. Only an editable refusal can carry <c>CanSaveAsVersion = true</c>: FR-11's
     /// version-save retry is Document-only — an Email/Attachment save carrying <c>ExistingDocumentId</c>
     /// ignores it and creates its own document (pinned by
     /// <c>OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_IgnoresIt_AndBehavesAsBefore</c>),
     /// so advertising that retry for an immutable capture would offer the pane a choice the server does not
     /// honour.</para>
+    /// <para><b>Task 088 (UAT-5).</b> Every OWNED collision now carries the owning document's id and display
+    /// name, whatever its content type and wherever it is filed, so the pane can offer "Open". The version
+    /// retry is the separate <c>CanSaveAsVersion</c> flag (editable AND filed to the target record). The
+    /// endpoint strips id, name and flag when the caller cannot read that document.</para>
     /// </remarks>
     private async Task<(SaveError? Refusal, OfficeStorageUploader.UploadResult Upload)> ResolveNameCollisionAsync(
         OfficeStorageUploader.UploadResult collidedUpload,
@@ -1451,7 +1455,8 @@ public class OfficeService : IOfficeService
         }
 
         // ══ TASK 055 (#1005 / ISS-006) — the version retry is offered ONLY when the colliding document is
-        // ══ already filed where this save is filing.
+        // ══ already filed where this save is filing. (Task 088: that is now the CanSaveAsVersion flag; the
+        // ══ document's identity travels regardless, for the pane's "Open".)
         //
         // The defect this closes: Word's default upload name is "Untitled Document.docx" (getSubject() falls
         // back to it whenever the Title property is blank, which is the norm) and containers are
@@ -1471,27 +1476,35 @@ public class OfficeService : IOfficeService
             && collisionTarget.DirectAssociationIds.Contains(targetId);
 
         // Immutable captures get no version-save retry either — FR-11's version path is Document-only.
-        var offersVersionRetry = isEditable && associationMatches;
+        var canSaveAsVersion = isEditable && associationMatches;
 
         if (isEditable && !associationMatches)
         {
             _logger.LogInformation(
                 "Collision refusal for '{FileName}': the owning document {ExistingDocumentId} is not filed to "
-                + "the record this save targets, so no version retry is offered. The pane shows \"Keep both\" only.",
+                + "the record this save targets, so no version retry is offered.",
                 fileName, collidingDocumentId);
         }
 
+        // ══ TASK 088 (UAT-5) — the identity travels on EVERY owned collision; the version retry is a FLAG.
+        //
+        // Until task 088 the id's PRESENCE was the version-retry signal, so the #1005 rule above had to
+        // withhold the identity to withhold the offer — which also took away any way to reach the other file
+        // ("Name Already Exists" offered Keep both + Dismiss only, UAT-5). The two meanings are now separate:
+        // CanSaveAsVersion carries the #1005 rule, and the id + name let the pane offer "Open". Nothing here is
+        // an authorization decision: the endpoint (WithholdCollisionIdentityIfUnauthorizedAsync, ADR-008)
+        // strips the id, the name AND the flag unless the caller holds Read on that document, and Open itself
+        // goes through GET /api/documents/{id}/open-links, whose filter re-checks Read.
         return (new SaveError
         {
             Code = OfficeErrorCodes.NameCollision,
             Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
             Retryable = false,
             FileName = fileName,
-            ExistingDocumentId = offersVersionRetry ? collidingDocumentId : null,
-            // The name travels WITH the id, never without it: naming a document the pane cannot act on
-            // would disclose it for no user benefit. The endpoint strips both again if the caller holds no
-            // Read on that document (ADR-008 gate — this method makes no authorization decision).
-            ExistingDocumentName = offersVersionRetry ? collisionTarget?.DocumentName : null
+            ExistingDocumentId = collidingDocumentId,
+            // The name travels WITH the id, never without it.
+            ExistingDocumentName = collisionTarget?.DocumentName,
+            CanSaveAsVersion = canSaveAsVersion
         }, collidedUpload);
     }
 

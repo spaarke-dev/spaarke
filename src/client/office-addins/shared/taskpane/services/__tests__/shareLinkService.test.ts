@@ -1,6 +1,6 @@
 /**
- * Unit tests for shareLinkService (spaarkeai-word-add-in-r1 task 037 / FR-17 — Word ribbon
- * shareDocument).
+ * Unit tests for shareLinkService (spaarkeai-word-add-in-r1 task 037 / FR-17; since task 089 its only caller is
+ * Send Email — the Word ribbon's Share button was replaced by "Open Spaarke").
  *
  * Covers:
  *   - mints via POST /api/documents/{documentId}/share-link with NO body (no expiry override)

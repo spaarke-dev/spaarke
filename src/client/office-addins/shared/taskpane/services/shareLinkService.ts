@@ -2,8 +2,9 @@ import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '../utils/cleanGuid';
 
 /**
- * shareLinkService.ts — the add-in's ONE share-link minter: the Word ribbon's `shareDocument` command
- * (task 037, FR-17) and Send Email (`sendEmailService.ts`, task 036, FR-15) both call it.
+ * shareLinkService.ts — the add-in's ONE share-link minter, called by Send Email (`sendEmailService.ts`, task 036,
+ * FR-15). The Word ribbon's Share command (task 037, FR-17) was its other caller until task 089 (UAT-10) replaced
+ * that button with "Open Spaarke"; this service stays because Send Email needs it.
  *
  * Task 037 wrote it as a duplicate of a private copy in `sendEmailService.ts`, because its wave forbade
  * touching that file; task 075 removed the copy and pointed Send Email here.

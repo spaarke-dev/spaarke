@@ -66,10 +66,10 @@ public class OfficeTypedNameCollisionTests
         },
     };
 
-    private static SaveRequest AttachmentSave(string fileName, byte[] bytes) => new()
+    private static SaveRequest AttachmentSave(string fileName, byte[] bytes, SaveEntityReference? record = null) => new()
     {
         ContentType = SaveContentType.Attachment,
-        TargetEntity = NewRecord(),
+        TargetEntity = record ?? NewRecord(),
         Attachment = new AttachmentMetadata
         {
             AttachmentId = $"att-{Guid.NewGuid():N}",
@@ -81,16 +81,21 @@ public class OfficeTypedNameCollisionTests
     private static List<OfficeVersionSaveWorld.SpeItem> EmlItems(OfficeVersionSaveWorld world) =>
         world.SpeItems.Values.Where(i => i.Name.EndsWith(".eml", StringComparison.OrdinalIgnoreCase)).ToList();
 
-    /// <summary>The string-valued top-level properties of a ProblemDetails body. A null-valued extension (an
-    /// absent <c>existingDocumentId</c>) is therefore absent from the result, which is what the tests assert on.
-    /// Mirrors <see cref="OfficeCreateCollisionTests"/>' own helper.</summary>
+    /// <summary>The string- and boolean-valued top-level properties of a ProblemDetails body (booleans as
+    /// <c>"true"</c>/<c>"false"</c>). A null-valued extension (an absent <c>existingDocumentId</c>) is therefore
+    /// absent from the result, which is what the tests assert on. Mirrors <see cref="OfficeCreateCollisionTests"/>'
+    /// own helper.</summary>
     private static async Task<Dictionary<string, string?>> ReadProblemAsync(HttpResponseMessage response)
     {
         using var stream = await response.Content.ReadAsStreamAsync();
         using var document = await JsonDocument.ParseAsync(stream);
         return document.RootElement.EnumerateObject()
-            .Where(property => property.Value.ValueKind == JsonValueKind.String)
-            .ToDictionary(property => property.Name, property => property.Value.GetString());
+            .Where(property => property.Value.ValueKind is JsonValueKind.String or JsonValueKind.True or JsonValueKind.False)
+            .ToDictionary(
+                property => property.Name,
+                property => property.Value.ValueKind == JsonValueKind.String
+                    ? property.Value.GetString()
+                    : property.Value.GetBoolean() ? "true" : "false");
     }
 
     private static async Task<JobStatusResponse> JobOf(HttpClient client, SaveResponse saved)
@@ -142,19 +147,28 @@ public class OfficeTypedNameCollisionTests
         // An Email/Attachment save carrying document.existingDocumentId IGNORES it and creates its own
         // document (OfficeVersionSaveContractTests pins that). Advertising the version-save retry here would
         // therefore offer the pane a choice the server does not honour, so the refusal deliberately omits it.
+        //
+        // Task 088 (UAT-5): the retry is now the canSaveAsVersion FLAG, not the id's presence. The readable
+        // owning document's id travels so the pane — Outlook's as well as Word's — can offer "Open"; the flag
+        // stays false for every immutable capture, whatever it is filed to. The owning document is filed to
+        // the SAME record the save targets, so the flag is false here for the content type alone.
         var world = new OfficeVersionSaveWorld();
-        var (_, existingItemId) = world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes);
+        var record = NewRecord();
+        var (existingId, existingItemId) = world.SeedDocument(
+            SaveContainer, "Exhibit A.pdf", ExhibitBytes, matterId: record.EntityId);
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", DifferentBytes));
+            "/api/office/save", AttachmentSave("Exhibit A.pdf", DifferentBytes, record));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var problem = await ReadProblemAsync(response);
         problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
         problem.Should().ContainKey("fileName").WhoseValue.Should().Be("Exhibit A.pdf");
-        problem.Should().NotContainKey("existingDocumentId",
+        problem.Should().ContainKey("canSaveAsVersion").WhoseValue.Should().Be("false",
             "an immutable capture has no version-save retry to offer");
+        problem.Should().ContainKey("existingDocumentId").WhoseValue.Should().Be(existingId.ToString("D"),
+            "the caller can read the owning document, so the pane may offer to open it");
 
         world.SpeItems[existingItemId].Versions.Should().ContainSingle("the existing file is untouched");
         world.SpeItems[existingItemId].Versions[0].Should().Equal(ExhibitBytes);

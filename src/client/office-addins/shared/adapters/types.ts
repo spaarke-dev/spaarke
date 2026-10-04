@@ -92,6 +92,16 @@ export interface HostCapabilities {
    * falls back to the URL-only path task 013 already shipped.
    */
   canReadDocumentStamp: boolean;
+  /**
+   * Whether the host can WRITE the identity stamp into the document open in Word after a save
+   * (spaarkeai-word-add-in-r1 task 089, UAT-9) — `Office.context.document.customXmlParts.addAsync` /
+   * `CustomXmlPart.deleteAsync`, the same Common API `CustomXmlParts` set as the read (019 conditions 1 and 4).
+   *
+   * Word-only and runtime-gated exactly like {@link canReadDocumentStamp}; `false` in Outlook, which has no open
+   * document. Callers MUST gate `writeDocumentStamp()` on this flag, never on `hostType` (NFR-10). When it is
+   * `false` no write is attempted and the save is reported exactly as before.
+   */
+  canWriteDocumentStamp: boolean;
   /** Whether document can be saved as PDF */
   canSaveAsPdf: boolean;
   /** Whether item can be saved as EML (Outlook emails) */

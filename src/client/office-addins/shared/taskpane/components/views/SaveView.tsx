@@ -4,7 +4,7 @@ import { SaveFlow } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
-import type { DocumentIdentityState } from '../../services/documentIdentityService';
+import { writeIdentityStampAfterSave, type DocumentIdentityState } from '../../services/documentIdentityService';
 
 const useStyles = makeStyles({
   container: {
@@ -51,8 +51,8 @@ export interface SaveViewProps {
   onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
-  /** Callback when view document is clicked */
-  onViewDocument?: (documentUrl: string) => void;
+  // Task 088 (UAT-1): `onViewDocument` (and its `window.open` fallback, which opened the stored file's Graph
+  // webUrl — Word for the web) is REMOVED. SaveFlow's View Document now opens the Spaarke document record.
   /** Callback to navigate to different view */
   onNavigate?: (view: 'save' | 'status') => void;
   /** Entity types allowed for association */
@@ -102,7 +102,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onComplete,
   onSaved,
   onQuickCreate,
-  onViewDocument,
   onNavigate,
   allowedEntityTypes,
   resolvedDocumentId,
@@ -231,19 +230,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
     throw new Error('getAccessToken not provided');
   }, []);
 
-  // Handle view document click
-  const handleViewDocument = useCallback(
-    (url: string) => {
-      if (onViewDocument) {
-        onViewDocument(url);
-      } else {
-        // Default behavior: open in new tab
-        window.open(url, '_blank');
-      }
-    },
-    [onViewDocument]
-  );
-
   // Task 045: reads the CURRENT document bytes, live — never cached. `useSaveFlow.startSave` calls
   // this at the moment a save attempt actually submits (first Save, "Keep both", "Save as new
   // version", a `retry()`, or the next Save after "Save Another"), so every attempt uploads the
@@ -273,6 +259,20 @@ export const SaveView: React.FC<SaveViewProps> = ({
       throw new Error(message || "Couldn't read the document's current content. Please try again.");
     }
   }, [hostAdapter]);
+
+  // Task 089 (UAT-9): after EVERY successful pane save — create or version, first save or "Save version" — mark
+  // the open document with the id it was saved as, so its next save (pane or ribbon, now or after reopening the
+  // file) resolves it instead of colliding with its own record. The server stamps only the stored copy (task 014).
+  // Capability-gated and non-fatal inside `writeIdentityStampAfterSave`; never delays the caller's onComplete.
+  const handleComplete = useCallback(
+    (documentId: string, documentUrl: string) => {
+      if (hostAdapter) {
+        void writeIdentityStampAfterSave(hostAdapter, documentId);
+      }
+      onComplete?.(documentId, documentUrl);
+    },
+    [hostAdapter, onComplete]
+  );
 
   // Loading state
   if (isLoading) {
@@ -323,7 +323,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
         hostType={hostType}
         attachments={attachments}
         getAccessToken={getAccessToken || defaultGetAccessToken}
-        onViewDocument={handleViewDocument}
         showDocumentInfo
         canOpenRecord={canOpenRecord}
         canSuggestRelatedRecords={canSuggestRelatedRecords}
@@ -337,7 +336,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(documentUrl !== undefined ? { documentUrl } : {})}
         {...(canGetDocumentContent ? { captureDocumentContent } : {})}
         {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
-        {...(onComplete ? { onComplete } : {})}
+        onComplete={handleComplete}
         {...(onSaved ? { onSaved } : {})}
         {...(onQuickCreate ? { onQuickCreate } : {})}
         {...(onNavigate ? { onNavigate } : {})}

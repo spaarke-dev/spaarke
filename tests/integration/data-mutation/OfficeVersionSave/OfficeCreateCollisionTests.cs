@@ -86,16 +86,22 @@ public class OfficeCreateCollisionTests
         return job.Result!.Artifact!.Id;
     }
 
-    /// <summary>The string-valued top-level properties of a ProblemDetails error body (errorCode, fileName,
-    /// existingDocumentId — Guid serializes as a string). Mirrors the established <c>ReadProblemAsync</c> idiom
-    /// in <c>OfficeQuickCreateContractTests</c> / <c>OfficeSaveSpineIdempotencyTests</c>.</summary>
+    /// <summary>The string- and boolean-valued top-level properties of a ProblemDetails error body (errorCode,
+    /// fileName, existingDocumentId — Guid serializes as a string; canSaveAsVersion and retryable as
+    /// <c>"true"</c>/<c>"false"</c>). A null-valued extension is absent from the result, which is what the
+    /// "withheld" assertions rely on. Mirrors the established <c>ReadProblemAsync</c> idiom in
+    /// <c>OfficeQuickCreateContractTests</c> / <c>OfficeSaveSpineIdempotencyTests</c>.</summary>
     private static async Task<Dictionary<string, string?>> ReadProblemAsync(HttpResponseMessage response)
     {
         using var stream = await response.Content.ReadAsStreamAsync();
         using var document = await JsonDocument.ParseAsync(stream);
         return document.RootElement.EnumerateObject()
-            .Where(property => property.Value.ValueKind == JsonValueKind.String)
-            .ToDictionary(property => property.Name, property => property.Value.GetString());
+            .Where(property => property.Value.ValueKind is JsonValueKind.String or JsonValueKind.True or JsonValueKind.False)
+            .ToDictionary(
+                property => property.Name,
+                property => property.Value.ValueKind == JsonValueKind.String
+                    ? property.Value.GetString()
+                    : property.Value.GetBoolean() ? "true" : "false");
     }
 
     private static OfficeVersionSaveWorld.SpeItem TheItemNamed(OfficeVersionSaveWorld world, string fileName) =>
@@ -306,6 +312,9 @@ public class OfficeCreateCollisionTests
             "an opaque GUID cannot tell a user the target is not their document — the name is what makes declining possible");
         problem.Should().ContainKey("existingDocumentId").WhoseValue.Should().Be(existingId.ToString("D"),
             "the document IS filed to the record the caller is filing to, so the version retry is legitimate here");
+        // Task 088 (AC6): the version retry is now a FLAG, not the id's presence — and here it is offered.
+        problem.Should().ContainKey("canSaveAsVersion").WhoseValue.Should().Be("true",
+            "readable AND filed to the target record: today's behaviour — Keep both, Save as new version, plus Open");
     }
 
     [Fact]
@@ -335,25 +344,64 @@ public class OfficeCreateCollisionTests
             "naming a document the caller cannot read discloses its subject to someone with no rights on it");
         problem.Should().NotContainKey("existingDocumentId",
             "the id is withheld in the same breath, so the pane falls back to \"Keep both\" only");
+        // Task 088 (AC7): exactly the pre-088 payload — the new flag is not written at all, so it can neither
+        // offer a version retry nor reveal, by its presence, that an identity was resolved and then withheld.
+        problem.Should().NotContainKey("canSaveAsVersion",
+            "a caller who cannot read the other document gets exactly the payload it got before task 088");
         world.AccessChecks.Should().Contain(existingId.ToString("D"),
             "the gate must actually evaluate the caller's rights — a withheld field that was never checked "
             + "would pass this test today and leak the moment the seeding changed");
     }
 
     [Fact]
-    public async Task Collision_WhenTheCollidingDocumentIsFiledToADifferentRecord_WithholdsTheIdSoNoVersionRetryIsOffered()
+    public async Task Collision_WhenTheCallerCannotReadADocumentFiledElsewhere_WithholdsItsIdentityAndOffersNoVersionRetry()
+    {
+        // Task 088 (AC7, the newly-reachable half). Before task 088 a document filed to ANOTHER record never had
+        // its identity on the refusal at all, so the Read gate was never consulted for it. Task 088 carries the
+        // identity on every owned collision — so this is the case the gate must now catch: an unreadable
+        // document on someone else's matter must still yield nothing but "the name is taken".
+        var world = new OfficeVersionSaveWorld();
+        var (existingId, _) = world.SeedDocument(
+            SaveContainer, "Brief.docx", B,
+            rights: AccessRights.None,
+            documentName: "Board Minutes — Confidential",
+            matterId: Guid.NewGuid());
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var client = factory.CreateClient();
+
+        var collision = await client.PostAsJsonAsync("/api/office/save", CreateSave("Brief.docx", A));
+
+        collision.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await ReadProblemAsync(collision);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
+        problem.Should().NotContainKey("existingDocumentId", "the caller holds no Read on that document");
+        problem.Should().NotContainKey("existingDocumentName", "naming it would describe a document the caller cannot see");
+        problem.Should().NotContainKey("canSaveAsVersion", "the payload is exactly the pre-088 \"name is taken\" shape");
+        world.AccessChecks.Should().Contain(existingId.ToString("D"),
+            "withheld because the gate evaluated the caller's rights and found none — not because nothing asked");
+    }
+
+    [Fact]
+    public async Task Collision_WhenTheReadableCollidingDocumentIsFiledToADifferentRecord_IdentifiesItForOpen_ButOffersNoVersionRetry()
     {
         // THE #1005 CASE. The colliding document belongs to a different matter than the one the caller
         // selected. Offering "Save as new version" here is what wrote a patent report onto a stranger's row:
         // the version path sends no targetEntity, so the caller's selection is silently discarded and the
         // bytes land wherever the COLLIDING document happens to be filed.
         //
-        // Withholding the id is the fix, and it is deliberately NOT "re-associate the document to the
+        // Not offering the retry is the fix, and it is deliberately NOT "re-associate the document to the
         // caller's record" — that would re-file another user's document onto the caller's matter, which is
         // worse than the defect and crosses the boundary task 023 D-4/D-5 drew (escalation trigger (a)).
+        //
+        // Task 088 (UAT-5, AC5) — HOW the retry is withheld changed, the invariant did not. Task 055 withheld the
+        // document's IDENTITY, because the id's presence was the pane's retry signal; that also left the user no
+        // way to reach the file that owns the name. The retry is now the separate canSaveAsVersion flag (false
+        // here), and a caller who CAN read the document gets its id and name so the pane can offer "Open".
+        // The #1005 guarantee is pinned by the flag below and by the pane suite (SaveFlowCollision.test.tsx),
+        // which offers "Save as new version" from the flag alone, never from the id.
         var world = new OfficeVersionSaveWorld();
         var someoneElsesMatter = Guid.NewGuid();
-        world.SeedDocument(
+        var (existingId, _) = world.SeedDocument(
             SaveContainer, "Brief.docx", B,
             documentName: "Unrelated Matter — Draft",
             matterId: someoneElsesMatter);
@@ -364,9 +412,14 @@ public class OfficeCreateCollisionTests
 
         collision.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var problem = await ReadProblemAsync(collision);
-        problem.Should().NotContainKey("existingDocumentId",
+        problem.Should().ContainKey("canSaveAsVersion").WhoseValue.Should().Be("false",
             "a version retry against a document filed elsewhere silently discards the caller's chosen record");
-        problem.Should().NotContainKey("existingDocumentName",
-            "nor is the other record's document named — the caller never selected it and cannot infer it from here");
+        problem.Should().ContainKey("existingDocumentId").WhoseValue.Should().Be(existingId.ToString("D"),
+            "the caller can read it, so the pane may offer to open it (UAT-5)");
+        problem.Should().ContainKey("existingDocumentName").WhoseValue.Should().Be("Unrelated Matter — Draft",
+            "the pane names what \"Open\" would open, so the user knows which file holds the name");
+        world.AccessChecks.Should().Contain(existingId.ToString("D"),
+            "the identity reached the wire only after the Read gate evaluated the caller's rights on it");
+        world.Documents.Should().ContainSingle("the refusal wrote nothing, and nothing was re-associated");
     }
 }
