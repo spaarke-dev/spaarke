@@ -23,7 +23,7 @@ The machine was starved: ~300 `dotnet` processes, **248 of them VS Code C# Dev K
 | Worktree | Branch | State at handoff |
 |---|---|---|
 | this one | `docs/ontology-platform-design` | clean, pushed |
-| `C:\wt081` | `ontology/081-cleanup` | **see below: WIP commit requested from the agent** |
+| `C:\wt081` | `ontology/081-cleanup` | WIP committed + pushed `89b5230f9`: C-8, C-11, C-13, C-17 implemented, tests mostly verified, final report pending (read the commit message) |
 | `C:\wt092` | `fix/master-build-test-baseline` (PR #1123) | WIP committed + pushed `e81d65e64`, clean |
 | `C:\wt094` | `fix/pcf-deploy-verify-build` (PR #1286) | clean, pushed |
 | `C:\wt095` | `fix/email-attachment-regex-timeout` (PR #1287) | clean, pushed |
