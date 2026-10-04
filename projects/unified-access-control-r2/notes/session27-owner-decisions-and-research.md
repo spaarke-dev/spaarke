@@ -316,6 +316,10 @@ The cause is that no authoritative container → business-unit binding exists, s
 2. **Reporting (trigger 5): option (A), completed.** The catalog row id is the contract, read AS THE CALLER; the Power BI report/workspace ids are derived server-side from the row; the client is fixed to match; the update verb is aligned (the BFF maps the verb the client sends); and the row-level-security effective identity (business unit) is computed server-side from the caller's systemuser and put in the embed token, so the `businessunit`/`bu` RLS claim is actually produced. Tests per route; the seven reporting Pending waivers resolve.
 3. **Field-mapping push (trigger 4): option (a).** Resolve the target's parent lookup from relationship metadata (the lookup on the target that references the source entity), so every profile works — including "Matter to Invoice (Attorney Matrix)" via `sprk_invoice.sprk_matter` — with no per-table naming convention, no schema change and no deactivated profile. Ambiguous metadata (several lookups to the source) fails closed with a clear error.
 
+## Round 22 (2026-10-04). BINDING. Main-session decision under the owner's standing directive (round 15). Task 148.
+
+On UNSECURE, a root sharee's share is removed from a child ONLY if that child was owned by the Secure Record owner team when the pass began (it was isolated, so the share is 149's mirror). A share on an ordinary, never-isolated child (e.g. a user-owned document shared manually) is the user's own intent and is kept. The "owned by the secure team" set is snapshotted at the start of the pass, before any re-own.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
