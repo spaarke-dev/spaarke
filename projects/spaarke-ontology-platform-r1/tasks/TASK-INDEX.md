@@ -108,7 +108,7 @@
 | ✅ 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1121](https://github.com/spaarke-dev/spaarke/pull/1121) **merged** `ec7211aaf`. All ~40 deferred sites converged; case-semantics audit in PR body. #1118 and #1121 must merge before 081 |
 | ✅ 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1122](https://github.com/spaarke-dev/spaarke/pull/1122) **merged** `48d4fad04`. 4 colour violations fixed; 3 cards documented as different; SECTION_REGISTRY kept with consumer cited |
 | ✅ 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | [PR #1123](https://github.com/spaarke-dev/spaarke/pull/1123). 6 PCF builds fixed (broken since the 2026-08-14 CVE bump); 17 failing suites fixed or evidenced; **one user-visible fix** (FR-02 section height) |
-| 🔲 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | Owner decision 2026-10-04 (from 092's CI finding). Advisory, nightly, no PR trigger |
+| ✅ 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1282](https://github.com/spaarke-dev/spaarke/pull/1282) **merged** `e7f1129ec`. First run: 17/18 pass; ScopeConfigEditor fails (undeclared eslint); Communication PCFs pass on Linux/Node 20 (092 re-investigating) |
 
 ### Phase 9 — Wrap-up
 
