@@ -80,7 +80,7 @@ $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep → builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry → fresh-master SpaarkeAi builds failed on the unbuilt lib).
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
-    @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # depends on Auth
+    @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # type-only, no @spaarke/* deps (auth dep dropped 2026-10-03, reuse audit C-14)
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
     @{ Name = "Spaarke.DocumentOperations";   Path = "$RepoRoot\src\client\shared\Spaarke.DocumentOperations" }   # depends on Auth (added 2026-06-29 by spaarkeai-compose-r1 task 030)
     @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
