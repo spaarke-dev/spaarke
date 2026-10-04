@@ -166,6 +166,7 @@ function New-Label([string]$Text) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -336,26 +337,23 @@ Write-Host "`n(d) Solution components"
 $solution = @((Invoke-DvGet "solutions?`$select=solutionid,uniquename&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
 if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found" }
 else {
-    $rows = @((Invoke-DvGet "solutioncomponents?`$select=objectid,componenttype,rootcomponentbehavior&`$filter=_solutionid_value eq $($solution.solutionid)").value)
-    $inSolution = @($rows | ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
-    # A table in the solution with rootcomponentbehavior = 0 ("include subcomponents") carries its columns and
-    # relationships implicitly: they have no rows of their own, and AddSolutionComponent on one is a no-op.
-    $tablesWithSubcomponents = @($rows | Where-Object { $_.componenttype -eq 1 -and $_.rootcomponentbehavior -eq 0 } |
-        ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
+    # Paged, and a table in the solution with rootcomponentbehavior = 0 ("include subcomponents") carries its columns
+    # and relationships implicitly (scripts/common/DataverseSolutionMembership.ps1).
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
 
     $components = [System.Collections.Generic.List[object]]::new()
     foreach ($t in $Tables) {
-        $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId.ToString().ToLowerInvariant()
-        $viaTable = $tablesWithSubcomponents -contains $tableId
-        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; ViaTable = $viaTable }) }
+        $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId
+        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId }) }
         $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')?`$select=MetadataId"
-        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; ViaTable = $viaTable }) }
+        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; TableId = $tableId }) }
     }
-    foreach ($profileId in $readerId, $writerId) { if ($profileId) { $components.Add(@{ Id = $profileId; Type = 70; Label = "field security profile $profileId"; ViaTable = $false }) } }
+    foreach ($profileId in $readerId, $writerId) { if ($profileId) { $components.Add(@{ Id = $profileId; Type = 70; Label = "field security profile $profileId" }) } }
 
     foreach ($c in $components) {
-        if ($inSolution -contains $c.Id.ToString().ToLowerInvariant()) { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
-        if ($c.ViaTable) { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
         if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
         if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
         Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false } | Out-Null

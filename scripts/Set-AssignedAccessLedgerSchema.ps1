@@ -125,6 +125,7 @@ function New-Label([string]$Text) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } default { 'Red' } }
@@ -271,6 +272,44 @@ else {
         if ($k -and $k.EntityKeyIndexStatus -eq 'Active') { Report 'OK' "$KeySchemaName index Active"; break }
         if ($k -and $k.EntityKeyIndexStatus -eq 'Failed') { Report 'FAIL' "$KeySchemaName index FAILED"; break }
         Write-Host "    waiting for the key index ($i/30)..."; Start-Sleep -Seconds 10
+    }
+}
+
+# ── (d2) SOLUTION ───────────────────────────────────────────────────────────────────────────────────────────
+# The components above are created with the MSCRM.SolutionUniqueName header, but a component created before that
+# header was used (or in another solution) is not in it -- so -Verify checks membership instead of assuming it.
+Write-Host "`n(d2) Solution components"
+$solution = @((Invoke-DvGet "solutions?`$select=solutionid,uniquename&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
+if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found" }
+elseif (-not $entity) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "$Table and its components in $SolutionUniqueName (after the table exists)" }
+else {
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
+    $components = [System.Collections.Generic.List[object]]::new()
+    $components.Add(@{ Id = $entity.MetadataId; Type = 1; Label = "table $Table" })
+    $attrIds = @{}
+    foreach ($a in @((Invoke-DvGet "EntityDefinitions(LogicalName='$Table')/Attributes?`$select=LogicalName,MetadataId").value)) { $attrIds[$a.LogicalName] = $a.MetadataId }
+    foreach ($name in @('sprk_name', 'sprk_state', 'sprk_grantedlevel', 'sprk_grantedexpiry') + @($StringColumns | ForEach-Object { $_.Name }) + @($Lookups | ForEach-Object { $_.Name })) {
+        if ($attrIds[$name]) { $components.Add(@{ Id = $attrIds[$name]; Type = 2; Label = "$Table.$name"; TableId = $entity.MetadataId }) }
+    }
+    foreach ($l in $Lookups) {
+        $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$($l.Rel)')?`$select=MetadataId"
+        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $($l.Rel)"; TableId = $entity.MetadataId }) }
+    }
+    $keyRow = @((Invoke-DvGet "EntityDefinitions(LogicalName='$Table')/Keys?`$select=SchemaName,MetadataId").value) | Where-Object { $_.SchemaName -eq $KeySchemaName } | Select-Object -First 1
+    if ($keyRow) { $components.Add(@{ Id = $keyRow.MetadataId; Type = 14; Label = "key $KeySchemaName"; TableId = $entity.MetadataId }) }
+
+    foreach ($c in $components) {
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
+        if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
+        # A table is added WITH its subcomponents (rootcomponentbehavior 0), so its columns, relationships and key follow.
+        $body = @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false }
+        if ($c.Type -eq 1) { $body.DoNotIncludeSubcomponents = $false }
+        Invoke-DvWrite POST 'AddSolutionComponent' $body | Out-Null
+        Report 'DONE' "added $($c.Label) to $SolutionUniqueName"
+        if ($c.Type -eq 1) { $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid }
     }
 }
 
