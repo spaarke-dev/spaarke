@@ -302,6 +302,14 @@ Owner: *"we need this to be properly fixed so that we do not have the issue — 
 4. **Amendment blocker — option (a):** add `sprk_regardingrecordurl` to `sprk_analysis` with a schema script (dry run / `-Apply` / `-Verify`, in the repo's schema-script pattern including the rootcomponentbehavior-0 solution check), so every child table carries the full ADR-024 pair; then the analysis form gets the picker, hidden cells and presave, then the lock.
 5. Live steps (presave v1.4.0 deploy, form scripts, the schema script, the grid handler) are main-session manual gates on dev, run dry → apply → verify.
 
+## Round 20 (2026-10-04). BINDING. Main-session decision under the owner's standing directive (round 15). Task 165, Model 1 cross-customer containers.
+
+The cause is that no authoritative container → business-unit binding exists, so routes bound only to a container TYPE let one customer's leaf admin reach another customer's containers of the same type. Fix:
+1. Every SPE container is stamped with its owning business unit at creation (a `fileStorageContainer` custom property, e.g. `spaarkeBusinessUnitId`, written by the BFF's container-creation path); a backfill script (dry run / `-Apply` / `-Verify`) stamps existing containers from their authoritative records and lists any whose owner cannot be derived.
+2. The container, item, permission and bulk routes authorize PER CONTAINER: a leaf-unit admin only containers bound to its own unit or a descendant; an unbound container only a ROOT-unit admin; an unreadable binding fails closed.
+3. Configs of different customers may then share a `containerTypeId` / owning app (Model 1): the app-identity duplicate check is narrowed accordingly.
+4. 165's round-16 environment scoping is folded into the EXISTING SPE-admin scope filter (CLAUDE.md §11: no new filter class).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
