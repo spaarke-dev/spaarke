@@ -523,9 +523,21 @@ internal static class AssignedAccessTestDoubles
         public SecureShareNoAccessGuard Guard =>
             new(Participations, DenyList, Identities, NullLogger<SecureShareNoAccessGuard>.Instance);
 
+        /// <summary>
+        /// Task 149 (batch 4 integration, the 142 x 149 merge-order obligation): the Dataverse rows the REAL secure-child
+        /// share synchronizer reads — a world with no secure record by default, so it answers "not applicable"; seed a
+        /// Secure-team-owned root and children to watch a root share write reach them.
+        /// </summary>
+        public Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld ChildWorld { get; set; } =
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+
+        /// <summary>The REAL synchronizer over <see cref="ChildWorld"/>, this harness's share table and its No Access guard.</summary>
+        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Children =>
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, Shares, Guard);
+
         public AssignedAccessMaterializer Materializer => new(
-            Store, Grants, Participations, AccessibleRecords, Identities, Guard, Shares, Cache.Mock.Object, Standing, Registry,
-            Configuration, Time, Logger);
+            Store, Grants, Participations, AccessibleRecords, Identities, Guard, Shares, Children, Cache.Mock.Object, Standing,
+            Registry, Configuration, Time, Logger);
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)

@@ -19,8 +19,9 @@ namespace Sprk.Bff.Api.Services.Access;
 /// for as long as nothing repairs it;</item>
 /// <item>a fan-out that partly failed (the endpoint names the counts; this completes it);</item>
 /// <item>any other root-share writer: task 143's No Access enforcer calls the synchronizer after it removes a root share
-/// (wired in task 149 r3); task 142's Assigned-To materializer must call it after a confirmed root share write — a binding
-/// merge-order obligation on whichever of 142/149 merges second (notes/task-149 §14). Until then this job is the net.</item>
+/// (wired in task 149 r3), and task 142's Assigned-To materializer calls it after a confirmed root share write (the binding
+/// 142 x 149 merge-order obligation, notes/task-149 §14, discharged at the batch 4 integration); this job completes what
+/// either could not.</item>
 /// </list>
 /// No relationship cascades Share/Unshare/Reparent (live metadata, 2026-10-02), so without this job none of the four would
 /// ever reach the children. The cadence bounds every one of them to about two minutes — the owner's "minutes, never hourly"

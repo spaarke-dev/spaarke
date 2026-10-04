@@ -1558,4 +1558,118 @@ public class AssignedAccessMaterializerTests
         next.Complete.Should().BeTrue();
         next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Renewed);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Batch 4 integration — the BINDING 142 x 149 merge-order obligation (task 149 note §14): a CONFIRMED root share
+    // write reaches the secure record's CHILDREN in the same run, through task 149's REAL synchronizer.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid ChildDocument = Guid.Parse("14914200-0000-4000-8000-0000000000d1");
+
+    private int? ChildMask(Guid user) => _h.Shares.MaskOf("sprk_document", ChildDocument, DataversePrincipalRef.User(user));
+
+    /// <summary>A Secure-team-owned matter (its <c>sprk_issecure</c> as given) with one Secure-team-owned document under it.</summary>
+    private Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld SecureTeamOwnedMatter(bool flagged) =>
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+            .Add(MatterTable, _matter,
+                ("owningteam", new Microsoft.Xrm.Sdk.EntityReference(
+                    "team", Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SecureTeam)),
+                ("sprk_issecure", flagged))
+            .SecureChild("sprk_document", ChildDocument, ("sprk_matter", MatterTable, _matter));
+
+    /// <summary>
+    /// (a) A 142 share REMOVAL on a root the synchronizer treats as secure — Secure-team-owned with its flag reading No, the
+    /// only state in which 142 removes one there — removes the user from every child in the SAME call, not at the next tick.
+    /// </summary>
+    [Fact]
+    public async Task AnAutoShareRemoval_OnASecureTeamOwnedRoot_RemovesTheUserFromItsChildren_InTheSameRun()
+    {
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: false);
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        var shared = await Sync();
+        shared.Complete.Should().BeTrue();
+        ShareMask(user).Should().Be(CollaborateMask);
+        ChildMask(user).Should().NotBeNull("the root share write reached the child in the same run");
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        var removed = await Sync();
+
+        removed.Complete.Should().BeTrue();
+        ShareMask(user).Should().BeNull("142 ended the auto share on the root");
+        ChildMask(user).Should().BeNull("and the child followed in the same run");
+    }
+
+    /// <summary>
+    /// (b) The RESTORE after a lifted No Access wall on a flagged secure root gives the user every child in the same call
+    /// (task 143's guard is consulted for the child grant, as for every one).
+    /// </summary>
+    [Fact]
+    public async Task ARestoreAfterTheWallIsLifted_OnAFlaggedSecureRoot_GivesTheUserItsChildren_InTheSameRun()
+    {
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: true);
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();                                     // shared while the record's flags read standard
+        Secure();                                         // became secure (A3: kept)
+        _h.DenyList.DenySystemUserOnRecord(user, _matter);
+        _h.Shares.Reset();                                // task 143's enforcer removed the walled share (root and child)
+
+        await Sync();
+        ChildMask(user).Should().BeNull("walled: nothing restored, nothing fanned out");
+
+        _h.DenyList = new GrantPolicyTestDoubles.SeamNoAccessListReader(); // the wall is lifted
+        var restored = await Sync();
+
+        restored.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Restored);
+        restored.Complete.Should().BeTrue();
+        ShareMask(user).Should().Be(CollaborateMask);
+        ChildMask(user).Should().NotBeNull("the restore reached the child in the same run, not at the next tick");
+    }
+
+    /// <summary>(c) A fan-out that is not complete is a failure of the run; the root write STANDS.</summary>
+    [Fact]
+    public async Task AnIncompleteFanOut_IsARunFailure_AndTheRootShareStands()
+    {
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: false).FailingQueriesOf("sprk_document");
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeFalse("the job reports Success = false");
+        outcome.Failures.Should().ContainSingle(f => f.Kind == "children-incomplete");
+        ShareMask(user).Should().Be(CollaborateMask, "the root write is never rolled back");
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    /// <summary>
+    /// (d) A run with no confirmed share write does not read the children at all: over the same unreadable-children world
+    /// as (c), a grant-only run (an unlinked contact) and a second run of an unchanged root are complete.
+    /// </summary>
+    [Fact]
+    public async Task ARunWithNoConfirmedShareWrite_DoesNotReadTheChildren()
+    {
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: false).FailingQueriesOf("sprk_document");
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var granted = await Sync();
+
+        granted.Complete.Should().BeTrue("a grant is not a share: the children are never read");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Shares.Writes.Should().BeEmpty();
+
+        var (linked, user) = _h.LinkedContact();
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: false);
+        _h.Store.Assign(Matter, _matter, Paralegal1, linked);
+        (await Sync()).Complete.Should().BeTrue();
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        _h.ChildWorld = SecureTeamOwnedMatter(flagged: false).FailingQueriesOf("sprk_document");
+        var unchanged = await Sync();
+
+        unchanged.Complete.Should().BeTrue("an unchanged root writes no share, so the unreadable children are never asked");
+        unchanged.Writes.Should().Be(0);
+    }
 }

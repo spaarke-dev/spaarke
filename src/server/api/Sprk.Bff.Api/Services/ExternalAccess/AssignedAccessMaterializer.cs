@@ -190,6 +190,12 @@ public sealed class AssignedAccessMaterializer
     private readonly IContactIdentityStore _identities;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IDataverseRecordShareService _recordShare;
+
+    /// <summary>
+    /// Task 149 (the BINDING 142 x 149 merge-order obligation, task 149 note §14): a confirmed system-user share write on a
+    /// secure root reaches that root's secure CHILDREN in the same run — never only at the next reconcile tick.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer _secureChildShares;
     private readonly ITenantCache _cache;
     private readonly ISubjectStandingGrantReader _standingGrants;
     private readonly IOptions<MembershipOptions> _membership;
@@ -205,6 +211,7 @@ public sealed class AssignedAccessMaterializer
         IContactIdentityStore identities,
         SecureShareNoAccessGuard noAccessGuard,
         IDataverseRecordShareService recordShare,
+        Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer secureChildShares,
         ITenantCache cache,
         ISubjectStandingGrantReader standingGrants,
         IOptions<MembershipOptions> membership,
@@ -219,6 +226,9 @@ public sealed class AssignedAccessMaterializer
         _identities = identities;
         _noAccessGuard = noAccessGuard;
         _recordShare = recordShare;
+        // Both Scoped and unconditionally registered (ExternalAccessModule); no cycle — the synchronizer never depends on
+        // the materializer (task 149 note §14, step 1).
+        _secureChildShares = secureChildShares ?? throw new ArgumentNullException(nameof(secureChildShares));
         _cache = cache;
         _standingGrants = standingGrants;
         _membership = membership;
@@ -518,10 +528,55 @@ public sealed class AssignedAccessMaterializer
             }
         }
 
+        // ── Task 149: a confirmed root share write reaches the secure children now (once per root, not per subject) ──
+        if (run.RootShareWritten)
+        {
+            await SyncChildrenAsync(run, ct).ConfigureAwait(false);
+        }
+
         _logger.LogInformation(
             "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: {Subjects} assigned subject(s), {Writes} write(s), {Failures} failure(s).",
             request.Trigger, run.Logical, request.RootId, desired.Count, run.Writes, run.Failures.Count);
         return run.ToOutcome(AssignedAccessStatus.Evaluated);
+    }
+
+    /// <summary>
+    /// Task 149 (the BINDING 142 x 149 merge-order obligation, task 149 note §14 steps 2-3): after this run CONFIRMED at
+    /// least one system-user share write on the root (a grant or widening read back, or a removal / restore read back),
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.SyncRootAsync"/> mirrors the root's share set
+    /// onto its secure children — once for the root. On an ordinary root it answers "not applicable" after reading the
+    /// root's own row. The root write STANDS whatever this answers (never rolled back); a fan-out that is not complete, or
+    /// that threw, is a run failure (<c>children-incomplete</c>), so the job reports <c>Success = false</c> and the
+    /// two-minute reconcile completes the children — the shape of <c>NoAccessShareEnforcer.SyncChildrenAsync</c>.
+    /// </summary>
+    private async Task SyncChildrenAsync(Run run, CancellationToken ct)
+    {
+        Sprk.Bff.Api.Services.Access.SecureChildShareSyncResult children;
+        try
+        {
+            children = await _secureChildShares.SyncRootAsync(run.Logical, run.RootId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[ASSIGNED-ACCESS] {Type} {RootId}: the secure children could not be updated after the share write.",
+                run.Logical, run.RootId);
+            children = Sprk.Bff.Api.Services.Access.SecureChildShareSyncResult.Failed("the children could not be updated");
+        }
+
+        if (children.IsComplete)
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "[ASSIGNED-ACCESS] {Type} {RootId}: the share write stands, but its secure children are {Status} " +
+            "({NotUpdated} not updated, {Held} held of {InScope}; {Detail}).",
+            run.Logical, run.RootId, children.Status, children.ChildrenNotUpdated, children.ChildrenHeld,
+            children.ChildrenInScope, children.Detail);
+        run.Fail(null, "children-incomplete",
+            $"This record's access was updated, but {children.ChildrenLeftOutOfLine} of its {children.ChildrenInScope} related " +
+            "records (documents, events, to-dos, communications) could not be updated yet " +
+            $"({children.Status}). The scheduled safety net finishes it within a few minutes.");
     }
 
     /// <summary>The assigned subjects (registry order) and the fields that name each.</summary>
@@ -1378,6 +1433,7 @@ public sealed class AssignedAccessMaterializer
             return null;
         }
 
+        run.RootShareWritten = true; // task 149: a CONFIRMED root share write — its secure children follow (SyncChildrenAsync)
         return stored;
     }
 
@@ -1415,6 +1471,7 @@ public sealed class AssignedAccessMaterializer
             return false;
         }
 
+        run.RootShareWritten = true; // task 149: a CONFIRMED root share removal / restore — its secure children follow
         return true;
     }
 
@@ -1891,6 +1948,10 @@ public sealed class AssignedAccessMaterializer
         public string Logical { get; }
         public Guid RootId => Request.RootId;
         public int Writes { get; set; }
+
+        /// <summary>Task 149: this run made at least one CONFIRMED system-user share write on the root.</summary>
+        public bool RootShareWritten { get; set; }
+
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();
 
