@@ -153,11 +153,8 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
     {
         if (disposing)
         {
-            if (Volatile.Read(ref _bulkProcessorStarted) == 1)
-            {
-                BulkOperations.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
-            }
-
+            // A bulk loop started by StartBulkProcessorOnceAsync stops with the host: the container disposes the
+            // singleton, and BackgroundService.Dispose cancels its loop.
             Graph.Dispose();
         }
 

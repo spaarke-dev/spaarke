@@ -355,6 +355,35 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         _fixture.Graph.RequestsFor("/search").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// A route value and a bound body that name DIFFERENT containers are refused before any container is read — the
+    /// filter must never authorize one container and let the handler act on another. No shipped route carries both
+    /// today, so the filter is driven directly (the config, scope and Graph reads are the host's real ones).
+    /// </summary>
+    [Fact]
+    public async Task ARequestWhoseRouteAndBodyNameDifferentContainers_Is400_BeforeAnyContainerIsRead()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        http.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim("oid", AdminSurfaceHostFixture.CallerOid.ToString()) }, "test"));
+        http.Request.QueryString = new Microsoft.AspNetCore.Http.QueryString($"?configId={ConfigA}");
+        http.Request.RouteValues["containerId"] = "c-own";
+        var body = new Sprk.Bff.Api.Api.SpeAdmin.SearchItemsEndpoints.SearchItemsRequest("q", "c-other", null, null, null);
+
+        var filter = new Sprk.Bff.Api.Api.Filters.SpeAdminTenantScopeFilter(
+            scope.ServiceProvider.GetRequiredService<SpeAdminTenantScope>());
+        var result = await filter.InvokeAsync(
+            Microsoft.AspNetCore.Http.EndpointFilterInvocationContext.Create(http, body),
+            _ => ValueTask.FromResult<object?>("PASSED-THROUGH"));
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(400);
+        result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>()
+            .Which.ProblemDetails.Extensions["errorCode"].Should().Be("spe.admin.deny.container_id_ambiguous");
+        _fixture.Graph.AllRequests.Should().BeEmpty("neither container was read");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Lists and searches are trimmed to the containers the caller reaches
     // ─────────────────────────────────────────────────────────────────────────

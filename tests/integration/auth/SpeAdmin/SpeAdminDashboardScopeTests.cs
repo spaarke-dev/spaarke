@@ -202,6 +202,9 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
         var metrics = await Json(await client.PostAsync("/api/spe/dashboard/refresh", content: null));
 
         metrics.GetProperty("containerCountByConfig").GetProperty(ConfigB.ToString()).GetInt32().Should().Be(0);
+        metrics.GetProperty("unattributedContainerCount").GetInt32().Should().Be(1,
+            "only c-unbound — a container whose binding could not be read is not 'unbound', it is unknown");
+        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(3, "c-own, c-sub, c-unbound");
         metrics.GetRawText().Should().Contain(SpeDashboardSyncService.BindingConcernPrefix);
         metrics.GetProperty("syncHealth").GetString().Should().Be("Degraded");
     }
