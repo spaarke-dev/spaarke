@@ -1,4 +1,5 @@
 export * from './ensureNavigatorSidePane';
+export * from './guid';
 export * from './logger';
 export * from './lookupMatching';
 export * from './parseDataParams';

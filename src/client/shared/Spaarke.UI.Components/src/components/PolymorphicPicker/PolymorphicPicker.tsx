@@ -55,6 +55,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -259,7 +260,7 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
           return;
         }
         const picked = results[0];
-        const cleanId = picked.id.replace(/[{}]/g, '').toLowerCase();
+        const cleanId = cleanGuid(picked.id);
         onSelect(entityType, cleanId, picked.name);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Lookup failed.';

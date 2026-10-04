@@ -47,6 +47,12 @@ jest.mock('@spaarke/ui-components', () => {
     clearDefaultWorkspaceRenderer: () => {
       _slot = null;
     },
+    // C-7 (spaarke-ontology-platform-r1 reuse audit): `getUserIdSafe()` in
+    // WorkspaceLayoutWidget.tsx now routes through the canonical `cleanGuid`
+    // instead of a hand-rolled `.replace(/[{}]/g, '')` — this sparse mock
+    // (deliberately avoiding the full barrel per the comment below) must
+    // provide it too. Same brace-strip + lowercase behavior as the real impl.
+    cleanGuid: (id: string | null | undefined) => (id ? id.replace(/[{}]/g, '').trim().toLowerCase() : ''),
   };
 });
 

@@ -11,9 +11,9 @@
 
 import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
-import { DueDateCardList } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCardList';
-import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
+import { DueDateCardList, type IEventDueDateCardProps } from '@spaarke/visuals';
 import { OOB_MODAL_SIZES } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
+import { cleanGuid } from '@spaarke/ui-components';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
@@ -143,7 +143,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         let fetchXml = resolved.fetchXml;
         if (chartDefinition.sprk_contextfieldname && contextRecordId) {
           const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, '').replace(/_value$/, '');
-          const cleanId = contextRecordId.replace(/[{}]/g, '');
+          const cleanId = cleanGuid(contextRecordId);
           fetchXml = injectContextFilter(fetchXml, filterField, cleanId);
         }
 
@@ -158,7 +158,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         let contextCondition = '';
         if (chartDefinition.sprk_contextfieldname && contextRecordId) {
           const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, '').replace(/_value$/, '');
-          const cleanId = contextRecordId.replace(/[{}]/g, '');
+          const cleanId = cleanGuid(contextRecordId);
           contextCondition = `<condition attribute="${filterField}" operator="eq" value="${cleanId}" />`;
         }
 
