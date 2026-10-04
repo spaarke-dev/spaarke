@@ -25,6 +25,7 @@
 
 import {
   applyResolverFields,
+  cleanGuid,
   TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
@@ -238,10 +239,10 @@ export async function applyRegardingSelection(
     catalogEntry.navPropHint
   );
 
-  const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await ctx.webApi.updateRecord(ctx.hostEntity, cleanGuid(ctx.hostRecordId as string), payload);
     } catch (err) {
       return {
         success: false,
@@ -282,7 +283,7 @@ export async function unlinkRegarding(
   entityType: string,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
-  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  const cleanId = ctx.hostRecordId ? cleanGuid(ctx.hostRecordId) : undefined;
   if (!cleanId || cleanId.length !== 36) {
     return { success: true }; // Nothing filed to unlink without a persisted record.
   }
@@ -328,7 +329,7 @@ export async function clearPrimaryRegarding(
   entityType: string,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
-  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  const cleanId = ctx.hostRecordId ? cleanGuid(ctx.hostRecordId) : undefined;
   if (!cleanId || cleanId.length !== 36) {
     return { success: true }; // Nothing to clear without a persisted record.
   }
@@ -371,7 +372,7 @@ export async function clearPrimaryRegarding(
  * is no host GUID (CREATE mode — not a review scenario).
  */
 export async function advanceAssociationStatus(ctx: IResolverWriteContext): Promise<IResolverWriteResult> {
-  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  const cleanId = ctx.hostRecordId ? cleanGuid(ctx.hostRecordId) : undefined;
   if (!cleanId || cleanId.length !== 36) {
     return { success: true }; // Nothing to advance without a persisted record.
   }
@@ -405,7 +406,7 @@ export async function persistOverrideReason(
   reason: string,
   nowIso: string
 ): Promise<IResolverWriteResult> {
-  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  const cleanId = ctx.hostRecordId ? cleanGuid(ctx.hostRecordId) : undefined;
   if (!cleanId || cleanId.length !== 36) {
     return { success: true };
   }

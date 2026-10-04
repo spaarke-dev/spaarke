@@ -15,15 +15,11 @@ import { useState, useEffect } from 'react';
 import type { IChartDefinition, DrillInteraction } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { logger } from '../utils/logger';
-import {
-  CalendarVisual as CalendarVisualView,
-  type ICalendarEvent,
-  type ICalendarEventRecord,
-} from '../../../../shared/Spaarke.Visuals/src/components/CalendarVisual';
+import { CalendarVisual as CalendarVisualView, type ICalendarEvent, type ICalendarEventRecord } from '@spaarke/visuals';
 
 // Re-export the presentational event type so existing importers
 // (ChartRenderer) keep their `from './CalendarVisual'` path.
-export type { ICalendarEvent } from '../../../../shared/Spaarke.Visuals/src/components/CalendarVisual';
+export type { ICalendarEvent } from '@spaarke/visuals';
 
 export interface ICalendarVisualProps {
   /** Aggregated events (badge counts) — used when no fetch is possible */

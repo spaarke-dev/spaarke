@@ -10,8 +10,8 @@
 
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { DueDateCard } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCard';
-import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
+import { DueDateCard, type IEventDueDateCardProps } from '@spaarke/visuals';
+import { cleanGuid } from '@spaarke/ui-components';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { substituteParameters } from '../services/ViewDataService';
@@ -135,7 +135,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         );
       } else {
         // Hardcoded single-event-lookup fallback (pre-v1.4.5 behavior).
-        const cleanRecordId = recordId.replace(/[{}]/g, '');
+        const cleanRecordId = cleanGuid(recordId);
         fetchXml = [
           `<fetch top="1">`,
           `  <entity name="${entityName}">`,
