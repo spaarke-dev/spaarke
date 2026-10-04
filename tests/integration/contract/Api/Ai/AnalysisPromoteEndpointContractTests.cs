@@ -33,16 +33,16 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Hosting approach</b> (mirrors <see cref="AnalysisForkEndpointContractTests"/>, ADR-038): a
+/// <b>Hosting approach</b> (ADR-038): a
 /// minimal in-process <see cref="WebApplication"/> mapping the REAL <c>MapAnalysisEndpoints</c>. The
 /// promote handler runs against a REAL <see cref="ChatSessionManager"/> over an
 /// <see cref="InMemoryTenantCache"/> and the SAME capturing <see cref="CapturingChatDataverseRepository"/>
-/// double the fork tests use (extended with <c>BindSessionToAnalysisAsync</c> capture/fail-injection),
+/// double the deleted fork tests used (extended with <c>BindSessionToAnalysisAsync</c> capture/fail-injection),
 /// so the fetch→create→bind composition is exercised through the production endpoint.
 /// </para>
 /// <para>
 /// <b>Coverage</b>: happy-path 201 binding an EXISTING loose session in place (no new session, no
-/// archive — contrast with <c>/fork</c>); 401 unauthenticated; 404 session-not-found; 400
+/// archive); 401 unauthenticated; 404 session-not-found; 400
 /// double-promote guard (already Analysis-owned); 400 no-document (neither request nor session
 /// supplies one); the compensation/no-orphan path (bind fails after Analysis create → the Analysis is
 /// rolled back, 500); and the task's NEGATIVE acceptance criterion — a loose session created and used
@@ -392,8 +392,8 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
 /// <summary>
 /// Test fixture hosting a minimal <see cref="WebApplication"/> with <c>MapAnalysisEndpoints</c> and
 /// the promote handler's dependency graph. Reuses the SAME <see cref="CapturingChatDataverseRepository"/>
-/// double (extended for <c>BindSessionToAnalysisAsync</c>) and fake-auth scheme the fork endpoint
-/// fixture uses (<see cref="AnalysisForkEndpointTestFixture"/> / <see cref="SummarizeFakeAuthHandler"/>).
+/// double (extended for <c>BindSessionToAnalysisAsync</c>) and the <see cref="SummarizeFakeAuthHandler"/> fake-auth
+/// scheme. (The fork endpoint and its fixture were deleted by unified-access-control-r2 task 162.)
 /// </summary>
 public sealed class AnalysisPromoteEndpointTestFixture : IAsyncLifetime, IDisposable
 {
@@ -401,7 +401,7 @@ public sealed class AnalysisPromoteEndpointTestFixture : IAsyncLifetime, IDispos
     public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
 
     // MUST match the "tid" claim SummarizeFakeAuthHandler always emits (shared fake-auth scheme
-    // with AnalysisForkEndpointContractTests) — the endpoint's ExtractTenantId reads this claim.
+    // with the other analysis contract fixtures) — the endpoint's ExtractTenantId reads this claim.
     public const string TenantId = "00000000-0000-0000-0000-000000000abc";
     public static readonly Guid AnalysisId = Guid.Parse("bbbbbbbb-1111-2222-3333-444444444444");
 
@@ -445,6 +445,12 @@ public sealed class AnalysisPromoteEndpointTestFixture : IAsyncLifetime, IDispos
 
         builder.Services.AddSingleton(Mock.Of<IAiAuthorizationService>());
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
+
+        // Task 162: the promote route checks, as the caller, the Create privilege on sprk_analysis and
+        // analysis.attach on the new row's parents (G5), and the session's owner. These tests pin the promote
+        // COMPOSITION, so every seam answers an explicit ALLOW (the sessions are created as the caller); the deny
+        // cases are AnalysisEndpointsAuthorizationContractTests.
+        builder.Services.AddAllowAllAnalysisAuthorization();
 
         // ── Promote handler dependency graph ─────────────────────────────────────────
         builder.Services.AddSingleton<ITenantCache>(_cache);

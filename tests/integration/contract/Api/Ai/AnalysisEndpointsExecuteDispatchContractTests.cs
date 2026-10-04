@@ -218,6 +218,11 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
             .ReturnsAsync(AuthorizationResult.Authorized(Array.Empty<Guid>()));
         builder.Services.AddSingleton(authMock.Object);
 
+        // Task 162: /execute chains the run filter (Write on the documents for the document-profile branch or a
+        // playbook that can write; the playbook-use decision otherwise). These tests pin the DISPATCH decision, so
+        // every seam answers an explicit ALLOW; the deny cases are AnalysisEndpointsAuthorizationContractTests.
+        builder.Services.AddAllowAllAnalysisAuthorization();
+
         // /execute handler dependency graph — module-boundary doubles + real concretes.
         builder.Services.AddSingleton(ConsumerRoutingMock.Object);
         builder.Services.AddSingleton(PlaybookOrchestratorMock.Object);

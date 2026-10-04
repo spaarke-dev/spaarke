@@ -290,6 +290,26 @@ public class RouteAuthorizationGuardTests
             + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
             + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
 
+        // ---- AI analysis: added 2026-10-03 by unified-access-control-r2 task 162 (sweep findings #1, #2, #22,
+        //      #50, #51, #52; GitHub #233 item 1) ----
+        //
+        // Absent from this census while serving analysis working documents and writing sprk_analysis rows,
+        // document profile fields and SPE files app-only. Worse than absent: every route here carried an
+        // Add…AuthorizationFilter, so Rule A credited them by NAME and Rule B passed the filter file because its
+        // text contains "AuthorizationService" — while four of the seven decided nothing (AnalysisAccess was a
+        // pass-through, and AiAuthorizationFilter ignores the fork/promote bodies). The structural rules cannot
+        // tell a deciding filter from a decorative one with the right name; AnalysisEndpointsAuthorizationContract
+        // Tests (real MapAnalysisEndpoints host, one deny case per mapped route, completeness-checked) is what
+        // proves these. /fork, /{analysisId}/save and /{analysisId}/export were DELETED (owner round 10 item 1).
+        new GovernedFile("Api/Ai/AnalysisEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/analysis/* — create and execute (Read on every body document via IAiAuthorizationService; "
+            + "execute adds the run filter: Write on every document for the document-profile branch or a playbook "
+            + "that can write, plus the playbook-use decision), promote (G5: Create privilege on sprk_analysis, "
+            + "analysis.attach on the body document and regarding record, playbook-use; the session owner and the "
+            + "session-derived document are checked in the handler, see SessionOwnershipGuardTests) and GET "
+            + "/{analysisId} (Read on EVERY populated anchor of the analysis, uniform 404). Every new check is "
+            + "evaluated by FinanceAuthorizationFilter; no route in this file carries a waiver."),
+
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
             "THE reference implementation per the Wave-3 build plan: each handler checks project access AND "

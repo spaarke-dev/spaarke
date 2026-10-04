@@ -25,10 +25,14 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///      (this is how <c>entity.associate_document</c> reaches the rule — a scan that missed
 ///      const-indirection would have silently dropped that finding)
 ///
-/// Scope note: the AI filters (<c>AiAuthorizationFilter</c>, <c>AnalysisAuthorizationFilter</c>,
-/// <c>VisualizationAuthorizationFilter</c>) route through <c>IAiAuthorizationService</c>, which checks
-/// <c>AccessRights.Read</c> directly and never consults this policy — so they are correctly out of
-/// scope. <c>DataverseAuthorizationFilter</c> likewise uses <c>IDataversePrivilegeChecker</c>.
+/// Scope note: <c>AiAuthorizationFilter</c>, <c>VisualizationAuthorizationFilter</c> and the DocumentAccess mode
+/// of <c>AnalysisAuthorizationFilter</c> route through <c>IAiAuthorizationService</c>, which checks
+/// <c>AccessRights.Read</c> directly and never consults this policy. Since unified-access-control-r2 task 162 the
+/// OTHER modes of <c>AnalysisAuthorizationFilter</c> (GET /{analysisId}, /promote, the /execute run check) and
+/// <c>PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync</c> DO consult it — "read", "write" and
+/// "analysis.attach", through <c>FinanceAuthorizationFilter</c> — and their call sites use the
+/// <c>Operation = SomeConst</c> mechanism this scan covers. <c>DataverseAuthorizationFilter</c> uses
+/// <c>IDataversePrivilegeChecker</c>.
 /// </summary>
 public class OperationAccessPolicyCompletenessTests
 {

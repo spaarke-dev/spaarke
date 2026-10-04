@@ -247,7 +247,7 @@ public class RecordOwnerAssignmentCensusTests
         new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
             "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
-            "Create / fork / promote resolve the owner from the document and regarding record; a refusal is a 409."),
+            "Create and promote resolve the owner from the document and regarding record; a refusal is a 409 (the fork route was deleted by task 162)."),
         new UnscannedWriter("AnalysisResultPersistence.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
             "Outputs are owned like their analysis; a refusal skips the analysis and its outputs."),
         new UnscannedWriter("AppOnlyAnalysisService.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
@@ -1764,7 +1764,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
         new PersonBearingWriter("AnalysisEndpoints.cs", "CreateAnalysis", "POST /api/ai/analysis/create caller"),
-        new PersonBearingWriter("AnalysisEndpoints.cs", "ForkAnalysis", "fork caller"),
+        // (ForkAnalysis left with POST /api/ai/analysis/fork, deleted by task 162 under owner round 10 item 1.)
         new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "PersistReviewMemoAsync", "the user who generated the memo"),

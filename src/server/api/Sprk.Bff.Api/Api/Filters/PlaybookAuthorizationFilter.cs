@@ -75,6 +75,66 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     private readonly ILogger<PlaybookAuthorizationFilter>? _logger;
     private readonly PlaybookAuthorizationMode _mode;
 
+    /// <summary>The <see cref="Spaarke.Core.Auth.OperationAccessPolicy"/> key the playbook-use decision asks of a playbook row.</summary>
+    public const string PlaybookUseOperation = "read";
+
+    /// <summary>
+    /// The playbook-use decision — "may this caller run this playbook" — shared by every route that runs or binds a
+    /// caller-chosen playbook (unified-access-control-r2 task 162: /api/ai/analysis/execute and /promote; task 164
+    /// switches this filter's own routes and the chat/agent playbook routes to it).
+    /// </summary>
+    /// <returns>
+    /// <c>null</c> when no check is needed: the playbook exists and is PUBLIC (<c>sprk_ispublic</c>, an application
+    /// flag, not a Dataverse share). Otherwise a <see cref="FinanceCheckPath.Record"/> check, operation
+    /// <see cref="PlaybookUseOperation"/>, on that <c>sprk_analysisplaybook</c> row — so Dataverse's OWN answer decides
+    /// (ownership, team POA shares, role depth; owner round 9). A playbook <see cref="IPlaybookService.GetPlaybookAsync"/>
+    /// does not find gets the same check, which Dataverse answers None for, so unknown and denied are one answer.
+    /// </returns>
+    /// <remarks>
+    /// Deliberately does NOT compare <c>playbook.OwnerId</c> (a Dataverse systemuserid) with the caller's Entra oid:
+    /// the two GUID spaces differ, which is the defect in <see cref="InvokeAsync"/>'s owner branch (owner round 12
+    /// item 6, task 164). A fault in the lookup propagates; every caller denies on it (ADR-003).
+    /// </remarks>
+    public static async Task<FinanceAuthorizationCheck?> BuildPlaybookUseCheckAsync(
+        IPlaybookService playbookService, Guid playbookId, string source, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(playbookService);
+
+        if (playbookId != Guid.Empty)
+        {
+            var playbook = await playbookService.GetPlaybookAsync(playbookId, cancellationToken);
+            if (playbook is { IsPublic: true })
+            {
+                return null;
+            }
+        }
+
+        // An empty id reaches the evaluator as a check with no record, which it denies (no_target).
+        return new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = PlaybookService.EntitySetName,
+            RecordId = playbookId,
+            Operation = PlaybookUseOperation,
+            Source = source,
+        };
+    }
+
+    /// <summary>
+    /// The same decision as <see cref="BuildPlaybookUseCheckAsync(IPlaybookService, Guid, string, CancellationToken)"/>,
+    /// resolving <see cref="IPlaybookService"/> from <paramref name="services"/>. For callers OUTSIDE the AI API surface
+    /// (e.g. AnalysisAuthorizationFilter): ADR-013 / FR-C6 keeps <see cref="IPlaybookService"/> out of their type
+    /// dependencies (ADR013_AiBoundaryTests), and this filter is the grandfathered owner of that lookup. A missing
+    /// registration throws, which every caller denies on (ADR-003).
+    /// </summary>
+    public static Task<FinanceAuthorizationCheck?> BuildPlaybookUseCheckAsync(
+        IServiceProvider services, Guid playbookId, string source, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return BuildPlaybookUseCheckAsync(
+            services.GetRequiredService<IPlaybookService>(), playbookId, source, cancellationToken);
+    }
+
     public PlaybookAuthorizationFilter(
         IPlaybookService playbookService,
         IPlaybookSharingService? sharingService,
