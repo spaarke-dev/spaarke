@@ -458,6 +458,43 @@ public class GrantorCeilingTests
         _dataverse.Creates.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Task 142 r5 (r4 verifier finding 6): the core's switch over the check's answer, one row per refusing answer —
+    /// including a value outside the enum, which no production check returns: it is never "allowed", it refuses as a
+    /// FAULT (fail closed). An entry refuses as an entry. Nothing is written. The positive twin is
+    /// <see cref="CreateGrantAsync_CalledDirectly_GrantsWhenTheCheckAnswersAllowed"/> (same double, Allowed).
+    /// </summary>
+    [Theory]
+    [InlineData((int)NoAccessCheckAnswer.Denied, ExternalGrantLifecycle.GranteeDeniedReasonCode, 422, false)]
+    [InlineData((int)NoAccessCheckAnswer.Unverifiable, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode, 503, true)]
+    [InlineData(99, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode, 503, true)]
+    public async Task CreateGrantAsync_CalledDirectly_RefusesEveryAnswerButAllowed_AnUnknownAnswerAsAFault(
+        int answer, string reasonCode, int status, bool isFault)
+    {
+        var outcome = await Core(
+            ContactGrant(ExternalAccessLevel.ViewOnly), GrantCeiling.FromGrantorRights(FullAccessCaller),
+            GrantPolicyTestDoubles.DenyListAnswering((NoAccessCheckAnswer)answer));
+
+        outcome.Refusal.Should().NotBeNull("only an Allowed answer grants");
+        outcome.Refusal!.ReasonCode.Should().Be(reasonCode);
+        outcome.Refusal.StatusCode.Should().Be(status);
+        outcome.Refusal.IsDenyListReadFault.Should().Be(isFault);
+        _dataverse.Creates.Should().BeEmpty("a refused grant writes nothing");
+        _dataverse.Updates.Should().BeEmpty();
+    }
+
+    /// <summary>The positive twin: the same double answering Allowed — the grant is written.</summary>
+    [Fact]
+    public async Task CreateGrantAsync_CalledDirectly_GrantsWhenTheCheckAnswersAllowed()
+    {
+        var outcome = await Core(
+            ContactGrant(ExternalAccessLevel.ViewOnly), GrantCeiling.FromGrantorRights(FullAccessCaller),
+            GrantPolicyTestDoubles.DenyListAnswering(NoAccessCheckAnswer.Allowed));
+
+        outcome.Refusal.Should().BeNull();
+        _dataverse.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
+    }
+
     /// <summary>Task 142 r4: one switch per No Access read fault the write-time check can meet.</summary>
     private void InjectNoAccessFault(string fault)
     {
@@ -659,10 +696,12 @@ public class GrantorCeilingTests
             PortalConfig(), AssignedAccessTestDoubles.InertMaterializer(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
-    private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(GrantAccessRequest request, GrantCeiling ceiling) =>
+    /// <param name="noAccessCheck">The write-time No Access check; the real one over the seam reader when null.</param>
+    private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(
+        GrantAccessRequest request, GrantCeiling ceiling, IAccessibleRecordSetService? noAccessCheck = null) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, ceiling, callerOid: null,
-            _dataverse, _participations, DenyList(), NullLogger.Instance,
+            _dataverse, _participations, noAccessCheck ?? DenyList(), NullLogger.Instance,
             CancellationToken.None);
 
     private void AssertNothingOnboardedOrWritten()

@@ -2,7 +2,8 @@
 
 > Branch `task/uac-r2-142` (from `task/uac-r2-143-r2` + `task/uac-r2-137-b2` + `work/unified-access-control-r2`, base
 > `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11), **`task/uac-r2-142-r2`** (§12),
-> **`task/uac-r2-142-r3`** (§13) and the owner-round-13 fix round **`task/uac-r2-142-r4`** (§14). Server, client, web
+> **`task/uac-r2-142-r3`** (§13), the owner-round-13 fix round **`task/uac-r2-142-r4`** (§14) and the r4 verifier's fix
+> round **`task/uac-r2-142-r5`** (§15). Server, client, web
 > resources, ribbon source and schema script complete. **Live writes: none** — every live step is a pending manual gate
 > (§7). The ADR-034 amendment A4 was **ACCEPTED by the owner in round 11 (2026-10-03)** (§8); the main session applies the
 > concise `.claude/adr` edit (exact text: §13.4) with the PR, and the code merges only after the dependency merges in §7
@@ -262,7 +263,7 @@ last modal change).
 
 | # | Gate | Command / action |
 |---|---|---|
-| G-0 | **Dependency merges FIRST** (verifier r0 finding 7). This branch carries the non-merge commits of tasks 133, 137 and 143 that `work/unified-access-control-r2` does not have yet, including two `WIP … UNVERIFIED, do not merge` commits — `b38756ba6` (133-b1, an ancestor of `task/uac-r2-133-b2` / `-b2-r2`) and `33108909e` (137-b1, an ancestor of `task/uac-r2-137-b2`), each superseded inside its own verified line. Merging 142 first would bring them in unreviewed. | Into `work/unified-access-control-r2`, in order: `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) — each verified in its own round. ⚠️ 137-b2 + 143-r2 have a SEMANTIC conflict with no textual one (143 r1 added `IContactIdentityStore` to `AccessibleRecordSetService`'s constructor; 137's seam test used the old one): bring `843d62b46` (`tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs`, +3 lines) with the second of the two merges, or the test project does not compile. Then re-merge `work` into the 142 line and merge it. Confirm with `git log --oneline work/unified-access-control-r2..task/uac-r2-142-r3 --no-merges` = only 142 commits. **Re-checked in round r3** (`git merge-base --is-ancestor`, work at `3850eda5a`): none of `task/uac-r2-133-b2-r2`, `task/uac-r2-137-b2`, `task/uac-r2-143-r2` or `843d62b46` is an ancestor of `work` yet; still open — the main session's integration order |
+| G-0 | **Dependency merges FIRST** (verifier r0 finding 7). This branch carries the non-merge commits of tasks 133, 137 and 143 that `work/unified-access-control-r2` does not have yet, including two `WIP … UNVERIFIED, do not merge` commits — `b38756ba6` (133-b1, an ancestor of `task/uac-r2-133-b2` / `-b2-r2`) and `33108909e` (137-b1, an ancestor of `task/uac-r2-137-b2`), each superseded inside its own verified line. Merging 142 first would bring them in unreviewed. | Into `work/unified-access-control-r2`, in order: `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) — each verified in its own round. ⚠️ 137-b2 + 143-r2 have a SEMANTIC conflict with no textual one (143 r1 added `IContactIdentityStore` to `AccessibleRecordSetService`'s constructor; 137's seam test used the old one): bring `843d62b46` (`tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs`, +3 lines) with the second of the two merges, or the test project does not compile. Then re-merge `work` into the 142 line and merge it. Confirm with `git log --oneline work/unified-access-control-r2..task/uac-r2-142-r3 --no-merges` = only 142 commits. **Re-checked in round r3** (`git merge-base --is-ancestor`, work at `3850eda5a`): none of `task/uac-r2-133-b2-r2`, `task/uac-r2-137-b2`, `task/uac-r2-143-r2` or `843d62b46` is an ancestor of `work` yet; still open — the main session's integration order. **Re-checked in round r5** (work at `e6dd48b43`): still none of the four is an ancestor; still open |
 | G-1 | Ledger schema, BEFORE any BFF deploy of this branch (without it every materialization reads `ledger-unreadable` and writes nothing — fail closed) | `pwsh scripts/Set-AssignedAccessLedgerSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run), then `-Apply`, then `-Verify` (exit 0) and `describe('tables/sprk_assignedaccess')`; confirm `sprk_AssignedAccessLedgerKey` Active and the privilege census lists only System Administrator / System Customizer for Create/Write/Delete. Record in `src/solutions/SpaarkeCore/entities/sprk_assignedaccess/entity-schema.md` |
 | G-2 | BFF deploy | the usual BFF deploy of the merged branch (job registers enabled; `ExternalAccess__AssignedAccess__JobRevokeOnChangeEnabled` absent = report-only) |
 | G-3 | Web resources | dataverse-deploy: `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`; `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`; publish |
@@ -382,6 +383,8 @@ text. Paste into the PR:
   a tri-state answer from `IsGranteeDeniedOnRecordAsync` (or a fault-reporting overload) — an interface change to
   `AccessibleRecordSetService`, which this POML scopes out (relevant-files: "ONLY per the owner's answer to escalation
   (d)" = keep → untouched) and which tasks 139/140 also call. Not changed; reported for the owner/main session.
+- **R-14 — ESCALATION, open (r5, r4 verifier finding 7; not answered by owner rounds 1–13).** A subject the deny-list
+  reader will not EVALUATE is classified as a transient fault. Details and options: §15.4.
 
 ## 10. Quality gates (Step 9.5)
 
@@ -828,3 +831,145 @@ Documents, one regex-engine timeout in `EmailAttachmentProcessorTests`, one `Tas
 selects every row of the one theory). `Spaarke.ArchTests` **346/346**; `Sprk.Bff.Api.IntegrationTests` **104/104**;
 `Spe.Integration.Tests` **403 passed, 0 failed, 25 skipped (428)**. No client file changed (no client build/test).
 Publish size: skipped (harness) — main session; no package added (no CVE delta).
+
+## 15. Round r5 — the r4 verifier's findings (2026-10-03, branch `task/uac-r2-142-r5`)
+
+Base: `task/uac-r2-142-r4` (`b36c89ede`). **Branch name**: the harness asked for
+`switch -c task/uac-r2-142-r1 task/uac-r2-142-r4`; `task/uac-r2-142-r1` already exists (this task's round r1,
+`4ac362f8e`, checked out in another worktree), so the switch refused. Nothing was overwritten: the round runs on
+`task/uac-r2-142-r5`, the next name in this task's round sequence (r1 → r2 → r3 → r4 each built on the previous).
+Binding input: owner rounds 1–13 and the "Peer report: #1081" section, read from `work/unified-access-control-r2`
+(`e6dd48b43`). Live writes: none. Escalation: one, item 7 (§15.4) — not answered by rounds 1–13.
+
+### 15.1 Per item
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | Scope and method | Acknowledged; no action. |
+| 2 | Item 1 (R-13 tri-state) implemented correctly | Acknowledged; no action. |
+| 3 | Item 2 (wall-guard Unverifiable fails the run) implemented correctly | Acknowledged; no action. |
+| 4 | Item 3 (I-12) done | Acknowledged; re-grepped `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: no `I-11`. |
+| 5 | MEDIUM — the mixed-batch union of `DenyVetoResult.Removed` is unguarded (seed V1 survived; fail OPEN on the read path) | **FIXED** — §15.2. V1 now fails 1; its mirror V1b fails 1. |
+| 6 | LOW — the defensive "unknown answer" branches are untested (seed V7 survived) | **FIXED** — §15.3. V7 now fails 2; the materializer's analogue M4 fails 1. |
+| 7 | LOW — a subject the reader will not evaluate is classified as a transient fault | **ESCALATED (R-14)** — §15.4; the main session decides. As-built operator guidance added to the admin guide (fail-closed behaviour unchanged). |
+| 8 | LOW — comment and fixture drift | **FIXED**: (a) `GrantExternalAccessEndpoint.PolicyRefusalProblem`'s XML doc lists 503 `no_access_unverifiable` beside `policy_unreadable`, and names which codes task 139 added; (b) `AccessGrantModal.grantOutcome.test.tsx` mocks the current `grantee_denied` detail ("…it is on the record's No Access list. Nothing was granted."); (c) the `ContinueOursAsync` wall fault now reads "…so **the decision on its removed share** was not written" (was "the reason its share was removed was not written"). Also seen, NOT changed: `notes/task-139-grant-model.md:41-43` still describes the r3-era `grantee_denied` detail — task 139's own decision record of its time, superseded by §14.1; left for that task's owner / the integrator. |
+| 9 | The wire change is within scope | Acknowledged; no action. |
+| 10 | The verifier's seeds | V1 and V7 (the two survivors) now fail — §15.2/§15.3. |
+| 11 | Test quality | The new tests keep the shape: §15.2 runs the production `AccessibleRecordSetService` with the same seam fakes as its neighbours; §15.3's double (`Mock<IAccessibleRecordSetService>`, Strict) sits at the module boundary and exists only to hand the consumer a value no production check returns — the r4 rule for the null-answer `Mock<INoAccessListReader>`. Every refusal row has an Allowed twin through the same double. No `Mock<HttpMessageHandler>`, no assertion on a value the test itself supplied. |
+| 12 | Suites | r5's own runs: §15.5. |
+| 13 | Criterion 19 NOT MET (V1) | **Closed** by item 5 (plus item 6's defensive branches). |
+| 14 | Criterion 18 NOT MET | Unchanged — main session: the concise `.claude/adr/ADR-034` edit (exact text §13.4) and the PR §6.5 path-B block (§8). Sub-agent write boundary. |
+| 15 | Criterion 20 PARTIALLY MET | Build, ArchTests and the full unit suite re-run in r5 (§15.5). CVE check run this round: `dotnet list … package --vulnerable --include-transitive` on `Sprk.Bff.Api` — "no vulnerable packages" (no package added). Publish size: main session (harness: skip). |
+| 16 | Criterion 21 PENDING-LIVE-GATE | Unchanged — main session (G-7, G-5). |
+| 17 | G-0 NOT MET | Re-checked (merge-base `--is-ancestor`, work at `e6dd48b43`): none of `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) or `843d62b46` is an ancestor yet. Main session's integration order. |
+
+### 15.2 Item 5 — the mixed-batch read path is pinned
+
+`AccessibleRecordSetServiceTests.ComposeAsync_ABatchWithAnEntryAndAnUnverifiableRecord_RemovesBoth_AndKeepsTheirTwin`
+(unit project, beside the single-kind veto tests): one contact, three Full Access project grants in ONE composition — a
+record an entry names (`DenyingReader`, record-keyed), a record whose referenced organizations are unreadable
+(`UnreadableOrgReferences`; never sent to the reader, so only the unverifiable set can remove it) and a twin (resolvable,
+no entry). Asserts both vetoed records are absent and the twin keeps exactly
+`ExternalAccessLevels.ToAccessRights(FullAccess)`. This is the only batch shape in which `DenyVetoResult.Removed`'s third
+branch (`Denied.Concat(Unverifiable)`) runs; it is reachable on both contact planes (one
+`ApplyVetoPipeline(…, veto.Removed, …)` call, `AccessibleRecordSetService.cs` ~`:2005`). No production change — the code
+was correct; the guard was missing.
+
+### 15.3 Item 6 — an answer outside the enum refuses, at both consumers
+
+- **Grant core** (`GrantorCeilingTests`, task 139's file):
+  `CreateGrantAsync_CalledDirectly_RefusesEveryAnswerButAllowed_AnUnknownAnswerAsAFault` — Denied → 422 `grantee_denied`,
+  not a fault; Unverifiable → 503 `no_access_unverifiable`, `IsDenyListReadFault`; `(NoAccessCheckAnswer)99` → the same
+  503 fault; nothing written in any row. Twin `CreateGrantAsync_CalledDirectly_GrantsWhenTheCheckAnswersAllowed` (same
+  double, Allowed → the row is written). The private `Core(...)` helper gained an optional check argument;
+  `GrantPolicyTestDoubles.DenyListAnswering` gained a `NoAccessCheckAnswer` overload (the `bool` one now delegates to it).
+- **Materializer** (`AssignedAccessMaterializerTests.AnUnknownNoAccessAnswer_IsADenyListFault_NeverSuggestedNorGranted`,
+  secure / standard): on a secure record the value reaches the materializer's own `!= Allowed` branch; on a standard one
+  it reaches the core's `default` through the fresh-grant path. Both: the deny-list fault fingerprint
+  (`AssertDenyListFault`), `Skipped(no-access-unverifiable)`, no grant; then the same double answering Allowed suggests /
+  grants. Seam: `Harness.NoAccessCheckOverride` (test-only; null = the real check, so every other test is unchanged).
+
+**Bite proof** — each seed applied ALONE by exact string replacement (scratch script), build + the seed set
+(AssignedAccess, GrantorCeiling, GranteeNoAccessCheck, AccessibleRecordSet, UnifiedEvaluator, GrantLifecycle, NoAccess:
+**560** tests), restored byte-for-byte (MD5 re-checked) and touched:
+
+| Seed | What it breaks | Failed |
+|---|---|---|
+| V1 (the r4 verifier's) | `Removed`'s mixed branch returns `Denied` only — the unverifiable record is returned (fail OPEN) | 1 (§15.2's test) |
+| V1b | … returns `Unverifiable` only — the walled record is returned (fail OPEN) | 1 (§15.2's test) |
+| V7 (the r4 verifier's) | the core's switch gains `case (NoAccessCheckAnswer)99:` → allowed | 2 (the core's 99 row; the materializer's standard row) |
+| M4 | the materializer's own check refuses only `Unverifiable` (`!= Allowed` → `== Unverifiable`) | 1 (the materializer's secure row) |
+
+### 15.4 Item 7 — ESCALATION (R-14): a subject the deny-list reader will not evaluate
+
+**Not answered by owner rounds 1–13** (round 13 item 4 speaks of read faults — "Dataverse 5xx, throttling, unreadable
+memberships"; a deterministic "will not evaluate" is not named). Stopped and recorded; no classification change made.
+
+🔔 **Human Input Required — classification of the reader's query-bound refusal**
+
+- **The behaviour.** `NoAccessListReader.GetDeniedRecordsAsync(NoAccessSubjects, …)` returns `FailedClosed` when the
+  subject set exceeds its safe query bound — more than 25 organizations (`MaxSubjectOrganizationIds`) or more than 5
+  contacts (`MaxSubjectContactIds`) — logged ERROR `[NO-ACCESS] FAIL-CLOSED: … exceed the safe query bound …`. That is a
+  deterministic "cannot safely evaluate", not a transient read fault. Since r4 every consumer maps `FailedClosed` to
+  Unverifiable: the grant routes answer **503 `no_access_unverifiable` "Try again in a moment"** (it never succeeds for
+  that grantee), the materializer reports `deny-list-unreadable` **on every pass** (the job stays red for as long as the
+  subject is assigned), and task 143's guard (`SecureShareNoAccessGuard`, fault `deny-list`) does the same on the share
+  path. Fail closed throughout; nothing is exposed.
+- **Reach.** The grant core and the materializer's suggestion check pass ONE contact, so the contact bound cannot fire
+  there; the organization bound fires when the contact's WALL set (every `statecode`-active membership row — date-ended
+  ones count until deactivated, owner D-2/D-10) plus the request's firm exceeds 25. Task 143's guard passes the linked
+  contact and any contact bound to the user's oid (one, under the 141 contract), so in practice only the organization
+  bound. The reader's own design note calls a set that large implausible ("exists to make an implausible case fail
+  SAFE"). The READ path's handling is unchanged by r4 (tasks 038/039: every candidate removed — that contact sees nothing).
+- **Options.**
+  - **(A) Accept as built** (fail closed; every consumer honestly reports it could not check). Operator guidance added
+    this round, as-built: the admin guide's 503 row now says what a persistent single-grantee 503 means and which log
+    line names it (`docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md`).
+  - **(B) A distinct non-retryable classification**: a "not evaluable" flag on `NoAccessListResult`, a fourth
+    `NoAccessCheckAnswer` (or a reason on Unverifiable), a 422 code (e.g. `sdap.access.grant.no_access_not_evaluable`,
+    "ask an administrator"), and a distinct materializer failure kind. Touches task 038's reader, task 143's guard and
+    task 139's routes (a second wire change); the read path's blackout for that contact remains.
+  - **(C) Remove the case**: split the SUBJECT side into chunks and union the per-chunk matches (sound for a veto — the
+    union over subject chunks equals the single OR'd query, and any chunk fault still fails the whole answer closed).
+    Touches task 038/143's reader only; ends the permanent red, the wrong retry advice AND the read-path blackout.
+- **Recommendation**: **(A) now**, plus a GitHub issue for **(C)** if the owner wants the case gone — (C) is the only
+  option that also fixes the read path; (B) adds a wire state to label a case (C) removes. No 142 code changes for (A).
+
+### 15.5 Surface (CLAUDE.md §10/§11), ADRs, runs
+
+**Surface**: no new service, DI registration, endpoint, option, job, column or package; no plugin (ADR-002). Production
+diff: one XML-doc paragraph (`GrantExternalAccessEndpoint.PolicyRefusalProblem`) and one log/user-message phrase
+(`AssignedAccessMaterializer.ContinueOursAsync`). Test-only additions: `GrantPolicyTestDoubles.DenyListAnswering(NoAccessCheckAnswer)`
+(overload of an existing double; the bool one delegates), `Harness.NoAccessCheckOverride` (null = unchanged), the
+`Core(...)` helper's optional argument. No §11 justification needed (no new product surface). `.claude/**`: nothing
+needed this round.
+
+**ADR check (this round's diff)**: ADR-003 — no behaviour change; the new tests pin two fail-closed guards (the union, the
+unknown-answer branches). ADR-038 — production code between module-boundary doubles; the one Strict
+`Mock<IAccessibleRecordSetService>` only injects an out-of-range value and its consumers' outcomes are asserted; KEEP
+paths (`tests/integration/auth/**`; the unit `Infrastructure/ExternalAccess` file it extends). ADR-036 A1 — unchanged (a
+fault is still a counted failure). CLAUDE.md §6.5 — item 7 surfaced as an escalation, not decided silently.
+
+**Formatting**: `dotnet format` (the pre-commit hook's command) on the seven changed C# files also reformatted three
+pre-existing object initializers (one property per line — `AssignedAccessTestDoubles.Person`, two `NoAccessEntryRow`
+initializers in `AccessibleRecordSetServiceTests`) and moved one `using Spaarke.Dataverse` into sorted order — whitespace
+and ordering only. Prettier `--check` on the changed `.tsx`: clean.
+
+**Round r5 runs.** Affected first (after format): the seed set **560/560** (r4 553 + 7 new); AssignedAccess **159/159**
+(157 + 2); `GrantorCeilingTests` **52/52** (48 + 4); `AccessibleRecordSetServiceTests` **80/80**; the wider affected set
+(AccessControl, ExternalAccess, NoAccess, Grant*, AccessibleRecord*, RecordCreation, FieldMapping, UpdateRecordActionCore,
+the two AI record handlers, DelegationRule, InternalUserShare, AssignedAccess, UnifiedEvaluator) **2,746 passed, 0
+failed, 1 skipped** (r4 2,739 + 7). Client (`Spaarke.UI.Components`, after `npm install --legacy-peer-deps --no-audit
+--no-fund`): the AccessGrantModal suites **89/89** with `--runInBand`; the first parallel run had 2 `findByText` timeouts
+in `AccessGrantModal.userShare.test.tsx` (a file this round did not touch) that pass alone (17/17) — load, not a defect.
+Package build (`npm run build` = `tsc`; the changed file is a `__tests__` file the tsconfig excludes): green once the two
+`file:` siblings it imports (`Spaarke.SdapClient`, `Spaarke.Auth`) were built in this fresh worktree (before that, 9
+`TS2307`/`TS18046` errors, all from "cannot find module @spaarke/…").
+
+Once at the end, sequentially, after `dotnet format`: BFF build **0 warnings / 0 errors**; full BFF unit suite **14,667
+passed, 0 failed, 54 skipped (14,721 = r4's 14,714 + the 7 new)**, 36m16s; `Spaarke.ArchTests` **346/346**. Both
+integration suites' FIRST run aborted before any test ran — "vstest.console process failed to connect to testhost process
+after 90 seconds … machine slowness" (other agents' suites were running) — and were re-run at once with
+`VSTEST_CONNECTION_TIMEOUT=900` and `--no-build` (same bytes): `Sprk.Bff.Api.IntegrationTests` **104/104**;
+`Spe.Integration.Tests` **403 passed, 0 failed, 25 skipped (428)**. CVE: no vulnerable packages. Publish size: skipped
+(harness) — main session.

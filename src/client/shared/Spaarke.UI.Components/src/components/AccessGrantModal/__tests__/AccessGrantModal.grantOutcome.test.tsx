@@ -162,7 +162,7 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       [
         422,
         'sdap.access.grant.grantee_denied',
-        "This contact or organization cannot be given access to this record: it is on the record's No Access list, or that list could not be checked. Nothing was granted.",
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list. Nothing was granted.",
       ],
       [
         403,

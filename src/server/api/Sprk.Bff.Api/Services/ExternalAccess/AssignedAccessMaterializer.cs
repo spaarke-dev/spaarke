@@ -736,7 +736,7 @@ public sealed class AssignedAccessMaterializer
                     // Cannot tell why it went (task 143's enforcer, or an operator): decide nothing this pass. Task 142 r4
                     // (owner round 13 item 5): the wall check's Unverifiable FAILS THE RUN like the deny-list fault —
                     // counted, logged, the job red — never a quiet "nothing decided".
-                    DenyListFault(run, subject, "the reason its share was removed", detail: wall.Fault);
+                    DenyListFault(run, subject, "the decision on its removed share", detail: wall.Fault);
                     run.Entry(subject, fields, user, AssignedAccessState.Shared, AssignedAccessReason.NoAccessUnverifiable,
                         AssignedAccessAction.None);
                     return true;

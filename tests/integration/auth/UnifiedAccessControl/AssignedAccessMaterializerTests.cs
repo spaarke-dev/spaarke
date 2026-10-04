@@ -1696,6 +1696,43 @@ public class AssignedAccessMaterializerTests
         LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.NoAccess);
     }
 
+    /// <summary>
+    /// Task 142 r5 (r4 verifier finding 6): an answer the code does not know — a value outside the enum, which no
+    /// production check returns — is never "allowed". On a SECURE record it reaches the materializer's own check (before
+    /// suggesting); on a standard record it reaches the grant core's switch (through the fresh-grant path). Either way it
+    /// is a deny-list fault: reported, nothing suggested or granted. Twin: the same double answering Allowed suggests /
+    /// grants on the next pass.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnUnknownNoAccessAnswer_IsADenyListFault_NeverSuggestedNorGranted(bool secure)
+    {
+        if (secure)
+            Secure();
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.NoAccessCheckOverride = GrantPolicyTestDoubles.DenyListAnswering((NoAccessCheckAnswer)99);
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "an unknown answer is never read as allowed");
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+        _h.Grants.Rows.Should().BeEmpty("fail closed");
+
+        _h.NoAccessCheckOverride = GrantPolicyTestDoubles.DenyListAnswering(NoAccessCheckAnswer.Allowed);
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        if (secure)
+            LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.PendingConfirmation);
+        else
+            _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("granted once the answer is Allowed");
+    }
+
     [Theory]
     [InlineData("memberships-unreadable")]
     [InlineData("referenced-organizations-unreadable")]

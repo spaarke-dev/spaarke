@@ -662,9 +662,10 @@ public static class GrantExternalAccessEndpoint
     /// <summary>
     /// The ProblemDetails for a write-time policy refusal (task 138), shared by <c>/grant</c>,
     /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record /
-    /// grantee_denied), 503 (policy_unreadable), 403 (caller_cannot_grant) or 409 (would_lower_existing) — the last
-    /// three added by task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
-    /// Manage Access dialog shows verbatim, and the <c>traceId</c>.
+    /// grantee_denied), 503 (policy_unreadable, or no_access_unverifiable — the No Access check could not be completed,
+    /// task 142 r4), 403 (caller_cannot_grant) or 409 (would_lower_existing) — grantee_denied, 403 and 409 added by
+    /// task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the Manage Access dialog shows
+    /// verbatim, and the <c>traceId</c>.
     /// </summary>
     internal static IResult PolicyRefusalProblem(
         GrantPolicyDecision refusal, HttpContext httpContext, IDictionary<string, object?>? extra = null)

@@ -390,12 +390,21 @@ internal static class GrantPolicyTestDoubles
     /// <see cref="NoAccessCheckAnswer.Denied"/>.
     /// </summary>
     internal static IAccessibleRecordSetService DenyListAnswering(bool denied)
+        => DenyListAnswering(denied ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed);
+
+    /// <summary>
+    /// A write-time No Access check that answers <paramref name="answer"/> for every grantee — including a value outside
+    /// the enum, which no production check returns, to pin that a consumer's defensive branch refuses it (task 142 r5,
+    /// r4 verifier finding 6). Only for tests ABOUT a consumer's handling of the answer; the answer itself is pinned
+    /// through <see cref="RealDenyList"/>.
+    /// </summary>
+    internal static IAccessibleRecordSetService DenyListAnswering(NoAccessCheckAnswer answer)
     {
         var mock = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
         mock.Setup(s => s.CheckGranteeNoAccessAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(),
                 It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(denied ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed);
+            .ReturnsAsync(answer);
         return mock.Object;
     }
 }
