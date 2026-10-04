@@ -9,7 +9,10 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] **One F3 check.** Task 146-c1 adds a shared F3 helper. Apply 146's recorded replacement so that 150's `UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync` calls it. After integration, exactly one F3 check exists.
 - [ ] **The creator column constant.** 146's helper reads `sprk_createdbyperson` by its logical name. Switch it to 133's constant.
 - [ ] **133's interim stamp** in `DataverseCreateRecordHandler` is replaced by 146's create-as-the-app, which puts the stamp in the create payload (133 note §13.8, owner round 7 item 3).
-- [ ] **143 × 149.** 149-r3 merged 143 and wired `SecureShareNoAccessGuard` and the `SyncRootAsync` call. Confirm both are present after the integration merge.
+- [x] **143 × 149.** `SecureShareNoAccessGuard` and the `SyncRootAsync` callers confirmed present after the 149-r4 merge (`67d20b393`).
+- [x] **142 × 149.** 142's Assigned-To materializer wired to 149's child-share fan-out (149's note: the second of the two to land does it) — fix `b1443d12a`, 4 tests.
+- [x] **146 × 156 × 142 × 133** hand-merge done in `d457890f9`: update writers = write → 156 restamp → 142 materializer; ONE creator stamp (146's in-payload; 133's interim stamp and 149's `WithCreatorPersonAsync` removed); `ForChild` ignores `sprk_regardingrecordtype`; `EventColumnsWritten` includes the regarding lookups.
+- [ ] **Run the external-grid jest suite** (`DataGrid.externalHost.test.tsx`, needs `npm install --legacy-peer-deps --no-audit --no-fund` in `src/client/shared/Spaarke.UI.Components`) and check whether `Spe.Integration.Tests`' 5 build warnings predate the merges.
 - [ ] **156 × 146 hand-merge points:** the `DataverseUpdateRecordHandler` constructor, remarks and PATCH block; the `TaskActionCore` / `ActionSeam` / `CreateTaskNodeExecutor` constructors; and `RecordOwnershipContext.ForChild` must ignore `sprk_regardingrecordtype`. 156's note lists them.
 - [ ] **167's ledger** (sweep integration): fill `ResolvedBy` and `ProofTest` from each fix task's "Route authorization ledger input" table, delete the Pending waivers that are now stale, and assign each UNOWNED-NEW entry to an owning task.
 
@@ -31,6 +34,7 @@ This is the running list of obligations the main session takes on while integrat
 - [x] **146 G146-1** (9 → 26, the §5.4 strip, negative and positive probes) and **G146-2**: DONE 2026-10-03.
 - [ ] **Copy G146-1's verbatim refusals** from `notes/batch4-live-gates-2026-10-03.md` into the 17 `evidence` fields of `config/secure-record-owner-role.json` on the integration branch, replacing "VERBATIM REFUSAL PENDING".
 - [ ] **142:** the ledger schema (`sprk_assignedaccess`) and the "Update Access" ribbon.
+- [ ] **146 (round 13 item 9) — HARD PREREQUISITE before the BFF deploy:** apply 146's child-table `sprk_createdbyperson` schema script (dry run → `-Apply` → `-Verify`). 146 now stamps every app-created child unconditionally, so a missing column fails the create (gate G146-6).
 
 **Then:**
 - [ ] Deploy the BFF from a fresh worktree.
