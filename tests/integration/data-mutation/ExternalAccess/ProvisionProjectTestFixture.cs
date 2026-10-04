@@ -482,12 +482,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     private void Seed(
         string entitySet, Guid id, Guid? owningTeamId, string? containerId, Guid? legacySecurityBuId, bool isSecure,
         Guid? owningBusinessUnitId, Guid? owningUserId, Guid? createdBy, Guid? createdByPerson)
-        => _records[id] = new SeededRecord(
+    {
+        _records[id] = new SeededRecord(
             entitySet, id, owningTeamId, containerId, legacySecurityBuId, isSecure,
             OwningUserId: owningTeamId is null ? owningUserId ?? CallerSystemUserId : null,
             OwningBusinessUnitId: owningBusinessUnitId ?? BusinessUnitOf(owningTeamId),
             CreatedBy: createdBy ?? CallerSystemUserId,
             CreatedByPerson: createdByPerson);
+        MirrorIntoChildWorld(_records[id]);
+    }
 
     /// <summary>The BU a team owner places a record in — what Dataverse derives <c>owningbusinessunit</c> from.</summary>
     private static Guid? BusinessUnitOf(Guid? owningTeamId) =>
@@ -585,6 +588,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         UnreadableLinkUsers.Clear();
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
+        _childWorldMirrorsRoots = false;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -620,6 +624,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares.
             services.RemoveAll<SecureChildShareSynchronizer>();
             services.AddSingleton(SecureChildShareWorld.SynchronizerOver(() => ChildWorld, recordShare));
+
+            // Task 148: the REAL reconciler (real resolver, real synchronizer) over the same ChildWorld and recording shares;
+            // the platform-cascade rows through this fixture's DataverseWebApiClient double, as in production.
+            services.RemoveAll<SecureChildReconciler>();
+            services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
+                () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>()));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -809,9 +819,52 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 record = _records[id];
                 _records[id] = record with { ContainerId = container };
             }
+
+            MirrorIntoChildWorld(_records[id]);
         }
 
         return Task.CompletedTask;
+    }
+
+    // ── Task 148: the root as the reconciler, the resolver and the synchronizer see it ─────────────────────────────
+
+    /// <summary>
+    /// When true (<see cref="UseChildWorldForRoots"/>), every seeded root is ALSO a row of <see cref="ChildWorld"/>, and every
+    /// owner / flag change the endpoints make to it is applied there too — so the secure-child reconciler (which reads the
+    /// root, its children and the Secure team through <c>IGenericEntityService</c>) sees the same record the endpoint moved.
+    /// </summary>
+    private bool _childWorldMirrorsRoots;
+
+    /// <summary>
+    /// Task 148: a <see cref="ChildWorld"/> whose Secure Record BU and named owner team are THIS fixture's ids (so both
+    /// planes agree on which team isolates a record), with the caller in the general business unit, sharing this fixture's
+    /// write sequence, and mirroring every seeded root (those seeded so far and those seeded after).
+    /// </summary>
+    internal SecureChildShareWorld UseChildWorldForRoots()
+    {
+        ChildWorld = SecureChildShareWorld.Standard(SecureBuId, SecureOwnerTeamId)
+            .User(CallerSystemUserId, SecureChildShareWorld.GeneralBu);
+        ChildWorld.Sequence = NextSequence;
+        _childWorldMirrorsRoots = true;
+        foreach (var record in _records.Values)
+            MirrorIntoChildWorld(record);
+        return ChildWorld;
+    }
+
+    private void MirrorIntoChildWorld(SeededRecord record)
+    {
+        if (!_childWorldMirrorsRoots)
+            return;
+
+        var logical = record.EntitySet[..^1]; // sprk_projects → sprk_project (the three roots)
+        if (!ChildWorld.Has(logical, record.Id))
+            ChildWorld.Add(logical, record.Id);
+
+        if (record.OwningTeamId is { } team)
+            ChildWorld.MoveOwner(logical, record.Id, DataversePrincipalRef.Team(team));
+        else if (record.OwningUserId is { } user)
+            ChildWorld.MoveOwner(logical, record.Id, DataversePrincipalRef.User(user));
+        ChildWorld.Set(logical, record.Id, "sprk_issecure", record.IsSecure);
     }
 
     /// <summary>Extracts the GUID from an <c>/teams(guid)</c> OData bind value.</summary>

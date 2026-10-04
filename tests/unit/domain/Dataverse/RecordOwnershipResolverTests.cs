@@ -400,6 +400,35 @@ public class RecordOwnershipResolverTests
         directory.QueriedEntities.Should().NotContain("team", "a refusal is decided before any team is looked up");
     }
 
+    /// <summary>
+    /// Task 148: the ONE root an unsecure transition names (<see cref="RecordOwnershipContext.UnsecuringRoot"/>) is
+    /// mid-transition — moved off the Secure team, its flag cleared last — so its children resolve from its ownership like an
+    /// ordinary record's, to its business unit's team. Any OTHER flagged-not-isolated parent still refuses.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOwner_ForTheRootBeingUnsecured_ResolvesFromItsOwnership_ButAnotherFlaggedParentStillRefuses()
+    {
+        var directory = Directory()
+            .WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true)
+            .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: true);
+        var unsecuring = new RecordOwnershipParent("sprk_project", FlaggedProjectId);
+
+        var alone = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { Parents = new[] { unsecuring }, UnsecuringRoot = unsecuring },
+            CancellationToken.None);
+        var besideAnother = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { unsecuring, new RecordOwnershipParent("sprk_matter", MatterId) },
+                UnsecuringRoot = unsecuring,
+            },
+            CancellationToken.None);
+
+        alone.OwningTeamId.Should().Be(ChildTeam, "the unsecured record's own business unit decides its children");
+        besideAnother.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated,
+            "the exemption names one record; every other flagged-not-isolated parent keeps failing closed");
+    }
+
     [Fact]
     public async Task ResolveOwner_WhenAFlaggedRootIsIsolated_OwnsTheChildByTheNamedTeam()
     {

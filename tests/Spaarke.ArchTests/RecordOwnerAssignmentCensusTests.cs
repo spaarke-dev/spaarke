@@ -410,6 +410,9 @@ public class RecordOwnerAssignmentCensusTests
             "AI create-task — ForChild over the stamped parents."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
+        new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
+            "Task 148: an EXISTING child of a root moved into or out of isolation (provisioning, unsecure, the sweep) — the " +
+            "team IRecordOwnershipResolver answered for the row's own parents, its own update, read back."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
@@ -420,6 +423,13 @@ public class RecordOwnerAssignmentCensusTests
             "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
+        // Semantic merge conflict of task 133 c1 (this primitive) with task 146 r2 (this census), surfaced when task 148
+        // merged both: the row is one a ROOT's own Assign cascades to (sharepointdocumentlocation / sharepointdocument —
+        // never a sprk_* child), put back on its snapshotted owner, or (task 148) on the owner SecureChildReconciler resolved
+        // for a child of that root through IRecordOwnershipResolver (owner round 13 item 1).
+        new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
+            "A row a ROOT's Assign cascades to (SharePoint location / document), placed on its snapshotted owner (task 133 " +
+            "compensation) or on the resolver's owner for a child of that root (task 148 unsecure); read back."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
             "A work assignment (a ROOT) created owned by its assignee; S6 b (secure under a secure matter) is task 158 (owner round 6)."),
 

@@ -253,6 +253,18 @@ public sealed record RecordOwnershipContext
     /// </summary>
     public bool KeepCreatorUnlessTargetIsTeamOwned { get; init; }
 
+    /// <summary>
+    /// unified-access-control-r2 task 148 — the ONE root an unsecure transition is taking out of isolation, named by the
+    /// only caller allowed to name it (<c>SecureChildReconciler</c>, after <c>/unsecure-project</c> has moved the root off
+    /// the Secure Record owner team and read the move back). Its <c>sprk_issecure</c> flag is still <c>true</c> — the
+    /// endpoint clears it LAST, and keeps it when the child pass does not complete — so without this the flag-but-not-
+    /// isolated refusal (C11) would refuse every one of its children, and the transition could never re-own them. For
+    /// THAT root only, the flag is not read as "a provisioning that did not complete": its ownership decides, exactly as
+    /// for any ordinary parent. Every other parent keeps every rule (secure-if-any, the refusal). <c>null</c> everywhere
+    /// else.
+    /// </summary>
+    public RecordOwnershipParent? UnsecuringRoot { get; init; }
+
     /// <summary>True when a target record was supplied — i.e. the preferred source is available.</summary>
     public bool HasTarget =>
         !string.IsNullOrWhiteSpace(TargetEntityLogicalName)
@@ -1185,7 +1197,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // A root flagged secure but not owned in the Secure Record BU is a failed or interrupted provisioning (C11).
         // Its ownership says "ordinary"; its flag says "secure". Fail closed: refuse, never the ordinary team.
-        var notIsolated = decisive.FirstOrDefault(f => f.FlaggedSecure && f.BusinessUnitId != secureBu.Id);
+        // Task 148: the one root an unsecure transition names (UnsecuringRoot) is mid-transition, not a failed provisioning —
+        // its ownership has already been moved off the Secure team and read back, and its flag is cleared last.
+        var unsecuring = context.UnsecuringRoot is { IsSpecified: true } u
+            ? u with { EntityLogicalName = u.EntityLogicalName.Trim().ToLowerInvariant() }
+            : null;
+        var notIsolated = decisive.FirstOrDefault(f =>
+            f.FlaggedSecure && f.BusinessUnitId != secureBu.Id && f.Parent != unsecuring);
         if (notIsolated is not null)
         {
             _logger.LogError(

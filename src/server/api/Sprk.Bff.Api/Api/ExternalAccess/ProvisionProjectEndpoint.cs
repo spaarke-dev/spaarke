@@ -322,6 +322,14 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonCascadeChildrenNotRestored = "sdap.provision.cascade_children_not_restored";
 
     /// <summary>
+    /// Task 148 (ADR-003): the record is isolated and shared, but its EXISTING related records were not all brought into
+    /// isolation (re-owned to the Secure Record owner team and shared with the record's sharees). 500 with
+    /// <c>childrenReowned</c>, <c>childrenRemaining</c> and <c>childTables</c>; nothing done is undone. Calling again completes
+    /// the pass (the same caller may), and so does the secure-child reconciliation.
+    /// </summary>
+    internal const string ReasonChildrenIncomplete = "sdap.provision.children_incomplete";
+
+    /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
     /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
@@ -431,7 +439,7 @@ public static class ProvisionProjectEndpoint
         SpeFileStore speFileStore,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
-        SecureChildShareSynchronizer secureChildShares,
+        SecureChildReconciler secureChildren,
         IConfiguration configuration,
         SecureShareNoAccessGuard noAccessGuard,
         HttpContext httpContext,
@@ -534,6 +542,39 @@ public static class ProvisionProjectEndpoint
         {
             if (row.IsProvisioned(ownerTeamId))
             {
+                // ── Task 148: a provisioned record whose related records are not all secured yet ──
+                //
+                // An earlier call's child pass may not have finished (a record that kept its own container is "provisioned"
+                // the moment the team owns it, whatever came after), and a record secured before task 148 never had one.
+                // So the pass runs here too: with nothing to do it writes nothing and the 409 below is unchanged; with work
+                // to do it COMPLETES the pass (constraint "re-invoking provisioning on a root whose child pass is incomplete
+                // completes the pass instead of returning 409") — still nothing about the record itself is changed.
+                var pending = await secureChildren.ReconcileAsync(
+                    root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: false, ct);
+                if (!pending.IsComplete)
+                    return ChildrenIncomplete(pending, root, recordId, containerKept: true, logger, traceId);
+
+                if (pending.WroteAnything)
+                {
+                    logger.LogInformation(
+                        "[PROVISION] {RecordType} {RecordId} was already provisioned; this call completed its related records " +
+                        "(reowned={Reowned}). TraceId={TraceId}", root.WireToken, recordId, pending.ChildrenReowned, traceId);
+
+                    return TypedResults.Ok(new ProvisionProjectResponse(
+                        BusinessUnitId: secureBuId,
+                        BusinessUnitName: secureBuName,
+                        OwnerTeamId: ownerTeamId,
+                        OwnerTeamName: ownerTeamName,
+                        SpeContainerId: row.sprk_containerid!,
+                        SharedToCreatorSystemUserId: Guid.Empty,
+                        AdditionalPrincipalsShared: 0,
+                        RecordType: root.WireToken,
+                        RecordId: recordId,
+                        Resumed: true,
+                        Children: SecureChildPassSummary.From(pending),
+                        ChildrenOnly: true));
+                }
+
                 // Provisioned, and nothing is written. The recorded container is one of two things (see RootRow): one
                 // Step 7 recorded after Step 5.5 proved the creator's share, or the record's OWN container, kept (task
                 // 133 b2). A record that keeps its container is indistinguishable here from a finished one even when a
@@ -758,6 +799,22 @@ public static class ProvisionProjectEndpoint
         var (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
             recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
 
+        // ── Step 5.6 (task 148): the record's EXISTING related records follow it into isolation ──
+        //
+        // The record is isolated (Step 5) and shared (Step 5.5 + colleagues). Every child it ALREADY has — documents,
+        // events, to-dos, communications, memos, and their own children — is re-owned to the Secure Record owner team by the
+        // ownership rule (task 146), then the record's sharees are mirrored onto them (task 149's synchronizer, which mirrors
+        // Secure-team-owned rows only — so the mirror follows the re-own; the transient is an under-share of the sharees,
+        // never an over-share). Before the container steps, so a pass that cannot complete stops here: the record is secured
+        // and shared, its related records are reported child by child, and calling again completes the pass — the RESUME
+        // path below (no container recorded yet), or the already-provisioned path above for a record that kept its own.
+        var childPass = await secureChildren.ReconcileAsync(
+            root.LogicalName, recordId, SecureChildReconcileMode.Apply, unsecuring: false, ct);
+        if (!childPass.IsComplete)
+            return ChildrenIncomplete(childPass, root, recordId, containerKept: keptContainerId is not null, logger, traceId);
+
+        var childSummary = SecureChildPassSummary.From(childPass);
+
         // ── Steps 6 + 7: the record's own SPE container — kept when it already has one ──
         if (keptContainerId is not null)
         {
@@ -777,7 +834,8 @@ public static class ProvisionProjectEndpoint
                 RecordType: root.WireToken,
                 RecordId: recordId,
                 Resumed: resume,
-                SkippedPrincipals: skippedPrincipals));
+                SkippedPrincipals: skippedPrincipals,
+                Children: childSummary));
         }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
@@ -824,24 +882,9 @@ public static class ProvisionProjectEndpoint
             "OwnerTeam={TeamId}, Container={ContainerId}, Resumed={Resumed}",
             root.WireToken, recordId, secureBuId, secureBuName, ownerTeamId, speContainerId, resume);
 
-        // ── Step 8 (task 149): the record's secure children follow the shares Step 5.5 wrote ──
-        //
-        // Step 5.5 is a root-share writer like /share-user, so it fans out the same way. Today a freshly provisioned
-        // record has no Secure-team-owned children (task 148 re-owns existing ones, then runs this same synchronizer), so
-        // this is normally a no-op; it is here so the rule "every BFF root-share write fans out" has no exception. It
-        // never fails the provisioning: the record IS provisioned and shared, and the scheduled reconcile
-        // (SecureChildShareReconciliationJob) completes any child left out of line.
-        var children = await secureChildShares.SyncRootAsync(root.LogicalName, recordId, ct);
-        if (!children.IsComplete)
-        {
-            logger.LogWarning(
-                "[PROVISION] {RecordType} {RecordId} is provisioned, but its secure children are not all in line with its " +
-                "shares yet: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held}. The scheduled " +
-                "reconcile completes it. TraceId={TraceId}",
-                root.WireToken, recordId, children.Status, children.ChildrenInScope, children.ChildrenNotUpdated,
-                children.ChildrenHeld, traceId);
-        }
-
+        // Task 149's former Step 8 (the share fan-out after Step 5.5) is now inside Step 5.6: the reconciler runs the SAME
+        // synchronizer (SyncRootAsync) after it has re-owned the existing children, and a fan-out that does not complete is
+        // the children_incomplete error there, no longer a logged warning here (task 148, ADR-003).
         return TypedResults.Ok(new ProvisionProjectResponse(
             BusinessUnitId: secureBuId,
             BusinessUnitName: secureBuName,
@@ -853,12 +896,46 @@ public static class ProvisionProjectEndpoint
             RecordType: root.WireToken,
             RecordId: recordId,
             Resumed: resume,
-            SkippedPrincipals: skippedPrincipals));
+            SkippedPrincipals: skippedPrincipals,
+            Children: childSummary));
     }
 
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /// <summary>
+    /// Task 148 — a child pass that did not complete (ADR-003: never reported as success, never a bare 500). The record's own
+    /// steps that ran are NOT undone: it is isolated and shared, and a related record left behind is exactly as exposed as
+    /// it was before this call, never more. The detail and extensions carry per-table counts; calling again completes it.
+    /// </summary>
+    private static IResult ChildrenIncomplete(
+        SecureChildReconcileReport pass, SecureRecordRoot root, Guid recordId, bool containerKept, ILogger logger, string traceId)
+    {
+        var summary = SecureChildPassSummary.From(pass);
+        var perTable = string.Join(", ", summary.Tables
+            .Where(t => t.Reowned + t.Refused + t.Failed > 0)
+            .Select(t => $"{t.Table}: {t.Reowned} re-owned, {t.Refused + t.Failed} not"));
+
+        logger.LogError(
+            "[PROVISION] {RecordType} {RecordId} is secured and shared, but its related records are not all secured: " +
+            "status={Status} reowned={Reowned} remaining={Remaining} ({PerTable}) detail={Detail}. TraceId={TraceId}",
+            root.WireToken, recordId, pass.Status, summary.Reowned, summary.Remaining, perTable, pass.Detail, traceId);
+
+        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} is secured and shared, but its existing related records (documents, " +
+            $"events, to-dos, communications, memos) are not all secured yet: {summary.Reowned} re-owned, {summary.Remaining} " +
+            "remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
+            (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            ". No related record is more exposed than before this call. Calling provisioning again (the same caller may) " +
+            "completes them; the secure-child reconciliation completes them regardless.",
+            traceId,
+            (ReasonKey, ReasonChildrenIncomplete),
+            ("childrenReowned", summary.Reowned),
+            ("childrenRemaining", summary.Remaining),
+            ("childTables", summary.Tables),
+            ("containerKept", containerKept));
+    }
 
     /// <summary>
     /// The refusal for every state in which the Secure Record topology is not provably safe to assign into. Each

@@ -61,6 +61,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// (<c>sdap.provision.principal_no_access_unverifiable</c>). The other colleagues are still shared. Empty when none was
 /// skipped. Additive to the JSON contract.
 /// </param>
+/// <param name="Children">
+/// Task 148: what this call did to the record's EXISTING related records (documents, events, to-dos, communications, memos
+/// and the rest) — re-owned into the Secure Record owner team and shared with exactly the record's sharees. A successful
+/// response always carries a complete pass; an incomplete one is the <c>sdap.provision.children_incomplete</c> error.
+/// Additive to the JSON contract.
+/// </param>
+/// <param name="ChildrenOnly">
+/// Task 148: <c>true</c> when the record was ALREADY provisioned and this call only completed its related records (an earlier
+/// call's child pass had not finished). Nothing about the record itself changed and no share was written to it, so
+/// <c>SharedToCreatorSystemUserId</c> is <see cref="Guid.Empty"/> — its creator's share was proven by the earlier call. Absent
+/// work, such a call still answers 409 <c>already_provisioned</c>. Additive to the JSON contract.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
@@ -72,7 +84,9 @@ public record ProvisionProjectResponse(
     string RecordType,
     Guid RecordId,
     bool Resumed = false,
-    IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null);
+    IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null,
+    SecureChildPassSummary? Children = null,
+    bool ChildrenOnly = false);
 
 /// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>
 public record ProvisionSkippedPrincipal(Guid SystemUserId, string ReasonCode, string Message);

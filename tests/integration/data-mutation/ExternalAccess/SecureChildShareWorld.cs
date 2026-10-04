@@ -45,23 +45,55 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<string> _failingTables = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(string Table, Guid Id)> _failingRowReads = new();
     private readonly HashSet<string> _endlessTables = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Guid> _refusedOwnerWrites = new();
+    private readonly HashSet<Guid> _ignoredOwnerWrites = new();
 
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
+    /// <summary>
+    /// The NAMED owner team of THIS world (task 148): <see cref="SecureTeam"/> unless the world was built to match another
+    /// harness's ids (<see cref="Standard(Guid, Guid)"/>). <see cref="SecureRoot"/> and <see cref="SecureChild"/> use it.
+    /// </summary>
+    public Guid OwnerTeam { get; private init; } = SecureTeam;
+
+    /// <summary>The Secure Record BU of THIS world (task 148).</summary>
+    public Guid OwnerTeamBusinessUnit { get; private init; } = SecureBu;
+
+    /// <summary>
+    /// Task 148: every owner write (an <c>ownerid</c> update), in order, with the shared sequence when <see cref="Sequence"/>
+    /// is set — so a test can order a child's re-own against the share writes and the root's own updates.
+    /// </summary>
+    public List<(string Table, Guid Id, DataversePrincipalRef Owner, int Sequence)> OwnerWrites { get; } = new();
+
+    /// <summary>Task 148: the sequence a host harness shares with its own recorded writes (null = 0).</summary>
+    public Func<int>? Sequence { get; set; }
+
     /// <summary>A world with the Secure Record BU, its default team, two near-miss decoys and the named team.</summary>
-    public static SecureChildShareWorld Standard()
+    public static SecureChildShareWorld Standard() => Standard(SecureBu, SecureTeam);
+
+    /// <summary>
+    /// The standard world with the Secure Record BU and its named owner team carrying the given ids (task 148) — so a host
+    /// harness whose own Dataverse double resolves those ids (the provisioning fixture) and this world agree on which team
+    /// isolates a record. A user in the general BU (<see cref="SomeUser"/>) is seeded too.
+    /// </summary>
+    public static SecureChildShareWorld Standard(Guid secureBu, Guid secureTeam)
     {
-        var world = new SecureChildShareWorld();
+        var world = new SecureChildShareWorld { OwnerTeam = secureTeam, OwnerTeamBusinessUnit = secureBu };
         world.Add("businessunit", GeneralBu, ("name", "Spaarke"));
-        world.Add("businessunit", SecureBu, ("name", SecureBuName));
+        world.Add("businessunit", secureBu, ("name", SecureBuName));
         world.Team(GeneralTeam, GeneralBu, "Spaarke", isDefault: true, teamType: 0);
-        world.Team(SecureDefaultTeam, SecureBu, SecureBuName, isDefault: true, teamType: 0);
-        world.Team(Guid.NewGuid(), SecureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
-        world.Team(Guid.NewGuid(), SecureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
-        world.Team(SecureTeam, SecureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
+        world.Team(SecureDefaultTeam, secureBu, SecureBuName, isDefault: true, teamType: 0);
+        world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
+        world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
+        world.Team(secureTeam, secureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
+        world.User(SomeUser, GeneralBu);
         return world;
     }
+
+    /// <summary>A systemuser in a business unit — what a user-owned row's <c>owningbusinessunit</c> derives from (task 148).</summary>
+    public SecureChildShareWorld User(Guid id, Guid businessUnit) =>
+        Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)));
 
     /// <summary>An environment with no Secure Record BU at all.</summary>
     public static SecureChildShareWorld WithoutSecureBusinessUnit()
@@ -79,7 +111,7 @@ internal sealed class SecureChildShareWorld
 
     /// <summary>A secure root: owned by the named team, flagged.</summary>
     public SecureChildShareWorld SecureRoot(string table, Guid id) =>
-        Add(table, id, ("owningteam", TeamRef(SecureTeam)), ("sprk_issecure", true));
+        Add(table, id, ("owningteam", TeamRef(OwnerTeam)), ("sprk_issecure", true));
 
     /// <summary>An ordinary root, owned by the general BU's default team.</summary>
     public SecureChildShareWorld OrdinaryRoot(string table, Guid id) =>
@@ -91,7 +123,7 @@ internal sealed class SecureChildShareWorld
 
     /// <summary>A child owned by the Secure team, filed through the given lookups (column, target table, target id).</summary>
     public SecureChildShareWorld SecureChild(string table, Guid id, params (string Column, string Target, Guid TargetId)[] lookups) =>
-        Child(table, id, ("owningteam", TeamRef(SecureTeam)), lookups);
+        Child(table, id, ("owningteam", TeamRef(OwnerTeam)), lookups);
 
     /// <summary>A child owned by an ORDINARY team (a pre-146 row, or a child of an ordinary record).</summary>
     public SecureChildShareWorld OrdinaryChild(string table, Guid id, params (string Column, string Target, Guid TargetId)[] lookups) =>
@@ -133,6 +165,86 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 148: an owner write to THIS row throws (recorded first) — Dataverse refusing the re-own.</summary>
+    public SecureChildShareWorld RefusingOwnerWritesOf(Guid id)
+    {
+        _refusedOwnerWrites.Add(id);
+        return this;
+    }
+
+    /// <summary>Task 148: an owner write to THIS row is accepted (recorded) but not applied — the read-back must catch it.</summary>
+    public SecureChildShareWorld IgnoringOwnerWritesOf(Guid id)
+    {
+        _ignoredOwnerWrites.Add(id);
+        return this;
+    }
+
+    /// <summary>Task 148: lets owner writes to this row through again (the fault cleared before a second call).</summary>
+    public SecureChildShareWorld ClearOwnerWriteFaults()
+    {
+        _refusedOwnerWrites.Clear();
+        _ignoredOwnerWrites.Clear();
+        return this;
+    }
+
+    /// <summary>True when the row exists.</summary>
+    public bool Has(string table, Guid id) => _rows.ContainsKey((table, id));
+
+    /// <summary>A row's current owner (team first, then user), or null.</summary>
+    public DataversePrincipalRef? OwnerOf(string table, Guid id) =>
+        !_rows.TryGetValue((table, id), out var row)
+            ? null
+            : row.GetAttributeValue<EntityReference>("owningteam") is { } team
+                ? DataversePrincipalRef.Team(team.Id)
+                : row.GetAttributeValue<EntityReference>("owninguser") is { } user
+                    ? DataversePrincipalRef.User(user.Id)
+                    : null;
+
+    /// <summary>Task 148: sets a column on an existing row (a host harness mirroring its root's flag).</summary>
+    public void Set(string table, Guid id, string column, object? value)
+    {
+        if (!_rows.TryGetValue((table, id), out var row))
+            return;
+        if (value is null)
+            row.Attributes.Remove(column);
+        else
+            row[column] = value;
+    }
+
+    /// <summary>
+    /// Task 148: applies an owner change the way Dataverse does — the team or user owner replaces the other — without
+    /// recording it (a host harness mirroring an owner move IT recorded).
+    /// </summary>
+    public void MoveOwner(string table, Guid id, DataversePrincipalRef owner)
+    {
+        if (!_rows.TryGetValue((table, id), out var row))
+            return;
+        row.Attributes.Remove("owningteam");
+        row.Attributes.Remove("owninguser");
+        if (owner.Kind == DataversePrincipalKind.Team)
+            row["owningteam"] = TeamRef(owner.Id);
+        else
+            row["owninguser"] = new EntityReference("systemuser", owner.Id);
+    }
+
+    /// <summary>
+    /// Task 148: an <see cref="IGenericEntityService.UpdateAsync"/> of this world. Only owner changes are modelled (the
+    /// reconciler's one write); anything else is a test failure.
+    /// </summary>
+    public void Update(string table, Guid id, Dictionary<string, object> fields)
+    {
+        if (!fields.TryGetValue("ownerid", out var value) || value is not EntityReference owner || fields.Count != 1)
+            throw new NotSupportedException($"The test world models owner updates only (got {string.Join(",", fields.Keys)}).");
+
+        var principal = owner.LogicalName == "team" ? DataversePrincipalRef.Team(owner.Id) : DataversePrincipalRef.User(owner.Id);
+        OwnerWrites.Add((table, id, principal, Sequence?.Invoke() ?? 0));
+        if (_refusedOwnerWrites.Contains(id))
+            throw new InvalidOperationException("Test: Dataverse refused the re-own.");
+        if (_ignoredOwnerWrites.Contains(id))
+            return;
+        MoveOwner(table, id, principal);
+    }
+
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
@@ -169,14 +281,42 @@ internal sealed class SecureChildShareWorld
             new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore(),
             NullLogger<SecureShareNoAccessGuard>.Instance);
 
-    /// <summary>A strict <see cref="IGenericEntityService"/> whose queries this world answers; callers add other setups.</summary>
+    /// <summary>
+    /// A strict <see cref="IGenericEntityService"/> whose queries this world answers, and whose owner updates it applies
+    /// (task 148); callers add other setups.
+    /// </summary>
     public static Mock<IGenericEntityService> EntitiesOver(Func<SecureChildShareWorld> current)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        entities
+            .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                current().Update(table, id, fields);
+                return Task.CompletedTask;
+            });
         return entities;
+    }
+
+    /// <summary>
+    /// Task 148: the REAL <see cref="SecureChildReconciler"/> over this world — the REAL ownership resolver and the REAL
+    /// synchronizer over the same rows, the given share seam, and <paramref name="webApi"/> for the platform-cascade rows.
+    /// </summary>
+    public static SecureChildReconciler ReconcilerOver(
+        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares,
+        Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null)
+    {
+        var entities = EntitiesOver(current).Object;
+        var configuration = Configuration();
+        var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
+            entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
+        var synchronizer = new SecureChildShareSynchronizer(
+            entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
+        return new SecureChildReconciler(
+            entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance);
     }
 
     /// <summary>The two Secure Record names this world uses, as configuration.</summary>
@@ -219,7 +359,7 @@ internal sealed class SecureChildShareWorld
         return new EntityCollection(projected) { MoreRecords = more, PagingCookie = more ? "cookie" : null };
     }
 
-    private static Entity Project(Entity row, ColumnSet columns)
+    private Entity Project(Entity row, ColumnSet columns)
     {
         var copy = new Entity(row.LogicalName, row.Id);
         foreach (var (column, value) in row.Attributes)
@@ -228,7 +368,27 @@ internal sealed class SecureChildShareWorld
                 copy[column] = value;
         }
 
+        // Task 148: owningbusinessunit DERIVES from the owner, as in Dataverse — the ownership resolver reads it, and a
+        // stored copy would go stale on every re-own.
+        if ((columns.AllColumns || columns.Columns.Contains("owningbusinessunit"))
+            && !row.Attributes.ContainsKey("owningbusinessunit")
+            && OwningBusinessUnitOf(row) is { } bu)
+        {
+            copy["owningbusinessunit"] = new EntityReference("businessunit", bu);
+        }
+
         return copy;
+    }
+
+    private Guid? OwningBusinessUnitOf(Entity row)
+    {
+        if (row.GetAttributeValue<EntityReference>("owningteam") is { } team
+            && _rows.TryGetValue(("team", team.Id), out var teamRow))
+            return teamRow.GetAttributeValue<EntityReference>("businessunitid")?.Id;
+        if (row.GetAttributeValue<EntityReference>("owninguser") is { } user
+            && _rows.TryGetValue(("systemuser", user.Id), out var userRow))
+            return userRow.GetAttributeValue<EntityReference>("businessunitid")?.Id;
+        return null;
     }
 
     private static bool Matches(Entity row, FilterExpression filter)

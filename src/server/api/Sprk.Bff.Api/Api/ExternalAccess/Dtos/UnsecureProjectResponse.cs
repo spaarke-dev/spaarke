@@ -51,6 +51,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// actually knows. The JSON contract is still purely additive; only in-assembly source is affected,
 /// and both call sites live in the endpoint.</para>
 /// </remarks>
+/// <param name="Children">
+/// Task 148: what this call did to the record's EXISTING related records — each re-owned OUT of the Secure Record owner team
+/// to the owner the ownership rule gives a child of an ordinary record (its business unit's team), its mirrored shares
+/// removed — BEFORE the record's own shares were revoked and its flag cleared. On an already-unsecure record it is the pass
+/// that completes an earlier unsecure's related records (owner round 11 item 3). A successful response always carries a
+/// complete pass; an incomplete one is the <c>sdap.unsecure.children_incomplete</c> error, which leaves the flag set.
+/// Additive to the JSON contract.
+/// </param>
 public record UnsecureProjectResponse(
     Guid ProjectId,
     Guid NewOwnerSystemUserId,
@@ -58,4 +66,5 @@ public record UnsecureProjectResponse(
     bool AlreadyUnsecure,
     bool? SweepComplete,
     string RecordType,
-    Guid RecordId);
+    Guid RecordId,
+    SecureChildPassSummary? Children = null);
