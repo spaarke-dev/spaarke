@@ -159,6 +159,31 @@ internal static class GrantPolicyTestDoubles
                             ? new ReferencedOrganizations(orgs, Unreadable: false)
                             : ReferencedOrganizations.None));
         }
+
+        /// <summary>Task 137: a contact's live state. Unseeded, every contact is Active (answered, never a fault).</summary>
+        public ConcurrentDictionary<Guid, ContactRecordState> ContactStates { get; } = new();
+
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+            => Task.FromResult(ContactStates.TryGetValue(contactId, out var state) ? state : ContactRecordState.Active);
+
+        /// <summary>
+        /// Task 137: every call of the ONE grant-cache invalidation routine, as (contacts, organizations). The routine
+        /// itself — tenants, organization paging, failure handling — is pinned over a real cache by
+        /// <c>ExternalParticipationServiceInvalidationTests</c> and the task-137 section of
+        /// <c>GrantLifecycleCharacterizationTests</c>, and its production organization-member page read over the
+        /// transport by <c>OrganizationMembershipReadTests</c> (task 137 r2); here a test proves WHICH grantees a write
+        /// path asked it to invalidate.
+        /// </summary>
+        public ConcurrentQueue<(Guid[] Contacts, Guid[] Organizations)> Invalidations { get; } = new();
+
+        public override Task<GrantCacheInvalidation> InvalidateGrantSetsAsync(
+            IEnumerable<Guid> contactIds, IEnumerable<Guid> organizationIds, CancellationToken ct = default,
+            string? explicitTenantId = null)
+        {
+            var contacts = contactIds.ToArray();
+            Invalidations.Enqueue((contacts, organizationIds.ToArray()));
+            return Task.FromResult(new GrantCacheInvalidation(contacts.Length, 0, 0, Array.Empty<Guid>()));
+        }
     }
 
     /// <summary>
@@ -188,6 +213,12 @@ internal static class GrantPolicyTestDoubles
         /// rethrows rather than turning into its own fail-closed <c>null</c>.
         /// </summary>
         public Exception? Throws { get; set; }
+
+        /// <summary>
+        /// Task 142 round 18: when set, only the query whose SUBJECT fragment names this id faults (<c>null</c>) — one
+        /// faulted subject chunk among several, the others answering.
+        /// </summary>
+        public Guid? FaultsWhenSubjectNames { get; set; }
 
         /// <summary>How many chunk queries ran — proves the shared reader was consulted.</summary>
         public int Queries { get; private set; }
@@ -247,6 +278,8 @@ internal static class GrantPolicyTestDoubles
                 return Task.FromException<List<NoAccessEntryRow>?>(ex);
             if (Faults)
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
+            if (FaultsWhenSubjectNames is { } faulting && subjectFilter.Contains(faulting.ToString(), StringComparison.Ordinal))
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
 
             var recordLoop = objectFilter.Contains("sprk_objectrecordid", StringComparison.Ordinal);
             var rows = _entries
@@ -282,16 +315,104 @@ internal static class GrantPolicyTestDoubles
             NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
+    /// Task 137: the PRODUCTION <see cref="ExternalParticipationService"/> over <paramref name="cache"/>, with the
+    /// request's <paramref name="context"/> (its <c>tid</c>) and optional <paramref name="configuration"/> (the CIAM and
+    /// workforce tenant ids), and ONLY the organization-member page read substituted — answered from
+    /// <paramref name="members"/>, one page per <paramref name="pageSize"/> rows with a synthetic next link. The ONE
+    /// invalidation routine runs unmodified: tenant enumeration, paging to completion, per-removal failure handling.
+    /// </summary>
+    internal static MemberPagingParticipationService RealInvalidationOver(
+        Sprk.Bff.Api.Infrastructure.Cache.ITenantCache cache,
+        Microsoft.AspNetCore.Http.HttpContext? context,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
+        => new(cache, context, configuration);
+
+    /// <summary>See <see cref="RealInvalidationOver"/>.</summary>
+    internal sealed class MemberPagingParticipationService : ExternalParticipationService
+    {
+        public MemberPagingParticipationService(
+            Sprk.Bff.Api.Infrastructure.Cache.ITenantCache cache,
+            Microsoft.AspNetCore.Http.HttpContext? context,
+            Microsoft.Extensions.Configuration.IConfiguration? configuration)
+            : base(new HttpClient(), cache,
+                   configuration ?? new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                   credential: null!, AccessorFor(context), NullLogger<ExternalParticipationService>.Instance)
+        {
+        }
+
+        /// <summary>Each organization's ACTIVE members, in page order.</summary>
+        public ConcurrentDictionary<Guid, Guid[]> Members { get; } = new();
+
+        /// <summary>
+        /// When set, answers an organization's members instead of <see cref="Members"/> — e.g. a fake table that
+        /// interprets the production <c>ExternalOrganizationMembership.ActiveMembersFilter</c>.
+        /// </summary>
+        public Func<Guid, Guid[]>? MemberSource { get; set; }
+
+        /// <summary>Rows per page the double serves (the production page size by default).</summary>
+        public int PageSize { get; set; } = OrganizationMemberPageSize;
+
+        /// <summary>When set, the page with this zero-based index faults (for every organization).</summary>
+        public int? FailPage { get; set; }
+
+        /// <summary>Every (organization, page index) read, in order.</summary>
+        public ConcurrentQueue<(Guid OrganizationId, int Page)> PageReads { get; } = new();
+
+        /// <summary>
+        /// When set, the root-flag read answers these flags for every id instead of reading Dataverse — so a WRITE
+        /// path whose policy check reads the flags (<c>/grant</c>) can run end to end over the real invalidation
+        /// routine. Unset, the production read runs (and the write paths that never read flags are unaffected).
+        /// </summary>
+        public RootRecordFlags? RootFlags { get; set; }
+
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => RootFlags is { } flags
+                ? Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                    recordIds.Distinct().ToDictionary(id => id, _ => flags))
+                : base.GetRootRecordFlagsAsync(entityType, recordIds, ct);
+
+        internal override Task<OrganizationMemberPage> ReadOrganizationMemberPageAsync(
+            Guid organizationId, string? nextLink, CancellationToken ct)
+        {
+            var page = nextLink is null ? 0 : int.Parse(nextLink.Split('=')[1]);
+            PageReads.Enqueue((organizationId, page));
+            if (FailPage == page)
+                throw new HttpRequestException("Simulated member-page read failure.");
+
+            var all = MemberSource?.Invoke(organizationId)
+                      ?? (Members.TryGetValue(organizationId, out var ids) ? ids : Array.Empty<Guid>());
+            var slice = all.Skip(page * PageSize).Take(PageSize).ToList();
+            var more = (page + 1) * PageSize < all.Length;
+            return Task.FromResult(new OrganizationMemberPage(slice, more ? $"next?page={page + 1}" : null));
+        }
+
+        private static Microsoft.AspNetCore.Http.IHttpContextAccessor AccessorFor(Microsoft.AspNetCore.Http.HttpContext? context)
+            => new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = context };
+    }
+
+    /// <summary>
     /// A write-time No Access check that answers <paramref name="denied"/> for every grantee — for tests that are not
-    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>).
+    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>). Task 142 r4: the
+    /// check is a tri-state; <c>false</c> answers <see cref="NoAccessCheckAnswer.Allowed"/>, <c>true</c>
+    /// <see cref="NoAccessCheckAnswer.Denied"/>.
     /// </summary>
     internal static IAccessibleRecordSetService DenyListAnswering(bool denied)
+        => DenyListAnswering(denied ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed);
+
+    /// <summary>
+    /// A write-time No Access check that answers <paramref name="answer"/> for every grantee — including a value outside
+    /// the enum, which no production check returns, to pin that a consumer's defensive branch refuses it (task 142 r5,
+    /// r4 verifier finding 6). Only for tests ABOUT a consumer's handling of the answer; the answer itself is pinned
+    /// through <see cref="RealDenyList"/>.
+    /// </summary>
+    internal static IAccessibleRecordSetService DenyListAnswering(NoAccessCheckAnswer answer)
     {
         var mock = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
-        mock.Setup(s => s.IsGranteeDeniedOnRecordAsync(
+        mock.Setup(s => s.CheckGranteeNoAccessAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(),
                 It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(denied);
+            .ReturnsAsync(answer);
         return mock.Object;
     }
 }

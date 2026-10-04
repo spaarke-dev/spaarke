@@ -362,7 +362,11 @@ internal sealed class ComposeCreateOnSavePromoter
         var owner = await _ownership.ResolveOwnerAsync(
             Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
                 filedUnder,
-                callerObjectId: Guid.TryParse(savingUserOid, out var savingOid) ? savingOid : null),
+                callerObjectId: Guid.TryParse(savingUserOid, out var savingOid) ? savingOid : null) with
+            {
+                // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for the row the application upserts.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(savingUserOid),
+            },
             cancellationToken).ConfigureAwait(false);
         if (!owner.IsOwned)
         {
@@ -370,6 +374,7 @@ internal sealed class ComposeCreateOnSavePromoter
         }
 
         entity["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+        owner.StampCreatorOn(entity); // task 146 c1-r1 — the saving user, recorded on the app-created row
 
         Guid newId;
         bool rowCreatedThisCall;

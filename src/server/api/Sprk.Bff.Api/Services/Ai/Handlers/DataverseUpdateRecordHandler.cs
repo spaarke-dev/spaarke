@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -30,9 +30,25 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// task 031) gates by that declared class — NO gating/confirmation logic lives here.
 /// </para>
 /// <para>
-/// <b>User-OBO (spec MUST rule)</b>: executes through <see cref="IDataverseUserClient"/>
+/// <b>User-OBO (spec MUST rule)</b>: the caller's update executes through <see cref="IDataverseUserClient"/>
 /// under the calling user's exchanged token; privilege-denied updates surface the user's own
-/// access error.
+/// access error. That is unchanged: no step of the caller's own write runs app-only.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE helper — owner decisions round 8 item 1 (2026-10-03), CLAUDE.md §6.5
+/// path B</b> (unified-access-control-r2 task 156; the same reasoning as round 7 item 3, which amended the rule for the
+/// two AI CREATE tools). An update can change what a to-do / event / communication / analysis is filed under, or the
+/// matter / project of a record others are filed under, which leaves copies of that root stale. The core-ancestor
+/// re-stamp is a SERVER-owned invariant written app-only (ADR-002 WP-1), and task 156 AC1 requires it IN THE SAME
+/// OPERATION as the re-file. So, once the caller's PATCH has succeeded, this class calls
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp"/> inline. That helper is the re-stamp's ONLY app-only
+/// dependency (the re-file step below is the other, owner round 13 item 7), and it is narrow by construction: its ONE member re-stamps the copies the write just moved and writes
+/// only stamp columns, with values derived from the data (never a value from the caller). It exposes no Dataverse
+/// client and holds no <see cref="IServiceProvider"/>, so nothing can be resolved through it; the app-only client the
+/// re-stamp writes with stays private to <c>CoreAncestorRestamper</c>. The queued path this tool used before
+/// (an enqueue onto <c>CoreAncestorRestampQueue</c>, run by the background job seconds later) is removed; the queue stays
+/// for the storage resolver's stale refusals. Record: the task 156 note (owner round 8 section) and the task 156 POML
+/// execution block.
 /// </para>
 /// <para>
 /// <b>A RE-FILE re-derives the owner (unified-access-control-r2 task 146 r2, verifier item 2).</b> An update that sets or
@@ -44,9 +60,13 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// must see the row and hold AppendTo on each record it is moved under, so a refusal never answers questions about
 /// records they cannot see. A row of any other table moved under a SECURE record is refused (it cannot be re-owned here).
 /// The app-only steps are the resolver's reads, the owner assignment and, if that assignment fails, the restore of the
-/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). They run under CLAUDE.md §6.5
-/// PATH A, task 146 note §12c, which stays in force for this tool. spaarke-ai-architecture-redesign-r1 spec Amendment
-/// A-UAC146 (path B, owner round 7 item 3) covers the two CREATE tools only, and records this exception beside it.
+/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). <b>CLAUDE.md §6.5 PATH B — owner
+/// round 13 item 7 (2026-10-03): "the update tool's re-file step is folded into ADR path B, as round 8 did for 156's
+/// re-stamp."</b> spaarke-ai-architecture-redesign-r1 spec Amendment A-UAC146 now covers this step beside the two CREATE
+/// tools; it supersedes the project-scoped path-A record (task 146 note §12c) for it. The caller's own PATCH stays
+/// user-OBO; F3 on a move out of a secure root is asked AS THE CALLER (task 146 c1).
+/// After whichever path wrote the caller's update (the re-file's PATCH or the plain PATCH), the task 156 re-stamp runs,
+/// then the task 142 Assigned-To materializer (batch 4 integration).
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
@@ -61,18 +81,28 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp _restamp;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
+    private readonly IServiceScopeFactory? _scopes;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
+    /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership)
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
+        // AddToolFramework also calls), so this handler's registration gains no asymmetric dependency (§10 F.1).
+        _restamp = restamp ?? throw new ArgumentNullException(nameof(restamp));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         // Task 146 r2: unconditionally registered (MetadataServiceExtensions) — no asymmetric registration (§10 F.1).
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _scopes = scopes;
     }
 
     /// <inheritdoc />
@@ -204,6 +234,28 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
                 }
             }
+
+            // Task 156, owner round 8 item 1 (§6.5 path B — see the class remarks): the copies this write moved are
+            // re-stamped NOW, in the same operation, after the caller's own update succeeded. A write that can move no
+            // stamp reads nothing. Never thrown: a child that fails is logged and the reconciliation job repairs it; the
+            // caller's update stands either way.
+            var restamp = await _restamp
+                .AfterWriteAsync(tablename, recordId, mapped.Item!.Columns)
+                .ConfigureAwait(false);
+            if (!restamp.Complete)
+            {
+                _logger.LogWarning(
+                    "[dataverse.update_record] the core-ancestor re-stamp after the update of {Entity} {RecordId} did not finish "
+                    + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
+                    tablename, recordId, restamp.Failures.Count, restamp.Truncated);
+            }
+
+            // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and
+            // removes the previous one's unmodified auto access now. After the PATCH committed; never throws, never fails
+            // this update (a non-root or a non-registry column is a no-op).
+            await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, tablename, recordId, mapped.Item!.Columns, grantorOid: null, _logger, cancellationToken)
+                .ConfigureAwait(false);
 
             var result = ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,
@@ -351,6 +403,17 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     WhenUnfiled = string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase)
                         ? Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator
                         : Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam,
+                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
+                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
+                    // before anything is written.
+                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                        _ => Task.FromResult<Guid?>(me.SystemUserId),
+                        (record, token) => OwnedChildWrite.RightsOnAsync(
+                            _dataverse,
+                            me.SystemUserId,
+                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                            record.RecordId,
+                            token)),
                 },
                 async token =>
                 {
@@ -362,11 +425,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 },
                 ct).ConfigureAwait(false);
 
-            return resolution.IsRefused
-                ? new RefileStep(Error(tool,
+            return resolution switch
+            {
+                // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure
+                // endpoint's message and reason code, not an owner refusal.
+                { IsForbidden: true } => new RefileStep(Error(tool,
+                    $"The update was NOT written. {resolution.Reason}",
+                    resolution.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
+                { IsRefused: true } => new RefileStep(Error(tool,
                     $"The update was NOT written: the record's owner could not be decided — {resolution.Reason} ({resolution.RefusalCode}).",
-                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false)
-                : new RefileStep(null, true);
+                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
+                _ => new RefileStep(null, true),
+            };
         }
         catch (CallerWriteFailedException failed)
         {

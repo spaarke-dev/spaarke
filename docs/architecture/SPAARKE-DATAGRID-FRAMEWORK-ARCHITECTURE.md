@@ -241,7 +241,7 @@ const membershipResolver = createMembershipResolver(
 
 **Reference deployment** — the "My Tasks" grid (`sprk_gridconfiguration` "My Tasks (Assistant)"): sources the "My Tasks Open" saved query (Deadline+Task+Reminder, eventstatus=Open, **no owner filter**) and applies `membershipFilter: true`, so the Assistant's `list-tasks` capability opens "the open task-type events I'm on."
 
-**Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 5-min/user). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
+**Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 2-min/user since UAC-r2 task 132). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
 
 **Implementation:** `MembershipFilter` (`types/DataGridConfiguration.ts`) · `createMembershipResolver` (`services/membership.ts`) · `overlayMembershipFilter` (`components/DataGrid/fetchXmlOverlay.ts`) · the gated resolve effect in `DataGrid.tsx` · widget plumbing in `DataverseEntityViewWidget.tsx`.
 

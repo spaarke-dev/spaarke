@@ -566,6 +566,7 @@ public sealed class ThreadResolver : IThreadResolver
         // regarding a party (account / contact / organization — not an ownership parent) keeps the caller as owner,
         // as before, "so the new (empty) thread is visible in the caller's all-mode list".
         EntityReference threadOwner = new("systemuser", ownerSystemUserId);
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? recordOwner = null;
         if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(entityType))
         {
             var owner = await _ownership.ResolveOwnerAsync(
@@ -574,6 +575,8 @@ public sealed class ThreadResolver : IThreadResolver
                     TargetEntityLogicalName = entityType,
                     TargetRecordId = regardingId,
                     CallerSystemUserId = ownerSystemUserId,
+                    // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this app-created record thread.
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(ownerSystemUserId),
                 },
                 ct);
             if (!owner.IsOwned)
@@ -586,6 +589,7 @@ public sealed class ThreadResolver : IThreadResolver
             }
 
             threadOwner = new EntityReference("team", owner.OwningTeamId!.Value);
+            recordOwner = owner;
         }
 
         var thread = new DataverseEntity("sprk_communicationthread")
@@ -605,6 +609,8 @@ public sealed class ThreadResolver : IThreadResolver
         };
         if (!string.IsNullOrWhiteSpace(regarding.RecordName))
             thread["sprk_regardingrecordname"] = TruncateTo(regarding.RecordName!.Trim(), 400);
+
+        recordOwner?.StampCreatorOn(thread); // task 146 c1-r1 — the caller, on a team-owned record thread
 
         var threadId = await _entityService.CreateAsync(thread, ct);
         _logger.LogInformation(

@@ -331,3 +331,23 @@ the payload limit, returns the typed record, and can fail the next job create.
 - **`IProcessingJobService.GetEmailArtifactAsync` / `GetAttachmentArtifactAsync`** still return anonymous types as
   `Task<object?>`. They have **no caller at all** (grep over `src/`), so nothing fails today. Whoever first calls one
   must type it first, or it will fail exactly as §1.2 describes.
+
+## 11. Live check on `spaarke-bff-dev`, 2026-10-02 (after the deploy from master `5e39f2bea`)
+
+The owner authorized the deploy and the restarts. The deploy used `Deploy-BffApi.ps1` from a fresh worktree of
+`origin/master`: package 45.46 MB, SHA-256 verified, `/healthz` 200. Calls were made with a user token
+(`ralph.schroeder@spaarke.com`, a root-BU caller) against the endpoints the pane uses, with the pane's request shape.
+
+| Check (POML ui-tests) | Result |
+|---|---|
+| Save a document over 40 KB | **202**, job `2dcf1cf0-5bbe-f111-aaaf-0022482913fc` → Completed, document `fb79f621-43c5-4083-a721-d0d482074731` (79,651-byte .docx, unfiled). Owned by the root team "Spaarke", the #1081 path |
+| Restart, then read the same job | `az webapp restart` 12:23:03 UTC; new process "Application started" 12:23:29. `GET /api/office/jobs/{id}` → **200 Completed, same document id** (not 404). `GET …/stream` → `connected`, `progress` 100, `job-complete` with the same document id. **PASS** |
+| Save the identical document again | **No second document** (one `restart-probe-%` row). The response is the ORIGINAL job's 202, replayed by the `X-Idempotency-Key` response cache, so it reads `duplicate: false`; the pane would show a normal success for the same document rather than "already saved". **Outcome holds; the wording differs from the test's expectation** |
+| Cut a save mid-flight, graceful restart | **Cannot cut it.** A 12.6 MB save was started and the app restarted 3 s later (12:25:36); the old process kept serving and the save finished there at 12:25:41 (job `9889cf5c-…`); the new process started 12:25:59. The job reads Completed from the new process: a definite outcome |
+| Cut a save mid-flight, **hard kill** (owner: "if we need to produce it live then we should do it") | `kill -9` on the `dotnet` process over SSH (`az webapp create-remote-connection`), sent **0.1 s after the save's job row appeared** (row `58c85c4f-64be-f111-a05b-3833c5e9614d`, polled in Dataverse; a pre-connected SSH session waiting on `read`). The client got **HTTP 502 after 5 s**: a definite error. The row was left `Queued`, 0%. Back up at 13:22:59 |
+| Retry inside 2 minutes | **409 `OFFICE_IDEMPOTENCY_CONFLICT`** *"A request with the same idempotency key is currently being processed. Please retry shortly."* That is `IdempotencyFilter`'s Redis in-progress lock (`LockDuration` 2 min), taken by the dead request and never released. Between 2 and 5 minutes a retry would be answered as the dead job, which reads `Queued` until it is 5 minutes old. So after a crash the pane can show "processing" for up to about 5 minutes, never longer |
+| Retry after 5 minutes | The dead job reads **Failed / `Abandoned`**, `OFFICE_INTERNAL`, retryable, *"This save did not finish. Check whether the document was saved, then try again."* The retry got **202, a NEW job** `d110de0d-65be-f111-a05b-3833c5e9614d`, **Completed** with document `62669395-…`. It was not answered as a duplicate of the dead attempt. **PASS** |
+
+All three probe documents were deleted afterwards through `DELETE /api/documents/{id}`, along with the four
+`sprk_analysis` rows the profile runs had created. The document delete does not remove a document's analysis rows; they
+were deleted separately.

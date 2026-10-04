@@ -938,8 +938,15 @@ public class DocumentCheckoutService
         // for a secure document). Resolved BEFORE the POST; a refusal throws and nothing is written (the checkout
         // endpoint reports it). A document that is not team-owned (a pre-task-080 row) leaves the version with its
         // creator, as before.
+        //
+        // Task 146 c1-r1 (owner round 13 item 9): the user checking the document out asked for the version row the
+        // application creates — recorded as its creator person.
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_document", documentId), ct);
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_document", documentId) with
+            {
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(userId),
+            },
+            ct);
         if (owner.IsRefused)
         {
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_fileversion", owner);
@@ -957,6 +964,11 @@ public class DocumentCheckoutService
         if (owner.IsOwned)
         {
             payload["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
+        }
+
+        if (owner.CreatedByPerson is { } person && Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped("sprk_fileversion"))
+        {
+            payload[Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.NavigationProperty + "@odata.bind"] = $"/systemusers({person:D})";
         }
 
         if (_logger.IsEnabled(LogLevel.Debug))

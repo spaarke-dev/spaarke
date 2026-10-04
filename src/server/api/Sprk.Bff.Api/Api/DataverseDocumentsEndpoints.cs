@@ -96,8 +96,10 @@ public static class DataverseDocumentsEndpoints
             string id,
             [FromBody] UpdateDocumentRequest request,
             IDocumentDataverseService dataverseService,
+            [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
             Spaarke.Core.Auth.AuthorizationService authorization,
+            [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -156,6 +158,11 @@ public static class DataverseDocumentsEndpoints
                             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(context.User), out var callerOid)
                                 ? callerOid
                                 : null,
+                            // Owner round 10 item 7 (task 146 c1): replacing a lookup can move the document OUT of a
+                            // secure root — an un-secure. The resolver asks THIS caller's F3 rights (Full Access on the
+                            // root, or the document's creator) before anything is written; a refusal is the unsecure
+                            // endpoint's 403 ProblemDetails.
+                            SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
                         },
                         token => dataverseService.UpdateDocumentAsync(id, request, token),
                         context.RequestAborted);
@@ -164,6 +171,14 @@ public static class DataverseDocumentsEndpoints
                         return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
                     }
                 }
+
+                // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work
+                // assignment re-stamps every to-do and analysis filed under it, in this same request. Never thrown: a
+                // child that fails is logged and the reconciliation job repairs it; the document's own update stands.
+                await restamper.AfterWriteAsync(
+                    "sprk_document", Guid.Parse(id),
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.DocumentColumnsWritten(request),
+                    CancellationToken.None);
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
 
@@ -676,12 +691,17 @@ public static class DataverseDocumentsEndpoints
             // user (the caller included) can read it. The body names no record, so the caller's business-unit
             // default owner team decides. OwningTeamId and Id are [JsonIgnore]d on the request, so the body can
             // no longer set either; the owner is decided here, server-side, or the create is refused.
-            var owningTeamId = await ownershipResolver.ResolveOwningTeamAsync(
+            //
+            // Task 146 c1-r1 (owner round 13 item 9): the caller is also recorded as the person who asked
+            // (sprk_createdbyperson) — this create is app-only, so createdby is the application user.
+            var owner = await ownershipResolver.ResolveOwnerAsync(
                 new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
                 {
                     CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
                 },
                 ct);
+            var owningTeamId = owner.IsOwned ? owner.OwningTeamId : null;
 
             if (owningTeamId is null)
             {
@@ -703,6 +723,7 @@ public static class DataverseDocumentsEndpoints
             }
 
             request.OwningTeamId = owningTeamId;
+            request.CreatedByPersonId = owner.CreatedByPerson;
 
             var documentId = await dataverseService.CreateDocumentAsync(request);
 

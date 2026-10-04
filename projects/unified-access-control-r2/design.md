@@ -37,7 +37,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 <hot-path-declaration>
   <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints; scheduler lease + admin jobs trigger (task 103) -->
   <spaarke-ai>N</spaarke-ai>
-  <ci-workflows>N</ci-workflows>
+  <ci-workflows>Y</ci-workflows>       <!-- 2026-10-03 task 157 residual 4 (owner rounds 10 and 13): ci-tier1-blocking.yml gains the datagrid-external-host-gate job, ADVISORY until three green runs on ubuntu-latest, then blocking (round 13 item 11), classified in classify-tier1. ci-router.yml is NOT changed (round 13 item 12). GATE REPAIR under the shadow-window carve-out. Earlier tier1 touches: tasks 024/074/080 and #969 -->
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>
@@ -682,7 +682,7 @@ The Secure Project step must be reworked to §5. Independently, its current copy
 
 ## 7. Attestation
 
-Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model.
+Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model. The one exception is Assigned-To access (ADR-034 A4, task 142): the owner requires it to be a removable entry on the grant-access list, so it is written as ordinary grants/shares, each grant change captured by the FR-32 event log; the ledger `sprk_assignedaccess` records why each exists.
 
 - **Append-only access event log** for grant/deny state changes — few, exact, legally defensible.
 - **Evaluator replay** for derived access: it is a pure function of record lookups, org junctions, flags and deny entries, all already covered by Dataverse field audit. No new storage; the evaluator must be **versioned** so historical answers remain reproducible.

@@ -1,9 +1,9 @@
 using FluentAssertions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
-using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
@@ -143,6 +143,7 @@ public sealed class DataverseToolNameFreezeTests
         // GA: update_record(tablename, recordId, item) — all required.
         var handler = new DataverseUpdateRecordHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
@@ -179,7 +180,8 @@ public sealed class DataverseToolNameFreezeTests
             new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
                 Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact()),
-            new DataverseUpdateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
+            new DataverseUpdateRecordHandler(mock, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble()),
             new DataverseDeleteRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDeleteRecordHandler>.Instance)
         };

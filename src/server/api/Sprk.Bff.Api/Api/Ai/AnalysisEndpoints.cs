@@ -157,6 +157,7 @@ public static class AnalysisEndpoints
         IAnalysisDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AnalysisOrchestrationService> logger,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -188,7 +189,8 @@ public static class AnalysisEndpoints
             // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
             var owner = await ownership.ResolveOwnerAsync(
                 Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) }),
+                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                    with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
                 cancellationToken);
             if (!owner.IsOwned)
             {
@@ -204,6 +206,7 @@ public static class AnalysisEndpoints
                 request.Name,
                 playbookId: request.PlaybookId,
                 owningTeamId: owner.OwningTeamId,
+                createdByPersonId: owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded on the app-only create
                 ct: cancellationToken);
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
@@ -1222,7 +1225,8 @@ public static class AnalysisEndpoints
         // A Dataverse fault propagates as the request's 5xx — a fault is not a refusal.
         var owner = await ownership.ResolveOwnerAsync(
             Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) }),
+                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
             cancellationToken);
         if (!owner.IsOwned)
         {
@@ -1237,7 +1241,7 @@ public static class AnalysisEndpoints
         {
             analysisId = await analysisService.CreateAnalysisAsync(
                 request.DocumentId, request.Name, playbookId: request.PlaybookId,
-                owningTeamId: owner.OwningTeamId, ct: cancellationToken);
+                owningTeamId: owner.OwningTeamId, createdByPersonId: owner.CreatedByPerson, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1444,7 +1448,7 @@ public static class AnalysisEndpoints
                 regarding is not null
                     ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regarding.EntityLogicalName, regarding.RecordId)
                     : null,
-            }),
+            }) with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
             cancellationToken);
         if (!owner.IsOwned)
         {
@@ -1459,7 +1463,8 @@ public static class AnalysisEndpoints
         {
             analysisId = await analysisService.CreateAnalysisAsync(
                 documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId,
-                regarding: regarding, owningTeamId: owner.OwningTeamId, ct: cancellationToken);
+                regarding: regarding, owningTeamId: owner.OwningTeamId, createdByPersonId: owner.CreatedByPerson,
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {

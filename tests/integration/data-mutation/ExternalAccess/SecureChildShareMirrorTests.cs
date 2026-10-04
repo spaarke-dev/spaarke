@@ -533,14 +533,16 @@ public class SecureChildShareMirrorTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
             _shares, _users.Client, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
-            world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Context(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+            world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(),
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
+            Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> Unshare(SecureChildShareWorld world, Guid user) =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("project", ProjectR, user),
-            _shares, _users.Client, _flags, _cache.Object, world.Synchronizer(_shares), Context(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            _shares, _users.Client, _flags, _cache.Object,
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
+            world.Synchronizer(_shares), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     [Fact]
     public async Task ShareUser_OnASecureRoot_SharesEveryChild_AtTheSharedLevel()

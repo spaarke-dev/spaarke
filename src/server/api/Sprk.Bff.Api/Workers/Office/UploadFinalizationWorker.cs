@@ -619,7 +619,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Description = payload.ContentType == SaveContentType.Email
                 ? payload.EmailMetadata?.Subject
                 : payload.AttachmentMetadata?.OriginalFileName,
-            OwningTeamId = owningTeamId
+            OwningTeamId = owningTeamId,
+            // Task 146 c1-r1 (owner round 13 item 9): the saving user, carried by SaveAsync with the team.
+            CreatedByPersonId = payload.CreatedByPersonId,
         };
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -691,11 +693,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
         {
-            await CreateEmailArtifactAsync(payload.EmailMetadata, documentId, owningTeamId, cancellationToken);
+            await CreateEmailArtifactAsync(
+                payload.EmailMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
         else if (payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null)
         {
-            await CreateAttachmentArtifactAsync(payload.AttachmentMetadata, documentId, owningTeamId, cancellationToken);
+            await CreateAttachmentArtifactAsync(
+                payload.AttachmentMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
     }
 
@@ -703,7 +707,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         EmailArtifactPayload metadata,
         Guid documentId,
         Guid owningTeamId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating EmailArtifact for document {DocumentId}, subject: {Subject}",
@@ -739,7 +744,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             HasAttachments = metadata.HasAttachments,
             Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
             DocumentId = documentId,
-            OwningTeamId = owningTeamId // task 146 → ownerid
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var emailArtifactId = await _processingJobService.CreateEmailArtifactAsync(request, cancellationToken);
@@ -754,7 +760,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         AttachmentArtifactPayload metadata,
         Guid documentId,
         Guid owningTeamId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating AttachmentArtifact for document {DocumentId}, filename: {FileName}",
@@ -770,7 +777,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             IsInline = metadata.IsInline,
             EmailArtifactId = metadata.EmailArtifactId,
             DocumentId = documentId,
-            OwningTeamId = owningTeamId // task 146 → ownerid
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var attachmentArtifactId = await _processingJobService.CreateAttachmentArtifactAsync(request, cancellationToken);
@@ -1085,7 +1093,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         payload.AssociationType,
                         payload.AssociationId,
                         owningTeamId.Value,
-                        cancellationToken);
+                        cancellationToken,
+                        payload.CreatedByPersonId); // task 146 c1-r1 — the saving user
 
                     uploadedCount++;
                 }
@@ -1165,7 +1174,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string? associationType,
         Guid? associationId,
         Guid owningTeamId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
         {
@@ -1214,7 +1224,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Name = attachment.FileName,
             ContainerId = containerId,
             Description = $"Email attachment from {parentFileName}",
-            OwningTeamId = owningTeamId // task 080 — the parent email's team
+            OwningTeamId = owningTeamId, // task 080 — the parent email's team
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
         };
 
         var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);

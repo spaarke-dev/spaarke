@@ -49,6 +49,18 @@ public class SecureChildOwnershipEndpointTests
     private static readonly Guid OrdinaryMatter = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid FlaggedNotIsolatedProject = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
+    /// <summary>Full Access: Collaborate plus Delete — F3 admits it (owner round 3b; round 10 item 7 for children).</summary>
+    private const AccessRights FullAccess =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
+        | AccessRights.Delete;
+
+    /// <summary>Collaborate: Write without Delete — the Write holder F3 refuses.</summary>
+    private const AccessRights Collaborate =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
+
+    /// <summary>Who the F3 probe answers WhoAmI with (task 146 c1).</summary>
+    internal static readonly Guid ProbeCaller = Guid.Parse("f3f3f3f3-0000-4000-8000-0000000000ca");
+
     private const string Events = "sprk_events";
     private const string Projects = "sprk_projects";
     private const string Matters = "sprk_matters";
@@ -75,6 +87,7 @@ public class SecureChildOwnershipEndpointTests
         host.Events.Existing = SecureProjectEventEntity(eventId);
         host.Access.Grant(Events, eventId, AccessRights.Read | AccessRights.Write);
         host.Access.Grant(Projects, OrdinaryProject, AccessRights.Read | AccessRights.AppendTo);
+        host.Access.Grant(Projects, SecureProject, FullAccess); // c1: leaving a secure root is an un-secure (F3)
 
         var response = await host.PutEventAsync(eventId, new { regardingRecordType = 0, regardingRecordId = OrdinaryProject });
 
@@ -97,6 +110,7 @@ public class SecureChildOwnershipEndpointTests
         host.Events.Existing = SecureProjectEventEntity(eventId);
         host.Access.Grant(Events, eventId, AccessRights.Write);
         host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo);
+        host.Access.Grant(Projects, SecureProject, FullAccess); // c1: leaving a secure root is an un-secure (F3)
 
         var response = await host.PutEventAsync(eventId, new { regardingRecordType = 1, regardingRecordId = OrdinaryMatter });
 
@@ -138,6 +152,91 @@ public class SecureChildOwnershipEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         host.Events.Updates.Should().BeEmpty();
         world.Assignments.Should().BeEmpty();
+    }
+
+    // ---- c1, owner round 10 item 7: moving a child OUT of a secure root is an un-secure (F3) ----
+
+    [Fact]
+    public async Task EventRefile_OutOfASecureProject_ByAWriteOnlyHolderOnIt_Is403NotPermitted_InTheUnsecureEndpointsShape()
+    {
+        var eventId = Guid.NewGuid();
+        var world = SecureProjectEvent(eventId);
+        await using var host = await EventsHost.StartAsync(world.Resolver());
+        host.Events.Existing = SecureProjectEventEntity(eventId);
+        host.Access.Grant(Events, eventId, AccessRights.Read | AccessRights.Write);
+        host.Access.Grant(Projects, OrdinaryProject, AccessRights.Read | AccessRights.AppendTo);
+        host.Access.Grant(Projects, SecureProject, Collaborate); // Write, but not Full Access
+
+        var response = await host.PutEventAsync(eventId, new { regardingRecordType = 0, regardingRecordId = OrdinaryProject });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        problem["title"]!.GetValue<string>().Should().Be("Forbidden");
+        problem["reasonCode"]!.GetValue<string>().Should().Be("sdap.unsecure.not_permitted");
+        problem["traceId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+        problem["detail"]!.GetValue<string>().Should().Contain("Full Access").And.Contain("event");
+        host.Events.Updates.Should().BeEmpty("refused before any write");
+        world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EventRefile_OutOfASecureProject_ByTheEventsCreator_IsAllowed_WithoutFullAccess()
+    {
+        var eventId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_event", eventId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject),
+                ["createdby"] = new EntityReference("systemuser", ProbeCaller),
+            });
+        await using var host = await EventsHost.StartAsync(world.Resolver());
+        host.Events.Existing = SecureProjectEventEntity(eventId);
+        host.Access.Grant(Events, eventId, AccessRights.Read | AccessRights.Write);
+        host.Access.Grant(Projects, OrdinaryProject, AccessRights.Read | AccessRights.AppendTo);
+        host.Access.Grant(Projects, SecureProject, Collaborate);
+
+        var response = await host.PutEventAsync(eventId, new { regardingRecordType = 0, regardingRecordId = OrdinaryProject });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Events.Updates.Should().ContainSingle();
+        world.Assignments.Should().Equal(("sprk_event", eventId, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task AssociateRecord_OutOfASecureMatter_ByAWriteOnlyHolderOnIt_Is403NotPermitted_AndWritesNothing()
+    {
+        var documentId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
+        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo);
+        host.Access.Grant(Matters, SecureMatter, Collaborate);
+
+        var response = await host.AssociateAsync(documentId, OrdinaryMatter, "matter");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCode(response)).Should().Be("sdap.unsecure.not_permitted");
+        host.DocumentUpdates.Should().BeEmpty();
+        world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AssociateRecord_OutOfASecureMatter_ByAFullAccessHolderOnIt_IsReownedByTheNewMattersTeam()
+    {
+        var documentId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
+        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo);
+        host.Access.Grant(Matters, SecureMatter, FullAccess);
+
+        var response = await host.AssociateAsync(documentId, OrdinaryMatter, "matter");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.DocumentUpdates.Should().ContainSingle().Which.MatterLookup.Should().Be(OrdinaryMatter);
+        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
     }
 
     [Fact]
@@ -198,6 +297,23 @@ public class SecureChildOwnershipEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Events.Creates.Should().ContainSingle().Which.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
         host.Events.LogOwners.Should().Equal(Directory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task EventCreate_RecordsTheCallerAsThePersonWhoAsked_OnTheEventAndItsLogRow()
+    {
+        // c1-r1 (owner round 13 item 9): the create is app-only (createdby = the application), so the signed-in caller —
+        // looked up by their object id — is recorded as sprk_createdbyperson on both rows.
+        var callerSystemUser = Guid.Parse("c1c1c1c1-0000-4000-8000-000000000146");
+        var world = World().WithUser(callerSystemUser, Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId), Directory.ChildBu);
+        await using var host = await EventsHost.StartAsync(world.Resolver());
+
+        var response = await host.SendAsync(Authenticated(HttpMethod.Post, "/api/v1/events",
+            new { subject = "Filing deadline", regardingRecordType = 0, regardingRecordId = SecureProject }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Events.Creates.Should().ContainSingle().Which.CreatedByPersonId.Should().Be(callerSystemUser);
+        host.Events.LogPersons.Should().Equal(callerSystemUser);
     }
 
     [Fact]
@@ -349,6 +465,9 @@ public class SecureChildOwnershipEndpointTests
         public List<Spaarke.Dataverse.CreateEventRequest> Creates { get; } = new();
         public List<Guid?> LogOwners { get; } = new();
 
+        /// <summary>The creator person each log row was written with (task 146 c1-r1).</summary>
+        public List<Guid?> LogPersons { get; } = new();
+
         public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default) =>
             Task.FromResult(Existing is { } e && e.Id == id ? e : null);
 
@@ -364,9 +483,12 @@ public class SecureChildOwnershipEndpointTests
             return Task.FromResult((Guid.NewGuid(), DateTime.UtcNow));
         }
 
-        public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, CancellationToken ct = default)
+        public Task<Guid> CreateEventLogAsync(
+            Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null,
+            CancellationToken ct = default)
         {
             LogOwners.Add(owningTeamId);
+            LogPersons.Add(createdByPersonId);
             return Task.FromResult(Guid.NewGuid());
         }
 
@@ -397,6 +519,14 @@ public class SecureChildOwnershipEndpointTests
 
         public FinanceEndpointsAuthorizationContractTests.RecordingAccessDataSource Access { get; } = new();
 
+        /// <summary>The F3 probe (task 146 c1): WhoAmI = <see cref="ProbeCaller"/>; rights = the grants in <see cref="Access"/>.</summary>
+        public GrantsProbe Probe { get; }
+
+        protected OwnershipHost()
+        {
+            Probe = new GrantsProbe(Access);
+        }
+
         protected async Task InitializeAsync(IRecordOwnershipResolver resolver)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -416,6 +546,10 @@ public class SecureChildOwnershipEndpointTests
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton(resolver);
+            builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(Probe);
+            // Batch 4 integration (task 156): the re-file routes re-stamp after the write ([FromServices] CoreAncestorRestamper)
+            // — an in-memory restamper over an empty world (nothing filed under the re-filed rows here).
+            builder.Services.AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);
             Register(builder.Services);
 
             builder.WebHost.UseTestServer();
@@ -445,6 +579,31 @@ public class SecureChildOwnershipEndpointTests
                 await _app.DisposeAsync();
             }
         }
+    }
+
+    /// <summary>
+    /// The caller-scoped probe F3 asks (task 146 c1), answering from the SAME stated grants as the access seam, so one
+    /// statement of the caller's rights decides both the route filters and the move-out check. WhoAmI is
+    /// <see cref="ProbeCaller"/>.
+    /// </summary>
+    internal sealed class GrantsProbe : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe
+    {
+        private readonly FinanceEndpointsAuthorizationContractTests.RecordingAccessDataSource _access;
+
+        public GrantsProbe(FinanceEndpointsAuthorizationContractTests.RecordingAccessDataSource access)
+            : base(new HttpClient(),
+                   new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                   Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance)
+        {
+            _access = access;
+        }
+
+        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default) =>
+            Task.FromResult<Guid?>(ProbeCaller);
+
+        public override async Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default) =>
+            (await _access.GetRecordAccessAsync(ProbeCaller.ToString(), entitySet, recordId, callerBearerToken, ct)).AccessRights;
     }
 
     internal sealed class EventsHost : OwnershipHost

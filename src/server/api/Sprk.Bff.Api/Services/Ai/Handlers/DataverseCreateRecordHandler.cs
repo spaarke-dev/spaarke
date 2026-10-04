@@ -52,13 +52,15 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// spec and the task 146 note §13.
 /// </para>
 /// <para>
-/// <b>The creator stamp (unified-access-control-r2 task 133; owner round 7 item 2; integrated per owner round 10).</b> A
-/// row of <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c> records the PERSON who created it in the
-/// server-stamped, field-secured <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>). Those tables take the
-/// owned path above, so the application's create carries the column in its own payload — the caller, by
-/// <c>WhoAmI()</c> under their own token (<see cref="WithCreatorPersonAsync"/>). Task 133's interim shape (a user-OBO
-/// create followed by an app-only update of the column) is gone: there is no second write. An item that names the column
-/// is refused before any Dataverse call: a caller never chooses who created a record.
+/// <b>The creator stamp (unified-access-control-r2 task 133; owner round 7 item 2; task 146 c1-r1).</b> A row the
+/// application creates records the PERSON who asked for it in the server-stamped, field-secured
+/// <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>) — IN THE CREATE PAYLOAD, through the owner decision
+/// (<c>RecordOwnershipContext.RequestedBy</c> → <c>RecordOwnerResolution.StampCreatorOn</c>, in
+/// <see cref="OwnedChildWrite.CreateAsync"/>). That supersedes task 133's interim shape (a user-OBO create followed by
+/// one app-only column update), which is removed: there is exactly one stamp. An item that names the column is refused
+/// before any Dataverse call (pre-suspend in <c>ValidateChat</c>, and again here): a caller never chooses who created a
+/// record. A run-as-user create (per-user tables, unfiled communications, organization-owned tables) needs no stamp — its
+/// <c>createdby</c> is the person.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, column COUNT, outcome,
@@ -137,15 +139,21 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after a root is
+    /// created. Optional so a host composing the tool framework without the external-access module still resolves this
+    /// handler (CLAUDE.md §10 F.1); the materializer itself is looked up with GetService and skipped when absent.</param>
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
         HandoffUrlBuilder handoffUrlBuilder,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
-        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity)
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
@@ -305,17 +313,8 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             // the resolver's own rules keep it (OwnedChildWrite.PathFor).
             if (OwnedChildWrite.PathFor(tablename, mapped.Item!, ownershipType) == OwnedChildWrite.WritePath.Owned)
             {
-                var (forItem, forMapped, serverSet, forFailure) = await WithForPersonAsync(
+                var (forMapped, serverSet, forFailure) = await WithForPersonAsync(
                     tablename, item, mapped.Item!, cancellationToken).ConfigureAwait(false);
-                if (forFailure is not null)
-                {
-                    return LogOutcome(context, tablename, MapClientError(tool, forFailure, startedAt), stopwatch);
-                }
-
-                // Task 133 + owner round 10: a secure-root row the APPLICATION creates records its person in the create
-                // payload itself (sprk_createdbyperson), never by a follow-up update.
-                (forMapped, serverSet, forFailure) = await WithCreatorPersonAsync(
-                    tablename, forItem, forMapped, serverSet, cancellationToken).ConfigureAwait(false);
                 if (forFailure is not null)
                 {
                     return LogOutcome(context, tablename, MapClientError(tool, forFailure, startedAt), stopwatch);
@@ -324,6 +323,17 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
                     CallerObjectId(context), cancellationToken).ConfigureAwait(false);
+
+                // Task 142 (L1, owner Q5 + R3) on the owned path too (batch 4 integration): a project / matter / work
+                // assignment the application created gets its "Assigned *" contacts' grant or share now. After the create
+                // committed; never throws, never fails this create (a non-root table is a no-op).
+                if (owned.CreatedId is { } ownedId)
+                {
+                    await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                        _scopes, tablename, ownedId, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 return LogOutcome(context, tablename, OwnedCreateResult(tool, tablename, forMapped, owned, startedAt), stopwatch);
             }
 
@@ -363,6 +373,15 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             {
                 warnings.Add("The record was created but Dataverse did not echo the created row; the record id could not be determined. " +
                              "Use dataverse.search_data or dataverse.read_query to locate the new record.");
+            }
+
+            // Task 142 (L1, owner Q5 + R3): a created project/matter/work assignment's "Assigned *" contacts get their
+            // Collaborate grant or share now. After the create committed; never throws, never fails this create.
+            if (createdId is { } createdRoot)
+            {
+                await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                    _scopes, tablename, createdRoot, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             var citationPath = createdId.HasValue
@@ -430,21 +449,20 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// (<see cref="OwnedChildWrite.ForPersonColumns"/>) — re-mapped, so the column's navigation property comes from metadata
     /// like any other lookup — and that column as SERVER-set (it names the caller, so it costs no AppendTo check). A value
     /// the request supplies is never overwritten; a caller with no linked contact (task 141) leaves a contact column blank
-    /// (logged). Nothing is added for a table with no "for" column. Also returns the item the mapping came from, so a
-    /// further server-set column (<see cref="WithCreatorPersonAsync"/>) is added to it rather than to the request's.
+    /// (logged). Nothing is added for a table with no "for" column.
     /// </summary>
-    private async Task<(JsonElement Json, DataverseWriteItemMapper.MappedItem Item, IReadOnlySet<string>? ServerSet, DataverseUserResponse? Failure)>
+    private async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlySet<string>? ServerSet, DataverseUserResponse? Failure)>
         WithForPersonAsync(string tablename, JsonElement item, DataverseWriteItemMapper.MappedItem mapped, CancellationToken ct)
     {
         if (OwnedChildWrite.ForPersonColumns.GetValueOrDefault(tablename) is not { } forColumn
             || OwnedChildWrite.Sets(item, forColumn.Column))
         {
-            return (item, mapped, null, null);
+            return (mapped, null, null);
         }
 
         var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
-            return (item, mapped, null, failure);
+            return (mapped, null, failure);
 
         Guid? person = me.SystemUserId;
         if (string.Equals(forColumn.RelatedTable, "contact", StringComparison.OrdinalIgnoreCase))
@@ -456,71 +474,25 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                     "assigned_unset: entity={Entity} column={Column} reason=caller_has_no_linked_contact — the record is created "
                     + "owned by its team with the 'for' column blank (never a team, never an email match; task 146 b2)",
                     tablename, forColumn.Column);
-                return (item, mapped, null, null);
+                return (mapped, null, null);
             }
         }
 
-        var withFor = OwnedChildWrite.WithLookup(item, forColumn.Column, forColumn.RelatedTable, person.Value);
-        var remapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, withFor, ct).ConfigureAwait(false);
+        var remapped = await DataverseWriteItemMapper.MapAsync(
+            _dataverse, tablename, OwnedChildWrite.WithLookup(item, forColumn.Column, forColumn.RelatedTable, person.Value), ct)
+            .ConfigureAwait(false);
         if (remapped.ClientFailure is { } remapFailure)
-            return (item, mapped, null, remapFailure);
+            return (mapped, null, remapFailure);
         if (remapped.Item is null)
         {
             // The table's metadata does not carry the column as a lookup of that table: create without it (logged).
             _logger.LogWarning(
                 "assigned_unset: entity={Entity} column={Column} reason=column_not_mapped — {Error}",
                 tablename, forColumn.Column, remapped.ValidationError);
-            return (item, mapped, null, null);
+            return (mapped, null, null);
         }
 
-        return (withFor, remapped.Item, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { forColumn.Column }, null);
-    }
-
-    /// <summary>
-    /// Task 133 (owner round 7 item 2), integrated with task 146's create-as-the-app per owner round 10 ("133's interim
-    /// app-only stamp ... superseded at integration by task 146's create-as-the-app, which writes the stamp in the create
-    /// payload"): a row of a secure-root table (<see cref="RecordCreatorPerson.StampedTables"/>) the APPLICATION creates
-    /// names the PERSON who asked for it in <c>sprk_createdbyperson</c> — the caller, by <c>WhoAmI()</c> under their own
-    /// token, never a value from the item (an item naming the column is refused before any Dataverse call). Its
-    /// <c>createdby</c> is the application, so this column is what secure provisioning's resume shares to.
-    /// <para>Re-mapped like the "for" column, so its navigation property comes from metadata, and SERVER-set: it names the
-    /// caller, so it costs no AppendTo, and it is not the caller's field-security question — the column is field-secured
-    /// precisely so that only the BFF writes it (<see cref="OwnedChildWrite.CheckCallerMayCreateAsync"/>). Where the
-    /// table's metadata does not carry it as a <c>systemuser</c> lookup (the schema is not deployed yet) the row is created
-    /// without it, logged — the non-fatal posture task 133 gave the stamp. A metadata read failure is the caller's own
-    /// error and creates nothing.</para>
-    /// </summary>
-    private async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlySet<string>? ServerSet, DataverseUserResponse? Failure)>
-        WithCreatorPersonAsync(
-            string tablename, JsonElement item, DataverseWriteItemMapper.MappedItem mapped, IReadOnlySet<string>? serverSet,
-            CancellationToken ct)
-    {
-        if (!RecordCreatorPerson.IsStamped(tablename))
-            return (mapped, serverSet, null);
-
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
-        if (me.Failure is { } failure)
-            return (mapped, serverSet, failure);
-
-        var remapped = await DataverseWriteItemMapper.MapAsync(
-                _dataverse, tablename,
-                OwnedChildWrite.WithLookup(item, RecordCreatorPerson.Column, RecordCreatorPerson.TargetEntity, me.SystemUserId), ct)
-            .ConfigureAwait(false);
-        if (remapped.ClientFailure is { } remapFailure)
-            return (mapped, serverSet, remapFailure);
-        if (remapped.Item is null)
-        {
-            _logger.LogWarning(
-                "creator_person_unset: entity={Entity} column={Column} reason=column_not_mapped — the record is created "
-                + "without its creator person; a secure-provisioning resume refuses it until the schema is deployed. {Error}",
-                tablename, RecordCreatorPerson.Column, remapped.ValidationError);
-            return (mapped, serverSet, null);
-        }
-
-        var withCreator = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { RecordCreatorPerson.Column };
-        if (serverSet is not null)
-            withCreator.UnionWith(serverSet);
-        return (remapped.Item, withCreator, null);
+        return (remapped.Item, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { forColumn.Column }, null);
     }
 
     /// <summary>The caller's LINKED contact (task 141's <c>PersonIdentity.ContactId</c>) — never an email match; null when

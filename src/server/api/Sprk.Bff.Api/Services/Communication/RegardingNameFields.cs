@@ -8,6 +8,12 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// (<c>OfficeCommunicationsEndpoints.GetSuggestionsByMessageIdAsync</c>, task 042 — which resolves
 /// UN-filed candidate names so the picker shows a real name, not a GUID). Returns <c>null</c> for
 /// entity types with no known primary-name attribute (the caller falls back to the id).
+/// <para>
+/// Also the name source of <c>TaskActionCore</c>'s ADR-024 regarding pair (unified-access-control-r2 task 156, owner
+/// decisions round 8 item 2), which is why <c>sprk_communication</c> is listed: a playbook or communication follow-up task
+/// is most often filed under the email it follows up. <c>sprk_communication</c> is never an association candidate
+/// (<c>RegardingFieldMap</c> does not list it), so the entry changes nothing for the two callers above.
+/// </para>
 /// </summary>
 public static class RegardingNameFields
 {
@@ -18,6 +24,8 @@ public static class RegardingNameFields
         "sprk_project" => "sprk_projectname",
         "sprk_invoice" => "sprk_name",
         "sprk_event" => "sprk_eventname",
+        // Verified live 2026-10-02 (spaarkedev1 describe, read-only): sprk_name NVARCHAR(850), e.g. "Email: <subject>".
+        "sprk_communication" => "sprk_name",
         "sprk_workassignment" => "sprk_name",
         "sprk_servicerequest" => "sprk_name",
         "sprk_budget" => "sprk_name",
@@ -53,6 +61,7 @@ public static class RegardingNameFields
         "sprk_project" => "sprk_projects",
         "sprk_invoice" => "sprk_invoices",
         "sprk_event" => "sprk_events",
+        "sprk_communication" => "sprk_communications",
         "sprk_workassignment" => "sprk_workassignments",
         "sprk_servicerequest" => "sprk_servicerequests",
         "sprk_budget" => "sprk_budgets",

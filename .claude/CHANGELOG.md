@@ -7,6 +7,36 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — ADR-034 Amendment A4: Assigned-To access is materialized as removable grants (unified-access-control-r2 task 142)
+
+`.claude/adr/ADR-034-user-record-membership.md` gains the A4 call-out, four MUST bullets and two MUST NOT bullets.
+The access-conferring registry gets a second, **write-time** consumer. Every registry-listed Contact- or
+Organization-typed "Assigned *" column on a project, matter or work assignment gives the named subject
+**Collaborate** as an explicit, removable grant, or a POA share for a linked internal user. ONE invariant owner
+does this, `AssignedAccessMaterializer`, with three triggers: L1 inline, the sync route and an L4 job. Provenance
+lives in the `sprk_assignedaccess` ledger. It never lowers existing access, and an operator's removal sticks
+(`Declined`). The record's Restricted / Secure / Limited policy and the No Access list apply before any write, and
+nothing is written when an input cannot be read (ADR-003). The read-time standing-grant and organization-expansion
+terms are kept (owner A2 reversed).
+
+Line 41's claim that the Q4 `sprk_assigned*` fields have no BFF writers is corrected (142's writer census). The
+owner accepted the amendment under §6.5 path B in round 11, 2026-10-03. The spec's FR-32 and MUST NOT list and
+design §7 now name the one exception. Full rules: `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4".
+
+###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
+
+Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and
+`.claude/constraints/plugins.md` now say an invariant's ONE owner is **BFF code, or a platform-native declarative
+mechanism** that meets all three conditions: **(a)** Dataverse metadata, no Spaarke code runs (autonumber format,
+alternate key); **(b)** the platform applies it on every create/update, whoever writes; **(c)** a scripted
+per-environment `-Verify` named in the invariant's registry row. Plugins, low-code plugins, flows, webhooks,
+**business rules** (owner: excluded from this revision) and client code never own an invariant. **Autonumber
+columns** join "Permitted (not plugins)"; formula/rollup columns (computed on read — no owner) and business rules
+(never an owner) are split, which also removes the old contradiction between `plugins.md` ("no owner needed") and
+the full ADR ("not a substitute for WP-1 owners"). Origin: task 076's interim `MAT-`/`PRJ-` numbering
+(write-path invariant I-11) is owned by Dataverse autonumber; the owner chose "A now, B as its own task" and
+approved the wording 2026-10-03. Record: `projects/spaarkeai-word-add-in-r1/notes/087-adr-002-amendment.md`.
+
 ###### 2026-10-02 — root `CLAUDE.md` §1.1: product names vs engineering identifiers (spaarke-ontology-platform-r1)
 
 **SpaarkeAi is now called the Spaarke Console.** Added a §1.1 naming table so the rename does **not** require

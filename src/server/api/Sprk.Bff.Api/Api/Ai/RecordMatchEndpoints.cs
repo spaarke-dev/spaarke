@@ -151,10 +151,14 @@ public static class RecordMatchEndpoints
     /// <summary>
     /// Associate a document with a Dataverse record by updating the lookup field.
     /// </summary>
-    private static async Task<IResult> AssociateRecord(
+    /// <remarks>Internal (not private) so the test assembly can drive the handler directly (task 156: the re-file cascade).</remarks>
+    internal static async Task<IResult> AssociateRecord(
         AssociateRecordRequest request,
         IDocumentDataverseService dataverseService,
+        [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -180,6 +184,7 @@ public static class RecordMatchEndpoints
         try
         {
             var recordGuid = Guid.Parse(request.RecordId);
+            var documentGuid = Guid.Parse(request.DocumentId); // before the write: a bad id never fails after it
 
             // Build the update request with the appropriate lookup field
             var updateRequest = new UpdateDocumentRequest();
@@ -201,13 +206,25 @@ public static class RecordMatchEndpoints
                     EntityLogicalName = "sprk_document",
                     RecordId = Guid.Parse(request.DocumentId),
                     ParentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(updateRequest),
+                    // Owner round 10 item 7 (task 146 c1): associating replaces a lookup, so it can move the document
+                    // OUT of a secure root — an un-secure, decided by THIS caller's F3 rights before anything is written.
+                    SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext),
                 },
                 token => dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, token),
                 cancellationToken);
             if (reparent.IsRefused)
             {
-                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(reparent, "association");
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                    reparent, "association", httpContext.TraceIdentifier);
             }
+
+            // Task 156 (owner round 4 item 5, option b): associating a document with a different matter / project / work
+            // assignment re-files it, so every to-do and analysis filed under it is re-stamped in this same request.
+            // Never thrown: a child that fails is logged and the reconciliation job repairs it.
+            await restamper.AfterWriteAsync(
+                "sprk_document", documentGuid,
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.DocumentColumnsWritten(updateRequest),
+                CancellationToken.None);
 
             logger.LogInformation(
                 "Successfully associated document {DocumentId} with {RecordType} {RecordId}",

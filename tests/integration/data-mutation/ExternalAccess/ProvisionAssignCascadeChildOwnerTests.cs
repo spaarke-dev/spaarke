@@ -1,10 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -504,5 +511,139 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         ChildOwnerWrites().Should().BeEmpty("nothing is put back while whether the record moved is unknown");
         _fixture.OwnerOfCascadeChild(ownOwnerLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
             "the undo landed in the fixture, so the child IS on the record's owner — exactly what the response warns of");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Batch 4 integration — task 132 (C12) x task 133: every owner change the provisioning run makes is evicted, once
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Records every owner-change eviction (the hook at its module boundary).</summary>
+    private sealed class RecordingInvalidator : IMembershipCacheInvalidator
+    {
+        public ConcurrentQueue<(string Entity, string EntitySet, Guid RecordId)> OwnerChanges { get; } = new();
+
+        public Task PublishInvalidationAsync(Guid personId, string entityLogicalName, string? correlationId, CancellationToken ct) => Task.CompletedTask;
+
+        public Task InvalidateUserAccessAsync(Guid systemUserId, string? correlationId, CancellationToken ct) => Task.CompletedTask;
+
+        public Task InvalidateRecordOwnerChangeAsync(
+            string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        {
+            OwnerChanges.Enqueue((entityLogicalName, entitySetName, recordId));
+            return Task.CompletedTask;
+        }
+    }
+
+    private async Task<(HttpResponseMessage Response, RecordingInvalidator Evictions)> ProvisionRecordingEvictionsAsync(object body)
+    {
+        var recorder = new RecordingInvalidator();
+        using var host = _fixture.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IMembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(recorder);
+        }));
+        var client = host.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "provision-test-token");
+        var response = await client.PostAsJsonAsync(Route, body);
+        return (response, recorder);
+    }
+
+    /// <summary>A successful run evicts the record exactly once (the move, the creator's and the colleagues' shares).</summary>
+    [Fact]
+    public async Task Evictions_ASuccessfulRun_EvictsTheRecordOnce()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: Guid.NewGuid());
+
+        var (response, evictions) = await ProvisionRecordingEvictionsAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        evictions.OwnerChanges.Should().Equal(("sprk_project", "sprk_projects", projectId));
+    }
+
+    /// <summary>
+    /// A verified compensation: the forward move and the move back are two owner changes (one eviction each), and each
+    /// child put back on its own owner is evicted once; the child that already had the record's owner was never written,
+    /// so it is not evicted.
+    /// </summary>
+    [Fact]
+    public async Task Evictions_ACompensation_EvictsBothMovesAndEveryChildPutBack()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        var sameOwnerLocation = Guid.NewGuid();
+        var ownOwnerLocation = Guid.NewGuid();
+        var ownOwnerDocument = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedCascadeChild(projectId, Location, sameOwnerLocation, DataversePrincipalRef.Team(businessUnitTeam));
+        _fixture.SeedCascadeChild(projectId, Location, ownOwnerLocation, DataversePrincipalRef.User(Guid.NewGuid()));
+        _fixture.SeedCascadeChild(projectId, Document, ownOwnerDocument, DataversePrincipalRef.Team(Guid.NewGuid()));
+        _fixture.SharePointDocumentReadRefused = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof fails → compensate
+
+        var (response, evictions) = await ProvisionRecordingEvictionsAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ProblemOf(response)).GetProperty("childOwnersRestored").GetBoolean().Should().BeTrue();
+        evictions.OwnerChanges.Should().BeEquivalentTo(new[]
+        {
+            ("sprk_project", "sprk_projects", projectId),                                  // the move to the team
+            ("sprk_project", "sprk_projects", projectId),                                  // the move back
+            ("sharepointdocumentlocation", "sharepointdocumentlocations", ownOwnerLocation), // put back
+            ("sharepointdocument", "sharepointdocuments", ownOwnerDocument),                 // put back
+        });
+    }
+
+    /// <summary>
+    /// The move back cannot be read back: it may have landed, so it is evicted as well (the forward move already was);
+    /// nothing is put back, so no child is evicted.
+    /// </summary>
+    [Fact]
+    public async Task Evictions_AnUnverifiedMoveBack_EvictsTheRecordForBothMoves_AndNoChild()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedCascadeChild(projectId, Location, Guid.NewGuid(), DataversePrincipalRef.User(Guid.NewGuid()));
+        _fixture.SharePointDocumentReadRefused = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailOwnerReadBackAfterBindTo = businessUnitTeam;
+
+        var (response, evictions) = await ProvisionRecordingEvictionsAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        evictions.OwnerChanges.Should().Equal(
+            ("sprk_project", "sprk_projects", projectId), ("sprk_project", "sprk_projects", projectId));
+    }
+
+    /// <summary>A forward move that cannot be read back may have landed: evicted once, before the failure is reported.</summary>
+    [Fact]
+    public async Task Evictions_AnUnverifiedForwardMove_EvictsTheRecordOnce()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: Guid.NewGuid());
+        _fixture.OwnerReadBackFails = true;
+
+        var (response, evictions) = await ProvisionRecordingEvictionsAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ProblemOf(response)).GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        evictions.OwnerChanges.Should().Equal(("sprk_project", "sprk_projects", projectId));
+    }
+
+    /// <summary>A refusal before any owner move (the cascaded rows cannot be read) changes nothing and evicts nothing.</summary>
+    [Fact]
+    public async Task Evictions_ARefusalBeforeAnyMove_EvictsNothing()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: Guid.NewGuid());
+        _fixture.CascadeChildSnapshotReadFailsWith = HttpStatusCode.ServiceUnavailable;
+
+        var (response, evictions) = await ProvisionRecordingEvictionsAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        _fixture.Updates.Should().NotContain(u => u.Payload.ContainsKey("ownerid@odata.bind"), "precondition: nothing moved");
+        evictions.OwnerChanges.Should().BeEmpty();
     }
 }

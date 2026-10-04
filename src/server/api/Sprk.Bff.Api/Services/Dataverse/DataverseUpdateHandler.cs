@@ -10,17 +10,20 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 {
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly CoreAncestorRestamper _restamper;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
+        CoreAncestorRestamper restamper,
         IRecordOwnershipResolver ownership,
         ILogger<DataverseUpdateHandler> logger)
     {
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -51,22 +54,31 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
-            return;
+        }
+        else
+        {
+            var reparent = await _ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = entityLogicalName,
+                    RecordId = recordId,
+                    ParentChanges = parentChanges,
+                },
+                token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token),
+                ct);
+            if (reparent.IsRefused)
+            {
+                throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
+            }
         }
 
-        var reparent = await _ownership.ReparentAsync(
-            new RecordReparent
-            {
-                EntityLogicalName = entityLogicalName,
-                RecordId = recordId,
-                ParentChanges = parentChanges,
-            },
-            token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token),
-            ct);
-        if (reparent.IsRefused)
-        {
-            throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
-        }
+        // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
+        // analysis is filed under, or the matter / project of a record others are filed under — so the affected copies
+        // are re-stamped in the same operation, after whichever path wrote it (the plain write, or the re-file once its
+        // owner is settled; batch 4 integration). A write that cannot move a stamp reads nothing. Never thrown: a child
+        // that fails is logged and the reconciliation job repairs it; this record's own update stands.
+        await _restamper.AfterWriteAsync(entityLogicalName, recordId, fields.Keys, CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     private async Task WriteAsync(

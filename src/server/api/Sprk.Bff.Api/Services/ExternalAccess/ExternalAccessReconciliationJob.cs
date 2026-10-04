@@ -45,14 +45,17 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// access for 90 more days. That makes R1 the one rule here that GRANTS rather than removes, which is why it is
 /// gated by the same owner switch as R2 and R3 rather than treated as harmless.</para>
 ///
-/// <para><b>Ships disabled, and writes nothing until an owner says so</b> (owner decision D-2 part 3). TWO
-/// independent switches, both of which must be thrown: the registration is
-/// <c>AddScheduledJob&lt;&gt;(cron, enabled: false)</c> so the scheduler never ticks it, and writes are gated
-/// on <see cref="WritesEnabledConfigKey"/>, which DEFAULTS TO REPORT-ONLY. The flag is named positively on
+/// <para><b>Runs on its schedule, and writes nothing until an owner says so</b> (owner decision D-2 part 3;
+/// posture decided in owner round 7 item 1, task 137, 2026-10-02: "enable the schedule in report-only mode now;
+/// enable writes only after the owner has reviewed one report"). The registration is
+/// <c>AddScheduledJob&lt;&gt;(cron)</c> — ENABLED, so every tick produces a report — and writes are gated on
+/// <see cref="WritesEnabledConfigKey"/>, which DEFAULTS TO REPORT-ONLY. The flag is named positively on
 /// purpose: an absent, empty or unparseable value is <c>false</c>, so every way of getting the configuration
 /// wrong lands on "write nothing". A before-state line is logged for EVERY row the run would change, in both
-/// modes, before anything is written — so the report a manual admin trigger produces is the same evidence the
-/// write pass would act on.</para>
+/// modes, before anything is written — so the report a scheduled or manually triggered run produces is the same
+/// evidence the write pass would act on. Inactive contacts and inactive roots have NO writer rule here by the
+/// same decision: they are read-time guards (<c>AccessibleRecordSetService</c>), so reactivating one restores
+/// access with no data repair.</para>
 ///
 /// <para><b>Fail direction — deliberately inverted relative to the read path</b> (ADR-003). For a READER,
 /// an empty result on a fault is the ISS-019 hazard: it reads as "no access" or "no rows" and is acted on. For
@@ -199,7 +202,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     public string Description =>
         "Makes an external-access row's own state the truth: stamps the default expiry on an undated grant, " +
         "deactivates a grant whose organization is inactive, and deactivates a membership whose end date has " +
-        "passed. Ships disabled and in report-only mode — writes require an explicit owner switch.";
+        "passed. Runs on its schedule in report-only mode — writes require an explicit owner switch.";
 
     /// <summary>
     /// Whether this run may write. Report-only is the default and the fail-safe: an absent, empty or
@@ -327,7 +330,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     /// <summary>
     /// THE HEARTBEAT (ADR-036 A1 rule 5). One structured line on every attempt, whatever happened — including
     /// an attempt that found nothing to reconcile. "Nothing to do" and "the job died" must not look alike, and
-    /// a run whose counts an operator can read is the only visibility this job has while it ships disabled.
+    /// a run whose counts an operator can read is the report the owner reviews before writes are enabled.
     /// </summary>
     private void LogHeartbeat(
         string status,

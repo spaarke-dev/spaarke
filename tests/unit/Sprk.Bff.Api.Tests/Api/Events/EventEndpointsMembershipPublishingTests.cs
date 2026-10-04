@@ -126,6 +126,25 @@ public class EventEndpointsMembershipPublishingTests
         payload.Should().ContainKey("ownerid@odata.bind").WhoseValue.Should().Be($"/teams({OwnerEventTestKit.TeamId})");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CreateEventPayload_BindsThePersonWhoAsked_OnlyWhenThereIsOne(bool hasPerson)
+    {
+        // Task 146 c1-r1 (owner round 13 item 9): the app-only create records the person; a writer for nobody records nobody.
+        var person = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000e1");
+        var payload = DataverseWebApiService.BuildCreateEventPayload(
+            new DataverseCreateEventRequest
+            {
+                Name = "Hearing", OwningTeamId = OwnerEventTestKit.TeamId, CreatedByPersonId = hasPerson ? person : null,
+            });
+
+        if (hasPerson)
+            payload.Should().ContainKey("sprk_CreatedByPerson@odata.bind").WhoseValue.Should().Be($"/systemusers({person:D})");
+        else
+            payload.Keys.Should().NotContain(k => k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ── ADR-034 A3: the owner event names the row's REAL owner — the team the create wrote (task 146) ─────────
 
     [Fact]
@@ -222,7 +241,7 @@ public class EventEndpointsMembershipPublishingTests
                 .Callback<DataverseCreateEventRequest, CancellationToken>((r, _) => Created = r)
                 .ReturnsAsync((EventId, DateTime.UtcNow));
             EventService.Setup(s => s.CreateEventLogAsync(
-                    EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
 
             // A row owner the create did NOT write: were the handler to read it back, it would publish this user.

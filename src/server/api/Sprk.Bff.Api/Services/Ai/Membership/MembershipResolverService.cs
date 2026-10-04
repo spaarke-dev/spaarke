@@ -2,8 +2,8 @@
 // Task 033 (2026-06-21): Implements IMembershipResolverService.
 //
 // Pipeline:
-//   1. Cache lookup — key "membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}"
-//      TTL 5 min (FR-1A.8 Phase 1A; Phase 2 task 086 extends TTL + pub/sub invalidation).
+//   1. Cache lookup — key "tenant:{tid}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v{n}"
+//      TTL 2 min (was 5 — unified-access-control-r2 task 132; BFF team/BU/owner writes evict it).
 //   2. Cache MISS:
 //      a. IMembershipFieldDiscoveryService.DiscoverAsync(entityType) → descriptors
 //      b. Filter descriptors by options.Roles + options.IdentityTypes (case-insensitive)
@@ -19,7 +19,8 @@
 //         the row's id to that role's bucket if non-empty).
 //      g. Apply paging: if matches > options.Limit, truncate ids[] and emit a
 //         continuationToken (encoded skip + take using the deterministic sort).
-//      h. Build MembershipResponse, cache it (5-min TTL), return.
+//      h. Build MembershipResponse, cache it (2-min TTL) unless it was built over a FAULTED read (task 132),
+//         return.
 //
 // Phase 1D (includeRelated) is ACCEPTED-BUT-IGNORED here — task 054 implements
 // transitive expansion as a downstream layer that calls this service per parent +
@@ -28,15 +29,16 @@
 // Failure isolation:
 //   - DiscoverAsync throws (entity not found) → propagate (caller's input is invalid).
 //   - IdentityNormalizationService throws OnlyOperationCanceledException; other
-//     failures yield empty fields per the task 031 contract.
+//     failures yield empty fields per the task 031 contract — and, since task 132, are RECORDED on the
+//     identity, so a response built over a faulted identity is returned but NOT cached.
 //   - Fetch query failure throws; the caller sees a 500/ProblemDetails from the
 //     endpoint layer (task 035). No retries here — IRequestSender resiliency is
 //     a deeper concern (ADR-016).
 //   - Cache read/write failures fail-open (warn + continue).
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md FR-1A.5 through
-//            FR-1A.9; design.md Part 1 § "Endpoint contract"; ADR-009 (Redis 5-min
-//            TTL Phase 1A); ADR-010 (interface as testing seam); ADR-013
+//            FR-1A.9; design.md Part 1 § "Endpoint contract"; ADR-009 (Redis 2-min
+//            TTL since task 132); ADR-010 (interface as testing seam); ADR-013
 //            (lives under Services/Ai/Membership/); ADR-016 (cache + retry pattern);
 //            bff-extensions.md §A (BFF pre-merge checklist).
 
@@ -58,18 +60,18 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// Default <see cref="IMembershipResolverService"/> implementation. Orchestrates
 /// discovery + identity normalization + a single OR-joined FetchXml query to
 /// resolve the rows of <c>entityType</c> a user is a member of, grouped by role.
-/// Per-user results cached in Redis (5-min TTL, FR-1A.8 Phase 1A).
+/// Per-user results cached in Redis (2-min TTL since task 132; never when built over a faulted read).
 /// </summary>
 public sealed class MembershipResolverService : IMembershipResolverService
 {
     /// <summary>
     /// Cache resource label (per ITenantCache contract). The on-wire key becomes
-    /// <c>tenant:{tenantId}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v1</c>
+    /// <c>tenant:{tenantId}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v{CacheVersion}</c>
     /// (with the configured <c>InstanceName</c> prepended by StackExchangeRedisCache).
     /// </summary>
     /// <remarks>
-    /// Phase 2 invalidation channel (FR-2P2.8) — a future per-user invalidation can
-    /// target this resource label without affecting other Redis namespaces.
+    /// Evicted per user and per entity type, across every tenant segment, by
+    /// <see cref="IMembershipCacheInvalidator"/> (task 132) — the patterns are built from <see cref="ComposeCacheId"/>.
     /// </remarks>
     internal const string CacheResource = "membership-resolved";
 
@@ -82,6 +84,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// carry silently-truncated id sets, so they must be orphaned rather than served.
     /// <para>
     /// Prior bump: 3 (r5 2026-07-09) for the distinct='true' completeness fix.
+    /// </para>
+    /// <para>
+    /// <b>Bumped 4 → 5 by task 132 (defect C12).</b> The key is unchanged, but entries written by the pre-fix code
+    /// may be FAULT-derived (an empty response built over a failed team or systemuser read), so the version is what
+    /// keeps them from being served after the deploy — the "bump REQUIRED" case below.
     /// </para>
     /// <para>
     /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
@@ -106,10 +113,14 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// authorization decision.
     /// </para>
     /// </summary>
-    private const int CacheVersion = 4;
+    internal const int CacheVersion = 5;
 
-    /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
-    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in
+    /// minutes, ≤ 5). Stacked on the identity TTL it bounds an owner or team change made OUTSIDE the BFF at
+    /// 2 + 2 = 4 minutes; BFF writes evict both (<see cref="IMembershipCacheInvalidator"/>).
+    /// </summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
     private readonly IMembershipFieldDiscoveryService _discovery;
     private readonly IIdentityNormalizationService _identity;
@@ -267,6 +278,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // ADR-034 A3 (task 152): the PEOPLE-TARGETING surface — person terms only (human createdby, user-valued
         // owner, registry Contact-typed "Assigned *" columns). See FilterToPeopleTargetingTermsAsync.
         IReadOnlyList<MembershipDescriptor> candidateFields;
+
+        // Task 132 (C12): true when this response is built over a read that could not be completed — the identity (any
+        // faulted sub-read) or, on the people-targeting surface, the human/application-user check. Such a response is
+        // returned to this request unchanged (fail soft, as before) and is NEVER cached: caching it is what kept a team
+        // read's failure hiding every team-owned record for the identity TTL plus this one.
+        var faulted = false;
         if (effectiveOptions.AccessConferringOnly)
         {
             candidateFields = FilterToAccessConferringRoles(
@@ -274,8 +291,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
         else if (effectiveOptions.PeopleTargeting)
         {
-            candidateFields = await FilterToPeopleTargetingTermsAsync(
+            (candidateFields, var createdByUnreadable) = await FilterToPeopleTargetingTermsAsync(
                 normalizedEntity, systemUserId, discovery.DiscoveredFields, ct).ConfigureAwait(false);
+            faulted |= createdByUnreadable;
         }
         else
         {
@@ -287,6 +305,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
         //     would also be valid, but discovery is typically cache-hot;
         //     sequential keeps the failure-flow simpler).
         var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+        faulted |= identity.IsFaulted;
 
         if (effectiveOptions.PeopleTargeting
             && identity.ContactId is null
@@ -329,7 +348,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, emptyResponse, faulted, systemUserId, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -365,7 +384,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, emptyResponse, faulted, systemUserId, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -408,7 +427,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
             ContinuationToken: nextToken,
             RelatedByRole: relatedByRole);
 
-        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
+        await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, response, faulted, systemUserId, ct).ConfigureAwait(false);
 
         sw.Stop();
         _logger.LogInformation(
@@ -801,7 +820,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// owner named Created By, Assigned To and personal ownership, and nothing else. Adding one is an ADR-034 edit.
     /// </para>
     /// </remarks>
-    private async Task<IReadOnlyList<MembershipDescriptor>> FilterToPeopleTargetingTermsAsync(
+    /// <returns>
+    /// The person-term descriptors, and whether the human/application-user check could not be read (task 132 — the
+    /// response built over it is then not cached; Created By binds nothing for this request, as before).
+    /// </returns>
+    private async Task<(IReadOnlyList<MembershipDescriptor> Descriptors, bool CreatedByUnreadable)> FilterToPeopleTargetingTermsAsync(
         string entityType,
         Guid systemUserId,
         IReadOnlyList<MembershipDescriptor> discovered,
@@ -876,7 +899,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // Stable order (by field) so the emitted FetchXML is deterministic.
         result.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
-        return result;
+        return (result, isApplicationUser is null);
     }
 
     // ── Descriptor filtering ───────────────────────────────────────────────
@@ -1714,7 +1737,18 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// returned string carries the user + entity + options-hash composition.
     /// </summary>
     private static string BuildCacheId(Guid systemUserId, string entityType, MembershipResolveOptions options)
-        => $"{systemUserId:D}:{entityType}:{HashOptions(options)}";
+        => ComposeCacheId(SystemUserSubject(systemUserId), entityType, HashOptions(options));
+
+    /// <summary>
+    /// The ONE composition of a membership cache id: <c>{subject}:{entityType}:{optionsHash}</c>. Readers pass real
+    /// values; the eviction patterns of <see cref="IMembershipCacheInvalidator"/> pass the Redis glob <c>*</c> for the
+    /// segments they do not fix (task 132), so a pattern cannot drift from the key a read wrote.
+    /// </summary>
+    internal static string ComposeCacheId(string subject, string entityType, string optionsHash)
+        => $"{subject}:{entityType}:{optionsHash}";
+
+    /// <summary>The subject segment of a systemuser-plane cache id (task 132 — shared with the eviction patterns).</summary>
+    internal static string SystemUserSubject(Guid systemUserId) => systemUserId.ToString("D");
 
     /// <summary>
     /// Builds the resource-id segment for the contact-anchored entry point.
@@ -1724,7 +1758,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// <see cref="BuildCacheId"/>.
     /// </summary>
     private static string BuildContactCacheId(Guid contactId, string entityType, MembershipResolveOptions options)
-        => $"contact:{contactId:D}:{entityType}:{HashOptions(options)}";
+        => ComposeCacheId($"contact:{contactId:D}", entityType, HashOptions(options));
 
     /// <summary>
     /// Options hash — deterministic across equivalent option values regardless of
@@ -1746,7 +1780,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// AUTHORIZATION caller (filtered, <c>true</c>) and the SCOPING caller
     /// (<c>Api/Membership/MembershipEndpoints</c>, unfiltered, <c>false</c>) would have shared one
     /// cache entry — same user, same entity, same Limit, therefore the same
-    /// <c>{systemUserId}:{entityType}:{optionsHash}</c> — for the 5-minute TTL. Whichever call
+    /// <c>{systemUserId}:{entityType}:{optionsHash}</c> — for the cache TTL (5 min then). Whichever call
     /// arrived first would decide what the other saw, and in the direction that matters: a scoping
     /// call landing first hands the authorization gate the UNFILTERED descriptor set, which is
     /// exactly the register A-8 over-inclusion FR-24 exists to close, reintroduced through Redis
@@ -1832,7 +1866,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 CacheVersion,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -1845,6 +1879,24 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 tenantId, cacheId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// The systemuser path's ONE cache gate (task 132 · C12): a response built over a faulted read is not stored.
+    /// </summary>
+    private async Task TrySetCacheUnlessFaultedAsync(
+        string tenantId, string cacheId, MembershipResponse response, bool faulted, Guid systemUserId, CancellationToken ct)
+    {
+        if (faulted)
+        {
+            _logger.LogWarning(
+                "MembershipResolverService: response for systemUserId={SystemUserId} entity={EntityType} was built over a " +
+                "FAULTED identity/people-targeting read; returned to this request only and NOT cached (task 132)",
+                systemUserId, response.EntityType);
+            return;
+        }
+
+        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
     }
 
     private async Task TrySetCacheAsync(string tenantId, string cacheId, MembershipResponse response, CancellationToken ct)
@@ -1860,7 +1912,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 CacheTtl,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }

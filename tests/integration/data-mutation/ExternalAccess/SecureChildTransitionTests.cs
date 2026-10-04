@@ -1,6 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -486,6 +492,55 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.ChildWorld.OwnerOf("sprk_document", family.DocDirect).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
         _fixture.SharesOn(family.DocDirect).Should().BeEmpty();
         _fixture.IsSecureOf(rootId).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Batch 4 integration, task 132 (C12) x task 148: the record's owner moved in Step 3, so an unsecure whose child pass
+    /// is incomplete (children_incomplete, flag and shares kept) still evicts the record's owner change, exactly once —
+    /// the colleagues of the new owner's business unit gain the record by ownership whether or not the children finished.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_WhenTheChildPassIsIncomplete_StillEvictsTheRecordsOwnerChange()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        var family = SeedFamily("sprk_project", rootId, childrenIsolated: true);
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Creator), RecordShareLevels.CollaborateRights);
+        _fixture.ChildWorld.RefusingOwnerWritesOf(family.DocDirect);
+        var recorder = new OwnerChangeRecorder();
+        using var host = _fixture.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IMembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(recorder);
+        }));
+        var client = host.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "provision-test-token");
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await JsonOf(response)).GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete);
+        _fixture.IsSecureOf(rootId).Should().BeTrue("precondition: the pass stopped before the flag was cleared");
+        recorder.OwnerChanges.Should().Equal(("sprk_project", "sprk_projects", rootId));
+        _fixture.ChildWorld.ClearOwnerWriteFaults();
+    }
+
+    /// <summary>Records every owner-change eviction (the hook at its module boundary).</summary>
+    private sealed class OwnerChangeRecorder : IMembershipCacheInvalidator
+    {
+        public ConcurrentQueue<(string Entity, string EntitySet, Guid RecordId)> OwnerChanges { get; } = new();
+
+        public Task PublishInvalidationAsync(Guid personId, string entityLogicalName, string? correlationId, CancellationToken ct) => Task.CompletedTask;
+
+        public Task InvalidateUserAccessAsync(Guid systemUserId, string? correlationId, CancellationToken ct) => Task.CompletedTask;
+
+        public Task InvalidateRecordOwnerChangeAsync(
+            string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        {
+            OwnerChanges.Enqueue((entityLogicalName, entitySetName, recordId));
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>

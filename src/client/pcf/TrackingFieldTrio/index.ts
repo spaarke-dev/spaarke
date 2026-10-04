@@ -120,6 +120,15 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.34 (task 142, unified-access-control-r2 — Assigned-To auto-grants, owner Q5 / A3 / A2):
+ * no change in this file's logic; the bundled `AccessGrantModal` now reads the record's Assigned-To ledger from the
+ * BFF (`GET /api/v1/external-access/assigned-access`) and shows SERVER-derived suggestions on a secure record
+ * ("Suggested from Assigned Paralegal 1", Grant / Dismiss — owner A3 = prompt), names the field behind an automatic
+ * grant in Current Access, and — owner A2 reversed (standing and organization access stay) — warns before and after
+ * removing an automatic grant whose contact still reaches the record through a standing or organization term.
+ * `CANDIDATE_ROLE_FIELDS` stays for the email-members feature; a candidate the server already suggests is offered
+ * once, in Suggested Access.
+ *
  * v1.0.33 (task 139, unified-access-control-r2 — the grant model, owner C4 + Q1):
  * no change in this file's logic; the bundled `AccessGrantModal` now reports a
  * `/grant` or `/invite-and-grant` that the server capped at the caller's own
@@ -1186,7 +1195,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.33 • Built 2026-10-02',
+      versionText: 'v1.0.34 • Built 2026-10-03',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

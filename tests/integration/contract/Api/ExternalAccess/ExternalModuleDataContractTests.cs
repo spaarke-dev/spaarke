@@ -21,6 +21,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
@@ -92,6 +96,86 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         var response = await client.GetAsync("/api/v1/external/api/dataverse/metadata/systemuser");
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    // ── View scope (unified-access-control-r2 task 157, F1) — only registered views, 404 otherwise ──────
+    // Every production module grid is inline and registers no view, so both routes answer 404 over HTTP, and they
+    // answer it before any Dataverse read. The pipeline itself is covered in
+    // tests/integration/auth/UnifiedAccessControl/ExternalModuleSavedQueryScopeTests.cs; the rows here prove the ROUTES
+    // run it. The by-id row that bites a route-level bypass is
+    // ModuleSavedQuery_WhenTheIdIsAnInternalViewOfARegisteredEntity_Returns404: an unknown id 404s whether or not the
+    // allow-list runs, so only a view the app's own read actually serves can tell the two apart.
+
+    [Theory]
+    [InlineData("sprk_project")]   // a registered entity: its internal MDA views are not listed
+    [InlineData("contact")]        // an entity with no module
+    public async Task ModuleSavedQueries_WhenNoViewIsRegisteredForTheEntity_Returns404(string entity)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        var response = await client.GetAsync($"/api/v1/external/api/dataverse/savedqueries/{entity}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_SAVEDQUERY_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task ModuleSavedQuery_WhenTheViewIsNotRegistered_Returns404()
+    {
+        // An unknown id: no view exists for it. The same 404 as a refused id (an unknown and a denied id look alike).
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        var response = await client.GetAsync($"/api/v1/external/api/dataverse/savedquery/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_SAVEDQUERY_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task ModuleSavedQuery_WhenTheIdIsAnInternalViewOfARegisteredEntity_Returns404()
+    {
+        // F1 over the real route. The app's own SavedQueryService serves an INTERNAL sprk_project view for this id: it
+        // is planted in the distributed cache that service reads first, because its Dataverse read needs a live
+        // ServiceClient. sprk_project has an external module, so the pre-157 route served this view with a 200; the
+        // route must now refuse it, because no module grid is registered to use it.
+        var internalView = Guid.NewGuid();
+        const string viewName = "All Projects (internal MDA view)";
+        var view = new SavedQueryDto(
+            EntityName: "sprk_project",
+            FetchXml: "<fetch><entity name='sprk_project'><attribute name='ownerid'/></entity></fetch>",
+            LayoutXml: "<grid name='resultset'><row name='result' id='sprk_projectid'/></grid>",
+            Name: viewName);
+        var cache = _fixture.Services.GetRequiredService<IDistributedCache>();
+        var cacheKey = $"sdap:dv:savedquery:{internalView:D}";
+        await cache.SetStringAsync(
+            cacheKey, JsonSerializer.Serialize(view, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        try
+        {
+            // Precondition: the read the route would make really returns the view. Without it a 404 below could come
+            // from an absent view, which is the blind spot of the unknown-id row above.
+            using (var scope = _fixture.Services.CreateScope())
+            {
+                var served = await scope.ServiceProvider.GetRequiredService<SavedQueryService>()
+                    .GetSavedQueryAsync(internalView, CancellationToken.None);
+                served.Should().Be(view, "the fixture must serve the internal view, or this test cannot see a bypass");
+            }
+
+            using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+            var response = await client.GetAsync($"/api/v1/external/api/dataverse/savedquery/{internalView}");
+
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+                "a view no external module grid is registered to use is refused, even on an entity that has a module");
+            var body = await response.Content.ReadAsStringAsync();
+            body.Should().NotContain(viewName).And.NotContain("ownerid", "no part of the view definition leaves the BFF");
+            JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString().Should().Be("DV_SAVEDQUERY_NOT_FOUND");
+        }
+        finally
+        {
+            await cache.RemoveAsync(cacheKey);
+        }
     }
 
     // ── Over-read defense (C1) — the FetchXml may reference ONLY the module entity ────────────────

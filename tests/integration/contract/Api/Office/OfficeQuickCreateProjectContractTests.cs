@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.ServiceModel;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
@@ -23,10 +24,10 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// <remarks>
 /// <para>🔴 The load-bearing assertion in this file is that <b><c>sprk_projectnumber</c> is NEVER written</b> — not
 /// directly and not through a field-mapping rule of any type or casing. It is the <c>sprk_project</c> PRIMARY NAME
-/// attribute, and the owner decided on 2026-09-17 that numbering belongs to a separate on-create component, so a
-/// pane-created Project deliberately has a blank display name until that ships. See
-/// <c>projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</c>. A future change that starts populating
-/// the number here must delete these assertions consciously, not discover them.</para>
+/// attribute. Task 076 (owner decisions 2026-10-02) kept the assertion and reversed its reason: the platform's
+/// autonumber now assigns <c>PRJ-######</c> (interim until the numbering function), and fills the column ONLY when the
+/// create leaves it empty, so a value sent here would pre-empt the sequence. The service reads the number back and
+/// warns when it is missing (<see cref="Post_Project_WhenTheCreatedProjectHasNoNumber_Returns201_AndWarnsThatItHasNoName"/>).</para>
 /// <para>Deliberately a SEPARATE file from <c>OfficeQuickCreateContractTests</c> so task 030's Matter contract stays
 /// byte-for-byte untouched (task 031 AC7). It reuses that file's
 /// <see cref="OfficeQuickCreateTestWebAppFactory"/> host: the real pipeline runs end to end (routing, OfficeAuthFilter,
@@ -51,7 +52,7 @@ public class OfficeQuickCreateProjectContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Project_Returns201_OwnedByCallersTeam_WithBusinessUnitDefaults_AndNeverANumber()
+    public async Task Post_Project_Returns201_OwnedByCallersTeam_WithBusinessUnitDefaults_AndLeavesTheNumberToThePlatform()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -81,7 +82,7 @@ public class OfficeQuickCreateProjectContractTests
             .BeEquivalentTo(OwnerTeam);
         project.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
         project.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
-        AssertNoProjectNumberSent(project);
+        AssertNumberLeftToThePlatform(project);
         project.Contains("sprk_containerid").Should()
             .BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
     }
@@ -190,7 +191,7 @@ public class OfficeQuickCreateProjectContractTests
 
         // The protected attributes: never sent on create, whatever the profile says — Default, Copy, Template,
         // Concat, and a mis-cased, padded target alike.
-        AssertNoProjectNumberSent(project);
+        AssertNumberLeftToThePlatform(project);
         project.GetAttributeValue<EntityReference>("ownerid").Should()
             .BeEquivalentTo(OwnerTeam);
         project.Contains("sprk_containerid").Should().BeFalse();
@@ -227,8 +228,9 @@ public class OfficeQuickCreateProjectContractTests
         body!.Warnings.Should().BeNull("a missing profile is a silent no-op, not a failure");
         created.Entity!.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         created.Entity.GetAttributeValue<string>("sprk_projectname").Should().Be("No Profile Project");
+        // The SOURCE record's id: since task 076 the created project (also a sprk_project) is read back for its number.
         factory.Entities.Verify(
-            e => e.RetrieveAsync("sprk_project", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "with no profile there is nothing to read from the source record");
     }
 
@@ -374,16 +376,64 @@ public class OfficeQuickCreateProjectContractTests
         AssertNothingCreated(factory);
     }
 
+    // ── Numbering: the platform's autonumber (task 076, interim until the numbering function) ─────────────
+
+    [Fact]
+    public async Task Post_Project_WhenTheCreatedProjectHasNoNumber_Returns201_AndWarnsThatItHasNoName()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+        ArrangeNumberReadBack(factory, null); // this environment has no autonumber on the column
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Unnumbered Project" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the record exists; the missing number is reported, not undone");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("project was created without a number"));
+    }
+
+    [Fact]
+    public async Task Post_Project_WhenTheNumberKeyRefusesTheFirstCreate_RetriesOnce_Returns201()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+        factory.Entities
+            .SetupSequence(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException( // production's wrapping (DataverseServiceClientImpl.CreateAsync)
+                "Failed to create sprk_project record: Entity Key Project Number (unique) violated.",
+                new FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault
+                    {
+                        ErrorCode = unchecked((int)0x80060892),
+                        Message = "Entity Key Project Number (unique) violated. A record with the same value for Project Number already exists.",
+                    },
+                    new FaultReason("Entity Key Project Number (unique) violated"))))
+            .ReturnsAsync(CreatedProjectId);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created,
+            "sprk_ProjectNumber already existed before task 076, so a project number typed ahead of the sequence costs one retry");
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     // ── Arrangement + assertion helpers ─────────────────────────────────────────────────────────────────
     //
     // Deliberately local rather than shared with OfficeQuickCreateContractTests: extracting them would edit task
     // 030's file, which AC7 requires to pass unmodified. The duplication is a few lines of arrangement.
 
-    /// <summary>No key on the create payload names the project number, in any casing or padding.</summary>
-    private static void AssertNoProjectNumberSent(Entity project)
+    /// <summary>
+    /// No key on the create payload names the project number, in any casing or padding. Updated by task 076: the same
+    /// assertion, now because the platform's autonumber fills the column only when the create leaves it empty.
+    /// </summary>
+    private static void AssertNumberLeftToThePlatform(Entity project)
         => project.Attributes.Keys
             .Should().NotContain(key => string.Equals(key.Trim(), "sprk_projectnumber", StringComparison.OrdinalIgnoreCase),
-                "numbering is left to a planned separate on-create component; this path must never send sprk_projectnumber");
+                "the platform's autonumber fills sprk_projectnumber only when the create leaves it empty (task 076)");
 
     private static void AssertNothingCreated(OfficeQuickCreateTestWebAppFactory factory)
         => factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -440,6 +490,10 @@ public class OfficeQuickCreateProjectContractTests
         return requests;
     }
 
+    /// <summary>
+    /// Captures the create payload, and arranges the read-back of the created project's number as the platform's
+    /// autonumber would answer it (task 076).
+    /// </summary>
     private static CreatedHolder CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
     {
         var holder = new CreatedHolder();
@@ -447,8 +501,18 @@ public class OfficeQuickCreateProjectContractTests
             .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((entity, _) => holder.Entity = entity)
             .ReturnsAsync(CreatedProjectId);
+        ArrangeNumberReadBack(factory, "PRJ-000042");
         return holder;
     }
+
+    /// <summary>The created project's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
+    private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
+        => factory.Entities
+            .Setup(e => e.RetrieveAsync(
+                "sprk_project", CreatedProjectId,
+                It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_projectnumber"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_project", CreatedProjectId) { ["sprk_projectnumber"] = number });
 
     private static FieldMappingRuleEntity Rule(
         string name, string sourceField, int sourceType, string targetField, int targetType,

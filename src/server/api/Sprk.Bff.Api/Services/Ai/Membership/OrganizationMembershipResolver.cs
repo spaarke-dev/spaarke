@@ -13,9 +13,13 @@
 //   - If set → executes a single FetchXml query filtered by the configured
 //     lookup field equalling the systemuser GUID, capped by
 //     MaxOrganizationsPerUser. Returns the organization GUIDs.
-//   - All failure modes (missing field, query error, permission issue) fail
-//     soft to an empty list + Warning log. Throwing here would cascade-fail
-//     the entire membership pipeline for unrelated reasons.
+//   - Through IOrganizationMembershipResolver, all failure modes (missing
+//     field, query error, permission issue) fail soft to an empty list +
+//     Warning log. Throwing there would cascade-fail the entire membership
+//     pipeline for unrelated reasons. Through the IIdentityOrganizationResolver
+//     seam a QUERY fault propagates instead (unified-access-control-r2 task
+//     132): IdentityNormalizationService merges nothing from it for the request
+//     — the same fail-soft result — and does not cache the identity.
 //
 // Operator alternatives (deferred — not in this implementation):
 //   (a) Dataverse N:N between systemuser and sprk_organization — future swap.
@@ -80,7 +84,7 @@ public sealed class OrganizationMembershipResolver
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<Guid>> GetOrganizationIdsAsync(
+    public Task<IReadOnlyList<Guid>> GetOrganizationIdsAsync(
         Guid systemUserId,
         PersonIdentity? identityContext,
         CancellationToken ct)
@@ -90,6 +94,19 @@ public sealed class OrganizationMembershipResolver
         // contactId from it — keeping the parameter on the contract.
         _ = identityContext;
 
+        return ResolveCoreAsync(systemUserId, failSoft: true, ct);
+    }
+
+    /// <summary>
+    /// The one implementation behind both contracts. <paramref name="failSoft"/> decides what a QUERY fault does:
+    /// the canonical contract keeps its fail-soft "empty + Warning" behaviour; the identity seam
+    /// (<see cref="IIdentityOrganizationResolver"/>) lets the fault reach <c>IdentityNormalizationService</c>, which
+    /// records it and does not cache an identity built over it (unified-access-control-r2 task 132 · defect C12).
+    /// Before that, the identity layer's own fault handling for resolvers was unreachable: this class swallowed the
+    /// fault first, so a failed read looked exactly like "member of no organization" and was cached.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ResolveCoreAsync(Guid systemUserId, bool failSoft, CancellationToken ct)
+    {
         if (systemUserId == Guid.Empty)
         {
             _logger.LogDebug(
@@ -174,6 +191,11 @@ public sealed class OrganizationMembershipResolver
             // Surface cancellation to the caller — not a soft failure.
             throw;
         }
+        catch (Exception) when (!failSoft)
+        {
+            // The identity seam (task 132): the caller classifies the fault. Logged there.
+            throw;
+        }
         catch (Exception ex)
         {
             // Fail-soft: a query failure (e.g., the configured lookup field
@@ -201,6 +223,8 @@ public sealed class OrganizationMembershipResolver
         CancellationToken ct)
     {
         _ = contactId; // see remarks above
-        return GetOrganizationIdsAsync(systemUserId, identityContext: null, ct);
+        // Task 132: NOT fail-soft — a query fault propagates to IdentityNormalizationService, which merges nothing from
+        // this resolver for the request (as before) and does not cache the identity.
+        return ResolveCoreAsync(systemUserId, failSoft: false, ct);
     }
 }

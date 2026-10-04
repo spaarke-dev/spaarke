@@ -116,6 +116,17 @@ public class ExternalAccessQueryIntegrityGuardTests
     /// actually sent EQUALS the builder's output, in both the over-match theory and the one-read test. The
     /// two are complementary: the wire assertion covers the production call site against any edit; this
     /// guard covers a further junction query added to this file that no behavioural test drives.</para>
+    ///
+    /// <para><b>Both directions, both spellings (task 137 r2).</b> Task 137 added the organization → members
+    /// read (<c>ReadOrganizationMemberPageAsync</c>, the grant-cache fan-out) and spells its entity set through
+    /// the constant <c>{ExternalOrganizationMembership.EntitySet}</c>, which a scan for the literal
+    /// <c>/sprk_contactorganizations</c> never saw — a verifier found the guard blind to exactly the kind of
+    /// query its remarks say it exists for. It now matches either spelling, accepts the builder of each
+    /// direction (<c>BuildOrganizationMembershipFilter</c> for contact → organizations,
+    /// <c>ExternalOrganizationMembership.ActiveMembersFilter</c> for organization → members — the shared filter
+    /// the revoke path's SPE sweep also uses), and requires BOTH reads to be found, so it cannot go vacuous for
+    /// either one. The member read's wire shape is also pinned behaviourally, by the two
+    /// <c>OrganizationMembershipReadTests.OrgFanOut_TheRealMemberPageRead_*</c> tests.</para>
     /// </remarks>
     [Fact(DisplayName = "Task 109: membership-junction queries build their $filter, never inline it")]
     public void MembershipJunctionQueriesUseTheWallSafeFilterBuilder()
@@ -125,7 +136,9 @@ public class ExternalAccessQueryIntegrityGuardTests
 
         var junctionQueryStarts = lines
             .Select((text, index) => (Text: text, Index: index))
-            .Where(l => l.Text.Contains("/sprk_contactorganizations", StringComparison.Ordinal))
+            // Either spelling of the entity set: the literal, or the shared constant interpolated (task 137 r2).
+            .Where(l => l.Text.Contains("/sprk_contactorganizations", StringComparison.Ordinal)
+                        || l.Text.Contains("/{ExternalOrganizationMembership.EntitySet}", StringComparison.Ordinal))
             .ToList();
 
         Assert.True(
@@ -134,19 +147,37 @@ public class ExternalAccessQueryIntegrityGuardTests
             + "the file moved or the query was restructured — a guard that finds nothing passes vacuously, "
             + "so fix the guard rather than deleting it.");
 
-        var inlined = junctionQueryStarts
+        var windows = junctionQueryStarts
             .Select(start => (start.Index, Window: string.Join('\n', lines.Skip(start.Index).Take(4))))
             .Where(w => w.Window.Contains("$filter=", StringComparison.Ordinal))
-            .Where(w => !w.Window.Contains("BuildOrganizationMembershipFilter", StringComparison.Ordinal))
+            .ToList();
+
+        // Not vacuous for EITHER direction: each read must be found, through its own builder.
+        Assert.True(
+            windows.Any(w => w.Window.Contains("BuildOrganizationMembershipFilter", StringComparison.Ordinal)),
+            "The contact -> organizations junction read (BuildOrganizationMembershipFilter) was not found in "
+            + $"{ParticipationServiceRelativePath}. If it moved or was renamed, fix this guard rather than deleting it.");
+        Assert.True(
+            windows.Any(w => w.Window.Contains("ExternalOrganizationMembership.ActiveMembersFilter", StringComparison.Ordinal)),
+            "The organization -> members junction read (ExternalOrganizationMembership.ActiveMembersFilter, the "
+            + $"task-137 grant-cache fan-out) was not found in {ParticipationServiceRelativePath}. If it moved or "
+            + "was renamed, fix this guard rather than deleting it.");
+
+        var inlined = windows
+            .Where(w => !w.Window.Contains("BuildOrganizationMembershipFilter", StringComparison.Ordinal)
+                        && !w.Window.Contains("ExternalOrganizationMembership.ActiveMembersFilter", StringComparison.Ordinal))
             .Select(w => (Line: w.Index + 1, Text: lines[w.Index].Trim()))
             .ToList();
 
         Assert.True(
             inlined.Count == 0,
             "A sprk_contactorganizations query builds its $filter inline instead of calling "
-            + "BuildOrganizationMembershipFilter. That filter defines the FR-23 WALL-subject set and must stay "
-            + "statecode-only; a date bound added there narrows the ethical wall (owner D-2 part 2 / D-10). "
-            + "Date bounds belong to the conferring set, in memory (MembershipConfersOn)."
+            + "BuildOrganizationMembershipFilter (contact -> organizations) or "
+            + "ExternalOrganizationMembership.ActiveMembersFilter (organization -> members). The first defines the "
+            + "FR-23 WALL-subject set and must stay statecode-only; a date bound added there narrows the ethical "
+            + "wall (owner D-2 part 2 / D-10). The second defines whom a grant-cache invalidation reaches; a filter "
+            + "inlined there can silently leave members on the 60-second TTL. Date bounds belong to the conferring "
+            + "set, in memory (MembershipConfersOn)."
             + $"{Environment.NewLine}  offending line(s): "
             + string.Join("; ", inlined.Select(l => $"{l.Line}: {l.Text}")));
     }

@@ -250,14 +250,17 @@ public class ProjectClosureCascadeTests
         ITenantCache? cache = null,
         Guid? projectId = null,
         string? containerId = null,
-        Mock<SpeContainerMembershipService>? spe = null) =>
+        Mock<SpeContainerMembershipService>? spe = null,
+        ExternalParticipationService? participations = null) =>
         ProjectClosureEndpoint.Handle(
             new CloseProjectRequest(projectId ?? ProjectId, containerId),
             client.Object,
             spe?.Object ?? new SpeContainerMembershipService(
                 Mock.Of<IGraphClientFactory>(),
                 NullLogger<SpeContainerMembershipService>.Instance),
-            cache ?? Mock.Of<ITenantCache>(),
+            // Task 137: the closure invalidates through the ONE routine, run here for real over this test's cache and
+            // the request's tid, so the RemoveAsync verifications below still read what the production code removed.
+            participations ?? GrantPolicyTestDoubles.RealInvalidationOver(cache ?? Mock.Of<ITenantCache>(), AuthenticatedContext()),
             AuthenticatedContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
@@ -697,6 +700,37 @@ public class ProjectClosureCascadeTests
         var body = OkBody(result);
         body.AccessRecordsRevoked.Should().Be(2);
         body.AffectedContactIds.Should().ContainSingle().Which.Should().Be(ContactId);
+    }
+
+    /// <summary>
+    /// Task 137 (C5): closing a project with an ORGANIZATION grant clears every ACTIVE member's cached grant set —
+    /// members used to wait out the 60-second TTL because an organization grant names no contact. 205 members, past
+    /// the revoke path's 200-member bound, are paged to completion.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WithAnOrganizationGrant_InvalidatesEveryActiveMember()
+    {
+        var organizationId = Guid.Parse("0a0a0a0a-0000-0000-0000-0000000000f1");
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(organizationId, ProjectId);
+        var client = table.BuildMock();
+        var cache = new Mock<ITenantCache>();
+        var members = Enumerable.Range(1, 205).Select(i => Guid.Parse($"dddddddd-0000-0000-0000-{i:D12}")).ToArray();
+        var participations = GrantPolicyTestDoubles.RealInvalidationOver(cache.Object, AuthenticatedContext());
+        participations.PageSize = 100;
+        participations.Members[organizationId] = members;
+
+        await CloseProject(client, participations: participations);
+
+        foreach (var member in members)
+        {
+            cache.Verify(
+                c => c.RemoveAsync(
+                    TenantId, ExternalParticipationService.ExternalAccessResource,
+                    member.ToString(), ExternalParticipationService.CacheVersion,
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
     }
 
     /// <summary>

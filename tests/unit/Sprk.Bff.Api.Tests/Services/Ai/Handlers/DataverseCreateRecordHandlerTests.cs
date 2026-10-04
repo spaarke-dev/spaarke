@@ -573,6 +573,55 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     // refusal of an item that names the column.
     // ═════════════════════════════════════════════════════════════════════════════
 
+    private void SetupCreate(string entitySetName, string primaryIdAttribute, Guid createdId, Guid? createdBy)
+    {
+        var echoedCreatedBy = createdBy is { } by ? $$""", "_createdby_value": "{{by:D}}" """ : string.Empty;
+        _dataverse
+            .Setup(d => d.PostAsync($"/api/data/v9.2/{entitySetName}", It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(201, ParseJson(
+                $$"""{ "{{primaryIdAttribute}}": "{{createdId:D}}"{{echoedCreatedBy}} }""")));
+    }
+
+    /// <summary>
+    /// Batch 4 integration (task 133 x task 146): task 133's INTERIM shape — a run-as-user create of a secure root followed
+    /// by one app-only <c>sprk_createdbyperson</c> update — is superseded by task 146's create-as-the-app, which stamps the
+    /// column IN THE CREATE PAYLOAD (<c>OwnedChildWrite.CreateAsync</c> → <c>RecordOwnerResolution.StampCreatorOn</c>;
+    /// pinned in <c>SecureChildOwnershipAiToolTests</c>). Exactly one stamp: a create that runs as the user (here: metadata
+    /// that declares no user/team ownership) makes no app-only follow-up write — its <c>createdby</c> is the person.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_matter", "sprk_matters", "sprk_matterid", "sprk_mattername")]
+    [InlineData("sprk_project", "sprk_projects", "sprk_projectid", "sprk_projectname")]
+    [InlineData("sprk_workassignment", "sprk_workassignments", "sprk_workassignmentid", "sprk_name")]
+    public async Task ExecuteChatAsync_ARunAsUserCreateOfASecureRoot_MakesNoInterimAppOnlyStamp(
+        string table, string entitySet, string primaryId, string nameColumn)
+    {
+        var createdId = Guid.NewGuid();
+        SetupEntityMetadata(table, entitySet, primaryId);
+        SetupCreate(entitySet, primaryId, createdId, Guid.NewGuid());
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"{{{table}}}","item":{"{{{nameColumn}}}":"New"}}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _appOnly.VerifyNoOtherCalls();
+    }
+
+    /// <summary>Any other table is never touched by the app-only seam: the handler stays user-scoped for it.</summary>
+    [Fact]
+    public async Task ExecuteChatAsync_CreatingAnotherTable_WritesNothingAppOnly()
+    {
+        var createdId = Guid.NewGuid();
+        SetupEntityMetadata("account", "accounts", "accountid");
+        SetupCreate("accounts", "accountid", createdId, Guid.NewGuid());
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"account","item":{"name":"Contoso"}}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _appOnly.VerifyNoOtherCalls();
+    }
+
     /// <summary>
     /// The column is server-stamped: an item naming it — in any casing, its Web API read form, or a bind — is refused
     /// pre-suspend AND on the execute path, before any Dataverse call. A caller never chooses who created a record.

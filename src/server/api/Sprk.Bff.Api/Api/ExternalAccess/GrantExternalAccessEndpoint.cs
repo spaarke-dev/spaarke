@@ -1,10 +1,10 @@
 using System.Security.Claims;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -25,20 +25,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
-/// ADR-009: Redis cache invalidation after grant (key: sdap:external:access:{contactId}).
+/// ADR-009: Redis cache invalidation after grant — ExternalParticipationService.InvalidateGrantSetsAsync (task 137).
 /// ADR-010: Concrete DI injections.
 /// </summary>
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
-    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
-    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
-    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so grant
-    // invalidation never actually cleared the cache (it relied on the 60s TTL). Tenant scope is derived
-    // from the caller's 'tid' claim; the cached value is per-Contact participation data, not an authz
-    // decision (ADR-009).
-    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
-    private const int CacheVersion = ExternalParticipationService.CacheVersion;
+    // Cache invalidation (task 137): through ExternalParticipationService.InvalidateGrantSetsAsync — the ONE
+    // routine every grant-write path calls. It owns the key (resource + version), removes under every tenant a
+    // grant set can be cached under (the CIAM one included), and expands an organization grant to its members.
+    // This file used to carry its own cache.RemoveAsync copy keyed on the caller's tid alone.
 
     /// <summary>
     /// Registers the grant endpoint on the external-access group.
@@ -62,7 +58,8 @@ public static class GrantExternalAccessEndpoint
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
             // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
-            // grantee_denied). 503: the policy could not be read (policy_unreadable).
+            // grantee_denied). 503: the policy could not be read (policy_unreadable), or whether the grantee is on the
+            // No Access list could not be checked (task 142 r4 — no_access_unverifiable).
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -81,7 +78,7 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         CallerRecordAccessProbe callerAccessProbe,
-        ITenantCache cache,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -144,7 +141,7 @@ public static class GrantExternalAccessEndpoint
         {
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct);
         }
         catch (Exception ex)
         {
@@ -181,6 +178,14 @@ public static class GrantExternalAccessEndpoint
                     ["accessRecordId"] = outcome.AccessRecordId,
                 });
         }
+
+        // Task 142: a MANUAL grant onto a subject the Assigned-To ledger holds (an auto grant, a suggestion on a secure
+        // record — "Grant" in Manage Access — or a declined entry) is now the operator's: ADOPTED, never revoked by the
+        // rule afterwards. Keyed on the grant key the core wrote. Ledger-only; never thrown.
+        var grantedKey = ResolveGrantKey(request, root.Type, root.Id);
+        await assignedAccess.MarkGrantAdoptedAsync(
+            root.Type, root.Id, grantedKey.ContactId, grantedKey.IsOrganizationGrant ? grantedKey.OrganizationId : null,
+            outcome.AccessRecordId, CancellationToken.None);
 
         // Broker-only: no synthetic SPE container membership is granted on the external path. Task 139: the level
         // actually written, and whether the grantor's ceiling narrowed the request.
@@ -285,8 +290,6 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
-        ITenantCache cache,
-        HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
     {
@@ -434,7 +437,7 @@ public static class GrantExternalAccessEndpoint
             }
 
             await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
-            await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+            await InvalidateGranteeCacheAsync(key, participations);
 
             return new GrantUpsertOutcome(survivor.Id, null)
             {
@@ -496,7 +499,7 @@ public static class GrantExternalAccessEndpoint
                 "duplicate will be collapsed by the next grant or revoke on this key.", key);
         }
 
-        await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+        await InvalidateGranteeCacheAsync(key, participations);
 
         return new GrantUpsertOutcome(accessRecordId, null)
         {
@@ -537,7 +540,9 @@ public static class GrantExternalAccessEndpoint
     /// (NARROW, not refuse — owner Q1). (3) Never-lower: when the cap narrowed the request and an active row on the
     /// key holds a HIGHER level, refuse 409 — an explicit request for a lower level (not narrowed) is a deliberate
     /// downgrade by a Write-holder and is allowed, as before. (4) The No Access list, through the read path's own
-    /// veto code (<see cref="IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync"/>); a fault refuses.</para>
+    /// veto code (<see cref="IAccessibleRecordSetService.CheckGranteeNoAccessAsync"/>): an entry refuses 422
+    /// (<see cref="GrantPolicyDecision.GranteeDenied"/>); a check that could not be completed refuses 503
+    /// (<see cref="GrantPolicyDecision.GranteeDenyListUnreadable"/>, task 142 r4) — a fault, never an entry.</para>
     /// <para>The existing-row read propagates its exception, exactly as the upsert's own read always did — a failed
     /// pre-existence read must never be mistaken for "no rows".</para>
     /// </remarks>
@@ -593,25 +598,41 @@ public static class GrantExternalAccessEndpoint
             return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
         }
 
-        // (4) FR-23 at write time — the grantee must not be on this record's No Access list.
-        bool denied;
+        // (4) FR-23 at write time — the grantee must not be on this record's No Access list. A TRI-STATE answer (task 142
+        // r4 · owner round 13 item 4): an entry is the record's policy (422 grantee_denied); a check that could not be
+        // completed is a FAULT (503 no_access_unverifiable), reported as one and never absorbed into "denied". Both
+        // refuse — only Allowed grants.
+        NoAccessCheckAnswer noAccess;
         try
         {
-            denied = await accessibleRecords.IsGranteeDeniedOnRecordAsync(
+            noAccess = await accessibleRecords.CheckGranteeNoAccessAsync(
                 ExternalGrantRoot.LogicalNameFor(rootType), rootId, grantee.ContactId, grantee.OrganizationIds, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            // The check's contract is "never throws but for the caller's cancellation"; a throw anyway is the same fault.
             logger.LogError(ex,
-                "[EXT-GRANT] The No Access check for {RootType} {RootId} threw; refusing (fail closed).",
-                rootType, rootId);
-            denied = true;
+                "[EXT-GRANT] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} threw; refusing (fail " +
+                "closed), reported as a fault.", rootType, rootId);
+            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
         }
 
-        if (denied)
-            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenied, requestedLevel);
+        switch (noAccess)
+        {
+            case NoAccessCheckAnswer.Allowed:
+                return new GrantCheck(null, granted, narrowed, existing);
 
-        return new GrantCheck(null, granted, narrowed, existing);
+            case NoAccessCheckAnswer.Denied:
+                return GrantCheck.Refused(GrantPolicyDecision.GranteeDenied, requestedLevel);
+
+            default:
+                // Unverifiable — or an answer this code does not know, which is never "allowed" (fail closed).
+                logger.LogError(
+                    "[EXT-GRANT] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} could not be completed " +
+                    "({Answer}); refusing (fail closed), reported as a fault, not as an entry on the list.",
+                    rootType, rootId, noAccess);
+                return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
+        }
     }
 
     /// <summary>
@@ -641,9 +662,10 @@ public static class GrantExternalAccessEndpoint
     /// <summary>
     /// The ProblemDetails for a write-time policy refusal (task 138), shared by <c>/grant</c>,
     /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record /
-    /// grantee_denied), 503 (policy_unreadable), 403 (caller_cannot_grant) or 409 (would_lower_existing) — the last
-    /// three added by task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
-    /// Manage Access dialog shows verbatim, and the <c>traceId</c>.
+    /// grantee_denied), 503 (policy_unreadable, or no_access_unverifiable — the No Access check could not be completed,
+    /// task 142 r4), 403 (caller_cannot_grant) or 409 (would_lower_existing) — grantee_denied, 403 and 409 added by
+    /// task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the Manage Access dialog shows
+    /// verbatim, and the <c>traceId</c>.
     /// </summary>
     internal static IResult PolicyRefusalProblem(
         GrantPolicyDecision refusal, HttpContext httpContext, IDictionary<string, object?>? extra = null)
@@ -765,48 +787,20 @@ public static class GrantExternalAccessEndpoint
     }
 
     /// <summary>
-    /// Invalidates the grantee Contact's Redis participation cache. Non-fatal.
+    /// Invalidates the grant cache of everyone the written grant reaches, through the ONE routine (task 137):
+    /// the contact on a person grant, every ACTIVE member on an organization grant — under every tenant id a grant
+    /// set can be cached under, so a CIAM grantee's entry is cleared too. Non-fatal by construction.
     /// </summary>
-    private static async Task InvalidateGranteeCacheAsync(
-        GrantAccessRequest request,
-        ITenantCache cache,
-        HttpContext httpContext,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        try
-        {
-            var tenantId = ExtractTenantId(httpContext);
-            if (request.ContactId == Guid.Empty)
-            {
-                // Organization grant (task 073 #7): there is no single grantee contact to invalidate —
-                // every active member's participation set is affected. We deliberately DO NOT fan out an
-                // invalidation per member here (that would need a members-of-org read on the write path);
-                // members pick up the new org grant within the 60s participation-cache TTL. (An org-scoped
-                // cache key is a possible future optimization — see the org-grant design note.)
-                logger.LogDebug(
-                    "[EXT-GRANT] Organization grant — no per-contact cache to invalidate; members refresh within the participation TTL.");
-            }
-            else if (!string.IsNullOrEmpty(tenantId))
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion, ct: ct);
-                logger.LogDebug("[EXT-GRANT] Invalidated cache for Contact {ContactId}", request.ContactId);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "[EXT-GRANT] No tenant claim found — skipping cache invalidation for Contact {ContactId}",
-                    request.ContactId);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-GRANT] Failed to invalidate Redis cache for Contact {ContactId}. Non-critical.",
-                request.ContactId);
-        }
-    }
+    /// <remarks>
+    /// Keyed on the grant KEY the upsert wrote, not on the request: an OrganizationId beside a ContactId is the
+    /// contact's firm (metadata), so only a key with no contact is an organization grant. The write has committed,
+    /// so the clean-up runs to completion even if the caller disconnects.
+    /// </remarks>
+    private static Task InvalidateGranteeCacheAsync(ExternalGrantKey key, ExternalParticipationService participations)
+        => participations.InvalidateGrantSetsAsync(
+            key.ContactId is { } contactId ? new[] { contactId } : Array.Empty<Guid>(),
+            key.IsOrganizationGrant && key.OrganizationId is { } organizationId ? new[] { organizationId } : Array.Empty<Guid>(),
+            CancellationToken.None);
 
     /// <summary>
     /// Resolves the caller's Azure AD object id (<c>oid</c>) — the input to
@@ -985,12 +979,4 @@ public static class GrantExternalAccessEndpoint
 
         return payload;
     }
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 }

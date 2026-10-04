@@ -86,6 +86,11 @@ public class InternalUserShareTests
     private readonly IdentityBinding.InMemoryContactIdentityStore _identity = new();
     private readonly SecureShareNoAccessGuard _guard;
 
+    /// <summary>Task 142: an inert materializer — its ledger is empty, so the share routes' operator markers are no-ops here
+    /// (the markers themselves are pinned by <c>AssignedAccessMarkerTests</c>).</summary>
+    private static Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer AssignedAccess =>
+        AssignedAccessTestDoubles.InertMaterializer();
+
     public InternalUserShareTests()
     {
         _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, NullLogger<SecureShareNoAccessGuard>.Instance);
@@ -502,6 +507,7 @@ public class InternalUserShareTests
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
             _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
+            AssignedAccessTestDoubles.InertMaterializer(),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
@@ -1156,7 +1162,8 @@ public class InternalUserShareTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
             _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
-            _children.Synchronizer(_shares), _guard, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _children.Synchronizer(_shares), _guard, AssignedAccess, AuthenticatedContext(), NullLogger<Program>.Instance,
+            CancellationToken.None);
 
     /// <summary>
     /// Reports fixed rights for the caller, which is what the intersection rule reads. A probe that answered
@@ -1192,7 +1199,8 @@ public class InternalUserShareTests
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
-            _shares, _users.Client, _flags, _cache.Object, _children.Synchronizer(_shares), AuthenticatedContext(),
+            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
+            AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>

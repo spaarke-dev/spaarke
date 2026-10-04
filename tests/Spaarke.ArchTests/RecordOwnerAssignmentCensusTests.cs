@@ -205,11 +205,12 @@ public class RecordOwnerAssignmentCensusTests
 
         // ── Waived ─────────────────────────────────────────────────────────────────────────────────────────────
         new CensusEntry("MessagingIngestor.cs", "sprk_communication", 1, Disposition.Waived,
-            "An inbound chat message names no parent at create, so it keeps its creator (task 146 escalation E1: unfiled "
-            + "communications stay creator-owned — the per-user master thread keys on the message's owner and Direct-"
-            + "thread privacy rests on per-participant shares). It is filed only by joining a record thread, which "
-            + "re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
-            WaiverKind.Pending),
+            "An inbound chat message names no parent at create, so it keeps its creator: task 146 escalation E1, ACCEPTED "
+            + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
+            + "keep their creator as owner; filed ones are routed secure-if-any. The per-user master thread keys on the "
+            + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
+            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
+            WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
             + "design (task 146 constraint 'per-user artifacts'; escalation E2).",
@@ -433,15 +434,17 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
             "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
+        // One entry for both callers of this primitive (batch 4 integration: 133's compensation and 148's unsecure were each
+        // censused on their own branch; the 148 merge joined them). The row is one a ROOT's own Assign cascades to
+        // (sharepointdocumentlocation / sharepointdocument — never a sprk_* child).
+        new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
+            "A row a ROOT's Assign cascades to (document location / document). Provisioning's compensation (task 133 c1, owner " +
+            "round 10 item 4): after a VERIFIED move of the ROOT back, put back on the owner it had before the call, read from " +
+            "the snapshot taken before any write — the root move's own side effect, undone. Unsecure (task 148, owner round 13 " +
+            "item 1): placed on the owner SecureChildReconciler resolved for a child of that root through " +
+            "IRecordOwnershipResolver. Read back in both."),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
-        // Semantic merge conflict of task 133 c1 (this primitive) with task 146 r2 (this census), surfaced when task 148
-        // merged both: the row is one a ROOT's own Assign cascades to (sharepointdocumentlocation / sharepointdocument —
-        // never a sprk_* child), put back on its snapshotted owner, or (task 148) on the owner SecureChildReconciler resolved
-        // for a child of that root through IRecordOwnershipResolver (owner round 13 item 1).
-        new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
-            "A row a ROOT's Assign cascades to (SharePoint location / document), placed on its snapshotted owner (task 133 " +
-            "compensation) or on the resolver's owner for a child of that root (task 148 unsecure); read back."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
             "A work assignment (a ROOT) created owned by its assignee; S6 b (secure under a secure matter) is task 158 (owner round 6)."),
 
@@ -1733,6 +1736,210 @@ public class RecordOwnerAssignmentCensusTests
             "Tables the server can make the Secure Record team own, missing from config/secure-record-owner-role.json — "
             + "add each through the file's howToExtend procedure (refusal first), then the live role per task 145's "
             + "procedure: " + string.Join(", ", missing));
+    }
+
+    // =============================================================================================
+    // THE PERSON WHO ASKED (task 146 c1-r1, owner round 13 item 9, 2026-10-03, BINDING)
+    // ---------------------------------------------------------------------------------------------
+    // "Children the BFF creates as the application record the person who asked: sprk_createdbyperson is added to the
+    // child tables ... and stamped by every app-create writer, so F3's 'or the creator' branch works for them."
+    // (1) Every child table a census create writes carries the column (RecordCreatorPerson.StampedChildTables — the same
+    //     list the schema script creates, ChildRecordCreatorPersonSchemaAgreementTests), and the set stays inside the
+    //     codified Secure Record Owner role set (the child tables this task governs).
+    // (2) Every app-create writer that acts for a person names that person in the member that creates (or decides the
+    //     owner of) the row. The writers that act for NOBODY are listed apart, each with its reason, so the boundary is
+    //     reviewed, not assumed. Behaviour tests pin the stamp for every family a harness can drive
+    //     (SecureChildOwnership*Tests, OfficeRecordOwnershipTests, EventEndpointsMembershipPublishingTests); this list
+    //     also pins the members no harness drives (the upload worker, the checkout file version, the shared seams).
+    // =============================================================================================
+
+    /// <summary>One app-create writer that acts for a person: the member that must name them.</summary>
+    private sealed record PersonBearingWriter(string File, string Member, string Person);
+
+    private static readonly IReadOnlyList<PersonBearingWriter> PersonBearingWriters = new[]
+    {
+        new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
+        new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
+        new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
+        new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
+        new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
+        new PersonBearingWriter("AnalysisEndpoints.cs", "CreateAnalysis", "POST /api/ai/analysis/create caller"),
+        new PersonBearingWriter("AnalysisEndpoints.cs", "ForkAnalysis", "fork caller"),
+        new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
+        new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),
+        new PersonBearingWriter("AnalysisResultPersistence.cs", "PersistReviewMemoAsync", "the user who generated the memo"),
+        new PersonBearingWriter("AnalysisOrchestrationService.cs", "ExecutePlaybookAsync", "hands the HTTP caller to the profile store"),
+        new PersonBearingWriter("ReviewMemoEndpoints.cs", "GenerateReviewMemo", "hands the HTTP caller to the memo store"),
+        new PersonBearingWriter("ComposeCreateOnSavePromoter.cs", "PromoteIfEphemeralAsync", "the saving user (oid)"),
+        new PersonBearingWriter("DocumentCheckoutService.cs", "CreateFileVersionAsync", "the user checking the document out"),
+        new PersonBearingWriter("CommunicationService.cs", "ResolveOutboundOwnerAsync", "the sender of an outbound communication"),
+        new PersonBearingWriter("CommunicationService.cs", "ResolveContentOwnerAsync", "the sender / archiver of its .eml and attachment rows"),
+        new PersonBearingWriter("CommunicationService.cs", "SendAsync", "shared-mailbox sender (HTTP caller)"),
+        new PersonBearingWriter("CommunicationService.cs", "SendAsUserAsync", "user-mode sender (oid)"),
+        new PersonBearingWriter("CommunicationService.cs", "SendMessageAsync", "message sender (HTTP caller)"),
+        new PersonBearingWriter("CommunicationService.cs", "ArchiveExistingAsync", "the caller asking for an archive"),
+        new PersonBearingWriter("CommunicationEndpoints.cs", "ArchiveCommunicationAsync", "hands the HTTP caller to the archive"),
+        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureAsync", "the Office user who saved the email"),
+        new PersonBearingWriter("MessageAttachmentMaterializer.cs", "MaterializeAsync", "the message's sender, when the caller knows them"),
+        new PersonBearingWriter("ThreadResolver.cs", "CreateRecordThreadAsync", "the caller creating a record thread"),
+        new PersonBearingWriter("CommunicationProposalApplyService.cs", "ResolveAuditRowOwnerAsync", "the confirming user"),
+        new PersonBearingWriter("CommunicationCreateTaskApplyService.cs", "ResolveAuditRowOwnerAsync", "the confirming user"),
+        new PersonBearingWriter("CommunicationCreateTaskApplyService.cs", "ApplyAsync", "the confirming user, on the task it creates"),
+        new PersonBearingWriter("TaskActionCore.cs", "CreateAsync", "the person who asked for the task (RequestedBySystemUserId)"),
+        new PersonBearingWriter("ActionSeam.cs", "CreateTaskAsync", "hands RequestedBySystemUserId to the task core"),
+        new PersonBearingWriter("OfficeService.cs", "SaveAsync", "the Office user saving a document (carried to the worker)"),
+        new PersonBearingWriter("OfficeService.cs", "QuickCreateAsync", "the Office user quick-creating an invoice"),
+        new PersonBearingWriter("OfficeService.cs", "ResolveTodoOwnerTeamAsync", "the Office user creating a To Do"),
+        new PersonBearingWriter("OfficeDocumentPersistence.cs", "CreateDocumentWithSpePointersAsync", "the saving user, on the document"),
+        new PersonBearingWriter("OfficeJobQueue.cs", "QueueUploadFinalizationAsync", "carries the saving user to the worker"),
+        new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateDocumentRecordAsync", "the carried saving user"),
+        new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateEmailArtifactAsync", "the carried saving user"),
+        new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateAttachmentArtifactAsync", "the carried saving user"),
+        new PersonBearingWriter("UploadFinalizationWorker.cs", "ProcessSingleAttachmentAsync", "the carried saving user"),
+        new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
+        new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
+        new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
+        new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
+        new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
+        new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
+        new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", "seam: maps CreatedByPersonId"),
+        new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
+        new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
+        new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
+    };
+
+    /// <summary>
+    /// The census writers that act for NOBODY, and so record no person — reviewed, not assumed (each reason names why no
+    /// person asked). A writer moved from here to <see cref="PersonBearingWriters"/> must start naming its person.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> PersonLessWriters = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["IncomingCommunicationProcessor.cs"] = "inbound mail: nobody in the organisation asked for it (the sender is outside it)",
+        ["EmailAttachmentProcessor.cs"] = "inbound mail attachments: as above",
+        ["MessagingIngestor.cs"] = "inbound channel message (E1, keeps the application as creator): no BFF caller",
+        ["CommunicationParticipantIndexer.cs"] = "derived index rows of a communication: system work",
+        ["CommunicationEnrichmentService.cs"] = "background enrichment and its review logs: system work",
+        ["TodoGenerationService.cs"] = "scheduled to-do generation: system work",
+        ["SignalEvaluationService.cs"] = "scheduled spend signals: system work",
+        ["SpendSnapshotService.cs"] = "scheduled spend snapshots: system work",
+        ["DataverseObservationMirror.cs"] = "insight observation mirror: system work",
+        ["AppOnlyAnalysisService.cs"] = "background document profile: system work",
+        ["ExternalDataService.cs"] = "external portal: the person is a CONTACT, and sprk_createdbyperson names a systemuser",
+        ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
+        ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
+    };
+
+    private static readonly Regex PersonToken = new(
+        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller)\b",
+        RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]
+    public void EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn()
+    {
+        var stamped = Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables;
+        var created = Census.Where(e => e.Disposition is Disposition.Routed or Disposition.Seam).Select(e => e.Table)
+            .Append("sprk_spendsnapshot") // an unscanned keyed UpsertRequest (SpendSnapshotService) — see UnscannedWriters
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = created.Where(t => !stamped.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.True(missing.Count == 0,
+            "Child tables the server creates app-only, without the creator-person column in RecordCreatorPerson."
+            + "StampedChildTables (and scripts/Set-ChildRecordCreatorPersonSchema.ps1): " + string.Join(", ", missing));
+
+        using var config = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json")));
+        var codifiedChildren = config.RootElement.GetProperty("tables").EnumerateArray()
+            .Where(t => t.GetProperty("kind").GetString() == "child")
+            .Select(t => t.GetProperty("logicalName").GetString()!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var outside = stamped.Where(t => !codifiedChildren.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.True(outside.Count == 0,
+            "Stamped child tables outside the codified Secure Record Owner child set (the tables task 146 governs): "
+            + string.Join(", ", outside));
+    }
+
+    [Fact(DisplayName = "Task 146 c1-r1: every app-create writer that acts for a person names that person")]
+    public void EveryAppCreateWriterThatActsForAPersonNamesThem()
+    {
+        var files = ServerFiles();
+        var problems = PersonCoverageProblems(files, PersonBearingWriters).ToList();
+        foreach (var (file, why) in PersonLessWriters)
+        {
+            if (CodeOf(files, file) is null)
+                problems.Add($"{file}: listed as person-less ({why}) but no such file exists — remove the stale entry");
+        }
+
+        Assert.True(problems.Count == 0,
+            "App-create writers that act for a person must record them (owner round 13 item 9; task note §17):\n  "
+            + string.Join("\n  ", problems));
+    }
+
+    private static IEnumerable<string> PersonCoverageProblems(
+        IReadOnlyDictionary<string, string> files, IEnumerable<PersonBearingWriter> writers)
+    {
+        foreach (var writer in writers)
+        {
+            if (CodeOf(files, writer.File) is not { } code)
+            {
+                yield return $"{writer.File}: listed ({writer.Person}) but no such file exists";
+                continue;
+            }
+
+            var regions = MemberRegions(code, writer.Member).ToList();
+            if (regions.Count == 0)
+            {
+                yield return $"{writer.File}.{writer.Member}: listed ({writer.Person}) but no such member exists";
+                continue;
+            }
+
+            if (!regions.Any(PersonToken.IsMatch))
+                yield return $"{writer.File}.{writer.Member}: creates (or decides the owner of) a row for {writer.Person} without naming them";
+        }
+    }
+
+    /// <summary>The text of every member named <paramref name="member"/> — from its declaration to the next one.</summary>
+    private static IEnumerable<string> MemberRegions(string code, string member)
+    {
+        var members = MemberDeclaration.Matches(code).ToList();
+        for (var i = 0; i < members.Count; i++)
+        {
+            if (MemberNameAt(code, members, members[i].Index) != member)
+                continue;
+            var end = i + 1 < members.Count ? members[i + 1].Index : code.Length;
+            yield return code[members[i].Index..end];
+        }
+    }
+
+    [Fact(DisplayName = "Task 146 c1-r1: negative control — the person check flags a listed writer that names nobody")]
+    public void PersonCoverage_NegativeControl()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private async Task<Guid> NamesThePersonAsync(RecordOwnershipContext context)",
+            "    {",
+            "        var owner = await _ownership.ResolveOwnerAsync(context with { RequestedBy = RecordRequester.Of(me) }, ct);",
+            "        owner.ApplyTo(row);",
+            "    }",
+            "    private async Task<Guid> NamesNobodyAsync(RecordOwnershipContext context)",
+            "    {",
+            "        var owner = await _ownership.ResolveOwnerAsync(context, ct); // RequestedBy is only in a comment",
+            "        owner.ApplyTo(row);",
+            "    }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var problems = PersonCoverageProblems(files, new[]
+        {
+            new PersonBearingWriter("Seeded.cs", "NamesThePersonAsync", "a"),
+            new PersonBearingWriter("Seeded.cs", "NamesNobodyAsync", "b"),
+            new PersonBearingWriter("Seeded.cs", "Missing", "c"),
+        }).ToList();
+
+        Assert.Equal(2, problems.Count);
+        Assert.Contains(problems, p => p.Contains("NamesNobodyAsync", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Contains("Missing", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Task 146 r1: negative control — the per-site check flags the one site in a multi-site member that lost its owner")]

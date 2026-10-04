@@ -2,7 +2,7 @@
 
 > **Domain**: Dataverse Extensibility / Record Invariants
 > **Source ADRs**: ADR-002 (reviewed + clarified 2026-09-25)
-> **Last Updated**: 2026-09-25
+> **Last Updated**: 2026-10-03 (WP-1 amendment, task 087)
 > **Last Reviewed**: 2026-09-25
 > **Reviewed By**: ADR-002 plugin review (main session, owner-approved)
 > **Status**: Verified
@@ -24,7 +24,7 @@ Load when:
 
 **Spaarke ships no Dataverse plugins. Invariants live on the server.**
 
-Every rule a record must satisfy when saved has **one owner in the BFF write path**. Clients may preview it; they never solely enforce it. Writes outside the product are corrected asynchronously, and security rules fail closed.
+Every rule a record must satisfy when saved has **one owner** — in the BFF write path, or a platform-native declarative mechanism (e.g. autonumber) that meets WP-1 (a)–(c). Clients may preview it; they never solely enforce it. Writes outside the product are corrected asynchronously, and security rules fail closed.
 
 Full rationale + registry: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../../docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 
@@ -43,7 +43,7 @@ Full rationale + registry: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE
 
 ## MUST Rules
 
-- ✅ **MUST** give each new invariant exactly one server-side owner and add it to the invariant registry (WP-1)
+- ✅ **MUST** give each new invariant exactly one owner — a BFF write-path component, or a platform-native declarative mechanism that is Dataverse metadata (no Spaarke code), applies on every create/update, and has a per-environment `-Verify` named in the registry row — and add it to the invariant registry (WP-1)
 - ✅ **MUST** apply security and on-load-UX invariants **inline, same request**; multi-row effects in one Dataverse transaction (WP-4)
 - ✅ **MUST** provide an idempotent, **fill-only** async fix-up and/or reconciliation for writes outside the product (WP-5)
 - ✅ **MUST** make security invariants fail closed (WP-6)
@@ -55,12 +55,13 @@ Full rationale + registry: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE
 
 | Question | Answer |
 |---|---|
-| Is it a rule the saved record must satisfy? | Yes → **write-path invariant** → BFF write path owner (WP-1) |
+| Is it a rule the saved record must satisfy? | Yes → **write-path invariant** → BFF write-path owner, or a platform-native declarative owner under WP-1 (a)–(c) |
 | Does it affect security, or what the user sees when the record opens? | Inline in the BFF create/update request (WP-4) |
 | Can the record also be written outside the product? | Add async fix-up (change signal → BFF worker) and/or reconciliation (WP-5) |
 | Is it a security rule? | Must fail closed (WP-6) |
-| Is it only uniqueness? | Alternate key |
-| Is it a trivial derived value? | Formula column may suffice (no owner needed if no code) |
+| Is it only uniqueness? | Alternate key (a platform-native owner under WP-1 when registered) |
+| Is it a generated sequential identifier? | Autonumber column — registry owner = the platform under WP-1 (a)–(c), with a per-environment `-Verify` (the seed is not carried by a solution import) |
+| Is it a trivial derived value shown, not stored? | Formula column — computed on read, so not a stored invariant and no registry owner. If it must be STORED, it is an invariant (WP-1) |
 | Is it a UX suggestion the user can change before saving? | Client-only is fine — it is not an invariant |
 
 ---
@@ -71,8 +72,10 @@ Full rationale + registry: [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE
 |---|---|
 | Service endpoint / webhook **step registration (no code)** | Async change signal to Service Bus / BFF for WP-5 |
 | Plugin-less Custom API | Business-event contract only |
-| Alternate keys | Uniqueness |
-| Formula / rollup columns, entity-scope business rules | Trivial derived values/defaults |
+| Alternate keys | Uniqueness (may own an invariant under WP-1 (a)–(c)) |
+| Autonumber columns | Generated sequential identifiers (may own an invariant under WP-1 (a)–(c); `-Verify` per environment) |
+| Formula / rollup columns | Derived values computed on read (not an invariant owner) |
+| Entity-scope business rules | Defaults / UX only — **never** an invariant owner |
 | Native Dataverse security | Real access control |
 
 ---

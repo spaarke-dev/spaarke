@@ -1,5 +1,10 @@
 # Task 031: Project creation semantics for r1
 
+> ⚠️ **SUPERSEDED on numbering by task 076 (owner decisions 2026-10-02).** Records are no longer nameless: Dataverse's
+> platform autonumber assigns `MAT-######` / `PRJ-######` on create (interim until the numbering function), set up per
+> environment by `scripts/Set-RecordNumberingSchema.ps1`; the service still never writes the number. See
+> `notes/076-record-numbering.md`. The rest of this note stands.
+
 > **Task**: `tasks/031-creation-service-project.poml` (FR-13, Project half)
 > **Date**: 2026-09-17
 > **Author**: task-execute sub-agent (opus / high)
@@ -49,7 +54,7 @@ was that `sprk_matternumber` is "a secondary reference field" — that was false
 > value, nothing. Leave it to whatever the user supplied (which may be empty) and let the numbering project fill it
 > later.
 
-**A pane-created Project showing a blank name until the numbering project ships is EXPECTED, not a defect.**
+~~**A pane-created Project showing a blank name until the numbering project ships is EXPECTED, not a defect.**~~ *(Superseded 2026-10-02 by task 076: it now gets `PRJ-######` from the platform.)*
 
 ### Rationale (why this is the right call, not merely the instructed one)
 

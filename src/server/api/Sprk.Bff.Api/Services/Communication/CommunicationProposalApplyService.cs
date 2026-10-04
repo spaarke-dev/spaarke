@@ -292,7 +292,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
 
         // Task 146: the audit row is owned like its communication. Resolved BEFORE the target write, so a refusal (409)
         // leaves neither a mutated record nor a mutate-without-audit gap.
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, ct).ConfigureAwait(false);
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false);
 
         // (8) Apply via the blessed write core UNDER THE CONFIRMING USER'S IMPERSONATION. The value is passed as a
         //     String mapping so UpdateRecordActionCore's metadata-driven coercion resolves Choice/Boolean/Number
@@ -417,7 +417,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         var suggestionJson = row.GetAttributeValue<string>("sprk_aisuggestion");
         var suggestion = ParseSuggestion(suggestionJson);
 
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, ct).ConfigureAwait(false); // task 146
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false); // task 146
         var auditLogId = await WriteDismissedAuditRowAsync(
             communicationRef.Id, targetEntity, targetRecordIdRaw, targetField,
             suggestion, suggestionJson, callerSystemUserId, auditOwner, ct).ConfigureAwait(false);
@@ -515,7 +515,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         }
 
         // Task 146: resolve the compensating audit row's owner BEFORE the revert write (as apply does).
-        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, ct).ConfigureAwait(false);
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false);
 
         // (5) Write the old value back UNDER THE CALLER'S IMPERSONATION (same blessed core as apply).
         var updateResult = await _actionSeam.UpdateRecordAsync(
@@ -576,11 +576,16 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     /// (the named Secure team's for a secure message), or the creator while the message is unfiled (E1). A REFUSAL is
     /// a 409 carrying the stable reason code; nothing has been written yet.
     /// </summary>
+    /// <remarks>Task 146 c1-r1 (owner round 13 item 9): the confirming user asked for the audit row the application
+    /// creates — it is recorded as the row's creator person.</remarks>
     private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveAuditRowOwnerAsync(
-        Guid communicationId, CancellationToken ct)
+        Guid communicationId, Guid callerSystemUserId, CancellationToken ct)
     {
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId),
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId) with
+            {
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(callerSystemUserId),
+            },
             ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {

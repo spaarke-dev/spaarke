@@ -91,6 +91,11 @@ switch is thrown.
 
 ## 6. The two switches, and why there are two
 
+> **Superseded in part (2026-10-02, task 137 r3, owner round 7 item 1).** Switch 1 is now ON: the job is registered
+> enabled on its daily `0 5 * * *` schedule, and every tick runs report-only. Switch 2 is unchanged:
+> `WritesEnabled` stays `false` until the owner has reviewed one report. See `task-137-soft-revocation.md` §6 and
+> `DEPLOY-CHECKLIST.md` §4.1. The text below records the posture as shipped by task 117.
+
 Both must be thrown before a single row is written.
 
 1. **`AddScheduledJob<ExternalAccessReconciliationJob>(cron, enabled: false)`** — the scheduler never

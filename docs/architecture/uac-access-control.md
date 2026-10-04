@@ -54,17 +54,22 @@ Direct query pattern: query the document directly → 200 = grant `AccessRights.
 
 ## Redis Caching TTLs (ADR-009)
 
-Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153, 180` (corrected 2026-08-20 — plain `IDistributedCache`, NOT `ITenantCache`; no tenant segment, no version suffix):
+Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs` — since unified-access-control-r2 task 132 (defect C12, ADR-009 path C) through `ITenantCache` under the caller's `tid` (the on-wire key carries the configured `InstanceName` in front):
 
 | Data | Cache Key Pattern | TTL |
 |------|-------------------|-----|
-| User Roles | `sdap:auth:roles:{userOid}` | 2 min |
-| Team Memberships | `sdap:auth:teams:{userOid}` | 2 min |
-| Resource Access | `sdap:auth:access:{userOid}:{resourceId}` | 60 sec |
+| Document access | `tenant:{tid}:auth-access:{authMode}:{userOid}:{documentId}:v1` | 60 sec |
+| Record access | `tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v1` | 60 sec |
+
+The user-level role and team keys that used to be written here (2 min) were read by nothing and are deleted. A request with no `tid` is not cached at all.
+
+**A fault is never cached (task 132).** `DataverseAccessDataSource` marks a snapshot `AccessSnapshot.Faulted` when it is not a complete Dataverse answer — an OBO failure, a user lookup that could not be completed, a RetrievePrincipalAccess or probe status other than an answer, a timeout, a failed team / role sub-read, or the DEGRADED probe-derived Read after RetrievePrincipalAccess gave no answer. The request receives exactly the rights it always did; the snapshot is not stored. An answer — RPA with no rights, a probe 403 / 404, a lookup that found no systemuser — is cached. Re-owns evict every user's snapshot of the record (`IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync`).
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
+The membership-side caches (identity, membership resolution, impersonated root sets) are 2 minutes since task 132 (were 10 / 5 / 5) and are evicted by the BFF's own team, business-unit and owner writes; the residual staleness table is in [`caching-architecture.md`](caching-architecture.md#access-cache-residual-staleness-unified-access-control-r2-task-132--defect-c12).
+
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. A set built over a failed read (the grant query, the organization-grant read, or the membership junction) is returned to its request and never cached (task 132). Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 
@@ -134,7 +139,7 @@ No level carries Assign. Collaborate and Full Access carry Share so a Write-hold
 - `ExternalAccessLevels.GrantCeilingFor` maps the rights to a ceiling over Read / Write / Delete only: Full Access iff Read+Write+Delete; Collaborate iff Read+Write; View Only iff Read; otherwise none (→ **403** `sdap.access.grant.caller_cannot_grant`). Create, Append, AppendTo and Share are not consulted (RetrievePrincipalAccess need not report CreateAccess on an existing record).
 - A request above the ceiling is **narrowed, not refused**: written at the ceiling, and the response says so (`grantedAccessLevel`, `narrowed: true`). `/share-user` intersects right by right (Dataverse's own rule) and reports its existing `narrowed` flag.
 - **Never silently lower.** When the request was narrowed and the grantee already holds more (a higher active grant row, or share rights the narrowed mask lacks), the write is refused with **409** `sdap.access.grant.would_lower_existing` — the grant upsert updates levels in place and ModifyAccess replaces rights, so without this a "Full Access please" capped to Collaborate would lower someone else's Full Access grant. An explicit request for a lower level (not narrowed) is a deliberate downgrade and is applied.
-- **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` → `ResolveDenyVetoAsync`). A deny-list fault refuses too (fail closed). The internal-user No Access list on `/share-user` is task 143's.
+- **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.CheckGranteeNoAccessAsync` → `ResolveDenyVetoAsync`). The check answers a **tri-state** (task 142 r4, owner round 13 item 4): Allowed, Denied (an entry), or Unverifiable — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or referenced organizations, a fail-closed deny-list read). Unverifiable refuses too (fail closed), but as a fault — **503** `sdap.access.grant.no_access_unverifiable` — never absorbed into `grantee_denied`. The read path removes both (unchanged). The internal-user No Access list on `/share-user` is task 143's.
 
 **Where the checks live (WP-1).** The policy (task 138), ceiling, never-lower and No Access checks run inside the one grant-writing core, `GrantExternalAccessEndpoint.CreateGrantAsync`, which takes a REQUIRED `GrantCeiling`; `/invite-and-grant` runs the same `CheckGrantAsync` BEFORE onboarding (resolving an existing contact by email read-only), so a refusal leaves no Contact or CIAM account behind. The ArchTest `GrantCeilingGuardTests` pins that the core is the only writer of a grant's level and that every call supplies a ceiling. Assigned-To auto-grants (task 142) are uncapped Collaborate (owner rule 5) and supply their own named ceiling.
 

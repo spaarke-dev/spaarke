@@ -295,6 +295,21 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                     return enforce.EntryId is { } entryId && entryId != Guid.Empty
                         ? new DelegationTarget(NoAccessEnforceEndpoint.EntrySet, entryId)
                         : null;
+
+                // ── /assigned-access/sync, /assigned-access, /assigned-access/dismiss (task 142) ──
+                // The Assigned-To routes change (or, for the list, disclose) who can reach a record, so they take the same
+                // Write-on-the-record check as /share-user — the post-save script, a wizard and the "Update Access" ribbon
+                // command all call them as the user. Each target comes from the SAME explicit-root resolver its handler
+                // uses, so the record authorized is the record materialized. Without these cases the default branch below
+                // would deny every caller — the filter "attached" but never reaching the request type.
+                case AssignedAccessSyncRequest sync:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(sync.RecordType, sync.RecordId));
+
+                case AssignedAccessListQuery assignedList:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(assignedList.RecordType, assignedList.RecordId));
+
+                case AssignedAccessDismissRequest dismiss:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(dismiss.RecordType, dismiss.RecordId));
             }
         }
 

@@ -444,6 +444,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Every query the endpoints issued (entity set, filter) — so a test can prove a table was never read.</summary>
     public ConcurrentBag<(string EntitySet, string? Filter)> Queries { get; } = new();
 
+    /// <summary>
+    /// When true, the ownership PATCH is APPLIED and then fails as an HttpClient timeout would — Dataverse committed
+    /// it, the caller never heard back (unified-access-control-r2 task 132: an ambiguous re-own). Default false.
+    /// Batch 4 integration: task 132's own <c>OwnerReadBackFails</c> is the same flag as task 133's above (the owner
+    /// read-back throws), so the fixture keeps the one definition.
+    /// </summary>
+    public bool OwnershipPatchTimesOutAfterApplying { get; set; }
+
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
         Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null, Guid? CreatedByPerson = null);
@@ -538,6 +546,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
+        OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
         Grants.Clear();
         Revokes.Clear();
@@ -821,6 +830,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             }
 
             MirrorIntoChildWorld(_records[id]);
+        }
+
+        if (OwnershipPatchTimesOutAfterApplying && flat.ContainsKey("ownerid@odata.bind"))
+        {
+            // Applied above; the response never arrives — what an HttpClient timeout looks like to the caller.
+            return Task.FromException(new TaskCanceledException(
+                "Simulated timeout: Dataverse committed the ownership PATCH but the response never arrived."));
         }
 
         return Task.CompletedTask;

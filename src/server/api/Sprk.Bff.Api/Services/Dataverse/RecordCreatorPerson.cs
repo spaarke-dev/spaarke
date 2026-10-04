@@ -18,9 +18,9 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 ///
 /// <para><b>Who writes it.</b> Only the BFF: every BFF create path of the three tables stamps it — the app-only paths
 /// in the create payload itself (Office quick-create: the Office caller; <c>POST /api/v1/work-assignments</c>: the
-/// endpoint's caller, resolved by WhoAmI; the chat create <c>dataverse.create_record</c>, which task 146 moved to
-/// create-as-the-app per owner round 7 item 3: the caller, resolved by WhoAmI under their own token — owner round 10
-/// retired task 133's interim follow-up update). It is field-secured
+/// endpoint's caller, resolved by WhoAmI), and the chat create (<c>dataverse.create_record</c>), which task 146 moved to
+/// create-as-the-app (owner round 7 item 3), in that create's payload too (<c>OwnedChildWrite.CreateAsync</c>; task 133's
+/// interim app-only follow-up update was removed at the batch 4 integration, so there is one stamp). It is field-secured
 /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every user can READ it (the reader profile sits on every
 /// business unit's default team), only the BFF application user(s) can create or update it — so a client create cannot
 /// name someone else as its creator.</para>
@@ -32,25 +32,71 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 ///
 /// <para><b>Placement (CLAUDE.md §10/§11).</b> A static holder of one column's name and its two write shapes, so the
 /// one reader and the three writers cannot drift apart. No service, no interface, no DI registration.</para>
+///
+/// <para><b>The CHILD tables too (unified-access-control-r2 task 146 c1-r1; owner round 13 item 9, 2026-10-03).</b>
+/// "Children the BFF creates as the application record the person who asked." F3 (owner round 10 item 7) lets the
+/// person who created a secure record's child move it out of the secure record; for a child the BFF created app-only,
+/// <c>createdby</c> is the application user, so without this column the creator branch could never admit anyone. The
+/// same column, with the same field security, goes on every child table the BFF creates app-only
+/// (<see cref="StampedChildTables"/>, created by <c>scripts/Set-ChildRecordCreatorPersonSchema.ps1</c>, pinned against it by
+/// <c>ChildRecordCreatorPersonSchemaAgreementTests</c>). Every app-create writer that acts for a person stamps it through
+/// the owner decision (<c>RecordOwnershipContext.RequestedBy</c> → <c>RecordOwnerResolution.CreatedByPerson</c>, written by
+/// <c>RecordOwnerResolution.ApplyTo</c> / <c>StampCreatorOn</c>). Writers that act for nobody (inbound mail, background
+/// jobs) leave it empty. <see cref="StampedTables"/> stays the three roots: task 133's schema script and its agreement test
+/// pin exactly that set.</para>
 /// </remarks>
 public static class RecordCreatorPerson
 {
     /// <summary>The lookup's logical name. The SDK writes address it by this name; the schema script creates it.</summary>
-    public const string Column = "sprk_createdbyperson";
+    /// <remarks>Task 146 c1-r1: spelled once, in <see cref="Spaarke.Dataverse.RecordCreatorPersonColumn"/>, which the shared
+    /// create seams also write through.</remarks>
+    public const string Column = Spaarke.Dataverse.RecordCreatorPersonColumn.LogicalName;
 
     /// <summary>The Web API read form of the lookup.</summary>
     public const string ValueColumn = "_sprk_createdbyperson_value";
 
     /// <summary>The table the lookup points at.</summary>
-    public const string TargetEntity = "systemuser";
+    public const string TargetEntity = Spaarke.Dataverse.RecordCreatorPersonColumn.TargetEntity;
+
+    /// <summary>
+    /// The lookup's single-valued navigation property — what a Web API write binds (<c>sprk_CreatedByPerson@odata.bind</c>).
+    /// Dataverse names it after the lookup's schema name; read live 2026-10-03 on the roots
+    /// (<c>RelationshipDefinitions(SchemaName='sprk_systemuser_sprk_matter_createdbyperson')</c> →
+    /// <c>ReferencingEntityNavigationPropertyName = sprk_CreatedByPerson</c>), and the child schema script sets it explicitly.
+    /// </summary>
+    public const string NavigationProperty = Spaarke.Dataverse.RecordCreatorPersonColumn.NavigationProperty;
 
     /// <summary>The tables that carry the column — the three secure roots.</summary>
     public static readonly IReadOnlySet<string> StampedTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_project", "sprk_matter", "sprk_workassignment" };
 
-    /// <summary>Whether <paramref name="entityLogicalName"/> carries the column.</summary>
+    /// <summary>
+    /// The CHILD tables that carry the column (task 146 c1-r1, owner round 13 item 9): every child or content table the BFF
+    /// creates as the application — the census's routed and seam create tables (<c>RecordOwnerAssignmentCensusTests</c>
+    /// pins that every one of them is here), each in the codified Secure Record Owner role set.
+    /// </summary>
+    public static readonly IReadOnlySet<string> StampedChildTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_document", "sprk_todo", "sprk_event", "sprk_eventlog", "sprk_communication", "sprk_communicationthread",
+        "sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_analysis",
+        "sprk_analysisoutput", "sprk_emailartifact", "sprk_attachmentartifact", "sprk_fileversion", "sprk_invoice",
+        "sprk_spendsignal", "sprk_spendsnapshot",
+    };
+
+    /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>
     public static bool IsStamped(string? entityLogicalName) =>
-        entityLogicalName is not null && StampedTables.Contains(entityLogicalName.Trim());
+        entityLogicalName is not null
+        && (StampedTables.Contains(entityLogicalName.Trim()) || StampedChildTables.Contains(entityLogicalName.Trim()));
+
+    /// <summary>Binds <paramref name="systemUserId"/> on a Web API create payload (app-only creates through a PATCH/POST).</summary>
+    public static void Bind(IDictionary<string, object?> fields, Guid systemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        if (systemUserId == Guid.Empty)
+            throw new ArgumentException("The creator's systemuserid is required.", nameof(systemUserId));
+
+        Spaarke.Dataverse.RecordCreatorPersonColumn.BindIfKnown(fields, systemUserId);
+    }
 
     /// <summary>Stamps <paramref name="systemUserId"/> on an SDK create payload (app-only creates).</summary>
     public static void Stamp(Entity entity, Guid systemUserId)

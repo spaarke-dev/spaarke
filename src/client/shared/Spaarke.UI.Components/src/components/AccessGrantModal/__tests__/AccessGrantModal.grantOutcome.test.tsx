@@ -8,13 +8,16 @@
  *  - the grantee already holds more than the caller can grant (409
  *    `sdap.access.grant.would_lower_existing`),
  *  - the grantee is on the record's No Access list (422 `sdap.access.grant.grantee_denied`),
- *  - the caller's own access allows granting nothing (403 `sdap.access.grant.caller_cannot_grant`).
+ *  - the caller's own access allows granting nothing (403 `sdap.access.grant.caller_cannot_grant`),
+ *  - whether the grantee is on the No Access list could not be checked (503
+ *    `sdap.access.grant.no_access_unverifiable` — task 142, owner round 13 item 4 / round 18).
  * And `/unshare-user` refuses to remove the last person who can open a secure record
  * (409 `sdap.access.user_share.last_reader_on_secure_record`, owner round 3 S5).
  *
- * Each refusal must render the server's own sentence — never a generic "try again"
- * (retrying fails the same way), and never the delegation banner (the caller DOES
- * hold Write; that is a different state).
+ * Each refusal must render the server's own sentence — never the modal's generic
+ * "N failed. Please try again." (a policy refusal fails the same way on retry; the
+ * 503's own sentence says whether to retry), and never the delegation banner (the
+ * caller DOES hold Write; that is a different state).
  */
 
 import * as React from 'react';
@@ -162,12 +165,17 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       [
         422,
         'sdap.access.grant.grantee_denied',
-        "This contact or organization cannot be given access to this record: it is on the record's No Access list, or that list could not be checked. Nothing was granted.",
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list. Nothing was granted.",
       ],
       [
         403,
         'sdap.access.grant.caller_cannot_grant',
         'You can only give someone the access you have on this record, and your own access to it could not be confirmed. Nothing was granted. Try again; if it persists, ask someone with access to the record.',
+      ],
+      [
+        503,
+        'sdap.access.grant.no_access_unverifiable',
+        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was granted. Try again in a moment.",
       ],
     ])('a %i %s from /invite-and-grant shows its detail, not a generic failure', async (status, reasonCode, detail) => {
       const fetchMock = fetchWith(url =>
@@ -197,6 +205,22 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       await grantCandidateAt('Full Access');
 
       expect(await screen.findByText(/already have more access than you can grant/)).toBeInTheDocument();
+    });
+
+    it('a 503 no_access_unverifiable from /grant (an internal contact) shows its detail, not the generic failure', async () => {
+      const detail =
+        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was granted. Try again in a moment.";
+      const fetchMock = fetchWith(url =>
+        url.includes('/grant') && !url.includes('invite')
+          ? problem(503, 'sdap.access.grant.no_access_unverifiable', detail)
+          : null
+      );
+      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, true)} />);
+
+      await grantCandidateAt('Full Access');
+
+      expect(await screen.findByText(/No Access list could not be checked/)).toBeInTheDocument();
+      expect(screen.queryByText(/failed\. Please try again/)).not.toBeInTheDocument();
     });
   });
 

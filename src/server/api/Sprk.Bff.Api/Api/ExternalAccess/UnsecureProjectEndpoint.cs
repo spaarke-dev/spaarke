@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -130,6 +131,7 @@ public static class UnsecureProjectEndpoint
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildReconciler secureChildren,
         IConfiguration configuration,
+        IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -278,6 +280,10 @@ public static class UnsecureProjectEndpoint
                 "[UNSECURE] Dataverse refused the ownership assignment of {RecordType} {RecordId} to user " +
                 "{OwnerId}. TraceId={TraceId}", root.WireToken, recordId, newOwnerId, traceId);
 
+            // Task 132 (C12): a PATCH that timed out after Dataverse committed it lands here too — the record may have
+            // been re-owned. Evict (always safe), exactly as on the "could not verify" outcome below.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "Ownership could not be reassigned, so the secure designation was left in place.",
                 traceId, (ReasonKey, ReasonOwnerAssignmentFailed));
@@ -314,6 +320,9 @@ public static class UnsecureProjectEndpoint
                 "[UNSECURE] Could not verify the ownership reassignment of {RecordType} {RecordId}. " +
                 "Treating it as failed. TraceId={TraceId}", root.WireToken, recordId, traceId);
 
+            // Task 132 (C12): the PATCH was accepted and may have applied — evict (always safe) before reporting.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The ownership reassignment could not be verified, so the secure designation was left " +
                 "in place.", traceId, (ReasonKey, ReasonOwnerAssignmentNotApplied));
@@ -331,19 +340,35 @@ public static class UnsecureProjectEndpoint
         // A pass that does not complete STOPS here (ADR-003): the record's own shares stay (its sharees keep reaching the
         // related records that are still isolated) and sprk_issecure stays set — the flag keeps meaning "related records
         // may still be isolated". The ownership move above stands. Calling again completes the pass.
-        var childPass = await secureChildren.ReconcileAsync(
-            root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, ct);
-        if (!childPass.IsComplete)
-            return ChildrenIncomplete(childPass, root, recordId, flagStillSet: true, logger, traceId,
-                ("newOwnerSystemUserId", newOwnerId));
-
-        // ── Step 4: Revoke the explicit shares ───────────────────────────────
         //
-        // After Step 3.5 every related record is out of isolation and carries none of the record's sharees, so revoking
-        // the record's own shares now leaves nothing reachable by nobody (owner round 11 item 3: 148 re-owns the children
-        // before the record's shares go).
-        var sweep = await RevokeAllSharesAsync(
-            recordShare, root, recordId, logger, traceId, ct);
+        // Steps 3.5 and 4 share one eviction (task 132 · C12, Step 4.5 below): the record's owner changed in Step 3, so an
+        // incomplete child pass that returns here must evict exactly as a completed one does.
+        ShareSweep sweep;
+        SecureChildReconcileReport childPass;
+        try
+        {
+            childPass = await secureChildren.ReconcileAsync(
+                root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, ct);
+            if (!childPass.IsComplete)
+                return ChildrenIncomplete(childPass, root, recordId, flagStillSet: true, logger, traceId,
+                    ("newOwnerSystemUserId", newOwnerId));
+
+            // ── Step 4: Revoke the explicit shares ───────────────────────────────
+            //
+            // After Step 3.5 every related record is out of isolation and carries none of the record's sharees, so
+            // revoking the record's own shares now leaves nothing reachable by nobody (owner round 11 item 3: 148 re-owns
+            // the children before the record's shares go).
+            sweep = await RevokeAllSharesAsync(
+                recordShare, root, recordId, logger, traceId, ct);
+        }
+        finally
+        {
+            // ── Step 4.5 (task 132 · C12): the owner changed (and, past Step 4, the shares went) — evict, before any
+            // return ── The record now sits with a user in a normal business unit, so that unit's colleagues gain it by
+            // ownership, and every former sharee loses it. Their cached membership, impersonated root sets and access
+            // snapshots would otherwise keep the old answer for the TTLs.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
 
         // ── Step 5: Clear the flag ───────────────────────────────────────────
         try
@@ -445,6 +470,17 @@ public static class UnsecureProjectEndpoint
             traceId,
             extensions.ToArray());
     }
+
+    /// <summary>
+    /// Evicts the caches an owner change makes stale, through the ONE hook every owner-changing writer must call
+    /// (<see cref="IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>, task 132). Never fails the request:
+    /// the hook does not throw, and it is not bound to the request's token — a client that disconnects must not leave
+    /// the clean-up half done.
+    /// </summary>
+    private static Task EvictAfterOwnerChangeAsync(
+        IMembershipCacheInvalidator accessCacheInvalidator, SecureRecordRoot root, Guid recordId, string traceId)
+        => accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+            root.LogicalName, root.EntitySet, recordId, traceId, CancellationToken.None);
 
     /// <summary>
     /// The owner an un-secured record lands on: the request's nomination, else configuration, else

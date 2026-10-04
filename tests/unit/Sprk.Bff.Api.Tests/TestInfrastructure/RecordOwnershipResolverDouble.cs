@@ -40,6 +40,15 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
     /// <summary>When set, every question throws it (a Dataverse fault).</summary>
     public Exception? Fault { get; set; }
 
+    /// <summary>
+    /// Task 146 c1-r1: the person a requester known only by Entra object id resolves to (a requester named by
+    /// systemuserid is echoed as given). <see langword="null"/>: such a requester resolves to nobody.
+    /// </summary>
+    public Guid? ObjectIdRequesterPerson { get; set; } = DefaultRequesterPersonId;
+
+    /// <summary>The person an object-id requester resolves to unless a test says otherwise.</summary>
+    public static readonly Guid DefaultRequesterPersonId = Guid.Parse("0f0f0f0f-0146-4146-8146-000000000146");
+
     /// <summary>Every context the resolver was asked about, in order.</summary>
     public ConcurrentQueue<RecordOwnershipContext> Requests { get; } = new();
 
@@ -57,8 +66,17 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
     public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
     {
         Requests.Enqueue(context);
-        return Task.FromResult(Answer(context.HasParent, context.WhenUnfiled));
+        var answer = Answer(context.HasParent, context.WhenUnfiled);
+        return Task.FromResult(answer.IsRefused ? answer : answer with { CreatedByPerson = PersonOf(context.RequestedBy) });
     }
+
+    /// <summary>The person who asked, as the real resolver answers it: the systemuserid given, else the object id's user.</summary>
+    private Guid? PersonOf(RecordRequester? requester) =>
+        requester?.SystemUserId is { } systemUserId && systemUserId != Guid.Empty
+            ? systemUserId
+            : requester?.ObjectId is { } objectId && objectId != Guid.Empty
+                ? ObjectIdRequesterPerson
+                : null;
 
     public async Task<RecordOwnerResolution> ReparentAsync(
         RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct)

@@ -462,6 +462,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ["ownerid@odata.bind"] = $"/teams({owningTeamId})"
         };
 
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.BindIfKnown(payload, request.CreatedByPersonId);
+
         if (request.EventTypeId.HasValue)
             payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
 
@@ -620,7 +623,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         }
     }
 
-    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, CancellationToken ct = default)
+    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
 
         var logName = $"Event Log - {EventLogAction.GetDisplayName(action)} - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
@@ -637,6 +640,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             // Task 146: owned like its event (the caller resolved it). Unset only for an event that is not team-owned.
             payload["ownerid@odata.bind"] = $"/teams({teamId})";
         }
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person whose change the log records.
+        RecordCreatorPersonColumn.BindIfKnown(payload, createdByPersonId);
 
         _logger.LogInformation("Creating event log for event {EventId}: {Action}", eventId, EventLogAction.GetDisplayName(action));
 
@@ -1344,6 +1350,64 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             throw ShareReadFailed(entityLogicalName, recordId, "the shares continue on another page");
 
         return ReadPrincipalAccessRows(data.Value, entityLogicalName, recordId, strict: true);
+    }
+
+    /// <summary>
+    /// <paramref name="principalSystemUserId"/>'s EFFECTIVE rights on one record, as Dataverse answers them:
+    /// <c>RetrievePrincipalAccess</c> bound to that user and asked AS that user (<c>MSCRMCallerID</c> impersonation) —
+    /// the same question <c>CallerRecordAccessProbe</c> asks under a caller's own token, for a writer that acts for a user
+    /// by impersonation and holds no token of theirs (unified-access-control-r2 task 146 c1-r1, owner round 13 item 8: a
+    /// playbook that impersonates a user is checked under F3 as that user).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>An answer versus a fault.</b> <c>403</c> and <c>404</c> are Dataverse's answer that the user cannot see the
+    /// record (404 is how it reports a record a principal cannot read), so they are <see cref="AccessRights.None"/>. Any
+    /// other failure — throttling, a 5xx, an unreadable body — THROWS: a fault is never read as "no rights", so a caller
+    /// can tell a refusal from a check that could not run.</para>
+    /// </remarks>
+    /// <param name="entitySetName">The record's Web API entity set (e.g. <c>sprk_matters</c>), from an explicit table.</param>
+    /// <exception cref="ArgumentException"><paramref name="principalSystemUserId"/> is <see cref="Guid.Empty"/>.</exception>
+    /// <exception cref="HttpRequestException">Dataverse did not answer.</exception>
+    public async Task<AccessRights> RetrievePrincipalRightsAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        if (principalSystemUserId == Guid.Empty)
+            throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
+
+        var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySetName}({recordId:D})\"}}");
+        using var response = await SendGetAsync(
+            $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}",
+            ct,
+            impersonateSystemUserId: principalSystemUserId);
+
+        if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogInformation(
+                "RetrievePrincipalAccess as {Principal} on {EntitySet}({RecordId}): {StatusCode} — no rights.",
+                principalSystemUserId, entitySetName, recordId, (int)response.StatusCode);
+            return AccessRights.None;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"RetrievePrincipalAccess as {principalSystemUserId:D} on {entitySetName}({recordId:D}) answered "
+                + $"{(int)response.StatusCode} {response.StatusCode}.",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        using var document = JsonDocument.Parse(body);
+        var rights = document.RootElement.TryGetProperty("AccessRights", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+        // An absent or empty rights string is an authoritative "no rights": Dataverse answered, and the answer was nothing.
+        return DataverseAccessRightsMapper.FromAccessRightsString(rights);
     }
 
     /// <summary>How many records one batched share read names — keeps the OData filter far below the URL limit.</summary>

@@ -201,9 +201,17 @@ public static partial class ProblemDetailsHelper
     }
 
     /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
+    /// <remarks>
+    /// A refusal the F3 check made (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsForbidden"/>:
+    /// the caller may not move a child out of a secure root, owner round 10 item 7) is NOT an owner refusal: it is
+    /// answered with the unsecure endpoint's ProblemDetails shape — its status (403, or 500 when the permission could
+    /// not be read), title, the F3 message as the detail, <c>reasonCode</c> and <c>traceId</c>.
+    /// </remarks>
     public static IResult RecordOwnerRefused(
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun, string? traceId = null) =>
-        RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
+        refusal is { IsForbidden: true, SecureRemovalRefusal: { } decision }
+            ? decision.ToProblem(refusal.Reason ?? decision.MoveOutDetail(noun), traceId)
+            : RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
 
     private static string GetErrorCode(string? errorCode, int status)
     {

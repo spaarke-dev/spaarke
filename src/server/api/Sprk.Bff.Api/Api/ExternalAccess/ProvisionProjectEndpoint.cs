@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -446,6 +447,7 @@ public static class ProvisionProjectEndpoint
         SecureChildReconciler secureChildren,
         IConfiguration configuration,
         SecureShareNoAccessGuard noAccessGuard,
+        IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -790,8 +792,9 @@ public static class ProvisionProjectEndpoint
         {
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
-                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, httpContext, root, recordId, row, ownerTeamId,
-                keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger, traceId, ct);
+                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, accessCacheInvalidator, httpContext, root,
+                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger,
+                traceId, ct);
 
             if (forward.Error != null)
                 return forward.Error;
@@ -800,8 +803,25 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Named colleagues: only once the creator's share is proven ─────────
-        var (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
-            recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
+        int additionalShared;
+        IReadOnlyList<ProvisionSkippedPrincipal> skippedPrincipals;
+        try
+        {
+            (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
+                recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
+        }
+        finally
+        {
+            // ── Step 5.6 (task 132 · C12): ownership and shares changed — evict, before any return ──────────
+            // Forward: the record left its business-unit owner for the memberless secure team (verified, Step 5) and the
+            // creator and colleagues got explicit shares. Resume: the creator's share was ensured and colleagues shared.
+            // Without this, a BU colleague whose cached membership contained the record through ownership keeps it on
+            // Teams/SPA for the identity + membership TTLs, and every user's cached impersonated root set and access
+            // snapshot for it stay stale. Runs once per successful run (the failure branches of the forward path evict
+            // where their own owner change happens), on success or failure of the colleague step, before any later
+            // return, and never fails provisioning: the hook does not throw and is not bound to the request's token.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
 
         // ── Step 8 (task 148): the record's EXISTING related records follow it into isolation ──
         //
@@ -1215,6 +1235,7 @@ public static class ProvisionProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         SecureShareNoAccessGuard noAccessGuard,
+        IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         SecureRecordRoot root,
         Guid recordId,
@@ -1484,6 +1505,10 @@ public static class ProvisionProjectEndpoint
                 shareIssued |= creatorShareProven;
             }
 
+            // Task 132 (C12): the PATCH may have re-owned the record, and the creator's share may have been written —
+            // evict (always safe, never fails the request) before either answer below.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
             if (shareIssued)
             {
                 string afterText;
@@ -1547,6 +1572,11 @@ public static class ProvisionProjectEndpoint
 
         wroteCreatorShare |= proof.WriteAttempted;
 
+        // Task 132 (C12): the verified move to the team (Step 5) changed who can read the record, and Step 5.5 may have
+        // written the creator's share. Evict now — the compensation below is a second, separate owner change and evicts
+        // for its own outcome. (On the proven path the caller evicts once after the colleagues' shares.)
+        await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
         // ── COMPENSATE: back to the pre-call owner, read back ────────────────
         logger.LogError(
             "[PROVISION] The creator's share on {RecordType} {RecordId} for user {CreatorId} could not be proven after " +
@@ -1562,6 +1592,11 @@ public static class ProvisionProjectEndpoint
 
             var restored = !wroteCreatorShare
                            || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, logger, ct);
+
+            // Task 132 (C12): the move back (verified) and the creator-share restore changed who can read the record, and
+            // each child put back on its own owner is an owner change of its own — evict each, once, before any return.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+            await EvictRestoredChildrenAsync(accessCacheInvalidator, children, traceId);
 
             // What the response may claim about the creator's shares (task 133 verifier round 1). When the pre-call share
             // set could not be read, the only safe restore target is "no share" — which also removes any explicit share
@@ -1616,6 +1651,13 @@ public static class ProvisionProjectEndpoint
         // "reverted"). The record may be owned by the memberless team with no confirmed creator share — the one state
         // that can leave nobody able to open it — so it is CRITICAL, and only an administrator can finish it.
         var undoUnverified = back.Outcome == OwnerMoveOutcome.Unverified;
+        if (undoUnverified)
+        {
+            // Task 132 (C12): the move back may have re-owned the record (and cascaded) — evict (always safe). A move back
+            // read back as NOT taken effect changed nothing: the record is still the team's, already evicted above.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
+
         logger.LogCritical(
             "[PROVISION] {RecordType} {RecordId}: the creator's share could not be proven AND the move back to " +
             "{OwnerKind} {OwnerId} {UndoState} (outcome {Outcome}). It may be owned by the memberless Secure Record " +
@@ -2347,6 +2389,36 @@ public static class ProvisionProjectEndpoint
         shares
             .Where(s => s.Principal == DataversePrincipalRef.User(systemUserId))
             .Aggregate(0, (mask, s) => mask | s.AccessRightsMask);
+
+    /// <summary>
+    /// Evicts the caches an owner change makes stale, through the ONE hook every owner-changing writer must call
+    /// (<see cref="IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>, task 132). Never fails the request:
+    /// the hook does not throw, and it is not bound to the request's token — a client that disconnects must not leave
+    /// the clean-up half done.
+    /// </summary>
+    private static Task EvictAfterOwnerChangeAsync(
+        IMembershipCacheInvalidator accessCacheInvalidator, SecureRecordRoot root, Guid recordId, string traceId)
+        => accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+            root.LogicalName, root.EntitySet, recordId, traceId, CancellationToken.None);
+
+    /// <summary>
+    /// Task 132 x task 133 (batch 4 integration): each cascaded child the compensation tried to put back on its own owner
+    /// is an owner change — evicted once, whatever its read-back said (a PATCH that reports failure can have committed).
+    /// A child read as already on its owner, gone, or unreadable before any write was not written: nothing to evict.
+    /// </summary>
+    private static async Task EvictRestoredChildrenAsync(
+        IMembershipCacheInvalidator accessCacheInvalidator, CascadeRestoreReport children, string traceId)
+    {
+        foreach (var restore in children.Children)
+        {
+            if (restore.Outcome is CascadeChildRestoreOutcome.Restored or CascadeChildRestoreOutcome.Refused
+                or CascadeChildRestoreOutcome.NotApplied or CascadeChildRestoreOutcome.Unverified)
+            {
+                await accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+                    restore.Child.LogicalName, restore.Child.EntitySet, restore.Child.Id, traceId, CancellationToken.None);
+            }
+        }
+    }
 
     /// <summary>
     /// Assigns the record's owner to <paramref name="target"/>, then reads the owner back. Used for the move to the

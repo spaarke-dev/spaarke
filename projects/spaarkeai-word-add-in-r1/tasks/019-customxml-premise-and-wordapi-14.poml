@@ -74,6 +74,13 @@
     <criterion testable="false">Task 014's status is annotated with the outcome — green light, or the blocker that stops it.</criterion>
   </acceptance-criteria>
 
+  <steps mode="directional">
+    <!-- Added 2026-10-02 by task 079 (record integrity) so this file validates. The task was authored WITHOUT a
+         steps element and was executed against its goal, constraints and acceptance criteria, which remain the
+         record of what was asked. This element is not a claim about how the work was done; see notes. -->
+    <step>Work to the goal, constraints and acceptance criteria above. (Authored without steps; see the notes for what was done.)</step>
+  </steps>
+
   <outputs>
     <output type="code">src/client/office-addins/word/manifest.json</output>
     <output type="doc">projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md</output>

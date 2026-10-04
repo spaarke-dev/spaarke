@@ -310,6 +310,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         document["ownerid"] = new EntityReference("team", owningTeamId);
 
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(document, request.CreatedByPersonId);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -432,7 +435,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, Guid? owningTeamId = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, Guid? owningTeamId = null, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // FR-D9: at least one anchor is required — a source document OR a regarding (matter/project)
         // target. A document-less analysis is valid ONLY when a regarding target makes it discoverable.
@@ -457,6 +460,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ["statuscode"] = new OptionSetValue(1), // Active
             ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(analysis, createdByPersonId);
 
         // Document anchor is now optional (FR-D9). Only bind when supplied.
         if (documentId is { } docId && docId != Guid.Empty)
@@ -630,6 +636,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId),
             ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked.
+        RecordCreatorPersonColumn.StampIfKnown(entity, output.CreatedByPersonId);
 
         if (output.OutputTypeId.HasValue)
         {
@@ -1979,6 +1988,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// </summary>
     public const string ArtifactOwningTeamProperty = "OwningTeamId";
 
+    /// <summary>
+    /// The request property an artifact create maps to <c>sprk_createdbyperson</c> (a <c>systemuser</c>) — task 146 c1-r1,
+    /// owner round 13 item 9: the person who asked, since the create is app-only. Optional (a writer acting for nobody).
+    /// </summary>
+    public const string ArtifactCreatedByPersonProperty = "CreatedByPersonId";
+
     public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
     {
         var entity = new Entity("sprk_emailartifact");
@@ -2004,6 +2019,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
                     entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
                 continue;
             }
 
@@ -2106,6 +2128,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
                     entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
                 continue;
             }
 
@@ -2228,7 +2257,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
-    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, CancellationToken ct = default)
+    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("CreateEventLogAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");

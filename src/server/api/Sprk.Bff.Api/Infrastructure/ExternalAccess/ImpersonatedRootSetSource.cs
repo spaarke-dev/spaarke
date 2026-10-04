@@ -80,10 +80,15 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// entries written under an older shape may carry a silently different id set, and serving one is
     /// an authorization answer derived from a query nobody ran.
     /// </summary>
-    private const int CacheVersion = 1;
+    internal const int CacheVersion = 1;
 
-    /// <summary>5-minute TTL, matching the membership precedent (FR-1A.8).</summary>
-    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// 2-minute TTL (was 5), matching the membership cache — unified-access-control-r2 task 132, owner rounds 3 R3/R4
+    /// (access changes take effect in minutes, ≤ 5). It bounds an owner, team or business-unit change made OUTSIDE the
+    /// BFF; the BFF's own writes evict the entry (<c>IMembershipCacheInvalidator</c>: per user on a team change, for
+    /// every user of the entity type on a re-own). Faults are still never cached — this class has no catch on the read.
+    /// </summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// Row cap for a single impersonated read. Hitting it sets <see cref="RootIdSet.Truncated"/>;
@@ -203,7 +208,14 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
             ?? "anonymous";
 
     /// <summary>The cache id of one user's set for one root type — shared by <see cref="GetAsync"/> and <see cref="InvalidateAsync"/>.</summary>
-    internal static string CacheId(Guid systemUserId, string entityType) => $"{systemUserId:D}:{entityType}";
+    internal static string CacheId(Guid systemUserId, string entityType) => CacheId(systemUserId.ToString("D"), entityType);
+
+    /// <summary>
+    /// The composition behind <see cref="CacheId(Guid, string)"/>, over segments — so the eviction patterns
+    /// (<c>IMembershipCacheInvalidator</c>, task 132) are built by the same code with the Redis glob <c>*</c> for the
+    /// segment they do not fix, and cannot drift from the key a read wrote.
+    /// </summary>
+    internal static string CacheId(string userSegment, string entityTypeSegment) => $"{userSegment}:{entityTypeSegment}";
 
     /// <summary>
     /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
