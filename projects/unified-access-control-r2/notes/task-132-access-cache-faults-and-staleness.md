@@ -492,3 +492,164 @@ escalation). No live write was made.
 No new service, interface, DI registration, endpoint, option, job, column or package. Source changes are in existing
 methods of existing BFF classes (one catch, two eviction calls on existing failure paths, one condition) plus
 comments; test changes extend existing test classes and the existing fixture.
+
+## 16. Batch 4 integration residuals (f1, 2026-10-04, `task/uac-r2-132-f1` from `integ/uac-r2-batch4` @ `6b685f0d4`)
+
+Two residuals found when 132 was merged into batch 4. Owner/main-session rounds 1-25 re-read from
+`work/unified-access-control-r2`: none speaks to either beyond the standing directive (round 15, "fix it the correct way");
+round 10 item 3 ANSWERED escalation 7 (the degraded RPA-fallback answer stays uncached, as built), so the POML status
+moves from `completed-with-escalation` to `completed` with only the live manual gates G-1 / G-2 (§12) outstanding.
+No live write was made.
+
+### 16.1 Residual 1 — share-only changes must evict like owner changes: CLOSED, by construction
+
+**What a POA share stales (trace, code-read 2026-10-04).** (a) `ImpersonatedRootSetSource` — the set is an impersonated
+Dataverse query, which sees POA shares; a TEAM share changes every member's set. (b) `CachedAccessDataSource` — both
+snapshots are RetrievePrincipalAccess answers, which include POA: the record snapshot (`auth-record-access`) and, for a
+`sprk_documents` record, the document snapshot (`auth-access`, keyed WITHOUT the set). Not stale: membership resolution
+(FetchXml over lookup columns + ownership; no `principalobjectaccess` read anywhere in `MembershipResolverService`),
+identity, and the external grant set (`sprk_externalrecordaccess` rows, task 137's own invalidation).
+
+**Census of POA writers (Grep 2026-10-04): 8 files, 23 write sites.** InternalShareEndpoints 3 (share grant/modify,
+unshare revoke) · ProvisionProjectEndpoint 7 (share-first creator grant, its restore grant/modify/revoke, the resume /
+unverified-move creator grant, the colleagues' shares) · UnsecureProjectEndpoint 1 · SecureChildShareSynchronizer 3
+(task 149's child fan-out: grant / modify / revoke) · AssignedAccessMaterializer 4 · NoAccessShareEnforcer 1 ·
+DirectThreadAccessService 2 · PlaybookSharingService 2. The integration named four paths; four more write shares too
+(the Assigned-To materializer's root shares; the No Access enforcer's revoke — an over-grant if it is not evicted;
+Direct-thread and playbook sharing).
+
+**Decision — evict in the ONE POA seam, not at each writer.** Every one of the 23 sites goes through
+`IDataverseRecordShareService` (task 060's consolidation), so `DataverseRecordShareService` now calls the new
+`IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync(entitySet, recordId, …)` after every
+`GrantAccessAsync` / `ModifyAccessAsync` / `RevokeAccessAsync` — in a `finally` (a write that throws or is cancelled
+may have committed), with `CancellationToken.None`, never throwing (the hook does not throw; a defect that made it
+throw is caught and logged; the write's own return or exception is what the caller sees). Wiring each of 23 sites
+would leave the next writer to remember; the seam makes it impossible to forget, and
+`PoaShareClientSingletonGuardTests` now fails the build on a POA write that bypasses the seam (the concrete client or
+the SDK messages). `InternalShareEndpoints`' existing per-user `ImpersonatedRootSetSource.InvalidateAsync` is kept: it
+is what works where the invalidator is the Null peer (in-memory cache, Development/Testing).
+
+| Named path | Write sites → seam | Evicted after the write |
+|---|---|---|
+| InternalShareEndpoints share / unshare | `recordShare.GrantAccessAsync` / `ModifyAccessAsync` / `RevokeAccessAsync` (root) | every user's root set for the root type; every user's snapshot of the root |
+| Provisioning share-first creator grant and its restore | `EnsureCreatorShareAsync` grant/modify, `RestoreCreatorShareAsync` revoke/grant/modify | same, for the record |
+| Resume creator-share error paths | the unverified-move unconfirmed grant (and every grant / restore above on the resume flow) | same — including when the grant throws |
+| SecureChildShareSynchronizer fan-out (task 149) | `_owner._recordShare.Grant/Modify/RevokeAccessAsync` per child | that child's snapshots (record-scoped; plus document-scoped for `sprk_documents`); no root-set pattern (a child is not a root) |
+
+**Patterns** (`MembershipCacheInvalidator.RecordShareChangePatterns`, built from the readers' own builders): the root-set
+pattern for the root type when the set is a root's (`ImpersonatedRootSetSource.TryGetEntityTypeForSet` — the seam knows
+only the set; per TYPE, all users, because a team share reaches every member); the record-snapshot pattern; and for
+`sprk_documents` the document-snapshot pattern. **Document id normalised:** the document snapshot key took the route
+text verbatim (casing / braces vary), so no pattern could be sure to reach it — `CachedAccessDataSource.DocumentIdSegment`
+now writes the `D` format and `CacheVersion` 1 → 2 so no unnormalised v1 entry is served after deploy. The owner-change
+hook gained the document pattern too (an owner change on a document stales the same key).
+
+**Cost.** One SCAN per pattern per write: a root share 2, a child share 1 (2 for a document), a thread / playbook share
+1. A fan-out of N children costs N–2N SCANs over a keyspace measured ≤ 178 keys in dev (§6.5: one round trip each).
+Escalation trigger 8 does not fire.
+
+### 16.2 Residual 2 — child-restore evictions scanned for nothing: CLOSED, and the premise corrected
+
+**Premise checked.** For the root-set pattern it was exactly right (`ImpersonatedRootSetSource` refuses any non-root type
+before touching the cache). For the other two it was right only by observation: GET
+`/api/users/me/memberships/{entityType}` accepts ANY entity, and the generic discovery includes `ownerid`, so a
+membership entry for `sharepointdocumentlocation` could be written (and the forward Assign cascade, which no one evicts,
+would leave it stale); and nothing stopped a record-snapshot caller from passing `sharepointdocumentlocations`.
+
+**Fix — make "nothing to evict" true by construction, then evict only what can exist.** ONE declaration beside the
+cascade's own table list: `AssignCascadeChildOwners.IsReownedByCascade` / `IsReownedByCascadeEntitySet` (the owner-bearing
+tables of `TablesFor`; a future cascading relationship is covered the moment it is listed). Readers:
+`MembershipResolverService.CachesEntityType` (both planes — systemuser and contact — never read or write the cache for
+such a type), `CachedAccessDataSource.CachesRecordEntitySet` (the record snapshot reads live). The hook builds each
+pattern only when its cache can hold the type (`MembershipResolverService.CachesEntityType`,
+`ImpersonatedRootSetSource.CachesEntityType`, `CachedAccessDataSource.CachesRecordEntitySet` / `IsDocumentEntitySet`), and
+`EvictAsync` returns before touching Redis when there is no pattern. A child restore now builds 0 patterns, 0 SCANs; a
+root's owner change still builds its 3. `ProvisionProjectEndpoint.EvictRestoredChildrenAsync` keeps calling the hook (the
+HOOK decides what an owner change can have made stale). Side benefit: the forward cascade's silent child re-owns can no
+longer leave a stale entry anywhere.
+
+### 16.3 Tests (KEEP paths; no transport mock, no DI / ctor / reflection test, no sleep)
+
+`tests/integration/auth/UnifiedAccessControl/AccessCacheInvalidationTests.Shares.cs` (the class made `partial`; its
+`AccessCacheWorld` gains a cascade-child discovery entry, an inner-read counter and a document-snapshot warmer):
+- `ShareChangeEviction_RemovesEveryUsersRootSetForTheType_AndEverySnapshotOfTheRecord_Only` — criterion 23 for the new
+  hook: every pattern reaches a key a production reader wrote; identity / membership / matter / other-record /
+  other-set keys stay.
+- `ShareChangeEviction_OnADocument_RemovesItsDocumentAndRecordSnapshots_HoweverTheIdWasSpelled` — upper-case and braced
+  ids; no root-set pattern scanned.
+- `PoaSeam_EveryShareWrite_EvictsThatRecord_AndTheWritesOwnOutcomeStands` ×6 (grant / modify / revoke × Dataverse 204 /
+  500) — the PRODUCTION seam over the PRODUCTION `DataverseWebApiService` against an in-memory Web API server (ADR-038
+  §7's named replacement for B1); a refused write still throws, after the eviction.
+- `PoaSeam_WhenTheCallerCancels_TheEvictionStillRuns_AndTheCancellationPropagates`.
+- `PoaSeam_WhenEvictionFails_TheShareWriteSucceeds_AndTheFailureIsLogged`.
+- `CascadeChildOwnerChange_BuildsNoPattern_AndScansNothing_WhileARootStillScans` ×2.
+- `CascadeChildTables_AreNeverCached_SoNeitherTheCascadeNorItsRestoreCanLeaveOneStale` (both membership planes + the
+  record snapshot; a root snapshot still cached as the control).
+
+`tests/Spaarke.ArchTests/PoaShareClientSingletonGuardTests.cs`: `EveryPoaShareWriteGoesThroughTheEvictingSeam`;
+`EachNamedShareWriterWritesOnlyThroughTheSeam` ×8 (one per writer file — the per-path pin: at least one write visible,
+every one through the seam); `NoServerFileSendsSdkPoaMessages`; `Detector_FlagsAWriteOnTheConcreteClient_AndPassesAWriteThroughTheSeam`
+(negative + positive controls). Test doubles of the extended interface (`SpyMembershipCacheInvalidator`,
+`ProvisionAssignCascadeChildOwnerTests.RecordingInvalidator`) gain the new member.
+
+Beyond the closed set, justified: the cancellation and eviction-failure cases pin the two properties the integration
+named ("CancellationToken.None, never fails the request"); the six seam cases are one per write method per outcome
+because each method has its own `finally` (a seed that moves one out of its `finally` reddens only that method's refused
+case).
+
+### 16.4 Perturbations — each seeded in the production file, rebuilt, seen red, restored byte-identical (asserted) and touched
+
+Seeded by a script (`git checkout` restore, `git diff --quiet` asserted per seed, file touched), run against
+`AccessCacheInvalidationTests` (behaviour seeds) or `PoaShareClientSingletonGuardTests` (bypass seeds).
+
+| # | Seed (production file) | Red |
+|---|---|---|
+| F1 | the seam's GRANT no longer evicts (`IDataverseRecordShareService.cs`) | **3** — `PoaSeam_EveryShareWrite_…(grant, ×2)`, `PoaSeam_WhenEvictionFails_…` |
+| F2 | MODIFY evicts only after a successful write (moved out of its `finally`) | **1** — `PoaSeam_EveryShareWrite_…(modify, refused)` |
+| F3 | REVOKE skips the eviction when the caller's token is cancelled | **1** — `PoaSeam_WhenTheCallerCancels_…` |
+| F4 | the share-change patterns omit the root set (`MembershipCacheInvalidator.cs`) | **7** — all six `PoaSeam_EveryShareWrite_…` + `ShareChangeEviction_RemovesEveryUsersRootSet…` |
+| F5 | no document-snapshot pattern | **1** — `ShareChangeEviction_OnADocument_…` |
+| F6 | the document id written verbatim (`CachedAccessDataSource.DocumentIdSegment`) | **1** — `ShareChangeEviction_OnADocument_…` |
+| F7 | the membership resolver caches every type (`CachesEntityType => true`) | **3** — `CascadeChildOwnerChange_…` ×2, `CascadeChildTables_AreNeverCached_…` |
+| F8 | the record snapshot caches a cascade-child set (bypass removed) | **1** — `CascadeChildTables_AreNeverCached_…` |
+| F9 | the root-set source claims every type (`CachesEntityType => true`) | **2** — `CascadeChildOwnerChange_…` ×2 |
+| F10 | the CONTACT plane caches a cascade-child type (its gate removed) | **1** — `CascadeChildTables_AreNeverCached_…` |
+| F11 | a compiling POA revoke on a `DataverseWebApiService` added to `InternalShareEndpoints.cs` | **2** — `EveryPoaShareWriteGoesThroughTheEvictingSeam`, `EachNamedShareWriterWritesOnlyThroughTheSeam(InternalShareEndpoints)` |
+| F12 | the same bypass in `ProvisionProjectEndpoint.cs` (creator share / restore / resume paths) | **2** — the global rule + the provisioning case |
+| F13 | the same bypass in `SecureChildShareSynchronizer.cs` (task 149's fan-out) | **2** — the global rule + the synchronizer case |
+| F14 | the same bypass in `UnsecureProjectEndpoint.cs` | **2** — the global rule + the unsecure case |
+
+All 14 restored byte-identical (asserted) and touched. Nothing stayed green.
+
+### 16.5 Placement + justification (CLAUDE.md §10 / §11)
+
+Placement: in the BFF, in place — the existing POA seam, the existing invalidator interface and its two
+implementations, the existing caches. No new service, class, endpoint, option, job, column, PCF or package; no new DI
+registration (`DataverseRecordShareService`'s existing registration resolves its two added singleton dependencies).
+No Dataverse plugin (ADR-002); fail closed unchanged (ADR-003 — eviction only ever removes cached data).
+
+Three-question justification for the one new member, `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync`:
+(1) **Existing** — `InvalidateRecordOwnerChangeAsync` (owner changes) and `ImpersonatedRootSetSource.InvalidateAsync`
+(per user, the CALLER's tenant only, called by InternalShareEndpoints only). (2) **Extension** — a member on the existing
+interface + Null peer + real implementation; reusing the owner hook would also wipe every user's membership entries for
+the type on every share although a share is not a membership term (needless Dataverse re-reads); extending
+`ImpersonatedRootSetSource.InvalidateAsync` cannot reach the snapshots or other tenants. (3) **Cost of doing nothing** —
+an unshare (or a No Access enforcer revoke) leaves the removed user's cached root set granting the record for up to
+2 min and their snapshot for 60 s (over-grant); a new share leaves the sharee denied for the same windows; a child
+fan-out leaves every child's snapshot stale. The new `internal` predicates (`IsReownedByCascade*`, `CachesEntityType`,
+`CachesRecordEntitySet`, `IsDocumentEntitySet`, `TryGetEntityTypeForSet`, `DocumentIdSegment`) are members of the
+existing classes whose rule they state; `DataverseAccessDataSource.DocumentEntitySetName` became `public` (additive;
+Spaarke.Dataverse has no consumer outside the BFF — §5).
+
+`.claude/**`: no edit needed.
+
+### 16.5a Results
+
+**f1 results (2026-10-04)**, after every seed was restored: build 0 warnings / 0 errors; affected classes first
+(`AccessCacheInvalidationTests` 26 / 0 / 0 — 13 existing + 13 new; `PoaShareClientSingletonGuardTests` 14 / 0 / 0 — 3
+existing + 11 new; the wider affected set incl. `ProvisionAssignCascadeChildOwnerTests`, `InternalUserShareTests`,
+`DataverseRecordShareWireTests`, `ImpersonatedRootSetSourceTests`, `MembershipCacheInvalidatorTests`,
+`SecureChildShare*`, `MembershipResolver*` 395 / 0 / 0 before the new tests); then once, in full: BFF unit suite
+**15,430 passed / 0 failed / 54 skipped (15,484; 20 m 52 s)**; NetArchTest **606 / 0 / 0**;
+`Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**.
+No contention failure this run. No package change (no publish-size or CVE delta).

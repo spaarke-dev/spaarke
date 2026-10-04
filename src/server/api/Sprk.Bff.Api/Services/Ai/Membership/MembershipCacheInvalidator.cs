@@ -116,7 +116,7 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
             _logger.LogWarning(
                 "MembershipCacheInvalidator: junction pub/sub publication is INERT (Membership:CacheInvalidator:Enabled " +
                 "is not true) — sprk_userentityassociation writes evict nothing until the {Ttl} TTL. BFF write-path " +
-                "access eviction (team/BU/owner changes) is ACTIVE (instanceName='{InstanceName}').",
+                "access eviction (team/BU/owner/share changes) is ACTIVE (instanceName='{InstanceName}').",
                 MembershipResolverService.CacheTtl, _instanceName);
         }
     }
