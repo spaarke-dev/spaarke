@@ -105,8 +105,9 @@
 | ✅ 086 | [Dead + misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)](086-dead-code-own-pr.poml) | FULL | **opus**/high | — | I | [PR #1120](https://github.com/spaarke-dev/spaarke/pull/1120). C-21 deleted (owner). Closes #1112, #1113 |
 | ✅ 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1119](https://github.com/spaarke-dev/spaarke/pull/1119). Also dropped 2 more unused EventsPage deps |
 | ✅ 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | [PR #1116](https://github.com/spaarke-dev/spaarke/pull/1116). Web resource: needs a deploy after merge |
-| 🔲 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | `cleanGuid` ×~70 |
+| ✅ 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1121](https://github.com/spaarke-dev/spaarke/pull/1121). All ~40 deferred sites converged; case-semantics audit in PR body. #1118 and #1121 must merge before 081 |
 | 🔲 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | Audit, then fix |
+| 🔲 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | Found by 089: 6 PCFs fail `build:prod` on master; 11 failing suites in 3 shared packages. Reproduce first |
 
 ### Phase 9 — Wrap-up
 

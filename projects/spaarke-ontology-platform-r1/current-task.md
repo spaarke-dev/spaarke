@@ -11,13 +11,13 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active in the main session.** Last completed: **006** (dedicated writer identity) and **002** (privilege re-verify), both ✅ 2026-10-04 |
+| **Task** | **none active in the main session.** Recently completed: 006, 002 (2026-10-04), 089 (PR #1121) |
 | **Step** | — |
-| **Status** | orchestrating; waiting on background agents 021 and 089 |
-| **Next Action** | (1) When **021** reports: record it in POML + TASK-INDEX, then dispatch **030** (deps 021 + 006 now both satisfied) and **022** (held only to keep 021 alone in this worktree). (2) When **089** reports: record it, then dispatch **091**. (3) **081** waits for PRs #1118 + #1121 to merge, then merge master into this branch. Writer identity for 030: client id `69040982-612e-469e-a85f-26d5172367c5`, systemuser `3121bf1b-9fbf-f111-aaaf-0022482913fc` (see `notes/security-roles.md` §9) |
-| **Running in background** | **021** predicate compiler (opus subagent, in THIS worktree; told not to touch this file) · **089** `cleanGuid` follow-up (in `C:\wt089`, PR #1121: converge the ~40 deferred call sites + case-semantics audit). Their reports arrive as agent messages; record them in POML + TASK-INDEX |
+| **Status** | orchestrating; 021 is closing out (reviewer findings, then the full BFF suite) |
+| **Next Action** | (1) When **021** reports its suite line + review findings: check them, commit its files on this branch (PredicateCompiler.cs, SignalsModule.cs, PredicateCompilerTests.cs, seam SignalPredicateTests.cs, tests/fixtures/signals/, notes/pathb-fetchxml-reference.md, notes/021-…-progress.md), set TASK-INDEX 021 ✅, run the drift check. (2) THEN dispatch **030** + **022** (this worktree, one at a time) and **091** + **092** (own worktrees C:\wt091, C:\wt092). Heavy jobs are held until 021's suite reports so nothing contends. (3) **081** waits for #1118 + #1121 to merge. Writer identity for 030: client id `69040982-612e-469e-a85f-26d5172367c5`, systemuser `3121bf1b-9fbf-f111-aaaf-0022482913fc` |
+| **Running in background** | **021** (opus subagent, THIS worktree; holds uncommitted files listed above; told not to touch this file or commit) plus its reviewer agent |
 | **Branch / git** | `docs/ontology-platform-design`, 0 behind `origin/master`; the 006/002 records are committed and pushed with this checkpoint |
-| **Index** | 50 tasks: **19 ✅ · 0 🔄 · 31 🔲**. Drift check clean (50/50) |
+| **Index** | 51 tasks: **20 ✅ · 0 🔄 · 31 🔲** (092 added from 089's findings). Drift check clean |
 
 ### Files modified since the last commit
 - none (all committed with this checkpoint)

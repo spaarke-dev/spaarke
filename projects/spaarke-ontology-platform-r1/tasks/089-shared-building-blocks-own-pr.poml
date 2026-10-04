@@ -4,7 +4,7 @@
     <title>Shared building blocks, own PR (C-7, C-12, C-15)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,6 +97,8 @@
   </acceptance-criteria>
 
   <notes>Was part of task 081's old scope; moved out because it touches about 70 call sites across many solutions unrelated to ontology.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1121 (chore/shared-building-blocks), head e6050d73b, 2 commits, open and ready for review. Round 2 converged the ~40 deferred cleanGuid call sites across 10 PCFs, 2 code pages and 12 solutions; the 14 raw web resources with no @spaarke/ui-components dependency stay excluded (re-scanned). Case-semantics audit table for every converged site is in the PR body. Fixed 2 jest moduleNameMapper gaps, 2 stale jest.mock fixtures missing cleanGuid, and 4 SpaarkeAi fixtures asserting the old case-preserving output (downstream sinks traced). SpaarkeAi isolated run: 121/121 suites, 1121/1121 tests. Pre-existing master failures it surfaced (6 PCFs failing build:prod on a pdfjs/SprkChat babel error; failing suites in Communication.Components, AI.Widgets, DailyBriefing.Components) are task 092.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
