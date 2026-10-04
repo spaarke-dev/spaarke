@@ -112,11 +112,45 @@ public class ClientChildFixUpTests
     }
 
     /// <summary>
-    /// Report-only is the default (no configuration): the recent-changes pass plans the change (<c>wouldChange</c>, the
-    /// row's current owner listed) and writes nothing. That holds for owners and for shares alike.
+    /// Round 28 item 2 (task 147 r1): with NO configuration at all — the deployed default — the recent-changes pass WRITES
+    /// (the L4 net is on in every environment where 148 is deployed) while the sweep stays report-only. The correction is
+    /// the standing report: listed in <c>changes</c> with <c>pass: "recent"</c> and counted in
+    /// <c>recentChanges.corrected</c>.
     /// </summary>
     [Fact]
-    public async Task ReportOnly_PlansTheRecentChange_AndWritesNothing()
+    public async Task WithNoConfiguration_TheRecentPassWrites_AndReportsTheCorrection_WhileTheSweepStaysReportOnly()
+    {
+        var job = new JobHarness();
+        var roots = OrderedRoots(2);
+        var (swept, target, sweptTodo, todo) = (roots[0], roots[1], Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", swept).SecureRoot("sprk_workassignment", target)
+            // In the sweep window, never modified: only the (report-only) sweep reaches it.
+            .UserOwnedChild("sprk_todo", sweptTodo, ("sprk_regardingworkassignment", "sprk_workassignment", swept))
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", target))
+            .Modified("sprk_todo", todo, MinutesAgo(2));
+
+        var report = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "1");
+
+        report.GetProperty("mode").GetString().Should().Be(SecureChildReconciliationJob.ModeReportOnly, "the sweep's own mode");
+        var recent = report.GetProperty("recentChanges");
+        recent.GetProperty("mode").GetString().Should().Be(SecureChildReconciliationJob.ModeWrite);
+        recent.GetProperty("corrected").GetInt32().Should().Be(1);
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        report.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == todo)
+            .GetProperty("pass").GetString().Should().Be("recent");
+        job.World.OwnerOf("sprk_todo", sweptTodo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "the sweep window is report-only until the owner turns the backfill's writes on");
+        report.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == sweptTodo)
+            .GetProperty("pass").GetString().Should().Be("sweep");
+    }
+
+    /// <summary>
+    /// The emergency stop (<c>RecentChangesWritesEnabled=false</c>): the recent-changes pass plans the change
+    /// (<c>wouldChange</c>, the row's current owner listed) and writes nothing, owners and shares alike. A pass that wrote
+    /// nothing does not move the watermark, so the first run after the stop is lifted still sees the change and corrects it.
+    /// </summary>
+    [Fact]
+    public async Task TheEmergencyStop_PlansTheRecentChange_AndWritesNothing_AndKeepsTheWindow()
     {
         var job = new JobHarness();
         var (root, todo) = (Guid.NewGuid(), Guid.NewGuid());
@@ -125,21 +159,49 @@ public class ClientChildFixUpTests
             .Modified("sprk_todo", todo, MinutesAgo(2));
         job.Shares.Seed("sprk_workassignment", root, DataversePrincipalRef.User(Sharee), CollaborateMask);
 
-        var report = await job.RunAsync(writesEnabled: null);
+        var report = await job.RunAsync(writesEnabled: null, recentWritesEnabled: "false");
 
-        report.GetProperty("mode").GetString().Should().Be(SecureChildReconciliationJob.ModeReportOnly);
+        report.GetProperty("recentChanges").GetProperty("mode").GetString().Should().Be(SecureChildReconciliationJob.ModeReportOnly);
         report.GetProperty("wouldChange").GetInt32().Should().Be(1);
         job.World.OwnerWrites.Should().BeEmpty();
         job.Shares.WriteLog.Should().BeEmpty();
         job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
 
-        // A report-only run corrects nothing, so it does not move the watermark: the first run with writes on still
-        // sees the change and corrects it (the same window, not only the next full sweep).
-        var again = await job.RunAsync(writesEnabled: null);
+        var again = await job.RunAsync(writesEnabled: null, recentWritesEnabled: "false");
         again.GetProperty("recentChanges").GetProperty("rowsChanged").GetInt32().Should().Be(1);
 
-        await job.RunAsync(writesEnabled: "true");
+        await job.RunAsync(writesEnabled: null);
         job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    /// <summary>
+    /// A SCHEDULED tick with the sweep report-only is the L4 net alone: it runs the recent-changes pass, takes no sweep
+    /// window and leaves the backfill's cursor where it was, so the next manual (backfill) run begins where the previous
+    /// manual run stopped.
+    /// </summary>
+    [Fact]
+    public async Task AScheduledTick_WithTheSweepReportOnly_RunsOnlyTheRecentPass_AndLeavesTheSweepCursor()
+    {
+        var job = new JobHarness();
+        var roots = OrderedRoots(3);
+        foreach (var root in roots)
+            job.World.SecureRoot("sprk_workassignment", root);
+        var todo = Guid.NewGuid();
+        job.World.UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", roots[2]));
+
+        var manual = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "1");
+        manual.GetProperty("resumeAfter").GetString().Should().Be($"sprk_workassignment:{roots[0]:D}");
+
+        job.World.Modified("sprk_todo", todo, MinutesAgo(1));
+        var scheduled = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "1", trigger: JobRunTrigger.Scheduled);
+
+        scheduled.GetProperty("sweepRan").GetBoolean().Should().BeFalse();
+        scheduled.GetProperty("rootsInRun").GetInt32().Should().Be(0);
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the scheduled tick is the L4 net: the recent-changes pass writes");
+
+        var next = await job.RunAsync(writesEnabled: null, maxRootsPerRun: "1");
+        next.GetProperty("startPosition").GetInt32().Should().Be(2, "the scheduled tick did not move the backfill's cursor");
     }
 
     /// <summary>
@@ -262,6 +324,156 @@ public class ClientChildFixUpTests
     }
 
     /// <summary>
+    /// Task 147 r1 (verifier item 4): a recently changed record whose pass came back incomplete is NOT reported once and
+    /// then left to the capped sweep. It is carried: every following run reconciles it again first (and reports it again
+    /// while it still fails), and the first run after the fault clears corrects the child — even though the child has not
+    /// changed again (it is behind the watermark) and the record lies outside every sweep window those runs take.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedReown_IsRetriedEveryRun_UntilItSucceeds_OutsideTheSweepWindow()
+    {
+        var job = new JobHarness();
+        var roots = OrderedRoots(4);
+        var target = roots[3];
+        var todo = Guid.NewGuid();
+        foreach (var root in roots)
+            job.World.SecureRoot("sprk_workassignment", root);
+        job.World.UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", target))
+            .Modified("sprk_todo", todo, MinutesAgo(2))
+            .RefusingOwnerWritesOf(todo);
+
+        var first = await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+        first.GetProperty("recentChanges").GetProperty("carriedRoots").GetInt32().Should().Be(1);
+
+        var second = await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+        second.GetProperty("recentChanges").GetProperty("rowsChanged").GetInt32().Should().Be(0,
+            "the child has not changed again: it is behind the watermark");
+        second.GetProperty("recentChanges").GetProperty("retriedRoots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal($"sprk_workassignment:{target:D}");
+        second.GetProperty("failed").GetInt32().Should().Be(1, "still refused, so it is reported again");
+        job.LastResult!.Success.Should().BeFalse();
+
+        job.World.ClearOwnerWriteFaults();
+        var third = await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+
+        third.GetProperty("resumeAfter").GetString().Should().NotBe($"sprk_workassignment:{target:D}",
+            "the sweep window has not reached the record");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        third.GetProperty("recentChanges").GetProperty("carriedRoots").GetInt32().Should().Be(0);
+        job.LastResult!.Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Task 147 r1 (verifier item 4): a changed row the walk cannot place (its record is flagged secure but not isolated)
+    /// is carried and looked at again in EVERY run, reported each time, not only in the run that listed it. Once the record
+    /// is isolated (its provisioning completed) the next run places the row and moves it, with no further edit to the row.
+    /// </summary>
+    [Fact]
+    public async Task AnUndeterminedRow_IsReportedEveryRun_AndPlacedOnceItsRecordIsIsolated()
+    {
+        var job = new JobHarness();
+        var roots = OrderedRoots(2);
+        var (secure, flagged, todo) = (roots[0], roots[1], Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", secure).FlaggedNotIsolatedRoot("sprk_workassignment", flagged)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", flagged))
+            .Modified("sprk_todo", todo, MinutesAgo(2));
+
+        await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+        job.LastResult!.Success.Should().BeFalse();
+
+        var second = await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+        second.GetProperty("recentChanges").GetProperty("retriedRows").GetInt32().Should().Be(1);
+        second.GetProperty("recentChanges").GetProperty("undetermined").EnumerateArray().Select(u => u.GetString())
+            .Should().ContainSingle().Which.Should().Contain(todo.ToString("D"));
+        job.LastResult!.Success.Should().BeFalse("an unplaced row is reported in every run until it is placed");
+
+        // The record's provisioning completes: it is now isolated.
+        job.World.MoveOwner("sprk_workassignment", flagged, DataversePrincipalRef.Team(SecureTeam));
+        var third = await job.RunAsync(writesEnabled: "true", maxRootsPerRun: "1");
+
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        third.GetProperty("recentChanges").GetProperty("carriedRows").GetInt32().Should().Be(0);
+    }
+
+    /// <summary>
+    /// Task 147 r1 (verifier item 4): a changed row under a MISSING ancestor is reported in every run it stays that way —
+    /// never once and then forgotten — and drops out once the row itself is gone.
+    /// </summary>
+    [Fact]
+    public async Task ARowUnderAMissingAncestor_IsReportedEveryRun_AndDropsOutWhenDeleted()
+    {
+        var job = new JobHarness();
+        var (missing, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", Guid.NewGuid())
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", missing))
+            .Modified("sprk_todo", todo, MinutesAgo(2));
+
+        await job.RunAsync(writesEnabled: "true");
+        var second = await job.RunAsync(writesEnabled: "true");
+
+        second.GetProperty("recentChanges").GetProperty("undetermined").EnumerateArray().Select(u => u.GetString())
+            .Should().ContainSingle().Which.Should().Contain("does not exist");
+        job.LastResult!.Success.Should().BeFalse();
+
+        job.World.Remove("sprk_todo", todo);
+        var third = await job.RunAsync(writesEnabled: "true");
+        third.GetProperty("recentChanges").GetProperty("undetermined").GetArrayLength().Should().Be(0);
+        third.GetProperty("recentChanges").GetProperty("carriedRows").GetInt32().Should().Be(0);
+        job.LastResult!.Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Task 147 r1 (verifier item 5): the synchronizer answering FAILED (a second "Secure Record Owners" team appears between
+    /// the job's own team check and the synchronizer's) is a failure of the pass — reported, the run unsuccessful, nothing
+    /// written, and the window kept — never mapped to "no failure".
+    /// </summary>
+    [Fact]
+    public async Task TheSynchronizerAnsweringFailed_IsReported_NothingIsWritten_AndTheWindowIsKept()
+    {
+        var job = new JobHarness();
+        var (root, todo, duplicate) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root))
+            .Modified("sprk_todo", todo, MinutesAgo(2))
+            .AfterQueriesOf("team", 1, w => w.Team(duplicate, SecureChildShareWorld.SecureBu,
+                SecureChildShareWorld.SecureOwnerTeamName, isDefault: false, teamType: 0));
+
+        var report = await job.RunAsync(writesEnabled: null);
+
+        report.GetProperty("recentChanges").GetProperty("failure").GetString().Should().NotBeNullOrEmpty();
+        job.LastResult!.Success.Should().BeFalse();
+        job.World.OwnerWrites.Should().BeEmpty();
+
+        job.World.Remove("team", duplicate);
+        await job.RunAsync(writesEnabled: null);
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the failed run kept its window, so the next run still lists and corrects the child");
+    }
+
+    /// <summary>
+    /// Task 147 r1 (verifier item 5): the job's OWN team check refusing (two "Secure Record Owners" teams from the start) is
+    /// reported as the pass's failure; nothing is written and the run is not a success.
+    /// </summary>
+    [Fact]
+    public async Task TheJobsOwnTeamCheckRefusing_IsReported_AndNothingIsWritten()
+    {
+        var job = new JobHarness();
+        var (root, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root))
+            .Modified("sprk_todo", todo, MinutesAgo(2))
+            .Team(Guid.NewGuid(), SecureChildShareWorld.SecureBu, SecureChildShareWorld.SecureOwnerTeamName,
+                isDefault: false, teamType: 0);
+
+        var report = await job.RunAsync(writesEnabled: null);
+
+        report.GetProperty("recentChanges").GetProperty("failure").GetString().Should().NotBeNullOrEmpty();
+        report.GetProperty("recentChanges").GetProperty("rowsChanged").GetInt32().Should().Be(0, "nothing was listed");
+        job.LastResult!.Success.Should().BeFalse();
+        job.World.OwnerWrites.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// The job over a world, built as the scheduler builds it: ONE job instance (it keeps its cursor and its watermark),
     /// with the real reconciler and the real synchronizer resolved per run from a scope. Work-assignment roots cascade
     /// nothing on Assign, so the platform-cascade Web API client is never called. A project or matter root needs a Web
@@ -276,7 +488,9 @@ public class ClientChildFixUpTests
         private SecureChildReconciliationJob? _job;
         private ServiceProvider? _provider;
 
-        public async Task<JsonElement> RunAsync(string? writesEnabled, string? maxRootsPerRun = null, bool webApiNeeded = false)
+        public async Task<JsonElement> RunAsync(
+            string? writesEnabled, string? maxRootsPerRun = null, bool webApiNeeded = false,
+            string? recentWritesEnabled = null, JobRunTrigger trigger = JobRunTrigger.ManualAdmin)
         {
             if (_job is null)
             {
@@ -293,8 +507,9 @@ public class ClientChildFixUpTests
 
             _configuration[SecureChildReconciliationJob.WritesEnabledConfigKey] = writesEnabled;
             _configuration[SecureChildReconciliationJob.MaxRootsPerRunConfigKey] = maxRootsPerRun;
+            _configuration[SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey] = recentWritesEnabled;
             LastResult = await _job.ExecuteAsync(
-                new JobRunContext(Guid.NewGuid(), "test", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
+                new JobRunContext(Guid.NewGuid(), "test", trigger, new Dictionary<string, object>()),
                 CancellationToken.None);
 
             using var doc = JsonDocument.Parse(LastResult.ResultJson!);

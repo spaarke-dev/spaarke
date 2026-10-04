@@ -116,11 +116,18 @@ public sealed record SecureChildMirrorRemoval(SecureChildShareSyncStatus Status,
 /// <param name="Undetermined">Rows whose roots could not all be determined from the data, each with the reason: a missing
 /// ancestor, a root flagged secure but not isolated, or a chain deeper than the walk.</param>
 /// <param name="Detail">Why the walk was Failed or NotApplicable.</param>
+/// <param name="UndeterminedRows">The rows of <paramref name="Undetermined"/>, as (table, id), in the same order — so a caller
+/// can look at exactly those rows again (task 147 r1: the reconciliation job carries them to its next run).</param>
 public sealed record SecureRootsAbove(
     SecureChildShareSyncStatus Status,
     IReadOnlyList<(string Table, Guid Id)> Roots,
     IReadOnlyList<string> Undetermined,
-    string? Detail);
+    string? Detail,
+    IReadOnlyList<(string Table, Guid Id)>? UndeterminedRows = null)
+{
+    /// <summary>The undetermined rows as (table, id); empty when none.</summary>
+    public IReadOnlyList<(string Table, Guid Id)> UndeterminedRowRefs => UndeterminedRows ?? Array.Empty<(string, Guid)>();
+}
 
 /// <summary>
 /// Keeps every CHILD of a secure record shared with exactly the internal principals its secure root is shared with —
@@ -380,19 +387,24 @@ public sealed class SecureChildShareSynchronizer
         var run = new Run(this, secureTeamId, ct);
         var roots = new HashSet<RowRef>();
         var undetermined = new List<string>();
+        var undeterminedRows = new List<(string Table, Guid Id)>();
         foreach (var entity in rows.DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id)))
         {
             var (reference, lineage) = await run.LineageOfReadRowAsync(entity).ConfigureAwait(false);
             roots.UnionWith(lineage.SecureRoots);
             if (lineage.Undetermined is { } why)
+            {
                 undetermined.Add($"{reference}: {why}");
+                undeterminedRows.Add((reference.Table, reference.Id));
+            }
         }
 
         return new SecureRootsAbove(
             SecureChildShareSyncStatus.Completed,
             roots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).Select(r => (r.Table, r.Id)).ToList(),
             undetermined,
-            null);
+            null,
+            undeterminedRows);
     }
 
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)

@@ -47,6 +47,7 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<string> _endlessTables = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _refusedOwnerWrites = new();
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
+    private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
@@ -198,6 +199,24 @@ internal sealed class SecureChildShareWorld
     {
         _refusedOwnerWrites.Clear();
         _ignoredOwnerWrites.Clear();
+        return this;
+    }
+
+    /// <summary>
+    /// Task 147 r1: changes the world once, right after the <paramref name="count"/>-th query of <paramref name="table"/> has
+    /// been answered — the state between two reads of the same thing (e.g. a second Secure Record Owners team appearing
+    /// between the job's own team check and the synchronizer's).
+    /// </summary>
+    public SecureChildShareWorld AfterQueriesOf(string table, int count, Action<SecureChildShareWorld> change)
+    {
+        _afterQueries.Add((table, count, change));
+        return this;
+    }
+
+    /// <summary>Task 147 r1: deletes a row (a record removed between two runs).</summary>
+    public SecureChildShareWorld Remove(string table, Guid id)
+    {
+        _rows.Remove((table, id));
         return this;
     }
 
@@ -380,7 +399,17 @@ internal sealed class SecureChildShareWorld
         }
 
         var projected = matched.Select(r => Project(r, query.ColumnSet)).ToList();
-        return new EntityCollection(projected) { MoreRecords = more, PagingCookie = more ? "cookie" : null };
+        var answer = new EntityCollection(projected) { MoreRecords = more, PagingCookie = more ? "cookie" : null };
+
+        var asked = QueriedTables.Count(t => string.Equals(t, query.EntityName, StringComparison.OrdinalIgnoreCase));
+        foreach (var hook in _afterQueries.Where(h => h.AfterCount == asked
+                     && string.Equals(h.Table, query.EntityName, StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            _afterQueries.Remove(hook);
+            hook.Change(this);
+        }
+
+        return answer;
     }
 
     private Entity Project(Entity row, ColumnSet columns)

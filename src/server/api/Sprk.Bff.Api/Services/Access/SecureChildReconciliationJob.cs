@@ -16,11 +16,14 @@ namespace Sprk.Bff.Api.Services.Access;
 /// that were already secure before task 148 — and any child a pass left incomplete — are reached only by a sweep. Run once
 /// with writes on, it is the one-time backfill (operator runbook: SECURE-PROJECT-ENVIRONMENT-SETUP.md §7c.1, script
 /// <c>scripts/Invoke-SecureChildBackfill.ps1</c>); task 147 schedules it as the standing L4 safety net.</para>
-/// <para><b>Ships disabled AND report-only</b> (the <c>ExternalAccessReconciliationJob</c> posture). The registration is
-/// <c>AddScheduledJob&lt;&gt;(cron, enabled: false)</c>, and writes need <see cref="WritesEnabledConfigKey"/> = <c>true</c>:
-/// an absent, empty or unparseable value writes nothing, so every way of getting the configuration wrong lands on "report".
-/// A manual admin trigger of the disabled job reports. In report-only mode every change the run WOULD make is logged per row
-/// with the row's current owner, and summarized in the run's <c>ResultJson</c>.</para>
+/// <para><b>Two parts, two switches (task 147, round 28 item 2).</b> The job is ENABLED every 2 minutes. Its
+/// <b>recent-changes pass</b> (below) is the L4 net for writes made outside the product and WRITES unless
+/// <see cref="RecentChangesWritesEnabledConfigKey"/> parses to <c>false</c> (an emergency stop). Its <b>sweep</b> over every
+/// secure record — the task 148 backfill — keeps the <c>ExternalAccessReconciliationJob</c> posture: writes need
+/// <see cref="WritesEnabledConfigKey"/> = <c>true</c>; an absent, empty or unparseable value writes nothing. A scheduled
+/// tick runs the sweep window only while the sweep writes; a manual admin trigger (the backfill script) always runs it, in
+/// its own mode. In report-only mode every change a part WOULD make is logged per row with the row's current owner, and
+/// summarized in the run's <c>ResultJson</c>.</para>
 /// <para><b>Ordered, capped, resumable.</b> Roots are taken in a fixed order (table, then id), at most
 /// <see cref="MaxRootsPerRunConfigKey"/> per run (default <see cref="DefaultMaxRootsPerRun"/>). The next run continues
 /// after the last root the previous one reached (a cursor in this singleton, per instance — the task 143 job's precedent),
@@ -40,9 +43,14 @@ namespace Sprk.Bff.Api.Services.Access;
 /// instance, like the cursor. It moves only past a listing that completed. A changed row the walk cannot place (under a
 /// record flagged secure but not isolated, or under a missing ancestor) is listed in <c>recentChanges.undetermined</c>, and
 /// the run is not a success.</para>
-/// <para><b>Standing schedule (task 147): pending the owner.</b> The job still ships disabled and report-only. Turning it on
-/// as the L4 net makes its interval the window in which a non-product child of a secure record sits in its creator's
-/// business unit. Task 147's escalation puts that interval to the owner (notes/task-147-client-child-writers.md §6).</para>
+/// <para><b>Standing schedule (task 147, round 28 item 2, decided 2026-10-04).</b> Every 2 minutes, writes on for the
+/// recent-changes pass, in every environment where task 148 is deployed: the interval is the window in which a child
+/// written OUTSIDE the product under a secure record sits in its creator's business unit. In-product creates no longer
+/// open that window: the product's writers create through the BFF (task 147, G5), and the model-driven native creates
+/// under a secure parent are replaced by BFF-backed commands. Each correction is listed in <c>ResultJson.changes</c> with
+/// <c>pass: "recent"</c> and its previous owner, and counted in <c>recentChanges.corrected</c> — the standing correction
+/// report. A record whose recent pass came back incomplete, and a changed row the walk could not place, are carried to the
+/// next run and looked at again in every run until finished (task 147 r1).</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
@@ -56,11 +64,24 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// <summary>Stable job id — the scheduler's run history and admin endpoints key off it.</summary>
     public const string JobIdConstant = "secure-child-reconciliation";
 
-    /// <summary>Every 15 minutes once enabled; task 147 owns the standing cadence. Registered disabled.</summary>
-    internal const string DefaultCronSchedule = "*/15 * * * *";
+    /// <summary>
+    /// Every 2 minutes, ENABLED (task 147, round 28 item 2: the recent-changes pass is the L4 net for writes made outside the
+    /// product, "every 2 minutes with writes ON in every environment where 148 is deployed" — the same window owner round 11
+    /// item 2 accepted for 149's shares).
+    /// </summary>
+    internal const string DefaultCronSchedule = "*/2 * * * *";
 
-    /// <summary>The owner switch that turns report-only into writes. Absent, empty or unparseable = report-only.</summary>
+    /// <summary>
+    /// The owner switch that turns the SWEEP (the backfill over every secure record) from report-only into writes. Absent,
+    /// empty or unparseable = report-only.
+    /// </summary>
     internal const string WritesEnabledConfigKey = "SecureChild:Reconciliation:WritesEnabled";
+
+    /// <summary>
+    /// Task 147 (round 28 item 2): the recent-changes pass WRITES unless this parses to <c>false</c> — an emergency stop,
+    /// not an opt-in. Absent, empty or unparseable = writes on.
+    /// </summary>
+    internal const string RecentChangesWritesEnabledConfigKey = "SecureChild:Reconciliation:RecentChangesWritesEnabled";
 
     /// <summary>The per-run root cap.</summary>
     internal const string MaxRootsPerRunConfigKey = "SecureChild:Reconciliation:MaxRootsPerRun";
@@ -134,8 +155,22 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     {
         ArgumentNullException.ThrowIfNull(context);
         var started = _timeProvider.GetTimestamp();
+        // The SWEEP (task 148: every secure record in order, the backfill) writes only when the owner switch says so.
         var writes = bool.TryParse(_configuration[WritesEnabledConfigKey], out var enabled) && enabled;
         var mode = writes ? SecureChildReconcileMode.Apply : SecureChildReconcileMode.ReportOnly;
+
+        // The RECENT-CHANGES pass (task 147, decided by round 28 item 2) writes in every environment this job runs in:
+        // only an explicit "false" turns it off. Its writes are bounded by the rule — the Sweep trigger never releases an
+        // isolated row (owner round 24 item 2) — so they only ever move a child INTO isolation under a secure record.
+        var recentWrites = !(bool.TryParse(_configuration[RecentChangesWritesEnabledConfigKey], out var recentEnabled)
+                             && !recentEnabled);
+        var recentMode = recentWrites ? SecureChildReconcileMode.Apply : SecureChildReconcileMode.ReportOnly;
+
+        // A SCHEDULED tick runs the sweep window only when the sweep writes. With the sweep off, a scheduled tick is the L4
+        // net alone (recent changes + carried work), so the backfill's report-only sweep is not re-planned every two minutes
+        // and the backfill script's per-instance cursor is not moved by the schedule. A manual trigger (the backfill
+        // script, an operator) always runs the sweep window, in the sweep's own mode.
+        var runSweep = writes || context.Trigger != JobRunTrigger.Scheduled;
         var cap = int.TryParse(_configuration[MaxRootsPerRunConfigKey], out var configured) && configured > 0
             ? configured
             : DefaultMaxRootsPerRun;
@@ -154,9 +189,19 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // window next reaches their record. They are reconciled first, by the same pass.
         var startedAt = _timeProvider.GetUtcNow();
         DateTimeOffset since;
+        IReadOnlyList<(string Table, Guid Id)> retryRoots;
+        IReadOnlyList<(string Table, Guid Id)> retryRows;
         lock (_cursorGate)
+        {
             since = _recentChangesWatermark ?? startedAt - InitialRecentChangesLookback;
-        var recent = await FindRecentlyChangedRootsAsync(dataverse, synchronizer, since, cancellationToken)
+            // Task 147 r1 (verifier item 4): what the previous runs could not finish is looked at again in EVERY run until
+            // it is finished — never reported once and then left to the capped sweep (or, for a row the walk could not
+            // place, never revisited at all).
+            retryRoots = _pendingRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+            retryRows = _pendingRows.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+        }
+
+        var recent = await FindRecentlyChangedRootsAsync(dataverse, synchronizer, since, retryRows, cancellationToken)
             .ConfigureAwait(false);
 
         // Continue after the last record the previous run reached (by ORDER, not position: records secured or unsecured
@@ -167,12 +212,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var start = resumeAfter is { } after ? roots.FindIndex(r => Compare((r.Table, r.Id), after) > 0) : 0;
         if (start < 0)
             start = 0;
-        var batch = roots.Skip(start).Take(cap).ToList();
+        var batch = runSweep ? roots.Skip(start).Take(cap).ToList() : new List<(string Table, Guid Id, string Key)>();
 
-        // The recent-changes roots go first. A record in both lists is reconciled once, and it still counts toward the
-        // sweep window's position.
-        var recentKeys = recent.Roots.Select(r => (r.Table, r.Id)).ToHashSet();
-        var work = recent.Roots
+        // The recent-changes roots go first, with every record a previous run left incomplete (task 147 r1). A record in
+        // both lists is reconciled once, and it still counts toward the sweep window's position. A carried record that is
+        // no longer flagged secure is not carried on: the sweep list is the authority on which records are.
+        var secureKeys = roots.Select(r => (r.Table, r.Id)).ToHashSet();
+        var firstRoots = recent.Roots
+            .Concat(retryRoots.Where(secureKeys.Contains))
+            .Distinct()
+            .ToList();
+        var recentKeys = firstRoots.ToHashSet();
+        var work = firstRoots
             .Select(r => (r.Table, r.Id, Key: $"{r.Table}:{r.Id:D}", Position: (int?)null))
             .Concat(batch.Select((b, i) => (b.Table, b.Id, b.Key, Position: (int?)(start + i + 1)))
                 .Where(b => !recentKeys.Contains((b.Table, b.Id))))
@@ -180,6 +231,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         var totals = new int[8];
         var incompleteRoots = new List<string>();
+        var stillIncomplete = new List<(string Table, Guid Id)>();
+        var recentCorrections = 0;
         var sampled = new List<object>();
         var changesTotal = 0;
         var sharesWritten = 0;
@@ -202,7 +255,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     context.RunId, mode, key, since);
             }
 
-            var report = await reconciler.ReconcileAsync(table, id, mode, SecureChildPassTrigger.Sweep, cancellationToken)
+            var report = await reconciler.ReconcileAsync(
+                    table, id, position is null ? recentMode : mode, SecureChildPassTrigger.Sweep, cancellationToken)
                 .ConfigureAwait(false);
 
             foreach (var t in report.Tables)
@@ -216,17 +270,29 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             mirrorsRevoked += report.MirrorSharesRevoked;
 
             if (!report.IsComplete)
+            {
                 incompleteRoots.Add($"{key}: {report.Status}{(report.Detail is null ? "" : " — " + report.Detail)}");
+
+                // Carried only from the recent-changes group: a sweep-window record that is incomplete is the sweep's to
+                // revisit, in the sweep's own mode (a carried record is reconciled in the recent-changes mode).
+                if (position is null)
+                    stillIncomplete.Add((table, id));
+            }
 
             foreach (var change in report.Changes)
             {
                 // Counted in full (task 148 r2): the listed sample is capped, the total is not — so a reader can tell
                 // when the list is incomplete (changesTotal > changesListed).
                 changesTotal++;
+                if (position is null && change.Outcome == SecureChildRowOutcome.Changed)
+                    recentCorrections++;
                 if (sampled.Count >= MaxSampledChanges)
                     continue;
                 sampled.Add(new
                 {
+                    // Task 147: which part of the run made it — "recent" (the L4 net's standing correction report) or
+                    // "sweep" (the backfill window).
+                    pass = position is null ? "recent" : "sweep",
                     root = key,
                     table = change.Table,
                     id = change.Id,
@@ -239,18 +305,33 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         }
 
         var lastKey = batch.Count > 0 ? batch[^1].Key : null;
-        var passComplete = start + batch.Count >= roots.Count;
+        var passComplete = runSweep && start + batch.Count >= roots.Count;
         lock (_cursorGate)
         {
-            _cursor = passComplete || batch.Count == 0 ? null : (batch[^1].Table, batch[^1].Id);
+            if (runSweep)
+                _cursor = passComplete || batch.Count == 0 ? null : (batch[^1].Table, batch[^1].Id);
 
             // The watermark moves only past a listing that COMPLETED, in a run that WROTE. After a failed listing, the
             // next run looks at the same window again. A report-only run corrects nothing, so it must not move the
             // watermark either: the first run with writes on then still sees the changes the report-only runs listed
             // (back to the initial lookback). A record whose pass was incomplete is revisited by the sweep, as every
             // secure record is.
-            if (recent.Failure is null && writes)
+            if (recent.Failure is null && recentWrites && !recent.PendingOverflow)
                 _recentChangesWatermark = startedAt - RecentChangesOverlap;
+
+            // Task 147 r1 (verifier item 4): carry forward, to be looked at first in the NEXT run, every record whose pass
+            // came back incomplete in THIS run (a refused or failed re-own, a record that cannot be decided) and every
+            // changed row the walk could not place. Each is reported again in every run until it is finished, so a refused
+            // re-own is retried within one interval rather than after ceil(records / cap) runs, and a row under a missing
+            // ancestor is never forgotten. A carried row that has since been isolated, deleted or placed drops out on its
+            // own. After a failed listing nothing was decided about the carried rows, so they stay carried.
+            _pendingRoots.Clear();
+            _pendingRoots.UnionWith(stillIncomplete);
+            if (recent.Failure is null)
+            {
+                _pendingRows.Clear();
+                _pendingRows.UnionWith(recent.UndeterminedRows.Take(MaxCarriedRows));
+            }
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
@@ -260,6 +341,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // missing ancestor.
         var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0;
         var recentOnly = work.Count - batch.Count(b => !recentKeys.Contains((b.Table, b.Id)));
+        int carriedRoots, carriedRows;
+        lock (_cursorGate)
+            (carriedRoots, carriedRows) = (_pendingRoots.Count, _pendingRows.Count);
 
         // THE HEARTBEAT (ADR-036 A1 rule 5) — every attempt, including one with nothing to do.
         _logger.Log(
@@ -292,6 +376,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             ResultJson: JsonSerializer.Serialize(new
             {
                 mode = writes ? ModeWrite : ModeReportOnly,
+                // Task 147: false on a scheduled tick while the sweep is report-only — that tick was the L4 net alone.
+                sweepRan = runSweep,
                 rootsInRun = batch.Count,
                 rootsTotal = roots.Count,
                 // Where in the ordered list this run began (1 = the first secure record). A pass is covered only from a run
@@ -323,20 +409,45 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 // `since`. They were reconciled before the sweep window, and their changes are in the totals above.
                 recentChanges = new
                 {
+                    mode = recentWrites ? ModeWrite : ModeReportOnly,
+                    // The standing correction report (round 28 item 2): children moved into isolation by this run's
+                    // recent-changes pass; each is listed in `changes` with pass "recent" and its previous owner.
+                    corrected = recentCorrections,
                     since = since.UtcDateTime,
                     rowsChanged = recent.RowsChanged,
                     rootsFound = recent.Roots.Count,
                     roots = recent.Roots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
                     undetermined = recent.Undetermined.Take(50).ToArray(),
                     failure = recent.Failure,
+                    // Task 147 r1: what earlier runs left unfinished and this run looked at again — records whose pass was
+                    // incomplete, and changed rows that could not be placed — and what is carried to the next run.
+                    retriedRoots = retryRoots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
+                    retriedRows = recent.RetriedRows,
+                    carriedRoots,
+                    carriedRows,
+                    // More unplaced rows than the job carries: the watermark stays, so the whole window is listed again.
+                    pendingOverflow = recent.PendingOverflow,
                 },
                 attempt = context.Attempt,
             }, ResultJsonOptions));
     }
 
-    /// <summary>What the recent-changes pass found (task 147).</summary>
+    /// <summary>What the recent-changes pass found (task 147; carried rows task 147 r1).</summary>
     private sealed record RecentChanges(
-        int RowsChanged, IReadOnlyList<(string Table, Guid Id)> Roots, IReadOnlyList<string> Undetermined, string? Failure);
+        int RowsChanged, IReadOnlyList<(string Table, Guid Id)> Roots, IReadOnlyList<string> Undetermined, string? Failure)
+    {
+        /// <summary>The undetermined rows as (table, id), to be carried to the next run.</summary>
+        public IReadOnlyList<(string Table, Guid Id)> UndeterminedRows { get; init; } = Array.Empty<(string, Guid)>();
+
+        /// <summary>How many rows carried from earlier runs were read again.</summary>
+        public int RetriedRows { get; init; }
+
+        /// <summary>More undetermined rows than <see cref="MaxCarriedRows"/>: the watermark must not move.</summary>
+        public bool PendingOverflow => UndeterminedRows.Count > MaxCarriedRows;
+    }
+
+    private static RecentChanges FailedRecentChanges(string failure) =>
+        new(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), failure);
 
     /// <summary>
     /// Task 147: lists the child rows of every lineage table modified since <paramref name="since"/> that are NOT already
@@ -353,14 +464,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// it was.</para>
     /// </remarks>
     private async Task<RecentChanges> FindRecentlyChangedRootsAsync(
-        IGenericEntityService dataverse, SecureChildShareSynchronizer synchronizer, DateTimeOffset since, CancellationToken ct)
+        IGenericEntityService dataverse, SecureChildShareSynchronizer synchronizer, DateTimeOffset since,
+        IReadOnlyList<(string Table, Guid Id)> carriedRows, CancellationToken ct)
     {
         try
         {
             var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(dataverse, _configuration, ct)
                 .ConfigureAwait(false);
             if (team.Refusal is { } refusal)
-                return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), refusal);
+                return FailedRecentChanges(refusal);
             if (team.TeamId is not { } secureTeamId)
                 return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null); // no record can be secure
 
@@ -394,24 +506,50 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 }
             }
 
+            var rowsChanged = changed.Count;
+
+            // Task 147 r1: the rows earlier runs could not place, read again by id whatever their modifiedon. A row that is
+            // now Secure-team-owned has been placed, and a row that no longer exists is gone; both drop out.
+            var listed = changed.Select(e => (e.LogicalName, e.Id)).ToHashSet();
+            var retried = 0;
+            foreach (var group in carriedRows.Where(r => !listed.Contains(r)).GroupBy(r => r.Table, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!SecureChildLineage.Children.TryGetValue(group.Key, out var table))
+                    continue;
+                var query = new QueryExpression(table.LogicalName)
+                {
+                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(table.IdColumn, ConditionOperator.In, group.Select(r => (object)r.Id).ToArray());
+                var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                retried += group.Count();
+                changed.AddRange(result.Entities
+                    .Where(e => e.GetAttributeValue<EntityReference>("owningteam")?.Id != secureTeamId));
+            }
+
             if (changed.Count == 0)
-                return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null);
+                return new RecentChanges(rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried };
 
             var above = await synchronizer.SecureRootsAboveAsync(changed, ct).ConfigureAwait(false);
             return above.Status switch
             {
-                SecureChildShareSyncStatus.Completed => new RecentChanges(changed.Count, above.Roots, above.Undetermined, null),
-                SecureChildShareSyncStatus.NotApplicable => new RecentChanges(changed.Count, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null),
-                _ => new RecentChanges(changed.Count, Array.Empty<(string, Guid)>(), Array.Empty<string>(),
-                    above.Detail ?? "the records above the changed related records could not be determined"),
+                SecureChildShareSyncStatus.Completed => new RecentChanges(rowsChanged, above.Roots, above.Undetermined, null)
+                {
+                    UndeterminedRows = above.UndeterminedRowRefs,
+                    RetriedRows = retried,
+                },
+                SecureChildShareSyncStatus.NotApplicable => new RecentChanges(
+                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried },
+                // Failed (an ambiguous Secure team) or anything else: nothing is decided, and the window stays.
+                _ => FailedRecentChanges(above.Detail ?? "the records above the changed related records could not be determined"),
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] The recently changed related records could not be listed or " +
                 "placed since {Since:o}; that window is looked at again next run.", since);
-            return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(),
-                "the recently changed related records could not be listed or placed");
+            return FailedRecentChanges("the recently changed related records could not be listed or placed");
         }
     }
 
@@ -472,4 +610,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // Task 147: the recent-changes watermark, with the same per-instance, in-singleton reasoning as the cursor. A restart
     // looks back InitialRecentChangesLookback. A change older than that is reached by the full sweep.
     private DateTimeOffset? _recentChangesWatermark;
+
+    // Task 147 r1 (verifier item 4): what a run could not finish, looked at first by the next run on this instance — the
+    // records whose pass was incomplete and the changed rows that could not be placed. Same per-instance, in-singleton
+    // reasoning as the cursor (ADR-052 §5). A restart drops them: every carried record is still a sweep record, and every
+    // carried row is named in the run history of each run that carried it.
+    private readonly HashSet<(string Table, Guid Id)> _pendingRoots = new();
+    private readonly HashSet<(string Table, Guid Id)> _pendingRows = new();
+
+    /// <summary>
+    /// Task 147 r1: the most unplaced rows the job carries between runs. Beyond it the watermark does not move, so the whole
+    /// window is listed again: nothing is dropped, it is only re-listed more broadly.
+    /// </summary>
+    internal const int MaxCarriedRows = 1000;
 }
