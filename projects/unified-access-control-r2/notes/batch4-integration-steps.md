@@ -16,11 +16,21 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] **156 × 146 hand-merge points:** the `DataverseUpdateRecordHandler` constructor, remarks and PATCH block; the `TaskActionCore` / `ActionSeam` / `CreateTaskNodeExecutor` constructors; and `RecordOwnershipContext.ForChild` must ignore `sprk_regardingrecordtype`. 156's note lists them.
 - [ ] **167's ledger** (sweep integration): fill `ResolvedBy` and `ProofTest` from each fix task's "Route authorization ledger input" table, delete the Pending waivers that are now stale, and assign each UNOWNED-NEW entry to an owning task.
 
+## Route-sweep merges (2026-10-04; order binding: 162 before 164, 164 before 163)
+
+- [x] **159** merged `b50db426a`. PUT/DELETE/cancel/logs deleted (round 10 item 1); 146's create ownership re-applied on 159's gated create; 146's PUT re-file F3 gate and 156's PUT re-stamp went with the PUT route (two absence pins replace their tests, seeded). **Owed at 167 integration:** 159 note §5 — the `Api/Events/EventEndpoints.cs` `GovernedFiles` entry (exact text there), `GET /api/v1/events` as a handler decision, delete the eight Pending waivers.
+- [x] **160** merged `58aa328e3`. Census 122 → 120. **Owed at 167 integration:** 160 note §8 (drop any 167 entry/waiver for the two deleted files; census −2 on 167's side).
+- [x] **161-r1** merged `dc75c60bb`. `sprk_communication` is a NAME-ONLY catalogue entry (156's TaskActionCore name; out of 161's route allow-list; live-verified). 161's "delete the Assign check once 146 lands" NOT done: under a non-parent regarding the supplied owner still picks the owning BU (reason in the merge message). **Owed at 167 integration:** 161 note §9 ledger rows.
+- [x] **162-f1** merged `8fd16bbea`. Fork handler/tests gone; promote = 162's session-document check, then 146's owner. **Owed at 167 integration:** 162 note §7/§8. **Owed at 164's merge:** 162 §14.3 one-line edit (done in the 164 merge, see below).
+- [x] **Round 34 item 1** (`scripts/Set-DocumentAnalysisCascadeSchema.ps1`, dry run + `-Verify` read-only on spaarkedev1: FAIL exit 1 as expected pre-apply) — commit below. **Manual gate:** `-Apply` → `-Verify` exit 0 → non-admin delete probe (162 note §14.14).
+- [x] **Round 34 item 2** confirmed + missing-row test added, seeded both ways (162 note §14.14).
+
 ## `.claude/` edits (main session only; sub-agents cannot write there)
 
 - [ ] **142:** the concise `.claude/adr/ADR-034-user-record-membership.md` Amendment A4 (ACCEPTED in owner round 11). The exact text is in 142's note.
 - [ ] **166:** `.claude/skills/bff-deploy/SKILL.md` §9c. Move its smoke check off `GET /healthz/dataverse/doc/{id}`, which was an anonymous document read, onto `/healthz/dataverse`. The exact text is in 166's note. Also update the runbooks it lists (`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`, `051-operator-runbook.md`).
 - [ ] **160 (only if a production caller needs the SDK path):** a one-line ADR-028 A5 note that an SDK CallerId path satisfies A5's "equivalent refusal".
+- [ ] **161 (optional pointer):** `.claude/patterns/api/endpoint-filters.md`, add one line under the filter list: "`CommunicationRecordAuthorizationFilter` — per-record gate for `/api/communications` routes; one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny answer (task 161)."
 - [ ] **`.claude/CHANGELOG.md`:** add an entry for each `.claude` edit above.
 
 ## Live steps on dev (owner round 11: approved; run each as dry run, then apply, then verify, and record it in the task's live-gate note)

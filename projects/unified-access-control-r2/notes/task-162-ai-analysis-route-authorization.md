@@ -736,3 +736,42 @@ All on `task/uac-r2-162-f1`, 2026-10-04, after the final code (the seeded runs a
 | 12 | Client consumers not broken | Confirmed; `/create`'s consumer (Playbook Library / Analysis Builder `analysisService.ts`) needs rights ordinary users hold (§14.4); live gate (k)/(l). |
 | 13 | Manual live gate pending | Still pending (main session): §11 (a)–(h) + §14.11 (i)–(m); item (c) is now decided. |
 | 14 | Publish size and CVE not re-verified | **Re-measured** this round (§14.10). |
+
+### 14.14 Integration (sweep lane, 2026-10-04) — round 34 items 1 and 2
+
+Merged into `integ/uac-r2-batch4` as `8fd16bbea` (162-f1), after 159/160/161. Decisions round 34 (BINDING) closed two of
+this note's open items on the integration branch:
+
+**Round 34 item 1 — deleting a document deletes its AI analyses and their outputs (F-162-f1-1, §14.8).** New script
+`scripts/Set-DocumentAnalysisCascadeSchema.ps1` (the `Set-*Schema.ps1` pattern: dry run by default, `-Apply`, `-Verify`;
+solution membership through `scripts/common/DataverseSolutionMembership.ps1` / `Test-DvInSolution`, so
+`SchemaScriptSolutionMembershipGuardTests` covers it — seeded: an own `solutioncomponents` read in its place reddens the
+guard, restored). It sets `Delete = Cascade` on `sprk_document_analysis_document` (`sprk_analysis.sprk_documentid ->
+sprk_document`) and `sprk_analysis_analysisoutput` (`sprk_analysisoutput.sprk_analysisid -> sprk_analysis`), changes no
+other cascade value, and `-Verify` fails if Assign/Share/Unshare/Reparent/Merge is anything but NoCascade. Analyses with no
+document (round 15's personal analyses) and analyses anchored only to a record have nothing to cascade from: untouched.
+
+Read-only runs on spaarkedev1 (2026-10-04, operator az identity): both relationships unmanaged + customizable, currently
+`Delete = RemoveLink`, `Archive = RemoveLink`, all else NoCascade; both already in SpaarkeCore through their referencing
+table (`rootcomponentbehavior 0`). Dry run: two `WOULD set … RemoveLink -> Cascade`, zero writes. `-Verify`: **FAIL, exit 1**
+(the two cascades) — the expected answer before the gate.
+
+- [ ] **MANUAL GATE (main session; NOT run by the integration lane):** `-Apply`, then `-Verify` → exit 0. If Dataverse
+      refuses the PUT because `Archive` must follow `Delete`, align `Archive` to `Cascade` in the script (one line) and
+      re-run — record which.
+- [ ] **Non-admin delete probe (after `-Verify` passes; dev; `uac.child.user@demo.spaarke.com`, round 11):**
+      (1) create a TEST `sprk_document` the user may delete (Core User), an analysis on it as task 146 creates it
+      (team-owned, `sprk_createdbyperson` = the user) and one `sprk_analysisoutput` under that analysis; also note one
+      unrelated anchorless analysis id; (2) as the user, delete the document (MDA or Web API with the user's token);
+      (3) expect: the delete SUCCEEDS (a cascade the user's rights blocked would make documents undeletable — the reason
+      for the probe); the analysis and its output are gone (`GET` → 404); the unrelated anchorless analysis is unchanged.
+      Record ids redacted to 8 characters and the result here.
+
+**Round 34 item 2 — ratified §14.5.** Confirmed on the merged code: a rights-query FAULT on promote's session-document
+check answers 403 `sdap.access.error.system_failure`, byte-identical to the same fault on a body document
+(`Promote_SessionDocumentFault_IsTheBodyDocumentFault403`, `Promote_SessionDocumentCheckException_Denies`); a missing right
+answers `insufficient_rights` (`Promote_SessionDocumentWithoutAttachRights_Is403WithTheBodyDocumentDenyBody`); and a
+missing ROW — now pinned by the new `Promote_SessionDocumentMissingRow_IsInsufficientRights_NotSystemFailure` — answers
+`insufficient_rights`, never `system_failure`. Seeded both ways in `PromoteSession` (every session-document deny →
+`system_failure` reddens the missing-right and missing-row tests; every deny → `insufficient_rights` reddens both fault
+tests), restored byte-identical.

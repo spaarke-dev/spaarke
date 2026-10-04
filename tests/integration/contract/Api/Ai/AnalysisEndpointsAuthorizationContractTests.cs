@@ -655,6 +655,22 @@ public class AnalysisEndpointsAuthorizationContractTests
         host.VerifyPromoteWroteNothing();
     }
 
+    [Fact(DisplayName = "Round 34 item 2: a session document whose row does not exist (the rights query answers no access, not a fault) is insufficient_rights, never system_failure — the same body as a body-document deny, nothing written")]
+    public async Task Promote_SessionDocumentMissingRow_IsInsufficientRights_NotSystemFailure()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var session = await host.SeedOwnSessionAsync(Guid.NewGuid()); // no grant at all: the row is absent for this caller
+
+        var sessionDeny = await host.SendAsync(Promote(new { sessionId = session.SessionId, name = "A" }));
+        var bodyDeny = await host.SendAsync(Promote(new { sessionId = session.SessionId, name = "A", documentId = Guid.NewGuid() }));
+
+        await AssertForbiddenAsync(sessionDeny, "sdap.access.deny.insufficient_rights");
+        (await sessionDeny.Content.ReadAsStringAsync()).Should().NotContain("system_failure",
+            "a missing row is a deny, not a fault (round 34 item 2; ADR-003 still fails closed)");
+        (await NormalizedBodyAsync(sessionDeny)).Should().Be(await NormalizedBodyAsync(bodyDeny));
+        host.VerifyPromoteWroteNothing();
+    }
+
     [Theory(DisplayName = "162 promote: another user's session, or one with no owner, is the 404 a missing session gets — byte-identical apart from correlationId — and nothing is written")]
     [InlineData("another-owner")]
     [InlineData("no-owner")]
