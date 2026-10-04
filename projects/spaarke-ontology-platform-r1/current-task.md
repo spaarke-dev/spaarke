@@ -11,13 +11,13 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active in the main session.** Recently completed: 006, 002 (2026-10-04), 089 (PR #1121) |
+| **Task** | **none active in the main session.** Recently completed: 021 (commit eafcd3b2d), 006, 002, 089 (PR #1121) |
 | **Step** | — |
-| **Status** | orchestrating; 021 is closing out (reviewer findings, then the full BFF suite) |
-| **Next Action** | (1) When **021** reports its suite line + review findings: check them, commit its files on this branch (PredicateCompiler.cs, SignalsModule.cs, PredicateCompilerTests.cs, seam SignalPredicateTests.cs, tests/fixtures/signals/, notes/pathb-fetchxml-reference.md, notes/021-…-progress.md), set TASK-INDEX 021 ✅, run the drift check. (2) THEN dispatch **030** + **022** (this worktree, one at a time) and **091** + **092** (own worktrees C:\wt091, C:\wt092). Heavy jobs are held until 021's suite reports so nothing contends. (3) **081** waits for #1118 + #1121 to merge. Writer identity for 030: client id `69040982-612e-469e-a85f-26d5172367c5`, systemuser `3121bf1b-9fbf-f111-aaaf-0022482913fc` |
-| **Running in background** | **021** (opus subagent, THIS worktree; holds uncommitted files listed above; told not to touch this file or commit) plus its reviewer agent |
-| **Branch / git** | `docs/ontology-platform-design`, 0 behind `origin/master`; the 006/002 records are committed and pushed with this checkpoint |
-| **Index** | 51 tasks: **20 ✅ · 0 🔄 · 31 🔲** (092 added from 089's findings). Drift check clean |
+| **Status** | orchestrating three background agents |
+| **Next Action** | Record each agent report when it arrives (verify claims, then POML + TASK-INDEX ✅ + drift check; for 030 also review and commit its files on this branch). After **030** reports, dispatch **022** in this worktree. **081** waits for PRs #1118 + #1121 to merge. Owner decision pending from 030: whether to fold Write on sprk_signal + Global reads into Spaarke Ontology Service (security-roles §9 finding a) |
+| **Running in background** | **task-030** Signal writer (sonnet, THIS worktree; must not commit or edit this file) · **task-091** C-18 sweeps (C:\wt091, branch chore/shared-lib-sweeps, own PR) · **task-092** master build/test failures (C:\wt092, branch fix/master-build-test-baseline, own PR) |
+| **Branch / git** | `docs/ontology-platform-design`, 20 ahead / 0 behind `origin/master`, in sync with its remote |
+| **Index** | 51 tasks: **21 ✅ · 0 🔄 · 30 🔲**. Drift check clean |
 
 ### Files modified since the last commit
 - none (all committed with this checkpoint)
