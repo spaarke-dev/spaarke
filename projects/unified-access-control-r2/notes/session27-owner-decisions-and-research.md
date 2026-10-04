@@ -256,6 +256,12 @@ Also from task 156's verifier, filed as work rather than decisions (the owner's 
 11. **157:** `datagrid-external-host-gate` lands **advisory** and becomes blocking after N green runs on the CI runner (the repo's standard).
 12. **157 / CI router:** the pre-existing `docs_only` skip belongs to `ci-cd-unit-test-remediation-r1`; the main session **files a GitHub issue** there. No router change in this project.
 
+## Owner answers, round 14 (2026-10-03). BINDING. Each "(Recommended)" option chosen.
+
+1. **167, health probes:** `GET /healthz`, `/healthz/catalog` and `/ping` use a **dedicated, looser `health-probe` rate-limit policy** (e.g. 120 per minute per client IP), not the shared `anonymous` policy (10/min). The platform health check, the slot-swap warm-up ping and the deploy workflow's poll loop must never see 429. Round 12 item 1 still holds: the probes are rate limited.
+2. **167, routes with neither RequireAuthorization nor AllowAnonymous:** set an authorization **FallbackPolicy requiring an authenticated user** (fail closed at runtime) **and** a guard rule that fails the build on any route lacking `RequireAuthorization*` or `AllowAnonymous` on its route or group chain, with negative and positive controls. Every intentionally anonymous endpoint carries an explicit `AllowAnonymous`.
+3. **133:** `container_ownership_unreadable` and `resume_creator_unavailable` (creatorState unreadable) classify **401/403 as Refused** (an administrator must act), as the cascade reads already do; 503/429 stay retryable.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
