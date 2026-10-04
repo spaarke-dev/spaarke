@@ -983,7 +983,7 @@ The route counts in the background come from a Python approximation of the scann
       path ('/health' was never mapped). The .claude/skills/bff-deploy/SKILL.md edit is recorded in note 17.8 for the
       main session.
       SEEDING: 8 seeds on real source (f1-1..f1-8), each failed the named rule(s), each restored and touched.
-      TESTS: see note section 17.9.
+      TESTS: Guard 61/61; ArchTests 392/392; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed; BFF unit suite run 1 14219 passed / 1 failed (Refine_GetMethod_NotAllowed, a real FallbackPolicy consequence, then fixed) / 54 skipped; run 2 (final) 14207 passed / 14 failed / 54 skipped, all 14 TaskCanceledException client timeouts under machine contention, those 14 re-run in isolation 47/47 cases passed (note section 17.11). FOUND (for the main session, note 17.9): /healthz/catalog runs uncached Dataverse reconciliation per call, so the 120/min probe budget lets one anonymous address drive ~360-480 Dataverse requests a minute; proposed complete fix: a single-flight 30 s result memo in RoutingConsumerTypeHealthCheck and ComposeIdentityKeyHealthCheck.
       PUBLISH SIZE: base 45.65 MB vs branch 45.65 MB (+398 bytes), Compress-Archive, 212 files each, PDBs included. No
       package change (CVE set unchanged).
     </outcome>
