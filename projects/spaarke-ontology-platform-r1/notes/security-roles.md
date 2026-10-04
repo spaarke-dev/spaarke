@@ -515,3 +515,23 @@ executable. Task 041 still tests the guarantee for **human** users in the Consol
   503, but that is **pre-existing** `ai-catalog-reconciliation` drift. App Insights logs the same message on
   2026-09-29, 09-30, 10-02 and 10-03 02:25Z, all before this change at 2026-10-04 02:49Z. Owned by the AI catalog,
   not this project.
+
+### 9.1 Who owns a Signal: settled live (2026-10-04, task 030 independent review)
+
+§4 said "set the owner (or at minimum the owning BU) from the grouping matter". Task 030 first implemented
+**owner = the matter BU's default team**. The independent review predicted that would fail, and probes as the
+writer (`MSCRMCallerID: 3121bf1b-…`) settled it. Every probe row was deleted; 0 remain.
+
+| Probe (create `sprk_signal` as the writer) | Result |
+|---|---|
+| Baseline: no lookup, no owner | 204 |
+| `sprk_Matter` → BU1 matter / → root matter | **204 / 204**. AppendTo at Basic is NOT a blocker (review F2 refuted). Nav property is `sprk_Matter` |
+| `ownerid` → **BU1 default team** | **403 `0x80040299`** "Read Privilege Check For Owner failed": that team holds no role with Read on `sprk_signal` |
+| `ownerid` → root default team | 204, but useless: BU1 users read Signals at Parent:Child BU depth, and root is above them |
+| **owner = writer, `owningbusinessunit` → BU1** | **204; stored owner = writer, owningbu = BU1** |
+
+**Decision (no role change needed):** the writer stays the owner, and `owningbusinessunit` is set from the
+grouping matter's BU on create. Console User's Parent:Child BU read then shows the Signal to exactly the matter's
+BU (and the BUs below it). This works because spaarkedev1 has
+**`EnableOwnershipAcrossBusinessUnits = true`**: an **environment dependency**. Provisioning must enable it for
+every new environment, and the writer verifies the stored owning BU after each create and refuses on mismatch.
