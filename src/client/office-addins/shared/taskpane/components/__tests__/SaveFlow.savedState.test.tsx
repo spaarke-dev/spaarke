@@ -1,17 +1,24 @@
 /**
  * Task 088 (spaarkeai-word-add-in-r1, UAT round 3 — UAT-1/6/7; owner 2026-10-03 "Keep the form"): after a save
- * the Save tab STAYS on the form instead of replacing it with a success card.
+ * the Save tab STAYS on the form instead of replacing it with a success card. REWRITTEN for task 094
+ * (owner, 2026-10-04 — UAT round 3 follow-up), which supersedes 088's name-edit re-enable trigger:
  *
- * In scope (the POML's closed acceptance set, AC1–AC4, plus the Outlook "same state, nothing Word-only" rule):
  * - the confirmation bar names the record the save was filed to, or says it was filed to none, with View
  *   Document + Copy Link; the footer shows Open Document immediately left of a gray, disabled "Saved";
- * - an edited name or an accepted Generate Profile turns "Saved" into "Save version", which sends a VERSION of
- *   the saved document (existingDocumentId + isNewVersion); reverting the name returns to "Saved";
+ * - the save button NEVER reads "Save version" anywhere in the pane — it is "Save" whenever enabled, "Saved"
+ *   when gray, "Save as new document" unchanged (owner, 2026-10-04);
+ * - once a document is in Spaarke, its name shows LOCKED (read-only, with a hint); "Save as new document" is
+ *   the only way to rename — editing the name is no longer possible and no longer re-enables Save;
+ * - with content-change detection supported, "Saved" turns into an enabled "Save" on a content-change event
+ *   (simulated via the lifted `savedState`/`onSavedStateChange` — the real subscription lives in `SaveView`);
+ *   an accepted Generate Profile still re-enables it too (088 behaviour, kept);
+ * - WITHOUT content-change detection, the button is an enabled "Save" immediately after a save — never gray
+ *   (owner's binding "never block a save" rule);
  * - View Document, Open Document and the duplicate card's View Existing Document open the Spaarke document
  *   RECORD (`appname=` from SPAARKE_APP_NAME; none when it is empty) — never the Graph webUrl;
  * - without `canOpenRecord` or without ORG_URL those buttons are not rendered at all;
- * - an Outlook save (no document bytes) reaches the same saved state, whose name is read-only and whose button
- *   stays "Saved"; Cancel returns to an empty form (what "Save Another" did).
+ * - an Outlook save (no document bytes) reaches the same saved state, whose name is read-only (no hint/unlock
+ *   — nothing to version from here) and whose button stays "Saved"; Cancel returns to an empty form.
  *
  * Real SaveFlow + real useSaveFlow + the REAL openRecordLauncher (the opened URL is asserted through the
  * global `Office.context.ui.openBrowserWindow` mock from jest.setup.js). Only fetch, SSE, the Profile section
@@ -20,7 +27,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { SaveFlow } from '../SaveFlow';
+import { SaveFlow, DEFAULT_SAVED_DOCUMENT_PANE_STATE, type SavedDocumentPaneState } from '../SaveFlow';
 import type { DocumentIdentityState } from '../../services/documentIdentityService';
 
 // The Profile section is replaced by a stub exposing the one seam SaveFlow uses: onProfileGenerated (task 088).
@@ -143,6 +150,10 @@ function renderWord(props: Partial<React.ComponentProps<typeof SaveFlow>> = {}) 
         itemName="Brief.docx"
         canProvideDocumentName
         canOpenRecord
+        // Task 094: this suite's default host CAN detect content changes (the owner's "Re-enable on
+        // document edits" scenario) — AC4's "unsupported" case gets its own describe block below with
+        // this explicitly turned off.
+        canDetectDocumentChanges
         captureDocumentContent={jest.fn().mockResolvedValue('UEsDBBQ=')}
         getAccessToken={jest.fn().mockResolvedValue('token')}
         apiBaseUrl="https://bff"
@@ -212,58 +223,117 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     renderWord({ documentIdentity: identity, resolvedDocumentId: SAVED_ID });
     saveResponses.push(accepted());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    // Task 094: the document is already in Spaarke — pre-save, the name box is LOCKED (Spaarke's own
+    // name, "Brief"), never an editable field, and the button never says "Save version".
+    expect(screen.queryByRole('textbox', { name: 'Document name' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save version' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled());
 
     expect(sentBody(0).document).toMatchObject({ existingDocumentId: SAVED_ID, isNewVersion: true });
     expect(screen.getByText('New version saved to Spaarke')).toBeInTheDocument();
     expect(screen.getByText('Gamma Merger')).toBeInTheDocument();
+    // The locked name shown after the version save is the record's OWN name, not editable.
+    expect(screen.getByText('Brief')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save version' })).not.toBeInTheDocument();
   });
 
-  it('AC2: an edited name turns "Saved" into "Save version", which sends a version of THE SAVED document; reverting the name returns to "Saved"', async () => {
+  it('AC1/AC2: once saved, the name box is LOCKED with a hint and "Save as new document" — never editable, never re-enabled by an edit', async () => {
     fileToMatter();
     renderWord();
     await saveAndWaitForSavedState();
     expect(sentBody(0).document.existingDocumentId).toBeUndefined(); // the first save was a create
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit document name' }));
-    const name = screen.getByRole('textbox', { name: 'Document name' });
-    fireEvent.change(name, { target: { value: 'Brief — final' } });
-    expect(screen.getByRole('button', { name: 'Save version' })).toBeEnabled();
-
-    fireEvent.change(name, { target: { value: 'Brief' } });
+    // No pencil, no input — editing the name is no longer possible from the saved state.
+    expect(screen.queryByRole('button', { name: 'Edit document name' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Document name' })).not.toBeInTheDocument();
+    expect(screen.getByText(/This document.s name is set in Spaarke/)).toBeInTheDocument();
+    // Task 094: a content-change event hasn't fired yet, and no profile was regenerated — still "Saved".
     expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled();
-
-    fireEvent.change(name, { target: { value: 'Brief — final' } });
-    saveResponses.push(accepted());
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
-
-    await waitFor(() => expect(sentBodies()).toHaveLength(2));
-    const version = sentBody(1);
-    expect(version.document).toMatchObject({
-      existingDocumentId: SAVED_ID,
-      isNewVersion: true,
-      title: 'Brief — final',
-    });
-    expect(version).not.toHaveProperty('targetEntity'); // a version never re-files the document
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled());
-    expect(screen.getByText('New version saved to Spaarke')).toBeInTheDocument();
-    expect(screen.getByText('Gamma Merger')).toBeInTheDocument(); // the filing it already had
   });
 
-  it('AC2: an accepted Generate Profile turns "Saved" into "Save version" (a version of the saved document)', async () => {
+  it('AC2: "Save as new document" unlocks the name box; saving sends a CREATE (no existingDocumentId)', async () => {
+    fileToMatter();
+    renderWord();
+    await saveAndWaitForSavedState();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save as new document' }));
+
+    // Unlocked: the plain editable new-document form is back, pencil affordance included.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit document name' }));
+    const name = screen.getByRole('textbox', { name: 'Document name' });
+    fireEvent.change(name, { target: { value: 'Brief — copy' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+
+    saveResponses.push(accepted());
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(sentBodies()).toHaveLength(2));
+    const created = sentBody(1);
+    expect(created.document).not.toHaveProperty('existingDocumentId');
+    expect(created.document).not.toHaveProperty('isNewVersion');
+    expect(created.document.title).toBe('Brief — copy');
+  });
+
+  // Task 094 (AC3): the real content-change SUBSCRIPTION lives in `SaveView` (covered by
+  // `WordAdapter.documentChangeDetection.test.ts` + `SaveView.documentChangeDetection.test.tsx`).
+  // SaveFlow's own responsibility — pinned here directly via the lifted, controlled `savedState` — is
+  // just reading `contentChangedSinceSave` correctly once it is set.
+  it('AC3: with content-change detection supported, contentChangedSinceSave=true turns "Saved" into an enabled "Save"', async () => {
+    const savedState: SavedDocumentPaneState = {
+      savedDocument: { documentId: SAVED_ID, savedName: 'Brief', filedTo: 'Gamma Merger', lastSave: 'create' },
+      profileRegenerated: false,
+      profileRefreshSignal: 0,
+      contentChangedSinceSave: true,
+    };
+    renderWord({ savedState, onSavedStateChange: jest.fn(), canDetectDocumentChanges: true });
+
+    expect(screen.queryByRole('button', { name: 'Saved' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('AC3: with content-change detection supported, contentChangedSinceSave=false stays "Saved" (gray)', async () => {
+    const savedState: SavedDocumentPaneState = {
+      savedDocument: { documentId: SAVED_ID, savedName: 'Brief', filedTo: 'Gamma Merger', lastSave: 'create' },
+      profileRegenerated: false,
+      profileRefreshSignal: 0,
+      contentChangedSinceSave: false,
+    };
+    renderWord({ savedState, onSavedStateChange: jest.fn(), canDetectDocumentChanges: true });
+
+    expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled();
+  });
+
+  it('AC4: WITHOUT content-change detection, the button is an enabled "Save" immediately after saving — never gray', async () => {
+    fileToMatter();
+    renderWord({ canDetectDocumentChanges: false });
+
+    saveResponses.push(accepted());
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(sentBodies()).toHaveLength(1));
+    // The owner's binding "never block a save" rule: never "Saved" (gray) when detection is unsupported.
+    expect(await screen.findByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Saved' })).not.toBeInTheDocument();
+  });
+
+  it('AC5: an accepted Generate Profile re-enables "Save" (088 behaviour, kept) — the button NEVER reads "Save version"', async () => {
     renderWord();
     await saveAndWaitForSavedState();
 
     fireEvent.click(screen.getByRole('button', { name: 'Stub: profile generated' }));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Save version' })).not.toBeInTheDocument();
+
     saveResponses.push(accepted());
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(sentBodies()).toHaveLength(2));
     expect(sentBody(1).document).toMatchObject({ existingDocumentId: SAVED_ID, isNewVersion: true });
   });
 
-  it('a refused "Save version" (OFFICE_009) still offers "Save as new document", which leaves the saved state for a create', async () => {
+  it('a refused version save (OFFICE_009) still offers "Save as new document", which leaves the saved state for a create', async () => {
     renderWord();
     await saveAndWaitForSavedState();
     fireEvent.click(screen.getByRole('button', { name: 'Stub: profile generated' }));
@@ -277,12 +347,63 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
       })
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save version' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // Exactly one "Save as new document" button: the saved-state name box suppresses its own copy
+    // while the error banner is already offering the same action (production rule, not a test artifact).
     fireEvent.click(await screen.findByRole('button', { name: 'Save as new document' }));
 
     expect(screen.queryByText('Saved to Spaarke')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
     expect(sentBodies()).toHaveLength(2); // nothing sent by the switch itself
+  });
+
+  // Task 094: the lifted saved-state bundle survives a Save-tab remount (switching to To Do/Find and
+  // back) — simulated here with a REAL React owner (so the controlled prop actually re-renders on each
+  // update, exactly like `App.tsx`'s `useState`): save while mounted, capture the settled bundle, unmount
+  // (the tab switch away), then mount a FRESH `SaveFlow` with that same captured bundle (the tab switch
+  // back) and confirm the saved state is there with no second save.
+  it('the saved-state bundle survives a remount when the caller (App.tsx) holds it across the switch', async () => {
+    let latest: SavedDocumentPaneState = DEFAULT_SAVED_DOCUMENT_PANE_STATE;
+    function Owner(): React.ReactElement {
+      const [savedState, setSavedState] = React.useState<SavedDocumentPaneState>(DEFAULT_SAVED_DOCUMENT_PANE_STATE);
+      latest = savedState;
+      return (
+        <FluentProvider theme={webLightTheme}>
+          <SaveFlow
+            hostType="word"
+            itemId="https://contoso.sharepoint.com/Brief.docx"
+            itemName="Brief.docx"
+            canProvideDocumentName
+            canOpenRecord
+            canDetectDocumentChanges
+            captureDocumentContent={jest.fn().mockResolvedValue('UEsDBBQ=')}
+            getAccessToken={jest.fn().mockResolvedValue('token')}
+            apiBaseUrl="https://bff"
+            savedState={savedState}
+            onSavedStateChange={setSavedState}
+          />
+        </FluentProvider>
+      );
+    }
+
+    fileToMatter();
+    const { unmount } = render(<Owner />);
+    saveResponses.push(accepted());
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled());
+    expect(latest.savedDocument).not.toBeNull();
+    const settled = latest;
+
+    // Simulate switching to Find/To Do (unmount the Save tab) and back (remount with the SAME bundle —
+    // App.tsx's own `useState` is what actually persists it; this re-render is the proof it was handed
+    // through unchanged).
+    unmount();
+    renderWord({ savedState: settled, onSavedStateChange: jest.fn() });
+
+    expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open Document' })).toBeInTheDocument();
+    expect(sentBodies()).toHaveLength(1); // no second save happened on remount
   });
 
   it('AC3: View Document and Open Document open the Spaarke document RECORD in the Spaarke app — never the file URL', async () => {

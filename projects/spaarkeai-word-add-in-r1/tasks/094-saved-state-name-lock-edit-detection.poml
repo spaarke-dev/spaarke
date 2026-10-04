@@ -3,7 +3,7 @@
   <metadata>
     <title>Save tab follow-up (owner 2026-10-04): the name is locked once a document is in Spaarke ("Save as new document" to rename); "Save" re-enables when the document's content changes; the saved state survives a tab switch; Open on "Name Already Exists" offers desktop Word and the browser</title>
     <phase>6 UAT round 3 (2026-10-03)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.ts`/`.tsx` (`SaveFlow.tsx`, `useSaveFlow.ts`, `App.tsx`, `WordAdapter.ts`/adapter types) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -142,4 +142,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    Escalation trigger did NOT fire: verified on Microsoft Learn (2026-10-04) that `Word.Document.onParagraphAdded`
+    / `onParagraphChanged` / `onParagraphDeleted` are GA (not preview) under requirement set WordApi 1.6, supported
+    on Word on the web / Windows / Mac since build 2308 (Aug 2023) and iPad since 16.76 — well below the "desktop
+    2501+" floor, so a GA event exists on every platform this add-in targets. Implemented all 7 steps directionally;
+    the only POML-undirected decision was suppressing the locked name box's own "Save as new document" button
+    whenever the error banner is already offering the identical action (a refused version save), to avoid showing
+    the same button twice. Full writeup, verification sources, gate numbers and the Step 9.5 review table:
+    `projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md`. Live AC9 (UAT round 4) is OPEN — no
+    Office host available in this session, per the POML's own "if unavailable, leave open."
+  </notes>
 </task>

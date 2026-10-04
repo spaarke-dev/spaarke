@@ -216,6 +216,35 @@ export function openFileUrl(
 }
 
 /**
+ * Task 094 (UAT round 4 trial): launches `ms-word:` by a synthetic anchor click — the one mechanism
+ * community evidence (OfficeDev/office-js#6926, Win Word 2608) showed launching desktop Word from a
+ * task pane. **No SUPPORTED Office.js call can do this**: `openBrowserWindow` only accepts http/https
+ * (Microsoft Learn, Office.UI; OfficeDev/office-js#2820 closed "by design" for Office URI schemes),
+ * and a bare `window.open('ms-word:...')` from a task pane is undocumented. This is the owner-accepted
+ * trial of that unsupported mechanism (2026-10-04: *"if this is just something to test, then fine"*).
+ *
+ * Nothing can detect a failed launch (no event, no promise rejection for a scheme the OS declines to
+ * open) — this always reports `{ opened: true }`. "Open in browser" ({@link openFileUrl}) is the real
+ * fallback button, never a retry of this one. Callers MUST gate the "Open in Word" affordance on
+ * {@link HostCapabilities.canOpenDesktopWord} themselves (NFR-10) — this function does not re-check it.
+ */
+export function openDesktopUrl(
+  url: string,
+  click: (anchor: HTMLAnchorElement) => void = anchor => anchor.click()
+): OpenRecordResult {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  try {
+    click(anchor);
+  } finally {
+    document.body.removeChild(anchor);
+  }
+  return { opened: true };
+}
+
+/**
  * Opens an existing Dataverse record in a new browser tab, following Spike-2's Option 3.
  *
  * Safe no-op (never throws, never opens a broken/blank window) when:

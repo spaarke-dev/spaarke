@@ -23,6 +23,7 @@ import { TaskPaneShell, type NavigationTab, type HostType } from './components/T
 import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
+import { DEFAULT_SAVED_DOCUMENT_PANE_STATE, type SavedDocumentPaneState } from './components/SaveFlow';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
@@ -248,6 +249,11 @@ export const App: React.FC<AppProps> = ({
   });
   // Monotonic attempt counter: a resolution result is applied only if no newer attempt has started.
   const identityAttemptRef = useRef(0);
+
+  // Task 094 (owner, 2026-10-04: "yes save should survive tab switch"): the Save tab's saved-state
+  // bundle, lifted here so switching to To Do/Find and back does not remount it away. `SaveView`/
+  // `SaveFlow` own reading and updating it; `App` only holds the value across the tab switch.
+  const [saveFlowState, setSaveFlowState] = useState<SavedDocumentPaneState>(DEFAULT_SAVED_DOCUMENT_PANE_STATE);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -833,6 +839,9 @@ export const App: React.FC<AppProps> = ({
             // silently. The retry re-runs task 013's resolution.
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
+            // Task 094: lifts the Save tab's saved-state bundle above its own mount lifecycle.
+            savedState={saveFlowState}
+            onSavedStateChange={setSaveFlowState}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.

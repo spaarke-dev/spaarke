@@ -14,6 +14,7 @@ import {
   buildOpenRecordUrl,
   buildOpenSpaarkeUrl,
   configuredSpaarkeAppName,
+  openDesktopUrl,
   openFileUrl,
   openRecord,
   openUrlInBrowserWindow,
@@ -112,6 +113,37 @@ describe('openFileUrl (task 088 / UAT-5 — the collision prompt opens the other
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe('openDesktopUrl (task 094 — the "Open in Word" UAT round 4 trial)', () => {
+  const DESKTOP_URL = 'ms-word:https://contoso.sharepoint.com/contentstorage/x/Brief.docx';
+
+  it('anchor-clicks the given url and reports opened: true', () => {
+    const click = jest.fn();
+
+    const result = openDesktopUrl(DESKTOP_URL, click);
+
+    expect(result).toEqual({ opened: true });
+    expect(click).toHaveBeenCalledTimes(1);
+    const [anchor] = click.mock.calls[0]!;
+    // The raw attribute, not the resolved `.href` getter — `ms-word:` is a non-standard scheme and
+    // this avoids any URL-normalization pitfall in how jsdom serializes it back.
+    expect(anchor.getAttribute('href')).toBe(DESKTOP_URL);
+  });
+
+  it('removes the anchor from the DOM after clicking it, even if the click throws', () => {
+    const click = jest.fn(() => {
+      throw new Error('boom');
+    });
+
+    expect(() => openDesktopUrl(DESKTOP_URL, click)).toThrow('boom');
+    expect(document.querySelectorAll('a').length).toBe(0);
+  });
+
+  it('with the real (default) click — invokes HTMLAnchorElement.click() without throwing', () => {
+    // jsdom implements click() as a no-op navigation; this just proves the default path is wired up.
+    expect(() => openDesktopUrl(DESKTOP_URL)).not.toThrow();
   });
 });
 
