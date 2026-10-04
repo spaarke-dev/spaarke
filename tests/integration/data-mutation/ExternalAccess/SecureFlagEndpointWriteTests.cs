@@ -481,20 +481,83 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         AssertNothingWritten(recordId);
     }
 
-    /// <summary>Before the creator-person schema runs, the column records nobody: no one is admitted by it.</summary>
-    [Fact]
-    public async Task Provision_AnUnflaggedAppCreatedRecord_WhenTheCreatorPersonColumnIsMissing_AdmitsNobodyThroughIt()
+    private static async Task<string?> ExtensionOf(HttpResponseMessage response, string name)
+    {
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return problem.RootElement.TryGetProperty(name, out var value) ? value.GetString() : null;
+    }
+
+    /// <summary>
+    /// Before the creator-person schema runs, the column records nobody, so nobody is admitted through it — and the
+    /// answer is UNVERIFIABLE, not "you did not create it" (round 17 item 1, 2026-10-03: one rule for one environment
+    /// fact, aligned with task 146's F3 helper). 403, deterministic (<c>creatorState: column-missing</c>: no retry), the
+    /// administrator named; nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_AnUnflaggedAppCreatedRecord_WhenTheCreatorPersonColumnIsMissing_IsUnverifiable(
+        string recordType)
     {
         var recordId = Guid.NewGuid();
-        Seed("project", recordId, isSecure: false, createdBy: BffApplicationUser);
+        Seed(recordType, recordId, isSecure: false, createdBy: BffApplicationUser);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+        _fixture.CreatorPersonColumnExists = false;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable,
+            "a column this environment lacks proves nobody is or is not the creator");
+        (await ExtensionOf(response, "creatorState")).Should().Be("column-missing");
+        (await DetailOf(response)).Should().Be(
+            $"Who created this {LabelOf(recordType)} is not recorded in this environment, so whether you may secure it " +
+            "could not be checked. Nothing was changed; an administrator needs to finish setting up the environment.");
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>The same rule on an unflagged RESUME (the record already owned by the Secure Record owner team).</summary>
+    [Fact]
+    public async Task Provision_ResumingAnUnflaggedAppCreatedRecord_WhenTheCreatorPersonColumnIsMissing_IsUnverifiable()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: BffApplicationUser);
         _fixture.SystemUsers[BffApplicationUser] = (false, true);
         _fixture.CreatorPersonColumnExists = false;
 
         var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
-        AssertNothingWritten(recordId);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable);
+        (await ExtensionOf(response, "creatorState")).Should().Be("column-missing");
+        AssertResumeWroteNothing(recordId);
+    }
+
+    /// <summary>
+    /// The missing column changes nothing when <c>createdby</c> already answers: a PERSON who is not the caller is a
+    /// definite "no" (the column is never read), and the caller as <c>createdby</c> is admitted.
+    /// </summary>
+    [Fact]
+    public async Task Provision_WhenTheCreatorPersonColumnIsMissing_ACreatedByPersonStillDecides()
+    {
+        var colleagues = Guid.NewGuid();
+        Seed("project", colleagues, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.CreatorPersonColumnExists = false;
+
+        var refused = await PostAsync(ProvisionRoute, new { recordType = "project", recordId = colleagues });
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(refused)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+
+        var own = Guid.NewGuid();
+        Seed("project", own, isSecure: false, createdBy: ProvisionProjectTestFixture.CallerSystemUserId);
+
+        var admitted = await PostAsync(ProvisionRoute, new { recordType = "project", recordId = own });
+
+        admitted.StatusCode.Should().Be(HttpStatusCode.OK, await admitted.Content.ReadAsStringAsync());
     }
 
     /// <summary>

@@ -486,12 +486,12 @@ public class PolymorphicGrantWriteTests
     }
 
     /// <summary>
-    /// The column → flag mapping of one READ row. A null sprk_accesspermission is Standard (today's behaviour) and
-    /// a null sprk_issecure is not secure; neither is ever unreadable — the row WAS read.
+    /// The column → flag mapping of one READ row whose <c>sprk_issecure</c> holds a value. A null
+    /// sprk_accesspermission is Standard (today's behaviour). An EMPTY sprk_issecure is the next test.
     /// </summary>
     [Theory]
     //          issecure  accesspermission  secure restricted limited
-    [InlineData(null, null, false, false, false)]
+    [InlineData(false, null, false, false, false)]
     [InlineData(false, 100000000, false, false, false)]
     [InlineData(false, 100000001, false, false, true)]
     [InlineData(false, 100000002, false, true, false)]

@@ -378,10 +378,46 @@ describe('provisionSecureProject — failure classification', () => {
     );
   });
 
-  it('says who created the project could not be checked, so it was not secured (F6 row 8, option B)', () => {
-    expect(classifyProvisioningFailure('sdap.provision.record_creator_unverifiable').errorMessage).toBe(
-      'Who created this project could not be checked, so it was not secured. Nothing about the project changed.'
+  // Task 150 round 17 item 2: rows 8 and task 133's `creator_unresolved` also answer an anomalous unflagged RESUME, where
+  // the Secure Record owner team already owns the record — so, like row 2's option D, neither may describe a first call.
+  it('says who created the project could not be checked, so securing it could not be finished — resume-neutral (F6 row 8, round 17)', () => {
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.record_creator_unverifiable');
+    expect(errorMessage).toBe(
+      'Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed.'
     );
+    expect(errorMessage).not.toMatch(/did not start|not secured/i);
+  });
+
+  it('says securing could not be finished because the account could not be confirmed — resume-neutral (creator_unresolved, round 17)', () => {
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.creator_unresolved');
+    expect(errorMessage).toBe(
+      'Securing the project could not be finished, because your account could not be confirmed. Nothing about the project changed.'
+    );
+    expect(errorMessage).not.toMatch(/did not start|not secured/i);
+  });
+
+  // Task 150 round 17 item 1: a missing creator column on the creator rule is UNVERIFIABLE (the server's
+  // record_creator_unverifiable, 403, creatorState column-missing) — deterministic, so no retry and the administrator named,
+  // with the same message the resume's column-missing refusal shows (one environment fact, one message).
+  it('reads creatorState=column-missing on record_creator_unverifiable as setup for an administrator, not a retry', async () => {
+    const authFetch = jest.fn().mockResolvedValue(
+      problemResponse(403, {
+        detail: 'operator text',
+        reasonCode: 'sdap.provision.record_creator_unverifiable',
+        creatorState: 'column-missing',
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('needs-administrator');
+    expect(result.retryable).toBe(false);
+    expect(result.errorMessage).toBe(
+      classifyProvisioningFailure('sdap.provision.resume_creator_unavailable', { creatorState: 'column-missing' })
+        .errorMessage
+    );
+    expect(result.errorMessage).toMatch(/not yet set up to record who created/i);
+    expect(result.errorMessage).not.toMatch(/did not start|not secured/i);
   });
 
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {

@@ -244,10 +244,13 @@ const REASON_STATES: Readonly<
       'This project was secured by an earlier mechanism that gave it its own business unit. Moving it onto the current one is a manual administrator step.',
     retryable: false,
   },
+  // Resume-neutral (task 150, round 17 item 2): this code also answers a RESUME of an unflagged record that the Secure
+  // Record owner team already owns, where "did not start" would be false. Like row 2's option D, the copy claims neither
+  // a first call nor a resume: securing could not be finished, and this call changed nothing.
   'sdap.provision.creator_unresolved': {
     failureKind: 'not-started',
     errorMessage:
-      'Securing the project did not start, because your account could not be confirmed. Nothing about the project changed.',
+      'Securing the project could not be finished, because your account could not be confirmed. Nothing about the project changed.',
     retryable: true,
   },
   // Not retryable (task 133 verifier round 1): the row was read without an owner, which is deterministic for that row —
@@ -312,12 +315,14 @@ const REASON_STATES: Readonly<
     retryable: false,
   },
   // Task 150 (owner round 10 item 10): whether the caller created the record could not be checked (a read failed).
-  // Refused before any change; the server tells the same caller they may call again.
-  // Copy: owner round 13 item 10 (F6 row 8, option B — notes/task-150-issecure-lock.md §6).
+  // Refused before any change; the server tells the same caller they may call again. Copy: owner round 13 item 10 (F6
+  // row 8, option B), made resume-neutral by round 17 item 2 — an unflagged RESUME meets this code with the record
+  // already owned by the Secure Record owner team, so "it was not secured" would describe a first call only. With
+  // `creatorState: column-missing` (round 17 item 1) the same code is deterministic: see CREATOR_COLUMN_MISSING.
   'sdap.provision.record_creator_unverifiable': {
     failureKind: 'not-started',
     errorMessage:
-      'Who created this project could not be checked, so it was not secured. Nothing about the project changed.',
+      'Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed.',
     retryable: true,
   },
   'sdap.provision.creator_share_failed': {
@@ -388,12 +393,14 @@ const RESUME_CREATOR_UNREADABLE = {
 };
 
 /**
- * `resume_creator_unavailable` with `creatorState: column-missing` (task 133 r1, verifier finding 10). The column that
- * records the person who created the project does not exist in this environment yet — the server's 400 is
- * deterministic, so calling again repeats the refusal until an administrator applies the schema. Not retryable: a
- * "Try securing again" here would fail every time.
+ * `creatorState: column-missing` — the column that records the person who created the project does not exist in this
+ * environment yet. Answered on `resume_creator_unavailable` (task 133 r1, verifier finding 10) and, since task 150 round
+ * 17 item 1, on `record_creator_unverifiable` (the creator rule for an unflagged record: unverifiable, not "not the
+ * creator"). The server's 400 is deterministic, so calling again repeats the refusal until an administrator applies the
+ * schema. Not retryable: a "Try securing again" here would fail every time. One environment fact, one message — and it
+ * is resume-neutral ("could not be finished"), true of a first call and of a resume alike.
  */
-const RESUME_CREATOR_COLUMN_MISSING = {
+const CREATOR_COLUMN_MISSING = {
   failureKind: 'needs-administrator' as const,
   errorMessage:
     'Securing the project could not be finished, because this environment is not yet set up to record who created a project. Nothing about the project changed; an administrator needs to finish setting it up.',
@@ -434,9 +441,10 @@ export interface IProvisioningFailureExtensions {
    */
   containerKept?: boolean;
   /**
-   * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
+   * `resume_creator_unavailable` (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
    * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment) — all
-   * deterministic: an administrator acts — or `unreadable` (a read failed: the same caller may retry).
+   * deterministic: an administrator acts — or `unreadable` (a read failed: the same caller may retry). Also read on
+   * `record_creator_unverifiable` (task 150 round 17 item 1), where only `column-missing` changes the state.
    */
   creatorState?: string;
 }
@@ -486,8 +494,12 @@ export function classifyProvisioningFailure(
     return { ...RESUME_CREATOR_UNREADABLE };
   }
 
-  if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'column-missing') {
-    return { ...RESUME_CREATOR_COLUMN_MISSING };
+  if (
+    (reasonCode === 'sdap.provision.resume_creator_unavailable' ||
+      reasonCode === 'sdap.provision.record_creator_unverifiable') &&
+    extensions?.creatorState === 'column-missing'
+  ) {
+    return { ...CREATOR_COLUMN_MISSING };
   }
 
   if (reasonCode != null && Object.prototype.hasOwnProperty.call(REASON_STATES, reasonCode)) {

@@ -461,6 +461,35 @@ public class SecureFlagFieldSecurityScriptAgreementTests
         backfill.Tables.Should().BeEquivalentTo(SecureFlagFieldSecurityAssertion.Tables);
     }
 
+    /// <summary>
+    /// The backfill's <c>-Apply</c> after-check must count the ROWS, not the one List <c>Get-DvAll</c> emits. The function
+    /// ends <c>, $rows</c> (the List as ONE pipeline object), so <c>@(Get-DvAll …).Count</c> is always 1: every
+    /// <c>-Apply</c> then printed "1 row(s) still hold NULL" per table and exited 1 after a full repair — seen live at G-0
+    /// in dev, 2026-10-03, fixed in task 150 c1-r2. A non-zero exit after a correct repair breaks the guide's "each must
+    /// exit 0" deploy order, and an operator who learns to ignore it would miss a real residual NULL (which makes the
+    /// task 150 BFF refuse uploads). Read as text (no PowerShell host, no network); the detector is exercised on seeds.
+    /// </summary>
+    [Fact]
+    public void TheBackfillScript_CountsTheRowsGetDvAllReturns_NotTheSingleListItEmits()
+    {
+        var script = File.ReadAllText(ScriptPath("Repair-SecureFlagNulls.ps1"));
+
+        Regex.IsMatch(script, @"^\s*,\s*\$rows\s*$", RegexOptions.Multiline).Should().BeTrue(
+            "this guard's premise: Get-DvAll emits its List as one object (if that changes, revisit the guard)");
+        ArrayWrapsGetDvAll(script).Should().BeFalse(
+            "@(Get-DvAll …) is a one-element array whose .Count is always 1 — count (Get-DvAll …).Count instead");
+    }
+
+    [Theory]
+    [InlineData("$after = if ($Apply) { @(Get-DvAll \"$set`?`$select=$idColumn\").Count } else { $ids.Count }", true)]
+    [InlineData("$after = @( Get-DvAll \"x\" )", true)]
+    [InlineData("$after = if ($Apply) { (Get-DvAll \"$set`?`$select=$idColumn\").Count } else { $ids.Count }", false)]
+    [InlineData("$nulls = Get-DvAll \"x\"\n$ids = @($nulls | ForEach-Object { $_.$idColumn })", false)]
+    public void TheArrayWrapDetector_SeesTheOneElementCountShape(string line, bool expected) =>
+        ArrayWrapsGetDvAll(line).Should().Be(expected);
+
+    private static bool ArrayWrapsGetDvAll(string script) => Regex.IsMatch(script, @"@\(\s*Get-DvAll\b");
+
     private const string Seed = """
         $Column = 'sprk_issecure'
         $Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice')

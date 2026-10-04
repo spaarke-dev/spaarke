@@ -70,7 +70,9 @@ under `src/client` writes it** (`projectService.test.ts` pins the payload).
 | `RecordContainerResolver` (record + ancestor walk; every upload path, communications via `CommunicationContainerResolver`) | app-only (`IGenericEntityService`) | **refuse** `secure_flag_unreadable` 503 | yes (§5.3) |
 | `ProvisionProjectEndpoint` (Step 1 + read-back) | app-only | a failed read-back refuses `secure_flag_not_set` | yes |
 | `UnsecureProjectEndpoint` (Step 1) | app-only | **refuse** `sdap.unsecure.secure_flag_unreadable` | yes |
-| `ExternalParticipationService:564/594` (FR-22 Secure suppression), `ExternalDataService:181/197`, `ExternalGrantLifecycle`, `InternalShareEndpoints`, `SubjectStandingGrantReader`, `RecordOwnershipResolver` | app-only | not secure | **no** — see §11.1 |
+| `ExternalParticipationService` (`GetRootRecordFlagsAsync` → `FlagsFrom`; FR-22 Secure suppression), and through it `ExternalGrantLifecycle` (grant policy), `InternalShareEndpoints` (last-reader rule), `AccessibleRecordSetService` (standing-grant / derived / org terms, which is how `SubjectStandingGrantReader`'s contribution is suppressed — that reader reads no `sprk_issecure`) | app-only | **`RootRecordFlags.Unreadable`** (secure + restricted + limited + unreadable) | **yes — round 17 item 3 (c1-r2-r2, §19)**; was "not secure" |
+| `ExternalDataService` (project label for the external SPA) | app-only | **shown as secure** (`?? true`) + error log | **yes — round 17 item 3 (§19)** |
+| `RecordOwnershipResolver.ReadParentAsync` (task 146's branch only; not on this branch) | app-only | "No" on 146's branch | **handed over** to integration (§19) — exact change recorded there |
 | client `RecordContainerResolver.ts`, `TrackingFieldTrio/index.ts:459/1066`, `AccessGrantModal` gating | user (`Xrm.WebApi`) | not secure / "unreadable" gating | no — the reader profile on every default team covers every user |
 | external SPA `ProjectPage.tsx:508` | via the BFF's app-only DTO | no badge | no |
 
@@ -140,8 +142,9 @@ Tests: `projectService.test.ts` (+2), `provisioningService.test.ts` (+2, code co
 to "you, or someone with Full Access" belongs with the Remove Secure command (task 142 / this task's ribbon part).
 
 **Owner pick (round 10 item 9, 2026-10-03): option A for rows 1, 3, 4, 5 and 6; option D (below) for row 2.** Implemented
-in round c1 (§15); no DRAFT marker remains on rows 1-6, and each picked string is pinned verbatim by a test (rows 7-11,
-below the table, are new and still DRAFT). The table is kept as the record of what was offered:
+in round c1 (§15); no DRAFT marker remains on rows 1-6, and each picked string is pinned verbatim by a test. Rows 7-11,
+below the table, were picked too (option B, owner round 13 item 10), implemented in c1-r2 (§17) and pinned verbatim; no
+DRAFT marker remains on any row. The table is kept as the record of what was offered for rows 1-6:
 
 | # | Where | A (implemented for rows 1, 3, 4, 5, 6; row 2 ships D, below) | B | C |
 |---|---|---|---|---|
@@ -172,14 +175,14 @@ options A/B/C offered in c1-r1 are removed per the owner's ruling; what ships, e
 | # | Where | Shipped (option B) |
 |---|---|---|
 | 7 | Client, `not_record_creator` (`provisioningService.ts`) | "Only the person who created this project can secure it this way. Nothing about the project changed." |
-| 8 | Client, `record_creator_unverifiable` (`provisioningService.ts`) | "Who created this project could not be checked, so it was not secured. Nothing about the project changed." |
+| 8 | Client, `record_creator_unverifiable` (`provisioningService.ts`) | ~~"Who created this project could not be checked, so it was not secured. Nothing about the project changed."~~ **Since round 17 item 2 (c1-r2-r2, §19), resume-neutral:** "Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed." |
 | 9 | Server `detail`, `not_record_creator` (`ProvisionProjectEndpoint.NotRecordCreator`) | "Only the person who created this {record} can secure it this way, and you did not create it. Nothing was changed." |
 | 10 | Server `detail`, `record_creator_unverifiable` (`ProvisionProjectEndpoint.RecordCreatorUnverifiable`) | "Who created this {record} could not be looked up, so whether you may secure it could not be checked. Nothing was changed; you may try again." |
 | 11 | Server `detail`, unflagged resume, caller unidentified (`creator_unresolved`, `RefuseUnflaggedResumeUnlessCreatorAsync`) | "Your account could not be confirmed, so whether you created this {record} could not be checked. Nothing was changed; you may try again." |
 
 `{record}` is `SecureRecordRoot.DisplayLabel` lower-cased ("project", "matter", "work assignment"). Option B drops A's
 "Securing the project did not start", which overstated an (anomalous) unflagged RESUME; row 8's "so it was not secured"
-remains, see §11.9.
+remained until round 17 item 2 replaced it with resume-neutral wording (§11.9, §19).
 
 The wizard's existing no-BFF copy ("… created as a normal project; an administrator can secure it.") was inaccurate
 before (the client had flagged it) and is accurate now; it is unchanged.
@@ -192,7 +195,9 @@ before/after counts and every id. **Must run before the task 150 BFF deploys.**
 **c1-r2 fix (verifier c1-r1 items 7 and 13):** `-Apply`'s after-check counted `@(Get-DvAll …).Count`; `Get-DvAll` emits
 its List as ONE object (`, $rows`), so the count was always 1 and every `-Apply` reported "after: 1 row(s) still hold
 NULL" per table and exited 1, even after a full repair (seen live at G-0 in dev, 2026-10-03). It now counts the List
-itself. Proven offline by a harness that shadows `az` / `Invoke-RestMethod` (§17).
+itself. Proven offline by a harness that shadows `az` / `Invoke-RestMethod` (§17). **Pinned since c1-r2-r2 (§19):**
+`SecureFlagFieldSecurityScriptAgreementTests.TheBackfillScript_CountsTheRowsGetDvAllReturns_NotTheSingleListItEmits`
+fails if any `@(Get-DvAll …)` reappears, or if `Get-DvAll` stops ending `, $rows` (the guard's premise).
 
 ### 7.2 `scripts/Set-SecureFlagFieldSecurity.ps1`
 Reuses task 133's profiles (never creates them, never edits membership). Preconditions p1–p5 (profiles in SpaarkeCore;
@@ -254,7 +259,7 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 | G-1 | Deploy the BFF carrying task 150 | after task 133's own ordering (its schema gate first) |
 | G-2 | Deploy the client (`@spaarke/ui-components` consumers: Create Project wizard, Summarize Files) and confirm no cached old bundle is served | the old client's create payload names `sprk_issecure` |
 | G-3 | `.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl … -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then `-Verify` | task 133's gate — creates both profiles and their members |
-| G-4 | `.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl … -BffApplicationIds … -ClientNoLongerWritesFlag -Apply` then `-Verify` | record the masked window per table — **four tables since c1** (`sprk_invoice` included: round 10 item 11; approved for the main session at integration by round 11) |
+| G-4 | `.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl … -BffApplicationIds … -ClientNoLongerWritesFlag -Apply` then `-Verify` | record the masked window per table — **four tables since c1** (`sprk_invoice` included: round 10 item 11; approved for the main session at integration by round 11). **Run it straight after G-1 (and G-3) in every environment, with no gap:** between the task 150 BFF deploy and the lock, an already-flagged row bypasses the creator rule (§11.10), so the gap is a security exposure, not just a pending step |
 | G-5 | standing assertion live: `$env:SPAARKE_NFR05_DATAVERSE_URL=…; $env:SPAARKE_BFF_APPLICATION_IDS=…; $env:AZURE_TOKEN_CREDENTIALS='AzureCliCredential'; dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"` | must PASS |
 | G-6 | NEGATIVE: as an existing non-admin test user with Write, `PATCH sprk_projects(<id>) {"sprk_issecure":false}` (and on a matter / work assignment), and a create naming it | refused, or unchanged on read-back. The user must hold no System Administrator, directly or through a team: **not a member of the "Spaarke Demo" team** (it holds System Administrator — #1081 peer report; the lock script's dry run lists it, 2026-10-03). If no such user with Write exists, ask the owner to create one (round 4 item 1) |
 | G-7 | NO MASKING: the same user's `GET …?$select=sprk_issecure` on the secure project returns `true` (present); the client `RecordContainerResolver.ts` resolves it to its own container; the BFF logs no `secure_flag_unreadable` | |
@@ -294,9 +299,10 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
 
 ## 11. Residuals and observations (not fixed here)
 
-1. **Other app-only readers still map an EMPTY flag to "not secure"** (§3.2, unchanged row). With the BFF's writer
-   membership (which carries Read) they are never masked, and the standing assertion fails if that membership is lost.
-   Making each refuse would be a scope expansion across the external plane; recorded for the owner / a follow-up.
+1. **CLOSED by round 17 item 3 (c1-r2-r2, §19).** *As raised:* other app-only readers mapped an EMPTY flag to "not
+   secure". They now fail closed through the one shared flag reader (`ExternalParticipationService.FlagsFrom` →
+   `RootRecordFlags.Unreadable`); `ExternalDataService` labels such a project secure; `RecordOwnershipResolver`'s read
+   (task 146's branch) is handed over with its exact change (§19).
 2. **A team-owned record with a container and the flag cleared** (only a System Administrator can do that now) answers
    409 `already_provisioned`; provisioning does not re-flag it. Edge case under F4.
 3. **The provision API accepts an existing non-secure record** (it always did: before, a form edit plus the call did
@@ -329,7 +335,8 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
    artifacts under round 5; nothing is coded. For this task: System Administrator holders write `sprk_issecure` by
    platform rule (F4), and the lock script's dry run (2026-10-03, read-only) LISTS the "Spaarke Demo" team among them;
    G-6 must use a user outside that team.
-9. **Copy on an (anomalous) unflagged RESUME (verifier c1-r1 item 9; c1-r2).** Since c1-r1 an unflagged resume answers
+9. **CLOSED by round 17 item 2 (c1-r2-r2, §19):** row 8 and task 133's `creator_unresolved` client copy are now
+   resume-neutral ("… securing it could not be finished …"), each pinned verbatim. *As raised:* **Copy on an (anomalous) unflagged RESUME (verifier c1-r1 item 9; c1-r2).** Since c1-r1 an unflagged resume answers
    `not_record_creator`, `record_creator_unverifiable` or `creator_unresolved`, and at that point the record is ALREADY
    owned by the Secure Record owner team. The owner's pick (round 13 item 10, option B) avoids A's "Securing the project
    did not start", and rows 7 and 9-11 ("Nothing … changed") are accurate for the refused call. Two strings still
@@ -345,8 +352,8 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
    provision a colleague's ORDINARY record through the Write gate — the outcome round 10 item 10 forbids for unflagged
    records. This is the pre-lock state the lock removes (after G-4 only the BFF and System Administrators can set the
    flag, F4), not a new capability: before task 150 the same flag write plus the call did it. Owner-decided (round 10
-   item 10 keeps flagged rows on the Write gate); it closes when G-4 is applied in each environment, so G-4 should follow
-   the task 150 BFF deploy (G-1) without delay.
+   item 10 keeps flagged rows on the Write gate); it closes when G-4 is applied in each environment, so G-4 MUST follow
+   the task 150 BFF deploy (G-1) with no gap in every environment (c1-r2-r2: the §9 G-4 row now says so).
 
 ## 12. Seeded-violation proofs (each restored and touched afterwards)
 
@@ -596,10 +603,10 @@ The differences the integrator must carry into this task's tests:
 | Rights probe throws, caller is the recorded creator person | 500 `permission_unverifiable` | admitted on the creator-person read; otherwise `permission_unverifiable` | `Unsecure_WhenTheFullAccessCheckThrows_RefusesWithAReasonBeforeAnyWrite` — its caller is not the creator, so it should still refuse; confirm |
 
 The **provisioning** creator rule (round 10 item 10: `RefuseUnlessRecordCreatorAsync`, `RefuseUnflaggedResumeUnlessCreatorAsync`)
-is NOT F3 and is not replaced: it admits only the creator (no Full Access branch), and a missing creator-person column
-there still records nobody (403 `sdap.provision.not_record_creator`). Round 13 item 6 addresses F3 only; whether the
-provisioning rule should also answer a missing column as "unverifiable" is not decided anywhere — noted for the owner,
-not changed.
+is NOT F3 and is not replaced: it admits only the creator (no Full Access branch). ~~A missing creator-person column
+there still records nobody (403 `sdap.provision.not_record_creator`) … not decided anywhere.~~ **Decided by round 17
+item 1 and implemented in c1-r2-r2 (§19):** a missing column there now answers 403
+`sdap.provision.record_creator_unverifiable` with `creatorState: column-missing`, aligned with 146's helper.
 
 **Tests (c1-r2).**
 - Affected BFF classes (SecureFlag*, ProvisionProject*, ProvisionResume*, ProvisionRecordedContainer, UnsecureProject,
@@ -658,3 +665,103 @@ on trust.
 
 **Placement (CLAUDE.md §10 / §11).** Nothing new: no code changed in this round. ADR-002: no plugin. ADR-003: no
 fail-closed path changed. No `.claude/**` edit needed.
+
+## 19. Fix round c1-r2-r2 (2026-10-03, branch `task/uac-r2-150-c1-r2-r2`) — the c1-r2-r1 verifier's 22 items
+
+Branched from `task/uac-r2-150-c1-r2-r1` (`7777251d3`). No live call; no live write. Two LOW items fixed (10, 11), one
+gate row sharpened (13), the rest re-checked against code and recorded. **Round 17** (work branch `82e90ce1f`, BINDING,
+committed after this round's instruction was computed) is ALSO done here: item 4 is exactly items 10 and 11, and the
+main session answered this round's question in the worktree ("include 17.1-3": round 17 supersedes the instruction's
+"do not change anything else" for exactly those three items) — see "Round 17" below.
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | Scope of c1-r2-r1 (note + POML only; branch name) | **Confirmed**; nothing to change |
+| 2 | Merge into the work branch | **Re-checked against the NEWER tip `82e90ce1f`:** `git merge-tree --write-tree` gives a tree, no conflicts. The work-branch files changed since `6b243f092` are 8 docs/notes plus `tests/integration/auth/README.md`; none is in this task's diff (this round's files are listed in the POML outcome; the README is not among them). Re-run after this round's changes: still clean |
+| 3 | Rows 7-11 option B verified | **Re-checked** by grep: client `provisioningService.ts:311/:320`, server `ProvisionProjectEndpoint.cs:1603/:1611/:1652`; `DRAFT` in `ProvisionProjectEndpoint.cs`: 0 |
+| 4 | Repair script fix verified offline | **Confirmed**; now also pinned (item 11) |
+| 5 | Verifier's seeds SA-SF + client rows 7-8 | **Recorded**; every guard bit. The `--no-build` stale-binary caution applies to this round's seed too, which is why the new guard reads the script AT RUN TIME (no rebuild between seed and run, so no stale binary can mask it) |
+| 6 | Verifier's suite counts | **Recorded**; this round's own counts below |
+| 7 | F3 hand-over vs 146's helper | **Confirmed**; and owner round 13 item 6 keeps the helper's behaviour. Not forked |
+| 8 | No client writer | **Re-checked**: grep `sprk_issecure` over `src/client` outside tests — external-spa type/mocks/selects, `RecordContainerResolver` read, PCF `TrackingFieldTrio` reads, comments; no write |
+| 9 | Flag first / already-flagged / 409 (as modified by round 10 item 10) | **Confirmed**; recorded divergence unchanged |
+| 10 | §6 line 144 "rows 7-11 … still DRAFT" | **Fixed.** §6 now says rows 7-11 were picked (option B, round 13 item 10), implemented in c1-r2 and pinned; the table is the record of what was offered for rows 1-6 |
+| 11 | After-count fix unpinned | **Fixed.** New `SecureFlagFieldSecurityScriptAgreementTests.TheBackfillScript_CountsTheRowsGetDvAllReturns_NotTheSingleListItEmits` reads `Repair-SecureFlagNulls.ps1` as text (the class's existing pattern: no PowerShell host, no network) and fails on any `@(Get-DvAll …)`; it also asserts the premise (`Get-DvAll` ends `, $rows`). Detector theory `TheArrayWrapDetector_SeesTheOneElementCountShape` (4 cases: the unfixed line and a spaced variant detected; the fixed line and the line-147 `$nulls` / `@($nulls \| ForEach-Object …)` shape not). The script comment names the test. Seeds below |
+| 12 | Integrator observation: `rootcomponentbehavior` fix vs 150's FLS script | **Confirmed it does not apply.** `Set-SecureFlagFieldSecurity.ps1:169` checks only `componenttype eq 70` (field security profiles), which are ROOT components and never table subcomponents, so a parent table's `rootcomponentbehavior = 0` cannot include them; the script checks no attribute or table membership. The integration step's "150's FLS script" needs no edit; for the main session: tick it as "not applicable (componenttype 70 only)" in `notes/batch4-integration-steps.md` (work-branch file; not edited here) |
+| 13 | §11.10 makes G-4's timing security-relevant | **Sharpened.** §9 G-4 row now says: run it straight after G-1 (and G-3) in every environment, no gap, and why; §11.10 says MUST |
+| 14 | Publish size not measured | **Not closed** — instruction: skip; main session measures against a fresh master build (CLAUDE.md §10). No package change (CVE status as c1-r1: clean) |
+| 15 | Endpoint-backed surface | **STOPPED** on tasks 142 and 148, unchanged |
+| 16 | Merge gate 3 (task 133) | **Open**: no `task/uac-r2-133*` branch merged into `work/unified-access-control-r2` |
+| 17-22 | Pending live gates G-3/G-4, G-6, G-7/G-8, G-5, G-10; G-0 outside dev | **Pending** — main session at integration (round 11). Dev G-0 PASSED 2026-10-03 |
+
+### 19.1 Round 17 (BINDING, 2026-10-03) — task 150's open questions
+
+| Item | Disposition |
+|---|---|
+| **17.1** Missing `sprk_createdbyperson` (400) in the provisioning creator rule → unverifiable, aligned with 146's F3 helper | **Done.** `ProvisionProjectEndpoint.RefuseUnlessRecordCreatorAsync`: the 400 now returns `RecordCreatorColumnMissing` — **403** `sdap.provision.record_creator_unverifiable` with `creatorState: column-missing` and `creatorColumn: sprk_createdbyperson`; detail: "Who created this {record} is not recorded in this environment, so whether you may secure it could not be checked. Nothing was changed; an administrator needs to finish setting up the environment." Forward AND unflagged resume (both call this rule). **Reason code:** round 17 names 146's `permission_unverifiable`; the provisioning plane's own "unverifiable" code is `record_creator_unverifiable` (the `sdap.unsecure.*` namespace belongs to the unsecure endpoint), so the existing provisioning code is used at 403 — the status 146's helper gives `CreatorColumnAbsent` — and the client tells it apart from a failed read (500, retryable) by `creatorState`, the extension the resume refusal already uses for the same fact. No new reason code. Client: `record_creator_unverifiable` + `creatorState: column-missing` → `needs-administrator`, not retryable, the same message as the resume's column-missing refusal (`CREATOR_COLUMN_MISSING`, renamed from `RESUME_CREATOR_COLUMN_MISSING`) — one environment fact, one message. Unchanged: `createdby` naming a person still decides without the column (definite "no", or admitted as the caller) |
+| **17.2** Resume-neutral copy for row 8 and 133's `creator_unresolved` | **Done.** Row 8: "Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed." `creator_unresolved`: "Securing the project could not be finished, because your account could not be confirmed. Nothing about the project changed." Neither says "did not start" or "not secured"; "could not be finished" is true of a first call and of a resume (row 2 option D's wording). Both pinned verbatim, each also asserting `not.toMatch(/did not start\|not secured/)`. Server rows 9-11 were already resume-neutral ("Nothing was changed") — unchanged |
+| **17.3** Empty-flag readers fail closed | **Done for every reader on this branch; one handed over.** One shared helper: `ExternalParticipationService.FlagsFrom(null, …)` → `RootRecordFlags.Unreadable` (+ an error log naming the FLS cause in `GetRootRecordFlagsAsync`), so every consumer of the ONE flag reader inherits it: **`ExternalGrantLifecycle`** (grant policy → 503 `policy_unreadable`), **`InternalShareEndpoints`** (last-reader rule applies), **`AccessibleRecordSetService`** (FR-22 suppression of the standing-grant / derived / org terms). **`SubjectStandingGrantReader`** reads no `sprk_issecure` (checked on this branch and on `task/uac-r2-146-c1-r1`; it reads `sprk_standinggrant`); its contribution is suppressed through the shared reader, which is what the standing-membership test proves. **`ExternalDataService`** only labels the project for the external SPA: an empty flag is shown as **secure** (`?? true`) and logged. **`RecordOwnershipResolver`**: its `sprk_issecure` read exists only on task 146's branch (`task/uac-r2-146-c1-r1`, `ReadParentAsync`), not here — **handed over, not forked** (below) |
+
+**Hand-over to integration — `RecordOwnershipResolver` (round 17 item 3; code on task 146's branch).** In
+`Services/Dataverse/RecordOwnershipResolver.cs`, `ReadParentAsync`, replace
+
+```csharp
+// NULL sprk_issecure is "No" — owner decision Q1 (2026-10-01) sets every NULL to No and defaults the column
+// to No; it is not read as secure. A flagged root that IS isolated takes the secure branch anyway by its BU.
+var flaggedSecure = isSecureFlaggedRoot && row.GetAttributeValue<bool?>(IsSecureColumn) == true;
+```
+
+with
+
+```csharp
+// An EMPTY sprk_issecure fails CLOSED (task 150, round 17 item 3): since the task 150 backfill every row holds true or
+// false and the column is field-secured, so empty means the BFF lost its field-level Read and the real value was
+// masked. Read as flagged: a root that is not isolated is then refused (never an ordinary team); one that IS isolated
+// takes the secure branch by its BU anyway.
+var flaggedSecure = isSecureFlaggedRoot && (row.GetAttributeValue<bool?>(IsSecureColumn) ?? true);
+```
+
+plus a test beside 146's flagged-not-isolated refusal test: a parent root whose row omits `sprk_issecure`, owned in an
+ordinary BU → refused exactly as a flagged-not-isolated parent; the explicit-`false` twin → resolved to the ordinary
+team. Seed: revert to `== true` → the new test fails. Recorded for the main session in the same way as the F3 hand-over
+(§17); task 146's own fix round may take it instead.
+
+**Tests (c1-r2-r2).**
+- `SecureFlagFieldSecurityScriptAgreementTests`: **14/14** (9 + 5 new).
+- Affected + new BFF classes (the §17 filter plus `EmptySecureFlag*`, `InternalUserShare*`, `AccessibleRecordSetService*`,
+  `PolymorphicGrantWrite*`, `ExternalDataService*`, `ExternalAccess*`, `GrantPolicy*`, `ExternalParticipation*`):
+  **1252/1252**.
+- New/changed BFF tests: `EmptySecureFlagFailsClosedTests` (new, KEEP `tests/integration/auth/**`; 11 cases: shared
+  reader ×4 + control ×2, grant policy ×2, external label ×3); `InternalUserShareTests.Unshare_WhenTheSecureFlagReadsEmpty_AppliesTheLastPersonRule`;
+  `AccessibleRecordSetServiceTests.ComposeAsync_ContactStandingMembershipOnARecordWhoseSecureFlagReadsEmpty_IsSuppressed`;
+  `SecureFlagEndpointWriteTests`: the missing-column test rewritten to the new rule and widened to the 3 root types,
+  + its resume twin, + "a `createdby` person still decides" (55 → 59); `PolymorphicGrantWriteTests.FlagsFrom_MapsTheRootColumns`
+  row `(null, null)` → `(false, null)` (its premise changed; the empty case moved to the new class).
+- Client: jest `CreateProjectWizard` + `SummarizeFilesWizard`, 9 suites, **127/127** (125 + `creator_unresolved`
+  verbatim + `record_creator_unverifiable` column-missing; row 8's verbatim test re-pinned); `@spaarke/ui-components`
+  `tsc` exit 0 (after building the local `Spaarke.SdapClient` and `Spaarke.Auth`).
+- Full BFF unit suite, once at the end: **14447 passed, 0 failed, 54 skipped (14501** = 14479 + 22 new cases: 5
+  agreement, 11 empty-flag, 1 last-reader, 1 standing-membership, 4 provisioning). `Spaarke.ArchTests`: **346/346**.
+  `Sprk.Bff.Api.IntegrationTests`: **104/104**. `Spe.Integration.Tests`: **403 passed, 25 skipped, 0 failed (428)**.
+
+**Seeded-violation proofs (c1-r2-r2; each restored from a copy and touched, every seeded build checked for "Build
+succeeded" first so no stale binary ran).** S28 script line 172 back to `@(Get-DvAll …).Count` → 1 fail ("found True");
+S29 `Get-DvAll`'s `, $rows` → `$rows` → 1 fail (the premise) · SG1 `FlagsFrom` maps empty to not secure again → **8 fail**
+(shared reader ×4, grant policy ×2, the standing-membership test, the last-reader test) · SG2 `MapProject` passes an
+empty flag through → 1 fail · SG3 the missing column answered `not_record_creator` again → **4 fail** (forward ×3 root
+types, resume) · SG4 the `creatorState` extension dropped → 4 fail · client C8 row 8 back to "so it was not secured" →
+1 fail · C9 `creator_unresolved` back to "did not start" → 1 fail · C10 column-missing not routed for
+`record_creator_unverifiable` → 1 fail.
+
+**Placement and justification (CLAUDE.md §10 / §11).** No new endpoint, service, DI registration, option, job,
+package, column, reason code or script. Changes extend existing members: `FlagsFrom`'s mapping, `MapProject` (made
+`internal`, with `ProjectRow`, so the mapping is tested without an HTTP stack — no `Mock<HttpMessageHandler>`, ADR-038
+B1), one new private ProblemDetails helper (`RecordCreatorColumnMissing`) beside `RecordCreatorUnverifiable`, one
+private log helper (`WarnOnEmptySecureFlag`), client copy + one classifier branch (a renamed constant). New test class
+`EmptySecureFlagFailsClosedTests` — three-question check: (1) existing: per-reader tests exist for a FAILED flag read
+(`Unreadable`), none for an EMPTY one (grep `FlagsFrom(isSecure: null` over `tests/`: 0 before); (2) extension: the
+reader-specific cases were added to the existing classes where a double already exists (`InternalUserShareTests`,
+`AccessibleRecordSetServiceTests`); the class holds only the pure mapping/policy/label cases; (3) cost of doing nothing:
+nothing would fail if a reader went back to "empty = not secure". ADR-002: no plugin. ADR-003: two more fail-closed
+paths (the shared reader, the label); none loosened. No `.claude/**` edit needed. Hot-path: BFF = Y (already declared
+for this project).

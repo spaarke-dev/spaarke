@@ -167,7 +167,8 @@ foreach ($t in $Tables) {
 
     # Get-DvAll emits its List as ONE object (`, $rows`), so wrapping the call in @(...) made a one-element array and
     # .Count was always 1 — every -Apply then reported "1 row(s) still hold NULL" per table and exited 1, even after a
-    # full repair (seen live at G-0 in dev, 2026-10-03). Count the List itself.
+    # full repair (seen live at G-0 in dev, 2026-10-03). Count the List itself. Pinned by
+    # SecureFlagFieldSecurityScriptAgreementTests.TheBackfillScript_CountsTheRowsGetDvAllReturns_NotTheSingleListItEmits.
     $after = if ($Apply) { (Get-DvAll "$set`?`$select=$idColumn&`$filter=$Column eq null").Count } else { $ids.Count }
     $entry.nullAfter = $after
     if ($Apply) {

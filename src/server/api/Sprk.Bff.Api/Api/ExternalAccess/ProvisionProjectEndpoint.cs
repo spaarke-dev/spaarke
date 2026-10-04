@@ -297,7 +297,8 @@ public static class ProvisionProjectEndpoint
     /// Task 150 (owner round 10 item 10): whether the caller created the unflagged record could not be checked — its
     /// <c>createdby</c> user or its <c>sprk_createdbyperson</c> could not be read. Refused before any write (500); the
     /// same caller may call again once the read works. A column this environment lacks (<c>sprk_createdbyperson</c>
-    /// before its schema script ran — a 400) records nobody, so it is <see cref="ReasonNotRecordCreator"/>, not this.
+    /// before its schema script ran — a 400) is this code too (round 17 item 1: unverifiable, not "not the creator"),
+    /// but 403 with <c>creatorState: column-missing</c>: deterministic until an administrator applies the schema.
     /// </summary>
     internal const string ReasonRecordCreatorUnverifiable = "sdap.provision.record_creator_unverifiable";
 
@@ -1516,8 +1517,9 @@ public static class ProvisionProjectEndpoint
     ///
     /// <para><b>Fail closed.</b> A read that fails refuses with <see cref="ReasonRecordCreatorUnverifiable"/> (500, the same
     /// caller may retry) — never folded into "the caller is the creator". A <c>sprk_createdbyperson</c> column this
-    /// environment lacks (400) records nobody, so it admits nobody (<see cref="ReasonNotRecordCreator"/>), as in the
-    /// unsecure endpoint's F3 check.</para>
+    /// environment lacks (400) admits nobody and is UNVERIFIABLE, not "not the creator" (round 17 item 1, aligned with
+    /// task 146's F3 helper): 403 <see cref="ReasonRecordCreatorUnverifiable"/> with <c>creatorState: column-missing</c>
+    /// (no retry; an administrator applies the schema).</para>
     /// </remarks>
     private static async Task<IResult?> RefuseUnlessRecordCreatorAsync(
         DataverseWebApiClient dataverseClient,
@@ -1569,11 +1571,15 @@ public static class ProvisionProjectEndpoint
         }
         catch (Exception ex) when (IsColumnMissing(ex))
         {
-            logger.LogInformation(
-                "[PROVISION] {Column} is not in this environment (400); no creator person is recorded on unflagged " +
-                "{RecordType} {RecordId} (createdby is {CreatedByState}).",
-                RecordCreatorPerson.Column, root.WireToken, recordId, createdByState);
-            person = null;
+            // Round 17 item 1 (2026-10-03): a missing creator-person column is UNVERIFIABLE, not "not the creator" —
+            // the same answer task 146's F3 helper gives for the same environment fact (CreatorColumnAbsent → 403
+            // permission_unverifiable). Nobody is known to be the creator, and nobody is known not to be.
+            logger.LogWarning(
+                "[PROVISION] {Column} is not in this environment (400), so who created unflagged {RecordType} " +
+                "{RecordId} (createdby is {CreatedByState}) cannot be checked. Refusing before any change: an " +
+                "administrator applies the schema (scripts/Set-RecordCreatorPersonSchema.ps1). TraceId={TraceId}",
+                RecordCreatorPerson.Column, root.WireToken, recordId, createdByState, traceId);
+            return RecordCreatorColumnMissing(root, traceId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1611,6 +1617,21 @@ public static class ProvisionProjectEndpoint
             $"Who created this {root.DisplayLabel.ToLowerInvariant()} could not be looked up, so whether you may secure it " +
             "could not be checked. Nothing was changed; you may try again.",
             traceId, (ReasonKey, ReasonRecordCreatorUnverifiable));
+
+    /// <summary>
+    /// <c>sprk_createdbyperson</c> is not in this environment, and <c>createdby</c> does not name a person: who created
+    /// the record cannot be checked (round 17 item 1). The same reason code as a failed read
+    /// (<see cref="ReasonRecordCreatorUnverifiable"/>), but 403 — a deterministic environment fact, not a fault, as
+    /// task 146's F3 helper answers it — with <c>creatorState: column-missing</c> (the extension the resume refusal
+    /// already uses for the same fact), so the client offers no retry and names the administrator.
+    /// </summary>
+    private static IResult RecordCreatorColumnMissing(SecureRecordRoot root, string traceId) =>
+        Problem(StatusCodes.Status403Forbidden, "Forbidden",
+            $"Who created this {root.DisplayLabel.ToLowerInvariant()} is not recorded in this environment, so whether " +
+            "you may secure it could not be checked. Nothing was changed; an administrator needs to finish setting " +
+            "up the environment.",
+            traceId, (ReasonKey, ReasonRecordCreatorUnverifiable), ("creatorState", UnusableColumnMissing),
+            ("creatorColumn", RecordCreatorPerson.Column));
 
     /// <summary>
     /// RESUME of a record NOT flagged secure (owned by the Secure Record owner team, no container recorded): the same
