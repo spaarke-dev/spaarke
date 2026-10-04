@@ -868,6 +868,8 @@ public class ChatSessionManager
 
             // Document references (ADR-040 fix — file refs survive the warm store)
             DocumentId = session.DocumentId,
+            // Task 164: the SPE drive of a Path B (SPE-item) document — needed to authorize its turns.
+            DocumentDriveId = session.DocumentDriveId,
             AdditionalDocumentIds = session.AdditionalDocumentIds?.ToList() ?? [],
             UploadedFiles = session.UploadedFiles is { Count: > 0 }
                 ? SessionPersistenceService.MapToStored(session.UploadedFiles)
@@ -960,6 +962,9 @@ public class ChatSessionManager
             // Redis-evicted session is denied access to their own conversation on reload. Null for
             // Cosmos documents written before #863: those fail closed for everyone, by design.
             OwnerOid = stored.OwnerOid,
+
+            // Task 164 — the SPE drive of a Path B (SPE-item) document; null for warm documents pre-dating the field.
+            DocumentDriveId = stored.DocumentDriveId,
 
             // FR-D4 (task 032) — restore the stored session title from the warm tier.
             Title = stored.Title,

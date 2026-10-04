@@ -308,6 +308,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:924                DeleteDriveItemForConfigAsync       CLIENT  <-- NEW
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:1067               UploadFileToContainerForConfigAsync CLIENT  <-- NEW
     //   Services/Ai/WorkingDocumentService.cs:172                 UploadSmallAsync                    record*
+    //     ^ SITE DELETED 2026-10-03 (task 162, with POST /api/ai/analysis/{analysisId}/save). Kept in this
+    //       historical census for the same reason as the OBO row above.
     //   Services/Communication/CommunicationService.cs:2066       UploadSmallAsync                    config
     //   Services/Communication/IncomingCommunicationProcessor.cs:921   UploadSmallAsync               record
     //   Services/Communication/IncomingCommunicationProcessor.cs:1093  UploadSmallAsync               record
@@ -809,18 +811,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "(caller-selectable fail/replace/rename), so a 'replace' here is an explicit caller choice "
             + "rather than the silent overwrite the path-keyed PUT performs."),
 
-        new SinkSite("Services/Ai/WorkingDocumentService.cs", "UploadSmallAsync", 1,
-            Provenance.ServerDerivedRecord, "",
-            "the matter's stamped sprk_containerid, read directly from the sprk_matter row",
-            "Analysis working documents go to the matter's own container — server-derived, so not a "
-            + "client-named write (ADR-003; ADR-013 AI boundary; ADR-007). FLAGGED, and pinned separately by "
-            + "TheSetOfSitesReadingAStampedContainerColumnDirectlyIsPinned: it reads sprk_containerid off "
-            + "the row instead of going through RecordContainerResolver, and SecureContainerDecision's own "
-            + "documentation states that stale stamps demonstrably exist because the creation wizard's "
-            + "business-unit cascade writes that column. For a SECURE matter the stamp is the right answer; "
-            + "for a non-secure one a stale stamp silently redirects content. Not a hole, but the one "
-            + "server-derived site whose correctness depends on data hygiene rather than on a resolver.",
-            DirectStampRead: true),
+        // Services/Ai/WorkingDocumentService.cs UploadSmallAsync #1 DELETED 2026-10-03 (unified-access-control-r2
+        // task 162, owner round 10 item 1): SaveToSpeAsync went with its only caller, POST
+        // /api/ai/analysis/{analysisId}/save (no caller in the repo, not published). It was the one site in the
+        // DirectStampRead set; that set is now EMPTY (Rule D below).
 
         // ---------------------------------------------------------------------------------------------
         // ServerDerivedConfig — legitimate only where there is no owning record.
@@ -1420,10 +1414,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             .Select(a => Key(a.File, a.Sink, a.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
 
-        var expected = new HashSet<string>(StringComparer.Ordinal)
-        {
-            Key("Services/Ai/WorkingDocumentService.cs", "UploadSmallAsync", 1),
-        };
+        // EMPTY since 2026-10-03: its one member (Services/Ai/WorkingDocumentService.cs UploadSmallAsync #1) was
+        // DELETED with POST /api/ai/analysis/{analysisId}/save by unified-access-control-r2 task 162. The pin stays:
+        // a NEW direct stamp read must still be argued for here.
+        var expected = new HashSet<string>(StringComparer.Ordinal);
 
         var added = actual.Except(expected, StringComparer.Ordinal).ToList();
         var removed = expected.Except(actual, StringComparer.Ordinal).ToList();

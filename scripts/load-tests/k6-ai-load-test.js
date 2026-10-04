@@ -4,7 +4,6 @@
  * Tests:
  * - RAG Search endpoints
  * - Analysis execution
- * - Export operations
  * - Circuit breaker behavior
  *
  * Prerequisites:
@@ -38,8 +37,6 @@ const resilienceHealthLatency = new Trend('resilience_health_latency', true);
 const circuitBreakerOpen = new Counter('circuit_breaker_open');
 const analysisExecuteLatency = new Trend('analysis_execute_latency', true);
 const analysisErrors = new Rate('analysis_errors');
-const exportLatency = new Trend('export_latency', true);
-const exportErrors = new Rate('export_errors');
 
 // Configuration
 const BASE_URL = __ENV.API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
@@ -95,9 +92,6 @@ export const options = {
         // Analysis execution
         analysis_execute_latency: ['p(95)<5000'],
         analysis_errors: ['rate<0.10'], // <10% error rate (may fail without auth)
-        // Export operations
-        export_latency: ['p(95)<3000'],
-        export_errors: ['rate<0.10'],
     },
 };
 
@@ -264,35 +258,6 @@ function testAnalysisExecution() {
         analysisErrors.add(1);
     } else {
         analysisErrors.add(0);
-    }
-}
-
-// ============================================================================
-// Test: Export (Requires Auth)
-// ============================================================================
-function testExport() {
-    const exportPayload = JSON.stringify({
-        analysisId: '00000000-0000-0000-0000-000000000000', // Placeholder
-        format: 'docx',
-    });
-
-    const start = Date.now();
-    const response = http.post(`${BASE_URL}/api/ai/analysis/{analysisId}/export`, exportPayload, {
-        headers: getHeaders(),
-        tags: { name: 'export' },
-    });
-    const duration = Date.now() - start;
-
-    exportLatency.add(duration);
-
-    const success = check(response, {
-        'export status 2xx or 4xx': (r) => r.status >= 200 && r.status < 500,
-    });
-
-    if (!success || response.status >= 500) {
-        exportErrors.add(1);
-    } else {
-        exportErrors.add(0);
     }
 }
 

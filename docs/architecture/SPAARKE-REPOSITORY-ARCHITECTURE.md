@@ -141,10 +141,7 @@ Sprk.Bff.Api/
 │   └── Ai/                 # AI analysis services
 │       ├── Export/         # Analysis export services
 │       │   ├── IExportService.cs       # Export service interface
-│       │   ├── ExportServiceRegistry.cs # Service resolution by format
-│       │   ├── DocxExportService.cs    # Word document export
-│       │   ├── PdfExportService.cs     # PDF export (QuestPDF)
-│       │   └── EmailExportService.cs   # Email via Microsoft Graph
+│       │   └── DocxExportService.cs    # Word document export (chat Word export)
 │       └── Tools/          # AI tool handlers
 ├── Telemetry/              # OpenTelemetry metrics
 │   ├── AiTelemetry.cs

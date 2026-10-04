@@ -51,7 +51,12 @@ public interface IPlaybookSharingService
     /// Checks team membership and organization-wide access.
     /// </summary>
     /// <param name="playbookId">Playbook ID.</param>
-    /// <param name="userId">User ID to check.</param>
+    /// <param name="userId">
+    /// The user's Dataverse <c>systemuserid</c> — compared with <c>_ownerid_value</c> and used as the
+    /// <c>teammemberships</c> key — NEVER the Entra <c>oid</c> (owner round 12 item 6). Since
+    /// unified-access-control-r2 task 164 no route calls this: PlaybookAuthorizationFilter asks Dataverse's own
+    /// answer (the caller's Read on the row), which already covers ownership and team GrantAccess shares.
+    /// </param>
     /// <param name="requiredRights">Required access rights.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if user has the required access.</returns>

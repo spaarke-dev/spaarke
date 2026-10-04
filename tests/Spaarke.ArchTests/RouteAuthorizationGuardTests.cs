@@ -276,6 +276,26 @@ public class RouteAuthorizationGuardTests
             + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
             + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
 
+        // ---- AI analysis: added 2026-10-03 by unified-access-control-r2 task 162 (sweep findings #1, #2, #22,
+        //      #50, #51, #52; GitHub #233 item 1) ----
+        //
+        // Absent from this census while serving analysis working documents and writing sprk_analysis rows,
+        // document profile fields and SPE files app-only. Worse than absent: every route here carried an
+        // Add…AuthorizationFilter, so Rule A credited them by NAME and Rule B passed the filter file because its
+        // text contains "AuthorizationService" — while four of the seven decided nothing (AnalysisAccess was a
+        // pass-through, and AiAuthorizationFilter ignores the fork/promote bodies). The structural rules cannot
+        // tell a deciding filter from a decorative one with the right name; AnalysisEndpointsAuthorizationContract
+        // Tests (real MapAnalysisEndpoints host, one deny case per mapped route, completeness-checked) is what
+        // proves these. /fork, /{analysisId}/save and /{analysisId}/export were DELETED (owner round 10 item 1).
+        new GovernedFile("Api/Ai/AnalysisEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/analysis/* — create and execute (Read on every body document via IAiAuthorizationService; "
+            + "execute adds the run filter: Write on every document for the document-profile branch or a playbook "
+            + "that can write, plus the playbook-use decision), promote (G5: Create privilege on sprk_analysis, "
+            + "analysis.attach on the body document and regarding record, playbook-use; the session owner and the "
+            + "session-derived document are checked in the handler, see SessionOwnershipGuardTests) and GET "
+            + "/{analysisId} (Read on EVERY populated anchor of the analysis, uniform 404). Every new check is "
+            + "evaluated by FinanceAuthorizationFilter; no route in this file carries a waiver."),
+
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
             "THE reference implementation per the Wave-3 build plan: each handler checks project access AND "
@@ -880,7 +900,22 @@ public class RouteAuthorizationGuardTests
     //            under owner round 10 item 1 — no caller in the repo and in no published API description.
     //            The file was NOT in GovernedFiles, so there is no entry to remove. Api/Ai/KnowledgeBaseEndpoints.cs
     //            lost four routes in the same task but keeps GET /indexes/health, so it is still counted.
-    private const int ExpectedEndpointFileCount = 119;
+    //
+    // 119 -> 117 (2026-10-03, unified-access-control-r2 task 164, owner round 10 item 1). A DOWNWARD move
+    // (written as 120 -> 118 on task 164's own branch; recounted 117 when task 163's fix round merged it):
+    //
+    //   164  -1  Api/Ai/PromptLibraryEndpoints.cs DELETED — all six /api/ai/prompts routes retired (no caller in
+    //            the repo, not in any published API description; sweep findings #56 and #57). Never governed.
+    //        -1  Api/Ai/RecordMatchEndpoints.cs DELETED — POST /api/ai/document-intelligence/match-records and
+    //            /associate-record retired on the same rule (sweep #31, #32). Never governed.
+    //         0  GET /api/ai/playbooks/by-name/{name} and PUT /api/ai/playbooks/{id:guid}/nodes/reorder were
+    //            retired too, but their files (PlaybookEndpoints.cs, NodeEndpoints.cs) still map other routes, so
+    //            the census cannot see them. Absence is pinned by
+    //            tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs.
+    //
+    // Reconcile at integration: sibling sweep tasks (159-169) move this count too; the merged value is the
+    // master count after every retired and added file, recounted, not a sum of deltas.
+    private const int ExpectedEndpointFileCount = 117;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
@@ -1214,8 +1249,13 @@ public class RouteAuthorizationGuardTests
                 + "not per-record authorization — the record decision is SpeAdminAuthorizationFilter's job.",
             ["AgentAuthorizationFilter"] =
                 "M365 Copilot gateway (/api/agent/*). Asserts a resolvable oid AND tid on the inbound agent "
-                + "token and denies without either. Identity precondition for a gateway, not a document "
-                + "route — it serves no document metadata or bytes, so it is outside Rule A's subject too.",
+                + "token and denies without either — an IDENTITY PRECONDITION only. It decides nothing about "
+                + "records, and the agent routes DO reach document and playbook data: the per-record decisions "
+                + "are made by other filters in the same chain (POST /run-playbook: PlaybookAuthorizationFilter "
+                + "run mode — the playbook-use decision, Read/Write on the document and the record parameters; "
+                + "POST /message: AiAuthorizationFilter's chat-context evaluation of the body document and the "
+                + "resumed session's stored context; task 164), and the status route's run-owner comparison is "
+                + "in its handler.",
             ["CommunicationAuthorizationFilter"] =
                 "Gates SENDING a communication, not reading a record. Its own summary is explicit that "
                 + "Phase 1 permits any authenticated user with a valid oid, so it does not misrepresent "

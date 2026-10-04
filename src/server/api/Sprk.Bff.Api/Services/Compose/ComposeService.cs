@@ -1059,7 +1059,14 @@ public class ComposeService : IComposeService
         // w14:paraId stable across edits; new/split paragraphs simply appear as new map entries
         // (R4 re-anchor — this task does not reconcile or diff the two snapshots).
         var referenceMap = ComposeReferenceMapping.BuildReferenceMap(paraIdMap);
-        session = session with { ReferenceMap = referenceMap };
+        // unified-access-control-r2 task 164 (owner round 16 item 2): a Path B session's DocumentId is the SPE drive-item
+        // id, and its chat turns are authorized by the caller's own SPE read of that item — which needs the drive too.
+        // Recorded on EVERY load (new or resumed), so a session that pre-dates the field gains it on the next open.
+        session = session with
+        {
+            ReferenceMap = referenceMap,
+            DocumentDriveId = request.DocumentRecordId.HasValue ? null : request.DriveId,
+        };
         await _sessions.UpdateSessionCacheAsync(session, cancellationToken).ConfigureAwait(false);
 
         // FR-A08/FR-A09 (task 044): carry the SERVER-DETERMINED "this was a PDF" fact forward on the
