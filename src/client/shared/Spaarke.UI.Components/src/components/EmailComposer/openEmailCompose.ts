@@ -25,7 +25,7 @@
  *
  * @see src/solutions/EmailPage/src/main.tsx — the receiving code page (compose mode).
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';

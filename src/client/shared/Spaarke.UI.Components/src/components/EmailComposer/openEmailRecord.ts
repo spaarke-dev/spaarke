@@ -27,7 +27,7 @@
  * @see src/solutions/EmailPage/src/main.tsx — the receiving code page (reads
  *   `data` → `id` → host form, in that order).
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 

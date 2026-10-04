@@ -17,7 +17,7 @@
  * (ADR-012) — these callbacks are injected by the host mount, never imported by
  * the engine.
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { cleanGuid } from '../../utils/guid';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
