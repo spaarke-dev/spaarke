@@ -323,6 +323,24 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
       <merge-gates>(1) F6: MET (rows 1-11 owner-picked and pinned). (2) G-0 in dev: MET (PASS 2026-10-03). (3) Task 133 merged first or together.</merge-gates>
       <open>Live gates G-1, G-2, G-3/G-4 (IsSecured + reader coverage, four tables), G-5, G-6 (user outside "Spaarke Demo"), G-7, G-8, G-9, G-10 (LOCAL BFF) - main session at integration (round 11); G-0 in every environment other than dev. Publish size against a fresh master build (main session). The F3 hand-over to task 146's helper at integration (owner round 13 item 6). Endpoint-backed secure/unsecure surface: ribbon on tasks 142 and 148.</open>
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-150-c1-r2-r1" result="partial" round="c1-r2 verifier (15 items)">
+      <summary>Every item re-checked against code; no code changed. The instructed branch name task/uac-r2-150-c1-r1 already exists (the c1-r1 round, 2d7e14f62, checked out in another worktree), so this round works on task/uac-r2-150-c1-r2-r1 from task/uac-r2-150-c1-r2 (765749d4d). The verifier's 5 BFF failures (item 8) were its own stale seeded binaries: the full BFF unit suite on a fresh build is 14425 passed, 0 failed. Open as before: publish size (main session), ribbon (142/148), live gates (main session), merge gate 3 (task 133 not yet in the work branch). Note section 18.</summary>
+      <done>
+        - Items 1, 2, 7: the 7-file scope, option B verbatim for rows 7-11 (compared with section 6 column B at 2d7e14f62), 0 DRAFT, no new surface: confirmed.
+        - Item 3: verifier seeds recorded; no new pin in this round, so no new seed.
+        - Item 4: Get-DvAll count shape reproduced in pwsh (fixed 0/1/3, unfixed 1/1/1); the other Get-DvAll caller (line 147) enumerates the List and is correct.
+        - Item 5: G-0 dev PASS matches work/unified-access-control-r2 notes/batch4-live-gates-2026-10-03.md.
+        - Item 6: section 17 hand-over table matches task 146's SecureDesignationRemoval.DecideAsync; precision added in note section 18 (non-Full-Access caller with an unreadable creator person: 500 permission_unverifiable under the helper too; CreatorColumnAbsent: 403).
+        - Item 8: re-run on a fresh build: affected 481/481, full BFF unit 14425/0 failed.
+        - Item 10: merge gate 3 still open (git branch --merged: no task/uac-r2-133* in work/unified-access-control-r2).
+        - Items 9, 11-15: unchanged stops, hand-offs and pending live gates (note sections 9, 11, 18).
+      </done>
+      <placement>Nothing new: no endpoint, service, DI registration, option, job, package, column, reason code, script or code change. No plugin (ADR-002); no fail-closed path changed (ADR-003). No .claude edit needed.</placement>
+      <tests>Affected BFF classes 481/481. Full BFF unit suite (once): 14425 passed, 0 failed, 54 skipped (14479). Spaarke.ArchTests 346/346. Sprk.Bff.Api.IntegrationTests 104/104. Spe.Integration.Tests 403 passed, 25 skipped, 0 failed (428). Client: jest CreateProjectWizard + SummarizeFilesWizard 9 suites 125/125 (after building local Spaarke.SdapClient and Spaarke.Auth); ui-components npm run build (tsc) exit 0.</tests>
+      <stops>Ribbon: tasks 142 and 148 (dependencies, unchanged).</stops>
+      <merge-gates>(1) F6: MET. (2) G-0 in dev: MET. (3) Task 133 merged first or together: OPEN.</merge-gates>
+      <open>Live gates G-1, G-2, G-3/G-4 (four tables), G-5, G-6, G-7, G-8, G-9, G-10 - main session at integration (round 11); G-0 in every environment other than dev. Publish size against a fresh master build (main session). F3 hand-over to task 146's helper at integration. Endpoint-backed secure/unsecure surface: ribbon on tasks 142 and 148.</open>
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: F3 = removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint (securing stays open to Write-holders). F5 superseded: securing an existing standard record is a RIBBON BUTTON on project/matter/work-assignment forms (enabled with 148, per F7). NEW owner UX requirement (assignment pending research): a red notification banner on secure records, linking to Share/Manage Access where possible.</amendment>

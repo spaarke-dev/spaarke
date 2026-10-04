@@ -620,3 +620,41 @@ harness → exit 1 with "1 row(s)" on every table (item 7).
 **Placement (CLAUDE.md §10 / §11).** No new endpoint, service, DI registration, option, job, package, column, reason
 code or script. Changes are copy strings, one script line and test assertions/helpers. ADR-002: no plugin. ADR-003: no
 fail-closed path changed. No `.claude/**` edit needed.
+
+## 18. Fix round c1-r2-r1 (2026-10-03) — the c1-r2 verifier's 15 items
+
+**Branch.** The round's instruction named `task/uac-r2-150-c1-r1` as the new branch, but that name already exists (it is
+the c1-r1 round, `2d7e14f62`, an ancestor of c1-r2, and is checked out in another worktree). Moving it would change
+another worktree's branch under it, so this round works on **`task/uac-r2-150-c1-r2-r1`**, created from
+`task/uac-r2-150-c1-r2` (`765749d4d`). Nothing else differs. No live call; no live write. No code changed in this round:
+every item is a verification, a hand-off or a stop already recorded, and each was re-checked against code, not taken
+on trust.
+
+| # | Verifier item | Disposition (re-checked here) |
+|---|---|---|
+| 1 | Scope of the round (7 files, `2d7e14f62`..`765749d4d`) | **Confirmed.** `git diff --stat` shows exactly those 7 files |
+| 2 | Rows 7-11 ship option B verbatim; §6 lists only the shipped copy; no DRAFT | **Confirmed.** Each shipped string compared with column B of §6 at `2d7e14f62` (rows 7-8 in `provisioningService.ts`; rows 9-11 in `ProvisionProjectEndpoint.NotRecordCreator`, `RecordCreatorUnverifiable`, `RefuseUnflaggedResumeUnlessCreatorAsync`, `{record}` = `DisplayLabel` lower-cased). Grep `DRAFT` over the named file set: 0 |
+| 3 | Verifier's seeds (server rows 9-11 → 5 fail; client rows 7-8 → 2 fail) | **Recorded.** Matches this task's own c1-r2 seeds (§17: S27, C7). No new pin was added in this round, so no new seed |
+| 4 | `Repair-SecureFlagNulls.ps1:171` after-check | **Confirmed.** Local pwsh repro of `Get-DvAll`'s `, $rows` shape: fixed `(…).Count` → 0 / 1 / 3 for 0 / 1 / 3 rows; unfixed `@(…).Count` → 1 / 1 / 1. The other caller (line 147, `$nulls = Get-DvAll …` then `@($nulls \| ForEach-Object …)`) enumerates the List and counts 0 / 1 / 3 correctly, so it has no such defect. `Set-SecureFlagFieldSecurity.ps1` p4 (`@((Invoke-DvGet …).value).Count`) does not use `Get-DvAll` |
+| 5 | G-0 reconciliation | **Confirmed** against `work/unified-access-control-r2:notes/batch4-live-gates-2026-10-03.md` "150 G-0 … PASS" (42 NULL rows: project 9, matter 18, work assignment 11, invoice 4; `-Apply` all 42 → No; `-Verify` PASS; the "1 row(s) still hold NULL" symptom). §9 G-0 row, merge gate 2 and the c1-r2 POML outcome agree with it |
+| 6 | §17 hand-over table vs task 146's `SecureDesignationRemoval.DecideAsync` (`task/uac-r2-146-c1-r1`) | **Confirmed** on all 3 rows (step 2 creator ids → step 3 Full Access on every secure record → step 4 creator-person read → step 5 refusal order). One precision for the integrator, read from the helper's `SecureRemovalDecision.StatusCode`: row 2's non-Full-Access caller with an unreadable creator person gets basis `CreatorUnreadable` → **500** `sdap.unsecure.permission_unverifiable` (the same status this branch gives), so `Unsecure_WhenTheRecordedCreatorPersonCannotBeRead_RefusesBeforeAnyWrite` keeps its 500 for that caller; only the Full Access case is new (admitted). Row 1's `CreatorColumnAbsent` maps to **403**. The three tests exist (`SecureFlagEndpointWriteTests` lines 715, 731, 750). Not forked or copied here |
+| 7 | No new surface; POML well-formed; comments match code | **Confirmed.** No endpoint, service, DI registration, option, job, package, column, reason code or script added in c1-r2 or here |
+| 8 | Verifier's 5 BFF failures were its own seed (stale `--no-build` binaries) | **Confirmed by re-run** on a fresh build of the restored source: the affected classes 481/481 and the full BFF unit suite (counts below) show none of those 5 failing |
+| 9 | Publish size not measured; ribbon not built | **Not closed here, by instruction and by dependency.** Publish size: this round's instruction says skip it; the main session measures against a fresh master build (CLAUDE.md §10). No package changed (CVE status as c1-r1: clean). Ribbon: STOPPED on tasks 142 and 148 (§9) |
+| 10 | Merge gate 3: task 133 first or together | **Still open.** Checked: no `task/uac-r2-133*` branch is merged into `work/unified-access-control-r2` (`git branch --merged`: none) |
+| 11 | Residuals §11.9, §11.10 | **Recorded**, unchanged |
+| 12 | Criterion: suites green + publish size ≤60 MB + no HIGH CVE | Suites green (below); no package change. **Publish size open** — main session |
+| 13 | Criterion: secure/unsecure through the endpoint-backed surface (manual live gate) | **STOPPED** on tasks 142 and 148 (ribbon) — unchanged |
+| 14 | Criterion: FLS lock live (G-3/G-4) | **Pending live gate** — main session at integration (round 11 approval) |
+| 15 | Criterion: G-5, G-6, G-7, G-10, G-1/G-2/G-8/G-9; G-0 outside dev | **Pending live gates** — main session at integration; G-0 PASSED in dev only |
+
+**Tests (c1-r2-r1, on `765749d4d` unchanged).**
+- Affected BFF classes (same filter as §17): **481/481**.
+- Full BFF unit suite, once: **14425 passed, 0 failed, 54 skipped (14479)** — 29 min, no failure of any kind, so item 8's 5 failures were the verifier's stale seeded binaries.
+- `Spaarke.ArchTests`: **346/346**. `Sprk.Bff.Api.IntegrationTests`: **104/104**. `Spe.Integration.Tests`: **403 passed, 25 skipped, 0 failed (428)**.
+- Client: jest `CreateProjectWizard` + `SummarizeFilesWizard`, 9 suites, **125/125** (after building the local
+  `Spaarke.SdapClient` and `Spaarke.Auth`, which a fresh worktree lacks — without them 4 suites fail to load
+  `@spaarke/sdap-client`, an environment gap, not a test failure); `@spaarke/ui-components` `npm run build` (tsc) exit 0.
+
+**Placement (CLAUDE.md §10 / §11).** Nothing new: no code changed in this round. ADR-002: no plugin. ADR-003: no
+fail-closed path changed. No `.claude/**` edit needed.
