@@ -31,11 +31,10 @@ export { DismissedSection } from './DismissedSection';
 export type { IDismissedSectionProps } from './DismissedSection';
 
 export { ThresholdSettingsPopover } from './ThresholdSettings';
-export { default as ThresholdSettings } from './ThresholdSettings';
 export type { IThresholdSettingsProps } from './ThresholdSettings';
-
-export { TodoDetailPane } from './TodoDetailPane';
-export type { ITodoDetailPaneProps } from './TodoDetailPane';
+// (The `ThresholdSettings` default-export alias — byte-identical to
+// ThresholdSettingsPopover — and `TodoDetailPane` — never rendered — were
+// DELETED 2026-10-03, reuse audit C-14: zero consumers.)
 
 export { TodoAISummaryDialog } from './TodoAISummaryDialog';
 export type { ITodoAISummaryDialogProps } from './TodoAISummaryDialog';

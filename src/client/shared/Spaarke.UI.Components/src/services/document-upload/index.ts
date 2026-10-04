@@ -54,7 +54,7 @@ export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationRe
 export { DocumentRecordService } from './DocumentRecordService';
 export type { DocumentRecordServiceOptions, EntityConfigResolver } from './DocumentRecordService';
 
-// IDataverseClient implementations
-export { PcfDataverseClient } from './PcfDataverseClient';
+// IDataverseClient implementation (Code Pages). The PCF-side PcfDataverseClient
+// was DELETED 2026-10-03 (reuse audit C-26): zero instantiation sites.
 export { ODataDataverseClient } from './ODataDataverseClient';
 export type { ODataDataverseClientOptions } from './ODataDataverseClient';
