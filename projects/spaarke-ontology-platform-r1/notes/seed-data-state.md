@@ -198,4 +198,4 @@ the seeded rows carry the "ONTOLOGY DEV SEED 005" name.
 
 **Spend snapshots:** `98b7d63b-...` (on `.01`) and `99b7d63b-...` (on the NC2 dev matter) are **not read by the
 seeded predicate**. The existing Finance `SignalEvaluationService` does read spend snapshots. As of this addendum
-no `sprk_spendsignal` row has been created from them. Whether to keep them is an owner decision.
+no `sprk_spendsignal` row has been created from them. **Owner decision 2026-10-03: KEEP them** (deliberate, e.g. for later Do-lane or finance testing). If the Finance signal service later produces a `sprk_spendsignal` on `REAL-2026-123456.01` or the NC2 matter, it comes from these seeded snapshots, not from real spend.

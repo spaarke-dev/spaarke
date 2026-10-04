@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-03 (task 004 completion)
-> **Recovery**: read "Quick Recovery" first. Everything needed to continue is in this file.
-> *(Supersedes the 2026-09-30 checkpoint entirely — that one named rev 3, a now-dead branch, and the D-1 spike
-> as the next action. All three are obsolete.)*
+> **Last Updated**: 2026-10-03 (by context-handoff, main session; orchestrator checkpoint)
+> **Recovery**: read "Quick Recovery" first. This file is the MAIN SESSION's orchestrator view: several tasks
+> run as subagents in parallel, so per-task detail lives in each POML's `<completion>` element and in `notes/`.
+> Sub-agents were told not to edit this file.
 
 ---
 
@@ -11,13 +11,55 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **PIPELINE COMPLETE — ready to implement.** `design.md` rev 11 · `spec.md` (44 FRs) · `plan.md` (10 phases) · **42 task POMLs**, all passing `Validate-TaskPoml.ps1` with 0 errors / 0 warnings |
-| **Active task** | **005 complete** (✅, STANDARD) — dev data + two negative controls seeded; communication classification produced via the LIVE `/api/office/save` → enrichment path (escalation trigger did NOT fire). Several other tasks (010/011/012/020/023/082/083 etc.) are running concurrently in this worktree — re-read this file before trusting "none" |
-| **Dataverse** | ✅ Five tables CREATED in `spaarkedev1` · roles assigned and **verified by query** · auditing on all five **and at org level** · ✅ task 001's four columns done · ✅ task 004 seeded `sprk_policy` POL-COMMIT-BUDGET = `4d204810-61bf-f111-aaaf-0022482913fc` (disabled, re-verified disabled after task 005) + `sprk_policyversion` v1 = `42b3e716-61bf-f111-aaaf-0022482913fc` — see `notes/004-seed-policy-rows.md`. ✅ task 005 seeded the positive triple + both negative controls — see `notes/seed-data-state.md` for every GUID, seeded-vs-real |
-| **NEXT ACTION** | Per `tasks/TASK-INDEX.md`, the first remaining 🔲 whose deps are satisfied is **021 — the predicate compiler** (deps 020 ✅, 005 ✅; FULL rigor, opus/xhigh, 🔴 risk item — `notExists` has no in-repo template). Confirm no other agent already owns it before starting. Task 002 is 🔄 escalated (see its row); task 003 is ✅ |
-| **Branch** | `docs/ontology-platform-design` — ⚠️ **NOT** `docs/ontology-platform-phase0` (squash-merged, dead) |
-| **Git** | 4 ahead / **44 behind** `origin/master`. Clean, all pushed. **Merge master before any deploy** |
-| **PR #1032** | ✅ **MERGED** to master as `93634db58` |
+| **Task** | **006 — Provision the dedicated least-privileged writer identity** (main session, FULL, opus/high, prescriptive) |
+| **Step** | **0 of 6 — not started.** Paused before any Azure change because the owner asked for a handoff |
+| **Status** | in-progress (owner APPROVED the plan; nothing executed yet) |
+| **Next Action** | Run `task-execute` on `tasks/006-provision-dedicated-writer-identity.poml`. Owner approved 2026-10-03, as proposed: (1) create user-assigned managed identity **`mi-ontology-writer-dev`** in **`rg-spaarke-dev`**; (2) attach it to App Service **`spaarke-bff-dev`** (likely restarts the dev BFF); (3) register it in **`spaarkedev1`** as a Dataverse application user holding **ONLY `Spaarke Ontology Service`**; (4) re-run the task 002 union check. **No client secret; never recreate `BFF-API-ClientSecret`.** Then record the client id in `notes/security-roles.md` for task 030 |
+| **Running in background** | **021** predicate compiler (opus subagent, in THIS worktree; told not to touch this file) · **089** `cleanGuid` follow-up (in `C:\wt089`, PR #1121: converge the ~40 deferred call sites + case-semantics audit). Their reports arrive as agent messages; record them in POML + TASK-INDEX |
+| **Branch / git** | `docs/ontology-platform-design` @ `9eb510a61`, **16 ahead / 0 behind** `origin/master`, in sync with its remote. One uncommitted file: `notes/seed-data-state.md` (owner "keep" decision for the spend snapshots) |
+| **Index** | 50 tasks: **17 ✅ · 1 🔄 (002) · 32 🔲**. 50 POMLs validate clean; no task-status drift |
+
+### Files modified since the last commit
+- `projects/spaarke-ontology-platform-r1/notes/seed-data-state.md` — records owner decision: KEEP the two spend snapshots + NC2 budget row
+
+### Owner decisions made 2026-10-03 (all recorded in task files)
+| Item | Decision |
+|---|---|
+| 002 writer principal | **Option A**: dedicated least-privileged identity, task **006** (002 and 030 now depend on 006) |
+| 022 invalid rule bodies | **Validate at evaluation time**, fail closed; authoring in the Spaarke Platform app stays |
+| C-21 Pillar-9 privacy shim | **Delete** (done in PR #1120) |
+| C-17 due-date tiers | **3/7/10 days** (task 081) |
+| Cleanup placement | Fix everything now, never defer to issues; cleanup unrelated to ontology goes to **its own PR** (see `notes/cleanup-placement-plan.md`) |
+| CalendarSidePane | **Not currently in use** but may return: fixed, not deleted (PR #1114) |
+| Task 005 spend snapshots | **Keep** |
+
+### Open PRs (merging is the owner's call; I do not merge)
+| PR | Content | Note |
+|---|---|---|
+| #1111 (draft) | This branch | |
+| #1118 | C-10 To-Do scorer, **live bug** | **Merge first**: task 081 (C-13) reuses its `dateLocal.ts`; it also turns a guard test green that has been red on master since 2026-08-17 |
+| #1114 | C-23 Calendar | Overlaps #1119 in `Spaarke.Events.Components/src/components/index.ts` (separate blocks) |
+| #1116 | C-22 InsightSummaryCard | Web resource: needs a deploy after merge |
+| #1117 | C-5, C-16 Compose | 7 edited test suites only run in CI |
+| #1119 | C-2, C-24, C-25 Events leftovers | |
+| #1120 | C-19, C-21, C-14, C-20, C-26, C-6, C-27; closes #1112, #1113 | Conflicts with this branch in `Spaarke.Visuals/src/components/index.ts`: keep `VisualMetricCard`, drop TrendCard lines. Reviewer to confirm ADR-020 SemVer path-A exception |
+| #1121 | C-7, C-12, C-15 | 089 follow-up in progress |
+
+### Held, and why
+- **081** waits for **#1118 AND #1121** to merge (C-13 needs `dateLocal.ts`; C-8 starts in `DailyBriefingApp.tsx`, which #1121 edits), then merge master into this branch
+- **091** (C-18 sweeps) after 089 finishes, so it does not compete for CPU
+- **022** can start any time (decision made); not dispatched yet to keep 021 alone in this worktree
+- **030** needs 021 + 006
+
+### Still with the owner
+- **Task 010 criterion 5**: Daily Briefing widget render check (needs a browser)
+
+### Verified this session (do not redo)
+- Full BFF suite uncontended at wave close: **Test Run Successful, 14,356 total / 14,302 passed / 54 skipped / 0 failed**. The 83/124-failure runs earlier were agent contention.
+- Publish size: master `62277d50a` 45.66 MB / 212 files vs branch 45.67 MB / 212 files (+0.01 MB, Compress-Archive). Master worktree `C:\wt111m` kept for re-measurement.
+- Shared git stash stack: 3 entries, all owned by other sessions, untouched. Sub-agents were told not to use bare `git stash`.
+
+---
 
 ### Do NOT re-litigate
 
