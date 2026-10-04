@@ -85,6 +85,12 @@ public class OfficeService : IOfficeService
     // Task.Run behind the 202 lost the profile on a restart, and the three optional parameters that built it.
     private readonly OfficeProfileQueue _profileQueue;
 
+    // Task 083 (#1044 writer half): the caller's linked CONTACT (task 141's link,
+    // systemuser.sprk_primarycontact / contact.sprk_externalobjectid), used to default CreateTodoAsync's
+    // sprk_assignedto when the request names no assignee. Required, not optional (ADR-032): registered
+    // unconditionally as a singleton by MembershipModule, so an absent one is a startup fault.
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+
     public OfficeService(
         OfficeJobStatusService jobs,
         OfficeEmailEnricher emailEnricher,
@@ -102,6 +108,7 @@ public class OfficeService : IOfficeService
         IGenericEntityService genericEntityService,
         ICallerSystemUserResolver callerSystemUserResolver,
         OfficeProfileQueue profileQueue,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ILogger<OfficeService> logger)
     {
         _containerResolver = containerResolver
@@ -114,6 +121,8 @@ public class OfficeService : IOfficeService
             ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownershipResolver = ownershipResolver
             ?? throw new ArgumentNullException(nameof(ownershipResolver));
+        _identity = identity
+            ?? throw new ArgumentNullException(nameof(identity));
         _jobs = jobs;
         _emailEnricher = emailEnricher;
         _documentPersistence = documentPersistence;
@@ -2029,6 +2038,51 @@ public class OfficeService : IOfficeService
         if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
         {
             entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
+        }
+        else
+        {
+            // Task 083 (#1044 writer half): task 080 made the owner a BU default team (above), so nothing on
+            // the row names the person it is for, and the Daily Briefing (UAC-r2 task 152's people-targeting
+            // surface, which matches sprk_assignedto through the SAME link) could not find it. Default to the
+            // CALLER's linked contact — task 141's link, read through IIdentityNormalizationService exactly as
+            // 141's contract directs (141-link-contract.md §6): resolve the caller's systemuserid with the
+            // existing task-067 resolver (already done by the endpoint into ownerSystemUserId), then
+            // ResolveAsync(...).ContactId. Two contacts on one oid, or an inactive one, resolve to null (141's
+            // ambiguity rule) — never refused: a To Do that is hard to find beats a refused one. Do NOT call
+            // ContactIdentityBinder here; linking is the reconciliation job's and the sign-in resolver's job.
+            Guid? callerContactId = null;
+            if (Guid.TryParse(ownerSystemUserId, out var callerSystemUserId))
+            {
+                try
+                {
+                    callerContactId = (await _identity.ResolveAsync(callerSystemUserId, cancellationToken)
+                        .ConfigureAwait(false)).ContactId;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "The caller's linked contact could not be resolved for {CallerId}", callerSystemUserId);
+                }
+            }
+
+            if (callerContactId is { } resolvedContactId && resolvedContactId != Guid.Empty)
+            {
+                entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", resolvedContactId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and the "
+                    + "caller has no linked contact, so sprk_assignedto is left blank; the To Do is still "
+                    + "created (never refused) but will not surface in the caller's Daily Briefing until the "
+                    + "link exists",
+                    ownerSystemUserId ?? "(unresolved)",
+                    "caller_has_no_linked_contact");
+            }
         }
 
         // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
