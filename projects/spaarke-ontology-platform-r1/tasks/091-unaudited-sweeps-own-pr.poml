@@ -4,7 +4,7 @@
     <title>Unaudited sweeps, own PR (C-18)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,6 +84,8 @@
   </acceptance-criteria>
 
   <notes>Dispatched after wave I so it does not compete with six other PR worktrees. May be split into one PR per item if the colour sweep is large.</notes>
+
+  <completion>COMPLETED 2026-10-04 (recorded by main session). PR #1122 (chore/shared-lib-sweeps), head 394642e83, open and ready for review, 3 files. (1) Colour sweep: 4 real violations fixed with Fluent tokens: RecordCardShell.tsx loadingOverlay rgba white wash -&gt; colorNeutralBackground1 + opacity (DataGrid precedent); HeaderCellContent.tsx menu boxShadow and drop-shadow rgba -&gt; colorNeutralShadowAmbient/Key; ColumnHeaderMenu.stories.tsx hex -&gt; theme token. Dataverse option-set colour metadata, 'transparent' and union-tag strings documented as not violations. (2) EmailCardList, MessageRow, ChatSessionCard documented as genuinely different from RecordCardShell (each would visibly change layout); no convergence, escalation not fired. (3) SECTION_REGISTRY kept: consumer WorkspaceGrid.tsx default in LegalWorkspace; SpaarkeAi uses createLegalWorkspaceSectionRegistry. Tests: Spaarke.UI.Components baseline on clean master = 7 suites failing deterministically; after = identical, no new failure; tsc clean. Six of those seven are now task 092 scope; the seventh (todoScoreMappings) is fixed by PR #1118.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

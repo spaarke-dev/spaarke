@@ -25,7 +25,8 @@
   <context>
     <background>Found 2026-10-04 by task 089 (PR #1121), which compared each failure against the unmodified master file. Owner rule 2026-10-03: defects found during this cleanup are fixed now, never deferred to an issue; unrelated ones go in their own PR.
 (1) BUILD: six PCFs fail npm run build:prod on master with a pdfjs / SprkChat babel-traverse error. Named by 089: CommunicationActions, CommunicationConnections, CommunicationConversationPanel, CommunicationMessageActions, plus two more (the PR #1121 body has the full table). 089's hypothesis: a full-barrel import of @spaarke/ui-components pulls SprkChat and pdfjs into PCF bundles. A PCF that cannot build from master cannot be redeployed.
-(2) TESTS, failing on master per 089's baseline runs: Spaarke.Communication.Components 2 suites; Spaarke.AI.Widgets 4 suites (089 calls them OOM-flaky; the worker swaps which failures show); Spaarke.DailyBriefing.Components 5 suites.</background>
+(2) TESTS, failing on master per 089's baseline runs: Spaarke.Communication.Components 2 suites; Spaarke.AI.Widgets 4 suites (089 calls them OOM-flaky; the worker swaps which failures show); Spaarke.DailyBriefing.Components 5 suites.
+(3) ADDED 2026-10-04 from task 091's baseline (clean master, 3 runs): Spaarke.UI.Components suites failing deterministically: TimelineComposeBox.test.tsx, ConversationView.forward.test.tsx, RichFilePreview.test.tsx, configResolution.test.ts, buildDynamicWorkspaceConfig.test.ts, surfaceLaunchRegistry.test.ts. EXCLUDED: todoScoreMappings.test.ts (PR #1118 edits it; confirm green there). Load-sensitive candidates to run in isolation: ConversationView.emailInFlow.test.tsx, AccessGrantModal.userShare.test.tsx.</background>
     <relevant-files>
       <file role="reference">https://github.com/spaarke-dev/spaarke/pull/1121 (per-consumer table: build + test, baseline vs after)</file>
       <file role="modify">src/client/pcf/</file>
@@ -81,7 +82,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Each PCF that failed npm run build:prod in 089's table either builds on the branch, or is shown not to fail on a clean master checkout.</criterion>
-    <criterion testable="true">Each failing suite in Spaarke.Communication.Components, Spaarke.AI.Widgets and Spaarke.DailyBriefing.Components passes on the branch, or is shown with evidence to be environment-only.</criterion>
+    <criterion testable="true">Each failing suite in Spaarke.Communication.Components, Spaarke.AI.Widgets, Spaarke.DailyBriefing.Components and the six Spaarke.UI.Components suites passes on the branch, or is shown with evidence to be environment-only.</criterion>
     <criterion testable="true">The PR body names, for each failure, the root cause, the CI coverage gap and the introducing commit (or says it could not be identified).</criterion>
     <criterion testable="true">Negative: no test was skipped, deleted or loosened, and no timeout or memory limit raised, without the PR body showing that was the root cause.</criterion>
     <criterion testable="true">A pull request against master is open and ready for review; it contains no unjustified package-lock.json change and no file outside this task's scope.</criterion>
