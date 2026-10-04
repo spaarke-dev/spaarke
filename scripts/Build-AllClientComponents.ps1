@@ -60,6 +60,7 @@ if ($Component) {
 
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF build result from output (pcf-scripts exits 0 on failure)
 
 # Shared libraries (build order matters — downstream deps must come after their dependencies)
 #
@@ -217,6 +218,15 @@ function Invoke-ComponentBuild {
             }
             if ($LASTEXITCODE -ne 0) {
                 throw "npm run build failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
+            }
+            # pcf-scripts EXITS 0 WHEN THE WEBPACK BUILD FAILS, so for PCF builds the exit code above
+            # proves nothing. Judge the result from the output (rule shared with
+            # scripts/Invoke-PcfBuildProd.ps1 and the nightly CI workflow).
+            if ($Category -eq 'PCF Controls') {
+                $pcfResult = Get-PcfBuildResult -Output $buildOutput -ExitCode $LASTEXITCODE
+                if (-not $pcfResult.Succeeded) {
+                    throw "PCF build $($pcfResult.Status.ToLower()) ($($pcfResult.Reason)) although npm exited $LASTEXITCODE`n$($pcfResult.Excerpt -join "`n")"
+                }
             }
 
             $stopwatch.Stop()

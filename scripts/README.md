@@ -742,7 +742,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 .\scripts\Deploy-AllWebResources.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
 
 # Skip specific components
-.\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons, PCFWebResources
+.\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons
 
 # Preview which components would be deployed
 .\scripts\Deploy-AllWebResources.ps1 -WhatIf
@@ -750,7 +750,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Parameters:**
 - `-DataverseUrl` — Target Dataverse environment URL (falls back to `DATAVERSE_URL` env var)
-- `-SkipComponent` — Array of component names to skip: `CorporateWorkspace`, `ExternalWorkspaceSpa`, `SpeAdminApp`, `WizardCodePages`, `EventsPage`, `PCFWebResources`, `RibbonIcons`
+- `-SkipComponent` — Array of component names to skip: `CorporateWorkspace`, `ExternalWorkspaceSpa`, `SpeAdminApp`, `WizardCodePages`, `EventsPage`, `RibbonIcons`
 
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
@@ -760,7 +760,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
 | 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
-| 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
+| 6 | ~~`Deploy-PCFWebResources.ps1`~~ | ~~PCF bundle.js + CSS~~ — **RETIRED 2026-10-04** (spaarke-ontology-platform-r1 task 094): it only ever pushed the `UniversalQuickCreate` bundle, from a hard-coded `C:\code_files\spaarke\src\controls\...` path that no longer exists; the control was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Deploy PCFs via the `pcf-deploy` skill. |
 | 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |
 
 ---
@@ -965,27 +965,31 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 ---
 
-#### `Deploy-PCFWebResources.ps1`
-**Purpose:** Deploy PCF control web resources to Dataverse
-**Usage:** 🟢 Active - Deploy after PCF build
+#### `Invoke-PcfBuildProd.ps1`
+**Purpose:** Production build of ONE PCF control (`npm run build:prod`) that **fails when the build failed**
+**Usage:** 🟢 Active - before packing or importing any PCF
 **Lifecycle:** ✅ Maintained
-**Dependencies:** PAC CLI, Dataverse connection
+**Dependencies:** Node/npm; the PCF's own `build:prod` script; `PcfBuildResult.psm1`
 **Owner:** Development Team
-**Last Used:** Phase 8 (File Viewer deployment)
+**Added:** 2026-10-04 (spaarke-ontology-platform-r1 task 094)
 
-**When to Use:**
-- After building PCF control (`npm run build`)
-- Deploying updates to existing controls
-- Testing PCF changes in Dataverse environment
+**Why it exists:** `pcf-scripts build` **exits 0 when webpack fails**. It logs `[build] Failed:` and
+`[pcf-1033] [Error] An error occurred compiling or bundling the control.` and returns without rethrowing, so a bare
+`npm run build:prod` followed by "copy `bundle.js` and pack" ships the PREVIOUS bundle still sitting in `out/`.
+This script judges the result from the output: FAIL on a non-zero exit, `[build] Failed`, a `compiled with N error(s)`
+line or `[pcf-1033]`; PASS only on `[build] Succeeded`. The same rule is used by `Build-AllClientComponents.ps1`
+(PCF step) and the nightly CI workflow `.github/workflows/pcf-build-prod-nightly.yml`.
 
 **Command:**
 ```powershell
-.\Deploy-PCFWebResources.ps1 -ControlName "UniversalQuickCreate" -Environment "dev"
+.\scripts\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/SemanticSearchControl          # exits 1 on a failed build
+.\scripts\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/SemanticSearchControl -Install # npm install first
 ```
 
-**Alternatives:**
-- PAC CLI: `pac pcf push`
-- Power Platform Build Tools (CI/CD)
+**Related:** `PcfBuildResult.psm1` (`Get-PcfBuildResult -Output <lines> -ExitCode <n>`) holds the rule for any other script.
+
+#### ~~`Deploy-PCFWebResources.ps1`~~
+**RETIRED 2026-10-04** (spaarke-ontology-platform-r1 task 094): it only ever pushed the `UniversalQuickCreate` bundle, from a hard-coded `C:\code_files\spaarke\src\controls\...` path that no longer exists; the control was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Deploy PCFs via the `pcf-deploy` skill.
 
 ---
 
@@ -1487,7 +1491,7 @@ These scripts were used during initial SPE Container Type registration and are k
 5. Update when usage patterns change
 
 **Naming Convention:**
-- **Action-Target-Method.ps1** (e.g., `Deploy-PCFWebResources.ps1`)
+- **Action-Target-Method.ps1** (e.g., `Deploy-SpeAdminApp.ps1`)
 - Use PascalCase for PowerShell scripts
 - Use kebab-case for JavaScript/Node scripts
 
@@ -1536,7 +1540,7 @@ These scripts were used during initial SPE Container Type registration and are k
 ### By Development Phase
 
 **Development:**
-- `Deploy-PCFWebResources.ps1` - After PCF changes
+- `Invoke-PcfBuildProd.ps1` - Production PCF build that fails on a failed build (then the `pcf-deploy` skill)
 - `Test-SdapBffApi.ps1` - Validate API changes
 
 **Deployment:**

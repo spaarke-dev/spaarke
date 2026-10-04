@@ -7,13 +7,38 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
-###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (C-19)
+###### 2026-10-04 — PCF deploy procedures verify the REAL build result; `pcf-scripts` exits 0 on a failed build
 
-`.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
-service. This PR deletes it (zero consumers, along with `EntityConfigurationService`, `CustomCommandFactory` and
-`Toolbar/CommandToolbar`: dead infrastructure from a deleted PCF that carried a loop-over-selection
-`deleteRecord`), so the example is removed. The full ADR's mention is left alone: it is past tense, and accurate
-as history. Found by the `spaarke-ontology-platform-r1` reuse audit (cleanup item C-19). The ADR-012 UI Components table also drops its `CommandToolbar` row (15 groups, was 16), and the `PageChrome` row now reads `ViewToolbar`, because `PageChrome/CommandBar` is deleted in the same PR.
+**What was wrong.** `pcf-scripts build` (and so `npm run build:prod` in every PCF) **exits 0 when the webpack
+build fails**: its `taskRunner.js` logs `[build] Failed:` and `[pcf-1033] [Error] An error occurred compiling or
+bundling the control.` and returns without rethrowing. Deploy procedures that ran the build and went on to "copy
+`bundle.js`, pack, import" could ship the PREVIOUS bundle still in `out/`. Found 2026-10-04 by
+`spaarke-ontology-platform-r1` (tasks 092 / 093b): the new nightly CI workflow reported 17 of 18 PCFs passing when
+9 had failed.
+
+**What changed** (one rule, judged from the OUTPUT: fail on a non-zero exit, `[build] Failed`, `compiled with N
+error(s)` or `[pcf-1033]`, after stripping ANSI colour; pass only on `[build] Succeeded`; anything else is a failure.
+Same rule as `.github/workflows/pcf-build-prod-nightly.yml`, PR #1285):
+- New `scripts/PcfBuildResult.psm1` (the rule) and `scripts/Invoke-PcfBuildProd.ps1` (build one PCF, exit 1 on a
+  failed build). Proven against a real failing build (VisualHost: npm exit 0, script exit 1) and a real passing one,
+  plus fake builds in Windows PowerShell 5.1 and pwsh 7.
+- `pcf-deploy` and `dataverse-deploy` SKILL.md: every build step runs the script **from the PCF folder**
+  (`pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .`) and stops on a non-zero exit; MUST rules
+  say why. `pcf-deploy` Step 3's copy paths now match its working folder (they were `../out/...`), and its
+  Manual Quick Deploy no longer uses dev-mode `npm run build`.
+- `.claude/commands/dataverse-deploy.md`: its "Quick Dev Deploy" was `npm run build:prod` + `pac pcf push`, which
+  contradicts `pcf-deploy`'s NEVER rule (push rebuilds in development mode). Now the verified build + pack + import.
+- `task-execute` and `project-pipeline` SKILL.md: wave build verification and the PCF checklist judge PCF builds
+  with the script; task-execute's checklist no longer suggests `pac pcf push`.
+- `script-aware`, `project-pipeline`, `task-execute`: the example PCF script was `Deploy-PCFWebResources.ps1`,
+  deleted below (`script-aware` had also documented a `-ControlName` parameter it never had).
+- `docs/guides/PCF-DEPLOYMENT-GUIDE.md` said **"NEVER use `npm run build:prod` — pcf-scripts only has `build`"**,
+  the AP-1 error `pcf-deploy` was corrected for in May. Corrected, plus a troubleshooting row for "build succeeded
+  but the deployed control is unchanged".
+- `src/client/pcf/{MatterHeader,RecordHeader}/Solution/pack.ps1` (which rebuild before packing) and
+  `scripts/Build-AllClientComponents.ps1` (PCF step) judge the build with the module.
+- `scripts/Deploy-PCFWebResources.ps1` **deleted** and dropped from `Deploy-AllWebResources.ps1`: it only ever pushed
+  `UniversalQuickCreate`, deleted 2026-06-22 by `pcf-orphan-cleanup-r1`, from a hard-coded path that no longer exists.
 
 ---
 ###### 2026-10-03 — root `CLAUDE.md` Calendar row corrected; `CalendarFilterPane` exported from the components barrel

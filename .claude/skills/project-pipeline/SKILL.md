@@ -414,7 +414,7 @@ DISCOVER RESOURCES (Comprehensive):
   6. DISCOVER applicable scripts (via script-aware)
      - READ scripts/README.md for script registry
      - Match spec keywords to script purposes:
-       - PCF deployment → Deploy-PCFWebResources.ps1
+       - PCF build → Invoke-PcfBuildProd.ps1 (deploy via the pcf-deploy skill)
        - API testing → Test-SdapBffApi.ps1
        - Custom pages → Deploy-CustomPage.ps1
        - Ribbon work → Export-EntityRibbon.ps1
@@ -498,7 +498,7 @@ ENHANCE CLAUDE.md with discovered resources:
    - 4 ADRs identified (ADR-001, ADR-007, ADR-008, ADR-010)
    - 2 skills applicable (dataverse-deploy, adr-aware)
    - 3 knowledge docs found (SPAARKE-ARCHITECTURE.md, ...)
-   - 2 scripts available (Deploy-PCFWebResources.ps1, Test-SdapBffApi.ps1)
+   - 2 scripts available (Invoke-PcfBuildProd.ps1, Test-SdapBffApi.ps1)
 
 ✅ Artifacts generated:
    - README.md (project overview, graduation criteria)
@@ -866,7 +866,7 @@ PARALLEL EXECUTION REQUIREMENTS:
 BUILD VERIFICATION BETWEEN WAVES (MANDATORY):
   After each wave completes, main session MUST verify the codebase still builds:
   - If any `.cs` file was modified in the wave: `dotnet build src/server/api/Sprk.Bff.Api/`
-  - If any `.ts`/`.tsx` file was modified: build the relevant package — **`npm run build:prod` for PCF** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1); `npm run build` for non-PCF packages that lack a `:prod` script
+  - If any `.ts`/`.tsx` file was modified: build the relevant package — **`npm run build:prod` for PCF, run through `scripts/Invoke-PcfBuildProd.ps1`** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1; `pcf-scripts` exits 0 on a failed build, so judge it from the output); `npm run build` for non-PCF packages that lack a `:prod` script
   - If build fails: STOP. Do not dispatch next wave. Report breakage with wave identifier.
   - This catches incoherent changes across parallel agents before they compound.
 
