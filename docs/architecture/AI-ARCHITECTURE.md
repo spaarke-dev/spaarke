@@ -483,7 +483,7 @@ Session state, audit logs, feedback, memory, and prompt history are persisted to
 | Container | Partition Key | TTL | Purpose | Service |
 |-----------|--------------|-----|---------|---------|
 | `sessions` | `/userId` | 90 days | AI conversation sessions | SessionPersistenceService |
-| `prompts` | `/sessionId` | 90 days | Individual prompt/completion pairs | PromptLibraryService |
+| `prompts` | `/sessionId` | 90 days | Still provisioned; no BFF service reads or writes it since the prompt library (`/api/ai/prompts`) was retired by unified-access-control-r2 task 164 | — (was PromptLibraryService) |
 | `audit` | `/tenantId` | None (permanent) | Immutable compliance audit trail (ADR-015 Tier 2) | AuditLogService |
 | `memory` | `/userId` | 90 days | Per-matter structured AI memory snapshots | MatterMemoryService |
 | `feedback` | `/tenantId` | 90 days | User feedback (thumbs up/down) on AI responses | FeedbackService |

@@ -892,7 +892,21 @@ public class RouteAuthorizationGuardTests
     //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
     //            affordance would vanish for every user. Both directions are pinned by
     //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 118 (2026-10-03, unified-access-control-r2 task 164, owner round 10 item 1). A DOWNWARD move:
+    //
+    //   164  -1  Api/Ai/PromptLibraryEndpoints.cs DELETED — all six /api/ai/prompts routes retired (no caller in
+    //            the repo, not in any published API description; sweep findings #56 and #57). Never governed.
+    //        -1  Api/Ai/RecordMatchEndpoints.cs DELETED — POST /api/ai/document-intelligence/match-records and
+    //            /associate-record retired on the same rule (sweep #31, #32). Never governed.
+    //         0  GET /api/ai/playbooks/by-name/{name} and PUT /api/ai/playbooks/{id:guid}/nodes/reorder were
+    //            retired too, but their files (PlaybookEndpoints.cs, NodeEndpoints.cs) still map other routes, so
+    //            the census cannot see them. Absence is pinned by
+    //            tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs.
+    //
+    // Reconcile at integration: sibling sweep tasks (159-169) move this count too; the merged value is the
+    // master count after every retired and added file, recounted, not a sum of deltas.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
@@ -1226,8 +1240,12 @@ public class RouteAuthorizationGuardTests
                 + "not per-record authorization — the record decision is SpeAdminAuthorizationFilter's job.",
             ["AgentAuthorizationFilter"] =
                 "M365 Copilot gateway (/api/agent/*). Asserts a resolvable oid AND tid on the inbound agent "
-                + "token and denies without either. Identity precondition for a gateway, not a document "
-                + "route — it serves no document metadata or bytes, so it is outside Rule A's subject too.",
+                + "token and denies without either — an IDENTITY PRECONDITION only. It decides nothing about "
+                + "records, and the agent routes DO reach document and playbook data: the per-record decisions "
+                + "are made by other filters in the same chain (POST /run-playbook: PlaybookAuthorizationFilter "
+                + "run mode, the playbook-use decision plus Read/Write on the document, task 164), and the "
+                + "status route's run-owner comparison is in its handler. POST /message's document and stored "
+                + "session context are task 164's open chat-family item (escalation trigger 3).",
             ["CommunicationAuthorizationFilter"] =
                 "Gates SENDING a communication, not reading a record. Its own summary is explicit that "
                 + "Phase 1 permits any authenticated user with a valid oid, so it does not misrepresent "

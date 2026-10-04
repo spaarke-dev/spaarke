@@ -1811,12 +1811,16 @@ public static class ChatEndpoints
         var seen = new HashSet<Guid>();
         var playbooks = new List<ChatPlaybookInfo>();
 
-        // 1. Load user's own playbooks (if user ID is available)
-        if (userId.HasValue)
+        // 1. Load user's own playbooks (if user ID is available). Owner round 12 item 6 (task 164): the owner
+        //    filter is the caller's Dataverse systemuserid, never the Entra oid; unresolvable → public only.
+        var ownerSystemUserId = userId.HasValue
+            ? await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, cancellationToken)
+            : null;
+        if (ownerSystemUserId.HasValue)
         {
             try
             {
-                var userPlaybooks = await playbookService.ListUserPlaybooksAsync(userId.Value, query, cancellationToken);
+                var userPlaybooks = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query, cancellationToken);
                 foreach (var pb in userPlaybooks.Items)
                 {
                     if (seen.Add(pb.Id))

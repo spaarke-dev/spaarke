@@ -16,6 +16,18 @@ public static class PlaybookRunEndpoints
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    /// <summary>
+    /// The execute route's 400 text for a missing <c>documentIds</c>. One constant, used by the handler AND by
+    /// <see cref="PlaybookAuthorizationFilter"/>'s run mode, which returns the same 400 before any rights query.
+    /// </summary>
+    public const string DocumentIdsRequiredMessage = "DocumentIds is required and must not be empty";
+
+    /// <summary>
+    /// The ONE text of the RunFailed SSE event when execution throws (ADR-019): the exception is logged server-side
+    /// only, never echoed to the caller (unified-access-control-r2 task 164).
+    /// </summary>
+    public const string RunFailedMessage = "The playbook run failed. See the server log for details.";
+
     public static IEndpointRouteBuilder MapPlaybookRunEndpoints(this IEndpointRouteBuilder app)
     {
         var playbookGroup = app.MapGroup("/api/ai/playbooks/{id:guid}")
@@ -38,8 +50,12 @@ public static class PlaybookRunEndpoints
             .ProducesProblem(404);
 
         // POST /api/ai/playbooks/{id}/execute - Execute playbook with SSE streaming
+        // unified-access-control-r2 task 164 (sweep #29): the run decision — the playbook-use decision (one uniform
+        // 404 for unknown / denied / fault) and the caller's own Read (or Write, when the run can write them) on
+        // every DocumentIds entry (one uniform 403) — runs BEFORE the handler writes SSE headers. The route's {id}
+        // is a PLAYBOOK id and is never authorized as a document (do not add AddAiAuthorizationFilter here).
         playbookGroup.MapPost("/execute", ExecutePlaybook)
-            .AddPlaybookAccessAuthorizationFilter()
+            .AddPlaybookRunAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("ExecuteNodePlaybook")
             .WithSummary("Execute a playbook with SSE streaming")
@@ -151,7 +167,7 @@ public static class PlaybookRunEndpoints
         if (request.DocumentIds == null || request.DocumentIds.Length == 0)
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "DocumentIds is required and must not be empty" }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = DocumentIdsRequiredMessage }, cancellationToken);
             return;
         }
 
@@ -195,7 +211,8 @@ public static class PlaybookRunEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                var errorEvent = PlaybookStreamEvent.RunFailed(Guid.Empty, id, ex.Message);
+                // ADR-019 (task 164): fixed text — the exception message stays in the server log above.
+                var errorEvent = PlaybookStreamEvent.RunFailed(Guid.Empty, id, RunFailedMessage);
                 await WriteSSEAsync(response, errorEvent, CancellationToken.None);
             }
         }

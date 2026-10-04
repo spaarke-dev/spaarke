@@ -92,14 +92,19 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Starting playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
             runId, request.PlaybookId, request.DocumentIds.Length);
 
-        // Create run context
+        // Create run context. StartedByOid (task 164, sweep #78): the HTTP caller's Entra oid, recorded so the
+        // agent status route can answer only the caller who started the run. NOT UserId, which is a Dataverse
+        // systemuserid for the eq-userid substitution and stays unset on the HTTP path.
         var context = new PlaybookRunContext(
             runId,
             request.PlaybookId,
             request.DocumentIds,
             httpContext,
             request.UserContext,
-            request.Parameters);
+            request.Parameters)
+        {
+            StartedByOid = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User)
+        };
 
         // If the caller pre-loaded the document context, attach it so all nodes share it.
         if (request.Document != null)

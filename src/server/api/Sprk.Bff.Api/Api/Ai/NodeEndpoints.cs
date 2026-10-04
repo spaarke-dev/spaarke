@@ -75,17 +75,9 @@ public static class NodeEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
-        // PUT /api/ai/playbooks/{id}/nodes/reorder - Reorder nodes
-        group.MapPut("/reorder", ReorderNodes)
-            .AddPlaybookOwnerAuthorizationFilter()
-            .WithName("ReorderPlaybookNodes")
-            .WithSummary("Reorder nodes in the playbook")
-            .WithDescription("Updates the execution order of nodes based on the provided sequence.")
-            .Produces(204)
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(404);
+        // PUT /api/ai/playbooks/{id}/nodes/reorder was REMOVED by unified-access-control-r2 task 164 (owner round 10
+        // item 1): no caller in the repo, not in any published API description, and sweep finding #54 (it PATCHed
+        // sprk_executionorder app-only on every body nodeId without checking the node belonged to the route playbook).
 
         // PUT /api/ai/playbooks/{id}/nodes/{nodeId}/scopes - Update node scopes
         group.MapPut("/{nodeId:guid}/scopes", UpdateNodeScopes)
@@ -301,45 +293,6 @@ public static class NodeEndpoints
     }
 
     /// <summary>
-    /// Reorder nodes in the playbook.
-    /// PUT /api/ai/playbooks/{id}/nodes/reorder
-    /// </summary>
-    private static async Task<IResult> ReorderNodes(
-        Guid id,
-        ReorderNodesRequest request,
-        INodeService nodeService,
-        ILoggerFactory loggerFactory,
-        CancellationToken cancellationToken)
-    {
-        var logger = loggerFactory.CreateLogger("NodeEndpoints");
-
-        if (request.NodeIds == null || request.NodeIds.Length == 0)
-        {
-            return Results.ValidationProblem(
-                new Dictionary<string, string[]>
-                {
-                    ["NodeIds"] = ["NodeIds array is required and must not be empty"]
-                });
-        }
-
-        try
-        {
-            await nodeService.ReorderNodesAsync(id, request.NodeIds, cancellationToken);
-            logger.LogInformation("Reordered {Count} nodes in playbook {PlaybookId}",
-                request.NodeIds.Length, id);
-            return Results.NoContent();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to reorder nodes in playbook {PlaybookId}", id);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to reorder nodes");
-        }
-    }
-
-    /// <summary>
     /// Update node scopes (skills and knowledge).
     /// PUT /api/ai/playbooks/{id}/nodes/{nodeId}/scopes
     /// </summary>
@@ -380,15 +333,4 @@ public static class NodeEndpoints
                 detail: "Failed to update node scopes");
         }
     }
-}
-
-/// <summary>
-/// Request model for reordering nodes.
-/// </summary>
-public record ReorderNodesRequest
-{
-    /// <summary>
-    /// Ordered array of node IDs representing the new execution order.
-    /// </summary>
-    public Guid[]? NodeIds { get; init; }
 }

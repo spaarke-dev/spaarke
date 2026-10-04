@@ -95,6 +95,71 @@ public class PlaybookOrchestrationServiceTests
 
     private static ResolvedScopes CreateEmptyScopes() => new([], [], []);
 
+    #region Run owner (unified-access-control-r2 task 164, sweep #78)
+
+    [Fact]
+    public async Task ExecuteAsync_RecordsTheHttpCallersOid_AsTheRunOwner_AndLeavesUserIdUnset()
+    {
+        // Arrange — one node whose executor captures the context it is handed.
+        const string callerOid = "6f0c1a52-0000-4000-8000-000000000164";
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var node = CreateNode("Extract Entities", actionId);
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        _scopeResolverMock.Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>())).ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock.Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>())).ReturnsAsync(CreateAction(actionId));
+        NodeExecutionContext? seen = null;
+        var executor = new Mock<INodeExecutor>();
+        executor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<NodeExecutionContext, CancellationToken>((ctx, _) => seen = ctx)
+            .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.AiAnalysis)).Returns(executor.Object);
+        var httpContext = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                new[] { new System.Security.Claims.Claim("oid", callerOid) }, "TestAuth"))
+        };
+
+        // Act
+        var runId = Guid.Empty;
+        await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), httpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.RunStarted)
+            {
+                runId = evt.RunId;
+            }
+        }
+
+        // Assert — the owner is on the new property; UserId (a systemuserid for eq-userid) is untouched.
+        var status = await _service.GetRunStatusAsync(runId, CancellationToken.None);
+        status!.StartedByOid.Should().Be(callerOid);
+        seen.Should().NotBeNull();
+        seen!.UserId.Should().BeNull("an Entra oid must never reach the eq-userid substitution");
+    }
+
+    [Fact]
+    public void PlaybookRunStatus_Json_NeverCarriesTheRunOwner()
+    {
+        var status = new PlaybookRunStatus
+        {
+            RunId = Guid.NewGuid(),
+            PlaybookId = Guid.NewGuid(),
+            State = PlaybookRunState.Running,
+            StartedAt = DateTimeOffset.UtcNow,
+            StartedByOid = "6f0c1a52-0000-4000-8000-000000000164",
+        };
+
+        var camel = System.Text.Json.JsonSerializer.Serialize(
+            status, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+        var plain = System.Text.Json.JsonSerializer.Serialize(status);
+
+        camel.Should().NotContain("6f0c1a52-0000-4000-8000-000000000164").And.NotContainEquivalentOf("startedByOid");
+        plain.Should().NotContain("6f0c1a52-0000-4000-8000-000000000164");
+    }
+
+    #endregion
+
     #region Mode Detection Tests
 
     [Fact]
