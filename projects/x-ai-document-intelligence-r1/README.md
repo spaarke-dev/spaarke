@@ -1,5 +1,7 @@
 # AI Document Intelligence R1 - Core Infrastructure
 
+> **Portfolio**: [Project #1248](https://github.com/spaarke-dev/spaarke/issues/1248) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: COMPLETE
 > **Version**: 3.0
 > **Last Updated**: December 28, 2025

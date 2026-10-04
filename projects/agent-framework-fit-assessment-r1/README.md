@@ -1,5 +1,7 @@
 # Agent Framework Fit Assessment — R1
 
+> **Portfolio**: [Project #1126](https://github.com/spaarke-dev/spaarke/issues/1126) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: ✅ **COMPLETE** — assessment landed 2026-06-03 at [`docs/assessments/agent-framework-fit-assessment-2026-06-03.md`](../../docs/assessments/agent-framework-fit-assessment-2026-06-03.md) (959 lines, 1 ADOPT · 5 PARTIAL · 4 DON'T ADOPT). All 9 tasks ✅. See [`COMPLETION.md`](./COMPLETION.md) for sign-off summary.
 > **Owner**: Ralph Schroeder
 > **Branch**: `work/coding-knowledge-base-setup-r1` (or split to a dedicated worktree)

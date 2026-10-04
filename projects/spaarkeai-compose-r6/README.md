@@ -1,5 +1,7 @@
 # Spaarke Compose R6 — Render-on-Save Canonical Model & Word-Parity Fidelity
 
+> **Portfolio**: [Project #1201](https://github.com/spaarke-dev/spaarke/issues/1201) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: ✅ **Complete** (100% — 30/30 tasks; closed 2026-08-13)
 > **Branch**: `work/spaarkeai-compose-r6` · **Created**: 2026-08-05 · **Closed**: 2026-08-13
 > **Governing ADR**: [ADR-049](../../.claude/adr/ADR-049-compose-shadow-document.md) — R6 Path-B amendment (task 001, merged to master with the code)

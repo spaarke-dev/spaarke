@@ -2,7 +2,7 @@
 
 > **Status**: 📝 **Planning** — plan authored; task POMLs not yet generated.
 > **Created**: 2026-07-28 · **Branch**: `work/email-communication-intelligence-r1`
-> **Portfolio**: Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2)
+> **Portfolio**: [Project #1157](https://github.com/spaarke-dev/spaarke/issues/1157) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
 > **Follows / builds on (shipped, merged)**: `email-communication-solution-r4` (Association Engine + enrichment) · `spaarke-notification-spine-r1` (action/notification delivery) · `email-communication-solution-r5` (Outlook-style review surfaces — **complete; owns all UI**).
 > **Source of truth**: [`spec.md`](spec.md) (17 FRs, 8 NFRs) + [`design.md`](design.md) **§0 (authoritative)**. §0 supersedes the v0.1/rev-2 charter (§1–§13) on all mechanism + scope claims.
 

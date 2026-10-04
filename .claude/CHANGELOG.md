@@ -7,6 +7,48 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — portfolio board hygiene: Type backfill, 156 missing projects registered, new `/project-spend-update` skill
+
+Triggered by investigating why `unified-access-control-r2` spent ~$4,490 over 3 days via 27
+self-authored Workflow-tool runs — a Claude Code judgment call, not a per-run user request. That
+investigation surfaced the portfolio board (Project #2) was itself unreliable: 39 items with no `Type`
+set (invisible to Type-filtered views), and 156 of 205 local `projects/` folders (32% of the then-active
+registry) with no board presence at all.
+
+- **`project-defer-issue-tracking`**: fixed the root cause — `gh issue create --project` added items to
+  the board but never set `Type`. Skill now sets it immediately after creation (`defer→Idea`,
+  `issue→Bug`). Backfilled the 39 existing untyped items by hand.
+- **156 missing projects registered** as `[Project]:` board issues (existence + `Type`/`Status` only —
+  not a full `/devops-project-register` pass; Epic linkage, Task Count, and Start Date were deliberately
+  left for later enrichment). Board now has 207 `Type=Project` items, 1:1 with local folders.
+- **Local README portfolio pointers backfilled** for all 156 (+1 manual test case) — `devops-project-sync`
+  Step 0 requires that pointer block to find a project's Issue #, so without this, any future task work
+  on those projects would have silently failed the sync precondition. 35 projects had no `README.md` at
+  all (created minimal ones); 119 got the pointer inserted after the title; 3 had a stale `Portfolio: TBD`
+  placeholder replaced.
+- **New `/project-spend-update` skill** + `scripts/ai-cost/{get-project-cost,update-board-spend}.py`:
+  manually-triggered (NOT wired into `task-execute` or `devops-project-sync`) refresh of three new board
+  fields — `AI Spend (est.)`, `AI Calls`, `AI Spend As Of` — estimated from local Claude Code transcripts
+  at list API pricing. Deliberately decoupled from task completion: the heaviest-spending pattern
+  (Workflow-tool batches) doesn't reliably route through `task-execute` Step 9.6, so a hook-tied refresh
+  would under-cover exactly the work most worth tracking. No attempt to separate metered-API from
+  subscription/Max-plan usage (owner direction: keep it simple, reconcile against the actual invoice
+  manually at the portfolio level).
+- `devops-portfolio-status` now notes the spend field may be stale and points at `AI Spend As Of` +
+  `/project-spend-update` rather than implying it's always current.
+
+GitHub Projects v2 has no `CURRENCY` field type (confirmed via `gh project field-create --help`) — `AI
+Spend (est.)` is a plain `NUMBER`, left as-is per owner decision (not worth the churn of a rename).
+
+**Still open** (tracked for a follow-up review, not done here): spot-check the `Active`/`Completed`
+Status heuristic guessed for the 156; triage the ~29 legacy pre-2026-taxonomy items now typed `Idea`
+(a few look like dead test artifacts, e.g. `#416 "New test Idea"`, that may want closing instead);
+decide whether to merge [PR #1283](https://github.com/spaarke-dev/spaarke/pull/1283).
+
+PR: #1283. See `projects` memory note `project_portfolio-board-hygiene-and-ai-cost-tracking.md` for full
+continuity context.
+
+---
 ###### 2026-10-03 — root `CLAUDE.md` Calendar row corrected; `CalendarFilterPane` exported from the components barrel
 
 Root `CLAUDE.md`'s "Calendar shared components" row described `CalendarSection` and `CalendarFilterPane` as two
