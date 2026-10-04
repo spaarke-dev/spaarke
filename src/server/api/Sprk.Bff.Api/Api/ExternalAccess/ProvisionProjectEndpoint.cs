@@ -786,6 +786,11 @@ public static class ProvisionProjectEndpoint
                 "OwnerTeam={TeamId}, Container={ContainerId} (its own, kept), Resumed={Resumed}",
                 root.WireToken, recordId, secureBuId, secureBuName, ownerTeamId, keptContainerId, resume);
 
+            // ── Step 8 (task 149) on the kept-container path too (integration residual found merging 132, 2026-10-04) ──
+            // Step 5.5 wrote the same root shares here as on the new-container path; keeping the container changes
+            // nothing about who the record's secure children must be shared with.
+            await FanOutToSecureChildrenAsync(secureChildShares, root, recordId, logger, traceId, ct);
+
             return TypedResults.Ok(new ProvisionProjectResponse(
                 BusinessUnitId: secureBuId,
                 BusinessUnitName: secureBuName,
@@ -845,22 +850,7 @@ public static class ProvisionProjectEndpoint
             root.WireToken, recordId, secureBuId, secureBuName, ownerTeamId, speContainerId, resume);
 
         // ── Step 8 (task 149): the record's secure children follow the shares Step 5.5 wrote ──
-        //
-        // Step 5.5 is a root-share writer like /share-user, so it fans out the same way. Today a freshly provisioned
-        // record has no Secure-team-owned children (task 148 re-owns existing ones, then runs this same synchronizer), so
-        // this is normally a no-op; it is here so the rule "every BFF root-share write fans out" has no exception. It
-        // never fails the provisioning: the record IS provisioned and shared, and the scheduled reconcile
-        // (SecureChildShareReconciliationJob) completes any child left out of line.
-        var children = await secureChildShares.SyncRootAsync(root.LogicalName, recordId, ct);
-        if (!children.IsComplete)
-        {
-            logger.LogWarning(
-                "[PROVISION] {RecordType} {RecordId} is provisioned, but its secure children are not all in line with its " +
-                "shares yet: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held}. The scheduled " +
-                "reconcile completes it. TraceId={TraceId}",
-                root.WireToken, recordId, children.Status, children.ChildrenInScope, children.ChildrenNotUpdated,
-                children.ChildrenHeld, traceId);
-        }
+        await FanOutToSecureChildrenAsync(secureChildShares, root, recordId, logger, traceId, ct);
 
         return TypedResults.Ok(new ProvisionProjectResponse(
             BusinessUnitId: secureBuId,
@@ -879,6 +869,39 @@ public static class ProvisionProjectEndpoint
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /// <summary>
+    /// Step 8 (task 149): brings the record's secure children into line with the root shares Step 5.5 wrote. Runs on
+    /// EVERY successful provisioning path — a new container (Steps 6 + 7) and a kept one (task 133 b2) alike — so the
+    /// rule "every BFF root-share write fans out" has no exception. Until 2026-10-04 it ran only after a NEW container
+    /// was recorded, so the children of a record that kept its own container missed the sharee mirror until the next
+    /// scheduled reconcile (the integration residual found merging task 132).
+    /// </summary>
+    /// <remarks>
+    /// Step 5.5 is a root-share writer like /share-user, so it fans out the same way. A freshly provisioned record
+    /// normally has no Secure-team-owned children (task 148 re-owns existing ones, then runs this same synchronizer), so
+    /// this is normally a no-op. It never fails the provisioning: the record IS provisioned and shared, and the
+    /// scheduled reconcile (SecureChildShareReconciliationJob) completes any child left out of line.
+    /// </remarks>
+    private static async Task FanOutToSecureChildrenAsync(
+        SecureChildShareSynchronizer secureChildShares,
+        SecureRecordRoot root,
+        Guid recordId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var children = await secureChildShares.SyncRootAsync(root.LogicalName, recordId, ct);
+        if (!children.IsComplete)
+        {
+            logger.LogWarning(
+                "[PROVISION] {RecordType} {RecordId} is provisioned, but its secure children are not all in line with its " +
+                "shares yet: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held}. The scheduled " +
+                "reconcile completes it. TraceId={TraceId}",
+                root.WireToken, recordId, children.Status, children.ChildrenInScope, children.ChildrenNotUpdated,
+                children.ChildrenHeld, traceId);
+        }
+    }
 
     /// <summary>
     /// The refusal for every state in which the Secure Record topology is not provably safe to assign into. Each

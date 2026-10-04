@@ -533,7 +533,8 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   checked for its children either. Its own share path (Manage Access and the No Access enforcement) skips it the same
   way, so a child is never wider than its record.
 - **When.** Immediately when a share is added, changed or removed through Manage Access (the response says how many
-  related records could not be updated yet, if any); immediately after secure provisioning; immediately after the No
+  related records could not be updated yet, if any); immediately after secure provisioning (whether the record keeps
+  its own container or gets a new one); immediately after the No
   Access enforcement removes a share on the record; and every two minutes for everything else — a new or re-filed
   child, a client-side create, and a Share/Unshare made in the model-driven app's own dialog on a secure record.
 - **The two-minute window is accepted** (owner decision, round 11 item 2, 2026-10-03). For a model-driven-app
