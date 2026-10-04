@@ -120,8 +120,9 @@ public interface IAccessibleRecordSetService
         CancellationToken ct);
 
     /// <summary>
-    /// The WRITE-time No Access check (unified-access-control-r2 task 139 · FR-23 · C4 fix direction): would the
-    /// FR-23 deny veto deny <paramref name="recordId"/> to this grantee? <c>true</c> means refuse the grant.
+    /// The WRITE-time No Access check (unified-access-control-r2 task 139 · FR-23 · C4 fix direction): does the FR-23
+    /// deny veto allow <paramref name="recordId"/> to this grantee, deny it, or could it not tell? Only
+    /// <see cref="NoAccessCheckAnswer.Allowed"/> lets a grant proceed.
     /// </summary>
     /// <param name="entityType">The root's LOGICAL name (<c>sprk_project</c> / <c>sprk_matter</c> / <c>sprk_workassignment</c>).</param>
     /// <param name="recordId">The record the grant would be written on.</param>
@@ -134,15 +135,42 @@ public interface IAccessibleRecordSetService
     /// <para>The decision comes from the SAME code as the read-path veto (<c>ResolveDenyVetoAsync</c>) — the record's
     /// referenced organizations, the subject's wall set, the one <see cref="INoAccessListReader"/> — so the key shapes
     /// are never re-implemented for the write path.</para>
-    /// <para>Fails CLOSED like the veto: an unreadable membership read, an unreadable record, a faulted deny-list read
-    /// — every one answers <c>true</c>. Nothing to check (no contact, no organization) answers <c>false</c>.</para>
+    /// <para><b>A tri-state, not a <c>bool</c></b> (task 142 r4 · owner round 13 item 4). A provable entry answers
+    /// <see cref="NoAccessCheckAnswer.Denied"/>. A READ FAULT answers <see cref="NoAccessCheckAnswer.Unverifiable"/> —
+    /// an unreadable membership read, an unreadable referenced-organization read, a fail-closed or absent deny-list
+    /// answer, a call without a record, and any exception other than the caller's own cancellation (an HttpClient
+    /// timeout included). Before r4 every one of them was absorbed into "denied", so a caller could not tell an outage
+    /// from the record's policy. Both refusals fail CLOSED: a caller must never grant on anything but
+    /// <see cref="NoAccessCheckAnswer.Allowed"/>, and must report <see cref="NoAccessCheckAnswer.Unverifiable"/> as a
+    /// fault. Nothing to check (no contact, no organization) answers <see cref="NoAccessCheckAnswer.Allowed"/>.</para>
+    /// <para>Never throws, except for the caller's own cancellation.</para>
     /// </remarks>
-    Task<bool> IsGranteeDeniedOnRecordAsync(
+    Task<NoAccessCheckAnswer> CheckGranteeNoAccessAsync(
         string entityType,
         Guid recordId,
         Guid? granteeContactId,
         IReadOnlyCollection<Guid> granteeOrganizationIds,
         CancellationToken ct);
+}
+
+/// <summary>
+/// The write-time No Access check's answer (unified-access-control-r2 task 142 r4 · owner round 13 item 4) — a
+/// TRI-STATE, so a read fault is reported as a fault instead of being absorbed into "denied".
+/// </summary>
+public enum NoAccessCheckAnswer
+{
+    /// <summary>Every input was read and no active entry covers the grantee on the record: the grant may proceed.</summary>
+    Allowed,
+
+    /// <summary>An active No Access entry covers the grantee on the record — the record's policy. Refuse.</summary>
+    Denied,
+
+    /// <summary>
+    /// The check could not be completed (Dataverse 5xx, throttling, a timeout, unreadable memberships or referenced
+    /// organizations, a fail-closed or absent deny-list answer). Refuse — fail closed, it NEVER grants — and report it
+    /// as a fault, never as an entry on the list.
+    /// </summary>
+    Unverifiable,
 }
 
 /// <summary>
@@ -648,6 +676,32 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly IReadOnlySet<Guid> EmptyDeniedSet = new HashSet<Guid>();
 
     /// <summary>
+    /// The FR-23 deny veto's answer for one candidate batch (task 142 r4 · owner round 13 item 4): the candidates a
+    /// matching entry provably denies, and — kept APART — the candidates that could not be evaluated because a read
+    /// faulted.
+    /// </summary>
+    /// <param name="Denied">Candidates an active entry covers (the record's policy).</param>
+    /// <param name="Unverifiable">Candidates the veto could not evaluate: the subject's memberships unreadable, the
+    /// record's referenced organizations unreadable, a fail-closed or absent deny-list answer, or a throw. Fail closed:
+    /// the read path removes them (<see cref="Removed"/>) and the write-time check refuses them — but as a FAULT
+    /// (<see cref="NoAccessCheckAnswer.Unverifiable"/>), never as an entry.</param>
+    private readonly record struct DenyVetoResult(IReadOnlySet<Guid> Denied, IReadOnlySet<Guid> Unverifiable)
+    {
+        internal static DenyVetoResult None { get; } = new(EmptyDeniedSet, EmptyDeniedSet);
+
+        internal static DenyVetoResult AllUnverifiable(IEnumerable<Guid> ids) => new(EmptyDeniedSet, ids.ToHashSet());
+
+        /// <summary>
+        /// Every candidate the READ path removes: a provable denial OR an unverifiable candidate — exactly the set the veto
+        /// removed before r4 split them (fail closed; the composition is unchanged).
+        /// </summary>
+        internal IReadOnlySet<Guid> Removed =>
+            Unverifiable.Count == 0 ? Denied
+            : Denied.Count == 0 ? Unverifiable
+            : Denied.Concat(Unverifiable).ToHashSet();
+    }
+
+    /// <summary>
     /// Narrows an org-expansion walk to org-typed descriptors ONLY (task 043).
     /// </summary>
     /// <remarks>
@@ -757,12 +811,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// <para>
     /// <b>Fails closed toward DENIAL for every fault it can observe.</b> These surfaces all resolve to
-    /// the SAME outcome — every id in <paramref name="candidateIds"/> denied:
+    /// the SAME read-path outcome — the affected ids removed — and since task 142 r4 each is reported in
+    /// <see cref="DenyVetoResult.Unverifiable"/>, never as a provable denial:
     /// </para>
     /// <list type="bullet">
     /// <item>The deny-list reader itself already fails closed (task 038), returning a deny-all-queried
-    /// result with <see cref="NoAccessListResult.FailedClosed"/> set rather than throwing. That result
-    /// flows straight through — its denied ids are unioned into the return value.</item>
+    /// result with <see cref="NoAccessListResult.FailedClosed"/> set rather than throwing. Every queried id is
+    /// unverifiable; a reader that returns no answer at all is the same fault.</item>
     /// <item>A record whose OWN referenced-organizations could not be resolved
     /// (<see cref="ReferencedOrganizations.Unreadable"/>) is denied DIRECTLY, independent of whatever
     /// the reader would say — it is never even added to the candidate batch sent to the reader.
@@ -792,8 +847,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// In every case the veto is never SKIPPED — an observable fault denies; it never causes the
     /// pipeline to proceed as though nothing needed checking (spec NFR-01).
     /// </para>
+    /// <para>
+    /// <b>A fault is reported as a fault, not absorbed into "denied"</b> (task 142 r4 · owner round 13 item 4). Every
+    /// fault above lands in <see cref="DenyVetoResult.Unverifiable"/>, a provable entry in
+    /// <see cref="DenyVetoResult.Denied"/>. The read path removes BOTH (<see cref="DenyVetoResult.Removed"/> — the
+    /// composition is unchanged); the write-time check answers <see cref="NoAccessCheckAnswer.Unverifiable"/> for the
+    /// first and <see cref="NoAccessCheckAnswer.Denied"/> for the second, so its callers can count an outage instead of
+    /// mistaking it for the record's policy. A cancellation still propagates (unchanged: a composition that cannot
+    /// finish throws rather than answer).
+    /// </para>
     /// </remarks>
-    private async Task<IReadOnlySet<Guid>> ResolveDenyVetoAsync(
+    private async Task<DenyVetoResult> ResolveDenyVetoAsync(
         string entityType,
         IReadOnlyCollection<Guid> candidateIds,
         Guid? subjectContactId,
@@ -802,7 +866,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     {
         if (candidateIds.Count == 0)
         {
-            return EmptyDeniedSet;
+            return DenyVetoResult.None;
         }
 
         // No subject on EITHER axis: nothing to check. On the read path this is exactly "no contact" — the org set is
@@ -812,20 +876,21 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         var hasContactSubject = subjectContactId is { } cid && cid != Guid.Empty;
         if (!hasContactSubject && !subjectOrgs.Unreadable && subjectOrgs.WallSubjectOrganizationIds.Count == 0)
         {
-            return EmptyDeniedSet;
+            return DenyVetoResult.None;
         }
 
-        // The subject's own organization memberships could not be read. Deny every queried candidate —
-        // the same outcome this method's catch-all has always produced for this fault, now decided from
-        // the hoisted read's outcome rather than by catching the read here (task 043).
+        // The subject's own organization memberships could not be read. Every queried candidate is UNVERIFIABLE —
+        // removed on the read path (the same outcome this method's catch-all has always produced for this fault, now
+        // decided from the hoisted read's outcome rather than by catching the read here — task 043), and a reported
+        // fault at write time (task 142 r4).
         if (subjectOrgs.Unreadable)
         {
             _logger.LogError(
                 "[WF-AUTHZ] Deny-veto resolution for {EntityType} ({Count} candidates) cannot proceed: " +
-                "the subject's active organizations were unreadable. Failing CLOSED — denying every " +
-                "queried candidate; the veto is never skipped (NFR-01).",
+                "the subject's active organizations were unreadable. Failing CLOSED — every queried candidate is " +
+                "unverifiable and removed; the veto is never skipped (NFR-01).",
                 entityType, candidateIds.Count);
-            return candidateIds.ToHashSet();
+            return DenyVetoResult.AllUnverifiable(candidateIds);
         }
 
         try
@@ -836,13 +901,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             var referencedOrgs = await _participations
                 .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
 
-            var forcedDeny = new HashSet<Guid>();
+            var unverifiable = new HashSet<Guid>();
             var candidateRecords = new List<NoAccessCandidateRecord>(candidateIds.Count);
             foreach (var recordId in candidateIds)
             {
                 if (referencedOrgs.TryGetValue(recordId, out var refs) && refs.Unreadable)
                 {
-                    forcedDeny.Add(recordId);
+                    // Never sent to the reader: an unreadable record is an unevaluated wall (task 039's escalation).
+                    unverifiable.Add(recordId);
                     continue;
                 }
 
@@ -852,15 +918,35 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 candidateRecords.Add(new NoAccessCandidateRecord(entityType, recordId, orgIds));
             }
 
+            var denied = new HashSet<Guid>();
             if (candidateRecords.Count > 0)
             {
                 var result = await _noAccessList
                     .GetDeniedRecordsAsync(subjectContactId, subjectOrgIds, candidateRecords, ct)
                     .ConfigureAwait(false);
-                forcedDeny.UnionWith(result.DeniedRecordIds);
+
+                if (result is null || result.FailedClosed)
+                {
+                    // The reader could not complete its read (or could not safely evaluate this subject — its own
+                    // precedent): its "denials" are precautionary, not provable. Every queried candidate is unverifiable.
+                    // A null answer used to reach the catch-all below as a NullReferenceException; it is the same fault.
+                    if (result is null)
+                    {
+                        _logger.LogError(
+                            "[WF-AUTHZ] Deny-veto resolution for {EntityType}: the deny-list reader returned no answer for " +
+                            "{Count} candidate(s). Failing CLOSED — they are unverifiable and removed (NFR-01).",
+                            entityType, candidateRecords.Count);
+                    }
+
+                    unverifiable.UnionWith(candidateRecords.Select(c => c.RecordId));
+                }
+                else
+                {
+                    denied.UnionWith(result.DeniedRecordIds);
+                }
             }
 
-            return forcedDeny;
+            return new DenyVetoResult(denied, unverifiable);
         }
         catch (OperationCanceledException)
         {
@@ -870,9 +956,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         {
             _logger.LogError(ex,
                 "[WF-AUTHZ] Deny-veto resolution FAILED for {EntityType} ({Count} candidates). Failing " +
-                "CLOSED — denying every queried candidate; the veto is never skipped (NFR-01).",
+                "CLOSED — every queried candidate is unverifiable and removed; the veto is never skipped (NFR-01).",
                 entityType, candidateIds.Count);
-            return candidateIds.ToHashSet();
+            return DenyVetoResult.AllUnverifiable(candidateIds);
         }
     }
 
@@ -1220,7 +1306,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <inheritdoc />
-    public async Task<bool> IsGranteeDeniedOnRecordAsync(
+    public async Task<NoAccessCheckAnswer> CheckGranteeNoAccessAsync(
         string entityType,
         Guid recordId,
         Guid? granteeContactId,
@@ -1229,39 +1315,67 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     {
         if (string.IsNullOrWhiteSpace(entityType) || recordId == Guid.Empty)
         {
-            // No record to check against is a caller bug; a write-time check that cannot be evaluated refuses.
+            // No record to check against is a caller bug: the check cannot be evaluated — refused, and reported as the
+            // fault it is (never as an entry on a list nobody read).
             _logger.LogError(
-                "[WF-AUTHZ] IsGranteeDeniedOnRecordAsync called without a record ({EntityType} {RecordId}); " +
+                "[WF-AUTHZ] CheckGranteeNoAccessAsync called without a record ({EntityType} {RecordId}); UNVERIFIABLE — " +
                 "refusing the grant (fail closed).", entityType, recordId);
-            return true;
+            return NoAccessCheckAnswer.Unverifiable;
         }
 
-        // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
-        // owner D-2 part 2 / D-10). None when there is no contact — not a fault.
-        var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
-
-        // The caller-supplied organizations (an org-wide grant's organization, or the firm a contact grant names) join
-        // the WALL set only — never the conferring set. Over-matching is the specified direction for a veto (B-10).
-        var wall = contactOrgs.WallSubjectOrganizationIds
-            .Concat(granteeOrganizationIds ?? Array.Empty<Guid>())
-            .Where(id => id != Guid.Empty)
-            .Distinct()
-            .ToList();
-        var subjectOrgs = contactOrgs with { WallSubjectOrganizationIds = wall };
-
-        var denied = await ResolveDenyVetoAsync(entityType, new[] { recordId }, granteeContactId, subjectOrgs, ct)
-            .ConfigureAwait(false);
-
-        if (denied.Contains(recordId))
+        try
         {
-            _logger.LogWarning(
-                "[WF-AUTHZ] Write-time No Access check DENIES {EntityType} {RecordId} to contact {ContactId} / " +
-                "organizations {OrganizationIds} (a matching entry, or an unreadable input — fail closed).",
-                entityType, recordId, granteeContactId, string.Join(",", wall));
-            return true;
-        }
+            // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
+            // owner D-2 part 2 / D-10). None when there is no contact — not a fault. A fault is ActiveOrgMemberships.Failed.
+            var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
 
-        return false;
+            // The caller-supplied organizations (an org-wide grant's organization, or the firm a contact grant names) join
+            // the WALL set only — never the conferring set. Over-matching is the specified direction for a veto (B-10).
+            var wall = contactOrgs.WallSubjectOrganizationIds
+                .Concat(granteeOrganizationIds ?? Array.Empty<Guid>())
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList();
+            var subjectOrgs = contactOrgs with { WallSubjectOrganizationIds = wall };
+
+            var veto = await ResolveDenyVetoAsync(entityType, new[] { recordId }, granteeContactId, subjectOrgs, ct)
+                .ConfigureAwait(false);
+
+            if (veto.Denied.Contains(recordId))
+            {
+                _logger.LogWarning(
+                    "[WF-AUTHZ] Write-time No Access check DENIES {EntityType} {RecordId} to contact {ContactId} / " +
+                    "organizations {OrganizationIds} (a matching entry).",
+                    entityType, recordId, granteeContactId, string.Join(",", wall));
+                return NoAccessCheckAnswer.Denied;
+            }
+
+            if (veto.Unverifiable.Contains(recordId))
+            {
+                _logger.LogError(
+                    "[WF-AUTHZ] Write-time No Access check for {EntityType} {RecordId} (contact {ContactId} / " +
+                    "organizations {OrganizationIds}) is UNVERIFIABLE: an input could not be read. Refusing (fail closed); " +
+                    "reported as a fault, not as an entry.",
+                    entityType, recordId, granteeContactId, string.Join(",", wall));
+                return NoAccessCheckAnswer.Unverifiable;
+            }
+
+            return NoAccessCheckAnswer.Allowed;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The veto code rethrows every OperationCanceledException so a read-path composition throws rather than
+            // answer — an HttpClient timeout among them. Here the CALLER did not cancel: it is a read fault like any other.
+            _logger.LogError(ex,
+                "[WF-AUTHZ] Write-time No Access check for {EntityType} {RecordId} (contact {ContactId}) could not be " +
+                "completed; UNVERIFIABLE — refusing (fail closed), reported as a fault.",
+                entityType, recordId, granteeContactId);
+            return NoAccessCheckAnswer.Unverifiable;
+        }
     }
 
     /// <summary>
@@ -1581,13 +1695,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Batch 4 integration (task 132 x task 143): the unknown-subject answer is task 143's three-subject veto's own
         // "remove whole" (SystemUserDenyVeto.All). Otherwise the organizations are read and task 143's veto decides.
         // Nothing here is cached: the composition is computed per call, so a fault-derived (fail-closed) veto is never
-        // stored for a later request.
+        // stored for a later request. Task 142 r4's tri-state: an unreadable contact is a FAULT, never a provable entry —
+        // on this read path both remove the candidates (fail closed; ResolveDenyVetoAsync's DenyVetoResult.Removed does
+        // the same). The write-time CheckGranteeNoAccessAsync never sees a principal's contact: its subject is the
+        // caller-supplied grantee, and an unreadable read there (memberships, referenced organizations, the reader)
+        // answers NoAccessCheckAnswer.Unverifiable, never Denied.
         SystemUserDenyVeto veto;
         if (principal.ContactUnreadable && IsGrantSupported(entityType) && candidates.Count > 0)
         {
             _logger.LogError(
                 "[WF-AUTHZ] Deny-veto subject for systemuser {SystemUserId} on {EntityType} is UNREADABLE (the linked-" +
-                "contact read failed). Failing CLOSED — denying every queried candidate ({Count}); the veto is never " +
+                "contact read failed): the veto is UNVERIFIABLE. Failing CLOSED — removing every queried candidate ({Count}); the veto is never " +
                 "skipped (NFR-01, task 132).",
                 systemUserId, entityType, candidates.Count);
             veto = SystemUserDenyVeto.All(candidates);
@@ -1913,10 +2031,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 ? ActiveOrgMemberships.None
                 : await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false));
 
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ct)
+        // A provable denial and an unverifiable candidate are both removed here (fail closed) — task 142 r4 split them
+        // only so the WRITE-time check can report the second as a fault.
+        var veto = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ct)
             .ConfigureAwait(false);
 
-        ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
+        ApplyVetoPipeline(composed, veto.Removed, flags, EmptyRights);
 
         // Last: no key without Read (task 136 · C2), on both contact sign-ins. Reachable cases: an
         // organization-only grant on a Secure or Limited root, and a matter / work-assignment grant row with no level

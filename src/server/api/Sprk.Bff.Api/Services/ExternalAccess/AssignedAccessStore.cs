@@ -56,13 +56,15 @@ public static class AssignedAccessReason
     /// <summary>The record is inactive (closed): it confers nothing contact-sourced (task 137).</summary>
     public const string RootInactive = "root-inactive";
 
-    /// <summary>On the record's No Access list (FR-23 / owner Q4), or the list could not be checked.</summary>
+    /// <summary>On the record's No Access list (FR-23 / owner Q4) — a matching entry. Since task 142 r4 a list that could
+    /// not be checked is <see cref="NoAccessUnverifiable"/>, never this.</summary>
     public const string NoAccess = "no-access";
 
     /// <summary>
-    /// A No Access check could not be completed: task 143's secure-record wall guard answered Unverifiable, or (task 142
-    /// r3) a contact/organization deny-list check THREW — the latter also reported as a
-    /// <c>deny-list-unreadable</c> failure. Never a grant, never "no-access" (an entry).
+    /// A No Access check could not be completed: task 143's secure-record wall guard answered Unverifiable, or a
+    /// contact/organization deny-list check answered Unverifiable or threw (task 142 r3/r4). Every one is also reported as
+    /// a <c>deny-list-unreadable</c> failure, so the run fails (owner round 13 items 4 and 5). Never a grant, never
+    /// "no-access" (an entry).
     /// </summary>
     public const string NoAccessUnverifiable = "no-access-unverifiable";
 

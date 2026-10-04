@@ -19,10 +19,10 @@ using System.Net.Http;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Spaarke.Dataverse;   // AccessRights — task 032 rights-fidelity assertions
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
-using Spaarke.Dataverse;   // AccessRights — task 032 rights-fidelity assertions
 using Xunit;
 using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
 
@@ -1304,13 +1304,17 @@ public class AccessibleRecordSetServiceTests
         var reader = new SubjectRowReader();
         reader.Add(new NoAccessEntryRow
         {
-            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectsystemuser_value = SystemUserId,
-            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = secure.ToString(),
+            sprk_noaccessentryid = Guid.NewGuid(),
+            _sprk_subjectsystemuser_value = SystemUserId,
+            _sprk_objectrecordtype_value = Guid.NewGuid(),
+            sprk_objectrecordid = secure.ToString(),
         });
         reader.Add(new NoAccessEntryRow
         {
-            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectsystemuser_value = SystemUserId,
-            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = open.ToString(),
+            sprk_noaccessentryid = Guid.NewGuid(),
+            _sprk_subjectsystemuser_value = SystemUserId,
+            _sprk_objectrecordtype_value = Guid.NewGuid(),
+            sprk_objectrecordid = open.ToString(),
         });
 
         var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
@@ -1398,8 +1402,10 @@ public class AccessibleRecordSetServiceTests
         var reader = new SubjectRowReader();
         reader.Add(new NoAccessEntryRow
         {
-            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectcontact_value = bound,
-            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = secure.ToString(),
+            sprk_noaccessentryid = Guid.NewGuid(),
+            _sprk_subjectcontact_value = bound,
+            _sprk_objectrecordtype_value = Guid.NewGuid(),
+            sprk_objectrecordid = secure.ToString(),
         });
 
         var sut = CreateSut(membership.Object, participations, NeverStanding(), reader, links);
@@ -1613,6 +1619,86 @@ public class AccessibleRecordSetServiceTests
         set.Contains(unresolvable).Should().BeFalse(
             "a record whose referenced organizations could not be resolved must be denied directly");
         set.Contains(resolvable).Should().BeTrue("a sibling record whose org references DID resolve is unaffected");
+    }
+
+    /// <summary>
+    /// Task 142 r5 (r4 verifier finding 5, criterion 19). Since r4 the veto answers a provable entry and an unverifiable
+    /// candidate in two sets, and the read path removes their UNION. A batch holding ONE OF EACH is the only case in which
+    /// that union's third branch runs — every other read-path test has a single-kind batch — so it is pinned here: the
+    /// record an entry denies AND the record whose referenced organizations could not be read are both removed, and their
+    /// twin (resolvable, no entry) is kept. Dropping either set from the union is fail OPEN on the read path: the record
+    /// with an unverifiable wall, or the walled record, would be returned as accessible.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_ABatchWithAnEntryAndAnUnverifiableRecord_RemovesBoth_AndKeepsTheirTwin()
+    {
+        var walled = GrantedProject;       // an entry on the list names it: a provable denial
+        var unresolvable = StandingMatter; // reused as a second project id (file convention): its wall cannot be evaluated
+        var twin = MemberRecordA;          // resolvable, named by no entry: the control
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = walled, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = unresolvable, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = twin, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        participations.UnreadableOrgReferences.Add(unresolvable);
+
+        // Record-keyed: denies ONLY the walled record. The unresolvable one is never sent to the reader at all (an
+        // unreadable record is an unevaluated wall), so its removal can come from the unverifiable set alone.
+        var reader = DenyingReader(deniedRecordIds: new[] { walled });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(walled).Should().BeFalse(
+            "a provable entry removes the record even when the same batch also holds an unverifiable one");
+        set.Contains(unresolvable).Should().BeFalse(
+            "an unverifiable record is removed even when the same batch also holds a provable entry (fail closed)");
+        set.RightsFor(twin).Should().Be(
+            ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.FullAccess),
+            "the twin — resolvable, named by no entry — keeps exactly its Full Access grant");
+    }
+
+    /// <summary>
+    /// Task 142 round 18 (R-14): a contact with more active organization memberships than ONE deny-list query holds (30;
+    /// the bound is 25) is evaluated on the READ path too. Before round 18 the reader refused that set and failed closed,
+    /// so EVERY candidate was removed — the contact saw nothing at all. Now only the record an entry walls off (via one of
+    /// the 30 organizations) is removed; its sibling keeps its grant.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_AContactWithMoreOrganizationsThanOneQueryHolds_LosesOnlyTheWalledRecord()
+    {
+        var walledOrganization = Guid.Parse("a4000000-0000-0000-0000-000000000142");
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = MemberRecordA, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        for (var i = 0; i < 29; i++)
+        {
+            participations.ActiveOrgIds.Add(Guid.NewGuid());
+        }
+
+        participations.ActiveOrgIds.Add(walledOrganization);
+
+        var reader = new SubjectRowReader();
+        reader.Add(new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = Guid.NewGuid(),
+            _sprk_subjectorganization_value = walledOrganization,
+            _sprk_objectrecordtype_value = Guid.NewGuid(),
+            sprk_objectrecordid = GrantedProject.ToString(),
+        });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse("an entry names one of the contact's 30 organizations on this record");
+        set.RightsFor(MemberRecordA).Should().Be(
+            ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.FullAccess),
+            "the sibling is evaluated and kept — no longer removed because the subject set was 'too large'");
+        reader.SubjectFilters.Distinct().Should().HaveCountGreaterThan(1, "the 30 organizations were split across queries");
     }
 
     [Fact]

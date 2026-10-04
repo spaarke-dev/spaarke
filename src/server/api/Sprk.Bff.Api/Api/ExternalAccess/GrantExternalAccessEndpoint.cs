@@ -1,10 +1,10 @@
 using System.Security.Claims;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -58,7 +58,8 @@ public static class GrantExternalAccessEndpoint
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
             // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
-            // grantee_denied). 503: the policy could not be read (policy_unreadable).
+            // grantee_denied). 503: the policy could not be read (policy_unreadable), or whether the grantee is on the
+            // No Access list could not be checked (task 142 r4 — no_access_unverifiable).
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -539,7 +540,9 @@ public static class GrantExternalAccessEndpoint
     /// (NARROW, not refuse — owner Q1). (3) Never-lower: when the cap narrowed the request and an active row on the
     /// key holds a HIGHER level, refuse 409 — an explicit request for a lower level (not narrowed) is a deliberate
     /// downgrade by a Write-holder and is allowed, as before. (4) The No Access list, through the read path's own
-    /// veto code (<see cref="IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync"/>); a fault refuses.</para>
+    /// veto code (<see cref="IAccessibleRecordSetService.CheckGranteeNoAccessAsync"/>): an entry refuses 422
+    /// (<see cref="GrantPolicyDecision.GranteeDenied"/>); a check that could not be completed refuses 503
+    /// (<see cref="GrantPolicyDecision.GranteeDenyListUnreadable"/>, task 142 r4) — a fault, never an entry.</para>
     /// <para>The existing-row read propagates its exception, exactly as the upsert's own read always did — a failed
     /// pre-existence read must never be mistaken for "no rows".</para>
     /// </remarks>
@@ -595,28 +598,41 @@ public static class GrantExternalAccessEndpoint
             return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
         }
 
-        // (4) FR-23 at write time — the grantee must not be on this record's No Access list.
-        bool denied;
+        // (4) FR-23 at write time — the grantee must not be on this record's No Access list. A TRI-STATE answer (task 142
+        // r4 · owner round 13 item 4): an entry is the record's policy (422 grantee_denied); a check that could not be
+        // completed is a FAULT (503 no_access_unverifiable), reported as one and never absorbed into "denied". Both
+        // refuse — only Allowed grants.
+        NoAccessCheckAnswer noAccess;
         try
         {
-            denied = await accessibleRecords.IsGranteeDeniedOnRecordAsync(
+            noAccess = await accessibleRecords.CheckGranteeNoAccessAsync(
                 ExternalGrantRoot.LogicalNameFor(rootType), rootId, grantee.ContactId, grantee.OrganizationIds, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            // The check's contract is "never throws but for the caller's cancellation"; a throw anyway is the same fault.
             logger.LogError(ex,
-                "[EXT-GRANT] The No Access check for {RootType} {RootId} threw; refusing (fail closed).",
-                rootType, rootId);
-
-            // Task 142 r3: a FAULT, not an entry — the same wire answer as GranteeDenied, flagged so an in-process caller
-            // (the Assigned-To materializer) reports it instead of waiting on it as the record's policy.
+                "[EXT-GRANT] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} threw; refusing (fail " +
+                "closed), reported as a fault.", rootType, rootId);
             return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
         }
 
-        if (denied)
-            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenied, requestedLevel);
+        switch (noAccess)
+        {
+            case NoAccessCheckAnswer.Allowed:
+                return new GrantCheck(null, granted, narrowed, existing);
 
-        return new GrantCheck(null, granted, narrowed, existing);
+            case NoAccessCheckAnswer.Denied:
+                return GrantCheck.Refused(GrantPolicyDecision.GranteeDenied, requestedLevel);
+
+            default:
+                // Unverifiable — or an answer this code does not know, which is never "allowed" (fail closed).
+                logger.LogError(
+                    "[EXT-GRANT] DENY-LIST-UNREADABLE: the No Access check for {RootType} {RootId} could not be completed " +
+                    "({Answer}); refusing (fail closed), reported as a fault, not as an entry on the list.",
+                    rootType, rootId, noAccess);
+                return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
+        }
     }
 
     /// <summary>
@@ -646,9 +662,10 @@ public static class GrantExternalAccessEndpoint
     /// <summary>
     /// The ProblemDetails for a write-time policy refusal (task 138), shared by <c>/grant</c>,
     /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record /
-    /// grantee_denied), 503 (policy_unreadable), 403 (caller_cannot_grant) or 409 (would_lower_existing) — the last
-    /// three added by task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
-    /// Manage Access dialog shows verbatim, and the <c>traceId</c>.
+    /// grantee_denied), 503 (policy_unreadable, or no_access_unverifiable — the No Access check could not be completed,
+    /// task 142 r4), 403 (caller_cannot_grant) or 409 (would_lower_existing) — grantee_denied, 403 and 409 added by
+    /// task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the Manage Access dialog shows
+    /// verbatim, and the <c>traceId</c>.
     /// </summary>
     internal static IResult PolicyRefusalProblem(
         GrantPolicyDecision refusal, HttpContext httpContext, IDictionary<string, object?>? extra = null)

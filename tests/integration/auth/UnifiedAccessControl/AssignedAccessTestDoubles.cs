@@ -252,7 +252,12 @@ internal static class AssignedAccessTestDoubles
 
         public void Person(Guid id) => SystemUsers[id] = new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow
         {
-            Id = id, FullName = "Person", IsDisabled = false, AccessMode = 0, ApplicationId = null, IsExternal = false,
+            Id = id,
+            FullName = "Person",
+            IsDisabled = false,
+            AccessMode = 0,
+            ApplicationId = null,
+            IsExternal = false,
         };
 
         public List<(string Set, string Payload)> Creates { get; } = new();
@@ -520,6 +525,12 @@ internal static class AssignedAccessTestDoubles
 
         public AccessibleRecordSetService AccessibleRecords => GrantPolicyTestDoubles.RealDenyList(Participations, DenyList);
 
+        /// <summary>
+        /// Replaces the write-time No Access check the materializer (and, through it, the grant core) consults — the real
+        /// one over <see cref="DenyList"/> when null. Task 142 r5: only to hand it an answer no production check returns.
+        /// </summary>
+        public IAccessibleRecordSetService? NoAccessCheckOverride { get; set; }
+
         public SecureShareNoAccessGuard Guard =>
             new(Participations, DenyList, Identities, NullLogger<SecureShareNoAccessGuard>.Instance);
 
@@ -536,8 +547,8 @@ internal static class AssignedAccessTestDoubles
             Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, Shares, Guard);
 
         public AssignedAccessMaterializer Materializer => new(
-            Store, Grants, Participations, AccessibleRecords, Identities, Guard, Shares, Children, Cache.Mock.Object, Standing,
-            Registry, Configuration, Time, Logger);
+            Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, Shares, Children,
+            Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger);
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)

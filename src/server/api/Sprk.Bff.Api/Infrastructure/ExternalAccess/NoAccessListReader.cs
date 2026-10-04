@@ -26,6 +26,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 // (NoAccessListResult.DenyingSubjectKinds), because the systemuser plane treats a systemuser-subject entry
 // and a contact-sourced one differently on a non-secure record (owner N3).
 //
+// unified-access-control-r2 task 142 round 18 (2026-10-03, BINDING): a subject set of ANY size is evaluated. The
+// subject side is split into chunks within one query's bound (MaxSubjectContactIds / MaxSubjectOrganizationIds), one
+// query per chunk, the matches unioned. The old "more than 25 organizations / 5 contacts → FailedClosed" answer is
+// gone; only a genuine read fault (in any chunk) still fails the whole answer closed.
+//
 // ⚠️ DEPLOY ORDER: RowSelect names _sprk_subjectsystemuser_value. In an environment without that column
 // every read 400s, fails CLOSED and denies every queried candidate — an outage on both planes. The column
 // is created (scripts/Set-NoAccessSystemUserSubjectSchema.ps1 -Apply, then -Verify) BEFORE this code deploys.
@@ -212,9 +217,9 @@ public interface INoAccessListReader
     /// </summary>
     /// <param name="contactId">The caller's own contact id, or <c>null</c> (or <see cref="Guid.Empty"/>,
     /// treated identically) for a principal with no linked contact.</param>
-    /// <param name="organizationIds">Organizations the contact is an ACTIVE member of. An
-    /// implausibly large set (see <see cref="NoAccessListReader"/> remarks) is itself treated as a
-    /// fail-closed condition — it cannot be safely embedded in a bounded query.</param>
+    /// <param name="organizationIds">Organizations the contact is an ACTIVE member of. A set of ANY size
+    /// is evaluated: one larger than one query's subject bound is split into subject chunks, one query
+    /// per chunk, and their matches are unioned (task 142 round 18).</param>
     /// <param name="candidates">The records to check, each carrying its own referenced-organization
     /// set (resolved by the caller).</param>
     /// <param name="ct">Cancellation token.</param>
@@ -254,12 +259,13 @@ public class NoAccessListReader : INoAccessListReader
     internal const int ObjectIdChunkSize = 50;
 
     /// <summary>
-    /// Defensive ceiling on the SUBJECT-side organization-id set. Chosen so the worst-case combined
-    /// clause count in one request (subject clauses + one object chunk's 50 clauses) stays within
-    /// the same order of magnitude as the proven single-dimension 50-clause precedent above, rather
-    /// than doubling it. In practice a contact belongs to a small handful of organizations
-    /// (register C-5) — this ceiling exists to make an implausible case fail SAFE, not because it
-    /// is expected to be hit.
+    /// Most SUBJECT-side organization ids ONE query embeds. Chosen so the worst-case combined clause
+    /// count in one request (subject clauses + one object chunk's 50 clauses) stays within the same
+    /// order of magnitude as the proven single-dimension 50-clause precedent above, rather than
+    /// doubling it. A larger set is NOT refused: it is split into subject chunks of at most this many
+    /// (<see cref="ChunkSubjects"/>), each queried, and the matches unioned (task 142 round 18 — before,
+    /// a set above the bound failed closed deterministically, which read as a permanent "could not be
+    /// checked").
     /// </summary>
     internal const int MaxSubjectOrganizationIds = 25;
 
@@ -282,6 +288,8 @@ public class NoAccessListReader : INoAccessListReader
     /// <summary>
     /// The subject <c>$filter</c> fragment over all three subject kinds (task 143): any of these contacts, OR
     /// any of these organizations, OR this systemuser. Same composition rules as the contact overload.
+    /// <see cref="GetDeniedRecordsAsync(NoAccessSubjects, IReadOnlyCollection{NoAccessCandidateRecord}, CancellationToken)"/>
+    /// calls it once per subject chunk (<see cref="ChunkSubjects"/>), so it never embeds more than one query's bound.
     /// </summary>
     internal static string BuildSubjectFilter(NoAccessSubjects subjects)
     {
@@ -373,10 +381,47 @@ public class NoAccessListReader : INoAccessListReader
         => GetDeniedRecordsAsync(NoAccessSubjects.ForContact(contactId, organizationIds), candidates, ct);
 
     /// <summary>
-    /// Most contacts one evaluation embeds as subjects (task 143: a systemuser's linked contact, plus any contact
-    /// bound to its oid). Same reasoning as <see cref="MaxSubjectOrganizationIds"/>: an implausible count fails SAFE.
+    /// Most contacts ONE query embeds as subjects (task 143: a systemuser's linked contact, plus any contact bound to
+    /// its oid). Same reasoning as <see cref="MaxSubjectOrganizationIds"/>; a larger set is chunked, never refused.
     /// </summary>
     internal const int MaxSubjectContactIds = 5;
+
+    /// <summary>
+    /// Splits <paramref name="subjects"/> into subject chunks that each fit ONE query's bound — at most
+    /// <see cref="MaxSubjectContactIds"/> contacts and <see cref="MaxSubjectOrganizationIds"/> organizations — so a set
+    /// of any size is evaluated (task 142 round 18). Chunk <c>i</c> takes the <c>i</c>-th slice of each kind; the
+    /// systemuser (at most one) rides in the first chunk. Every chunk carries at least one subject: the chunk count is
+    /// the larger of the two kinds' slice counts (at least one, for a systemuser alone), so each chunk index has a
+    /// slice of the kind that needs the most chunks. Pure and <c>internal</c>, so the bound is directly assertable.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the union is sound for a veto.</b> An entry names exactly ONE subject (schema Business Rule 1; malformed
+    /// rows deny nothing), so it matches the single OR'd subject filter iff it matches the filter of the chunk holding
+    /// that subject — the union of the per-chunk matches equals the one large query's matches. The other direction is
+    /// fail closed: any chunk that cannot be read fails the WHOLE answer (<see cref="NoAccessListResult.FailedClosed"/>),
+    /// so a partial union is never returned as "these are all the denials".
+    /// </remarks>
+    internal static IReadOnlyList<NoAccessSubjects> ChunkSubjects(NoAccessSubjects subjects)
+    {
+        var contacts = subjects.Contacts;
+        var organizations = subjects.Organizations;
+        var chunkCount = Math.Max(
+            1,
+            Math.Max(
+                (contacts.Count + MaxSubjectContactIds - 1) / MaxSubjectContactIds,
+                (organizations.Count + MaxSubjectOrganizationIds - 1) / MaxSubjectOrganizationIds));
+
+        var chunks = new List<NoAccessSubjects>(chunkCount);
+        for (var i = 0; i < chunkCount; i++)
+        {
+            chunks.Add(new NoAccessSubjects(
+                contacts.Skip(i * MaxSubjectContactIds).Take(MaxSubjectContactIds).ToArray(),
+                organizations.Skip(i * MaxSubjectOrganizationIds).Take(MaxSubjectOrganizationIds).ToArray(),
+                i == 0 ? subjects.User : null));
+        }
+
+        return chunks;
+    }
 
     /// <inheritdoc />
     public async Task<NoAccessListResult> GetDeniedRecordsAsync(
@@ -399,23 +444,21 @@ public class NoAccessListReader : INoAccessListReader
             return NoAccessListResult.Empty;
         }
 
-        var organizationIds = subjects.Organizations;
-        if (organizationIds.Count > MaxSubjectOrganizationIds || subjects.Contacts.Count > MaxSubjectContactIds)
+        // Task 142 round 18: a subject set of ANY size is evaluated. Each subject chunk fits one query's bound
+        // (NFR-02); every chunk is queried against every object chunk and the matches are unioned. There is no
+        // "too large to evaluate" answer any more — a deterministic FailedClosed made a grant "try again" forever and
+        // kept the Assigned-To job red for as long as the subject stayed assigned. A fault in ANY query still fails
+        // the whole answer closed (NFR-01).
+        var subjectFilters = ChunkSubjects(subjects).Select(BuildSubjectFilter).ToList();
+        if (subjectFilters.Count > 1)
         {
-            // Cannot safely embed this many ids in one bounded $filter (NFR-02), and there is no
-            // sound way to split the SUBJECT side across multiple requests and still trust any
-            // single response alone. The safe response to "cannot be safely evaluated" is the same
-            // one NFR-01 prescribes for an unreadable read: deny everything queried.
-            _logger.LogError(
-                "[NO-ACCESS] FAIL-CLOSED: {Count} organization ids / {ContactCount} contact ids exceed the safe " +
-                "query bound ({Max} / {MaxContacts}) for a single subject evaluation. Denying all {CandidateCount} " +
-                "queried candidates — deny-list evaluation for this subject cannot be safely performed.",
-                organizationIds.Count, subjects.Contacts.Count, MaxSubjectOrganizationIds, MaxSubjectContactIds,
-                candidates.Count);
-            return FailClosed(candidates);
+            _logger.LogInformation(
+                "[NO-ACCESS] Evaluating {ContactCount} contact ids / {OrganizationCount} organization ids in {ChunkCount} " +
+                "subject chunks (at most {MaxContacts} / {MaxOrganizations} per query); matches are unioned.",
+                subjects.Contacts.Count, subjects.Organizations.Count, subjectFilters.Count,
+                MaxSubjectContactIds, MaxSubjectOrganizationIds);
         }
 
-        var subjectFilter = BuildSubjectFilter(subjects);
         var denied = new Dictionary<Guid, List<Guid>>();
         var kinds = new Dictionary<Guid, NoAccessSubjectKinds>();
 
@@ -428,30 +471,34 @@ public class NoAccessListReader : INoAccessListReader
                 .Distinct()
                 .ToList();
 
-            foreach (var chunk in referencedOrgIds.Chunk(ObjectIdChunkSize))
-            {
-                var rows = await QueryChunkAsync(subjectFilter, BuildOrganizationObjectFilter(chunk), ct).ConfigureAwait(false);
-                if (rows is null)
-                {
-                    // QueryChunkAsync already logged the distinct fail-closed signal.
-                    return FailClosed(candidates);
-                }
-
-                ProcessRows(rows, candidates, denied, kinds);
-            }
-
             // Loop B — per-child revocation: chunk the DISTINCT candidate record ids themselves.
             var candidateRecordIds = candidates.Select(c => c.RecordId).Distinct().ToList();
 
-            foreach (var chunk in candidateRecordIds.Chunk(ObjectIdChunkSize))
+            foreach (var subjectFilter in subjectFilters)
             {
-                var rows = await QueryChunkAsync(subjectFilter, BuildRecordObjectFilter(chunk), ct).ConfigureAwait(false);
-                if (rows is null)
+                foreach (var chunk in referencedOrgIds.Chunk(ObjectIdChunkSize))
                 {
-                    return FailClosed(candidates);
+                    var rows = await QueryChunkAsync(subjectFilter, BuildOrganizationObjectFilter(chunk), ct).ConfigureAwait(false);
+                    if (rows is null)
+                    {
+                        // QueryChunkAsync already logged the distinct fail-closed signal. One unreadable chunk fails
+                        // the WHOLE answer: the matches gathered so far are not all the denials.
+                        return FailClosed(candidates);
+                    }
+
+                    ProcessRows(rows, candidates, denied, kinds);
                 }
 
-                ProcessRows(rows, candidates, denied, kinds);
+                foreach (var chunk in candidateRecordIds.Chunk(ObjectIdChunkSize))
+                {
+                    var rows = await QueryChunkAsync(subjectFilter, BuildRecordObjectFilter(chunk), ct).ConfigureAwait(false);
+                    if (rows is null)
+                    {
+                        return FailClosed(candidates);
+                    }
+
+                    ProcessRows(rows, candidates, denied, kinds);
+                }
             }
         }
         catch (OperationCanceledException)

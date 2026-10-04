@@ -418,6 +418,41 @@ public class AssignedAccessMaterializerTests
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Task 142 round 18 (R-14): a contact with more organizations than ONE deny-list query holds (here 30 active
+    /// memberships; the bound is 25) is CHECKED. Before round 18 the reader refused the set deterministically, so every
+    /// pass reported deny-list-unreadable — the sync answered 500 and the job stayed red for as long as the contact stayed
+    /// assigned. Now: no entry → granted, the run complete; an entry on the 30th organization → Skipped(no-access), the
+    /// record's policy, the run still complete.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AContactWithMoreOrganizationsThanOneQueryHolds_IsChecked_AndTheRunCompletes(bool lastOrganizationWalled)
+    {
+        var contact = _h.Contact();
+        var memberships = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToArray();
+        _h.Participations.ContactOrganizations[contact] = memberships;
+        if (lastOrganizationWalled)
+            _h.DenyList.DenyOrganizationOnRecord(memberships[^1], _matter);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeTrue("a large subject set is not a fault (round 18)");
+        outcome.Failures.Should().BeEmpty();
+        if (lastOrganizationWalled)
+        {
+            _h.Grants.Rows.Should().BeEmpty();
+            LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.NoAccess);
+        }
+        else
+        {
+            _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+            LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        }
+    }
+
     [Fact]
     public async Task AnUnreadableDenyList_IsASkip_NeverAGrant()
     {
@@ -1671,5 +1706,322 @@ public class AssignedAccessMaterializerTests
 
         unchanged.Complete.Should().BeTrue("an unchanged root writes no share, so the unreadable children are never asked");
         unchanged.Writes.Should().Be(0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r4, item 1 (owner round 13 item 4 — R-13) — the faults the deny-veto check used to ABSORB into "denied" are
+    // an Unverifiable answer now: on every consumer path they are a deny-list fault, never an entry and never a hold
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The three read faults the deny-veto code absorbed before r4 (memberships unreadable, the record's referenced
+    /// organizations unreadable, a fail-closed deny-list read) — each answered <see cref="NoAccessCheckAnswer.Unverifiable"/>
+    /// by the write-time check now. The r3 tests above inject a THROW; these inject the faults that never threw.
+    /// </summary>
+    private void InjectAbsorbedNoAccessFault(string fault)
+    {
+        switch (fault)
+        {
+            case "memberships-unreadable": _h.Participations.MembershipsUnreadable = true; break;
+            case "referenced-organizations-unreadable": _h.Participations.UnreadableReferencedOrganizations[_matter] = true; break;
+            case "deny-list-fails-closed": _h.DenyList.Faults = true; break;
+            default: throw new ArgumentOutOfRangeException(nameof(fault), fault, "unknown fault");
+        }
+    }
+
+    private void ClearAbsorbedNoAccessFaults()
+    {
+        _h.Participations.MembershipsUnreadable = false;
+        _h.Participations.UnreadableReferencedOrganizations.TryRemove(_matter, out _);
+        _h.DenyList.Faults = false;
+    }
+
+    /// <summary>
+    /// The R-13 headline: before r4 a restore whose No Access check met one of these faults HELD green
+    /// (<c>restore-pending:…grantee_denied</c>). It is a deny-list fault: reported, the run red, nothing written, the row
+    /// kept live — and the restore made once the inputs read. Twin: the "no-access" row of the hold theory (an ENTRY holds).
+    /// </summary>
+    [Theory]
+    [InlineData("memberships-unreadable")]
+    [InlineData("referenced-organizations-unreadable")]
+    [InlineData("deny-list-fails-closed")]
+    public async Task ARestoreWhoseNoAccessCheckIsUnverifiable_IsADenyListFault_NeverAPolicyHold(string fault)
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today.AddDays(200));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // raised to Collaborate
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        InjectAbsorbedNoAccessFault(fault);
+        var before = _h.TotalWrites;
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        _h.TotalWrites.Should().Be(before, "nothing is written while the check cannot be completed");
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().AccessLevel.Should().Be(Collaborate);
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted, "kept live, so the next pass retries");
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Restored);
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().AccessLevel.Should().Be(ViewOnly);
+    }
+
+    /// <summary>Before r4: <c>Skipped(no-access)</c> with a clean run. Now a fault, <c>no-access-unverifiable</c>.</summary>
+    [Theory]
+    [InlineData("memberships-unreadable")]
+    [InlineData("referenced-organizations-unreadable")]
+    [InlineData("deny-list-fails-closed")]
+    public async Task AFreshGrantWhoseNoAccessCheckIsUnverifiable_IsADenyListFault_NotNoAccess_AndNothingIsGranted(string fault)
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        InjectAbsorbedNoAccessFault(fault);
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        _h.Grants.Rows.Should().BeEmpty("fail closed");
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable, "nobody is known to be on the list");
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("decided again once the inputs read");
+    }
+
+    /// <summary>The materializer's OWN call of the tri-state check, before suggesting on a secure record.</summary>
+    [Theory]
+    [InlineData("memberships-unreadable")]
+    [InlineData("referenced-organizations-unreadable")]
+    [InlineData("deny-list-fails-closed")]
+    public async Task ASecureSuggestionWhoseNoAccessCheckIsUnverifiable_IsADenyListFault_AndIsNotSuggested(string fault)
+    {
+        Secure();
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        InjectAbsorbedNoAccessFault(fault);
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "never suggested while the check cannot be completed");
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+        _h.Grants.Rows.Should().BeEmpty();
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.PendingConfirmation);
+    }
+
+    /// <summary>
+    /// The secure suggestion's twin: an ENTRY on the list is the record's policy — <c>Skipped(no-access)</c>, a clean run,
+    /// no failure (so the tri-state's Denied branch is not read as a fault either).
+    /// </summary>
+    [Fact]
+    public async Task ASecureSuggestionForAContactOnTheList_IsSkippedNoAccess_ACleanRun()
+    {
+        Secure();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.DenyList.DenyContactOnRecord(contact, _matter);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeTrue();
+        outcome.Failures.Should().BeEmpty();
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.NoAccess);
+    }
+
+    /// <summary>
+    /// Task 142 r5 (r4 verifier finding 6): an answer the code does not know — a value outside the enum, which no
+    /// production check returns — is never "allowed". On a SECURE record it reaches the materializer's own check (before
+    /// suggesting); on a standard record it reaches the grant core's switch (through the fresh-grant path). Either way it
+    /// is a deny-list fault: reported, nothing suggested or granted. Twin: the same double answering Allowed suggests /
+    /// grants on the next pass.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnUnknownNoAccessAnswer_IsADenyListFault_NeverSuggestedNorGranted(bool secure)
+    {
+        if (secure)
+            Secure();
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.NoAccessCheckOverride = GrantPolicyTestDoubles.DenyListAnswering((NoAccessCheckAnswer)99);
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "an unknown answer is never read as allowed");
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+        _h.Grants.Rows.Should().BeEmpty("fail closed");
+
+        _h.NoAccessCheckOverride = GrantPolicyTestDoubles.DenyListAnswering(NoAccessCheckAnswer.Allowed);
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        if (secure)
+            LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.PendingConfirmation);
+        else
+            _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("granted once the answer is Allowed");
+    }
+
+    [Theory]
+    [InlineData("memberships-unreadable")]
+    [InlineData("referenced-organizations-unreadable")]
+    [InlineData("deny-list-fails-closed")]
+    public async Task ARenewalWhoseNoAccessCheckIsUnverifiable_IsADenyListFault_AndTheGrantIsKeptAsItIs(string fault)
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // granted, today + 90
+        _h.Time.Now = _h.Time.Now.AddDays(70); // 20 days left: inside the 30-day renewal window
+        InjectAbsorbedNoAccessFault(fault);
+
+        var faulted = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        AssertDenyListFault(faulted, log, contact);
+        faulted.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.None);
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(90), "not renewed this pass");
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        next.Complete.Should().BeTrue();
+        next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Renewed);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r4, item 2 (owner round 13 item 5) — task 143's wall guard answering Unverifiable on the internal-user share
+    // path FAILS THE RUN like the deny-list fault: counted, logged, the job red
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Three ways the wall guard cannot answer: the deny list, the linked contact's memberships, the record's
+    /// referenced organizations — each <see cref="SecureShareWallOutcome.Unverifiable"/>.</summary>
+    private void MakeTheWallUnverifiable(string fault)
+    {
+        switch (fault)
+        {
+            case "deny-list": _h.DenyList.Faults = true; break;
+            case "memberships": _h.Participations.MembershipsUnreadable = true; break;
+            case "referenced-organizations": _h.Participations.UnreadableReferencedOrganizations[_matter] = true; break;
+            default: throw new ArgumentOutOfRangeException(nameof(fault), fault, "unknown fault");
+        }
+    }
+
+    /// <summary>
+    /// An auto share gone from a SECURE record (r0 <c>ContinueOursAsync</c>): whether task 143's enforcer removed it (a
+    /// known cause) or an operator did (Declined) cannot be told while the wall cannot be read. Nothing is decided — and
+    /// the run fails. Once the wall reads (no entry), it is the operator's removal: Declined.
+    /// </summary>
+    [Theory]
+    [InlineData("deny-list")]
+    [InlineData("memberships")]
+    [InlineData("referenced-organizations")]
+    public async Task AnAutoShareGoneOnASecureRecord_WhoseWallIsUnverifiable_FailsTheRun_AndDecidesNothingThisPass(string fault)
+    {
+        var log = CaptureLog();
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // shared while the record was standard
+        Secure();
+        _h.Shares.Reset();
+        MakeTheWallUnverifiable(fault);
+        var before = _h.TotalWrites;
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        faulted.Entries.Should().ContainSingle().Which.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+        _h.TotalWrites.Should().Be(before, "nothing is decided while the wall cannot be read");
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared, "never Declined on a guess");
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Declined);
+        ShareMask(user).Should().BeNull();
+    }
+
+    /// <summary>
+    /// A fresh share on a SECURE record (A3: suggested) whose wall cannot be read: neither shared nor suggested, and the
+    /// run fails. Once it reads, the suggestion is made.
+    /// </summary>
+    [Theory]
+    [InlineData("deny-list")]
+    [InlineData("memberships")]
+    [InlineData("referenced-organizations")]
+    public async Task AFreshShareOnASecureRecord_WhoseWallIsUnverifiable_FailsTheRun_NeitherSharedNorSuggested(string fault)
+    {
+        Secure();
+        var log = CaptureLog();
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        MakeTheWallUnverifiable(fault);
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        ShareMask(user).Should().BeNull();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+
+        ClearAbsorbedNoAccessFaults();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.PendingConfirmation);
+    }
+
+    /// <summary>
+    /// Restoring a share task 143's enforcer removed, once the wall is lifted — but the lifted wall cannot be READ: not
+    /// restored, the run fails, and the ledger keeps <c>removed-by-no-access</c> so the restore still happens once it
+    /// reads. The twin is <see cref="AnAutoShareRemovedByTheNoAccessEnforcer_IsSkippedRemovedByNoAccess_AndRestoredOnceTheWallIsLifted"/>.
+    /// </summary>
+    [Fact]
+    public async Task RestoringAShareTheEnforcerRemoved_WhoseWallIsUnverifiable_FailsTheRun_AndRestoresOnceItReads()
+    {
+        var log = CaptureLog();
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        Secure();
+        _h.DenyList.DenySystemUserOnRecord(user, _matter);
+        _h.Shares.Reset(); // task 143's enforcer removed the walled share
+        await Sync();
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.RemovedByNoAccess);
+
+        _h.DenyList = new GrantPolicyTestDoubles.SeamNoAccessListReader { Faults = true }; // lifted — but unreadable
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        ShareMask(user).Should().BeNull("never restored on a wall nobody could read");
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.RemovedByNoAccess, "the restore is still owed");
+
+        _h.DenyList = new GrantPolicyTestDoubles.SeamNoAccessListReader();
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Restored);
+        ShareMask(user).Should().Be(CollaborateMask);
     }
 }

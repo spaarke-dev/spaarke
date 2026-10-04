@@ -164,8 +164,10 @@ public sealed record AssignedAccessListEntry(
 ///
 /// <para><b>Fails closed</b> (ADR-003 / WP-6): an unreadable root, ledger or flag set writes nothing; an unreadable link,
 /// wall or deny list skips the subject; a failed write is a <see cref="AssignedAccessFailure"/>, never "done". A No Access
-/// check that THREW is also a failure of its own kind (<see cref="DenyListUnreadableFailure"/>, task 142 r3) — never read
-/// as an entry or a policy hold, so the job reports it.</para>
+/// check that could not be completed — the deny-veto check's <see cref="NoAccessCheckAnswer.Unverifiable"/> (task 142 r4),
+/// a throw (r3), or task 143's wall guard's <see cref="SecureShareWallOutcome.Unverifiable"/> on the share path (r4) — is
+/// also a failure of its own kind (<see cref="DenyListUnreadableFailure"/>): never read as an entry or a policy hold, so
+/// the run fails and the job reports it (owner round 13 items 4 and 5).</para>
 /// </remarks>
 public sealed class AssignedAccessMaterializer
 {
@@ -176,8 +178,9 @@ public sealed class AssignedAccessMaterializer
     internal static int RenewalWindowDays => GrantExpiryReminderJob.ReminderDays.Max();
 
     /// <summary>
-    /// The failure kind of a No Access check that could not be completed (it threw — task 142 r3): never an entry, never a
-    /// policy hold. Counted by <see cref="AssignedAccessReconciliationJob"/> so monitoring sees a deny-list read fault.
+    /// The failure kind of a No Access check that could not be completed (an Unverifiable answer or a throw — task 142 r3,
+    /// r4; the deny-veto check and task 143's wall guard alike): never an entry, never a policy hold. Counted by
+    /// <see cref="AssignedAccessReconciliationJob"/> so monitoring sees a No Access read fault.
     /// </summary>
     internal const string DenyListUnreadableFailure = "deny-list-unreadable";
 
@@ -741,7 +744,7 @@ public sealed class AssignedAccessMaterializer
 
                 if (outcome.Refusal.IsDenyListReadFault)
                 {
-                    // Task 142 r3: the No Access check could not be completed — a fault, reported; nothing is renewed this
+                    // Task 142 r3/r4: the No Access check could not be completed — a fault, reported; nothing is renewed this
                     // pass and the next one tries again (the grant is kept as it is below).
                     DenyListFault(run, subject, "its renewal");
                 }
@@ -785,9 +788,13 @@ public sealed class AssignedAccessMaterializer
 
                 if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
                 {
+                    // Cannot tell why it went (task 143's enforcer, or an operator): decide nothing this pass. Task 142 r4
+                    // (owner round 13 item 5): the wall check's Unverifiable FAILS THE RUN like the deny-list fault —
+                    // counted, logged, the job red — never a quiet "nothing decided".
+                    DenyListFault(run, subject, "the decision on its removed share", detail: wall.Fault);
                     run.Entry(subject, fields, user, AssignedAccessState.Shared, AssignedAccessReason.NoAccessUnverifiable,
                         AssignedAccessAction.None);
-                    return true; // cannot tell why it went: decide nothing this pass
+                    return true;
                 }
             }
 
@@ -931,10 +938,10 @@ public sealed class AssignedAccessMaterializer
         // contact is never suggested.
         if (flags.IsSecure)
         {
-            bool denied;
+            NoAccessCheckAnswer noAccess;
             try
             {
-                denied = await _accessibleRecords.IsGranteeDeniedOnRecordAsync(
+                noAccess = await _accessibleRecords.CheckGranteeNoAccessAsync(
                     run.Logical, run.RootId, subject.Id, Array.Empty<Guid>(), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -945,9 +952,18 @@ public sealed class AssignedAccessMaterializer
                 return;
             }
 
-            if (denied)
+            if (noAccess == NoAccessCheckAnswer.Denied)
             {
                 await SkipAsync(AssignedAccessReason.NoAccess).ConfigureAwait(false);
+                return;
+            }
+
+            if (noAccess != NoAccessCheckAnswer.Allowed)
+            {
+                // Task 142 r4 (owner round 13 item 4): the check could not be completed — Unverifiable (or an answer this
+                // code does not know). A fault, not an entry: not suggested (fail closed), and reported.
+                DenyListFault(run, subject, "its suggestion", detail: noAccess.ToString());
+                await SkipAsync(AssignedAccessReason.NoAccessUnverifiable).ConfigureAwait(false);
                 return;
             }
 
@@ -983,8 +999,9 @@ public sealed class AssignedAccessMaterializer
         {
             if (refusal.IsDenyListReadFault)
             {
-                // Task 142 r3: the core's No Access check THREW. Not "no-access" (an entry): a fault — nothing granted
-                // (fail closed), reported, and decided again next pass (Skipped is never sticky).
+                // Task 142 r3/r4: the core's No Access check could not be completed (Unverifiable, or it threw). Not
+                // "no-access" (an entry): a fault — nothing granted (fail closed), reported, and decided again next pass
+                // (Skipped is never sticky).
                 DenyListFault(run, subject, "its access");
                 await SkipAsync(AssignedAccessReason.NoAccessUnverifiable).ConfigureAwait(false);
                 return;
@@ -1053,6 +1070,10 @@ public sealed class AssignedAccessMaterializer
 
             if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
             {
+                // Task 142 r4 (owner round 13 item 5): a fault, not a wall — nothing shared or suggested (fail closed), and
+                // the run FAILS like the deny-list fault (counted, logged, the job red). The ledger keeps what it said, so a
+                // share 143's enforcer removed is still restored once the check reads again.
+                DenyListFault(run, subject, restoring ? "its share" : "its suggestion", detail: wall.Fault);
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccessUnverifiable, user)
                     .ConfigureAwait(false);
                 return;
@@ -1099,155 +1120,155 @@ public sealed class AssignedAccessMaterializer
         switch (row.State)
         {
             case AssignedAccessState.Granted:
-            {
-                if (stillNamedElsewhere)
                 {
-                    await EndAsync(AssignedAccessReason.KeptOtherField, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
+                    if (stillNamedElsewhere)
+                    {
+                        await EndAsync(AssignedAccessReason.KeptOtherField, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
 
-                var key = GrantKeyFor(run, subject);
-                var active = await ExternalGrantLifecycle.QueryActiveRowsAsync(_dataverse, key, ct).ConfigureAwait(false);
-                var grant = active.FirstOrDefault(r => r.Id == row.GrantId);
-                if (grant is null)
-                {
-                    await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
+                    var key = GrantKeyFor(run, subject);
+                    var active = await ExternalGrantLifecycle.QueryActiveRowsAsync(_dataverse, key, ct).ConfigureAwait(false);
+                    var grant = active.FirstOrDefault(r => r.Id == row.GrantId);
+                    if (grant is null)
+                    {
+                        await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
 
-                if (IsModified(row, grant))
-                {
-                    await EndAsync(AssignedAccessReason.KeptModified, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
+                    if (IsModified(row, grant))
+                    {
+                        await EndAsync(AssignedAccessReason.KeptModified, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
 
-                if (!run.Request.RevokeOnChange)
-                {
-                    run.Entry(subject, fields, null, AssignedAccessState.Granted, AssignedAccessReason.AccessRemoved,
-                        AssignedAccessAction.WouldRevoke);
-                    return;
-                }
+                    if (!run.Request.RevokeOnChange)
+                    {
+                        run.Entry(subject, fields, null, AssignedAccessState.Granted, AssignedAccessReason.AccessRemoved,
+                            AssignedAccessAction.WouldRevoke);
+                        return;
+                    }
 
-                if (TryParseRaisedGrant(row.Reason, out var priorLevel, out var priorExpiry)
-                    && Enum.IsDefined(typeof(ExternalAccessLevel), priorLevel))
-                {
-                    // A raised MANUAL grant goes back to what someone chose — the level AND the date (task 142 r2, finding
-                    // 1): an explicit lower request carrying an explicit date, so the core writes both and the rule's own
-                    // renewal (A5) never outlives the assignment. Not narrowed (the earlier level is below Collaborate).
-                    var conferredBefore = ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, run.Today);
-                    var restored = await WriteGrantAsync(run, subject, (ExternalAccessLevel)priorLevel, priorExpiry, ct)
+                    if (TryParseRaisedGrant(row.Reason, out var priorLevel, out var priorExpiry)
+                        && Enum.IsDefined(typeof(ExternalAccessLevel), priorLevel))
+                    {
+                        // A raised MANUAL grant goes back to what someone chose — the level AND the date (task 142 r2, finding
+                        // 1): an explicit lower request carrying an explicit date, so the core writes both and the rule's own
+                        // renewal (A5) never outlives the assignment. Not narrowed (the earlier level is below Collaborate).
+                        var conferredBefore = ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, run.Today);
+                        var restored = await WriteGrantAsync(run, subject, (ExternalAccessLevel)priorLevel, priorExpiry, ct)
+                            .ConfigureAwait(false);
+                        if (restored.Refusal is { } refusal)
+                        {
+                            if (IsPolicyHold(refusal))
+                            {
+                                // Task 142 r2, finding 2: the record's policy (Restricted, an organization on a Secure or
+                                // Limited record) or its No Access list forbids writing this grantee now — for as long as that
+                                // lasts, possibly indefinitely (a secure record stays secure). Not a failure: nothing is
+                                // exposed (the read path suppresses this grant on the same terms) and nothing can be done until
+                                // it changes. The ledger row stays Granted, so every pass tries again and the restore happens
+                                // the first pass after the policy allows it — a form save, Update Access, or the job.
+                                _logger.LogInformation(
+                                    "[ASSIGNED-ACCESS] {Type} {RootId}: putting back {Subject}'s raised grant waits on the record's " +
+                                    "policy ({Reason}).", run.Logical, run.RootId, subject, refusal.ReasonCode);
+                                run.Entry(subject, fields, null, AssignedAccessState.Granted,
+                                    AssignedAccessReason.RestorePendingPrefix + refusal.ReasonCode, AssignedAccessAction.None);
+                                return;
+                            }
+
+                            if (refusal.IsDenyListReadFault)
+                            {
+                                // Task 142 r3/r4 (verifier r2 finding 4; owner round 13 item 4): the core's No Access check
+                                // could not be completed. Not the record's policy: a fault, reported (Success=false), never a
+                                // green "restore-pending". Nothing written; the row stays Granted, so the next pass retries.
+                                DenyListFault(run, subject, "its earlier level");
+                                return;
+                            }
+
+                            run.Fail(subject, "restore-refused",
+                                $"The raised grant of {subject} could not be put back to its earlier level ({refusal.ReasonCode}).");
+                            return;
+                        }
+
+                        run.Writes++;
+
+                        if (restored.Warning is not null)
+                        {
+                            // ADR-003: the earlier level and date are back on the row, but that date has passed, so the grant
+                            // confers nothing — no access was put back, and none is reported. When the grant still conferred
+                            // before this write (the rule had renewed it past the operator's date), putting the date back ENDED
+                            // the access: reported as revoked. The core returns before its own cache invalidation on this
+                            // path, so the grantee's cached grant set is cleared here — never left serving the ended access.
+                            _logger.LogWarning(
+                                "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject}'s raised grant was put back to its earlier level and " +
+                                "date, which has passed; it confers no access ({Warning}).", run.Logical, run.RootId, subject,
+                                restored.Warning);
+                            await InvalidateGrantSetAsync(subject).ConfigureAwait(false);
+                            await EndAsync(AssignedAccessReason.PriorLevelRestoredLapsed,
+                                conferredBefore ? AssignedAccessAction.Revoked : AssignedAccessAction.Ledger).ConfigureAwait(false);
+                            return;
+                        }
+
+                        await EndAsync(AssignedAccessReason.PriorLevelRestored, AssignedAccessAction.Restored).ConfigureAwait(false);
+                        return;
+                    }
+
+                    run.Writes += await ExternalGrantLifecycle.DeactivateAsync(_dataverse, active.Select(r => r.Id), _logger, ct)
                         .ConfigureAwait(false);
-                    if (restored.Refusal is { } refusal)
-                    {
-                        if (IsPolicyHold(refusal))
-                        {
-                            // Task 142 r2, finding 2: the record's policy (Restricted, an organization on a Secure or
-                            // Limited record) or its No Access list forbids writing this grantee now — for as long as that
-                            // lasts, possibly indefinitely (a secure record stays secure). Not a failure: nothing is
-                            // exposed (the read path suppresses this grant on the same terms) and nothing can be done until
-                            // it changes. The ledger row stays Granted, so every pass tries again and the restore happens
-                            // the first pass after the policy allows it — a form save, Update Access, or the job.
-                            _logger.LogInformation(
-                                "[ASSIGNED-ACCESS] {Type} {RootId}: putting back {Subject}'s raised grant waits on the record's " +
-                                "policy ({Reason}).", run.Logical, run.RootId, subject, refusal.ReasonCode);
-                            run.Entry(subject, fields, null, AssignedAccessState.Granted,
-                                AssignedAccessReason.RestorePendingPrefix + refusal.ReasonCode, AssignedAccessAction.None);
-                            return;
-                        }
-
-                        if (refusal.IsDenyListReadFault)
-                        {
-                            // Task 142 r3 (verifier r2 finding 4): the core's No Access check THREW. Same wire code as an
-                            // entry, but not the record's policy: a fault, reported (Success=false), never a green
-                            // "restore-pending". Nothing written; the row stays Granted, so the next pass retries.
-                            DenyListFault(run, subject, "its earlier level");
-                            return;
-                        }
-
-                        run.Fail(subject, "restore-refused",
-                            $"The raised grant of {subject} could not be put back to its earlier level ({refusal.ReasonCode}).");
-                        return;
-                    }
-
-                    run.Writes++;
-
-                    if (restored.Warning is not null)
-                    {
-                        // ADR-003: the earlier level and date are back on the row, but that date has passed, so the grant
-                        // confers nothing — no access was put back, and none is reported. When the grant still conferred
-                        // before this write (the rule had renewed it past the operator's date), putting the date back ENDED
-                        // the access: reported as revoked. The core returns before its own cache invalidation on this
-                        // path, so the grantee's cached grant set is cleared here — never left serving the ended access.
-                        _logger.LogWarning(
-                            "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject}'s raised grant was put back to its earlier level and " +
-                            "date, which has passed; it confers no access ({Warning}).", run.Logical, run.RootId, subject,
-                            restored.Warning);
-                        await InvalidateGrantSetAsync(subject).ConfigureAwait(false);
-                        await EndAsync(AssignedAccessReason.PriorLevelRestoredLapsed,
-                            conferredBefore ? AssignedAccessAction.Revoked : AssignedAccessAction.Ledger).ConfigureAwait(false);
-                        return;
-                    }
-
-                    await EndAsync(AssignedAccessReason.PriorLevelRestored, AssignedAccessAction.Restored).ConfigureAwait(false);
+                    await InvalidateGrantSetAsync(subject).ConfigureAwait(false);
+                    await EndAsync(AssignedAccessReason.AccessRemoved, AssignedAccessAction.Revoked).ConfigureAwait(false);
                     return;
                 }
-
-                run.Writes += await ExternalGrantLifecycle.DeactivateAsync(_dataverse, active.Select(r => r.Id), _logger, ct)
-                    .ConfigureAwait(false);
-                await InvalidateGrantSetAsync(subject).ConfigureAwait(false);
-                await EndAsync(AssignedAccessReason.AccessRemoved, AssignedAccessAction.Revoked).ConfigureAwait(false);
-                return;
-            }
 
             case AssignedAccessState.Shared:
-            {
-                if (stillNamedElsewhere)
                 {
-                    await EndAsync(AssignedAccessReason.KeptOtherField, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                    if (stillNamedElsewhere)
+                    {
+                        await EndAsync(AssignedAccessReason.KeptOtherField, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
+
+                    if (row.SystemUserId is not { } user || user == Guid.Empty)
+                    {
+                        await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
+
+                    var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+                    if (current == 0)
+                    {
+                        await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
+
+                    if (row.GrantedLevel is not { } written || written != current)
+                    {
+                        await EndAsync(AssignedAccessReason.KeptModified, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
+
+                    if (flags.IsSecure)
+                    {
+                        // Owner S5: a secure record always keeps someone who can see it — this rule never removes a share there.
+                        await EndAsync(AssignedAccessReason.KeptSecureRecord, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
+
+                    if (!run.Request.RevokeOnChange)
+                    {
+                        run.Entry(subject, fields, user, AssignedAccessState.Shared, AssignedAccessReason.AccessRemoved,
+                            AssignedAccessAction.WouldRevoke);
+                        return;
+                    }
+
+                    var restoreTo = TryParsePrior(row.Reason, AssignedAccessReason.RaisedFromMaskPrefix, out var priorMask) ? priorMask : 0;
+                    if (!await RemoveOrRestoreShareAsync(run, subject, user, restoreTo, ct).ConfigureAwait(false))
+                        return; // failure recorded
+
+                    await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
+                        restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);
                     return;
                 }
-
-                if (row.SystemUserId is not { } user || user == Guid.Empty)
-                {
-                    await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
-
-                var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
-                if (current == 0)
-                {
-                    await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
-
-                if (row.GrantedLevel is not { } written || written != current)
-                {
-                    await EndAsync(AssignedAccessReason.KeptModified, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
-
-                if (flags.IsSecure)
-                {
-                    // Owner S5: a secure record always keeps someone who can see it — this rule never removes a share there.
-                    await EndAsync(AssignedAccessReason.KeptSecureRecord, AssignedAccessAction.Ledger).ConfigureAwait(false);
-                    return;
-                }
-
-                if (!run.Request.RevokeOnChange)
-                {
-                    run.Entry(subject, fields, user, AssignedAccessState.Shared, AssignedAccessReason.AccessRemoved,
-                        AssignedAccessAction.WouldRevoke);
-                    return;
-                }
-
-                var restoreTo = TryParsePrior(row.Reason, AssignedAccessReason.RaisedFromMaskPrefix, out var priorMask) ? priorMask : 0;
-                if (!await RemoveOrRestoreShareAsync(run, subject, user, restoreTo, ct).ConfigureAwait(false))
-                    return; // failure recorded
-
-                await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
-                    restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);
-                return;
-            }
 
             case AssignedAccessState.Adopted:
                 await EndAsync(AssignedAccessReason.KeptAdopted, AssignedAccessAction.Ledger).ConfigureAwait(false);
@@ -1599,7 +1620,7 @@ public sealed class AssignedAccessMaterializer
     /// The grant core's refusals that state the record's CURRENT policy or No Access list — task 138's Restricted and
     /// direct-only organization rules, FR-23's deny check — rather than a fault. A restore refused for one of them waits
     /// (task 142 r2, finding 2); any other refusal (an unreadable policy, a ceiling refusal) is a failure the job reports.
-    /// A No Access check that THREW carries the deny check's code but is a fault (task 142 r3,
+    /// A No Access check that could not be completed is a fault (task 142 r3/r4,
     /// <see cref="GrantPolicyDecision.IsDenyListReadFault"/>), so it is never a hold.
     /// </summary>
     private static bool IsPolicyHold(GrantPolicyDecision refusal)
@@ -1609,17 +1630,21 @@ public sealed class AssignedAccessMaterializer
                or ExternalGrantLifecycle.GranteeDeniedReasonCode;
 
     /// <summary>
-    /// A No Access check that could not be completed — it THREW (task 142 r3, verifier r2 finding 4). Never read as an
-    /// entry or as a policy hold: the caller writes nothing (fail closed, ADR-003), and the subject is reported as a
-    /// <see cref="DenyListUnreadableFailure"/> — logged as its own line and counted by the job — so a sustained outage of
-    /// the deny-list read turns the job red (ADR-036 A1) instead of passing green. The next pass decides again.
+    /// A No Access check that could not be completed. Three sources, one report: the deny-veto check answered
+    /// <see cref="NoAccessCheckAnswer.Unverifiable"/> (task 142 r4 · owner round 13 item 4 — a read fault it used to absorb
+    /// into "denied"), or it THREW (r3, verifier r2 finding 4), or task 143's wall guard answered
+    /// <see cref="SecureShareWallOutcome.Unverifiable"/> on the internal-user share path (r4 · owner round 13 item 5).
+    /// Never read as an entry or as a policy hold: the caller writes nothing (fail closed, ADR-003), and the subject is
+    /// reported as a <see cref="DenyListUnreadableFailure"/> — logged as its own line and counted by the job — so a
+    /// sustained outage turns the job red (ADR-036 A1) instead of passing green. The next pass decides again.
     /// </summary>
-    private void DenyListFault(Run run, AssignedSubject subject, string what, Exception? ex = null)
+    /// <param name="detail">What could not be read, when the answer names it (the wall guard's fault, the answer).</param>
+    private void DenyListFault(Run run, AssignedSubject subject, string what, Exception? ex = null, string? detail = null)
     {
         _logger.LogError(ex,
             "[ASSIGNED-ACCESS] DENY-LIST-UNREADABLE {Type} {RootId}: the No Access check for {Subject} could not be " +
-            "completed, so {What} was not written (fail closed); the next pass tries again.",
-            run.Logical, run.RootId, subject, what);
+            "completed ({Detail}), so {What} was not written (fail closed); the next pass tries again.",
+            run.Logical, run.RootId, subject, detail ?? ex?.GetType().Name ?? "unverifiable", what);
         run.Fail(subject, DenyListUnreadableFailure,
             $"The No Access list could not be checked for {subject} on this record, so {what} was not written. " +
             "It is tried again automatically.");
@@ -1901,8 +1926,13 @@ public sealed class AssignedAccessMaterializer
         var vocabulary = new[] { "assigned", "lawfirm", "attorney", "paralegal", "external", "internal", "to" };
         var display = new Dictionary<string, string>
         {
-            ["assigned"] = "Assigned", ["lawfirm"] = "Law Firm", ["attorney"] = "Attorney", ["paralegal"] = "Paralegal",
-            ["external"] = "(External)", ["internal"] = "(Internal)", ["to"] = "To",
+            ["assigned"] = "Assigned",
+            ["lawfirm"] = "Law Firm",
+            ["attorney"] = "Attorney",
+            ["paralegal"] = "Paralegal",
+            ["external"] = "(External)",
+            ["internal"] = "(Internal)",
+            ["to"] = "To",
         };
 
         var rest = name;

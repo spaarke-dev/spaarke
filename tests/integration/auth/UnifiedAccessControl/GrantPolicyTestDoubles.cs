@@ -214,6 +214,12 @@ internal static class GrantPolicyTestDoubles
         /// </summary>
         public Exception? Throws { get; set; }
 
+        /// <summary>
+        /// Task 142 round 18: when set, only the query whose SUBJECT fragment names this id faults (<c>null</c>) — one
+        /// faulted subject chunk among several, the others answering.
+        /// </summary>
+        public Guid? FaultsWhenSubjectNames { get; set; }
+
         /// <summary>How many chunk queries ran — proves the shared reader was consulted.</summary>
         public int Queries { get; private set; }
 
@@ -271,6 +277,8 @@ internal static class GrantPolicyTestDoubles
             if (Throws is { } ex)
                 return Task.FromException<List<NoAccessEntryRow>?>(ex);
             if (Faults)
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
+            if (FaultsWhenSubjectNames is { } faulting && subjectFilter.Contains(faulting.ToString(), StringComparison.Ordinal))
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
 
             var recordLoop = objectFilter.Contains("sprk_objectrecordid", StringComparison.Ordinal);
@@ -385,15 +393,26 @@ internal static class GrantPolicyTestDoubles
 
     /// <summary>
     /// A write-time No Access check that answers <paramref name="denied"/> for every grantee — for tests that are not
-    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>).
+    /// ABOUT the deny list (the deny decision itself is pinned through <see cref="RealDenyList"/>). Task 142 r4: the
+    /// check is a tri-state; <c>false</c> answers <see cref="NoAccessCheckAnswer.Allowed"/>, <c>true</c>
+    /// <see cref="NoAccessCheckAnswer.Denied"/>.
     /// </summary>
     internal static IAccessibleRecordSetService DenyListAnswering(bool denied)
+        => DenyListAnswering(denied ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed);
+
+    /// <summary>
+    /// A write-time No Access check that answers <paramref name="answer"/> for every grantee — including a value outside
+    /// the enum, which no production check returns, to pin that a consumer's defensive branch refuses it (task 142 r5,
+    /// r4 verifier finding 6). Only for tests ABOUT a consumer's handling of the answer; the answer itself is pinned
+    /// through <see cref="RealDenyList"/>.
+    /// </summary>
+    internal static IAccessibleRecordSetService DenyListAnswering(NoAccessCheckAnswer answer)
     {
         var mock = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
-        mock.Setup(s => s.IsGranteeDeniedOnRecordAsync(
+        mock.Setup(s => s.CheckGranteeNoAccessAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(),
                 It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(denied);
+            .ReturnsAsync(answer);
         return mock.Object;
     }
 }
