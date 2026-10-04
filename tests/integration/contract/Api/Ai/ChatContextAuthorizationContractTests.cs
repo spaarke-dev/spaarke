@@ -123,20 +123,52 @@ public class ChatContextAuthorizationContractTests
     [Theory]
     [InlineData("sprk_analysisoutput")]
     [InlineData("sprk_analysis")]
-    public async Task Create_AnAnalysisHost_IsAuthorizedAsReadOnTheSprkAnalysisesSet(string entityType)
+    public async Task Create_AnAnalysisHost_IsDecidedByTheAnalysisReadRule_ReadOnEveryAnchor_NeverARowReadOnTheAnalysis(string entityType)
     {
         await using var host = await ChatAuthHost.StartAsync();
-        var analysis = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var document = Guid.NewGuid();
+        var analysis = host.Analysis(("sprk_regardingmatter", matter), ("sprk_documentid", document));
 
-        var denied = await host.SendAsync(Create(hostContext: Host(entityType, analysis)));
+        // A colleague's (Deep) Read on the analysis ROW itself grants nothing (owner round 15 item 4).
         host.Access.Grant(Analyses, analysis, AccessRights.Read);
-        var allowed = await host.SendAsync(Create(hostContext: Host(entityType, analysis)));
+        host.Access.Grant(Matters, matter, AccessRights.Read);
+        var oneAnchorUnreadable = await host.SendAsync(Create(hostContext: Host(entityType, analysis)));
+        host.Access.Grant(Documents, document, AccessRights.Read);
+        var everyAnchorReadable = await host.SendAsync(Create(hostContext: Host(entityType, analysis)));
 
-        AiAuthorizationFilter.AnalysisEntitySet.Should().Be("sprk_analysises", "the live EntityDefinitions value (task 164 note §12)");
-        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        allowed.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Access.Calls.Should().Contain(new AccessCall(AccessPath.Record, Analyses, analysis, HasToken: true),
-            "the analysis host reaches the seam on the one sprk_analysis entity-set constant");
+        oneAnchorUnreadable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        everyAnchorReadable.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Access.Calls.Should().Contain(new AccessCall(AccessPath.Record, Matters, matter, HasToken: true));
+        host.Access.Calls.Should().Contain(new AccessCall(AccessPath.Document, Documents, document, HasToken: true));
+        host.Access.Calls.Should().NotContain(c => c.Set == Analyses,
+            "an analysis is decided by its anchors, never by a business-unit-depth Read on the analysis row");
+    }
+
+    [Fact]
+    public async Task Create_AnAnalysisHostWithNoAnchor_AnUnknownOne_AndAnAnchorReadFault_AreTheUniform403()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        var standalone = host.Analysis();
+        host.Access.Grant(Analyses, standalone, AccessRights.Read);
+        var unknown = Guid.NewGuid();
+        host.AnalysisRows.Setup(r => r.RetrieveAsync("sprk_analysis", unknown, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("sprk_analysis With Id = " + unknown + " Does Not Exist"));
+        var faulting = Guid.NewGuid();
+        host.AnalysisRows.Setup(r => r.RetrieveAsync("sprk_analysis", faulting, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var reference = Normalize(await (await host.SendAsync(Create(hostContext: Host("sprk_analysis", standalone)))).Content.ReadAsStringAsync());
+        foreach (var id in new[] { standalone, unknown, faulting })
+        {
+            var response = await host.SendAsync(Create(hostContext: Host("sprk_analysisoutput", id)));
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            var body = await response.Content.ReadAsStringAsync();
+            Normalize(body).Should().Be(reference);
+            body.Should().NotContain(id.ToString());
+        }
+
+        host.VerifyNoSessionCreated();
     }
 
     [Fact]
@@ -344,6 +376,24 @@ public class ChatContextAuthorizationContractTests
         var allowed = await host.SendAsync(Message(readable), HttpCompletionOption.ResponseHeadersRead);
         allowed.StatusCode.Should().Be(HttpStatusCode.OK);
         host.Files.Verify(f => f.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), "b!readable-drive", itemId, It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task Messages_AStoredAnalysisHost_IsReDecidedByItsAnchorsOnEveryTurn()
+    {
+        await using var host = await ChatAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        var analysis = host.Analysis(("sprk_regardingmatter", matter));
+        host.Access.Grant(Analyses, analysis, AccessRights.Read);
+        var session = host.SeedSession(hostContext: Host("sprk_analysisoutput", analysis));
+
+        (await host.SendAsync(Message(session))).StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the caller cannot read the analysis's matter, whatever their Read on the analysis row");
+        host.VerifyNoTurnRan();
+
+        host.Access.Grant(Matters, matter, AccessRights.Read);
+        var allowed = await host.SendAsync(Message(session), HttpCompletionOption.ResponseHeadersRead);
+        allowed.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -691,6 +741,9 @@ public class ChatContextAuthorizationContractTests
         public Mock<IChatDataverseRepository> Repo { get; } = new(MockBehavior.Loose);
         public Mock<IChatContextProvider> ContextProvider { get; } = new(MockBehavior.Loose);
         public Mock<ISessionPersistenceService> Persistence { get; } = new(MockBehavior.Loose);
+
+        /// <summary>The app-only analysis anchor read of task 162's analysis-read rule (ids only).</summary>
+        public Mock<IGenericEntityService> AnalysisRows { get; } = new(MockBehavior.Loose);
         public RecordingDispatchOrchestrator Dispatch { get; } = new();
         private InMemoryTenantCache Cache { get; } = new();
 
@@ -730,6 +783,7 @@ public class ChatContextAuthorizationContractTests
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton(Files.Object);
             builder.Services.AddSingleton(Playbooks.Object);
+            builder.Services.AddSingleton(AnalysisRows.Object);
 
             // The REAL session stack over an in-memory tenant cache and a substituted repository.
             builder.Services.AddSingleton<ITenantCache>(Cache);
@@ -782,6 +836,25 @@ public class ChatContextAuthorizationContractTests
         {
             var id = Guid.NewGuid();
             Access.Grant(entitySet, id, AccessRights.Read);
+            return id;
+        }
+
+        /// <summary>
+        /// A new analysis whose app-only anchor read answers exactly <paramref name="anchors"/> (anchor column, parent id);
+        /// no anchors is a standalone analysis.
+        /// </summary>
+        public Guid Analysis(params (string Column, Guid Id)[] anchors)
+        {
+            var id = Guid.NewGuid();
+            var row = new Microsoft.Xrm.Sdk.Entity("sprk_analysis", id);
+            foreach (var (column, parentId) in anchors)
+            {
+                var target = AnalysisAuthorizationFilter.LookupColumns.Single(c => c.Column == column).TargetLogicalName;
+                row[column] = new Microsoft.Xrm.Sdk.EntityReference(target, parentId);
+            }
+
+            AnalysisRows.Setup(r => r.RetrieveAsync("sprk_analysis", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(row);
             return id;
         }
 

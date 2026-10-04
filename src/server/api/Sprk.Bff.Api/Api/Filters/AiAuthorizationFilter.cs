@@ -64,8 +64,9 @@ public static class AiAuthorizationFilterExtensions
 /// pre-fix session and a revoked caller are both refused).</para>
 /// <para><b>By kind, no new map</b> (owner round 16 item 2): a host of a type the existing allow-list resolves (matter,
 /// project, work assignment, invoice) → Read on that record; a <c>sprk_document</c> host → document Read; a
-/// <c>sprk_analysis</c> host or the <c>sprk_analysisoutput</c> sentinel → Read on <see cref="AnalysisEntitySet"/>; a
-/// host of ANY other type is DROPPED from the session (never kept unchecked); a document id that is a GUID → document
+/// <c>sprk_analysis</c> host or the <c>sprk_analysisoutput</c> sentinel → task 162's analysis-read rule
+/// (<see cref="AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync"/>: Read on every anchor of the analysis, never
+/// a row Read on the analysis itself — owner round 15 item 4); a host of ANY other type is DROPPED from the session (never kept unchecked); a document id that is a GUID → document
 /// Read (<see cref="IAiAuthorizationService"/>); a stored document id that is an SPE drive-item id (a Compose Path B
 /// session) → the caller's own SPE read of that item, OBO (<see cref="ISpeFileOperations"/>); a playbook → the
 /// playbook-use decision (<see cref="PlaybookAuthorizationFilter.IsPlaybookUseAllowedForCallerAsync"/>).</para>
@@ -76,12 +77,6 @@ public class AiAuthorizationFilter : IEndpointFilter
 {
     private readonly IAiAuthorizationService _authorizationService;
     private readonly ILogger<AiAuthorizationFilter>? _logger;
-
-    /// <summary>
-    /// <c>sprk_analysis</c>'s entity set — THE one constant for it (spaarkedev1 live <c>EntityDefinitions</c>, 2026-10-03:
-    /// <c>sprk_analysises</c>; task 162 pinned the same value). The analysis-host Read check queries it.
-    /// </summary>
-    public const string AnalysisEntitySet = AnalysisAuthorizationFilter.AnalysisEntitySetLabel;
 
     /// <summary>The host-context type of a document host (a chat embedded on a document).</summary>
     public const string DocumentHostEntityType = "sprk_document";
@@ -295,6 +290,9 @@ public class AiAuthorizationFilter : IEndpointFilter
         /// <summary>A <c>sprk_document</c> host: document Read as the caller.</summary>
         Document,
 
+        /// <summary>A <c>sprk_analysis</c> host or the <c>sprk_analysisoutput</c> sentinel: the analysis-read rule.</summary>
+        Analysis,
+
         /// <summary>A type outside the authorizable kinds: the host context is dropped from the session.</summary>
         Unsupported,
 
@@ -310,6 +308,8 @@ public class AiAuthorizationFilter : IEndpointFilter
         public List<(string EntitySet, Guid RecordId, string Source)> Records { get; } = [];
 
         public List<(string DriveId, string ItemId)> SpeItems { get; } = [];
+
+        public HashSet<Guid> Analyses { get; } = [];
 
         public HashSet<Guid> Playbooks { get; } = [];
 
@@ -356,8 +356,7 @@ public class AiAuthorizationFilter : IEndpointFilter
         else if (string.Equals(entityType, AnalysisHostEntityType, StringComparison.OrdinalIgnoreCase)
                  || string.Equals(entityType, ChatSessionManager.AnalysisHostContextEntityType, StringComparison.OrdinalIgnoreCase))
         {
-            kind = HostKind.Record;
-            entitySet = AnalysisEntitySet;
+            kind = HostKind.Analysis;
         }
         else
         {
@@ -565,7 +564,7 @@ public class AiAuthorizationFilter : IEndpointFilter
         return null;
     }
 
-    /// <summary>A BODY host context: Record / Document → its check; Unsupported → dropped; Invalid → 400.</summary>
+    /// <summary>A BODY host context: Record / Document / Analysis → its check; Unsupported → dropped; Invalid → 400.</summary>
     private static IResult? AddRequestHost(ChatHostContext? host, ChatContextChecks checks)
     {
         var (kind, entitySet, recordId) = Classify(host);
@@ -576,6 +575,9 @@ public class AiAuthorizationFilter : IEndpointFilter
                 return null;
             case HostKind.Document:
                 checks.Documents.Add(recordId);
+                return null;
+            case HostKind.Analysis:
+                checks.Analyses.Add(recordId);
                 return null;
             case HostKind.Unsupported:
                 checks.DropRequestHost = true;
@@ -623,6 +625,9 @@ public class AiAuthorizationFilter : IEndpointFilter
                 break;
             case HostKind.Document:
                 checks.Documents.Add(recordId);
+                break;
+            case HostKind.Analysis:
+                checks.Analyses.Add(recordId);
                 break;
             case HostKind.Unsupported:
                 checks.DropStoredHostOf = session;
@@ -705,8 +710,9 @@ public class AiAuthorizationFilter : IEndpointFilter
     /// <summary>
     /// Runs every collected check as the caller, through the cached seams: documents via
     /// <see cref="IAiAuthorizationService"/>, records via <see cref="AuthorizationService.GetCallerRecordAccessAsync"/>
-    /// (Read), SPE items via the caller's own OBO read (<see cref="ISpeFileOperations.GetFileMetadataAsUserAsync"/>),
-    /// playbooks via the playbook-use decision. Any denial, an undecidable id, a missing service or token, or a fault
+    /// (Read), analysis hosts via the analysis-read rule (<see cref="IsAnalysisReadableAsync"/>), SPE items via the
+    /// caller's own OBO read (<see cref="ISpeFileOperations.GetFileMetadataAsUserAsync"/>), playbooks via the playbook-use
+    /// decision. Any denial, an undecidable id, a missing service or token, or a fault
     /// answers false.
     /// </summary>
     private async Task<bool> AreChatContextChecksAllowedAsync(HttpContext httpContext, ChatContextChecks checks, string userId)
@@ -733,7 +739,7 @@ public class AiAuthorizationFilter : IEndpointFilter
                 }
             }
 
-            if (checks.Records.Count > 0)
+            if (checks.Records.Count > 0 || checks.Analyses.Count > 0)
             {
                 var authorizationService = httpContext.RequestServices.GetService<AuthorizationService>();
                 if (authorizationService is null)
@@ -751,6 +757,16 @@ public class AiAuthorizationFilter : IEndpointFilter
                         _logger?.LogWarning(
                             "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: no Read on {EntitySet}({RecordId}) [{Source}]",
                             userId, entitySet, recordId, source);
+                        return false;
+                    }
+                }
+
+                foreach (var analysisId in checks.Analyses)
+                {
+                    if (!await IsAnalysisReadableAsync(httpContext, authorizationService, analysisId, userId, token, ct))
+                    {
+                        _logger?.LogWarning(
+                            "[AI-AUTH-FILTER] Chat-context DENIED for caller {UserId}: analysis host {AnalysisId} not readable", userId, analysisId);
                         return false;
                     }
                 }
@@ -798,5 +814,64 @@ public class AiAuthorizationFilter : IEndpointFilter
             _logger?.LogError(ex, "[AI-AUTH-FILTER] Chat-context decision faulted for caller {UserId}; denying (fail closed)", userId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// The analysis host, decided by task 162's analysis-read rule
+    /// (<see cref="AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync"/>) and evaluated exactly as the per-route
+    /// evaluator evaluates it: a Document check through <see cref="AuthorizationService.AuthorizeAsync"/>, a Record check
+    /// through <see cref="AuthorizationService.GetCallerRecordAccessAsync"/> and the check's operation. A rejection, no
+    /// check (an analysis with no anchor), an empty id or a check of any other path is a denial.
+    /// </summary>
+    private async Task<bool> IsAnalysisReadableAsync(
+        HttpContext httpContext, AuthorizationService authorizationService, Guid analysisId, string userId, string? token, CancellationToken ct)
+    {
+        var targets = await AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync(httpContext, analysisId, _logger);
+        if (targets.Rejection is not null || targets.Checks.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var check in targets.Checks)
+        {
+            if (check.RecordId == Guid.Empty)
+            {
+                return false;
+            }
+
+            switch (check.Path)
+            {
+                case FinanceCheckPath.Document:
+                    var document = await authorizationService.AuthorizeAsync(new AuthorizationContext
+                    {
+                        UserId = userId,
+                        ResourceId = check.RecordId.ToString(),
+                        Operation = check.Operation,
+                        CorrelationId = httpContext.TraceIdentifier,
+                        UserAccessToken = token,
+                    }, ct);
+                    if (!document.IsAllowed)
+                    {
+                        return false;
+                    }
+
+                    break;
+
+                case FinanceCheckPath.Record:
+                    var snapshot = await authorizationService.GetCallerRecordAccessAsync(
+                        userId, check.EntitySetName, check.RecordId, token, ct);
+                    if (!OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, check.Operation))
+                    {
+                        return false;
+                    }
+
+                    break;
+
+                default:
+                    return false;
+            }
+        }
+
+        return true;
     }
 }

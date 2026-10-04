@@ -121,7 +121,13 @@ public class PlaybookParameterPolicyTests
     [InlineData("todayUtc", "2026-10-04T00:00:00Z", true)]
     [InlineData("todayUtc", "2026-10-04T12:30:15.123+02:00", true)]
     [InlineData("todayUtc", "2026-10-04'/><condition attribute='x", false)]
+    [InlineData("todayUtc", "2026-10-04' or", false)]
     [InlineData("todayUtc", "yesterday", false)]
+    [InlineData("todayUtc", "2026-10-04T10:00", true)]
+    [InlineData("todayUtc", "2026-10-04T10:00:00.1234567Z", true)]
+    [InlineData("todayUtc", "2026-10-04T10:00:00.12345678Z", false)]
+    [InlineData("todayUtc", "2026-10-04 10:00", false)]
+    [InlineData("todayUtc", "10/04/2026", false)]
     [InlineData("dueWithinDays", "3", true)]
     [InlineData("dueSoonWindowUtc", "2026-13-40", false)]
     public void TypedKey_IsAcceptedOnlyWhenItParsesAsItsType(string key, string value, bool accepted)
@@ -216,6 +222,14 @@ public class PlaybookParameterPolicyTests
     [InlineData("{\"recordId\":\"{{matterIdentity}}\"}", false)]
     [InlineData("{\"recordId\":\"{{othermatterId}}\"}", false)]
     [InlineData("{\"note\":\"matterId\"}", false)]
+    [InlineData("{\"recordId\":\"{{{matterId}}}\"}", true)]
+    [InlineData("{\"recordId\":\"{{#if matterId}}x{{/if}}\"}", true)]
+    [InlineData("{\"recordId\":\"{{ MATTERID }}\"}", true)]
+    [InlineData("{\"recordId\":\"{{other}} matterId {{x}}\"}", false)]
+    [InlineData("{\"recordId\":\"{matterId}\"}", false)]
+    [InlineData("{\"recordId\":\"{{matterId\"}", false)]
+    [InlineData("{\"recordId\":\"{{foo_matterId}} {{matterId_x}}\"}", false)]
+    [InlineData("{\"recordId\":\"{{matterIdx matterId}}\"}", true)]
     [InlineData(null, false)]
     public void ReferencesParameter_MatchesTheKeyInsideAnyTemplateExpression(string? configJson, bool expected)
     {

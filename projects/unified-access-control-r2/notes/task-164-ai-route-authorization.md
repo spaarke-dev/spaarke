@@ -434,7 +434,8 @@ No violation, so no §6.5 path was needed.
 Branch `task/uac-r2-164-r1` (from `task/uac-r2-164` @ `f7237b527`). Binding inputs: owner rounds 1-12 (12 relayed by the
 harness), **owner round 16 items 2, 3 and 7** (main-session decisions under the owner's standing directive "fix it in
 the correct way; never defer or sideline", recorded on `work/unified-access-control-r2` @ `0c007772c`), and the
-main session's note in the worktree ("Task 164's escalations are DECIDED ... implement round 16 completely"). Live
+main session's note in the worktree ("Task 164's escalations are DECIDED ... implement, completely, owner round 15
+(task 162) and round 16"). Live
 Dataverse was read only (two read queries, §12.5); nothing was written.
 
 ### 12.1 The verifier's 28 items, one by one
@@ -455,7 +456,7 @@ Dataverse was read only (two read queries, §12.5); nothing was written.
 | 12 | Integrate 162 first; merge 162's fix rounds into 164 | `task/uac-r2-162-r1` @ `d1c5e6f34` merged (commit `dccbda0`, no conflict — 162-r1 touches only the analysis filter / endpoints). Any later 162 round (round 15's anchorless-analysis work) must also be merged before 164 integrates; order stays 162 → 164 → 163's `/ask` consumer (round 16 item 7). |
 | 13 | A full dev playbook GUID in `DATAVERSE-AUTHENTICATION-GUIDE.md` | Replaced by `{playbookId}` with a pointer to `DOCUMENT_PROFILE_PLAYBOOK_ID` in `useAiSummary.ts` (the guide is cross-environment; the id is environment data). |
 | 14 | F0 create | Built (§12.2). Tests `Create_*` (9). |
-| 15 | F0 validation, closed set, pinned `sprk_analysis` set | Non-GUID document id / host id → 400 before any rights query; host types decided BY KIND (round 16 item 2 replaced "outside the set → 400" by "→ dropped"); `AiAuthorizationFilter.AnalysisEntitySet` = `AnalysisAuthorizationFilter.AnalysisEntitySetLabel` = `sprk_analysises` (ONE constant, aliased), pinned and asserted at the seam by `Create_AnAnalysisHost_IsAuthorizedAsReadOnTheSprkAnalysisesSet`. |
+| 15 | F0 validation, closed set, pinned `sprk_analysis` set | Non-GUID document id / host id → 400 before any rights query; host types decided BY KIND (round 16 item 2 replaced "outside the set → 400" by "→ dropped"). The analysis host needs no entity set at all: it is decided by task 162's analysis-read rule (Read on every anchor, §12.2), which owner round 15 item 4 requires (never a business-unit-depth row Read on an analysis), so no `sprk_analysises` URL is ever built and 162's `AnalysisEntitySetLabel` stays the one constant (a deny-log label). Tests `Create_AnAnalysisHost_IsDecidedByTheAnalysisReadRule_...` (asserts no call on `sprk_analysises`), `Create_AnAnalysisHostWithNoAnchor_...`, `Messages_AStoredAnalysisHost_...`. |
 | 16 | F1 PATCH `/context` | `MapPatch`; still `AddSessionOwnershipFilter`; body ids authorized; session unchanged on deny. Tests `SwitchContext_*` (4). |
 | 17 | Chat session PlaybookId | The playbook-use decision on create / PATCH, and on every turn that loads the stored playbook (messages, agent message). |
 | 18 | F2 messages | Per-turn document + stored document / additional documents / host / playbook, before SSE. Tests `Messages_*` (7). |
@@ -467,7 +468,7 @@ Dataverse was read only (two read queries, §12.5); nothing was written.
 | 24 | Parameters F9 / F11 + FetchXML injection | Root cause escaped at the substitution point; shared policy at both HTTP entries; run user = caller (§12.3). |
 | 25 | Fail closed, every family | Chat: missing token (`Create_NoBearerToken_...`, `Messages_NoBearerToken_...`), seam fault (`Create_..._AndASeamFault_...`), undecidable stored ids; agent status fault (item 5); parameters: record-path fault (`Execute_RecordParameter_ASeamFault_...`), unresolvable caller (`Execute_CallerWhoseSystemUserIdCannotBeResolved_...`). |
 | 26 | Real-host denial for the 5 chat keys | `ChatContextAuthorizationContractTests` hosts the REAL `MapChatEndpoints`, `MapDispatchSessionEndpoint` and `MapAgentEndpoints`; one or more denial tests per key (§9). |
-| 27 | Seeds for the new decisions; V3-V5 bite | 29 seeds, each red then restored (§12.7). |
+| 27 | Seeds for the new decisions; V3-V5 bite | 34 seeds, each red then restored (§12.7). |
 | 28 | Suites: publish size | See item 7. Every test suite re-run (§12.8). |
 
 ### 12.2 The chat family (owner round 16 item 2, option (a))
@@ -485,7 +486,7 @@ gets exactly the old path (`History_ARouteWithNoChatRequestBody_KeepsTheExisting
 |---|---|
 | Host of a type `SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet` resolves (matter, project, work assignment, invoice, short or `sprk_` form) | Read via `AuthorizationService.GetCallerRecordAccessAsync` on that set (cached path) |
 | Host `sprk_document` | document Read via `IAiAuthorizationService` |
-| Host `sprk_analysis` or the `sprk_analysisoutput` sentinel | Read on `sprk_analysises` (the one constant) |
+| Host `sprk_analysis` or the `sprk_analysisoutput` sentinel | task 162's analysis-read rule, ONE declaration shared with `GET /api/ai/analysis/{analysisId}`: `AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync` reads the analysis's anchor ids app-only and requires Read on EVERY populated anchor (documents and records), evaluated exactly as the per-route evaluator does. No anchor, an unknown id, an anchor type with no entity set, no token or a fault → deny. Never a row Read on the analysis (owner round 15 item 4); see §12.10 for standalone analyses |
 | Host of ANY other type (contact, account, sprk_event, …) or a blank type | DROPPED: create stores no host; PATCH clears it; a stored one is cleared and the clear PERSISTED (`ChatSessionManager.UpdateSessionCacheAsync`) before the turn — the dispatch orchestrator re-reads the session itself |
 | Document id that is a GUID (body, stored, additional) | document Read via `IAiAuthorizationService` |
 | Body document id that is not a GUID (non-empty) | 400 before any rights query |
@@ -569,8 +570,15 @@ other caller of `ExecuteAsync` leaves it null (unchanged); `ExecuteAppOnlyAsync`
 - `Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs` and `ReAnalysisFlowTests.cs` fixtures: GUID document ids (the shape clients send; `doc-test-001`
   is now a 400) and a permissive record path on its `IAccessDataSource` mock, matching its existing permissive document
   mock (authorization itself is proven in the contract tests).
-- `AnalysisAuthorizationFilter.AnalysisEntitySetLabel` doc: now says the chat filter aliases it as the analysis-host set.
+- `AnalysisAuthorizationFilter`: the analysis-read rule's target resolution is extracted, unchanged, into
+  `ResolveAnalysisReadTargetsAsync` (internal static), which `GET /{analysisId}` and the chat analysis host both call —
+  one declaration, so the two can never disagree. Its `AnalysisEntitySetLabel` is untouched (it reaches no URL).
 - `DispatchSessionEndpoint`: the binding-required errorCode and detail are `internal` constants shared with the filter.
+- `PlaybookParameterPolicy` has no regular expression: the ISO date check is an exact parse over seven formats and the
+  node-reference detector is a plain scan. The second full unit run exposed the defect (§12.8): under full-suite load
+  the compiled date regex's first match exceeded its 100 ms budget and `RegexMatchTimeoutException` escaped the run
+  filter as a 500 instead of the 400. Code that cannot time out answers the same under any load; the cases are pinned
+  (`TypedKey_IsAcceptedOnlyWhenItParsesAsItsType`, `ReferencesParameter_...`, now 21 and 16 cases; seeds P9, P9b).
 
 ### 12.5 Inventory added this round
 
@@ -603,7 +611,8 @@ other caller of `ExecuteAsync` leaves it null (unchanged); `ExecuteAppOnlyAsync`
 | `ChatSession.DocumentDriveId` + `StoredSession.DocumentDriveId` (+ the two mapper lines, + `ComposeService` records it) | `ActiveDocumentIdentity.SpeDriveId` exists but is the CHAT session's active-document pointer, read by `SendWorkspaceArtifactHandler`; overloading it would change that handler's choices | A Path B session stores only the drive-ITEM id; Graph cannot read an SPE item without its drive. One nullable init property next to `DocumentId`, persisted the same way | a Compose Path B session's turns cannot be decided by the caller's SPE read; they would be denied for everyone (fail closed) — the Compose AI toolbar broken on unsaved documents |
 | `PlaybookOrchestrationService.QueryTextPositions` + `HasQueryTextPositions`; `PlaybookTemplateContextBuilder.QueryTextLanguage` + `EscapeForQueryText` + `EscapeQueryTextValue` | `IndexRetrieveNode.EscapeODataValue` and `RagService.EscapeFilterValue` escape the values THEY build; nothing escapes a Layer-1 template value [grep `SecurityElement.Escape|EscapeFilterValue|EscapeODataValue`] | Extended the existing Layer-1 renderer and context builder (no new type beyond the nested enum); the table is next to the walker that applies it | any parameter or node output injects into an app-only FetchXML query or an AI Search filter |
 | `PlaybookAuthorizationFilter.IsPlaybookUseAllowedForCallerAsync`, `GetRunUserId`, `ParameterRejectedErrorCode`, `RecordParameterOperation` | the filter's private `IsPlaybookUseAllowedAsync` and run mode | Same filter, same evaluation (the instance method now calls the shared private static) | the chat filter would copy the playbook-use rule (a second policy) |
-| `AiAuthorizationFilter` constants (`AnalysisEntitySet` alias, host types, deny / 400 details), `IsHostContextDropped`, `ChatContextDenied`, private `HostKind` / `ChatContextChecks` | the filter already guards every chat route but decided nothing for chat DTOs | The POML's "extend AiAuthorizationFilter"; no new filter class, no new map (`AnalysisEntitySet` aliases 162's constant: one value, one constant) | the five routes stay open |
+| `AiAuthorizationFilter` constants (host types, deny / 400 details), `IsHostContextDropped`, `ChatContextDenied`, private `HostKind` / `ChatContextChecks` / `IsAnalysisReadableAsync` | the filter already guards every chat route but decided nothing for chat DTOs | The POML's "extend AiAuthorizationFilter"; no new filter class, no new map, no new constant for the analysis entity | the five routes stay open |
+| `AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync` | `AuthorizeAnalysisAccessAsync`'s inline anchor read (task 162) | extracted from it, unchanged; the GET route calls it | the chat analysis host would need a second copy of 162's analysis-read rule, or a row Read that round 15 forbids |
 | `SessionOwnershipFilterExtensions.OwnedSessionItemKey` | the ownership filter already reads the session | one `Items` entry, so the turn does not read the session twice (POML constraint permits sharing it) | a second session read per turn |
 | removed / not added | — | No new service, endpoint, DI registration, option, job, Dataverse column, package or filter class; `FinanceAuthorizationFilter.cs` untouched; no new logical-name → entity-set map | — |
 
@@ -620,7 +629,10 @@ and `Sprk.Bff.Api.Tests.Services.Ai.PlaybookOrchestrationServiceTests` (P6-P8).
 |---|---|---|---|
 | C1 | create: body document / host / playbook not collected | AiAuthorizationFilter.cs | `Create_UnreadableHost_UnreadableDocument_UnknownIds_AndASeamFault_AreOneUniform403_AndNothingIsStored`, `Create_APlaybookTheCallerMayNotUse_IsTheUniform403_AndAPublicOneIsAccepted` (2/2) |
 | C2 | stored session context not collected (messages, dispatch, agent) | AiAuthorizationFilter.cs | `Messages_APreFixSessionWhoseStoredContextIsUnreadable_IsDenied`, `Dispatch_AStoredContextTheCallerCannotRead_..._AndTheOrchestratorNeverRuns`, `Revocation_ASessionCreatedWhileTheCallerHeldRead_...`, `AgentMessage_AResumedSessionWithAnUnreadableStoredHost_IsTheUniform403` (4/4) |
-| C3 | analysis host kind removed (sentinel treated as unsupported) | AiAuthorizationFilter.cs | `Create_AnAnalysisHost_IsAuthorizedAsReadOnTheSprkAnalysisesSet` (2/2 cases) |
+| C3 | analysis host kind removed (sentinel treated as unsupported → dropped) | AiAuthorizationFilter.cs | `Create_AnAnalysisHost_IsDecidedByTheAnalysisReadRule_...` (2 cases), `Messages_AStoredAnalysisHost_IsReDecidedByItsAnchorsOnEveryTurn` (3/3) |
+| C3b | analysis host decided by a row Read on `sprk_analysises` again (the first r1 build) | AiAuthorizationFilter.cs | `Create_AnAnalysisHost_IsDecidedByTheAnalysisReadRule_...` (2 cases), `Create_AnAnalysisHostWithNoAnchor_AnUnknownOne_AndAnAnchorReadFault_AreTheUniform403`, `Messages_AStoredAnalysisHost_...` (4/4) |
+| C3c | an analysis with no anchor allowed | AiAuthorizationFilter.cs | `Create_AnAnalysisHostWithNoAnchor_...` (1/1) |
+| C3d | a stored analysis host not collected | AiAuthorizationFilter.cs | `Messages_AStoredAnalysisHost_IsReDecidedByItsAnchorsOnEveryTurn` (1/1) |
 | C4 | request host drop not applied (unsupported host stored) | AiAuthorizationFilter.cs | `Create_AHostOfAnUnauthorizableType_IsDropped_...` (4 cases), `SwitchContext_ToAnUnauthorizableHostType_DropsTheHost` (5/5) |
 | C5 | stored host drop not persisted | AiAuthorizationFilter.cs | `Messages_AStoredHostOfAnUnauthorizableType_IsDroppedAndPersisted_AndTheTurnProceeds` (1/1) |
 | C6 | SPE item: the caller's SPE read ignored | AiAuthorizationFilter.cs | `Messages_AStoredSpeItemDocument_IsDecidedByTheCallersOwnSpeRead` (1/1) |
@@ -634,6 +646,8 @@ and `Sprk.Bff.Api.Tests.Services.Ai.PlaybookOrchestrationServiceTests` (P6-P8).
 | C13 | a Compose Path B load does not record the drive (`DocumentDriveId = null`) | ComposeService.cs | `Sprk.Bff.Api.Tests.Seam.Compose.ComposeReferenceMapSessionLedgerSeamTests.Load_PathB_RecordsTheDocumentsDriveOnTheSession_SoItsTurnsCanBeDecidedByTheCallersSpeRead` (1/1) |
 | P1 | parameter policy (syntax 400s) not applied | PlaybookAuthorizationFilter.cs | `Execute_ServerOwnedParameter_InAnyLetterCase_...` (6 cases), `Execute_ParameterOfTheWrongShape_Is400_AndNothingRuns` (6 cases), `AgentRunPlaybook_ParameterPolicy_AppliesTheSame_AndTheRunUserIsTheCaller` (13/13) |
 | P1b | the allow-list removed (an undeclared key accepted) | PlaybookParameterPolicy.cs | `Sprk.Bff.Api.Tests.Domain.Ai.PlaybookParameterPolicyTests.AnUndeclaredKey_IsRefused_WhateverItsValue` (4 cases), `Execute_ParameterOfTheWrongShape_Is400_AndNothingRuns(tone, formal)` (5 of 10; the other cases are refused by other rules) |
+| P9 | the node-reference scan ignores word boundaries | PlaybookParameterPolicy.cs | `ReferencesParameter_MatchesTheKeyInsideAnyTemplateExpression` (3 of 16 cases: the word-boundary ones) |
+| P9b | an ISO date accepts a space-separated time | PlaybookParameterPolicy.cs | `TypedKey_IsAcceptedOnlyWhenItParsesAsItsType(todayUtc, "2026-10-04 10:00")` (1 of 21) |
 | P2 | record parameters not authorized | PlaybookAuthorizationFilter.cs | `Execute_RecordParameter_UnknownDeniedAndFaulting_AreOneUniform403_AndNothingRuns`, `Execute_RecordParameter_ASeamFault_IsTheSameUniform403`, `AgentRunPlaybook_ParameterPolicy_...` (3/3) |
 | P3 | Write-when-a-writing-node-references-it dropped (always Read) | PlaybookAuthorizationFilter.cs | `Execute_RecordParameterAWritingNodeUses_RequiresWrite_ReadSufficesOtherwise` (1/1) |
 | P4 | the caller's systemuserid not published as the run user | PlaybookAuthorizationFilter.cs | `Execute_ReaderWithAcceptedParameters_RunsAsTheCaller_TheirSystemUserIdIsTheRunUser`, `AgentRunPlaybook_ParameterPolicy_...` (2/2) |
@@ -655,26 +669,28 @@ now matches line endings). Round-0 seeds S1-S15 still apply to the code they nam
 ### 12.8 Suites (end of the round)
 
 Affected set first (the new and edited contract / domain / orchestration tests, the chat and re-analysis fixtures, the
-guard file): 296/296 after the allow-list change. Then once, sequentially, nothing else building:
+guard file): 296/296 after the allow-list change. The full suites then ran three times, each run sequential with
+nothing else building, because code changed after the first two:
 
-| Suite | Result |
-|---|---|
-| `Sprk.Bff.Api.Tests` (full BFF unit suite, incl. the contract / seam / domain globs) | **14,382 passed, 0 failed, 54 skipped (14,436)**, 19 m 21 s |
-| `Spaarke.ArchTests` (NetArchTest + route-authorization guard) | **346 passed, 0 failed, 0 skipped (346)** |
-| `Sprk.Bff.Api.IntegrationTests` | **101 passed, 0 failed, 0 skipped (101)** |
-| `Spe.Integration.Tests` | **398 passed, 0 failed, 25 skipped (423)** — on the re-run after the fixture fix below |
-| `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api) | no vulnerable packages |
+| Suite | Run 1 (first commit) | Run 2 (+ analysis host by 162's rule) | **Run 3 (final, + regex-free policy)** |
+|---|---|---|---|
+| `Sprk.Bff.Api.Tests` (full BFF unit suite, incl. the contract / seam / domain globs) | 14,382 passed, 0 failed, 54 skipped (14,436) | 14,384 passed, **1 failed**, 54 skipped (14,439) | **14,399 passed, 0 failed, 54 skipped (14,453)** |
+| `Spaarke.ArchTests` (NetArchTest + route-authorization guard) | 346/346 | 346/346 | **346 passed, 0 failed (346)** |
+| `Sprk.Bff.Api.IntegrationTests` | 101/101 | 101/101 | **101 passed, 0 failed (101)** |
+| `Spe.Integration.Tests` | 392 passed, **6 failed**, 25 skipped; re-run 398 / 0 / 25 | 398 passed, 0 failed, 25 skipped (423) | **398 passed, 0 failed, 25 skipped (423)** |
+| `dotnet list package --vulnerable --include-transitive` (Sprk.Bff.Api) | none | none | **none** |
 
-`Spe.Integration.Tests` first run: 392 passed, **6 failed** (all six in `ReAnalysisFlowTests`), 25 skipped. Cause: the
-fixture's stored document id was `"doc-reanalysis-001"` (a non-GUID with no drive, which a turn now cannot decide —
-fail closed) and its `IAccessDataSource` mock was `Loose` with no `GetRecordAccessAsync` setup (the session playbook's
-row is now checked as the caller). Fixed in the fixture only (a GUID document id; a permissive `GetRecordAccessAsync`,
-matching the fixture's already-permissive `IAiAuthorizationService`); targeted `ReAnalysisFlowTests` +
-`ChatEndpointsTests` 28/28, then the full suite above. No timing / contention failure in any run.
-
-Added after the full unit run: the Compose seam test for the drive record
-(`Load_PathB_RecordsTheDocumentsDriveOnTheSession_SoItsTurnsCanBeDecidedByTheCallersSpeRead`); its class
-`ComposeReferenceMapSessionLedgerSeamTests` 3/3, seed C13 red, restored, 3/3 again.
+- **Spe run 1, 6 failures** (all in `ReAnalysisFlowTests`): the fixture's stored document id was `"doc-reanalysis-001"`
+  (a non-GUID with no drive, which a turn can no longer decide — fail closed) and its `IAccessDataSource` mock was
+  `Loose` with no `GetRecordAccessAsync` setup (the session playbook's row is now checked as the caller). Fixed in the
+  fixture only (a GUID document id; a permissive `GetRecordAccessAsync`, matching the fixture's already-permissive
+  `IAiAuthorizationService`); targeted `ReAnalysisFlowTests` + `ChatEndpointsTests` 28/28, then the full re-run.
+- **Unit run 2, 1 failure:** `Execute_ParameterOfTheWrongShape_Is400_AndNothingRuns(todayUtc, "2026-10-04' or")` —
+  `RegexMatchTimeoutException` from `PlaybookParameterPolicy`'s date regex, under full-suite load; it escaped the run
+  filter as a 500. A real, load-dependent defect, not a test problem: fixed (§12.4, S2), seeds P9 / P9b, run 3 green.
+  The same case passed in isolation before and after the fix.
+- The Compose Path B seam test was added after run 1 (its class 3/3 in isolation, seed C13); runs 2 and 3 include it.
+- Run 3 adds 17 tests over run 1: the seam test, two analysis-host chat tests, and fourteen policy cases.
 
 ### 12.9 Live gate additions (dev, main session; ids redacted to 8 characters)
 
@@ -690,16 +706,29 @@ The POML's chat-family gates (a)-(f) and (j) now apply, plus:
 - (m) **Unsupported host types:** open the Console on a contact record → the Assistant works, but without host context
   (no record memory for the contact). Expected under round 16 item 2; record it.
 - (n) **Analysis wizard:** CreateAnalysisWizardWidget's session create (sentinel `sprk_analysisoutput`) succeeds for the
-  analysis its user just created (Read on `sprk_analysises`).
+  analysis its user just created, when the user can read the analysis's anchor (its document / record). A STANDALONE
+  analysis (no anchor) is refused (403) until task 162's round-15 personal rule lands (§12.10) — record which case the
+  wizard produces.
 
 ### 12.10 For the main session
 
-- **Round 15 vs round 16 on the analysis host — a FACT to see, decided as written.** Round 16 item 2 decides the
-  `sprk_analysis` / `sprk_analysisoutput` host by Read on the `sprk_analysises` row; that is what is built.
-  `prvReadsprk_analysis` is Deep on Core and Basic User (§12.5), so a colleague in the same business-unit subtree passes
-  that check for another user's STANDALONE analysis — the case round 15 item 4 makes personal on task 162's routes. If
-  the analysis host should follow 162's analysis-read rule once 162's round-15 fix lands, the change is one branch in
-  `AiAuthorizationFilter.Classify` (the analysis kind) calling 162's decision; nothing else moves.
+- **The analysis host follows owner round 15 (built this round, after the first r1 build).** The first r1 build
+  decided the `sprk_analysis` / `sprk_analysisoutput` host by Read on the `sprk_analysises` ROW. `prvReadsprk_analysis` is
+  Deep on Core and Basic User (§12.5), so a colleague in the same business-unit subtree passed that check for another
+  user's analysis — exactly the "business-unit-depth row Read" round 15 item 4 forbids. Round 16 item 2 asks for the
+  analysis kind with no new map and one constant; round 15 asks that an analysis be readable only through its anchors
+  (or, standalone, by its creator). Both are met by deciding the host with task 162's analysis-read rule, extracted into
+  ONE declaration (`AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync`) that the GET route and the chat host
+  share. Seed C3b (the row Read restored) turns three tests red.
+- **Standalone analyses — owned by task 162 (round 15 items 1-4), inherited here with no further change.** On this
+  branch 162's rule denies an analysis with no anchor (162-r1). Round 15 makes a standalone analysis readable by its
+  creator (matched by systemuserid) and assigns that work, the writer fixes and the backfill to task 162. 162 adds it in
+  the shared declaration, and the chat host inherits it with no change in 164; until 162's round-15 round is merged,
+  a chat on a standalone analysis is refused for everyone (fail closed, never open). Integration order is already 162 →
+  164 (round 16 item 7). Merge note: if 162 expresses the creator rule as a check of a path other than Document /
+  Record, `AiAuthorizationFilter.IsAnalysisReadableAsync` denies it (its `default` branch) until it evaluates that path
+  the way the per-route evaluator does (a case in one switch; the failure mode is a refusal, never an allow), and the
+  chat standalone test gains its creator case alongside 162's own.
 - **Publish size (items 7 / 28) not measured**, per this round's harness instruction. Net change this round is code only
   (no package): expected well under +0.1 MB. Procedure if the main session measures at integration: CLAUDE.md §10 —
   fresh worktrees of `origin/master` and this branch at SHORT paths (e.g. `C:\wt164m`, `C:\wt164b`), `dotnet publish -c
@@ -724,7 +753,8 @@ The POML's chat-family gates (a)-(f) and (j) now apply, plus:
 
 **code-review** (coverage-first; severity · confidence):
 - Critical: none found.
-- **W1 · high:** the analysis-host Deep-read fact (§12.10 first bullet).
+- **W1 · high (FIXED this round):** the first r1 build decided the analysis host by a Deep row Read, contrary to owner
+  round 15 item 4; now task 162's analysis-read rule decides it (§12.10 first bullet, seeds C3-C3d).
 - **W2 · medium:** per-turn latency of the stored-playbook check (§12.10).
 - **W3 · medium:** Compose Path B sessions loaded before deploy are refused until reopened (fail closed, by design).
 - **W4 · low:** `AiAuthorizationFilter.cs` grew from 155 to 802 lines (about half of it doc comments) with a second responsibility (chat context) — the
@@ -732,6 +762,9 @@ The POML's chat-family gates (a)-(f) and (j) now apply, plus:
   use these records for an AI turn). `PlaybookAuthorizationFilter.cs` 720 lines; the new `PlaybookParameterPolicy.cs` 259.
 - **S1:** the near-miss in §12.3 (self-referencing context) was caught by a test before commit; the fan-out and
   structured-predecessor shapes are now pinned.
+- **S2 (FIXED):** a load-dependent answer — `PlaybookParameterPolicy`'s regular expressions carried match timeouts, so a
+  slow first match threw instead of answering (seen once in the second full run). Replaced by code that cannot time
+  out (§12.4).
 - AI smells: no interface added; no catch-log-rethrow; catches deny.
 
 **adr-check:** ADR-001 (Minimal API, `MapPatch`), ADR-002 (no plugins), ADR-003 (every fault / missing token / missing

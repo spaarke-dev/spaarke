@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -134,10 +133,21 @@ public static class PlaybookParameterPolicy
             "cohortObservations", "liveFacts", "precedents", "focus", "practiceAreaHint", "documentTypeHint",
         };
 
-    private static readonly Regex IsoDateTime = new(
-        @"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,7})?)?(Z|[+-]\d{2}:\d{2})?)?$",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
+    /// <summary>
+    /// The ISO 8601 shapes an <see cref="ParameterValueType.IsoDateTime"/> value may take: a date, or a date and time
+    /// (minutes, seconds, up to 7 fractional digits) with an optional <c>Z</c> / offset. An exact parse, not a regular
+    /// expression: it cannot time out, so the answer never depends on load (a timed-out match would escape as a 500).
+    /// </summary>
+    private static readonly string[] IsoDateTimeFormats =
+    [
+        "yyyy-MM-dd",
+        "yyyy-MM-dd'T'HH:mm",
+        "yyyy-MM-dd'T'HH:mmK",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ssK",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK",
+    ];
 
     /// <summary>
     /// Applies rules 1-5 to a run's caller parameters (a closed allow-list). Syntax only — no rights query — so a refusal is a 400 that never
@@ -219,8 +229,8 @@ public static class PlaybookParameterPolicy
                 int.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
                 && number >= typed.Min && number <= typed.Max,
             ParameterValueType.IsoDateTime =>
-                IsoDateTime.IsMatch(trimmed)
-                && DateTimeOffset.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _),
+                DateTimeOffset.TryParseExact(
+                    trimmed, IsoDateTimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _),
             _ => false,
         };
     }
@@ -251,6 +261,8 @@ public static class PlaybookParameterPolicy
     /// True when <paramref name="text"/> (a node's ConfigJson) references the parameter <paramref name="key"/> inside any
     /// <c>{{ … }}</c> expression — directly (<c>{{matterId}}</c>), through a helper, or through a bag path such as
     /// <c>{{start.matterId}}</c>. Deliberately broad (fail closed): a match is the signal "this node may use the value".
+    /// A plain scan (an expression is <c>{{</c>, then no brace, then <c>}}</c>; the key matches case-insensitively as a
+    /// whole word), not a regular expression: it cannot time out, so the answer never depends on load.
     /// </summary>
     public static bool ReferencesParameter(string? text, string key)
     {
@@ -259,7 +271,38 @@ public static class PlaybookParameterPolicy
             return false;
         }
 
-        var pattern = @"\{\{[^{}]*(?<![A-Za-z0-9_])" + Regex.Escape(key) + @"(?![A-Za-z0-9_])[^{}]*\}\}";
-        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
+        for (var open = text.IndexOf("{{", StringComparison.Ordinal); open >= 0; open = text.IndexOf("{{", open + 1, StringComparison.Ordinal))
+        {
+            var start = open + 2;
+            var end = start;
+            while (end < text.Length && text[end] != '{' && text[end] != '}')
+            {
+                end++;
+            }
+
+            if (end + 1 >= text.Length || text[end] != '}' || text[end + 1] != '}')
+            {
+                continue;
+            }
+
+            var expression = text.AsSpan(start, end - start);
+            for (var at = expression.IndexOf(key, StringComparison.OrdinalIgnoreCase); at >= 0;)
+            {
+                var before = at == 0 ? '{' : expression[at - 1];
+                var afterIndex = at + key.Length;
+                var after = afterIndex < expression.Length ? expression[afterIndex] : '}';
+                if (!IsWordChar(before) && !IsWordChar(after))
+                {
+                    return true;
+                }
+
+                var next = expression[(at + 1)..].IndexOf(key, StringComparison.OrdinalIgnoreCase);
+                at = next < 0 ? -1 : at + 1 + next;
+            }
+        }
+
+        return false;
     }
+
+    private static bool IsWordChar(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
 }

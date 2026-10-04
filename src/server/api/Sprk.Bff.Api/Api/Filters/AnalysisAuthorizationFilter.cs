@@ -141,9 +141,8 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     public const string CreateAnalysisPrivilege = "prvCreatesprk_analysis";
 
     /// <summary>
-    /// <c>sprk_analysis</c>'s entity set per live metadata (spaarkedev1, 2026-10-03: <c>sprk_analysises</c>) — the ONE
-    /// constant for it. Here it is the Privilege check's deny-log label; task 164's
-    /// <c>AiAuthorizationFilter.AnalysisEntitySet</c> aliases it as the entity set of the chat analysis-host Read check.
+    /// <c>sprk_analysis</c>'s entity set per live metadata (spaarkedev1, 2026-10-03: <c>sprk_analysises</c>). Used
+    /// ONLY as the Privilege check's deny-log label; it reaches no URL.
     /// </summary>
     public const string AnalysisEntitySetLabel = "sprk_analysises";
 
@@ -337,38 +336,48 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        FinanceAuthorizationTargets targets;
+        var targets = await ResolveAnalysisReadTargetsAsync(httpContext, analysisId, _logger);
+        return await EvaluateAsync(context, next, targets, FinanceDenial.UniformNotFound);
+    }
+
+    /// <summary>
+    /// The analysis-read rule's ONE declaration: the checks a caller must pass to read analysis
+    /// <paramref name="analysisId"/> — Read on EVERY populated anchor, read app-only (ids only) — or a rejection (the
+    /// uniform 404) for no caller token, an unknown id, an anchor type with no entity set and any fault. An analysis
+    /// with no populated anchor yields NO check, which every evaluator denies. Used by <c>GET /{analysisId}</c> and by
+    /// the chat analysis host (task 164, <see cref="AiAuthorizationFilter"/>), so the two can never disagree; it is never
+    /// a row Read on the analysis itself (owner round 15 item 4: no business-unit-depth Read on an analysis).
+    /// </summary>
+    internal static async Task<FinanceAuthorizationTargets> ResolveAnalysisReadTargetsAsync(
+        HttpContext httpContext, Guid analysisId, ILogger? logger)
+    {
         if (TokenHelper.ExtractBearerTokenOrNull(httpContext) is null)
         {
             // Every check would deny without a caller token; do not spend an app-only read first.
-            targets = FinanceAuthorizationTargets.Reject(FinanceAuthorizationFilter.UniformRecordNotFound(httpContext));
+            return FinanceAuthorizationTargets.Reject(FinanceAuthorizationFilter.UniformRecordNotFound(httpContext));
         }
-        else
+
+        try
         {
-            try
-            {
-                var entityService = httpContext.RequestServices.GetRequiredService<IGenericEntityService>();
-                var row = await entityService.RetrieveAsync(
-                    AnalysisEntityLogicalName, analysisId, AnchorColumns, httpContext.RequestAborted);
-                targets = BuildAnchorTargets(row, httpContext, _logger);
-            }
-            catch (Exception ex)
-            {
-                // Not found and any other fault are ONE answer (ADR-003): never distinguishable to the caller.
-                if (RecordContainerResolver.IsRecordNotFound(ex))
-                {
-                    _logger?.LogInformation("[ANALYSIS-AUTH] Analysis {AnalysisId} does not exist; uniform 404", analysisId);
-                }
-                else
-                {
-                    _logger?.LogWarning(ex, "[ANALYSIS-AUTH] Anchor read for analysis {AnalysisId} faulted; uniform 404 (fail closed)", analysisId);
-                }
-
-                targets = FinanceAuthorizationTargets.Reject(FinanceAuthorizationFilter.UniformRecordNotFound(httpContext));
-            }
+            var entityService = httpContext.RequestServices.GetRequiredService<IGenericEntityService>();
+            var row = await entityService.RetrieveAsync(
+                AnalysisEntityLogicalName, analysisId, AnchorColumns, httpContext.RequestAborted);
+            return BuildAnchorTargets(row, httpContext, logger);
         }
+        catch (Exception ex)
+        {
+            // Not found and any other fault are ONE answer (ADR-003): never distinguishable to the caller.
+            if (RecordContainerResolver.IsRecordNotFound(ex))
+            {
+                logger?.LogInformation("[ANALYSIS-AUTH] Analysis {AnalysisId} does not exist; uniform 404", analysisId);
+            }
+            else
+            {
+                logger?.LogWarning(ex, "[ANALYSIS-AUTH] Anchor read for analysis {AnalysisId} faulted; uniform 404 (fail closed)", analysisId);
+            }
 
-        return await EvaluateAsync(context, next, targets, FinanceDenial.UniformNotFound);
+            return FinanceAuthorizationTargets.Reject(FinanceAuthorizationFilter.UniformRecordNotFound(httpContext));
+        }
     }
 
     /// <summary>
