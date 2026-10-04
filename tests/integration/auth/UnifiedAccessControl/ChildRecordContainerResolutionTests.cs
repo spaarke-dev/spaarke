@@ -131,6 +131,37 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0, "no shared container may be in scope on an unknown answer");
     }
 
+    [Fact(DisplayName = "Task 147 r1: a MEMO (a CHILD since task 147) under a SECURE project resolves the PROJECT's own container — it is read, never refused for unknown links")]
+    public async Task Memo_UnderASecureProject_ResolvesTheProjectsOwnContainer()
+    {
+        // Verifier item 2: with sprk_memo in the CHILD taxonomy and no ChildAncestorLinks entry, every memo resolution
+        // refused 409 ("a child record type whose link ... is not known"). With its swept links it is read like a to-do.
+        var world = new World()
+            .WithChild("sprk_memo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_memo", ChildId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a MEMO under a NON-secure project resolves its own business-unit container")]
+    public async Task Memo_UnderANonSecureProject_ResolvesItsBusinessUnitContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_memo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: false, "b!a-stale-project-stamp-00000000000")
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_memo", ChildId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+    }
+
     [Fact(DisplayName = "Task 155: a to-do under a NON-secure project resolves its OWN business-unit container — no 409")]
     public async Task Todo_UnderANonSecureProject_ResolvesItsOwnBusinessUnitContainer()
     {
@@ -721,6 +752,19 @@ public partial class ChildRecordContainerResolutionTests
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_matter>sprk_matter;sprk_project>sprk_project;transactioncurrencyid>transactioncurrency")]
+    // Task 147 r1: sprk_memo joined the CHILD taxonomy (owner round 2 item 6) — live sweep, Dataverse MCP describe,
+    // read-only, 2026-10-04 (every lookup / owner column of sprk_memo with its target).
+    [InlineData("sprk_memo", "both",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_regardingagreement>sprk_agreement;sprk_regardinganalysis>sprk_analysis;"
+        + "sprk_regardingbudget>sprk_budget;sprk_regardingcommunication>sprk_communication;"
+        + "sprk_regardingcontact>contact;sprk_regardingdocument>sprk_document;sprk_regardingevent>sprk_event;"
+        + "sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingorganization>sprk_organization;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingservicerequest>sprk_servicerequest;"
+        + "sprk_regardingtimekeeper>sprk_timekeeper;sprk_regardingworkassignment>sprk_workassignment;"
+        + "sprk_reportcard>sprk_reportcard")]
     [InlineData("sprk_reportcard", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
@@ -1151,7 +1195,9 @@ public partial class ChildRecordContainerResolutionTests
     }
 
     [Theory(DisplayName = "Task 155 f3: a pair whose TYPE is unclassified, blank or missing is refused (409); an unreadable type row is 503 — never 'no root'")]
-    [InlineData("sprk_memo", 409)]
+    // Task 147 r1: this row used sprk_memo as its unclassified type; the memo is an intermediate now (CHILD taxonomy), so
+    // an unclassified table that names nothing above itself takes its place. The memo case is pinned below.
+    [InlineData("sprk_spendsnapshot", 409)]
     [InlineData(null, 409)]
     [InlineData("<not-found>", 409)]
     [InlineData("<timeout>", 503)]
@@ -1180,6 +1226,23 @@ public partial class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a to-do whose pair names a MEMO (an intermediate since task 147, never a to-do stamp source) is refused as unverifiable — never 'no root', never the BU")]
+    public async Task Pair_NamingAMemo_OnAToDo_IsRefusedAsUnverifiable()
+    {
+        var memoTypeRef = Guid.Parse("14714714-0000-0000-0000-00000000000e");
+        var world = new World()
+            .WithChild("sprk_todo", pairId: MatterId.ToString(), pairType: memoTypeRef)
+            .WithBusinessUnit(BusinessUnitContainer);
+        world.WithRecordType(memoTypeRef, "sprk_memo");
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155 f3: a pair naming the SAME record as the typed root agrees by identity — no type read, and the secure root decides")]
@@ -2057,7 +2120,7 @@ public partial class ChildRecordContainerResolutionTests
             "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_invoice",
             "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit",
             "account", "sprk_organization", "sprk_agreement", "sprk_budget", "sprk_reportcard", "sprk_analysis",
-            "sprk_recordtype_ref",
+            "sprk_recordtype_ref", "sprk_memo", "sprk_timekeeper",
         };
 
         private readonly Dictionary<string, EntitySecurability> _classificationOverrides = new(StringComparer.Ordinal);

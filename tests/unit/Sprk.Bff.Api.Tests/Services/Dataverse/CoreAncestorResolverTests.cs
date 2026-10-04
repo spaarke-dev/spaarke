@@ -412,6 +412,29 @@ public class CoreAncestorResolverTests
         }
     }
 
+    /// <summary>
+    /// Task 147 r1 (verifier item 1): since task 156 C# derivation keys on <see cref="CoreAncestorResolver.IntermediateRootColumns"/>,
+    /// while the TypeScript side (until task 169 lands) derives every <c>CHILD_RECORD_ENTITIES</c> target through the four
+    /// <c>sprk_regarding{core}</c> columns. A CHILD type missing from the C# map reads Unclassified on the server and is
+    /// derived in the browser — the two sides disagree and no taxonomy parity test sees it. This pins the C# precondition:
+    /// every CHILD is an intermediate here, and every CHILD whose root columns are the four stamp columns carries exactly
+    /// the four the TypeScript side reads.
+    /// </summary>
+    [Fact(DisplayName = "Task 147 r1: every CHILD taxonomy entity is a C# intermediate, so no CHILD target reads Unclassified on the server while the browser derives it")]
+    public void EveryChildTaxonomyEntity_IsAnIntermediate()
+    {
+        CoreAncestorResolver.ChildRecordEntities
+            .Should().OnlyContain(e => CoreAncestorResolver.IsStampSourceEntity(e),
+                "a record filed under any CHILD type must be derived on the server, as it is in the browser");
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a memo's root columns are exactly the four stamp columns (what the TypeScript side reads for a CHILD target)")]
+    public void Memo_RootColumns_AreTheFourStampColumns()
+    {
+        CoreAncestorResolver.IntermediateRootColumns["sprk_memo"]
+            .Should().BeEquivalentTo(CoreAncestorResolver.CoreAncestorLookups.Select(l => (l.LookupAttribute, l.EntityType)));
+    }
+
     // ClassifyStampSource — the ONE rule the cascade, the reconciliation job and the storage resolver share.
 
     private static readonly Guid EventId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");

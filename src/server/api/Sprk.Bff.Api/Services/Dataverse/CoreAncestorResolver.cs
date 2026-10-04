@@ -81,10 +81,13 @@ public sealed class CoreAncestorResolver
     /// through other evaluator terms, never through core-ancestor inheritance. That is a distinct,
     /// non-error state; see <see cref="CoreAncestorStatus.Unclassified"/>.
     /// <para><c>sprk_memo</c> was added by unified-access-control-r2 task 147 (owner round 2 item 6, C10 part 2). A memo
-    /// carries all four <c>sprk_regarding{core}</c> lookups (live spaarkedev1, read-only, 2026-10-04), so a record filed
-    /// under a memo now derives the memo's own core ancestor instead of reading as Unclassified. The TypeScript
-    /// <c>CHILD_RECORD_ENTITIES</c> changed in the same commit, and <c>Taxonomy_MatchesTheTypeScriptSide</c> pins the
-    /// two.</para>
+    /// carries all four <c>sprk_regarding{core}</c> lookups (live spaarkedev1, read-only, 2026-10-04). Since task 156,
+    /// derivation keys on <see cref="IntermediateRootColumns"/>, not on this set, so the memo is ALSO an intermediate there
+    /// (task 147 r1), a stamped child in <see cref="StampSourceColumns"/>, and has storage-resolver links
+    /// (<c>RecordContainerResolver.ChildAncestorLinks</c>); only then does a record filed under a memo derive the memo's
+    /// own core ancestor. The TypeScript <c>CHILD_RECORD_ENTITIES</c> changed in the same change, and
+    /// <c>Taxonomy_MatchesTheTypeScriptSide</c> pins the two; <c>EveryChildTaxonomyEntity_IsAnIntermediate</c> pins that
+    /// no CHILD type reads as Unclassified here while the TypeScript side derives it.</para>
     /// </remarks>
     public static readonly IReadOnlyList<string> ChildRecordEntities =
     [
@@ -164,6 +167,12 @@ public sealed class CoreAncestorResolver
             ["sprk_event"] = StandardRootColumns(),
             ["sprk_todo"] = StandardRootColumns(),
             ["sprk_analysis"] = StandardRootColumns(),
+            // Task 147 r1: the memo joined the CHILD taxonomy (owner round 2 item 6), so it is an intermediate too — a
+            // record filed under a memo is stamped with the memo's root. It carries all four sprk_regarding{core}
+            // columns (live spaarkedev1, read-only, 2026-10-04), the same four the TypeScript derivation reads for a
+            // CHILD target, so C# and TypeScript agree for a memo target. Without this entry the C# side read a memo
+            // target as Unclassified while the TypeScript side derived it (verifier item 1).
+            ["sprk_memo"] = StandardRootColumns(),
             ["sprk_invoice"] = [("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter")],
             // The canonical document link vocabulary's (Spaarke.Dataverse.DocumentLinkFields — the one declaration)
             // links to a project / matter / work assignment: the typed column and its related twin. EXCLUDED, by name:
@@ -222,6 +231,17 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardingbudget", "sprk_budget"), ("sprk_regardingcommunication", "sprk_communication"),
                 ("sprk_regardingdocument", "sprk_document"), ("sprk_regardinginvoice", "sprk_invoice"),
             ],
+            // Task 147 r1 (live sweep of sprk_memo, read-only, 2026-10-04): a memo carries the four stamp columns and
+            // these eight lookups to intermediates. Its report-card lookup is named sprk_reportcard, not
+            // sprk_regardingreportcard. The BFF's memo create stamps a memo filed under one of these (WP-1), so the
+            // copy must be kept fresh by the restamper and the stamp job like every other stamped child.
+            ["sprk_memo"] =
+            [
+                ("sprk_regardinganalysis", "sprk_analysis"), ("sprk_regardingcommunication", "sprk_communication"),
+                ("sprk_regardingdocument", "sprk_document"), ("sprk_regardingevent", "sprk_event"),
+                ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingagreement", "sprk_agreement"),
+                ("sprk_regardingbudget", "sprk_budget"), ("sprk_reportcard", "sprk_reportcard"),
+            ],
         };
 
     /// <summary>
@@ -247,6 +267,13 @@ public sealed class CoreAncestorResolver
             [
                 ("sprk_regardingperson", "contact"), ("sprk_regardingorganization", "sprk_organization"),
                 ("sprk_regardingaccount", "account"),
+            ],
+            // Task 147 r1 (live 2026-10-04). A timekeeper is a person (a biller on an invoice line): a party, as a
+            // contact is, never an owner of content.
+            ["sprk_memo"] =
+            [
+                ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+                ("sprk_regardingtimekeeper", "sprk_timekeeper"),
             ],
         };
 
