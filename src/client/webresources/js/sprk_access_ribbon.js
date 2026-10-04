@@ -10,6 +10,20 @@
  *   (Spaarke.Access.Ribbon.isAccessMenuVisible).
  * - "Update Access" - re-applies the Assigned-To rule (task 142) AND the record's No Access entries (task 143) to this
  *   record now, in ONE BFF call: POST /api/v1/external-access/assigned-access/sync. Shows both outcomes, then refreshes.
+ * - "Make Secure" (task 150, UX amendment; owner round 27 copy) - on a record that is NOT secure, for a caller with
+ *   Write: confirms with the owner-authored copy (MAKE_SECURE_CONFIRMATION, the ONE constant), then calls the
+ *   provisioning endpoint POST /api/v1/external-access/provision-project (task 144, generalized to the three roots;
+ *   task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the outcome.
+ *   Shipped only where task 148's transition is deployed - an import/packaging rule, not a runtime check
+ *   (infrastructure/dataverse/ribbon/AccessRibbons/README.md).
+ * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: calls the unsecure endpoint
+ *   POST /api/v1/external-access/unsecure-project. The SERVER decides who may remove the designation (owner F3: Full
+ *   Access holders and the record's creator); a refusal shows the endpoint's ProblemDetails message. This script
+ *   decides nothing about who may unsecure - its enable rule only hides the command from callers without Write.
+ *
+ * Secure state: sprk_issecure is on no form, so a ValueRule cannot read it. The rules read it with
+ * Xrm.WebApi.retrieveRecord (every user reads the true value under task 150's reader profile). Anything other than a
+ * stored true or false - a failed read, a masked (empty) value - hides BOTH commands (fail closed, ADR-003).
  *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
@@ -35,7 +49,7 @@ Spaarke.Access = Spaarke.Access || {};
 Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.1.0"; // 1.1.0 - task 150: Make Secure / Remove Secure
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -117,10 +131,312 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * EnableRule for the "Access" flyout itself: visible only when at least one menu item is available, so the caller
-     * never opens an empty menu. Today that is Update Access; task 150 ORs in Make Secure / Remove Secure here.
+     * never opens an empty menu. Make Secure and Remove Secure (task 150) are each available only to a caller for whom
+     * Update Access is - both require the same Write verdict - so "any item available" is exactly Update Access's rule,
+     * and no secure-state read is spent on the flyout itself.
      */
     ns.isAccessMenuVisible = function (primaryControl) {
         return ns.canUpdateAccess(primaryControl);
+    };
+
+    // =========================================================================================================
+    // Task 150 - Make Secure / Remove Secure
+    // =========================================================================================================
+
+    var PROVISION_PATH = "/api/v1/external-access/provision-project";
+    var UNSECURE_PATH = "/api/v1/external-access/unsecure-project";
+    var SECURE_STATE_TTL_MS = 30000;
+
+    /** The {record} word of the confirmation copy, by table (owner round 27). */
+    ns.RECORD_WORDS = {
+        sprk_project: "project",
+        sprk_matter: "matter",
+        sprk_workassignment: "work assignment"
+    };
+
+    /**
+     * The Make Secure confirmation - owner-authored copy, ACCEPTED verbatim in owner round 27 (2026-10-04; "adjust in UAT
+     * if necessary"). The ONE constant: change it only with the owner. {record} is project, matter or work assignment.
+     */
+    ns.MAKE_SECURE_CONFIRMATION = Object.freeze({
+        title: "Make this {record} secure?",
+        paragraphs: Object.freeze([
+            "Only the person who created this {record} and the people it is shared with will keep access. Everyone else " +
+                "in your organization loses access, and external contacts keep only access granted to them directly.",
+            "Its existing documents, events, to-dos and other related records become secure too, for the same people, " +
+                "and its files move to the {record}'s own secure storage. This can take a few minutes.",
+            "To remove the secure designation later, ask someone with Full Access to the {record}, or the person who " +
+                "created it."
+        ]),
+        confirmButtonLabel: "Make Secure",
+        cancelButtonLabel: "Cancel"
+    });
+
+    /**
+     * The confirmation for one table, {record} filled in - the strings openConfirmDialog shows. Null for a table that is
+     * not one of the three roots (no dialog, no call).
+     */
+    ns.makeSecureConfirmationFor = function (entityName) {
+        var word = ns.RECORD_WORDS[entityName];
+        if (!word) {
+            return null;
+        }
+
+        var fill = function (text) { return text.split("{record}").join(word); };
+        var copy = ns.MAKE_SECURE_CONFIRMATION;
+        return {
+            title: fill(copy.title),
+            text: copy.paragraphs.map(fill).join("\n\n"),
+            confirmButtonLabel: copy.confirmButtonLabel,
+            cancelButtonLabel: copy.cancelButtonLabel
+        };
+    };
+
+    var secureStates = {};
+
+    function entityNameOf(primaryControl) {
+        try {
+            return primaryControl.data.entity.getEntityName();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function stateKey(record) {
+        return record.recordType + "_" + record.recordId;
+    }
+
+    /**
+     * The record's stored secure flag: true, false - or null when it is not KNOWN (the read failed, or the value came
+     * back empty: a masked field-secured column). Null hides both commands. Cached per record for a short while, so the
+     * flyout's rules cost one read; the commands forget it before they refresh the form.
+     */
+    function readSecureState(entityName, record) {
+        var key = stateKey(record);
+        var cached = secureStates[key];
+        if (cached && Date.now() - cached.at < SECURE_STATE_TTL_MS) {
+            return cached.promise;
+        }
+
+        var promise;
+        try {
+            promise = Promise.resolve(Xrm.WebApi.retrieveRecord(entityName, record.recordId, "?$select=sprk_issecure"))
+                .then(function (row) {
+                    var value = row ? row.sprk_issecure : undefined;
+                    if (value === true || value === false) {
+                        return value;
+                    }
+
+                    console.warn(LOG, "sprk_issecure came back empty; Make Secure and Remove Secure stay hidden.");
+                    return null;
+                }, function (error) {
+                    console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
+                    return null;
+                });
+        } catch (error) {
+            console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
+            promise = Promise.resolve(null);
+        }
+
+        secureStates[key] = { at: Date.now(), promise: promise };
+        return promise;
+    }
+
+    function forgetSecureState(record) {
+        delete secureStates[stateKey(record)];
+    }
+
+    /** Test seam: clears the secure-state cache. */
+    ns._resetSecureStateCache = function () {
+        secureStates = {};
+    };
+
+    /**
+     * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
+     * the record, the same rule as Update Access) AND the stored flag equals `wantSecure`. An unknown flag is never equal,
+     * so a failed or masked read hides both commands.
+     */
+    function secureCommandEnabled(primaryControl, wantSecure) {
+        try {
+            if (!helpersLoaded()) {
+                return false;
+            }
+
+            var record = Spaarke.AssignedAccess.recordOf(primaryControl);
+            var entityName = entityNameOf(primaryControl);
+            if (!record || !ns.RECORD_WORDS[entityName]) {
+                return false;
+            }
+
+            return Promise.all([Promise.resolve(ns.canUpdateAccess(primaryControl)), readSecureState(entityName, record)])
+                .then(function (answers) {
+                    return answers[0] === true && answers[1] === wantSecure;
+                })
+                .catch(function (error) {
+                    console.warn(LOG, "A secure-command rule failed; the command stays hidden.", error);
+                    return false;
+                });
+        } catch (error) {
+            console.error(LOG, "A secure-command rule failed:", error);
+            return false;
+        }
+    }
+
+    /** EnableRule for "Make Secure": the record is NOT secure and the caller has Write. */
+    ns.canMakeSecure = function (primaryControl) {
+        return secureCommandEnabled(primaryControl, false);
+    };
+
+    /** EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3). */
+    ns.canRemoveSecure = function (primaryControl) {
+        return secureCommandEnabled(primaryControl, true);
+    };
+
+    /**
+     * POSTs { recordType, recordId } to a secure-designation endpoint through Spaarke.BffAuth.authenticatedFetch (no
+     * token: no call). Resolves - never rejects - with { ok, status, body } or { skipped, reason }.
+     */
+    function postDesignation(path, record) {
+        return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
+            return Spaarke.BffAuth.authenticatedFetch(baseUrl + path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                body: JSON.stringify({ recordType: record.recordType, recordId: record.recordId })
+            }, baseUrl);
+        }).then(function (response) {
+            if (!response) {
+                return { ok: false, skipped: true, reason: "no-token" };
+            }
+
+            return response.json().then(function (body) { return body; }, function () { return null; })
+                .then(function (body) {
+                    return { ok: response.ok, status: response.status, body: body, skipped: false };
+                });
+        }).catch(function (error) {
+            console.error(LOG, "The secure-designation call failed:", error);
+            return { ok: false, skipped: false, status: 0, body: null, reason: "network" };
+        });
+    }
+
+    /** The endpoint's own ProblemDetails message when it sent one; otherwise a status-only line. */
+    ns.refusalText = function (commandName, result) {
+        if (result && result.body && typeof result.body.detail === "string" && result.body.detail) {
+            return result.body.detail;
+        }
+
+        return commandName + " did not complete" + (result && result.status ? " (" + result.status + ")" : "") +
+            ". Reload the record to see its current state.";
+    };
+
+    /** Forgets the cached state, refreshes the form and then its command bar, so every rule reads the new state. */
+    function refreshAfter(primaryControl, record) {
+        forgetSecureState(record);
+        try {
+            Promise.resolve(primaryControl.data.refresh(false)).then(function () {
+                try { primaryControl.ui.refreshRibbon(); } catch (ribbonError) { /* the next evaluation re-reads */ }
+            }, function (refreshError) {
+                console.warn(LOG, "The form could not be refreshed:", refreshError);
+            });
+        } catch (error) {
+            console.warn(LOG, "The form could not be refreshed:", error);
+        }
+    }
+
+    /** Runs one designation call and shows its outcome as Update Access does (a notification, or an alert). */
+    function runDesignation(primaryControl, record, commandName, path, successText) {
+        return postDesignation(path, record).then(function (result) {
+            if (result.skipped && result.reason === "no-token") {
+                alert(commandName, "Sign-in needed - reload the page and retry. Nothing was changed.");
+                return result;
+            }
+
+            // Whatever the outcome, the record may have changed (a partial pass answers 500): re-read it.
+            refreshAfter(primaryControl, record);
+
+            if (!result.ok) {
+                alert(commandName, ns.refusalText(commandName, result));
+                return result;
+            }
+
+            notify(successText);
+            return result;
+        });
+    }
+
+    function startCommand(primaryControl, commandName) {
+        if (!helpersLoaded() || !Spaarke.BffAuth.authenticatedFetch) {
+            alert(commandName,
+                "The sign-in helper for this command is not loaded on this form. Reload the page and try again; if " +
+                "it persists, ask an administrator to check the Access command's libraries.");
+            return null;
+        }
+
+        var record = Spaarke.AssignedAccess.recordOf(primaryControl);
+        var entityName = entityNameOf(primaryControl);
+        if (!record || !ns.RECORD_WORDS[entityName]) {
+            alert(commandName, "Save the record first.");
+            return null;
+        }
+
+        return { record: record, entityName: entityName };
+    }
+
+    /**
+     * "Make Secure": confirms with the owner-authored copy, then calls the provisioning endpoint. Cancel calls nothing.
+     * @param {object} primaryControl - the form context
+     * @returns {Promise} settles when the command has finished (a test seam; the ribbon ignores it)
+     */
+    ns.makeSecure = function (primaryControl) {
+        try {
+            var start = startCommand(primaryControl, "Make Secure");
+            if (!start) {
+                return Promise.resolve();
+            }
+
+            var confirmation = ns.makeSecureConfirmationFor(start.entityName);
+            return Promise.resolve(Xrm.Navigation.openConfirmDialog(
+                {
+                    title: confirmation.title,
+                    text: confirmation.text,
+                    confirmButtonLabel: confirmation.confirmButtonLabel,
+                    cancelButtonLabel: confirmation.cancelButtonLabel
+                },
+                { height: 360, width: 560 }
+            )).then(function (answer) {
+                if (!answer || answer.confirmed !== true) {
+                    return null;
+                }
+
+                return runDesignation(primaryControl, start.record, "Make Secure", PROVISION_PATH,
+                    "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.");
+            });
+        } catch (error) {
+            console.error(LOG, "makeSecure failed:", error);
+            alert("Make Secure", "This command could not run now. Reload the page and try again.");
+            return Promise.resolve();
+        }
+    };
+
+    /**
+     * "Remove Secure": calls the unsecure endpoint. Who may remove the designation is the server's decision (F3); its
+     * refusal message is shown as sent.
+     * @param {object} primaryControl - the form context
+     * @returns {Promise} settles when the command has finished (a test seam; the ribbon ignores it)
+     */
+    ns.removeSecure = function (primaryControl) {
+        try {
+            var start = startCommand(primaryControl, "Remove Secure");
+            if (!start) {
+                return Promise.resolve();
+            }
+
+            return runDesignation(primaryControl, start.record, "Remove Secure", UNSECURE_PATH,
+                "This " + ns.RECORD_WORDS[start.entityName] + " is no longer secure.");
+        } catch (error) {
+            console.error(LOG, "removeSecure failed:", error);
+            alert("Remove Secure", "This command could not run now. Reload the page and try again.");
+            return Promise.resolve();
+        }
     };
 
     function alert(title, text) {

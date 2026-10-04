@@ -128,6 +128,20 @@ export interface IProvisionProjectResponse {
    * written by this call (the earlier call proved the creator's), so `sharedToCreatorSystemUserId` is the empty GUID.
    */
   childrenOnly?: boolean;
+  /**
+   * Task 143 (owner N6): named colleagues from `sharePrincipalIds` who were NOT shared to, each with a reason code — on
+   * the record's No Access list, or that list could not be checked. The other colleagues are still shared. Optional
+   * because the server added it. The server's `message` is not shown: the per-person copy is authored here
+   * (`describeSkippedPrincipal`, round 29) and returned as `warnings` on the result.
+   */
+  skippedPrincipals?: IProvisionSkippedPrincipal[];
+}
+
+/** One named colleague the server did not share to (mirrors `ProvisionSkippedPrincipal`). */
+export interface IProvisionSkippedPrincipal {
+  systemUserId: string;
+  reasonCode: string;
+  message: string;
 }
 
 /**
@@ -221,6 +235,12 @@ export interface IProvisionProjectResult {
   retryable?: boolean;
   /** The raw `reasonCode` extension, when the server sent one — for logs and support, not for display. */
   reasonCode?: string;
+  /**
+   * Round 29: per-person warnings on a SUCCESS — one authored line per named colleague the server did not share to
+   * (`skippedPrincipals`). The host shows them with its other warnings, as it does a failed file upload. Absent when
+   * none was skipped.
+   */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +466,68 @@ const REASON_STATES: Readonly<
       'Securing the project could not be finished, because no person who can be given access to it is recorded as its creator. An administrator needs to finish securing it.',
     retryable: false,
   },
+  // Task 143 (owner N6): the caller is on the record's No Access list (directly, through an organization they belong to,
+  // or one the record references). Refused 403 before any change; deterministic for that caller. Copy: round 29.
+  'sdap.provision.creator_no_access': {
+    failureKind: 'not-started',
+    errorMessage:
+      "You are on this project's No Access list, so you cannot secure it. Nothing about the project changed.",
+    retryable: false,
+  },
+  // Task 143: whether the caller is on the No Access list could not be checked (a read failed). Refused 500 before any
+  // change; the server tells the same caller they may call again. Copy: round 29 (resume-neutral, "could not be
+  // finished").
+  'sdap.provision.creator_no_access_unverifiable': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Whether you may access this project could not be checked, so securing it could not be finished. Nothing about the project changed.',
+    retryable: true,
+  },
 };
+
+/**
+ * `resume_creator_no_access` (task 143) answered **409**: a RESUME's person — the record's creator — is on its No Access
+ * list, so no share was issued to them and nothing was written. Deterministic: an administrator reviews the record's
+ * access (assigns it to the person who should hold it). Not retryable. Copy: round 29.
+ */
+const RESUME_CREATOR_NO_ACCESS = {
+  failureKind: 'needs-administrator' as const,
+  errorMessage:
+    "Securing the project could not be finished, because the person who created it is on its No Access list. Nothing about the project changed. An administrator needs to review the project's access.",
+  retryable: false,
+};
+
+/**
+ * `resume_creator_no_access` answered **500**: whether the RESUME's person is on the No Access list could not be checked
+ * (a read failed). Nothing was written; the server tells the same caller they may call again. Copy: round 29.
+ */
+const RESUME_CREATOR_NO_ACCESS_UNVERIFIABLE = {
+  failureKind: 'not-started' as const,
+  errorMessage:
+    'Securing the project could not be finished, because the access of the person who created it could not be checked. Nothing about the project changed.',
+  retryable: true,
+};
+
+/**
+ * Round 29: the per-person warnings for task 143's skipped colleagues (`skippedPrincipals`). Not failures — the project is
+ * secured and shared with everyone else; these say who was left out and why. `{name}` is the colleague's display name.
+ */
+const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>> = {
+  'sdap.provision.principal_no_access': name =>
+    `${name} is on this project's No Access list, so the project was not shared with them.`,
+  'sdap.provision.principal_no_access_unverifiable': name =>
+    `Whether ${name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access.`,
+};
+
+/**
+ * The authored per-person warning for one skipped colleague, or `undefined` for a reason code this client does not know
+ * (the caller logs it; the server's own `message` is never shown).
+ */
+export function describeSkippedPrincipal(reasonCode: string, name: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(SKIPPED_PRINCIPAL_COPY, reasonCode)
+    ? SKIPPED_PRINCIPAL_COPY[reasonCode](name)
+    : undefined;
+}
 
 /**
  * `resume_creator_unavailable` with `creatorState: unreadable` (task 133 b2, verifier finding). The record's creator could
@@ -578,10 +659,15 @@ export interface IProvisioningFailureExtensions {
  * The environment message names the missing setup ("secure-record setup") because that is the one thing an
  * administrator needs to hear to fix it — and because "provisioning failed: HTTP 500" tells the person in front of
  * the wizard nothing they can act on.
+ *
+ * `httpStatus` decides only `resume_creator_no_access`, the one code the endpoint answers with two statuses (409: the
+ * creator is on the No Access list; 500: that could not be checked). Without either status it is not classified — the
+ * client cannot tell which state the record is in, so it says neither (the generic copy, not retryable).
  */
 export function classifyProvisioningFailure(
   reasonCode?: string,
-  extensions?: IProvisioningFailureExtensions
+  extensions?: IProvisioningFailureExtensions,
+  httpStatus?: number
 ): {
   failureKind: ProvisioningFailureKind;
   errorMessage: string;
@@ -638,6 +724,14 @@ export function classifyProvisioningFailure(
 
   if (reasonCode === 'sdap.provision.cascade_children_unreadable' && extensions?.cascadeChildState === 'refused') {
     return { ...CASCADE_CHILDREN_REFUSED };
+  }
+
+  if (reasonCode === 'sdap.provision.resume_creator_no_access' && httpStatus === 409) {
+    return { ...RESUME_CREATOR_NO_ACCESS };
+  }
+
+  if (reasonCode === 'sdap.provision.resume_creator_no_access' && httpStatus === 500) {
+    return { ...RESUME_CREATOR_NO_ACCESS_UNVERIFIABLE };
   }
 
   if (reasonCode != null && Object.prototype.hasOwnProperty.call(REASON_STATES, reasonCode)) {
@@ -715,12 +809,16 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
  * @param request - Provisioning request payload
  * @param authenticatedFetch - MSAL-backed fetch function for BFF API calls
  * @param bffBaseUrl - Base URL for the BFF API (e.g. "https://spe-api-dev.azurewebsites.net/api")
+ * @param principalNames - Optional. Display names of the `sharePrincipalIds` the host sent, keyed by systemuser id — the
+ *   `{name}` of the per-person warnings (round 29). A host that names colleagues knows their names; the server's response
+ *   carries only ids. An id with no name here is shown as the id.
  * @returns IProvisionProjectResult — never throws.
  */
 export async function provisionSecureProject(
   request: IProvisionProjectRequest,
   authenticatedFetch: typeof fetch,
-  bffBaseUrl: string
+  bffBaseUrl: string,
+  principalNames?: Readonly<Record<string, string>>
 ): Promise<IProvisionProjectResult> {
   const url = `${bffBaseUrl}/api/v1/external-access/provision-project`;
 
@@ -759,7 +857,11 @@ export async function provisionSecureProject(
         /* ignore JSON parse failure — classification falls through to 'error' */
       }
 
-      const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(reasonCode, extensions);
+      const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(
+        reasonCode,
+        extensions,
+        response.status
+      );
 
       // The server's detail goes to the console for support, and ONLY there. It is written for an
       // operator reading a log; putting it in front of the user is the raw-ProblemDetails failure
@@ -800,7 +902,22 @@ export async function provisionSecureProject(
       additionalPrincipalsShared: data.additionalPrincipalsShared,
     });
 
-    return { success: true, data };
+    // Round 29: each colleague the server did not share to is a per-person warning, in authored copy.
+    const warnings: string[] = [];
+    for (const skipped of data.skippedPrincipals ?? []) {
+      const name = principalNames?.[skipped.systemUserId] ?? skipped.systemUserId;
+      const warning = describeSkippedPrincipal(skipped.reasonCode, name);
+      if (warning) {
+        warnings.push(warning);
+      } else {
+        console.error('[ProvisioningService] A colleague was not shared to, for a reason this client does not know:', {
+          systemUserId: skipped.systemUserId,
+          reasonCode: skipped.reasonCode,
+        });
+      }
+    }
+
+    return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data };
   } catch (err) {
     // Transport failure — no reason code exists, so this is an unclassified 'error'. The exception
     // message stays in the console for the same reason the server's detail does.

@@ -88,7 +88,7 @@ under `src/client` writes it** (`projectService.test.ts` pins the payload).
 - **System Administrator** profile: full, created by the platform, not narrowable — F4.
 - **The masked window**: the Web API cannot create a field permission on an unsecured column (0x8004f508), so a single
   solution import of IsSecured + permissions is not available on this path; the lock script secures each column and
-  grants both profiles immediately, measuring the window per table. During it the task 150 BFF refuses, never mis-routes.
+  grants both profiles immediately, measuring the window per table. During it the task 150 BFF (unless its identity holds System Administrator) reads the flag EMPTY too, with the FULL effect of the G-0 row in §9 for those seconds — external participants' contact-sourced rights withheld, grants 503 `policy_unreadable`, the last-reader rule, uploads 503, provisioning `secure_flag_not_set`: it refuses, never mis-routes (round 26 item 2(c)).
 - **Live verification on "a user in each BU"** is a post-lock gate (G-8): before the lock nothing is masked to verify.
 
 ## 5. Server changes
@@ -244,18 +244,15 @@ census field `ConfiguredWriters`, channels pinned in `ConfiguredWriterChannels`,
 
 ## 9. Stops and pending manual gates
 
-**STOP — ribbon (step 5).** Task 142's shared Access group (`infrastructure/dataverse/ribbon/AccessRibbons/`,
-`Spaarke.Access.Ribbon`) has not merged (no branch exists). Per the UX amendment the ribbon work stops here and is told
-to the orchestrator; no group, file or script was created. When 142 lands: add **Remove Secure** (enabled when secure
-and the caller has Write; F3 enforced server-side; refusal shows the ProblemDetails detail, option 6 above) to 142's
-group; **Make Secure** stays out of the ribbon until 148's transition ships (F7), and its confirmation copy is owner-
-authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
+**Ribbon (step 5) — BUILT on the integration branch (§21), pending its live gate G-11.** ~~STOP~~ superseded: task 142's
+Access group merged into `integ/uac-r2-batch4`; Make Secure and Remove Secure are in 142's ONE group, ONE ribbon file
+and ONE command script, Make Secure release-gated to task 148 (same release) and confirmed with owner round 27's copy.
 
 **Pending live gates — run by the main session, in this order (task 150 step 6).** Each: dry run → `-Apply` → `-Verify`.
 
 | Gate | Command | Notes |
 |---|---|---|
-| G-0 | `.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply` then `-Verify` | **Before G-1, and in dev before task 150 merges to master** (peers deploy master to dev: #1081 report, `5e39f2bea`); in every other environment before it receives a BFF carrying task 150. The task 150 BFF refuses uploads (503) to the 42 NULL rows (38 on the roots + 4 invoices; the script discovers every carrier of the column) and their children. Harmless to the old BFF (NULL and false already route the same). No deploy script enforces it (r1 item 11). **DEV: PASS 2026-10-03** (main session, ahead of integration, work branch `92d5f3cc1`, `notes/batch4-live-gates-2026-10-03.md`, run with the `task/uac-r2-150-r2` script): dry run 42 NULL rows (project 9, matter 18, work assignment 11, invoice 4); `-Apply` set all 42 to No; `-Verify` PASS on 4 tables. That `-Apply` printed "1 row(s) still hold NULL" per table and exited 1 — the counting defect fixed in c1-r2 (§7.1, §17), not residual NULLs. **Still required in every other environment** |
+| G-0 | `.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply` then `-Verify` | **Before G-1, and in dev before task 150 merges to master** (peers deploy master to dev: #1081 report, `5e39f2bea`); in every other environment before it receives a BFF carrying task 150. **Full effect of a task 150 BFF before G-0 (round 26 item 2(c)):** every NULL-flag root (42 in dev before G-0: 38 on the roots + 4 invoices; the script discovers every carrier of the column) reads `RootRecordFlags.Unreadable` — secure AND Restricted AND inactive — in the ONE shared flag reader, so: external participants lose EVERY contact-sourced right on it (direct and organization grants, standing-grant membership, organization expansion); grants on it answer 503 `policy_unreadable`; the internal last-reader rule applies to removing a user's share; uploads to it and its children answer 503 `secure_flag_unreadable`; the external SPA labels it secure; unsecure and the child-ownership pass refuse it. Every effect is a refusal (nothing mis-routes), but the records are unusable externally and for uploads until G-0. (Provisioning alone treats NULL as unflagged and writes the flag itself.) Guide §7d "Shipping the task 150 BFF before step 0". Harmless to the old BFF (NULL and false already route the same). No deploy script enforces it (r1 item 11). **DEV: PASS 2026-10-03** (main session, ahead of integration, work branch `92d5f3cc1`, `notes/batch4-live-gates-2026-10-03.md`, run with the `task/uac-r2-150-r2` script): dry run 42 NULL rows (project 9, matter 18, work assignment 11, invoice 4); `-Apply` set all 42 to No; `-Verify` PASS on 4 tables. That `-Apply` printed "1 row(s) still hold NULL" per table and exited 1 — the counting defect fixed in c1-r2 (§7.1, §17), not residual NULLs. **Still required in every other environment** |
 | G-1 | Deploy the BFF carrying task 150 | after task 133's own ordering (its schema gate first) |
 | G-2 | Deploy the client (`@spaarke/ui-components` consumers: Create Project wizard, Summarize Files) and confirm no cached old bundle is served | the old client's create payload names `sprk_issecure` |
 | G-3 | `.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl … -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then `-Verify` | task 133's gate — creates both profiles and their members |
@@ -266,6 +263,7 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 | G-8 | a user in each populated BU (root `Spaarke`, `Spaarke Business Unit 1`) reads the true value | escalation trigger 1's live check |
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
+| G-11 | Access ribbon (§21): after G-1 (BFF with 148 + 150) and the web resources (`sprk_/scripts/access_ribbon.js` 1.1.0, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the four amendment ui-tests pass. Omit `-SecureTransitionDeployed` only where the BFF lacks task 148 |
 
 **Merge gates (all hold before task 150 reaches master):**
 1. **F6: MET.** Rows 1-6 closed by owner round 10 item 9 (c1, §15); rows 7-11 closed by owner round 13 item 10

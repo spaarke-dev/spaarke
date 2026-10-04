@@ -1,16 +1,36 @@
 # AccessRibbons — the shared "Access" group (project, matter, work assignment main forms)
 
 > **Owner**: unified-access-control-r2 task 142 (GitHub #1065) — owner round 3 R3 ("Update Access") + round 3b UX
-> (disposition row 4: ONE "Access" group, ONE source file, ONE script). **Task 150** adds Make Secure / Remove Secure to
-> THIS group, in THIS template and THIS script — never a second group or script.
-> **Live state**: NOT deployed (manual gate — see Deployment). Nothing here was applied to any environment.
+> (disposition row 4: ONE "Access" group, ONE source file, ONE script). **Task 150** added Make Secure / Remove Secure
+> to THIS group, in THIS template and THIS script — never a second group or script.
+> **Live state**: NOT deployed (manual gate — see Deployment). Nothing here was applied to any environment. `-Verify`
+> was run read-only against spaarkedev1 on 2026-10-04: FAIL on all three forms (no `sprk.Access.*` command) — the
+> correct pre-import verdict.
 
 ## What is here
 
 | File | Role |
 |---|---|
-| `access-group.template.xml` | The ONE authored definition: a FlyoutAnchor "Access" (Sequence 905) on `Mscrm.Form.{{entity}}.MainTab.Actions.Controls._children`, holding "Update Access". Never hand-edit a per-entity copy. |
-| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. |
+| `access-group.template.xml` | The ONE authored definition: a FlyoutAnchor "Access" (Sequence 905) on `Mscrm.Form.{{entity}}.MainTab.Actions.Controls._children`, holding "Update Access" (10), "Make Secure" (20, task 150, release-gated) and "Remove Secure" (30, task 150). Never hand-edit a per-entity copy. |
+| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. `-SecureTransitionDeployed` keeps Make Secure; without it the generator removes it. |
+| `Set-AccessRibbon.ps1` | Task 150: the three forms in one step — dry run (default; 142's checked-in exports, no Dataverse call), `-Apply` (live: records the live command lists, exports the dedicated ribbon solution, checks in the work-assignment export, merges, packs, imports, publishes, then verifies) and `-Verify` (read-only `RetrieveEntityRibbon`: the before-list is intact, the Access commands call `access_ribbon.js`, Make Secure present exactly when `-SecureTransitionDeployed`). |
+
+### Make Secure is release-gated (task 150 acceptance (b); owner R3b / F7)
+
+Make Secure secures an EXISTING record, so its existing children — and, with round 26 item 3, its files — must follow
+it. That is task 148's provisioning transition. **The rule:** Make Secure is imported only into an environment whose BFF
+carries task 148's transition, in the same release — run the generator (and `Set-AccessRibbon.ps1`) with
+`-SecureTransitionDeployed` only there. Elsewhere the Access group ships Update Access and Remove Secure, and `-Verify`
+fails if Make Secure is present. Tasks 148 and 150 are integrated together (`integ/uac-r2-batch4`), so the release
+that carries this ribbon carries 148: pass `-SecureTransitionDeployed` when that BFF is deployed. It is a packaging rule
+by design — the ribbon has no reliable runtime signal of the BFF's build, and a missing command is the safe default.
+
+**Who may use them.** Both commands are enabled only for a caller with Write (the cached can-manage-access verdict — the
+same rule as Update Access). Make Secure needs the record NOT secure, Remove Secure needs it secure; `sprk_issecure` is
+read with `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) read hides both. Who may REMOVE the designation is
+the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
+ProblemDetails message. Make Secure confirms first with the owner-authored copy (owner round 27, the
+`MAKE_SECURE_CONFIRMATION` constant in the script).
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in
@@ -57,7 +77,8 @@ second run, no command lost. That proves the transformation only — the live me
 
 Order matters: the BFF route and the web resources must exist before a ribbon that calls them.
 
-1. **BFF** carrying task 142 deployed (after `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` / `-Verify`).
+1. **BFF** carrying task 142 deployed (after `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` / `-Verify`) — and,
+   for Make Secure, tasks 148 + 150 (the same release).
 2. **Web resources** (dataverse-deploy skill), published:
    `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`;
    `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`.
@@ -65,19 +86,24 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    project — Push Updates, Upload Documents, Summarize Files, Find Similar, Playbook Library, Create To Do, Dark Mode;
    matter — Push Updates, Create Project, Create Event, Create To Do, Upload Documents, Summarize Files, Find Similar,
    Playbook Library; work assignment — Create To Do, Dark Mode.
-4. **Export** a dedicated small ribbon solution (per `.claude/skills/ribbon-edit/SKILL.md` — never SpaarkeCore) holding
-   the three entities (ribbon only), unpack it, and **check in the exported work-assignment `RibbonDiff.xml`** under
-   `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing (amendment UX (f)).
-5. **Merge**, one entity at a time:
+4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150
+   and the web resources must be `access_ribbon.js` 1.1.0):
    ```powershell
-   pwsh ./Merge-AccessRibbon.ps1 -ExportedRibbonDiff <unpacked>/Entities/sprk_Project/RibbonDiff.xml `
-       -Entity sprk_project -Out <unpacked>/Entities/sprk_Project/RibbonDiff.xml
-   # repeat for sprk_matter and sprk_workassignment
+   pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
+   pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
+       -SecureTransitionDeployed -Apply                                                  # LIVE: export → merge → import → verify
+   pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SecureTransitionDeployed `
+       -Verify -BeforeList <WorkDir>/before.json                                         # read-only, exit 0 = PASS
    ```
-   Keep each "Commands before / after" print — the AFTER list must be the BEFORE list plus `sprk.Access.*`.
-6. **Pack, import, publish.** Then on each form: every command from step 3 still renders and runs; the "Access" flyout
+   `-Apply` records each form's live command list (`before.json`), exports a dedicated small ribbon solution (per
+   `.claude/skills/ribbon-edit/SKILL.md` — never SpaarkeCore) holding the three entities, **checks in the exported
+   work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
+   (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:
+   the AFTER list is the BEFORE list plus `sprk.Access.*`), packs, imports with publish, and runs `-Verify` against
+   `before.json`. Omit `-SecureTransitionDeployed` only in an environment whose BFF does not carry task 148.
+   Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
-   user, whose direct call to the sync route still gets 403.
+   user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state.
 7. **Form libraries** (task 142's post-save call, separate from the ribbon): on the three main forms, register
    `sprk_/scripts/bff_auth.js` FIRST, then `sprk_/scripts/assignedaccess_postsave.js`, with OnLoad handler
    `Spaarke.AssignedAccess.onLoad` (pass execution context).

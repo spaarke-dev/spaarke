@@ -18,6 +18,7 @@
 import {
   provisionSecureProject,
   classifyProvisioningFailure,
+  describeSkippedPrincipal,
   type IProvisionProjectResponse,
 } from '../provisioningService';
 
@@ -368,7 +369,12 @@ describe('provisionSecureProject — failure classification', () => {
   // securing by calling again. `retryable` must match what the endpoint's detail tells that caller — a state the
   // server calls retryable that the client does not offer to retry strands the user; the reverse promises an action
   // that fails.
-  const EMITTED: ReadonlyArray<[string, string, boolean]> = [
+  //
+  // Round 29 widened the row: an optional HTTP status (the one code answered with two statuses is classified by it), and
+  // the PER-PERSON warnings — reason codes the endpoint emits inside a successful response (`skippedPrincipals`), which are
+  // not failures: their kind is 'per-person-warning', their copy comes from describeSkippedPrincipal, and `retryable` does
+  // not apply (false).
+  const EMITTED: ReadonlyArray<[string, string, boolean, number?]> = [
     ['sdap.provision.secure_bu_not_found', 'environment-not-configured', false],
     ['sdap.provision.secure_bu_ambiguous', 'environment-not-configured', false],
     ['sdap.provision.secure_owner_team_not_found', 'environment-not-configured', false],
@@ -428,10 +434,30 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.resume_creator_unavailable', 'needs-administrator', false],
     // Task 148: secured and shared, but some existing related records are not secured yet — the next call completes them.
     ['sdap.provision.children_incomplete', 'interrupted', true],
+    // Task 143 (owner N6), copy round 29: the caller is on the No Access list — refused 403 before any change,
+    // deterministic; whether they are could not be checked — refused 500 before any change, the same caller may call again.
+    ['sdap.provision.creator_no_access', 'not-started', false],
+    ['sdap.provision.creator_no_access_unverifiable', 'not-started', true],
+    // Task 143: a RESUME's person on the No Access list — 409, an administrator reviews the access (the 500 "could not be
+    // checked" twin is pinned verbatim below, retryable).
+    ['sdap.provision.resume_creator_no_access', 'needs-administrator', false, 409],
+    // Task 143: named colleagues skipped inside a SUCCESS — per-person warnings, not failures.
+    ['sdap.provision.principal_no_access', 'per-person-warning', false],
+    ['sdap.provision.principal_no_access_unverifiable', 'per-person-warning', false],
   ];
 
-  it.each(EMITTED)('maps reason code %s to %s (retryable: %s)', (reasonCode, expected, retryable) => {
-    const result = classifyProvisioningFailure(reasonCode);
+  const FAILURE_CODES = EMITTED.filter(([, kind]) => kind !== 'per-person-warning');
+  const WARNING_CODES = EMITTED.filter(([, kind]) => kind === 'per-person-warning');
+
+  // A rest parameter: jest reads a callback declaring more parameters than a row's values as a done-callback test.
+  it.each(EMITTED)('maps reason code %s to %s (retryable: %s)', (...row) => {
+    const [reasonCode, expected, retryable, status] = row;
+    if (expected === 'per-person-warning') {
+      expect(describeSkippedPrincipal(reasonCode, 'Dana Reyes')).toContain('Dana Reyes');
+      return;
+    }
+
+    const result = classifyProvisioningFailure(reasonCode, undefined, status);
     expect(result.failureKind).toBe(expected);
     expect(result.retryable).toBe(retryable);
     expect(result.errorMessage.trim().length).toBeGreaterThan(0);
@@ -440,16 +466,28 @@ describe('provisionSecureProject — failure classification', () => {
   it("never advises trying again in the message — the retry is the host's action, keyed on `retryable`", () => {
     // A message that says "try again" renders in hosts that may have nothing to click (FR-31). The advice lives
     // next to the "Try securing again" button in SecureProvisioningOutcome, which renders it only when retryable.
-    for (const code of [...EMITTED.map(([c]) => c), undefined, 'sdap.provision.something_invented_later']) {
-      expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    const cases: Array<[string | undefined, number | undefined]> = [
+      ...FAILURE_CODES.map(([code, , , status]): [string, number | undefined] => [code, status]),
+      ['sdap.provision.resume_creator_no_access', 500],
+      [undefined, undefined],
+      ['sdap.provision.something_invented_later', undefined],
+    ];
+    for (const [code, status] of cases) {
+      expect(classifyProvisioningFailure(code, undefined, status).errorMessage).not.toMatch(
+        /try (securing )?(it )?again|retry/i
+      );
+    }
+    for (const [code] of WARNING_CODES) {
+      expect(describeSkippedPrincipal(code, 'Dana Reyes')).not.toMatch(/try (securing )?(it )?again|retry/i);
     }
   });
 
   it('never calls a secure-requested project a normal project', () => {
     // Task 150: `sprk_issecure` is the server's first write and never cleared; whether the project ends secure is open.
-    for (const code of [...EMITTED.map(([c]) => c), undefined]) {
-      expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/normal project/i);
+    for (const [code, , , status] of FAILURE_CODES) {
+      expect(classifyProvisioningFailure(code, undefined, status).errorMessage).not.toMatch(/normal project/i);
     }
+    expect(classifyProvisioningFailure(undefined).errorMessage).not.toMatch(/normal project/i);
   });
 
   // Task 150, owner round 10 item 9 (F6): the copy the owner picked, verbatim. Row 2 is the resume-neutral option D: an
@@ -524,10 +562,128 @@ describe('provisionSecureProject — failure classification', () => {
     // 068 found (container_not_recorded once fell through to copy that was wrong in both halves). Adding a Reason*
     // constant server-side means adding it to EMITTED and deciding deliberately what state and retryability it has.
     // Nothing the endpoint emits lands on the generic 'error' copy.
-    for (const [code] of EMITTED) {
-      expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
+    for (const [code, , , status] of FAILURE_CODES) {
+      expect(classifyProvisioningFailure(code, undefined, status).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(32);
+    for (const [code] of WARNING_CODES) {
+      expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
+    }
+    expect(EMITTED).toHaveLength(37);
+  });
+
+  // Round 29 (owner round 27's stance: the recommended wording, adjustable in UAT): task 143's five provisioning codes,
+  // verbatim. Resume-neutral ("could not be finished") as in rounds 10 and 17.
+  it('says the caller is on the No Access list and nothing changed — not retryable (creator_no_access, round 29)', async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(403, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.errorMessage).toBe(
+      "You are on this project's No Access list, so you cannot secure it. Nothing about the project changed."
+    );
+    expect(result.retryable).toBe(false);
+  });
+
+  it('says whether the caller may access the project could not be checked — retryable (creator_no_access_unverifiable, round 29)', async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.creator_no_access_unverifiable' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.errorMessage).toBe(
+      'Whether you may access this project could not be checked, so securing it could not be finished. Nothing about the project changed.'
+    );
+    expect(result.retryable).toBe(true);
+  });
+
+  it('reads resume_creator_no_access by its status: 409 — the creator is on the No Access list, an administrator reviews (round 29)', async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(409, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.errorMessage).toBe(
+      "Securing the project could not be finished, because the person who created it is on its No Access list. Nothing about the project changed. An administrator needs to review the project's access."
+    );
+    expect(result.failureKind).toBe('needs-administrator');
+    expect(result.retryable).toBe(false);
+  });
+
+  it("reads resume_creator_no_access by its status: 500 — the creator's access could not be checked, retryable (round 29)", async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.resume_creator_no_access' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.errorMessage).toBe(
+      'Securing the project could not be finished, because the access of the person who created it could not be checked. Nothing about the project changed.'
+    );
+    expect(result.failureKind).toBe('not-started');
+    expect(result.retryable).toBe(true);
+  });
+
+  it('does not guess resume_creator_no_access without a 409 or 500 — the generic state, never a retry', () => {
+    const result = classifyProvisioningFailure('sdap.provision.resume_creator_no_access');
+    expect(result.failureKind).toBe('error');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('turns each skipped colleague into an authored per-person warning on the success result (round 29)', async () => {
+    const walled = '55555555-5555-5555-5555-555555555555';
+    const unchecked = '66666666-6666-6666-6666-666666666666';
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [
+          {
+            systemUserId: walled,
+            reasonCode: 'sdap.provision.principal_no_access',
+            message: 'server prose, never shown',
+          },
+          {
+            systemUserId: unchecked,
+            reasonCode: 'sdap.provision.principal_no_access_unverifiable',
+            message: 'server prose, never shown',
+          },
+        ],
+      })
+    );
+
+    const result = await provisionSecureProject(
+      { projectId: PROJECT_ID, sharePrincipalIds: [walled, unchecked] },
+      authFetch as never,
+      BFF,
+      { [walled]: 'Dana Reyes', [unchecked]: 'Sam Ortiz' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      "Dana Reyes is on this project's No Access list, so the project was not shared with them.",
+      'Whether Sam Ortiz may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access.',
+    ]);
+    expect(result.warnings?.join(' ')).not.toContain('server prose');
+  });
+
+  it('returns no warnings when no colleague was skipped', async () => {
+    const authFetch = jest.fn().mockResolvedValue(okResponse({ ...successBody, skippedPrincipals: [] }));
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

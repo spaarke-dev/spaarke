@@ -65,7 +65,7 @@ import {
 
 import { useExternalContext } from '../hooks/useExternalContext';
 import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
-import type { ODataProject, ODataDocument } from '../api/web-api-client';
+import type { ODataProject, ODataDocument, ODataEvent } from '../api/web-api-client';
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
 
@@ -259,6 +259,11 @@ interface ActivityItem {
 }
 
 interface TaggedDocument extends ODataDocument {
+  _resolvedProjectId: string;
+}
+
+/** An event, tagged with the project whose events route returned it. */
+interface TaggedEvent extends ODataEvent {
   _resolvedProjectId: string;
 }
 
@@ -676,9 +681,8 @@ export const OutsideCounselDashboard: React.FC = () => {
 
   const { context, isLoading: contextLoading, error: contextError, refresh } = useExternalContext();
 
-  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+  const [projectEvents, setProjectEvents] = useState<TaggedEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
-  const [upcomingItems, setUpcomingItems] = useState<UpcomingItem[]>([]);
   const [upcomingLoading, setUpcomingLoading] = useState(false);
   const [projectDetails, setProjectDetails] = useState<ODataProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -740,47 +744,18 @@ export const OutsideCounselDashboard: React.FC = () => {
           context.projects.map(p =>
             // Events only — the legacy event-as-todo toggle was removed in R3 task 007.
             // To-dos are queried separately via `getProjectTodos` per task 008.
+            // sprk_event has no sprk_projectid column: its project lookup is sprk_regardingproject.
             getEvents(p.projectId, {
-              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_projectid_value,createdon',
+              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_regardingproject_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
-            }).then(evts => evts.map(e => ({ ...e, _resolvedProjectId: p.projectId })))
+            }).then(evts => evts.map((e): TaggedEvent => ({ ...e, _resolvedProjectId: p.projectId })))
           )
         );
         if (cancelled) return;
-        const all = nested.flat();
-
-        const sorted = [...all].sort(
-          (a, b) =>
-            (b.createdon ? new Date(b.createdon).getTime() : 0) - (a.createdon ? new Date(a.createdon).getTime() : 0)
-        );
-        setRecentActivity(
-          sorted.slice(0, 10).map(e => ({
-            id: e.sprk_eventid,
-            name: e.sprk_name,
-            projectName: e._sprk_projectid_value ?? 'Unknown Project',
-            projectId: e._resolvedProjectId,
-            relativeDate: formatRelativeDate(e.createdon),
-          }))
-        );
-
-        const now = new Date();
-        setUpcomingItems(
-          all
-            .filter(e => e.sprk_duedate && !isNaN(new Date(e.sprk_duedate).getTime()))
-            .sort((a, b) => new Date(a.sprk_duedate!).getTime() - new Date(b.sprk_duedate!).getTime())
-            .filter(e => (new Date(e.sprk_duedate!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24) < 30)
-            .slice(0, 5)
-            .map(e => ({
-              id: e.sprk_eventid,
-              name: e.sprk_name,
-              projectName: e._sprk_projectid_value ?? 'Unknown Project',
-              dueDate: e.sprk_duedate,
-            }))
-        );
+        setProjectEvents(nested.flat());
       } catch {
-        setRecentActivity([]);
-        setUpcomingItems([]);
+        setProjectEvents([]);
       } finally {
         if (!cancelled) {
           setActivityLoading(false);
@@ -793,6 +768,49 @@ export const OutsideCounselDashboard: React.FC = () => {
       cancelled = true;
     };
   }, [context]);
+
+  // An event names its project by the project record's name, from the project details read (the event row carries
+  // only the lookup id). Derived here so names fill in whichever of the two reads finishes last.
+  const projectNameById = React.useMemo(
+    () => new Map(projectDetails.map(p => [p.sprk_projectid, p.sprk_name])),
+    [projectDetails]
+  );
+
+  const recentActivity: ActivityItem[] = React.useMemo(
+    () =>
+      [...projectEvents]
+        .sort(
+          (a, b) =>
+            (b.createdon ? new Date(b.createdon).getTime() : 0) - (a.createdon ? new Date(a.createdon).getTime() : 0)
+        )
+        .slice(0, 10)
+        .map(e => ({
+          id: e.sprk_eventid,
+          name: e.sprk_name,
+          projectName: projectNameById.get(e._resolvedProjectId) ?? 'Unknown Project',
+          projectId: e._resolvedProjectId,
+          relativeDate: formatRelativeDate(e.createdon),
+        })),
+    [projectEvents, projectNameById]
+  );
+
+  const upcomingItems: UpcomingItem[] = React.useMemo(() => {
+    const now = Date.now();
+    return projectEvents
+      .flatMap(e => {
+        const due = e.sprk_duedate ? new Date(e.sprk_duedate).getTime() : NaN;
+        return isNaN(due) ? [] : [{ event: e, due }];
+      })
+      .sort((a, b) => a.due - b.due)
+      .filter(({ due }) => (due - now) / (1000 * 60 * 60 * 24) < 30)
+      .slice(0, 5)
+      .map(({ event: e }) => ({
+        id: e.sprk_eventid,
+        name: e.sprk_name,
+        projectName: projectNameById.get(e._resolvedProjectId) ?? 'Unknown Project',
+        dueDate: e.sprk_duedate,
+      }));
+  }, [projectEvents, projectNameById]);
 
   // Fetch documents across all accessible projects
   useEffect(() => {

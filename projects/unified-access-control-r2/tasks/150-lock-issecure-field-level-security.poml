@@ -161,23 +161,57 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
   </outputs>
 
   <ui-tests>
-    <test name="Secure flag is read-only on the form">
-      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={secure-matter-id}</url>
+    <test name="Secure flag cannot be changed outside the endpoints (UX amendment (1): no form shows the field)">
       <steps>
-        <step>Sign in as an existing non-admin test user with Write on the matter</step>
-        <step>Open the matter form; locate the Secure field</step>
-        <step>Attempt to change the value</step>
+        <step>Confirm the recorded live inventory (note section 3.1): no form or view on the four tables references sprk_issecure</step>
+        <step>As an existing non-admin test user with Write on a secure matter (outside the "Spaarke Demo" team), PATCH sprk_matters({id}) {"sprk_issecure":false} through the Web API</step>
+        <step>As the same user, GET sprk_matters({id})?$select=sprk_issecure</step>
       </steps>
-      <expected>The control is locked (FLS lock icon or disabled); the value shown is the true value, not blank.</expected>
+      <expected>The PATCH is refused or the value is unchanged on read-back; the read returns true (present, not empty) - the NEGATIVE and NO MASKING gates G-6 / G-7.</expected>
     </test>
     <test name="Secure and unsecure through the endpoint-backed surface">
       <steps>
-        <step>On a non-secure project, matter and work assignment, invoke the secure affordance</step>
-        <step>Reload; verify the flag reads true and the record shows as secure</step>
-        <step>Invoke the unsecure affordance; reload; verify the flag reads false</step>
+        <step>On a non-secure project, matter and work assignment, as each record's creator, open Access and choose Make Secure; confirm</step>
+        <step>After the refresh, verify the flag reads true and Access now lists Remove Secure, not Make Secure</step>
+        <step>Choose Remove Secure; after the refresh verify the flag reads false and Access lists Make Secure again</step>
         <step>Check the browser console for errors</step>
       </steps>
-      <expected>Each action succeeds via the BFF; no console errors; a user without Write sees the action refused with authored copy.</expected>
+      <expected>Each action succeeds via the BFF; no console errors; a user without Write sees neither command.</expected>
+    </test>
+    <test name="Access group (UX amendment)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project&amp;id={secure-project-id}</url>
+      <steps>
+        <step>As a Write-holder on a SECURE project, open the project form</step>
+        <step>Open the Access flyout on the command bar</step>
+      </steps>
+      <expected>Update Access and Remove Secure are listed; Make Secure is not. Every command recorded before the import (Set-AccessRibbon.ps1 before.json) is still on the command bar.</expected>
+    </test>
+    <test name="Make Secure (after 148)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={non-secure-matter-id}</url>
+      <steps>
+        <step>In an environment whose BFF carries task 148 and whose ribbon was imported with -SecureTransitionDeployed, as a Write-holder (the matter's creator - see note section 21, residual R-150-1) open a NON-secure matter</step>
+        <step>Open Access and choose Make Secure</step>
+        <step>Read the confirmation dialog, then choose Make Secure</step>
+        <step>Wait for the refresh; read sprk_issecure (Web API) and reopen Access</step>
+      </steps>
+      <expected>The dialog shows exactly the owner round 27 copy: title "Make this matter secure?", the three paragraphs with {record} = matter, buttons "Make Secure" (primary) and "Cancel". After confirming, the record reads secure after the refresh and Access lists Remove Secure, not Make Secure.</expected>
+    </test>
+    <test name="F3 refusal">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={secure-matter-id}</url>
+      <steps>
+        <step>As a Collaborate holder who is NOT the record's creator (and not a Full Access holder), open a SECURE matter</step>
+        <step>Open Access and choose Remove Secure</step>
+        <step>Read sprk_issecure (Web API) after the refresh</step>
+      </steps>
+      <expected>An alert titled "Remove Secure" shows the endpoint's refusal message (sdap.unsecure.not_permitted ProblemDetails detail, verbatim); the record stays secure. Repeated by the creator and by a Full Access holder: both succeed.</expected>
+    </test>
+    <test name="Read-only user">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_workassignment&amp;id={work-assignment-id}</url>
+      <steps>
+        <step>As a user with Read but not Write, open a SECURE work assignment and open Access (if shown)</step>
+        <step>Repeat on a NON-secure work assignment</step>
+      </steps>
+      <expected>On both records neither Make Secure nor Remove Secure is available (the Access flyout itself is hidden for a caller with no Access command).</expected>
     </test>
     <test name="Secure create with failed provisioning uploads nothing">
       <steps>

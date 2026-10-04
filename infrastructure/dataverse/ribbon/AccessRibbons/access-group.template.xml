@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The ONE authored definition of the shared "Access" form group (unified-access-control-r2 task 142; owner round 3 R3
-  "Update Access" + round 3b UX, disposition row 4: ONE group, ONE source file, ONE script - task 150 adds Make Secure /
-  Remove Secure HERE, never a second group or script).
+  "Update Access" + round 3b UX, disposition row 4: ONE group, ONE source file, ONE script - task 150 added Make Secure /
+  Remove Secure HERE, never a second group or script). Make Secure is a release-gated item: it is generated only with
+  Merge-AccessRibbon.ps1 -SecureTransitionDeployed (task 148's transition deployed in the target environment, the same
+  release); without it the merge removes it, and Update Access + Remove Secure ship alone.
 
   NEVER hand-edit a per-entity copy. Merge-AccessRibbon.ps1 instantiates this template for one entity ({{entity}} =
   the LOGICAL name: sprk_project | sprk_matter | sprk_workassignment) and merges it into a FRESH export of that entity's
@@ -45,7 +47,24 @@
                         ToolTipDescription="$LocLabels:sprk.Access.{{entity}}.UpdateAccess.ToolTipDescription"
                         ModernImage="Refresh"
                         Sequence="10" />
-                <!-- Task 150 adds Make Secure (Sequence 20) and Remove Secure (Sequence 30) here. -->
+                <!-- Task 150. Make Secure ships only where task 148's transition is deployed: Merge-AccessRibbon.ps1
+                     removes every sprk.Access.{{entity}}.MakeSecure.* node unless -SecureTransitionDeployed. -->
+                <Button Id="sprk.Access.{{entity}}.Form.MakeSecure"
+                        Command="sprk.Access.{{entity}}.MakeSecure.Command"
+                        LabelText="$LocLabels:sprk.Access.{{entity}}.MakeSecure.LabelText"
+                        Alt="$LocLabels:sprk.Access.{{entity}}.MakeSecure.LabelText"
+                        ToolTipTitle="$LocLabels:sprk.Access.{{entity}}.MakeSecure.LabelText"
+                        ToolTipDescription="$LocLabels:sprk.Access.{{entity}}.MakeSecure.LabelText"
+                        ModernImage="Permissions"
+                        Sequence="20" />
+                <Button Id="sprk.Access.{{entity}}.Form.RemoveSecure"
+                        Command="sprk.Access.{{entity}}.RemoveSecure.Command"
+                        LabelText="$LocLabels:sprk.Access.{{entity}}.RemoveSecure.LabelText"
+                        Alt="$LocLabels:sprk.Access.{{entity}}.RemoveSecure.LabelText"
+                        ToolTipTitle="$LocLabels:sprk.Access.{{entity}}.RemoveSecure.LabelText"
+                        ToolTipDescription="$LocLabels:sprk.Access.{{entity}}.RemoveSecure.LabelText"
+                        ModernImage="Cancel"
+                        Sequence="30" />
               </Controls>
             </MenuSection>
           </Menu>
@@ -76,6 +95,34 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.{{entity}}.MakeSecure.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.{{entity}}.MakeSecure.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js"
+                            FunctionName="Spaarke.Access.Ribbon.makeSecure">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.Access.{{entity}}.RemoveSecure.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.{{entity}}.RemoveSecure.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js"
+                            FunctionName="Spaarke.Access.Ribbon.removeSecure">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
 
   <EnableRules>
@@ -95,6 +142,22 @@
         <CrmParameter Value="PrimaryControl" />
       </CustomRule>
     </EnableRule>
+    <EnableRule Id="sprk.Access.{{entity}}.MakeSecure.EnableRule">
+      <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js"
+                  FunctionName="Spaarke.Access.Ribbon.canMakeSecure" Default="false">
+        <CrmParameter Value="PrimaryControl" />
+      </CustomRule>
+    </EnableRule>
+    <EnableRule Id="sprk.Access.{{entity}}.RemoveSecure.EnableRule">
+      <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js"
+                  FunctionName="Spaarke.Access.Ribbon.canRemoveSecure" Default="false">
+        <CrmParameter Value="PrimaryControl" />
+      </CustomRule>
+    </EnableRule>
   </EnableRules>
 
   <LocLabels>
@@ -109,6 +172,12 @@
     </LocLabel>
     <LocLabel Id="sprk.Access.{{entity}}.UpdateAccess.ToolTipDescription">
       <Titles><Title description="Give this record's assigned people their access now and re-apply its No Access list" languagecode="1033" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.{{entity}}.MakeSecure.LabelText">
+      <Titles><Title description="Make Secure" languagecode="1033" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Access.{{entity}}.RemoveSecure.LabelText">
+      <Titles><Title description="Remove Secure" languagecode="1033" /></Titles>
     </LocLabel>
   </LocLabels>
 </AccessRibbon>

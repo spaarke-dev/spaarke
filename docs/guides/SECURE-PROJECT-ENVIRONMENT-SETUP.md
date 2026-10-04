@@ -837,11 +837,12 @@ user setting a value that looks meaningful. Its NULL rows are part of step 0.
 **Order — every step dry-run first, then `-Apply`, then `-Verify` (each must exit 0):**
 
 ```powershell
-# 0. One-time NULL cleanup (owner decision Q1). BEFORE the environment receives ANY BFF build containing task 150
-#    (it refuses an EMPTY flag: 503 on uploads to every NULL-flag row and its children). Where an environment is fed
-#    from master (dev: peers deploy master), that means BEFORE task 150 merges to master. Harmless to the older BFF,
-#    which already routes NULL and false the same. Nothing in Deploy-BffApi.ps1 or the release flow checks this:
-#    -Verify (exit 0) is the gate, run by hand.
+# 0. One-time NULL cleanup (owner decision Q1). BEFORE the environment receives ANY BFF build containing task 150,
+#    which reads an EMPTY flag as UNREADABLE everywhere - not only uploads: see "Shipping the task 150 BFF before
+#    step 0" below for the full effect on every NULL-flag record. Where an environment is fed from master (dev: peers
+#    deploy master), that means BEFORE task 150 merges to master. Harmless to the older BFF, which already routes NULL
+#    and false the same. Nothing in Deploy-BffApi.ps1 or the release flow checks this: -Verify (exit 0) is the gate,
+#    run by hand.
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com                # dry run: ids + counts
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply         # writes a JSON report
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify
@@ -861,14 +862,59 @@ $env:AZURE_TOKEN_CREDENTIALS = 'AzureCliCredential'
 dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"
 ```
 
+**Shipping the task 150 BFF before step 0 — the full effect (round 26 item 2(c)).** The task 150 BFF reads an EMPTY
+`sprk_issecure` as **unknown, and unknown fails closed** — in every reader, not only the upload path. Until step 0 has
+run, every record whose flag is NULL (and every record below it) is treated as **Unreadable: secure AND Restricted AND
+inactive at once**:
+
+- **External participants lose every contact-sourced right on it** — direct grants, organization grants, standing-grant
+  membership and organization expansion alike (the shared flag reader `ExternalParticipationService` answers
+  `RootRecordFlags.Unreadable`; the read-time evaluator removes every contact-sourced contribution). Their projects
+  disappear from the external SPA and the record-scoped routes refuse them.
+- **Grants answer 503 `policy_unreadable`** — granting a contact or an organization on it is refused (the write-time
+  grant policy cannot read the flag), for every caller.
+- **The last-reader rule applies** — removing a user's share is refused when no other enabled user would keep Read, as
+  on a secure record (an unreadable flag counts as secure).
+- **Uploads answer 503** (`secure_flag_unreadable`) — the container resolver refuses the record and everything filed
+  under it, rather than guess between its own and a shared container.
+- The external SPA labels such a project **secure** (`ExternalDataService`); unsecure (`secure_flag_unreadable`) and the
+  child-ownership pass (a NULL-flag root that is not isolated is refused, never given an ordinary team) refuse it
+  rather than read "not secure". Provisioning is the exception: it treats NULL as "not yet marked" and writes the flag
+  itself (its first write), under the creator rule.
+
+Nothing is mis-routed or exposed — every effect is a refusal — but every one of those records is unusable for external
+participants and for uploads until step 0's `-Apply` sets the flag. That is why step 0 comes first in EVERY environment.
+
 **The masked window.** The Web API cannot create a field permission on a column that is not yet secured, so between
 securing each column and granting the reader profile there are a few seconds in which non-administrators read the
-flag EMPTY. The lock script grants immediately after securing, and prints the measured window per table. With the
-task 150 BFF deployed, the BFF refuses during it (`secure_flag_unreadable`, `secure_flag_not_set`) — it never
-mis-routes.
+flag EMPTY — and so does the BFF identity, unless it holds System Administrator, until the writer profile's grant
+lands. The lock script grants immediately after securing, and prints the measured window per table. With the task 150
+BFF deployed, every record read during the window has the **full effect above** for those seconds (external participants'
+contact-sourced rights withheld, grants 503 `policy_unreadable`, the last-reader rule, uploads 503
+`secure_flag_unreadable`, provisioning `secure_flag_not_set`) — it refuses, it never mis-routes.
 
 **A new business unit** needs its default team added to the reader profile — re-run step 3 (`-Apply` adds every
 default team), then step 4's `-Verify` and step 5. The standing assertion fails on any default team without it.
+
+### 7d.1 The user surface — Make Secure / Remove Secure in the form's "Access" group (task 150, UX amendment)
+
+Users secure and unsecure an existing project, matter or work assignment from the main form's **Access** flyout (task
+142's ONE group, ONE ribbon source `infrastructure/dataverse/ribbon/AccessRibbons/`, ONE command script
+`sprk_/scripts/access_ribbon.js` 1.1.0) — never by editing the field, which no form shows and FLS locks.
+
+- **Make Secure** — shown on a record that is NOT secure, to a caller with Write. It confirms with the owner-authored
+  copy (owner round 27), then calls `/provision-project` (task 148's transition carries the existing children; round 26
+  item 3 moves the files). **Release rule (acceptance (b)): Make Secure is imported only into an environment whose BFF
+  carries task 148, in the same release** — `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without the switch the
+  group ships without it and `-Verify` fails if it is present.
+- **Remove Secure** — shown on a secure record, to a caller with Write. It calls `/unsecure-project`; the SERVER decides
+  who may (F3: Full Access holders and the creator) and the refusal shows the endpoint's message.
+- Both read `sprk_issecure` with `Xrm.WebApi.retrieveRecord` (every user's reader-profile Read, step 3); a failed or
+  masked read hides BOTH.
+
+Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.1.0, `assignedaccess_postsave.js`,
+`bff_auth.js`) → `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150
+POML ui-tests on the three forms.
 
 ---
 
