@@ -434,20 +434,17 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
             "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
+        // One entry for both callers of this primitive (batch 4 integration: 133's compensation and 148's unsecure were each
+        // censused on their own branch; the 148 merge joined them). The row is one a ROOT's own Assign cascades to
+        // (sharepointdocumentlocation / sharepointdocument — never a sprk_* child).
         new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
-            "Provisioning's compensation (task 133 c1, owner round 10 item 4): after a VERIFIED move of the ROOT back, each " +
-            "row the root's Assign cascaded to (document locations, documents) is put back on the owner it had before the " +
-            "call, read from the snapshot taken before any write — the root move's own side effect, undone; never a team " +
-            "computed for a child. (Batch 4 integration: task 133 landed after 146's census.)"),
+            "A row a ROOT's Assign cascades to (document location / document). Provisioning's compensation (task 133 c1, owner " +
+            "round 10 item 4): after a VERIFIED move of the ROOT back, put back on the owner it had before the call, read from " +
+            "the snapshot taken before any write — the root move's own side effect, undone. Unsecure (task 148, owner round 13 " +
+            "item 1): placed on the owner SecureChildReconciler resolved for a child of that root through " +
+            "IRecordOwnershipResolver. Read back in both."),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
-        // Semantic merge conflict of task 133 c1 (this primitive) with task 146 r2 (this census), surfaced when task 148
-        // merged both: the row is one a ROOT's own Assign cascades to (sharepointdocumentlocation / sharepointdocument —
-        // never a sprk_* child), put back on its snapshotted owner, or (task 148) on the owner SecureChildReconciler resolved
-        // for a child of that root through IRecordOwnershipResolver (owner round 13 item 1).
-        new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
-            "A row a ROOT's Assign cascades to (SharePoint location / document), placed on its snapshotted owner (task 133 " +
-            "compensation) or on the resolver's owner for a child of that root (task 148 unsecure); read back."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
             "A work assignment (a ROOT) created owned by its assignee; S6 b (secure under a secure matter) is task 158 (owner round 6)."),
 
