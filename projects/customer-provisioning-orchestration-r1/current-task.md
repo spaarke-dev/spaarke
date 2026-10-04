@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-04 ~20:45 UTC SESSION 34 — **T251 ✅ COMPLETE** (deployed to dev + verified in-tenant). **Next: T242** (no POML yet — run task-create from `notes/model1-dedicated-remediation-plan.md` T242 row).
+> **Last Updated**: 2026-10-04 ~21:30 UTC SESSION 34 END (context-handoff before a computer restart) — **T251 ✅ COMPLETE** (deployed to dev, verified in-tenant). **T242 + T242b FILED** (POMLs + TASK-INDEX rows, commit `1b0317cc2`); **T242 NOT STARTED** — next action: `task-execute` T242.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,15 +36,15 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 34, 2026-10-04)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 34 END, 2026-10-04)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **242 — Per-customer Redis → Azure Managed Redis B0 HA, Entra-only (owner D12)** · **no POML yet** · TASK-INDEX has no row |
-| **Step** | Not started. T251 ✅ closed this session (POML completed, TASK-INDEX ✅, plan G30 ✅, design status IMPLEMENTED). |
-| **Status** | pending (needs task creation) |
-| **Next Action** | (1) Create `tasks/242-*.poml` with `task-create` from the T242 row of `notes/model1-dedicated-remediation-plan.md` (≈ line 213): `modules/redis.bicep` → `Microsoft.Cache/redisEnterprise` B0 + database `accessKeysAuthentication: Disabled` + access-policy assignment for the stamp UAMI; `customer.bicep` wiring/outputs (host:10000); BFF `CacheModule` → `Microsoft.Azure.StackExchangeRedis` `ConfigureForAzureWithUserAssignedManagedIdentityAsync(clientId)` + `Protocol=Resp3`; drop `Redis-ConnectionString` from the manifest; **BFF §10** (placement, publish-size vs a fresh master build, CVE); preflight test create in westus2; recreate dev caches as B0 non-HA (live — ask the owner). Add the TASK-INDEX row. (2) Then `task-execute` T242 (FULL; touches BFF → `/conflict-check` hot path). |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → **T242** (next)  → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
+| **Task** | **242 — Per-customer Redis → Azure Managed Redis B0 HA, Entra-only (owner D12) — CODE** · `tasks/242-stamp-redis-managed-entra-only.poml` · status **pending** (TASK-INDEX `🔲 [open]`) · FULL · **opus @ high** · steps directional |
+| **Step** | **Not started.** Only the task files exist (T242 + T242b POMLs, TASK-INDEX rows — commit `1b0317cc2`). No code changed for T242. `task-execute` was invoked and stopped before Step 0.5 for this handoff. |
+| **Status** | pending — ready to start |
+| **Next Action** | `task-execute` on `tasks/242-stamp-redis-managed-entra-only.poml`. It touches the BFF (`CacheModule.cs`, csproj) → run `/conflict-check` first and update `projects/INDEX.md` hot-path row if BFF=Y is not already recorded. Load the POML `<knowledge>` (researcher `redis-per-customer-stamp-amr-decision-2026-09-30.md`, `bff-extensions.md`, ADR-009/028/010/032). The POML background lists every touchpoint with file:line (Explore inventory 2026-10-04). **T242b** (`tasks/242b-dev-redis-managed-recreate.poml`, live, owner confirms each step) follows T242's dev deploy. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → **T242** (next, code) → **T242b** (live dev cache)  → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
 
 ### Completed (SESSIONS 30–32)
 | Item | Commit | Outcome |
@@ -59,6 +59,7 @@
 | Container type (S31) | `f4250fc0f` | `Spaarke Model 1` = `fb3817a8-…` recorded; T241 must NOT delete `rg-spaarke-shared-prod` or the Syntex billing account (billing binding permanent). |
 | D23 / T250 / PRQ-E-14 (S31) | `13cf0f2e8` | **D23** `rg-spaarke-shared-prod` = single home for shared PROD resources (Model 1 SPE billing now; prod L2 control plane from its first deploy — change `platform-controlplane.bicep`'s RG name then; group is westus2); subscription renamed "Spaarke Shared Production"; T241 also deletes the partial `rg-spaarke-trial01-prod-model1` stamp. **T250** (plan row): `SpeAdminGraphService` still signs in as each owning app with a KV client SECRET (ADR-028 E-1) → add a MI-FIC credential mode; until then NO secret-based `sprk_specontainertypeconfig` for Model 1. `sprk_credentialmode` created on spaarkedev1 (owner-approved); schema script's case-sensitive existence check fixed. |
 | **T248** (S32) | `b730d9310` (+ master merge `cc7f76aa3`) | L2 signs in as the SPE owning app with MI-FIC — no certificate (D16, G28 closed). Live probe from a throwaway ACI with the Worker UAMI: FIC token `appidacr` 2; registration (already present) + containers GET 200. H0 `SpeOwnerCredential` (3 codes, no 24 h gate); T6 lists the run's container; Worker config `{ContainerTypeId, OwnerAppId}`; dev control plane + Worker deployed (Api part blocked by a pending swap; Worker 503 because of the sidecar → T251). Master merged (`cc7f76aa3`). Gates: 0 Critical / 0 violations; tests 2121 / 6 baseline; ArchTests 346. |
+| **T251** (S33–34) | `0b67f716f` `63fddc269` `633eb5ff3` `e1b874f55` `97ba6a24c` | Exchange sidecar works on the L2 Worker (G30 ✅). Sidecar holds no credential: the Worker mints an Exchange token as `Spaarke Exchange Admin` via MI-FIC (D24); narrowed Exchange role + delegating ×4 (D25); H14a on RBAC for Applications, stamp UAMI only, group-scoped (D26); H10 no longer grants the 4 mailbox roles in Entra. Root cause of the write failures: `-Organization <tenant GUID>` → Worker now resolves the initial domain from Graph `/organization`; sidecar requires it. Scope matched on `RecipientWriteScope=Group` + `CustomResourceScope=<group Name>`. Deployed to dev (image `provisioning-sidecar:633eb5ff3`); `Verify-Sidecar-Live.ps1 -InTenant` 5 PASS / 1 WARN. Fixed at discovery: the verify script (Kudu cannot reach the sidecar on Linux) and Deploy-ControlPlane's stale Worker key check. Open for T186: W1 (group Name vs DisplayName). |
 
 ### Live changes made 2026-10-04, SESSION 34 (T251 close — owner-approved: deploy to dev; cleanup of spike throwaways)
 - ACR `sprkcontrolplanedevacr`: `provisioning-sidecar:latest` + `:633eb5ff3` built (run `cc2`).
@@ -70,11 +71,11 @@
 
 ### Live changes made 2026-10-04 (T251 spike — owner-approved; operator ralph.schroeder@spaarke.com)
 - Entra app **`Spaarke Exchange Admin`** appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`, SP `b5d396bb-d8a7-4017-875c-d999a4692163`, single-tenant, no secret/cert; FIC `sprk-controlplane-dev-uami-assertion` (subject Worker UAMI `38f7693f-…`); Office 365 Exchange Online `Exchange.ManageAsApp` granted (appRoleAssignedTo). **KEEP.**
-- Entra app **`sprk-t251-spike-target`** appId `71f94c8c-d9b1-4bfa-b13d-00572718a20a`, SP `f85cab89-29e3-4c43-9b0c-3261d3b1c3f4`, FIC `sprk-t251-spike-uami` → Worker UAMI. **DELETE after spike.**
-- Exchange: mail-enabled security group **`sprk-t251-spike-scope`** (member testuser1@) — **DELETE after spike**; Exchange SP for `Spaarke Exchange Admin` (keep). `Enable-OrganizationCustomization` run (owner-approved, irreversible; effective 14:37). Role **`Spaarke App RBAC Admin`** (Role Management child, 14 cmdlets) + assignments `sprk-exoadmin-{rbacadmin,viewrecipients,deleg-MailRead,-MailReadWrite,-MailSend,-MailboxSettingsRead}` on the admin app (KEEP). Management scope `sprk-t251-spike-scope` (created by the app at 14:39 — DELETE after spike). Operator registered Exchange SP for `sprk-t251-spike-target` (DELETE after spike).
-- Entra app **`sprk-t251-spike-target2`** appId `e219a52f-7acb-4ffc-b072-c7693e3a0835`, SP `50c609e4-…` (no credentials) — **DELETE after spike**.
+- Entra app **`sprk-t251-spike-target`** appId `71f94c8c-d9b1-4bfa-b13d-00572718a20a`, SP `f85cab89-29e3-4c43-9b0c-3261d3b1c3f4`, FIC `sprk-t251-spike-uami` → Worker UAMI. ~~DELETE after spike~~ **DELETED (S34).**
+- Exchange: mail-enabled security group **`sprk-t251-spike-scope`** (member testuser1@) — **KEPT as the test group (S34, owner)**; Exchange SP for `Spaarke Exchange Admin` (keep). `Enable-OrganizationCustomization` run (owner-approved, irreversible; effective 14:37). Role **`Spaarke App RBAC Admin`** (Role Management child, 14 cmdlets) + assignments `sprk-exoadmin-{rbacadmin,viewrecipients,deleg-MailRead,-MailReadWrite,-MailSend,-MailboxSettingsRead}` on the admin app (KEEP). Management scope `sprk-t251-spike-scope` and the Exchange SPs of both spike apps — **DELETED (S34)**.
+- Entra app **`sprk-t251-spike-target2`** appId `e219a52f-7acb-4ffc-b072-c7693e3a0835`, SP `50c609e4-…` (no credentials) — **DELETED (S34)**.
 - Entra **Exchange Administrator** role assigned to `Spaarke Exchange Admin` 15:10 (owner-approved test) → **REMOVED 15:21** (made writes fail). App holds no Entra directory role.
-- Throwaway ACI `sprk-t251-exo-spike` created/deleted 4× (deleted after each run; one more run scheduled ~16:26).
+- Throwaway ACI `sprk-t251-exo-spike` created/deleted several times; none remains (the scheduled ~16:26 retry was cancelled).
 
 ### Live changes made 2026-10-03 (operator identity `ralph.schroeder@spaarke.com`; owner-performed or owner-approved)
 - **T248 (owner-approved)**: throwaway ACI `sprk-t248-fic-probe` (rg-spaarke-platform-dev) created → probe → DELETED. `az deployment sub create` `t248-platform-controlplane-dev-20261003-205456` (Worker settings + the Exchange sidecar created; Api module failed on a pending swap; Cosmos automatic failover on→off). Worker code zip-deployed (Deploy-ControlPlane.ps1) and started; Worker 503 (sidecar). Graph Explorer's grant on the `Spaarke Model 1` registration: owner KEEP.
@@ -90,9 +91,29 @@
 - Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
 
 ### Critical Context
-T251 switched H14a to **Exchange RBAC for Applications** (owner D26): the stamp UAMI alone gets `Application Mail.Read/ReadWrite/Send/MailboxSettings.Read` scoped to the customer group; H10 no longer grants those 4 in Entra; T3 fails if they are in Entra; T4 reads assignments via the sidecar `/read-mailbox-access`. The sidecar holds **no credential** (D24) — the Worker's `ExchangeAdminTokenSource` (MI-FIC) sends `X-Exchange-Access-Token`; the sidecar always binds; its one setting names app setting `ExchangeSidecar__SharedSecret`. Live tenant changes were made (see "Live changes made 2026-10-04"), incl. the **irreversible** `Enable-OrganizationCustomization`. Open owner items: **G31** (H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's tenant); Api site pending swap (blocks its Bicep). Never add a secret, certificate or Entra directory role to `Spaarke Exchange Admin`; never delete Key Vault secrets (`Exchange-Connect-Cert` sentinel stays, unused).
+**T242 (next)**: owner D12 — per-customer Redis = Azure Managed Redis `Balanced_B0`, HA on, Entra only, stamp UAMI via
+`databases/accessPolicyAssignments` (API 2025-07-01, OSSCluster, AllKeysLRU, port 10000). The split decided at filing:
+**T242 = code only** (module, customer.bicep, catalog without `Redis-ConnectionString`, `Redis__Endpoint` H2a→H4b,
+BFF `CacheModule` + Worker `DispatchModule` connect with their UAMI over RESP3 when an endpoint is set, connection string
+only in Development/Testing, H1 registers `Microsoft.Cache`, BFF §10 checks); **T242b = live dev**: recreate
+`spaarke-bff-redis-dev` (serves BOTH the dev BFF and the L2 Worker) as B0 non-HA Entra-only, rewire both, retire dev key
+rotation — owner confirms each live step. Known code risks (in the POML): StackExchange.Redis 2.7.27 → ≥2.10.1 for
+`Microsoft.Azure.StackExchangeRedis` 3.3.x; pub/sub needs RESP3 for token re-auth; SCAN-over-endpoints loops must stay
+cluster-safe; `RunContextContractTests` rule (g) couples `kvSecretValues` and the manifest.
+**Exchange (T251, done)**: never add a secret, certificate or Entra directory role to `Spaarke Exchange Admin`; the
+sidecar must connect with the tenant's initial domain, never the GUID. `Enable-OrganizationCustomization` was run
+(irreversible). Open owner items: **G31** (H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's
+tenant); the **Api site's pending slot swap** (every platform-controlplane deploy fails its Api module); board Status
+"Active" vs Status Reason "On hold" on Issue #438. Never delete Key Vault secrets (`Exchange-Connect-Cert` sentinel stays).
 
 ## 📁 Files Modified This Session
+
+### SESSION 34 (2026-10-04) — T251 closed + T242/T242b filed — commits `1ec4b5b68` `633eb5ff3` `e1b874f55` `97ba6a24c` (pushed) + `1b0317cc2` (local, pushed at handoff)
+- T251 fix: `ExchangeAdminTokenSource.cs` (initial-domain lookup via Graph `/organization`), `ExchangePolicySidecarClient.cs` (`organization` on the wire), `SidecarCore.psm1` + `Listener.ps1` (organization required; scope on RecipientWriteScope/CustomResourceScope), `Sidecar.Tests.ps1` (16), contract + live-verification tests.
+- `scripts/provisioning/Verify-Sidecar-Live.ps1` (rewritten: log-based bind check; `-InTenant` ACI replay via ARM REST; GUID-validated params), `scripts/provisioning/Deploy-ControlPlane.ps1` (Worker required keys), `controlplane-worker-app-service.bicep` description (+ platform-controlplane.json).
+- Docs/.claude: deployment guide §4.2.1 + T4 snippet, `.claude/constraints/provisioning.md` (initial domain + scope shape), CHANGELOG, researcher memory (`exo-apponly-dc-write-error-2026-10-04.md` new), design note §7 + status, runbook rewritten, `notes/sidecar-live-verification-2026-10-04.json`.
+- Project: README portfolio pointer (Issue #438, Epic #432); T251 POML completed; TASK-INDEX 251 ✅ + 242/242b rows; plan G30 ✅; POMLs `tasks/242-stamp-redis-managed-entra-only.poml`, `tasks/242b-dev-redis-managed-recreate.poml`.
+
 
 ### SESSION 33 (2026-10-04) — T251 (in progress) — committed `0b67f716f` + `63fddc269`, pushed, tree clean
 - Sidecar: `SidecarCore.psm1` (new), `Listener.ps1` (rewritten), `Sidecar.Tests.ps1` (new, Pester 12), `Dockerfile`; deleted the sidecar copy of `Set-ExchangeApplicationAccessPolicy.ps1`; CI Pester step in `.github/workflows/build-provisioning-sidecar.yml`.
