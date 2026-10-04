@@ -177,6 +177,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public Guid? SystemUserReadFailsFor { get; set; }
 
     /// <summary>
+    /// The HTTP status a failing systemuser read (<see cref="SystemUserByIdReadSucceeds"/> false, or
+    /// <see cref="SystemUserReadFailsFor"/>) carries, raised in the real client's shape — <see cref="HttpRequestException"/>
+    /// with the status (owner round 14 item 3, task 133 c1-r4: a 401/403 is refused, a 503/429 transient). Unset, the
+    /// failure is a non-HTTP fault, as before.
+    /// </summary>
+    public System.Net.HttpStatusCode? SystemUserReadFailsWith { get; set; }
+
+    /// <summary>
     /// Whether the environment carries <c>sprk_createdbyperson</c> (task 133 b2, owner round 7 item 2). When false, a
     /// projection naming its read form 400s, as Dataverse answers before <c>Set-RecordCreatorPersonSchema.ps1</c> runs.
     /// </summary>
@@ -202,6 +210,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>When true, every query that looks a container up by <c>sprk_containerid</c> throws (task 133 b2).</summary>
     public bool ContainerOwnershipReadFails { get; set; }
+
+    /// <summary>
+    /// When set, every query that looks a container up by <c>sprk_containerid</c> fails with this HTTP status, in the real
+    /// client's shape — <see cref="HttpRequestException"/> carrying it (owner round 14 item 3, task 133 c1-r4: a 401/403 is
+    /// refused, a 503/429 transient).
+    /// </summary>
+    public System.Net.HttpStatusCode? ContainerOwnershipReadFailsWith { get; set; }
 
     /// <summary>
     /// A RevokeAccess for this principal is accepted but NOT applied — the share stays (task 133 b2: a restore that
@@ -343,6 +358,92 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
+    // ── Task 133 c1 (owner round 10 item 4): the rows an owner move of a root cascades to ──
+
+    /// <summary>
+    /// The rows a root's Assign cascades to, by child id. Live metadata (2026-10-03): a project or matter cascades Assign
+    /// to <c>sharepointdocumentlocation</c> and <c>sharepointdocument</c> on <c>regardingobjectid</c> (and to the
+    /// business-owned <c>team</c>, which has no owner); a work assignment to nothing. <see cref="ApplyUpdate"/> applies the
+    /// cascade the way Dataverse does — every child of the moved root takes the root's new owner.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, CascadeChildRow> _cascadeChildren = new();
+
+    private sealed record CascadeChildRow(string EntitySet, string IdColumn, Guid Id, Guid RootId, DataversePrincipalRef Owner);
+
+    /// <summary>
+    /// Seeds a row a root's Assign cascades to: <c>sharepointdocumentlocation</c> or <c>sharepointdocument</c>, regarding
+    /// <paramref name="rootId"/>, owned by <paramref name="owner"/>.
+    /// </summary>
+    public void SeedCascadeChild(Guid rootId, string table, Guid childId, DataversePrincipalRef owner)
+        => _cascadeChildren[childId] = table switch
+        {
+            "sharepointdocumentlocation" => new("sharepointdocumentlocations", "sharepointdocumentlocationid", childId, rootId, owner),
+            "sharepointdocument" => new("sharepointdocuments", "sharepointdocumentid", childId, rootId, owner),
+            _ => throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table a root's Assign cascades to.")
+        };
+
+    /// <summary>The current owner of a seeded cascade child.</summary>
+    public DataversePrincipalRef? OwnerOfCascadeChild(Guid childId)
+        => _cascadeChildren.TryGetValue(childId, out var child) ? child.Owner : null;
+
+    /// <summary>
+    /// Dataverse's live answer in dev (2026-10-03): a read of <c>sharepointdocuments</c> is refused 400 — 0x80071017
+    /// "SharePoint S2S and MSTeams integration is not enabled for this org". Default true, as in dev; false models an
+    /// org with that integration on.
+    /// </summary>
+    public bool SharePointDocumentReadRefused { get; set; } = true;
+
+    /// <summary>
+    /// When set, the snapshot's read of a root's <c>sharepointdocumentlocations</c> (by <c>regardingobjectid</c>) fails
+    /// with this status, in the real client's shape (<see cref="HttpRequestException"/> carrying it).
+    /// </summary>
+    public System.Net.HttpStatusCode? CascadeChildSnapshotReadFailsWith { get; set; }
+
+    /// <summary>An <c>ownerid</c> PATCH on THIS cascade child throws (recorded first) — a child that cannot be put back.</summary>
+    public Guid? FailChildOwnerBindFor { get; set; }
+
+    /// <summary>
+    /// An <c>ownerid</c> PATCH on THIS cascade child is ACCEPTED (recorded, no error) but NOT applied: the child keeps the
+    /// owner it had (task 133 c1-r2). The child-level twin of <see cref="OwnershipPatchIsApplied"/> — Dataverse's silent
+    /// <c>@odata.bind</c> failure — so the restore's read-back, not the PATCH's success, must decide.
+    /// </summary>
+    public Guid? IgnoreChildOwnerBindFor { get; set; }
+
+    /// <summary>
+    /// Once an <c>ownerid</c> PATCH on THIS cascade child has been sent (recorded first), the row no longer reads — deleted
+    /// by someone else, or simply not returned (task 133 c1-r4): the restore's read-back after the PATCH finds NO row. The
+    /// PATCH itself is accepted, or — with <see cref="FailChildOwnerBindFor"/> on the same child — refused. The read
+    /// BEFORE the PATCH still finds the row, so it is never <c>Gone</c>: only that read decides <c>Gone</c>, and a row that
+    /// disappears after its PATCH is a failure (<c>NotApplied</c> / <c>Refused</c>), never "restored".
+    /// </summary>
+    public Guid? RemoveChildOnBindFor { get; set; }
+
+    /// <summary>
+    /// A read of THIS cascade child returns its row WITHOUT its id column (task 133 c1-r2): a row the snapshot could not
+    /// key a restore on, so the snapshot must refuse it — never record it under an empty id.
+    /// </summary>
+    public Guid? ChildRowReadWithoutIdFor { get; set; }
+
+    /// <summary>
+    /// A by-id read of THIS cascade child throws 503, in the real client's shape (task 133 c1-r1): the restore's read of
+    /// its current owner, BEFORE any PATCH — a child whose owner cannot be read, so nothing is written to it. The
+    /// snapshot's by-regarding read is unaffected.
+    /// </summary>
+    public Guid? FailChildOwnerReadFor { get; set; }
+
+    /// <summary>
+    /// Once an <c>ownerid</c> PATCH on THIS cascade child has been applied, its by-id read throws 503 (task 133 c1-r1):
+    /// the restore's read-back AFTER the PATCH — a child put back whose owner cannot be confirmed. The read before the
+    /// PATCH still answers.
+    /// </summary>
+    public Guid? FailChildOwnerReadBackAfterBindFor { get; set; }
+
+    /// <summary>The cascade children an <c>ownerid</c> PATCH has been applied to (for <see cref="FailChildOwnerReadBackAfterBindFor"/>).</summary>
+    private readonly ConcurrentDictionary<Guid, byte> _cascadeChildBindsApplied = new();
+
+    /// <summary>Every query the endpoints issued (entity set, filter) — so a test can prove a table was never read.</summary>
+    public ConcurrentBag<(string EntitySet, string? Filter)> Queries { get; } = new();
+
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
         Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null, Guid? CreatedByPerson = null);
@@ -450,15 +551,28 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SystemUsers[CallerSystemUserId] = (false, false);
         SystemUserByIdReadSucceeds = true;
         SystemUserReadFailsFor = null;
+        SystemUserReadFailsWith = null;
         CreatorPersonColumnExists = true;
         BusinessUnitContainers.Clear();
         ContainerOwnershipReadFails = false;
+        ContainerOwnershipReadFailsWith = null;
         RevokeNotAppliedFor = null;
         FailOwnerReadBackAfterBindTo = null;
         _failNextOwnerReadBack = false;
         if (_containerTypeChanged)
             SetContainerTypeId(ConfiguredContainerTypeId);
         _containerTypeChanged = false;
+        _cascadeChildren.Clear();
+        SharePointDocumentReadRefused = true;
+        CascadeChildSnapshotReadFailsWith = null;
+        FailChildOwnerBindFor = null;
+        IgnoreChildOwnerBindFor = null;
+        RemoveChildOnBindFor = null;
+        ChildRowReadWithoutIdFor = null;
+        FailChildOwnerReadFor = null;
+        FailChildOwnerReadBackAfterBindFor = null;
+        _cascadeChildBindsApplied.Clear();
+        Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
         FailShareForPrincipal = null;
@@ -528,6 +642,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
                     var top = invocation.Arguments[3] as int?;
 
+                    Queries.Add((entitySet, filter));
                     var json = RowsJsonFor(entitySet, filter, select, top);
                     var listType = typeof(List<>).MakeGenericType(rowType);
                     var rows = JsonSerializer.Deserialize(json, listType)
@@ -616,6 +731,38 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             }
         }
 
+        // Task 133 c1: putting a cascaded child back on its own owner — its own owner bind, as the endpoint sends it.
+        if (_cascadeChildren.TryGetValue(id, out var cascadeChild)
+            && cascadeChild.EntitySet == entitySet
+            && flat.TryGetValue("ownerid@odata.bind", out var childBind)
+            && childBind is not null)
+        {
+            // Task 133 c1-r4: the row is gone once its bind has been sent (recorded above) — whatever the PATCH reports.
+            if (RemoveChildOnBindFor == id)
+                _cascadeChildren.TryRemove(id, out _);
+
+            if (FailChildOwnerBindFor == id)
+                throw new InvalidOperationException("Dataverse 403: simulated refusal of a child row's ownership assignment.");
+
+            // Task 133 c1-r2: accepted, recorded above, and silently not applied. Task 133 c1-r4: or accepted, with the
+            // row gone — nothing left to apply it to.
+            if (IgnoreChildOwnerBindFor == id || RemoveChildOnBindFor == id)
+                return Task.CompletedTask;
+
+            if (ParseIdFromBind(childBind) is { } childOwnerId)
+            {
+                _cascadeChildren[id] = cascadeChild with
+                {
+                    Owner = childBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                        ? DataversePrincipalRef.User(childOwnerId)
+                        : DataversePrincipalRef.Team(childOwnerId)
+                };
+                _cascadeChildBindsApplied[id] = 0;
+            }
+
+            return Task.CompletedTask;
+        }
+
         if (_records.TryGetValue(id, out var record) && record.EntitySet == entitySet)
         {
             if (flat.TryGetValue("ownerid@odata.bind", out var ownerBind)
@@ -634,6 +781,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     // Live gate (b) disproved: the reassignment drops this principal's share.
                     if (AssignDropsShareOf is { } dropped)
                         _shares.TryRemove((id, DataversePrincipalRef.User(dropped)), out _);
+
+                    // Task 133 c1: the Assign cascade (live metadata) — every child of a moved project or matter takes
+                    // the root's new owner; a work assignment cascades nothing.
+                    if (entitySet is ProjectEntitySet or MatterEntitySet)
+                    {
+                        var newOwner = ownerBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                            ? DataversePrincipalRef.User(parsed)
+                            : DataversePrincipalRef.Team(parsed);
+                        foreach (var child in _cascadeChildren.Values.Where(c => c.RootId == id).ToList())
+                            _cascadeChildren[child.Id] = child with { Owner = newOwner };
+                    }
                 }
             }
 
@@ -785,6 +943,21 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <c>isdisabled eq false</c> or <c>applicationid eq null</c> would hide a disabled or application user, and the
     /// tests that seed one would go red.</para>
     /// </remarks>
+    /// <summary>
+    /// <see cref="ContainerOwnershipReadFailsWith"/>: a container-holder read fails with that status, in the real client's
+    /// shape (task 133 c1-r4).
+    /// </summary>
+    private void ThrowIfContainerOwnershipReadFailsWithStatus()
+    {
+        if (ContainerOwnershipReadFailsWith is { } status)
+        {
+            throw new HttpRequestException(
+                $"Dataverse {(int)status}: simulated failure reading which records hold a container.",
+                inner: null,
+                statusCode: status);
+        }
+    }
+
     private string RowsJsonFor(string entitySet, string? filter, string? select = null, int? top = null)
     {
         RejectUnknownColumns(entitySet, select);
@@ -802,6 +975,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 {
                     if (ContainerOwnershipReadFails)
                         throw new InvalidOperationException("Dataverse 503: simulated failure reading container holders.");
+                    ThrowIfContainerOwnershipReadFailsWithStatus();
 
                     var excluded = ExtractGuidAfter(filter, " ne ");
                     var holderIdColumn = entitySet switch
@@ -881,10 +1055,64 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 }
                 break;
 
+            case "sharepointdocumentlocations":
+            case "sharepointdocuments":
+                // Task 133 c1: the rows a root's Assign cascades to, by regardingobjectid (the snapshot) or by id (a
+                // restore's read and read-back).
+                if (entitySet == "sharepointdocuments" && SharePointDocumentReadRefused)
+                {
+                    throw new HttpRequestException(
+                        "Dataverse 400: 0x80071017 SharePoint S2S and MSTeams integration is not enabled for this org.",
+                        inner: null,
+                        statusCode: System.Net.HttpStatusCode.BadRequest);
+                }
+
+                var regardingRoot = filter is null ? null : ExtractGuidAfter(filter, "_regardingobjectid_value eq ");
+                if (regardingRoot is not null && entitySet == "sharepointdocumentlocations"
+                    && CascadeChildSnapshotReadFailsWith is { } snapshotStatus)
+                {
+                    throw new HttpRequestException(
+                        $"Dataverse {(int)snapshotStatus}: simulated failure reading the document locations.",
+                        inner: null,
+                        statusCode: snapshotStatus);
+                }
+
+                // Task 133 c1-r1: a restore's by-id read of one child — before its PATCH, or its read-back after it.
+                if (regardingRoot is null && filter is not null
+                    && ((FailChildOwnerReadFor is { } unreadableChild
+                         && filter.Contains(unreadableChild.ToString(), StringComparison.OrdinalIgnoreCase))
+                        || (FailChildOwnerReadBackAfterBindFor is { } unverifiableChild
+                            && _cascadeChildBindsApplied.ContainsKey(unverifiableChild)
+                            && filter.Contains(unverifiableChild.ToString(), StringComparison.OrdinalIgnoreCase))))
+                {
+                    throw new HttpRequestException(
+                        "Dataverse 503: simulated failure reading a related row's owner by id.",
+                        inner: null,
+                        statusCode: System.Net.HttpStatusCode.ServiceUnavailable);
+                }
+
+                payload.AddRange(_cascadeChildren.Values
+                    .Where(c => c.EntitySet == entitySet
+                                && (regardingRoot is { } rootId
+                                    ? c.RootId == rootId
+                                    : filter is not null && filter.Contains(c.Id.ToString(), StringComparison.OrdinalIgnoreCase)))
+                    .Select(c =>
+                    {
+                        var row = new Dictionary<string, object?>
+                        {
+                            [c.Owner.Kind == DataversePrincipalKind.SystemUser ? "_owninguser_value" : "_owningteam_value"] = c.Owner.Id
+                        };
+                        if (ChildRowReadWithoutIdFor != c.Id) // task 133 c1-r2: a row read without its id column
+                            row[c.IdColumn] = c.Id;
+                        return row;
+                    }));
+                break;
+
             case "businessunits" when filter is not null && ExtractQuoted(filter, "sprk_containerid eq ") is { } buContainer:
                 // Task 133 b2: which business unit's shared container is this?
                 if (ContainerOwnershipReadFails)
                     throw new InvalidOperationException("Dataverse 503: simulated failure reading business-unit containers.");
+                ThrowIfContainerOwnershipReadFailsWithStatus();
 
                 payload.AddRange(BusinessUnitContainers
                     .Where(b => string.Equals(b.Value, buContainer, StringComparison.Ordinal))
@@ -961,13 +1189,20 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
             case "systemusers" when filter is not null && filter.Contains("systemuserid eq ", StringComparison.OrdinalIgnoreCase):
                 // Task 133: a resume reads the record's createdby by id.
-                if (!SystemUserByIdReadSucceeds)
-                    throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
-
-                if (SystemUserReadFailsFor is { } unreadableUser
-                    && filter.Contains(unreadableUser.ToString(), StringComparison.OrdinalIgnoreCase))
+                if (!SystemUserByIdReadSucceeds
+                    || (SystemUserReadFailsFor is { } unreadableUser
+                        && filter.Contains(unreadableUser.ToString(), StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new InvalidOperationException($"Dataverse 503: simulated read failure for systemuser {unreadableUser}.");
+                    // Task 133 c1-r4 (owner round 14 item 3): in the real client's shape when a status is set.
+                    if (SystemUserReadFailsWith is { } systemUserStatus)
+                    {
+                        throw new HttpRequestException(
+                            $"Dataverse {(int)systemUserStatus}: simulated systemuser read failure.",
+                            inner: null,
+                            statusCode: systemUserStatus);
+                    }
+
+                    throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
                 }
 
                 foreach (var (userId, (isDisabled, isApplicationUser)) in SystemUsers)

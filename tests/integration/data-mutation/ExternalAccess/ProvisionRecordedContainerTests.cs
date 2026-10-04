@@ -178,14 +178,62 @@ public class ProvisionRecordedContainerTests : IClassFixture<ProvisionProjectTes
         var response = await ProvisionAsync(new { projectId });
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-        (await ProblemOf(response)).GetProperty("reasonCode").GetString()
-            .Should().Be(ProvisionProjectEndpoint.ReasonContainerOwnershipUnreadable);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonContainerOwnershipUnreadable);
+        problem.GetProperty("containerOwnershipState").GetString().Should().Be("unreadable",
+            "a fault that is not Dataverse refusing the read may pass on the next call");
         AssertNothingWritten(projectId, OwnContainer);
 
         _fixture.ContainerOwnershipReadFails = false;
         var retry = await ProvisionAsync(new { projectId });
         retry.StatusCode.Should().Be(HttpStatusCode.OK, "the stated recovery — the same caller calls again — works");
         _fixture.ContainerIdOf(projectId).Should().Be(OwnContainer);
+    }
+
+    /// <summary>
+    /// Owner round 14 item 3 (task 133 c1-r4): the container check classifies its read failure by the cascade reads' rule.
+    /// A 401/403 (the service's sign-in or Read privilege refused) or a 400 (Dataverse refusing the query) repeats on every
+    /// call: <c>containerOwnershipState: refused</c>, and the detail says calling again repeats it and names the Read
+    /// privilege — never "the same caller may". A 503 or 429 stays <c>unreadable</c>, the same caller's retry, which then
+    /// works. Each refused before any write.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "refused")]
+    [InlineData(HttpStatusCode.Forbidden, "refused")]
+    [InlineData(HttpStatusCode.BadRequest, "refused")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "unreadable")]
+    [InlineData(HttpStatusCode.TooManyRequests, "unreadable")]
+    public async Task Provision_WhenTheContainerCheckIsRefusedOrFails_ClassifiesItByTheReadsStatus(
+        HttpStatusCode status, string state)
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer);
+        _fixture.ContainerOwnershipReadFailsWith = status;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonContainerOwnershipUnreadable);
+        problem.GetProperty("containerOwnershipState").GetString().Should().Be(state);
+        var detail = problem.GetProperty("detail").GetString();
+        if (state == "refused")
+        {
+            detail.Should().Contain("Calling again repeats this refusal").And.Contain("Read privilege")
+                .And.NotContain("the same caller may");
+        }
+        else
+        {
+            detail.Should().Contain("(the same caller may)").And.NotContain("repeats this refusal");
+        }
+        AssertNothingWritten(projectId, OwnContainer);
+
+        if (state == "unreadable")
+        {
+            _fixture.ContainerOwnershipReadFailsWith = null;
+            var retry = await ProvisionAsync(new { projectId });
+            retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

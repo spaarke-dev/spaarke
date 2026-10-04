@@ -69,7 +69,9 @@ a usable person → else this column when it names a usable person → else refu
 nothing written; never the caller as a substitute — owner decision F8). An unreadable `createdby` stops the decision (500,
 the same caller may retry) rather than falling through to the column. A read of this column that Dataverse answers 400 (the
 column does not exist in the environment) is `creatorState: column-missing` — deterministic, no retry offered, an
-administrator applies the schema; any other failed read is the transient `unreadable` (task 133 r1).
+administrator applies the schema; a read Dataverse refuses with 401/403 (the BFF's sign-in or Read privilege) is
+`creatorState: refused` — deterministic too, an administrator restores the privilege (owner round 14 item 3); any other
+failed read is the transient `unreadable` (task 133 r1).
 
 ## Deployment
 
