@@ -8,11 +8,11 @@
  * etc.).
  *
  * Note on `TrendDirection`: `VisualMetricCard` exports a local `TrendDirection`
- * (`'up' | 'down' | 'neutral'`) while `TrendCard` re-exports the canonical
- * `TrendDirection` (`'up' | 'down' | 'flat'`) from the `types` barrel. The two
- * collide under `export *`, so neither is surfaced through this components
- * barrel (not an error) — the canonical `TrendDirection` is available from
- * `@spaarke/visuals/types`.
+ * (`'up' | 'down' | 'neutral'`) that would collide with the canonical
+ * `TrendDirection` (`'up' | 'down' | 'flat'`) surfaced at the package root via
+ * the `types` barrel, so it is not surfaced through this components barrel.
+ * (`TrendCard`, which re-exported the canonical one, had zero consumers and was
+ * deleted 2026-10-03 — reuse audit C-14.)
  *
  * `VisualMetricCard` (renamed from `MetricCard` 2026-10-03, item C-3) is unrelated to
  * `MetricCard` in `@spaarke/ui-components` (`WorkspaceShell/MetricCard.tsx`) — the clickable
@@ -34,13 +34,10 @@ export * from './MetricCardMatrix';
 export * from './MiniTable';
 export * from './StatusDistributionBar';
 
-// VisualMetricCard and TrendCard are re-exported explicitly (NOT `export *`) to avoid
-// the `TrendDirection` name clash: VisualMetricCard has a local `TrendDirection`
-// (`'up' | 'down' | 'neutral'`) and TrendCard re-exports the canonical
-// `TrendDirection` (`'up' | 'down' | 'flat'`) from `types`. The canonical one
-// is surfaced at the package root via the `types` barrel; VisualMetricCard's local
+// VisualMetricCard is re-exported explicitly (NOT `export *`) to avoid the
+// `TrendDirection` name clash: VisualMetricCard has a local `TrendDirection`
+// (`'up' | 'down' | 'neutral'`); the canonical one (`'up' | 'down' | 'flat'`) is
+// surfaced at the package root via the `types` barrel. VisualMetricCard's local
 // variant stays internal to `./MetricCard`.
 export { VisualMetricCard } from './MetricCard';
 export type { IVisualMetricCardProps } from './MetricCard';
-export { TrendCard } from './TrendCard';
-export type { ITrendCardProps } from './TrendCard';

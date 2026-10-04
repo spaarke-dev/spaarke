@@ -17,8 +17,9 @@
  *   This widget no longer imports `LegalWorkspaceApp` directly. It accepts an
  *   optional injected `renderer?: WorkspaceRenderer` prop OR consults the
  *   default-renderer slot exposed by `@spaarke/ui-components`. The host
- *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`
- *   at bootstrap, so default behaviour is unchanged from pre-C-4. Future
+ *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`
+ *   at bootstrap — a wrapper around `LegalWorkspaceApp` that injects SpaarkeAi's
+ *   section registry + a tab-scoped ComposeLaunchContext. Future
  *   hosts can register an alternate renderer without modifying this widget.
  *
  * Embedded mode:
@@ -254,7 +255,7 @@ export const WorkspaceLayoutWidget: React.FC<
 
   // Resolve the renderer: injected prop wins; otherwise consult the default slot.
   // The slot is populated by the host at bootstrap (e.g. SpaarkeAi `main.tsx`
-  // calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`).
+  // calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`, a LegalWorkspaceApp wrapper).
   const Renderer: WorkspaceRenderer | null = React.useMemo(() => renderer ?? getDefaultWorkspaceRenderer(), [renderer]);
 
   // Dev fallback: when Xrm isn't available (e.g. `npm run dev` in Vite),

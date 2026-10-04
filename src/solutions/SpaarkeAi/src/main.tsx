@@ -365,8 +365,8 @@ async function bootstrap(): Promise<void> {
   };
   setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
 
-  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget +
-  // getVisibleState into the WorkspaceWidgetRegistry (additive; the module also
+  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget
+  // into the WorkspaceWidgetRegistry (additive; the module also
   // registers as a top-level side effect, this explicit call documents intent
   // and guards against tree-shaking).
   registerComposeWidget();

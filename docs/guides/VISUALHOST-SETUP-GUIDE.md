@@ -2466,7 +2466,7 @@ Both columns already exist on `sprk_chartdefinition` (no schema changes needed):
 
 ### Valid keys
 
-The key set is **dev-defined** (registry keys in `WizardRegistry.ts`) — there is no Dataverse-side choice/option-set validation, so entering an unrecognized value shows a toast error (no crash) rather than a form-level error.
+The key set is **dev-defined** (keys in VisualHost's `WIZARD_KEY_TO_PAGE` map in `VisualHostRoot.tsx`) — there is no Dataverse-side choice/option-set validation, so entering an unrecognized value shows a toast error (no crash) rather than a form-level error.
 
 | Key | Opens | Creates |
 |---|---|---|
@@ -2490,7 +2490,7 @@ If `sprk_createwizardkey` is left blank, the control falls back to normalizing t
 The key set is intentionally **dev-defined** — adding a target is a small code change, not a Dataverse config. To wire a new wizard (say `contract`):
 
 1. **Build the wizard Code Page** under `src/solutions/Create{X}Wizard/` — copy an existing one (e.g. `CreateInvoiceWizard`); its `main.tsx` should use the shared `useWizardPageBootstrap()` hook and mount the corresponding shared wizard component. Deploy it as a web resource `sprk_create{x}wizard`.
-2. **Register the key → page mapping** in VisualHost's local resolver `WIZARD_KEY_TO_PAGE` in [`VisualHostRoot.tsx`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx) (e.g. `contract: 'sprk_createcontractwizard'`), and add an entity alias to `ENTITY_TO_WIZARD_KEY` if the entity-fallback name differs from a plain `sprk_`-strip. (This local map deliberately mirrors the shared `wizardRegistry.ts` resolution order but is kept in the PCF so the "+" cutover doesn't drag the wizard components — and their auth deps — back into the PCF bundle.)
+2. **Register the key → page mapping** in VisualHost's local resolver `WIZARD_KEY_TO_PAGE` in [`VisualHostRoot.tsx`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx) (e.g. `contract: 'sprk_createcontractwizard'`), and add an entity alias to `ENTITY_TO_WIZARD_KEY` if the entity-fallback name differs from a plain `sprk_`-strip. (This local map is the single source of truth for "+" wizard keys. The shared `wizardRegistry.ts` it once mirrored had zero consumers and was deleted 2026-10-03 — reuse audit C-20 — so there is no second registry to update.)
 3. **Bump + redeploy VisualHost** (version in all 5 locations) and deploy the new Code Page web resource.
 4. **Author** a `sprk_chartdefinition` with `sprk_createwizardenabled = Yes` and `sprk_createwizardkey = contract`.
 
