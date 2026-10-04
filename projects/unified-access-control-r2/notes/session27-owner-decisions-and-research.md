@@ -294,6 +294,14 @@ Owner: *"we need this to be properly fixed so that we do not have the issue — 
 1. `NoAccessListReader.GetDeniedRecordsAsync` must **evaluate any subject set**: chunk organization and contact ids within the safe query bound, one query per chunk, union the results. The deterministic "too large → FailedClosed" state is removed (it made a grant "try again" forever and kept the Assigned-To job red permanently). A genuine read fault in any chunk still fails the whole answer closed (Unverifiable). Tests for 26+ organizations / 6+ contacts and a fault in one chunk; the admin-guide limit sentence updated.
 2. Task 142 also adds the new 503 no-access-unverifiable code to the Manage Access client's `GRANT_POLICY_REASON_CODES`, and corrects the stale grantee_denied quote in `notes/task-139-grant-model.md`.
 
+## Round 19 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 168's escalations.
+
+1. **Trigger 1 — option (a):** the three type-2 forms with visible, editable root controls (`sprk_event` 90d2eff7 "Event modal form", `sprk_event` 835b8ee8 "Event Assign Work main form", `sprk_communication` b58ec3d8 "Message main form") get the filing picker (RegardingResolver) with hidden cells for the pair and lookups and the presave registration, THEN the root columns are locked. Form changes as dry-run/apply/verify scripts with snapshots.
+2. **Trigger 3:** fix the pre-existing defect on `sprk_event` eaf22dcb "Event main form": register `Spaarke.SmartTodo.RegardingPreSave` and add hidden cells for the pair and the lookups, so a CREATE stages the chosen lookup and the stamps.
+3. **Trigger 5:** neither "disable editing" nor "accept". The `sprk_event` and `sprk_analysis` editable home grids get an **OnRowLoad handler that disables the root columns** in the grid (inline editing of every other column keeps working). Test the handler; deploy is a main-session live step.
+4. **Amendment blocker — option (a):** add `sprk_regardingrecordurl` to `sprk_analysis` with a schema script (dry run / `-Apply` / `-Verify`, in the repo's schema-script pattern including the rootcomponentbehavior-0 solution check), so every child table carries the full ADR-024 pair; then the analysis form gets the picker, hidden cells and presave, then the lock.
+5. Live steps (presave v1.4.0 deploy, form scripts, the schema script, the grid handler) are main-session manual gates on dev, run dry → apply → verify.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
