@@ -965,6 +965,16 @@ public class ExternalParticipationService
                         ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission, row.statecode)
                         // Asked about, not returned. Cannot be distinguished from an unreadable row.
                         : RootRecordFlags.Unreadable;
+
+                    if (row is not null && row.sprk_issecure is null)
+                    {
+                        _logger.LogError(
+                            "[EXT-ACCESS] sprk_issecure came back EMPTY on {EntityType} {RecordId}. Failing CLOSED — "
+                            + "treated as unreadable (secure AND restricted). This service has likely lost its "
+                            + "field-level-security Read on the column (scripts/Set-SecureFlagFieldSecurity.ps1 -Verify), "
+                            + "or the row predates the backfill (scripts/Repair-SecureFlagNulls.ps1).",
+                            entityType, id);
+                    }
                 }
             }
         }
@@ -987,20 +997,29 @@ public class ExternalParticipationService
     /// asserted directly, without an HTTP stack).
     /// </summary>
     /// <remarks>
-    /// A null <c>sprk_issecure</c> is not secure, and a null <c>sprk_accesspermission</c> is Standard: both are
-    /// today's behaviour, unchanged (task 138 constraint; the NULL-<c>sprk_issecure</c> cleanup is task 153's
-    /// Q1 decision). <see cref="RootRecordFlags.IsUnreadable"/> is never set here — this row WAS read.
-    /// </remarks>
+    /// <para><b>An EMPTY <c>sprk_issecure</c> is <see cref="RootRecordFlags.Unreadable"/></b> (task 150, round 17
+    /// item 3) — exactly as <c>RecordContainerResolver</c> refuses it (<c>secure_flag_unreadable</c>). Since task 150
+    /// every row holds true or false (the one-time backfill <c>scripts/Repair-SecureFlagNulls.ps1</c>; the column
+    /// defaults to No) and the column is field-secured, so an empty value means the app identity has lost its
+    /// field-level Read and the TRUE value was masked. Reading that as "not secure" would let a derived-member,
+    /// standing-grant or org-expansion term reach a record that may be secure; the fail-closed answer is the same one
+    /// a failed read gets, with its unreadable marker, so the write-time grant policy reports "could not be read".
+    /// Every consumer of this reader inherits it (the read-time evaluator, the grant policy, the internal user-share
+    /// last-reader rule).</para>
+    /// <para>A null <c>sprk_accesspermission</c> is Standard — today's behaviour, unchanged (task 138).</para>
     /// <para><b>Task 137 · defect C5 — the root's own state.</b> Only <c>statecode</c> 0 is active. A non-zero OR
     /// NULL state is INACTIVE (fail closed, NFR-01): Dataverse never writes a null <c>statecode</c>, so a row
     /// without one is a row whose state was not read. No default for the parameter — every caller says what it
     /// read.</para>
+    /// </remarks>
     internal static RootRecordFlags FlagsFrom(bool? isSecure, int? accessPermission, int? stateCode)
-        => new(
-            IsSecure: isSecure == true,
-            IsRestricted: accessPermission == AccessPermissionRestricted,
-            IsLimited: accessPermission == AccessPermissionLimited,
-            IsInactive: stateCode != 0);
+        => isSecure is null
+            ? RootRecordFlags.Unreadable
+            : new(
+                IsSecure: isSecure == true,
+                IsRestricted: accessPermission == AccessPermissionRestricted,
+                IsLimited: accessPermission == AccessPermissionLimited,
+                IsInactive: stateCode != 0);
 
     /// <summary>
     /// The flag read's columns besides the id: the two policy flags (tasks 037, 138) and the row's own

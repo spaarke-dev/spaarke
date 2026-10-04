@@ -1008,6 +1008,8 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             },
             [("sprk_workassignment", WorkAssignmentWithDanglingPair)] = new("sprk_workassignment", WorkAssignmentWithDanglingPair)
             {
+                // Task 150: a securable root reads No, never absent, once the NULL backfill has run (an absent flag refuses).
+                ["sprk_issecure"] = false,
                 ["sprk_regardingrecordid"] = DeletedProject.ToString("D").ToUpperInvariant(),
                 ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectTypeRef)
             },

@@ -394,6 +394,46 @@ public class SecureChildShareMirrorTests
     }
 
     /// <summary>
+    /// Task 150, round 17 item 3: a root whose <c>sprk_issecure</c> comes back EMPTY (masked from this identity) fails
+    /// CLOSED — read as flagged, so a child filed under it is HELD exactly like one under a flagged-not-isolated root,
+    /// never mirrored as if that root were ordinary. The explicit-<c>false</c> twin below is the control.
+    /// </summary>
+    [Fact]
+    public async Task AChildUnderARootWhoseSecureFlagReadsEmpty_IsHeld_NeverGranted()
+    {
+        var heldDoc = Guid.NewGuid();
+        var world = World()
+            .MaskedFlagNotIsolatedRoot("sprk_project", FlaggedProject)
+            .SecureChild("sprk_document", heldDoc,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", FlaggedProject));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", heldDoc, User(UserA)).Should().BeNull(
+            "an empty flag is 'could not tell', so the child's secure roots are undetermined and it is never granted to");
+        result.ChildrenHeld.Should().Be(1);
+        result.IsComplete.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AChildUnderARootExplicitlyFlaggedNo_IsMirroredFromItsSecureRoot()
+    {
+        var doc = Guid.NewGuid();
+        var world = World()
+            .OrdinaryRoot("sprk_project", FlaggedProject)
+            .SecureChild("sprk_document", doc,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", FlaggedProject));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", doc, User(UserA)).Should().Be(ViewOnly,
+            "an ordinary root (flag read as No) contributes nothing, so the child carries its secure root's sharees");
+        result.ChildrenHeld.Should().Be(0);
+    }
+
+    /// <summary>
     /// An unshare of the ROOT that lands while a reconcile is mid-run (it read the root earlier) is not undone: every
     /// grant is re-checked against the roots read fresh, right before it is written.
     /// </summary>

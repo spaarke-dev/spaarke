@@ -16,13 +16,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// POST /api/v1/external-access/provision-project
 ///
-/// Provisions the infrastructure a secure record needs — a <c>sprk_project</c>, <c>sprk_matter</c> or
-/// <c>sprk_workassignment</c> carrying <c>sprk_issecure = true</c> (task 144 widened it from projects only). Called by
-/// the Create Project wizard immediately after creating the project with the Secure toggle on, and by a Write holder
-/// for any secure root.
+/// Makes a <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c> secure and provisions what a secure
+/// record needs (task 144 widened it from projects only). Called by the Create Project wizard immediately after
+/// creating the project with the Secure toggle on, and by a Write holder for any root.
+///
+/// <para><b>Task 150: this endpoint is the only writer of <c>sprk_issecure = true</c>.</b> The column is field-secured
+/// (only the BFF application user may create or update it — <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>), the client
+/// no longer writes it, and Step 4.1 sets it as the first write, read back. A record already flagged (an older client,
+/// or a row created before task 150) is provisioned exactly like an unflagged one.</para>
 ///
 /// Provisioning sequence (task 133 reordered the share around the owner move — C11):
-///   1. Confirm the record exists and carries <c>sprk_issecure = true</c>
+///   1. Confirm the record exists (flagged or not — task 150)
 ///   2. Resolve the ONE canonical Secure Record business unit, BY NAME, from configuration
 ///   3. Resolve that BU's NAMED, non-default owner team (<c>SecureRecord:OwnerTeamName</c>), and prove it has ZERO
 ///      members and that ZERO systemusers sit in the BU — before any mutation (<see cref="SecureRecordOwnerTeam"/>)
@@ -30,10 +34,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      by the team WITHOUT a container → RESUME (below); otherwise continue. Then, still before any mutation: the
 ///      SPE container type is configured; a container ALREADY recorded on the record is classified (a business unit's
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
-///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, the OWN owner of each
-///      row the owner move cascades to (<see cref="AssignCascadeChildOwners"/> — complete or refused, task 133 c1), and
-///      the creator's current share (complete read or nothing — a record that keeps its own container is refused when it
-///      cannot be read, task 133 r1)
+///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI) — and, for a record NOT yet flagged secure, that
+///      the caller created it (owner round 10 item 10, task 150: <c>createdby</c> when a person, else
+///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the Write gate) — the record's current owner, the
+///      OWN owner of each row the owner move cascades to (<see cref="AssignCascadeChildOwners"/> — complete or refused,
+///      task 133 c1), and the creator's current share (complete read or nothing — a record that keeps its own container
+///      is refused when it cannot be read, task 133 r1)
+///   4.1 Set <c>sprk_issecure = true</c> and read it back (task 150) — the FIRST write; skipped when already true
 ///   4.2 A replaced SHARED container is unlinked from the record (task 133 r1), so the team never owns a record that
 ///      records shared storage
 ///   4.5 SHARE-FIRST: give the creator their share while the record is still where it was created
@@ -77,7 +84,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <c>sprk_createdbyperson</c> is a usable person — absent, disabled, an application user or unreadable — the resume
 /// is REFUSED with its own reason code, zero grants and zero containers (the closed acceptance criterion; verifier
 /// round 2 withdrew a round-1 path that completed when another person already held a share, because it changed that
-/// owner-decided contract without the owner).</para>
+/// owner-decided contract without the owner). A resume of a record NOT flagged secure is held to the same creator rule
+/// as the forward path (owner round 10 item 10; task 150 verifier c1 item 4) — before any write; a flagged one stays on
+/// the Write gate.</para>
 ///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
 /// restores the access state every earlier refusal already leaves (the creator's own). Ownership means the record's AND
@@ -89,8 +98,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// moving a record OUT of the Secure Record business unit because storage failed would turn a storage failure into a
 /// disclosure. A container failure leaves a secured, shared record that the next call resumes; the only artifact a
 /// failed run can strand is an empty SPE container, which its error body names (ADR-003). <c>sprk_issecure</c> is
-/// never written here, on any path: a secure-requested record that failed provisioning stays flagged, so uploads to
-/// it fail closed (<c>RecordContainerResolver</c>).</para>
+/// written once, at Step 4.1, and never cleared here on any path: a record that failed provisioning after that write
+/// stays flagged, so uploads to it fail closed (<c>RecordContainerResolver</c>); one refused before it was never
+/// flagged, and the client uploads nothing to a secure-requested record whose provisioning did not succeed.</para>
 ///
 /// Authentication: Azure AD JWT (RequireAuthorization via the adminGroup).
 /// ADR-001: Minimal API — no controllers.
@@ -335,6 +345,35 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonChildrenIncomplete = "sdap.provision.children_incomplete";
 
     /// <summary>
+    /// Task 150: <c>sprk_issecure</c> could not be set true — the write failed, or the read-back did not show
+    /// <c>true</c>. It is the FIRST write, so nothing else was changed (the flag itself may or may not be set). The same
+    /// caller may call again. A read-back that comes back without the value usually means this service lost its
+    /// field-level-security Read on the column, which an administrator restores
+    /// (<c>scripts/Set-SecureFlagFieldSecurity.ps1 -Verify</c>); a refused write, that its application user is not in
+    /// the writer profile.
+    /// </summary>
+    internal const string ReasonSecureFlagNotSet = "sdap.provision.secure_flag_not_set";
+
+    /// <summary>
+    /// Task 150 (owner round 10 item 10, 2026-10-03): the record is NOT yet marked secure, and the caller is not the person
+    /// who created it. An unflagged record is secured through this call only for its creator — <c>createdby</c> when that
+    /// is a person, otherwise the server-stamped <c>sprk_createdbyperson</c> (an app-only create). A record already
+    /// flagged (an older client, a row from before task 150) stays on the route's Write gate. Refused before any write
+    /// (403), deterministic for that caller: securing an existing record someone else created, with the content already
+    /// filed under it, is task 148's transition, not this call.
+    /// </summary>
+    internal const string ReasonNotRecordCreator = "sdap.provision.not_record_creator";
+
+    /// <summary>
+    /// Task 150 (owner round 10 item 10): whether the caller created the unflagged record could not be checked — its
+    /// <c>createdby</c> user or its <c>sprk_createdbyperson</c> could not be read. Refused before any write (500); the
+    /// same caller may call again once the read works. A column this environment lacks (<c>sprk_createdbyperson</c>
+    /// before its schema script ran — a 400) is this code too (round 17 item 1: unverifiable, not "not the creator"),
+    /// but 403 with <c>creatorState: column-missing</c>: deterministic until an administrator applies the schema.
+    /// </summary>
+    internal const string ReasonRecordCreatorUnverifiable = "sdap.provision.record_creator_unverifiable";
+
+    /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
     /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
@@ -466,7 +505,7 @@ public static class ProvisionProjectEndpoint
             "Ref={Ref}, TraceId={TraceId}",
             root.WireToken, recordId, request.ProjectRef, traceId);
 
-        // ── Step 1: Confirm the record exists and is secure ──────────────────
+        // ── Step 1: Confirm the record exists (task 150: the flag is set later, not required here) ──
         RootRow? row;
         try
         {
@@ -493,12 +532,11 @@ public static class ProvisionProjectEndpoint
                 $"{root.DisplayLabel} {recordId} not found.", traceId);
         }
 
-        if (row.sprk_issecure != true)
-        {
-            return ProblemDetailsHelper.ValidationError(
-                $"{root.DisplayLabel} {recordId} is not secure (sprk_issecure is false or null). " +
-                "Mark it secure before provisioning.");
-        }
+        // Task 150: the record no longer has to arrive flagged. sprk_issecure is field-secured and ONLY this endpoint
+        // sets it (EnsureSecureFlagAsync, the first write, after every pre-mutation refusal below), so a record from the
+        // new client arrives unflagged. One from the old client, or created before task 150, arrives flagged and not
+        // provisioned; both take exactly the same path from here (rollout constraint), the flagged one skipping the write.
+        var alreadyFlagged = row.sprk_issecure == true;
 
         var recordName = row.NameFrom(root.NameColumn) ?? request.ProjectRef ?? recordId.ToString();
 
@@ -741,6 +779,23 @@ public static class ProvisionProjectEndpoint
         Guid creatorId;
         if (resume)
         {
+            // ── RESUME of an UNFLAGGED record: only its creator (owner round 10 item 10; task 150 verifier c1 item 4) ──
+            //
+            // The round-10 rule names an unflagged record, not the forward path: a resume would mark it secure too (the
+            // flag write below). Every documented resume meets a FLAGGED row — since task 150 the flag is the forward
+            // path's first write and nothing clears it on failure; before task 150 provisioning required it; and the
+            // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
+            // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
+            // on the route's Write gate.
+            if (!alreadyFlagged)
+            {
+                var unflaggedResumeRefusal = await RefuseUnflaggedResumeUnlessCreatorAsync(
+                    dataverseClient, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId, logger, traceId, ct);
+
+                if (unflaggedResumeRefusal != null)
+                    return unflaggedResumeRefusal;
+            }
+
             // ── RESUME: the person a resume shares to — createdby when a person, else sprk_createdbyperson ──
             var person = await ResolveResumeCreatorAsync(
                 dataverseClient, root, recordId, row, ownerTeamId, logger, traceId, ct);
@@ -778,6 +833,13 @@ public static class ProvisionProjectEndpoint
                           "list could not be checked, so nothing was changed. The same caller may try again.",
                     traceId, (ReasonKey, ReasonResumeCreatorNoAccess));
             }
+
+            // ── RESUME: the flag is the first write here too (task 150) ──
+            var resumeFlag = await EnsureSecureFlagAsync(
+                dataverseClient, root, recordId, alreadyFlagged, logger, traceId, ct);
+
+            if (resumeFlag != null)
+                return resumeFlag;
 
             // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
@@ -1266,6 +1328,19 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonCreatorUnresolved)));
         }
 
+        // ── Owner round 10 item 10 (task 150): an UNFLAGGED record is secured only for the person who created it ──
+        //
+        // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
+        // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
+        if (row.sprk_issecure != true)
+        {
+            var notCreator = await RefuseUnlessRecordCreatorAsync(
+                dataverseClient, root, recordId, row, creatorId, logger, traceId, ct);
+
+            if (notCreator != null)
+                return CreatorShareStep.Failed(notCreator);
+        }
+
         // ── Owner N6 (task 143): a creator the record's No Access list walls off is refused BEFORE any change ──
         // In task 133's order this is before Step 4.2 (the first write) and the share-first step, so nothing is moved,
         // unlinked or shared. The message names no entry and no reason (the refusal contract).
@@ -1355,6 +1430,18 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonCreatorShareFailed),
                 ("ownershipRestored", true), ("sharesRestored", true), ("containerKept", true)));
         }
+
+        // ── Step 4.1: the secure flag — the FIRST write of the forward path (task 150) ──
+        //
+        // After every read and every refusal above, so each of those still leaves "nothing changed" true — and before
+        // anything else is written, so from here on every failure leaves a record that is FLAGGED: its uploads are
+        // refused (RecordContainerResolver fails closed on a secure record with no container of its own), which is the
+        // state a secure-requested record must be in whenever provisioning did not finish.
+        var flagRefusal = await EnsureSecureFlagAsync(
+            dataverseClient, root, recordId, row.sprk_issecure == true, logger, traceId, ct);
+
+        if (flagRefusal != null)
+            return CreatorShareStep.Failed(flagRefusal);
 
         // ── Step 4.2: unlink a SHARED container before the owner move (task 133 r1) ──
         var unlinkedNote = string.Empty;
@@ -1837,6 +1924,188 @@ public static class ProvisionProjectEndpoint
         : "An administrator must call provisioning again to resume.";
 
     /// <summary>
+    /// On a record NOT yet flagged secure (owner round 10 item 10, 2026-10-03; task 150 note §11.6) — the forward path, and
+    /// a resume (<see cref="RefuseUnflaggedResumeUnlessCreatorAsync"/>, verifier c1 item 4): refuses — read-only, before
+    /// any write — unless the caller is the person who created the record. Returns the refusal to send, or <c>null</c>
+    /// when the caller is that person.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> After the <c>sprk_issecure</c> lock this call is the one way to mark a record secure, and the route
+    /// admits any Write holder — including a colleague who reaches someone else's ordinary record through business-unit
+    /// depth. Securing a record that already holds content, filed by other people, is task 148's transition (it carries the
+    /// children and files); this call secures what its creator just made — the only use the two wizards have of it.</para>
+    ///
+    /// <para><b>The creator</b> (the owner's rule: "<c>createdby</c> when human, else <c>sprk_createdbyperson</c>", the same
+    /// order the resume uses): the caller is admitted when they are <c>createdby</c> (they made the create — a delegated
+    /// caller is a person, so no read is needed); otherwise <c>createdby</c> is read, and when it is a PERSON (enabled or
+    /// not) that person is the creator and the caller is refused; when it is an application user (an app-only create, e.g.
+    /// Office quick-create — enabled or not: an application user is never a person, verifier c1 item 7) or absent, the
+    /// BFF-stamped <c>sprk_createdbyperson</c> (field-secured, written only by the BFF — task 133) names the creator.</para>
+    ///
+    /// <para><b>Fail closed.</b> A read that fails refuses with <see cref="ReasonRecordCreatorUnverifiable"/> (500, the same
+    /// caller may retry) — never folded into "the caller is the creator". A <c>sprk_createdbyperson</c> column this
+    /// environment lacks (400) admits nobody and is UNVERIFIABLE, not "not the creator" (round 17 item 1, aligned with
+    /// task 146's F3 helper): 403 <see cref="ReasonRecordCreatorUnverifiable"/> with <c>creatorState: column-missing</c>
+    /// (no retry; an administrator applies the schema).</para>
+    /// </remarks>
+    private static async Task<IResult?> RefuseUnlessRecordCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        Guid callerId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
+        if (createdBy == callerId)
+            return null;
+
+        string createdByState;
+        if (createdBy is { } createdById)
+        {
+            string? state;
+            try
+            {
+                state = await UnusablePersonStateAsync(dataverseClient, createdById, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] The creator (createdby {CreatorId}) of unflagged {RecordType} {RecordId} could not be read, " +
+                    "so whether caller {CallerId} created it is unknown. Refusing before any change. TraceId={TraceId}",
+                    createdById, root.WireToken, recordId, callerId, traceId);
+                return RecordCreatorUnverifiable(root, traceId);
+            }
+
+            // A PERSON created it — enabled or not, that person is the creator, and it is not the caller.
+            if (state is null or UnusableDisabled)
+                return NotRecordCreator(root, recordId, callerId, "createdby", logger, traceId);
+
+            createdByState = state;
+        }
+        else
+        {
+            createdByState = UnusableAbsent;
+        }
+
+        // createdby is an application user (an app-only create) or absent: the person the BFF stamped decides.
+        Guid? person;
+        try
+        {
+            person = await ReadCreatorPersonAsync(dataverseClient, root, recordId, ct);
+        }
+        catch (Exception ex) when (IsColumnMissing(ex))
+        {
+            // Round 17 item 1 (2026-10-03): a missing creator-person column is UNVERIFIABLE, not "not the creator" —
+            // the same answer task 146's F3 helper gives for the same environment fact (CreatorColumnAbsent → 403
+            // permission_unverifiable). Nobody is known to be the creator, and nobody is known not to be.
+            logger.LogWarning(
+                "[PROVISION] {Column} is not in this environment (400), so who created unflagged {RecordType} " +
+                "{RecordId} (createdby is {CreatedByState}) cannot be checked. Refusing before any change: an " +
+                "administrator applies the schema (scripts/Set-RecordCreatorPersonSchema.ps1). TraceId={TraceId}",
+                RecordCreatorPerson.Column, root.WireToken, recordId, createdByState, traceId);
+            return RecordCreatorColumnMissing(root, traceId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] The person recorded as creating unflagged {RecordType} {RecordId} ({Column}) could not be " +
+                "read. Refusing before any change. TraceId={TraceId}",
+                root.WireToken, recordId, RecordCreatorPerson.Column, traceId);
+            return RecordCreatorUnverifiable(root, traceId);
+        }
+
+        return person == callerId
+            ? null
+            : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
+    }
+
+    // F6 row 9 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
+    private static IResult NotRecordCreator(
+        SecureRecordRoot root, Guid recordId, Guid callerId, string decidingColumn, ILogger logger, string traceId)
+    {
+        logger.LogWarning(
+            "[PROVISION] Caller {CallerId} did not create unflagged {RecordType} {RecordId} (decided by {Column}). Refusing " +
+            "before any change: an ordinary record is secured through this call only for its creator (owner round 10 " +
+            "item 10). TraceId={TraceId}",
+            callerId, root.WireToken, recordId, decidingColumn, traceId);
+
+        return Problem(StatusCodes.Status403Forbidden, "Forbidden",
+            $"Only the person who created this {root.DisplayLabel.ToLowerInvariant()} can secure it this way, and you did " +
+            "not create it. Nothing was changed.",
+            traceId, (ReasonKey, ReasonNotRecordCreator), ("creatorColumn", decidingColumn));
+    }
+
+    // F6 row 10 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
+    private static IResult RecordCreatorUnverifiable(SecureRecordRoot root, string traceId) =>
+        Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"Who created this {root.DisplayLabel.ToLowerInvariant()} could not be looked up, so whether you may secure it " +
+            "could not be checked. Nothing was changed; you may try again.",
+            traceId, (ReasonKey, ReasonRecordCreatorUnverifiable));
+
+    /// <summary>
+    /// <c>sprk_createdbyperson</c> is not in this environment, and <c>createdby</c> does not name a person: who created
+    /// the record cannot be checked (round 17 item 1). The same reason code as a failed read
+    /// (<see cref="ReasonRecordCreatorUnverifiable"/>), but 403 — a deterministic environment fact, not a fault, as
+    /// task 146's F3 helper answers it — with <c>creatorState: column-missing</c> (the extension the resume refusal
+    /// already uses for the same fact), so the client offers no retry and names the administrator.
+    /// </summary>
+    private static IResult RecordCreatorColumnMissing(SecureRecordRoot root, string traceId) =>
+        Problem(StatusCodes.Status403Forbidden, "Forbidden",
+            $"Who created this {root.DisplayLabel.ToLowerInvariant()} is not recorded in this environment, so whether " +
+            "you may secure it could not be checked. Nothing was changed; an administrator needs to finish setting " +
+            "up the environment.",
+            traceId, (ReasonKey, ReasonRecordCreatorUnverifiable), ("creatorState", UnusableColumnMissing),
+            ("creatorColumn", RecordCreatorPerson.Column));
+
+    /// <summary>
+    /// RESUME of a record NOT flagged secure (owned by the Secure Record owner team, no container recorded): the same
+    /// creator rule as the forward path (owner round 10 item 10 — "may secure an UNFLAGGED record only for its creator";
+    /// task 150 verifier c1 item 4). Read-only, before any write. Returns the refusal to send, or <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// The caller is identified by WhoAmI, as on the forward path; an unresolved caller is refused
+    /// <see cref="ReasonCreatorUnresolved"/> (never read as "the creator"). Then
+    /// <see cref="RefuseUnlessRecordCreatorAsync"/> decides, with the same columns and the same fail-closed reads. A
+    /// System Administrator who is not the creator and needs to finish such a row sets the flag first (F4: the platform
+    /// lets that role write it) — the row is then on the Write gate like every documented resume.
+    /// </remarks>
+    private static async Task<IResult?> RefuseUnflaggedResumeUnlessCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        Guid ownerTeamId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var caller = await callerAccessProbe.GetCallerSystemUserIdAsync(
+            TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+
+        if (caller is not { } callerId || callerId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[PROVISION] Resume of unflagged {RecordType} {RecordId} refused: the caller's Dataverse identity could not " +
+                "be established, so it could not be shown to be the record's creator. Nothing was changed. TraceId={TraceId}",
+                root.WireToken, recordId, traceId);
+
+            // F6 row 11 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
+            return Problem(
+                StatusCodes.Status403Forbidden, "Forbidden",
+                "Your account could not be confirmed, so whether you created this " +
+                $"{root.DisplayLabel.ToLowerInvariant()} could not be checked. Nothing was changed; you may try again.",
+                traceId, (ReasonKey, ReasonCreatorUnresolved), ("ownerTeamId", ownerTeamId));
+        }
+
+        return await RefuseUnlessRecordCreatorAsync(dataverseClient, root, recordId, row, callerId, logger, traceId, ct);
+    }
+
+    /// <summary>
     /// On RESUME, refuses a request that names colleagues unless its caller IS the record's creator — before any write
     /// (task 133 verifier round 1).
     /// </summary>
@@ -2246,8 +2515,10 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// Why <paramref name="systemUserId"/> cannot be the person a secure record is kept open for — <c>absent</c>,
     /// <c>disabled</c> or <c>application-user</c> — or <c>null</c> when it can. Throws when the user cannot be read:
-    /// an unreadable user is never "usable". A row whose <c>isdisabled</c> is not read as <c>false</c> (including
-    /// null) is treated as disabled — only a proven-enabled user counts.
+    /// an unreadable user is never "usable". An application user is <c>application-user</c> whether enabled or not — it
+    /// is never a person, so a DISABLED application user is not read as a disabled person (task 150 verifier c1 item 7:
+    /// "createdby when human"). Otherwise a row whose <c>isdisabled</c> is not read as <c>false</c> (including null) is
+    /// treated as disabled — only a proven-enabled user counts.
     /// </summary>
     private static async Task<string?> UnusablePersonStateAsync(
         DataverseWebApiClient dataverseClient, Guid systemUserId, CancellationToken ct)
@@ -2262,10 +2533,10 @@ public static class ProvisionProjectEndpoint
         var user = users.FirstOrDefault();
         if (user is null)
             return UnusableAbsent;
-        if (user.isdisabled != false)
-            return UnusableDisabled;
         if (user.applicationid is { } app && app != Guid.Empty)
             return UnusableApplicationUser;
+        if (user.isdisabled != false)
+            return UnusableDisabled;
         return null;
     }
 
@@ -2658,6 +2929,97 @@ public static class ProvisionProjectEndpoint
             $"creator, but its own SPE container could not be created ({failure}). Nothing needs undoing: calling " +
             "provisioning again (the same caller may) resumes from here.",
             traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+    }
+
+    /// <summary>
+    /// Sets <c>sprk_issecure = true</c> and proves it by reading it back — or, when the record already reads
+    /// <c>true</c>, writes nothing (task 150). Returns the refusal to send, or <c>null</c> when the flag is proven set.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the server sets it.</b> The column is field-secured: only this service's application user (the
+    /// "Spaarke BFF-Managed Field Writers" profile) may create or update it, so a client can no longer mark a record
+    /// secure without provisioning it, nor clear the flag on a secure one. The client asks for a secure record by
+    /// calling this endpoint.</para>
+    ///
+    /// <para><b>Why FIRST, and why it is never undone.</b> Every refusal before it changes nothing, so the record is
+    /// still not flagged and the client — which skips every upload and child create for a secure-requested record whose
+    /// provisioning did not succeed — has put nothing in shared storage. From this write on, every failure leaves the
+    /// record FLAGGED with no container of its own, whose uploads are refused (fail closed). Compensation restores
+    /// ownership and shares, never the flag: un-flagging a record the user asked to secure would route its next upload
+    /// to shared storage, which cannot be retracted.</para>
+    ///
+    /// <para><b>The read-back is the proof</b> (ADR-003): an accepted PATCH is not evidence the value is stored, and a
+    /// read that comes back without the value — a field-secured column this identity cannot read is returned EMPTY,
+    /// not refused — must not be taken for success.</para>
+    /// </remarks>
+    private static async Task<IResult?> EnsureSecureFlagAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        bool alreadyFlagged,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        if (alreadyFlagged)
+        {
+            logger.LogInformation(
+                "[PROVISION] {RecordType} {RecordId} already reads sprk_issecure = true (created before task 150, or by an " +
+                "older client); the flag is not written again.", root.WireToken, recordId);
+            return null;
+        }
+
+        string failure;
+        try
+        {
+            await dataverseClient.UpdateAsync(
+                root.EntitySet,
+                recordId,
+                new Dictionary<string, object?> { ["sprk_issecure"] = true },
+                ct);
+
+            var reread = (await dataverseClient.QueryAsync<RootRow>(
+                root.EntitySet,
+                filter: $"{root.IdColumn} eq {recordId}",
+                select: $"{root.IdColumn},sprk_issecure",
+                top: 1,
+                cancellationToken: ct)).FirstOrDefault();
+
+            if (reread?.sprk_issecure == true)
+            {
+                logger.LogInformation(
+                    "[PROVISION] Set sprk_issecure = true on {RecordType} {RecordId} (read back).", root.WireToken, recordId);
+                return null;
+            }
+
+            failure = reread is null
+                ? "the record could not be read back"
+                : "the value read back was not true — if it came back empty, this service has likely lost its " +
+                  "field-level-security Read on sprk_issecure";
+
+            logger.LogError(
+                "[PROVISION] sprk_issecure on {RecordType} {RecordId} did not read back true after the write " +
+                "(read back: {Value}). Stopped: nothing else was written. TraceId={TraceId}",
+                root.WireToken, recordId, reread?.sprk_issecure?.ToString() ?? "(empty)", traceId);
+        }
+        catch (Exception ex)
+        {
+            failure = "the write or its read-back failed — if Dataverse refused the write, this service's application " +
+                      "user is not in the field security profile that may update sprk_issecure";
+
+            logger.LogError(ex,
+                "[PROVISION] Could not set sprk_issecure on {RecordType} {RecordId}. Stopped: nothing else was written. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+        }
+
+        return Problem(
+            StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} could not be marked secure ({failure}). That is the first change " +
+            "provisioning makes, so nothing else was changed: its ownership, shares and storage are as they were (the " +
+            "secure flag itself may or may not be set — while it is set, uploads to the record are refused). The same " +
+            "caller may retry; an administrator checks the field security setup with " +
+            "scripts/Set-SecureFlagFieldSecurity.ps1 -Verify.",
+            traceId, (ReasonKey, ReasonSecureFlagNotSet));
     }
 
     /// <summary>

@@ -257,6 +257,30 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>When false, the delegation probe reports Read only — the caller lacks Write (task 144).</summary>
     public bool CallerHoldsWrite { get; set; } = true;
 
+    /// <summary>
+    /// When true, the caller's rights include Delete — a Full Access holder, or an administrator (task 150: owner round
+    /// 3b F3, who may REMOVE the secure designation).
+    /// </summary>
+    public bool CallerHoldsDelete { get; set; }
+
+    /// <summary>
+    /// Task 150 r2 (verifier F6): the SECOND rights probe of a record THROWS. The first is the route's Write gate; the
+    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3).
+    /// </summary>
+    public bool FullAccessProbeThrows { get; set; }
+
+    /// <summary>
+    /// Task 150: every root read returns <c>sprk_issecure</c> EMPTY (JSON null) — what Dataverse answers for a
+    /// field-secured column the reading identity has no Read on.
+    /// </summary>
+    public bool SecureFlagReadsEmpty { get; set; }
+
+    /// <summary>Task 150: an UPDATE setting <c>sprk_issecure</c> to true throws (recorded first).</summary>
+    public bool SecureFlagWriteFails { get; set; }
+
+    /// <summary>Task 150: an UPDATE setting <c>sprk_issecure</c> to true is accepted but NOT applied.</summary>
+    public bool SecureFlagWriteNotApplied { get; set; }
+
     /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
     public Guid? FailShareForPrincipal { get; set; }
 
@@ -587,6 +611,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
+        CallerHoldsDelete = false;
+        FullAccessProbeThrows = false;
+        SecureFlagReadsEmpty = false;
+        SecureFlagWriteFails = false;
+        SecureFlagWriteNotApplied = false;
         FailShareForPrincipal = null;
         FailRevokeForPrincipal = null;
         StrictShareReadSucceeds = true;
@@ -735,6 +764,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             _failNextOwnerReadBack = true;
         }
 
+        var setsSecureFlag = flat.TryGetValue("sprk_issecure", out var flagWrite)
+                             && bool.TryParse(flagWrite, out var flagValue) && flagValue;
+
+        if (setsSecureFlag && SecureFlagWriteFails)
+            throw new InvalidOperationException("Dataverse 403: simulated refusal of the sprk_issecure write (field security).");
+
         if (flat.TryGetValue("sprk_containerid", out var containerWrite))
         {
             if (containerWrite is not null && !ContainerStampSucceeds)
@@ -814,7 +849,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 }
             }
 
-            if (flat.TryGetValue("sprk_issecure", out var isSecureRaw))
+            if (flat.TryGetValue("sprk_issecure", out var isSecureRaw) && !(setsSecureFlag && SecureFlagWriteNotApplied))
             {
                 record = _records[id];
                 _records[id] = record with
@@ -1093,7 +1128,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     {
                         [idColumn] = seeded.Id,
                         [nameColumn] = displayName,
-                        ["sprk_issecure"] = seeded.IsSecure
+                        ["sprk_issecure"] = SecureFlagReadsEmpty ? null : seeded.IsSecure
                     };
 
                     if (seeded.LegacySecurityBuId is { } legacy)
@@ -1398,10 +1433,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
+            var earlierProbes = _fixture.DelegationProbes.Count(p => p.EntitySet == entitySet && p.RecordId == recordId);
             _fixture.DelegationProbes.Add((entitySet, recordId));
-            return Task.FromResult(_fixture.CallerHoldsWrite
+            if (_fixture.FullAccessProbeThrows && earlierProbes >= 1)
+                throw new HttpRequestException("Dataverse 503: simulated failure of RetrievePrincipalAccess.");
+
+            var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
-                : AccessRights.Read);
+                : AccessRights.Read;
+
+            return Task.FromResult(_fixture.CallerHoldsDelete ? rights | AccessRights.Delete : rights);
         }
 
         /// <summary>

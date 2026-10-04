@@ -1730,9 +1730,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         var hasOwningTeam = row.GetAttributeValue<EntityReference>(OwningTeamColumn) is { } team && team.Id != Guid.Empty;
 
-        // NULL sprk_issecure is "No" — owner decision Q1 (2026-10-01) sets every NULL to No and defaults the column
-        // to No; it is not read as secure. A flagged root that IS isolated takes the secure branch anyway by its BU.
-        var flaggedSecure = isSecureFlaggedRoot && row.GetAttributeValue<bool?>(IsSecureColumn) == true;
+        // An EMPTY sprk_issecure fails CLOSED (task 150, round 17 item 3): since the task 150 backfill every row holds true or
+        // false and the column is field-secured, so empty means the BFF lost its field-level Read and the real value was
+        // masked. Read as flagged: a root that is not isolated is then refused (never an ordinary team); one that IS isolated
+        // takes the secure branch by its BU anyway.
+        var flaggedSecure = isSecureFlaggedRoot && (row.GetAttributeValue<bool?>(IsSecureColumn) ?? true);
 
         if (plannedOwningTeams is not null
             && plannedOwningTeams.TryGetValue(

@@ -470,12 +470,15 @@ public sealed class SecureChildShareSynchronizer
         query.Criteria.AddCondition(root.Table + "id", ConditionOperator.Equal, root.Id);
         var entity = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
 
-        // NULL sprk_issecure is "No" (owner decision Q1, 2026-10-01), as in the ownership resolver.
+        // An EMPTY sprk_issecure fails CLOSED (task 150, round 17 item 3), as in the ownership resolver: since the task 150
+        // backfill every row holds true or false and the column is field-secured, so empty means this identity lost its
+        // field-level Read and the real value was masked. Read as flagged: a root that is not isolated then leaves its
+        // child's lineage UNDETERMINED (shares only narrowed, never granted) instead of contributing nothing.
         return entity is null
             ? null
             : new RootFacts(
                 entity.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty ? team : null,
-                entity.GetAttributeValue<bool?>(IsSecureColumn) == true);
+                entity.GetAttributeValue<bool?>(IsSecureColumn) ?? true);
     }
 
     /// <summary>A row of a known table.</summary>

@@ -123,10 +123,17 @@ internal sealed class OwnershipDirectory
     /// A row with its owning business unit, and optionally its owning team, its <c>sprk_issecure</c> flag and other
     /// columns (a reparent reads the whole row).
     /// </summary>
+    /// <remarks>
+    /// Task 150 (round 17 item 3): on the three secure-flagged ROOT tables a row seeded with no <paramref name="isSecure"/>
+    /// reads <c>false</c> — the post-backfill reality (<c>scripts/Repair-SecureFlagNulls.ps1</c>: every row holds true or
+    /// false), because the resolver now reads an EMPTY flag as flagged (fail closed). A row whose flag must come back
+    /// EMPTY — masked by field-level security — is seeded with <see cref="WithMaskedSecureFlag"/>.
+    /// </remarks>
     public OwnershipDirectory WithRecord(
         string entity, Guid id, Guid? owningBusinessUnit, bool? isSecure = null, Guid? owningTeam = null,
         Dictionary<string, object>? extra = null)
     {
+        isSecure ??= SecureFlaggedRootTables.Contains(entity) ? false : null;
         var row = new Entity(entity, id);
         if (owningBusinessUnit is { } bu)
             row["owningbusinessunit"] = new EntityReference("businessunit", bu);
@@ -141,6 +148,21 @@ internal sealed class OwnershipDirectory
             row[column] = value;
 
         _records[(entity, id)] = row;
+        return this;
+    }
+
+    /// <summary>The three tables that carry <c>sprk_issecure</c> as a security input (project, matter, work assignment).</summary>
+    private static readonly HashSet<string> SecureFlaggedRootTables =
+        new(StringComparer.OrdinalIgnoreCase) { "sprk_project", "sprk_matter", "sprk_workassignment" };
+
+    /// <summary>
+    /// A root row whose <c>sprk_issecure</c> comes back EMPTY — the field-secured value masked from the BFF identity (task
+    /// 150, round 17 item 3). Otherwise as <see cref="WithRecord"/>.
+    /// </summary>
+    public OwnershipDirectory WithMaskedSecureFlag(string entity, Guid id, Guid owningBusinessUnit, Guid? owningTeam = null)
+    {
+        WithRecord(entity, id, owningBusinessUnit, isSecure: null, owningTeam: owningTeam);
+        _records[(entity, id)].Attributes.Remove("sprk_issecure");
         return this;
     }
 

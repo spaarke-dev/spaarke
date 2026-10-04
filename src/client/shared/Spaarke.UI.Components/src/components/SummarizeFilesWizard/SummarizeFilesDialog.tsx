@@ -520,15 +520,15 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         // authenticatedFetch + bffBaseUrl are REQUIRED here, not optional conveniences.
         //
         // This step renders the same `CreateProjectStep` the real wizard does, Secure toggle
-        // included. `projectService` writes `sprk_issecure = true` — but the thing that gives a
-        // secure project its OWN container, `provisionSecureProject`, lives in
-        // `CreateProjectWizard`'s onFinish, which THIS path does not go through.
+        // included. Securing a project — marking it secure (task 150: the server's first write;
+        // `projectService` never writes `sprk_issecure`, which is field-secured) and giving it its
+        // OWN container — is `provisionSecureProject`, called below exactly as the wizard does.
         //
-        // So before this fix a user could tick "Secure" here and get a project flagged secure
+        // Before the original fix a user could tick "Secure" here and get a project flagged secure
         // whose documents (then) landed in the SHARED business-unit container, with no warning — the
-        // wizard's provisioning-failure message lives on a path this dialog bypasses. It looked
-        // secure in Dataverse and to anything reading the flag. That is the exact isolation gap
-        // unified-access-control-r2 exists to close.
+        // wizard's provisioning-failure message lives on a path this dialog bypasses. That is the
+        // exact isolation gap unified-access-control-r2 exists to close. This dialog adds no file or
+        // child record to the project it creates, so task 150's hold-back has nothing to hold back here.
         const service = new ProjectService(dataService, authenticatedFetch, bffBaseUrl);
         const result = await service.createProject(currentProjectFormValues);
 
@@ -560,18 +560,22 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                   }
                 }
               } catch (err) {
+                // `provisionSecureProject` never throws; kept as a belt. Task 150: the project may or may not have
+                // been marked secure (the server's first write), so the copy claims neither. Copy: owner round 10
+                // item 9 (F6 row 5, option A — notes/task-150-issecure-lock.md §6).
                 warnings.push(
                   `Securing the project did not finish (${err instanceof Error ? err.message : 'Unknown error'}). ` +
-                    'It was created and marked secure, but is not yet isolated; documents cannot be added to it ' +
-                    'until an administrator finishes securing it.'
+                    'The project was created; an administrator can check how far securing it got and finish it.'
                 );
               }
             } else {
-              // Fail LOUDLY rather than silently creating a secure-in-name-only project.
+              // Fail LOUDLY rather than silently creating a project the user believes is secure. Task 150: the client
+              // no longer writes sprk_issecure, so with no BFF to ask the project is NOT marked secure — the old
+              // "was marked Secure" was replaced. Copy: owner round 10 item 9 (F6 row 4, option A —
+              // notes/task-150-issecure-lock.md §6).
               warnings.push(
-                'Project was marked Secure but could not be secured from this dialog ' +
-                  '(no authenticated BFF connection). Documents cannot be added to it until an ' +
-                  'administrator secures it.'
+                'The project was created but not secured, because securing it needs a connection to the Spaarke ' +
+                  'service that this dialog does not have. An administrator can secure it.'
               );
             }
           }

@@ -405,6 +405,13 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.cascade_children_unreadable', 'not-started', true],
     // Task 133 c1: undone, but records that moved with it are not back on their own owners — an administrator first.
     ['sdap.provision.cascade_children_not_restored', 'needs-administrator', false],
+    // Task 150: marking the project secure is the server's FIRST write; it failed, nothing else changed, the same caller
+    // may call again.
+    ['sdap.provision.secure_flag_not_set', 'not-started', true],
+    // Task 150 (owner round 10 item 10): an UNFLAGGED record is secured only for its creator. Refused before any change —
+    // deterministic for a caller who did not create it; a failed read of the creator, the same caller may call again.
+    ['sdap.provision.not_record_creator', 'not-started', false],
+    ['sdap.provision.record_creator_unverifiable', 'not-started', true],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -439,10 +446,77 @@ describe('provisionSecureProject — failure classification', () => {
   });
 
   it('never calls a secure-requested project a normal project', () => {
-    // `sprk_issecure` is set before provisioning and never cleared on a refusal (task 133 never writes it).
+    // Task 150: `sprk_issecure` is the server's first write and never cleared; whether the project ends secure is open.
     for (const code of [...EMITTED.map(([c]) => c), undefined]) {
       expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/normal project/i);
     }
+  });
+
+  // Task 150, owner round 10 item 9 (F6): the copy the owner picked, verbatim. Row 2 is the resume-neutral option D: an
+  // environment refusal comes before the flag write on a FIRST call, but on a RESUME (or for a row an older client
+  // flagged) the project is already flagged, and the response does not say which — so the copy claims neither.
+  it('says an environment refusal could not finish securing the project — claiming neither "not secured" nor "nothing changed" (F6 row 2, option D)', () => {
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.secure_bu_not_found');
+    expect(errorMessage).toBe(
+      'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could not be finished; an administrator can finish securing it once the setup is fixed.'
+    );
+    expect(errorMessage).not.toMatch(/not secured|nothing about it changed|marked secure/i);
+  });
+
+  it('says the flag could not be set, and that nothing else changed (F6 row 3, option A)', () => {
+    expect(classifyProvisioningFailure('sdap.provision.secure_flag_not_set').errorMessage).toBe(
+      'The project could not be marked secure, so securing it stopped before anything else changed: its ownership, sharing and document storage are as they were.'
+    );
+  });
+
+  // Task 150, owner round 13 item 10 (F6 rows 7-8): option B, verbatim. The two creator-rule refusals of an UNFLAGGED
+  // record (owner round 10 item 10).
+  it('says only the creator can secure the project this way, and that nothing changed (F6 row 7, option B)', () => {
+    expect(classifyProvisioningFailure('sdap.provision.not_record_creator').errorMessage).toBe(
+      'Only the person who created this project can secure it this way. Nothing about the project changed.'
+    );
+  });
+
+  // Task 150 round 17 item 2: rows 8 and task 133's `creator_unresolved` also answer an anomalous unflagged RESUME, where
+  // the Secure Record owner team already owns the record — so, like row 2's option D, neither may describe a first call.
+  it('says who created the project could not be checked, so securing it could not be finished — resume-neutral (F6 row 8, round 17)', () => {
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.record_creator_unverifiable');
+    expect(errorMessage).toBe(
+      'Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed.'
+    );
+    expect(errorMessage).not.toMatch(/did not start|not secured/i);
+  });
+
+  it('says securing could not be finished because the account could not be confirmed — resume-neutral (creator_unresolved, round 17)', () => {
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.creator_unresolved');
+    expect(errorMessage).toBe(
+      'Securing the project could not be finished, because your account could not be confirmed. Nothing about the project changed.'
+    );
+    expect(errorMessage).not.toMatch(/did not start|not secured/i);
+  });
+
+  // Task 150 round 17 item 1: a missing creator column on the creator rule is UNVERIFIABLE (the server's
+  // record_creator_unverifiable, 403, creatorState column-missing) — deterministic, so no retry and the administrator named,
+  // with the same message the resume's column-missing refusal shows (one environment fact, one message).
+  it('reads creatorState=column-missing on record_creator_unverifiable as setup for an administrator, not a retry', async () => {
+    const authFetch = jest.fn().mockResolvedValue(
+      problemResponse(403, {
+        detail: 'operator text',
+        reasonCode: 'sdap.provision.record_creator_unverifiable',
+        creatorState: 'column-missing',
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('needs-administrator');
+    expect(result.retryable).toBe(false);
+    expect(result.errorMessage).toBe(
+      classifyProvisioningFailure('sdap.provision.resume_creator_unavailable', { creatorState: 'column-missing' })
+        .errorMessage
+    );
+    expect(result.errorMessage).toMatch(/not yet set up to record who created/i);
+    expect(result.errorMessage).not.toMatch(/did not start|not secured/i);
   });
 
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {
@@ -453,7 +527,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(29);
+    expect(EMITTED).toHaveLength(32);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

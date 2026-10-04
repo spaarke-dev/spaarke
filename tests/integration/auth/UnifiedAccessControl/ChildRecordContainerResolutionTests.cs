@@ -109,6 +109,28 @@ public partial class ChildRecordContainerResolutionTests
         decision.ContainerId.Should().Be(RootContainer);
     }
 
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision on the ANCESTOR path. Before it, a root above the record whose flag
+    /// came back absent was read as not secure and the walk fell through to the business-unit container: exactly where
+    /// a secure project's to-do would land if this service lost its field-level Read on <c>sprk_issecure</c>.
+    /// </summary>
+    [Fact(DisplayName = "Task 150: a to-do under a project whose sprk_issecure comes back ABSENT is refused — the business unit is never read")]
+    public async Task Todo_UnderAProjectWhoseFlagIsAbsent_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: null, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+        refusal.Detail.Should().NotContain(ProjectId.ToString(), "another record's id is never returned to the caller");
+        world.Reads("businessunit").Should().Be(0, "no shared container may be in scope on an unknown answer");
+    }
+
     [Fact(DisplayName = "Task 155: a to-do under a NON-secure project resolves its OWN business-unit container — no 409")]
     public async Task Todo_UnderANonSecureProject_ResolvesItsOwnBusinessUnitContainer()
     {
@@ -186,11 +208,12 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("sprk_matter").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice (securable, own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
+    [Fact(DisplayName = "Task 155: an invoice (own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
     public async Task SecurableChild_NotItselfSecure_UnderASecureMatter_ResolvesTheMattersContainer()
     {
         // Live dev: sprk_invoice carries sprk_issecure, and links to its root through typed sprk_matter /
-        // sprk_project lookups, not sprk_regarding{core}.
+        // sprk_project lookups, not sprk_regarding{core}. This world declares the column on the invoice as live does;
+        // since task 150 the registry (and TestEntityCatalog) does not treat it as securable, and the links decide.
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
@@ -202,17 +225,28 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice that is ITSELF secure keeps its own container and never consults its root")]
-    public async Task SecurableChild_ItselfSecure_KeepsItsOwnContainer()
+    /// <summary>
+    /// Task 150 (owner round 10 item 11: "invoices follow their matter"). Until task 150 an invoice flagged secure was a
+    /// secure record in its own right — it kept a container of its own and never consulted its root, and with no
+    /// container it refused every upload even under an ordinary matter. Its flag is no longer a security input: the
+    /// matter decides, both ways. (The real registry's half — the invoice classified NotSecurable although its table
+    /// carries the column — is pinned in <c>SecurableEntityRegistryTests</c>.)
+    /// </summary>
+    [Theory(DisplayName = "Task 150: an invoice FLAGGED secure follows its matter — secure under a secure matter, ordinary under an ordinary one")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnInvoiceFlaggedSecure_FollowsItsMatter(bool matterIsSecure)
     {
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: true, ownContainer: OtherRootContainer)
-            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+            .WithRoot("sprk_matter", MatterId, isSecure: matterIsSecure, matterIsSecure ? RootContainer : null)
+            .WithBusinessUnit(BusinessUnitContainer);
 
         var decision = await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
 
-        decision.ContainerId.Should().Be(OtherRootContainer);
-        world.RootReads().Should().Be(0);
+        decision.ContainerId.Should().Be(matterIsSecure ? RootContainer : BusinessUnitContainer,
+            "the invoice's own flag and container decide nothing; its matter does");
+        world.Reads("sprk_matter").Should().Be(1, "the invoice's root is always consulted now");
     }
 
     [Fact(DisplayName = "Task 155: a contact (no ancestor concept) resolves its own business-unit container by the two-argument overload")]
@@ -484,8 +518,10 @@ public partial class ChildRecordContainerResolutionTests
     {
         // A service request is CORE (nothing is copied from it) and cannot carry sprk_issecure; a work assignment carries
         // no copy (its matter / project are its own links). Neither row has anything the resolver can compare.
+        // A work assignment is itself a securable root: post-backfill it reads No (task 150), never absent.
         var world = new World()
-            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId))
+            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId),
+                isSecure: entity == "sprk_workassignment" ? false : null)
             .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -732,7 +768,10 @@ public partial class ChildRecordContainerResolutionTests
                             RecordContainerResolver.ChildAncestorLinks.RecordKind.Party))
             .Select(c => c.Column);
 
-        var securable = SecurableWithInvoice.Contains(entity);
+        // Task 150 (owner round 10 item 11): the invoice's table carries sprk_issecure (this world declares it, as live
+        // metadata does), but its flag is not a security input — so its row is read for its links only, never for a flag
+        // or a container of its own.
+        var securable = SecurableWithInvoice.Contains(entity) && entity != "sprk_invoice";
         var expected = ownershipColumns
             .Concat(pairShape switch
             {
@@ -816,8 +855,9 @@ public partial class ChildRecordContainerResolutionTests
     [Fact(DisplayName = "Task 155: an email regarding an invoice under a SECURE matter routes to the MATTER's own container, not the archive")]
     public async Task Communication_RegardingAnInvoiceUnderASecureMatter_RoutesToTheMattersContainer()
     {
-        // The deliberate behaviour change: CommunicationContainerResolver asks about securable regardings only, and
-        // sprk_invoice is securable live — so the invoice, now a CHILD, resolves through its secure root.
+        // The deliberate behaviour change: the invoice, a CHILD, resolves through its secure root. (This world declares
+        // sprk_issecure on the invoice as live metadata does; since task 150 the invoice's own flag is not a security
+        // input, so its matter alone decides.)
         var world = new World(securable: SecurableWithInvoice)
             .WithCommunicationRegardingInvoice(copyMatter: MatterId)
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
@@ -1217,11 +1257,17 @@ public partial class ChildRecordContainerResolutionTests
         world.RootReads().Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155 f3: a work assignment with a NULL flag under a NON-secure matter resolves its BU container (live: most rows)")]
-    public async Task WorkAssignment_NullFlag_UnderANonSecureMatter_ResolvesItsBusinessUnit()
+    /// <remarks>
+    /// CONVERTED by task 150. This was "a work assignment with a NULL flag … resolves its BU container (live: most
+    /// rows)". The owner's ABSENT-branch decision backfills every NULL <c>sprk_issecure</c> to No
+    /// (<c>scripts/Repair-SecureFlagNulls.ps1</c>; the column already defaults to No, and every live NULL row predates
+    /// the column), so the live shape is now an explicit FALSE — pinned here — and a NULL refuses (next test).
+    /// </remarks>
+    [Fact(DisplayName = "Task 155 f3 / 150: a work assignment flagged No under a NON-secure matter resolves its BU container")]
+    public async Task WorkAssignment_FlaggedNo_UnderANonSecureMatter_ResolvesItsBusinessUnit()
     {
         var world = new World()
-            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithChild("sprk_workassignment", regardingMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -1229,6 +1275,21 @@ public partial class ChildRecordContainerResolutionTests
 
         decision.ContainerId.Should().Be(BusinessUnitContainer);
         world.Reads("sprk_matter").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 150: a work assignment whose OWN sprk_issecure is ABSENT is refused before its matter is read")]
+    public async Task WorkAssignment_AbsentFlag_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155 f3: a NON-secure project whose polymorphic pair names a SECURE matter resolves the matter's container (live: 0 projects carry the pair)")]
@@ -2137,7 +2198,7 @@ public partial class ChildRecordContainerResolutionTests
         public World WithRoot(
             string entity,
             Guid id,
-            bool isSecure,
+            bool? isSecure,
             string? containerId,
             Guid? regardingProject = null,
             Guid? regardingMatter = null,
@@ -2145,7 +2206,9 @@ public partial class ChildRecordContainerResolutionTests
             Guid? pairType = null,
             (string Column, Guid Id)? intermediate = null)
         {
-            var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
+            // isSecure null = the attribute ABSENT on the row (task 150: a field-secured value masked from the reader).
+            var row = new Entity(entity, id);
+            if (isSecure is { } flag) row["sprk_issecure"] = flag;
             if (containerId is not null) row["sprk_containerid"] = containerId;
             if (regardingProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);

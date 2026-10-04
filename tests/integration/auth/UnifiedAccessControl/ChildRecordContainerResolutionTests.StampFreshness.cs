@@ -351,8 +351,16 @@ public partial class ChildRecordContainerResolutionTests
         world.Queue.Children.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Task 156: a record above that is ITSELF secure (an invoice with its own flag) is a secure root — its container, never the matter's BU")]
-    public async Task SecureIntermediate_IsASecureRootInItsOwnRight()
+    /// <summary>
+    /// Task 156's "a record above that is ITSELF secure" case, for the one intermediate that carries <c>sprk_issecure</c> —
+    /// the invoice — under owner round 10 item 11 (task 150, later than task 156's premise): invoices follow their matter.
+    /// The invoice's own flag and container are not a security input, so a to-do under an invoice FLAGGED secure resolves
+    /// through the invoice's matter: the matter's container when the matter is secure, the business unit's when it is not.
+    /// </summary>
+    [Theory(DisplayName = "Task 156 x task 150: a to-do under an invoice FLAGGED secure follows the invoice's matter — the invoice's own flag decides nothing")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IntermediateInvoiceFlaggedSecure_FollowsItsMatter(bool matterIsSecure)
     {
         var world = new World(securable: SecurableWithInvoice)
             .WithRow("sprk_todo", ChildId,
@@ -360,11 +368,12 @@ public partial class ChildRecordContainerResolutionTests
                 pairId: IntermediateId.ToString())
             .WithRow("sprk_invoice", IntermediateId, [("sprk_matter", "sprk_matter", MatterId)],
                 isSecure: true, container: OtherRootContainer)
-            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_matter", MatterId, isSecure: matterIsSecure, matterIsSecure ? RootContainer : null)
             .WithBusinessUnit(BusinessUnitContainer);
 
-        (await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId)).ContainerId.Should().Be(OtherRootContainer,
-            "a child of a secure record is secure (C10 part 2) — the invoice is that record");
+        (await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId)).ContainerId.Should().Be(
+            matterIsSecure ? RootContainer : BusinessUnitContainer,
+            "the invoice's own flag and container are not a security input (owner round 10 item 11); its matter decides");
     }
 
     // =============================================================================================
