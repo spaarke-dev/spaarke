@@ -646,3 +646,28 @@ Batches: 1 = S1 S4 S9 S11a S12a S14 (26 failed / 173); 2 = S2 S3 S7 S11b S12b S1
 | `InsightEndpointsContractTests`, `Phase1SmokeTest`, `PredictMatterCostEvalHarnessTests` | node seam (non-persisting); `lookBackYears` / `matterType` → the declared text key `matterDescription`; the eval harness sends only `matterId` (the golden dataset is unchanged) | the shared allow-list refuses undeclared keys; no authorized-caller assertion weakened |
 | `RagEndpointsAuthorizationContractTests` | `errorCode` + `code` asserted on the 409 / 400 / 500 cases | item 12(a) |
 | `VersionSaveAiRefreshSeamTests` | the two deleted `IRagService` members removed from its fake | item 12(c) |
+
+### 15.12 Test results (f1, code head `1a7018f2f`; later commits are notes/POML only)
+| Run | Result |
+|---|---|
+| BFF build (`Sprk.Bff.Api`) | **0 warnings, 0 errors** (TreatWarningsAsErrors) |
+| Affected, during the round | Insights contract + orchestrator + smoke + eval + playbook tests **585 / 585**; 164/163 neighbours (PlaybookAuthorizationFilter, PlaybookRouteAuthorizationContractTests, PlaybookParameterPolicyTests, ExecutorSideEffect*, AnalysisAuthorizationFilterTests, RAG/Workspace/retirement/RagServiceTenantGuard, SendToIndex, RagEndpointsTests, WorkspaceEndpointsContractTests, Finance, ChatContext, AnalysisEndpointsAuthorization, PlaybookQueryTextEscaping, AiPlaybookPromptRecordMatchRouteRetirement) **587 / 587**; RAG after the member removal **183 / 183** + **71 / 71**; Spe `KnowledgeBaseEndpointsTests` **2 / 2** |
+| **Full BFF unit suite** (`tests/unit/Sprk.Bff.Api.Tests`, compiles `tests/integration/contract/**`, regression, seam, auth) | **Test Run Successful — 14,610 total: 14,556 passed, 54 skipped, 0 failed** (20.7 min, one clean single run) |
+| **NetArchTest** (`tests/Spaarke.ArchTests`) | **346 / 346** (census 117) |
+| **Sprk.Bff.Api.IntegrationTests** (full) | **101 / 101** (three fewer than f0's 104: task 164-r1 deleted `PlaybookByNameDeprecationTests` with its route) |
+| **Spe.Integration.Tests** (full) | **412 total: 387 passed, 25 skipped (env-gated live smokes), 0 failed** |
+| Zone B grep (SPEC §3.5.4) | 0 matches |
+| Seeding | §15.10 — 15 seeds, every one bit |
+
+Item 17 (a clean single full run) is therefore met in f1: the run above had no failures of any kind.
+
+### 15.13 Conflict check (f1)
+Sibling fix-round branches touching f1's files (diff from `91a1c1c83`): `task/uac-r2-162-f1` edits
+`PlaybookAuthorizationFilter.cs` (a hunk near line 75 — f1's edits are at `ParameterRejected` and
+`RecordParameterOperation`/`BuildSubjectRunChecksAsync`, ~lines 500-640) and `INodeExecutor.cs` (it adds
+`ExecutorSideEffects`, which f1 extends at its end) — integration order is 162 → 164 → 163 (round 16 item 7), so f1
+lands on top of both and any conflict is the append at the end of `ExecutorSideEffects`. `task/uac-r2-165-f1`,
+`166-f1` and `167-f1` touch `RouteAuthorizationGuardTests.cs` (the census — recount at integration, §15.7 item 7);
+`167-f1` also touches the Ledger/Scanner files (§15.7). No sibling touches `InsightEndpoints.cs`,
+`InsightsAssistantEndpoint.cs`, `InsightsOrchestrator.cs`, `AssistantToolCallHandler.cs`, the two PublicContracts
+models, `IRagService.cs` / `RagService.cs` / `NullRagService.cs`, or the Insights tests.
