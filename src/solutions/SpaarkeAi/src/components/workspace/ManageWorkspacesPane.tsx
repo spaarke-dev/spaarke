@@ -172,7 +172,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, formatRelativeTime } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -392,15 +392,17 @@ const useStyles = makeStyles({
 //     be redundant).
 //   - Unparseable / empty string → returns null. Defensive: don't render a
 //     broken date if the wire shape ever changes unexpectedly.
-//   - <60s ago → "Modified just now" (FR-07 acceptance criterion: new layouts
-//     surface "just now" or near-equivalent relative time).
-//   - <60m ago → "Modified Nm ago"
-//   - <24h ago → "Modified Nh ago"
-//   - <7d ago → "Modified Nd ago"
-//   - older → "Modified {locale short date}" (e.g., "Modified 5/26/2026")
-//
-// Mirrors the `formatRelative` helper in HistoryOverlay.tsx for visual
-// consistency across SpaarkeAi.
+//   - <60s ago → "Modified now" or "Modified N seconds ago" (FR-07 acceptance
+//     criterion: new layouts surface "just now" or near-equivalent relative
+//     time — satisfied by the shared formatter's `Intl.RelativeTimeFormat`
+//     "now").
+//   - older → "Modified {relative time}" (e.g., "Modified 5 minutes ago",
+//     "Modified yesterday", "Modified 2 months ago") via the shared
+//     `formatRelativeTime` (task 081 / C-13 — this previously hand-rolled its
+//     own minute/hour/day bucketing plus a locale-date fallback after 7 days,
+//     one of five independently reimplemented copies of the same idiom,
+//     explicitly noted below as "mirroring" the HistoryOverlay.tsx copy
+//     rather than sharing it).
 // ---------------------------------------------------------------------------
 
 const UNIX_EPOCH_SENTINEL = 0;
@@ -412,15 +414,7 @@ function formatModifiedOn(iso: string): string | null {
   // Unix-epoch sentinel = "system layout, never modified" → no display.
   if (ts === UNIX_EPOCH_SENTINEL) return null;
 
-  const diffMs = Date.now() - ts;
-  if (diffMs < 60_000) return "Modified just now";
-  if (diffMs < 3_600_000)
-    return `Modified ${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000)
-    return `Modified ${Math.floor(diffMs / 3_600_000)}h ago`;
-  if (diffMs < 7 * 86_400_000)
-    return `Modified ${Math.floor(diffMs / 86_400_000)}d ago`;
-  return `Modified ${new Date(ts).toLocaleDateString()}`;
+  return `Modified ${formatRelativeTime(iso)}`;
 }
 
 // ---------------------------------------------------------------------------

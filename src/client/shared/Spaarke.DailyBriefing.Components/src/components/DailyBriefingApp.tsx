@@ -46,9 +46,10 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
+  Caption1,
 } from '@fluentui/react-components';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 import { DigestHeader } from './DigestHeader';
-import { EmptyState } from './EmptyState';
 import { TldrSection } from './TldrSection';
 import type { TldrResolvableItem } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
@@ -56,7 +57,7 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES, cleanGuid } from '@spaarke/ui-components';
+import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES, cleanGuid, EmptyState } from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
@@ -104,6 +105,13 @@ const useStyles = makeStyles({
   },
   errorBar: {
     marginBottom: tokens.spacingVerticalL,
+  },
+  emptyStateIcon: {
+    color: tokens.colorPaletteGreenForeground1,
+  },
+  emptyStateTimestamp: {
+    color: tokens.colorNeutralForeground4,
+    textAlign: 'center',
   },
 });
 
@@ -686,7 +694,16 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
-          <EmptyState />
+          <EmptyState
+            icon={<CheckmarkCircleRegular className={styles.emptyStateIcon} />}
+            heading="You're all caught up!"
+            description="No unread notifications. New activity across your matters and projects will appear here automatically."
+            footer={
+              <Caption1 className={styles.emptyStateTimestamp}>
+                Last checked at {new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+              </Caption1>
+            }
+          />
         </div>
         <Toaster toasterId={toasterId} position="bottom-end" />
       </div>

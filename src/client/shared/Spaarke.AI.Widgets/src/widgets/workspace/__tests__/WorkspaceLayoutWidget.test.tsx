@@ -25,8 +25,9 @@
  *   - `@fluentui/react-components` is mocked to avoid pulling in the full
  *     Fluent v9 surface (matches the wrapper-test pattern in
  *     `WorkspaceWidgetWrapper.test.tsx`).
- *   - `window.Xrm` / `window.parent.Xrm` is stubbed via Object.defineProperty
- *     to control the locateXrm() outcome.
+ *   - `window.Xrm` is stubbed (and the `@spaarke/ui-components` `getXrm` mock
+ *     above reads it) to control the getWebApiSafe()/getUserIdSafe() outcome
+ *     (task 081 / C-8 — was `locateXrm()`, now the shared `getXrm()` walker).
  */
 
 import * as React from 'react';
@@ -53,6 +54,12 @@ jest.mock('@spaarke/ui-components', () => {
     // (deliberately avoiding the full barrel per the comment below) must
     // provide it too. Same brace-strip + lowercase behavior as the real impl.
     cleanGuid: (id: string | null | undefined) => (id ? id.replace(/[{}]/g, '').trim().toLowerCase() : ''),
+    // task 081 (C-8): `getWebApiSafe()`/`getUserIdSafe()` now resolve Xrm via
+    // the shared `getXrm()` walker instead of a local `locateXrm()` — this
+    // sparse mock must provide it too. jsdom's single-window test environment
+    // never exercises the parent/top branches (window.parent === window), so
+    // a window-only read matches `installXrm()`'s `window.Xrm` stub exactly.
+    getXrm: () => (window as unknown as { Xrm?: unknown }).Xrm,
   };
 });
 
@@ -87,7 +94,7 @@ jest.mock('@fluentui/react-components', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Xrm fixture helpers — stub locateXrm() targets via window.Xrm
+// Xrm fixture helpers — stub the mocked getXrm()'s target via window.Xrm
 // ---------------------------------------------------------------------------
 
 const FAKE_USER_ID = '11111111-2222-3333-4444-555555555555';
@@ -109,8 +116,8 @@ const makeFakeXrm = () => ({
 
 function installXrm(): void {
   // jsdom doesn't define window.Xrm by default; assigning to (window as any).Xrm
-  // is the canonical pattern used elsewhere in the codebase (see locateXrm()
-  // in WorkspaceLayoutWidget.tsx).
+  // is the canonical pattern used elsewhere in the codebase (see `getXrm()`
+  // in `xrmContext.ts`, read here via this file's `@spaarke/ui-components` mock).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = makeFakeXrm();
 }

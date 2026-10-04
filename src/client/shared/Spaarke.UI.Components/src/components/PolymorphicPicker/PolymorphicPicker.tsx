@@ -56,6 +56,7 @@ import {
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm, type XrmContext } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -181,29 +182,23 @@ const useStyles = makeStyles({
 // in iframes that must reach up to the host to call `Xrm.Utility.*`).
 // ---------------------------------------------------------------------------
 
-interface IXrmUtility {
-  lookupObjects: (opts: {
-    entityTypes: string[];
-    defaultEntityType?: string;
-    allowMultiSelect: boolean;
-  }) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
-}
-
-interface IXrmBridge {
-  Utility?: IXrmUtility;
-}
-
 /**
- * Locate Xrm on the current window or one of its parents. Exported for tests
- * to override via mocking; not part of the public component API surface.
+ * @deprecated Use {@link getXrm} from `../../utils/xrmContext` directly.
+ * Kept as a thin alias (NOT a second frame-walk implementation — task 081 /
+ * C-8 converged the six duplicate walkers onto `xrmContext.ts:306`) only
+ * because `Spaarke.Communication.Components` (`EmailConnectionsReview.tsx`,
+ * `FieldUpdateReconcileTab.tsx`, `TaskReconcileTab.tsx`) imports this exact
+ * name from `@spaarke/ui-components`. New code should import `getXrm`.
  *
- * @internal
+ * Note the previous local walker accepted ANY frame whose `.Xrm` was truthy
+ * (no `WebApi` presence check); `getXrm` additionally requires `.WebApi` to
+ * be present before accepting a frame. Xrm always provides `WebApi` and
+ * `Utility` together on a real Dataverse host, so this does not change
+ * behavior for this picker's `Utility.lookupObjects` use — only PolymorphicPicker's
+ * own call site below is the actual behavior boundary; the three external
+ * `getXrmForPicker()` call sites get the same widened (not narrowed) check.
  */
-export function getXrmForPicker(): IXrmBridge | undefined {
-  if (typeof window === 'undefined') return undefined;
-  const w = window as unknown as { Xrm?: IXrmBridge; parent?: { Xrm?: IXrmBridge }; top?: { Xrm?: IXrmBridge } };
-  return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-}
+export const getXrmForPicker: () => XrmContext | undefined = getXrm;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -243,7 +238,7 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
       setError(null);
       setIsLookingUp(true);
       try {
-        const xrm = getXrmForPicker();
+        const xrm = getXrm();
         if (!xrm?.Utility?.lookupObjects) {
           const msg = 'Xrm.Utility.lookupObjects is not available.';
           setError(msg);

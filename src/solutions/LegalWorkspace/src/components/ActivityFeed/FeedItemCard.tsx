@@ -31,9 +31,8 @@ import {
 } from "@fluentui/react-icons";
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
-import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
-import { RecordCardShell, CardIcon, createXrmNavigationService } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, createXrmNavigationService, formatRelativeTime } from "@spaarke/ui-components";
 
 // R3 FR-14 / OS-1 note:
 //   The legacy "Flag as To Do" button on the FeedItemCard wrote

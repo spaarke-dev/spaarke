@@ -10,11 +10,11 @@ import {
   Text,
   Spinner,
 } from "@fluentui/react-components";
-import { DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
+import { DismissRegular, ArrowClockwiseRegular, AlertRegular } from "@fluentui/react-icons";
+import { EmptyState } from "@spaarke/ui-components";
 import { INotificationItem, NotificationCategory } from "../../types";
 import { NotificationItem } from "./NotificationItem";
 import { NotificationFilters } from "./NotificationFilters";
-import { EmptyState } from "./EmptyState";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -157,7 +157,13 @@ export const NotificationPanel: React.FC<INotificationPanelProps> = ({
         {/* Notification list or empty state */}
         {!hasFilteredNotifications ? (
           <EmptyState
-            reason={hasAnyNotifications ? "no-match" : "no-notifications"}
+            icon={<AlertRegular style={{ color: tokens.colorNeutralForeground4 }} />}
+            heading={hasAnyNotifications ? "No matching notifications" : "No notifications"}
+            description={
+              hasAnyNotifications
+                ? "No notifications match the selected filters. Try removing some filters to see more results."
+                : "You're all caught up. New activity across your matters and projects will appear here."
+            }
           />
         ) : (
           <div
