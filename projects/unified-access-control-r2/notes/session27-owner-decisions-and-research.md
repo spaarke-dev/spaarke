@@ -369,6 +369,21 @@ The owner, verbatim: "Accept your recommended wording so that the task does not 
 - **Body, paragraph 3:** To remove the secure designation later, ask someone with Full Access to the {record}, or the person who created it.
 - **Buttons:** **Make Secure** (primary) · **Cancel**
 
+## Round 28 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 147's E1 and E2.
+
+1. **E1 — browser-initiated child creates through the BFF use A1, the existing G5 pattern (round 7 item 3, b2).**
+   - **Pre-check as the caller:** Create and Append on the table, AppendTo on every record named, and the payload names no owner and no field-secured column. That last check is the server-side column policy, so an app-only create cannot bypass FLS.
+   - **The create:** made by the APPLICATION, owned by the team `RecordOwnershipResolver` names (`OwnedChildWrite`), with `sprk_createdbyperson` stamped as the caller (146's 17 tables). `createdby` is the app; the person lives in `sprk_createdbyperson`. Every reader of "who created it" uses `RecordCreatorPerson` (createdbyperson, else createdby).
+     - Task 152's briefing "Created By" matching is updated to it in the same integration (an item on 152's code, tests + seed).
+   - **Rejected:** A2, because Assign into the Secure Record BU is likely refused for users. A3, because it leaves a user-owned window of one request, which the owner has never accepted.
+   - **One create endpoint per table.** 147 builds the routes in this BFF on the existing cores. Re-files go through the existing families: events and communications through 159/161's routes, and Compose's document association through `PUT /api/v1/documents/{id}`.
+     - The sibling `field-mapping-server-write-path-r1` (design-only, also app-only by its Q2) extends these routes instead of adding its own. This is recorded in 147's note for that project.
+2. **E2 — close the in-product paths; the job covers only the out-of-product ones.**
+   - **In-product native creates of a child under a SECURE parent** (subgrid "+ New", quick create, a form New with the parent prefilled) are replaced by BFF-backed commands. These are the existing ribbon command-script pattern (142/150), with enable rules that read `sprk_issecure` through `Xrm.WebApi`. A read failure hides the native command and shows the BFF one (fail closed). Every such surface comes from 147's census plus a live form/subgrid inventory (read-only), as dry-run/-Apply/-Verify scripts.
+   - **Writes outside the product** (imports, flows, direct API) are ADR-002 WP-5 territory. `SecureChildReconciliationJob`'s recent-changes pass runs every 2 minutes with writes ON in every environment where 148 is deployed, with a standing report of each correction.
+   - The model-driven Create privilege on child tables is NOT removed globally: it would break ordinary records, and the native-command replacement closes the in-product path without it.
+3. **Merge order:** task 169 rebases onto 147, which adds `sprk_memo` to the CHILD taxonomy under owner round 2 item 6. 169's "byte-for-byte unchanged" criterion then holds against that base.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
