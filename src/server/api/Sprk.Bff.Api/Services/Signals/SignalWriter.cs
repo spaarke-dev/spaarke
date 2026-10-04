@@ -640,6 +640,20 @@ public sealed partial class SignalWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(template);
         ArgumentNullException.ThrowIfNull(factValues);
 
+        if (HasMalformedPlaceholder(template))
+        {
+            // Task 022 review finding #3: checked on the TEMPLATE, not the rendered output -- a malformed
+            // placeholder (unbalanced braces, an empty token, a disallowed character in the field name) is
+            // never matched by SentenceToken() at all, so before this fix it passed straight through to the
+            // final rendered sentence as literal text, unflagged. Checking the template (rather than what
+            // comes out the other end) also avoids a false positive if some SUBSTITUTED fact value happens to
+            // itself contain a literal brace character.
+            throw new SignalSentenceTemplateException(
+                "sprk_sentence template contains a malformed {{...}} placeholder (unbalanced braces, an empty " +
+                "token, or a character outside [A-Za-z0-9_.] in the field name) that would otherwise render " +
+                "as literal text instead of substituting.");
+        }
+
         var rendered = SentenceToken().Replace(template, match =>
         {
             var token = match.Groups[1].Value;
@@ -673,6 +687,42 @@ public sealed partial class SignalWriter
         }
 
         return rendered;
+    }
+
+    /// <summary>
+    /// Extracts every <c>{{token}}</c> name <paramref name="template"/> references, WITHOUT requiring a fact
+    /// snapshot to render against. Shared by task 022's <see cref="PolicyVersionValidator"/> so "what counts as
+    /// a token" has exactly one definition in this codebase — <see cref="RenderSentence"/>'s own
+    /// <see cref="SentenceToken"/> regex — rather than a second copy that could silently drift from it.
+    /// </summary>
+    internal static IReadOnlyList<string> ExtractTemplateTokens(string template)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        return SentenceToken().Matches(template).Select(m => m.Groups[1].Value).Distinct().ToArray();
+    }
+
+    /// <summary>
+    /// True when <paramref name="template"/> contains a <c>{{</c>/<c>}}</c>-shaped placeholder attempt that
+    /// <see cref="SentenceToken"/> does NOT recognize as well-formed — e.g. a disallowed character in the
+    /// field name (<c>{{sprk-x}}</c>, <c>{{a b}}</c>), an empty token (<c>{{}}</c>), an unclosed brace pair
+    /// (<c>{{x</c>), or an extra brace around an otherwise-valid token (<c>{{{x}}}</c>). Task 022 review
+    /// finding #3: all five previously passed both <see cref="PolicyVersionValidator"/> and
+    /// <see cref="RenderSentence"/> unflagged and would have rendered with stray literal brace text.
+    /// </summary>
+    /// <remarks>
+    /// Checks for ANY leftover single <c>{</c> or <c>}</c> after removing every well-formed match — not only a
+    /// literal residual <c>{{</c>/<c>}}</c> pair — because <c>{{{x}}}</c> matches <see cref="SentenceToken"/>'s
+    /// INNER <c>{{x}}</c> (regex is not anchored), leaving only single stray braces (<c>{</c> ... <c>}</c>)
+    /// behind; a doubled-brace-only check would miss exactly that case. Ordinary rendered prose (the shipped
+    /// message templates) never contains a bare curly brace, so this is not expected to false-positive on
+    /// legitimate authored text.
+    /// </remarks>
+    internal static bool HasMalformedPlaceholder(string template)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        var withoutWellFormedTokens = SentenceToken().Replace(template, string.Empty);
+        return withoutWellFormedTokens.Contains('{', StringComparison.Ordinal)
+            || withoutWellFormedTokens.Contains('}', StringComparison.Ordinal);
     }
 
     private static string FormatFactValue(object value) => value switch

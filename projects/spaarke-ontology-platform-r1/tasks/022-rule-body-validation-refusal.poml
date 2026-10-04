@@ -4,7 +4,7 @@
     <title>Rule-body validation refuses invalid bodies at save</title>
     <phase>2 Policy and rule bodies</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>A validation gate; if it is lenient, an unparseable rule body reaches the evaluator at runtime.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,4 +90,70 @@
   <notes>spec.md FR-08. Immutability makes this the only point of control: a bad body saved once cannot be edited out.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion date="2026-10-04" rigor="FULL" escalation-fired="false">
+    <summary>New PolicyVersionValidator (Services/Signals/) is the single fail-closed seam, on top of RuleBodySchemaValidator (020) + PredicateCompiler (021): Validate() is pure (schema -&gt; compile -&gt; message-template read-set check, never throws, every failure is field-level); ValidateForEvaluation(policyVersionId, policyCode, ...) is the task-031 seam -- logs OntologyWriterEvents.PolicyVersionInvalid (50301) + records ontology.policy.invalid{reason}, returns false, never throws. CompiledPredicate gained ReadFields (the flat field-name set the compiled predicate reads) as a side effect of the existing CompileFilterConditions walk; SignalWriter gained internal ExtractTemplateTokens reusing RenderSentence's own token regex. No new BFF write path exists for sprk_policyversion today (confirmed by grep) -- the escalation trigger is resolved by the owner's evaluation-time decision, already in this POML's constraints, not left open.</summary>
+    <acceptance>All 8 criteria met with evidence in notes/022-progress.md: (1-4) Validate() tests for valid body, malformed JSON, schema failure, and compiler-level failure (unverified join) -- all field-level, never a bare boolean; (5) model-driven-app bypass gap documented with its mitigation (evaluation-time fail-closed gate) in notes/022-progress.md "Known limitation"; (6) 148/148 Signals-scoped tests pass twice; BFF builds 0 warnings; (7) ValidateForEvaluation never throws, logs+meters, returns false so the evaluator continues; (8) the gate takes only column values, never a provenance flag, so Platform-app-authored and BFF-authored rows are checked identically.</acceptance>
+    <quality-gates>Independent review returned FAIL (2026-10-04, rework in progress). Findings: (1) CRITICAL -- "never throws" contract false: top-level and nested-filter duplicate JSON keys throw ArgumentException (JsonObject.InitializeDictionary), and 1e999999 throws FormatException (JsonElement.GetDecimal); both escaped Validate/ValidateForEvaluation with no 50301 log, no metric. (2) Tautological no-leak test asserted "not valid json" against the real text "not valid JSON" -- never actually exercised the no-leak guarantee. (3) Malformed placeholders ({{sprk-x}}, {{a b}}, {{}}, {{x, {{{x}}}) passed the validator and would render literally -- token-extraction regex only matched well-formed tokens, so malformed ones were invisible to the check. (4) ReadFields overclaimed: it is filter-condition attributes only (exists AND notExists), not everything "read"; naming/docs corrected. Design settled by the coordinator: template tokens come ONLY from positive fields (subject's own `when` + `exists` clauses), never `notExists` (fabricated-value risk under section 0.3); ambiguous same-name-on-multiple-positive-entities tokens refused; bool API replaced with TryPrepareForEvaluation(PolicyVersionSnapshot, subjectId, out CompiledPredicate?) as the ONLY path to a compiled predicate for the evaluator; Validate renamed ValidateForSave. Rework fixes all four findings plus F5-F11 below; see &lt;rework&gt; element for fixed/rejected-with-reason per item and the new test run.</quality-gates>
+    <test-run>Isolated (Signals-filtered) run, twice: "Passed! - Failed: 0, Passed: 148, Skipped: 0, Total: 148" both times. Full-suite run attempted twice this session and NOT clean, but neither failure implicates this task's code -- see escalation note below.</test-run>
+    <publish-size>Fresh worktrees (C:/wt022m off origin/master @a082cfcda7, C:/wt022b = this branch's HEAD 62e47b32e + this task's uncommitted src changes copied in), both short paths, both published+zipped with PowerShell Compress-Archive -CompressionLevel Optimal: master 45.66 MB (212 files) vs branch+task 45.69 MB (212 files) = +0.036 MB. Well under the +5 MB single-task escalation threshold. Worktrees removed after measuring.</publish-size>
+    <cve-scan>dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api.csproj: "has no vulnerable packages given the current sources." No new packages added by this task.</cve-scan>
+    <conflict-check>git diff origin/master...HEAD + gh pr list --json files across 21 open PRs: zero overlap with any Services/Signals/** or OntologyWriter* file.</conflict-check>
+    <escalation-note>Full BFF suite attempted twice this session, neither clean, but NOT a code defect in this task's work: run 1 (no other command running in this session concurrently) = 35 failed / 14380 passed / 54 skipped / 14469 total over 1h16m -- the one failure captured in full (OfficeQuickCreateContractTests, unrelated to Signals) showed an HttpClient/TestHost response-read timeout, the classic resource-contention signature; run 2 (same, isolated from this session's own commands) ABORTED at 13m9s on a fatal CLR crash (0x80131506) inside ASP.NET Core route-pattern parsing during WebApplicationFactory host startup for SpeAdmin endpoints -- 0 failed / 12766 passed / 35 skipped up to the crash, again nothing in Signals. Concrete evidence: at the time of run 2, Get-Process showed 301 "dotnet" processes + 1 VBCSCompiler running system-wide on this machine -- consistent with the large number of other active agents in this session's roster (task-004/005/010-012/020/021/023/030/080/082-093, review-030/030b, several audit/cluster/verify agents), several of which are very likely running their own dotnet build/test processes in sibling worktrees concurrently. This matches the project's own precedent in current-task.md ("Full BFF suite uncontended at wave close: 14,356 total / 14,302 passed / 54 skipped / 0 failed. The 83/124-failure runs earlier were agent contention."). Recommend the main session re-run the full suite once contention subsides rather than accept either of these two runs as a verdict on this task's code.</escalation-note>
+  </completion>
+
+  <rework date="2026-10-04" trigger="independent-review-FAIL">
+    <disposition>Full fixed/rejected-with-reason table for every finding (1-11) is in
+      notes/022-progress.md "Rework (2026-10-04)" section (markdown table; too long to duplicate here
+      verbatim). Summary: (1) FIXED at two layers (RuleBodySchemaValidator strict-parse + bounded catch;
+      PolicyVersionValidator.ValidateInternal catch-all; TryPrepareForEvaluation's own catch) -- PLUS an
+      independently-discovered Json.Schema.Net 7.3.4 thread-safety bug (concurrent Evaluate() on the shared
+      schema instance produced ~40% false IsValid=true, and separately an unhandled IndexOutOfRangeException)
+      fixed with a lock (RuleBodySchemaValidator.EvaluationGate) and pinned by two Parallel.For regression
+      tests. (2) FIXED: exact structured-field-set + exact-message assertion, replacing the tautological
+      substring check. (3) FIXED: new shared SignalWriter.HasMalformedPlaceholder, called from the validator
+      (refuses) AND from RenderSentence (throws) -- both sides, as asked. (4) FIXED: ReadFields renamed
+      ConditionFields with corrected docs. (5) IMPLEMENTED per coordinator decision: CompiledPredicate gained
+      PositiveReadFields (subject when + exists clauses only) and AmbiguousPositiveFields (same field name on
+      &gt;1 distinct positive entity); the sprk_revisedon (notExists-only) test now asserts REFUSAL, not
+      success; FactValues guidance for task 031 documented on the class. (6) IMPLEMENTED per coordinator
+      decision: TryPrepareForEvaluation(PolicyVersionSnapshot, Guid? subjectId, out CompiledPredicate?
+      compiled) is the ONLY path to a compiled predicate; Validate renamed ValidateForSave. Compile was NOT
+      made non-public -- REJECTED WITH REASON: internal only blocks a different assembly, and
+      PredicateCompiler/PolicyVersionValidator/the evaluator all live in Sprk.Bff.Api, so it would not stop a
+      same-assembly bypass; true enforcement would require nesting PredicateCompiler privately, breaking its
+      own standalone tested contract (task 021's PredicateCompilerTests.cs) for no real gain. (7) FIXED: six
+      bounded sub-reasons added to OntologyWriterFailureReason (rule_type_unsupported, schema_invalid,
+      compile_refused, template_token_outside_read_set, template_malformed, internal_error), replacing the
+      single policy_version_rule_body_invalid bucket; tests assert the EXACT metric reason tag value via the
+      MeterListener's tag callback. Fixing this surfaced a real bug: PolicyVersionValidator was delegating
+      rule-type recognition to RuleBodySchemaValidator.ValidateRaw, which conflated "unknown ruletype" with
+      "known-type body fails schema" -- every unknown/blank ruletype was being mis-metered as schema_invalid;
+      rule-type parsing is now decided once, directly, before any schema call. (8) FIXED: TryParseRuleType
+      matches exact member names in a loop, never Enum.TryParse's comma-combining leniency. (9) FIXED:
+      PredicateCompiler.MaxRuleBodyLength=32768 / MaxInListLength=200, bounded PredicateCompilationException
+      refusals, limits stated with reasoning. One observation (not a fix, scope stayed literal to "in the
+      compiler"): RuleBodySchemaValidator's own parse+evaluate still runs before these caps, so it is not
+      itself length-bounded. (10) FIXED: all three field sets built via ToFrozenSet(StringComparer.Ordinal).
+      (11) FIXED: all eleven listed test gaps added (see PolicyVersionValidatorTests.cs).</disposition>
+    <test-run>tests/unit/domain/Signals/** (the four maintain-class files touched), three consecutive runs:
+      "Passed! - Failed: 0, Passed: 186, Skipped: 0, Total: 186" every time -- zero flakes after the
+      concurrency fix (the fix eliminated an intermittent RuleBodySchemaValidatorTests failure that appeared
+      DURING this rework, traced to the Json.Schema.Net bug above, not to any of this task's own logic).
+      BFF build: 0 warnings, 0 errors.</test-run>
+    <full-suite-note>Run ONCE as instructed, nothing else of mine running concurrently (checked: 293 system-wide
+      "dotnet" processes measured immediately before launch -- the machine was NOT quiet, consistent with the
+      coordinator's own expectation). Result: "Failed: 23, Passed: 14302, Skipped: 54, Total: 14379, Duration:
+      19m47s -- Test Run Aborted (Test host process crashed)". All 23 failures are in UNRELATED subsystems
+      (Office/Insights/Communication/Compose/Memory/Workspace/EndToEnd/Eval contract + integration tests) --
+      grep for Signal/PolicyVersion/RuleBody/PredicateCompiler/OntologyWriter across every failure line: zero
+      matches. The captured stack traces are HttpClient/TestHost read-timeout and "client aborted the request"
+      -- the same resource-contention signature as both of the FIRST pass's full-suite attempts, now
+      reproduced a third time at a different, still-heavy, system load. Not re-running a second time per the
+      coordinator's own instruction ("if it still fails... I'll run it when the machine is quieter").</full-suite-note>
+    <publish-size-note>Not re-measured: no .csproj/package change; the diff is ~305 lines of plain C# logic
+      across 6 modified files plus one new ~280-line class (mostly XML doc comments, stripped from the
+      compiled DLL, plus small bounded checks) -- the same order of magnitude as the first pass's measured
+      +0.036 MB. Judged not to meet the coordinator's "grows materially" re-measurement trigger.</publish-size-note>
+  </rework>
 </task>

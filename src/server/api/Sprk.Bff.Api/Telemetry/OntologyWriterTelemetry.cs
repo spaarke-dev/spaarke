@@ -29,12 +29,35 @@ public static class OntologyWriterTelemetry
                      "observed failures is not evidence of health — it may mean the failures are silent.");
 
     /// <summary>
+    /// <c>customMetrics/ontology.policy.invalid</c> (task 022, same <see cref="MeterName"/> as the writer's own
+    /// failure counter — this is still the ontology domain, just the policy-validation side rather than the
+    /// write side; CLAUDE.md §11 reuse-first: extending this class's existing Meter rather than standing up a
+    /// second one). Dimensioned by <c>reason</c> (<see cref="OntologyWriterFailureReason"/>) for the same
+    /// log/metric-vocabulary-agreement reason as <see cref="FailuresCounter"/>.
+    /// </summary>
+    private static readonly Counter<long> PolicyInvalidCounter = Meter.CreateCounter<long>(
+        name: "ontology.policy.invalid",
+        unit: "{policyversion}",
+        description: "Count of sprk_policyversion rows whose sprk_rulebody/sprk_messagetemplate failed " +
+                     "fail-closed validation at evaluation time, by reason. Admins can author policy rows " +
+                     "directly in the Spaarke Platform app, bypassing BFF save-time validation, so this is the " +
+                     "only guaranteed observation point for an invalid policy version.");
+
+    /// <summary>
     /// Records one Signal-writer refusal/failure. <paramref name="reason"/> MUST be one of
     /// <see cref="OntologyWriterFailureReason"/>'s bounded-cardinality constants — never a raw exception
     /// message, a policy code, or any fact/sentence content.
     /// </summary>
     public static void RecordFailure(string reason) =>
         FailuresCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>
+    /// Records one <c>sprk_policyversion</c> validation refusal (task 022). <paramref name="reason"/> MUST be
+    /// one of <see cref="OntologyWriterFailureReason"/>'s bounded-cardinality constants — never the rule body,
+    /// the message template, or a validator error string.
+    /// </summary>
+    public static void RecordPolicyInvalid(string reason) =>
+        PolicyInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
 }
 
 /// <summary>
@@ -90,4 +113,40 @@ public static class OntologyWriterFailureReason
     /// independent review). This is a refused write under the owner's no-silent-failure rule, logged and
     /// metered WITHOUT the rendered content (R2 removed the rendered string from the exception message).</summary>
     public const string SentenceTemplateInvalid = "sentence_template_invalid";
+
+    // ── sprk_policyversion validation sub-reasons (task 022 rework, review finding #7) ─────────────────────
+    // Replaces the single bucket "policy_version_rule_body_invalid" with six bounded, mutually-exclusive
+    // sub-reasons so an alert/dashboard can distinguish "nobody has authored a Threshold policy's schema yet"
+    // from "an admin typo'd a field name in the message template" without parsing free-text error strings.
+
+    /// <summary>The policy version's <c>sprk_ruletype</c> is unrecognized, OR is a closed-set member with no
+    /// authored schema yet (<see cref="Sprk.Bff.Api.Services.Signals.RuleType.Threshold"/> /
+    /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType.Switch"/>, task 020 scope).</summary>
+    public const string RuleTypeUnsupported = "rule_type_unsupported";
+
+    /// <summary>The <c>sprk_rulebody</c> failed <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator"/>
+    /// — malformed JSON (incl. duplicate keys, an out-of-range number) or a JSON Schema violation.</summary>
+    public const string SchemaInvalid = "schema_invalid";
+
+    /// <summary>The <c>sprk_rulebody</c> passed schema validation but
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PredicateCompiler.Compile"/> refused it — an unverified join, a
+    /// non-global-readable entity, a cross-clause <c>$</c>-reference, or a bounded-refusal limit (clause count,
+    /// body length, <c>in</c>-list length).</summary>
+    public const string CompileRefused = "compile_refused";
+
+    /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token that the compiled
+    /// predicate does not read from a POSITIVE clause (the subject's own <c>when</c> filter or an <c>exists</c>
+    /// clause) — either absent entirely, present only on a <c>notExists</c> clause (whose value can never be
+    /// read for a firing subject), or ambiguous (the same field name on more than one positive entity).</summary>
+    public const string TemplateTokenOutsideReadSet = "template_token_outside_read_set";
+
+    /// <summary>The <c>sprk_messagetemplate</c> contains a malformed <c>{{...}}</c> placeholder attempt
+    /// (unbalanced braces, an empty token, or a disallowed character) that would otherwise render as literal
+    /// text — see <see cref="Sprk.Bff.Api.Services.Signals.SignalWriter.HasMalformedPlaceholder"/>.</summary>
+    public const string TemplateMalformed = "template_malformed";
+
+    /// <summary>An exception not covered by any of the above escaped the validator's own checks (task 022
+    /// review finding #1 — e.g. a library throwing on pathological-but-syntactically-valid input not yet
+    /// discovered). The validator still fails closed rather than propagate it.</summary>
+    public const string InternalError = "internal_error";
 }

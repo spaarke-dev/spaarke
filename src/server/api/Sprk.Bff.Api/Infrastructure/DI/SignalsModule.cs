@@ -6,8 +6,9 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <summary>
 /// DI module for the Signal/Policy domain (ADR-010: feature module pattern; spec FR-09..FR-16,
 /// spaarke-ontology-platform-r1 task 023). Registers the policy-scope resolution building block, the
-/// predicate compiler (task 021) and the Signal writer (task 030). The nightly/event-triggered evaluators
-/// (tasks 031/032) add their own registrations here as they land.
+/// predicate compiler (task 021), the fail-closed policy-version validator (task 022) and the Signal writer
+/// (task 030). The nightly/event-triggered evaluators (tasks 031/032) add their own registrations here as they
+/// land.
 /// </summary>
 public static class SignalsModule
 {
@@ -26,6 +27,12 @@ public static class SignalsModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<RuleBodySchemaValidator>();
         services.AddSingleton<PredicateCompiler>();
+
+        // PolicyVersionValidator (task 022, spec FR-08): the fail-closed save/evaluation-time gate on top of
+        // the two registrations above -- the single seam any future sprk_policyversion save path AND the
+        // evaluator (task 031) both call so an invalid rule body is refused with one shared EventId/reason
+        // vocabulary rather than two independently hand-rolled checks.
+        services.AddSingleton<PolicyVersionValidator>();
 
         // OntologyWriterDataverseClient (task 030; rework F10 — ADR-010 Path C): registered as the CONCRETE
         // type (public sealed, no interface of this project's own) — see its own XML doc for why that is safe

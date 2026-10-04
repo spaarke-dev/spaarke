@@ -17,11 +17,34 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <c>IGenericEntityService.RetrieveMultipleAsync(new FetchExpression(FetchXml))</c>.</param>
 /// <param name="WindowAnchorUtc">The instant every relative-date token (<c>now</c>, <c>now-30d</c>) was resolved
 /// against. Recorded so a caller can state, truthfully, which window a Signal was evaluated over (§0.3).</param>
+/// <param name="ConditionFields">Every field name used as a filter-condition ATTRIBUTE KEY somewhere in the
+/// body — the union of the <c>when</c> filter's keys and every clause's <c>filter</c> keys, across BOTH
+/// <c>exists</c> AND <c>notExists</c> clauses, flat (no entity prefix). Task 022 review finding #4: this is
+/// narrower than "everything the predicate reads" — it says nothing about which entity a name belongs to, and
+/// critically it includes <c>notExists</c> fields, whose VALUE can never be read for a firing subject (no
+/// matching row exists). Do NOT use this set to decide what a <c>sprk_messagetemplate</c> token may safely
+/// reference — use <see cref="PositiveReadFields"/> for that.</param>
+/// <param name="PositiveReadFields">The subset of field names that are safe for a <c>sprk_messagetemplate</c>
+/// token to reference under section 0.3: a field read by the subject's own <c>when</c> filter, or by an
+/// <c>exists</c> clause's filter — NEVER a <c>notExists</c> clause (task 022 review finding #5: a firing
+/// subject has, by definition, no matching <c>notExists</c> row, so that clause's filter VALUES cannot be
+/// read for it; only the fact of absence is known, which literal template text can state). A field name is
+/// excluded from this set (and instead lands in <see cref="AmbiguousPositiveFields"/>) when it appears on MORE
+/// THAN ONE distinct positive entity (the subject's own entity for <c>when</c>, or a clause's related entity
+/// for <c>exists</c>) — the value would not be well defined.</param>
+/// <param name="AmbiguousPositiveFields">Field names that appear in a positive position (<c>when</c> or an
+/// <c>exists</c> clause) on MORE than one distinct entity — e.g. the subject's own <c>sprk_name</c> AND an
+/// <c>exists</c> clause's related entity's <c>sprk_name</c>. <see cref="PolicyVersionValidator"/> refuses a
+/// <c>sprk_messagetemplate</c> token naming one of these with a specific "ambiguous" message rather than the
+/// generic "not read" message it gives for a field absent from both sets.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
     string FetchXml,
-    DateTimeOffset WindowAnchorUtc);
+    DateTimeOffset WindowAnchorUtc,
+    IReadOnlySet<string> ConditionFields,
+    IReadOnlySet<string> PositiveReadFields,
+    IReadOnlySet<string> AmbiguousPositiveFields);
 
 /// <summary>
 /// Thrown when a rule body cannot be compiled into a single FetchXML filter. The message names the offending
@@ -151,6 +174,16 @@ public sealed partial class PredicateCompiler
     /// <summary>Dataverse's limit on <c>link-entity</c> elements in one query. One clause = one link.</summary>
     public const int MaxClauses = 15;
 
+    /// <summary>Task 022 review finding #9 (bounded refusal): the shipped Path B body is ~0.6 KB
+    /// (<c>tests/fixtures/signals/pathb-existence.rulebody.json</c>); 32 KB is over 50x that while still
+    /// bounding how much a pathological rule body can cost to parse and compile before any other check runs.</summary>
+    public const int MaxRuleBodyLength = 32_768;
+
+    /// <summary>Task 022 review finding #9 (bounded refusal): the shipped example's one <c>in</c> list holds 2
+    /// values; 200 is far beyond any realistic authored rule while bounding both the resulting FetchXML
+    /// string's size and Dataverse's own per-query cost for a large <c>in</c> condition.</summary>
+    public const int MaxInListLength = 200;
+
     private static readonly JsonDocumentOptions StrictJson = new() { AllowDuplicateProperties = false };
 
     private readonly RuleBodySchemaValidator _validator;
@@ -173,6 +206,14 @@ public sealed partial class PredicateCompiler
     /// expressed as one FetchXML filter. Never returns a partial query.</exception>
     public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId = null)
     {
+        // Bounded refusal BEFORE any parsing (review finding #9): reject a pathological body by length alone,
+        // cheaply, rather than pay JSON-parse + schema-evaluation cost first.
+        if ((ruleBodyJson?.Length ?? 0) > MaxRuleBodyLength)
+        {
+            throw new PredicateCompilationException(
+                $"Rule body is {ruleBodyJson!.Length} characters, exceeding the {MaxRuleBodyLength}-character limit.");
+        }
+
         // Parse strictly FIRST: duplicate keys are refused here, so the schema validator and this compiler can never
         // see two different objects in the same text.
         JsonDocument doc;
@@ -221,6 +262,11 @@ public sealed partial class PredicateCompiler
             new XElement("order", new XAttribute("attribute", subjectIdAttribute)));
 
         var rootConditions = new List<XElement>();
+        var conditionFields = new HashSet<string>(StringComparer.Ordinal);
+        // Field name -> distinct positive entities it was read on (subject entity for "when"; related entity
+        // for an "exists" clause). NEVER populated for a "notExists" clause (review finding #5) -- its filter
+        // fields still land in conditionFields above, but never here.
+        var positiveFieldEntities = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
         if (subjectId is { } id)
         {
@@ -234,7 +280,8 @@ public sealed partial class PredicateCompiler
 
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object)
         {
-            rootConditions.AddRange(CompileFilterConditions(subject, when, nowUtc, "when"));
+            rootConditions.AddRange(
+                CompileFilterConditions(subject, when, nowUtc, "when", conditionFields, positiveFieldEntities));
         }
 
         var index = 0;
@@ -249,8 +296,12 @@ public sealed partial class PredicateCompiler
                 RequireIdentifier(relatedRaw, where + (isExists ? ".exists" : ".notExists")),
                 where + (isExists ? ".exists" : ".notExists"));
             // Filter first, so an FR-07 violation is reported as FR-07 even where the join is also unverified.
+            // Positive-field tracking (the 3rd arg) is passed ONLY for an exists clause -- a notExists clause's
+            // filter fields still populate conditionFields (inside CompileFilterConditions, unconditionally)
+            // but must never be treated as readable for a firing subject (review finding #5).
             var linkFilter = new XElement("filter", new XAttribute("type", "and"),
-                CompileFilterConditions(related, clause.GetProperty("filter"), nowUtc, where + ".filter"));
+                CompileFilterConditions(related, clause.GetProperty("filter"), nowUtc, where + ".filter",
+                    conditionFields, isExists ? positiveFieldEntities : null));
 
             var path = RequireVerifiedJoin(
                 subject, related, RequireIdentifier(clause.GetProperty("path").GetString(), where + ".path"), where + ".path");
@@ -293,21 +344,52 @@ public sealed partial class PredicateCompiler
             throw new PredicateCompilationException("Rule body contains a character that cannot appear in XML: " + ex.Message);
         }
 
+        // Split the positive-field map (built during the walk above) into the safe, unambiguous set and the
+        // ambiguous (same name, >1 distinct positive entity) set -- review finding #5 + #10 (FrozenSet).
+        var positiveReadFields = positiveFieldEntities
+            .Where(kv => kv.Value.Count == 1)
+            .Select(kv => kv.Key)
+            .ToFrozenSet(StringComparer.Ordinal);
+        var ambiguousPositiveFields = positiveFieldEntities
+            .Where(kv => kv.Value.Count > 1)
+            .Select(kv => kv.Key)
+            .ToFrozenSet(StringComparer.Ordinal);
+
         return new CompiledPredicate(
             SubjectEntity: subject,
             SubjectIdAttribute: subjectIdAttribute,
             FetchXml: fetchXml,
-            WindowAnchorUtc: nowUtc);
+            WindowAnchorUtc: nowUtc,
+            ConditionFields: conditionFields.ToFrozenSet(StringComparer.Ordinal),
+            PositiveReadFields: positiveReadFields,
+            AmbiguousPositiveFields: ambiguousPositiveFields);
     }
 
+    /// <param name="positiveFieldEntities">Non-null ONLY when <paramref name="filter"/> is a POSITIVE filter
+    /// (the body's own "when", or an "exists" clause) -- null for a "notExists" clause, so its fields are
+    /// added to <paramref name="conditionFields"/> (unconditionally, below) but never tracked as positively
+    /// readable (review finding #5).</param>
     private static IEnumerable<XElement> CompileFilterConditions(
-        string entityName, JsonElement filter, DateTimeOffset nowUtc, string where)
+        string entityName, JsonElement filter, DateTimeOffset nowUtc, string where,
+        ISet<string> conditionFields, Dictionary<string, HashSet<string>>? positiveFieldEntities)
     {
         var conditions = new List<XElement>();
 
         foreach (var field in filter.EnumerateObject())
         {
             var attribute = RequireIdentifier(field.Name, where);
+            conditionFields.Add(attribute);
+            if (positiveFieldEntities is not null)
+            {
+                if (!positiveFieldEntities.TryGetValue(attribute, out var entities))
+                {
+                    entities = new HashSet<string>(StringComparer.Ordinal);
+                    positiveFieldEntities[attribute] = entities;
+                }
+
+                entities.Add(entityName);
+            }
+
             var at = $"{where}.{field.Name}";
 
             if (string.Equals(entityName, BudgetEntity, StringComparison.Ordinal)
@@ -326,6 +408,12 @@ public sealed partial class PredicateCompiler
                     if (values.Count == 0)
                     {
                         throw new PredicateCompilationException($"{at}: an empty id list matches nothing; refusing to compile.");
+                    }
+
+                    if (values.Count > MaxInListLength)
+                    {
+                        throw new PredicateCompilationException(
+                            $"{at}: an 'in' list of {values.Count} values exceeds the {MaxInListLength}-value limit.");
                     }
 
                     conditions.Add(new XElement("condition",

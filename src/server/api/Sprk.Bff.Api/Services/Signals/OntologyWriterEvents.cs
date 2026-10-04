@@ -18,4 +18,18 @@ public static class OntologyWriterEvents
     /// rendered sentence (matter detail) — see each call site's own comment for why.
     /// </summary>
     public static readonly EventId WriteRefused = new(50300, nameof(WriteRefused));
+
+    /// <summary>
+    /// Logged at Error, exactly once per refused <c>sprk_policyversion</c>, by
+    /// <see cref="PolicyVersionValidator.TryPrepareForEvaluation"/> — task 022, owner directive 2026-10-03/04:
+    /// admins may author policy rows directly in the Spaarke Platform app (bypassing the BFF), so the
+    /// evaluator (task 031) re-validates every policy version's <c>sprk_rulebody</c> at evaluation time and
+    /// must fail closed and loudly, never silently producing zero Signals. ONE EventId covers every
+    /// policy-validation refusal; the structured <c>reason</c> property (one of the six bounded sub-reasons
+    /// added to <see cref="Telemetry.OntologyWriterFailureReason"/> in the task 022 rework — review finding
+    /// #7) distinguishes WHICH. Structured properties: <c>policyVersionId</c>, <c>policyCode</c> and
+    /// <c>reason</c> ONLY — never the rule body, the message template, or the validator's field-level error
+    /// text (all of which may echo admin-authored config content).
+    /// </summary>
+    public static readonly EventId PolicyVersionInvalid = new(50301, nameof(PolicyVersionInvalid));
 }

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
@@ -386,5 +387,123 @@ public class PredicateCompilerTests
         var act = () => Compiler().Compile(Fixture("pathb-existence.rulebody.json"), Guid.Empty);
 
         act.Should().Throw<PredicateCompilationException>().WithMessage("*subjectId must not be Guid.Empty*");
+    }
+
+    // =====================================================================================
+    // Task 022 rework (review finding #4): ConditionFields is filter-condition attributes only (both exists
+    // AND notExists) -- renamed from the first-pass "ReadFields" which overclaimed what was "read".
+    // =====================================================================================
+
+    [Fact]
+    public void Compile_ConditionFields_IncludesBothExistsAndNotExistsFilterAttributes()
+    {
+        var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
+
+        // exists clause fields:
+        compiled.ConditionFields.Should().Contain("sprk_triagecategory");
+        compiled.ConditionFields.Should().Contain("sprk_receiveddate");
+        compiled.ConditionFields.Should().Contain("sprk_reviewoutcome");
+        // notExists clause field -- included here (unlike PositiveReadFields below):
+        compiled.ConditionFields.Should().Contain("sprk_revisedon");
+    }
+
+    [Fact]
+    public void Compile_ConditionFields_And_PositiveReadFields_AreFrozenSets()
+    {
+        // Review finding #10.
+        var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
+
+        compiled.ConditionFields.Should().BeAssignableTo<FrozenSet<string>>();
+        compiled.PositiveReadFields.Should().BeAssignableTo<FrozenSet<string>>();
+        compiled.AmbiguousPositiveFields.Should().BeAssignableTo<FrozenSet<string>>();
+    }
+
+    // =====================================================================================
+    // Task 022 rework (review finding #5): PositiveReadFields excludes notExists fields entirely -- a firing
+    // subject has no matching notExists row, so that clause's filter VALUES can never be read for it.
+    // =====================================================================================
+
+    [Fact]
+    public void Compile_PositiveReadFields_ExcludesNotExistsFields_IncludesExistsAndWhenFields()
+    {
+        var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
+
+        compiled.PositiveReadFields.Should().Contain("sprk_receiveddate");
+        compiled.PositiveReadFields.Should().Contain("sprk_triagecategory");
+        compiled.PositiveReadFields.Should().Contain("sprk_reviewoutcome");
+        compiled.PositiveReadFields.Should().NotContain("sprk_revisedon", "it is read only inside the notExists clause");
+    }
+
+    [Fact]
+    public void Compile_PositiveReadFields_FieldAmbiguousAcrossTwoPositiveEntities_IsExcludedAndListedAsAmbiguous()
+    {
+        // "sprk_name" appears in the subject's own "when" filter (entity sprk_matter) AND in an "exists"
+        // clause's filter (entity sprk_communication) -- two DISTINCT positive entities, so the value is not
+        // well defined and the field must not be treated as safely readable.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "when": { "sprk_name": "whatever" },
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_name": "x" } }
+              ]
+            }
+            """;
+
+        var compiled = Compiler().Compile(body);
+
+        compiled.PositiveReadFields.Should().NotContain("sprk_name");
+        compiled.AmbiguousPositiveFields.Should().Contain("sprk_name");
+    }
+
+    [Fact]
+    public void Compile_SameEntityReferencedByTwoExistsClauses_FieldIsNotAmbiguous()
+    {
+        // Two DIFFERENT exists clauses on the SAME related entity (sprk_communication) sharing a field name is
+        // NOT the ambiguity review finding #5 describes -- "more than one DISTINCT entity", not "more than one
+        // clause". Both clauses read the same entity type, so the field stays in PositiveReadFields.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_receiveddate": { ">=": "now-30d" } } },
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_receiveddate": { "<": "now-1d" }, "sprk_name": "x" } }
+              ]
+            }
+            """;
+
+        var compiled = Compiler().Compile(body);
+
+        compiled.PositiveReadFields.Should().Contain("sprk_receiveddate");
+        compiled.AmbiguousPositiveFields.Should().NotContain("sprk_receiveddate");
+    }
+
+    // =====================================================================================
+    // Task 022 rework (review finding #9): bounded refusals on rule-body length and 'in'-list length.
+    // =====================================================================================
+
+    [Fact]
+    public void Compile_RuleBodyLongerThanMaxLength_IsRefused()
+    {
+        var hugeValue = new string('a', PredicateCompiler.MaxRuleBodyLength + 1);
+        var body = Body($$"""{"sprk_name":"{{hugeValue}}"}""");
+
+        var act = () => Compiler().Compile(body);
+
+        act.Should().Throw<PredicateCompilationException>().WithMessage($"*exceeding the {PredicateCompiler.MaxRuleBodyLength}-character limit*");
+    }
+
+    [Fact]
+    public void Compile_InListLongerThanMaxLength_IsRefused()
+    {
+        var hugeList = string.Join(",", Enumerable.Range(0, PredicateCompiler.MaxInListLength + 1).Select(i => $"\"id{i}\""));
+        var body = Body($$"""{"sprk_triagecategory":[{{hugeList}}]}""");
+
+        var act = () => Compiler().Compile(body);
+
+        act.Should().Throw<PredicateCompilationException>()
+            .WithMessage($"*an 'in' list of {PredicateCompiler.MaxInListLength + 1} values exceeds the {PredicateCompiler.MaxInListLength}-value limit*");
     }
 }

@@ -41,10 +41,12 @@ public sealed record RuleBodyValidationResult(bool IsValid, IReadOnlyList<string
 /// JSON Schema metadata — no AI-internal types, no <c>Services/Ai/*</c> dependency, no Dataverse reads.
 /// </para>
 /// <para>
-/// <b>Not yet wired to the Dataverse save path.</b> Task 022 ("Rule-body validation refusal") is the task
-/// that calls this validator on create/update of <c>sprk_policyversion</c>. This task only builds the
-/// validation seam itself and proves it refuses the CM-3 cross-clause-variable violation at the schema
-/// level (see the escalation trigger in task 020's POML).
+/// <b>Wired via <see cref="PolicyVersionValidator"/> (task 022).</b> That class calls this validator first
+/// (shape), then <see cref="PredicateCompiler"/> (strictly more than shape) on create/update of
+/// <c>sprk_policyversion</c> and again at evaluation time (the owner's fail-closed decision — a policy row
+/// can be authored directly in the Spaarke Platform app, bypassing the BFF). This class proves it refuses the
+/// CM-3 cross-clause-variable violation at the schema level (see the escalation trigger in task 020's POML)
+/// and — after task 022's rework — never throws for ANY input, however pathological.
 /// </para>
 /// </remarks>
 public sealed class RuleBodySchemaValidator
@@ -53,8 +55,29 @@ public sealed class RuleBodySchemaValidator
 
     private static readonly Lazy<JsonSchema> ExistenceSchema = new(LoadExistenceSchema);
 
+    /// <summary>Serializes every call into <c>JsonSchema.Evaluate</c> against the shared
+    /// <see cref="ExistenceSchema"/> instance — see <see cref="Validate"/>'s own remarks for the measured
+    /// thread-safety bug this guards against. Static (not per-instance) because the race is on the SHARED
+    /// schema object, not on <see cref="RuleBodySchemaValidator"/> itself, and this type is a DI singleton
+    /// anyway (so a per-instance lock would have been equivalent in practice, but static states the real
+    /// invariant: one schema, one evaluation at a time, regardless of how many validator instances exist).</summary>
+    private static readonly object EvaluationGate = new();
+
+    /// <summary>Duplicate object keys are refused at ANY nesting depth (top-level AND inside a nested
+    /// <c>filter</c>) rather than silently accepted — task 022 review finding #1: with the default
+    /// <c>AllowDuplicateProperties = true</c>, a duplicate key reaching <see cref="JsonNode"/> construction
+    /// throws an unhandled <see cref="ArgumentException"/> from <c>JsonObject</c>'s internal dictionary
+    /// insert, escaping this validator entirely. Parsing strictly here converts that into an ordinary,
+    /// catchable <see cref="JsonException"/> before a <see cref="JsonNode"/> is ever built.</summary>
+    private static readonly JsonDocumentOptions StrictJson = new() { AllowDuplicateProperties = false };
+
     /// <summary>
-    /// Validates <paramref name="ruleBodyJson"/> against the schema for <paramref name="ruleType"/>.
+    /// Validates <paramref name="ruleBodyJson"/> against the schema for <paramref name="ruleType"/>. Never
+    /// throws for ANY input, however pathological — see the final catch-all below (task 022 review finding
+    /// #1): besides duplicate keys, a syntactically-valid-but-extreme number such as <c>1e999999</c> throws
+    /// <see cref="FormatException"/>/<see cref="OverflowException"/> out of the schema library's own numeric
+    /// evaluation, which is also converted to an ordinary <see cref="RuleBodyValidationResult.Failure(string)"/>
+    /// here rather than left to escape.
     /// </summary>
     public RuleBodyValidationResult Validate(RuleType ruleType, string? ruleBodyJson)
     {
@@ -66,7 +89,14 @@ public sealed class RuleBodySchemaValidator
         JsonNode? node;
         try
         {
-            node = JsonNode.Parse(ruleBodyJson);
+            // Strict parse FIRST (AllowDuplicateProperties = false applies recursively to every nesting depth,
+            // so this catches a duplicate key inside a clause's "filter" exactly as it catches a top-level
+            // duplicate — ONE option, not a depth-by-depth special case). Only once that succeeds do we build
+            // the JsonNode tree the schema evaluator needs, from the already-validated JsonElement -- never
+            // from the raw text again, so a duplicate can never reach JsonNode construction's unguarded
+            // dictionary insert.
+            using var strictDoc = JsonDocument.Parse(ruleBodyJson, StrictJson);
+            node = JsonSerializer.SerializeToNode(strictDoc.RootElement);
         }
         catch (JsonException ex)
         {
@@ -80,7 +110,37 @@ public sealed class RuleBodySchemaValidator
 
         var schema = ResolveSchema(ruleType);
 
-        var results = schema.Evaluate(node, new EvaluationOptions { OutputFormat = OutputFormat.List });
+        EvaluationResults results;
+        try
+        {
+            // SERIALIZED (review finding #1, discovered during the rework's own test run, not by the
+            // reviewer's probe): Json.Schema.Net 7.3.4's JsonSchema.Evaluate is NOT thread-safe for
+            // CONCURRENT calls against the SAME JsonSchema instance -- and ExistenceSchema is a process-wide
+            // static singleton, evaluated by every PolicyVersionValidator call (itself an AddSingleton), so
+            // concurrent calls WILL happen under real load. Measured directly against this exact package
+            // version (throwaway repro, 2000-4000 iterations, Parallel.For): un-synchronized concurrent
+            // Evaluate() calls on one schema instance produced wrong IsValid=true results for an ACTUALLY
+            // INVALID body at a ~40% rate, and in a second run threw an unhandled IndexOutOfRangeException
+            // from inside Json.Schema.SchemaConstraint.BuildEvaluation. A lock around the Evaluate call
+            // eliminated BOTH symptoms across the same iteration counts. This is a correctness bug with the
+            // owner's fail-closed mandate at stake -- a false IsValid=true is a FAIL-OPEN, not merely a flaky
+            // test -- so it is fixed here rather than left as "probably a test-parallelism quirk".
+            lock (EvaluationGate)
+            {
+                results = schema.Evaluate(node, new EvaluationOptions { OutputFormat = OutputFormat.List });
+            }
+        }
+        catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException or IndexOutOfRangeException)
+        {
+            // An extreme-but-syntactically-valid JSON number (e.g. 1e999999) throws FormatException out of
+            // the schema library's own JsonElement.GetDecimal call during numeric-keyword evaluation;
+            // ArgumentException/IndexOutOfRangeException are caught too, defensively, for the same class of
+            // internal-library fragility the lock above is the primary defense against.
+            return RuleBodyValidationResult.Failure(
+                $"sprk_rulebody could not be evaluated against its schema ({ex.GetType().Name}): a value is " +
+                "likely out of the numeric range this validator supports, or the schema library hit an " +
+                "internal error on this input.");
+        }
 
         if (results.IsValid)
         {
@@ -116,8 +176,13 @@ public sealed class RuleBodySchemaValidator
     }
 
     /// <summary>
-    /// True only for the three closed <see cref="RuleType"/> members, by name (case-insensitive) or by their
-    /// Dataverse option-set numeric value as a string.
+    /// True only for the three closed <see cref="RuleType"/> members, by EXACT name (case-insensitive) or by
+    /// their Dataverse option-set numeric value as a string. Deliberately does NOT use <see cref="Enum.TryParse"/>
+    /// on the string directly — task 022 review finding #8: <c>Enum.TryParse</c> accepts a comma-separated list
+    /// of names (e.g. <c>"Threshold,Switch"</c>) and OR's their underlying values together even though
+    /// <see cref="RuleType"/> carries no <c>[Flags]</c> attribute, and the OR'd result can coincide with a
+    /// defined member by accident of the chosen numeric values. Matching against each exact member name (no
+    /// comma, no whitespace-splitting) closes that off entirely.
     /// </summary>
     public static bool TryParseRuleType(string? ruleTypeRaw, out RuleType ruleType)
     {
@@ -128,10 +193,13 @@ public sealed class RuleBodySchemaValidator
             return false;
         }
 
-        if (Enum.TryParse(ruleTypeRaw, ignoreCase: true, out RuleType parsed) && Enum.IsDefined(parsed))
+        foreach (var candidate in Enum.GetValues<RuleType>())
         {
-            ruleType = parsed;
-            return true;
+            if (string.Equals(ruleTypeRaw, candidate.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                ruleType = candidate;
+                return true;
+            }
         }
 
         if (int.TryParse(ruleTypeRaw, out var numeric) && Enum.IsDefined(typeof(RuleType), numeric))

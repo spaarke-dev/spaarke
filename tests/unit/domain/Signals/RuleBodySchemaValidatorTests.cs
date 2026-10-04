@@ -273,4 +273,152 @@ public class RuleBodySchemaValidatorTests
 
         act.Should().Throw<NotSupportedException>();
     }
+
+    // =====================================================================================
+    // Task 022 rework (review finding #1): pathological-but-syntactically-valid JSON must be REFUSED, never
+    // thrown. Both cases previously escaped as unhandled ArgumentException/FormatException.
+    // =====================================================================================
+
+    [Fact]
+    public void Validate_WithTopLevelDuplicateKey_IsRefused_NeverThrows()
+    {
+        // Two "subject" keys at the top level. Before the fix, JsonNode.Parse's eager JsonObject construction
+        // threw an unhandled ArgumentException ("An item with the same key has already been added") here.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "subject": "sprk_communication",
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "a": "b" } }
+              ]
+            }
+            """;
+
+        var act = () => _sut.Validate(RuleType.Existence, body);
+
+        var result = act.Should().NotThrow().Subject;
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_WithDuplicateKeyInsideNestedFilter_IsRefused_NeverThrows()
+    {
+        // The duplicate is INSIDE a clause's "filter" object, two nesting levels deep -- proves
+        // AllowDuplicateProperties=false applies recursively, not only at the document root.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                {
+                  "exists": "sprk_communication",
+                  "path": "sprk_regardingmatter",
+                  "filter": { "sprk_triagecategory": "a", "sprk_triagecategory": "b" }
+                }
+              ]
+            }
+            """;
+
+        var act = () => _sut.Validate(RuleType.Existence, body);
+
+        var result = act.Should().NotThrow().Subject;
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_WithExtremeNumericLiteral_IsRefused_NeverThrows()
+    {
+        // 1e999999 is syntactically valid JSON but overflows every .NET numeric type the schema library's
+        // numeric-keyword evaluation reads it as. Before the fix this threw an unhandled FormatException out
+        // of JsonElement.GetDecimal.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_amount": 1e999999 } }
+              ]
+            }
+            """;
+
+        var act = () => _sut.Validate(RuleType.Existence, body);
+
+        var result = act.Should().NotThrow().Subject;
+        result.IsValid.Should().BeFalse();
+    }
+
+    // =====================================================================================
+    // Task 022 rework (review finding #8): rule-type name parsing must be EXACT, never a comma-combined set.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("Threshold,Switch")]
+    [InlineData("Threshold, Switch")]
+    [InlineData("Existence,Threshold")]
+    public void TryParseRuleType_WithCommaCombinedNames_IsRefused(string ruleTypeRaw)
+    {
+        // Enum.TryParse treats a comma-separated name list as a bitwise-OR combination even though RuleType
+        // carries no [Flags] attribute. TryParseRuleType must not inherit that leniency.
+        var parsed = RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out _);
+
+        parsed.Should().BeFalse();
+    }
+
+    // =====================================================================================
+    // Task 022 rework: discovered WHILE fixing review finding #1, not one of the reviewer's listed items --
+    // Json.Schema.Net 7.3.4's JsonSchema.Evaluate is not thread-safe for concurrent calls against the SAME
+    // JsonSchema instance (confirmed via a throwaway 2000/4000-iteration Parallel.For repro against the
+    // package directly: ~40% false IsValid=true on an actually-invalid body, and a separate run threw an
+    // unhandled IndexOutOfRangeException from inside the library). ExistenceSchema is a process-wide static
+    // singleton and RuleBodySchemaValidator is an AddSingleton, so concurrent calls are a real production
+    // shape, not a test-only artifact. A false IsValid=true is a FAIL-OPEN against the owner's fail-closed
+    // mandate -- this permanent regression test pins the fix (a lock around Evaluate in Validate()).
+    // =====================================================================================
+
+    [Fact]
+    public void Validate_CalledConcurrently_NeverReturnsTrueForAnActuallyInvalidBody()
+    {
+        const string invalidBody = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                { "path": "sprk_matter", "filter": { "a": "b" } }
+              ]
+            }
+            """;
+
+        var falsePositives = 0;
+        Parallel.For(0, 500, _ =>
+        {
+            var result = new RuleBodySchemaValidator().Validate(RuleType.Existence, invalidBody);
+            if (result.IsValid)
+            {
+                Interlocked.Increment(ref falsePositives);
+            }
+        });
+
+        falsePositives.Should().Be(0);
+    }
+
+    [Fact]
+    public void Validate_CalledConcurrentlyWithMixOfValidAndInvalid_NeverThrows_NeverMisclassifies()
+    {
+        var mismatches = 0;
+        Parallel.For(0, 1000, i =>
+        {
+            var body = i % 2 == 0 ? ValidExistenceBody : """
+                {"type":"Existence","subject":"sprk_matter","all":[{"path":"sprk_matter","filter":{"a":"b"}}]}
+                """;
+            var result = new RuleBodySchemaValidator().Validate(RuleType.Existence, body);
+            var expectedValid = i % 2 == 0;
+            if (result.IsValid != expectedValid)
+            {
+                Interlocked.Increment(ref mismatches);
+            }
+        });
+
+        mismatches.Should().Be(0);
+    }
 }
