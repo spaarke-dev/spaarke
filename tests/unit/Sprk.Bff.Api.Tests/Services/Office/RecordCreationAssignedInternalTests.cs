@@ -47,6 +47,7 @@ public class RecordCreationAssignedInternalTests
             ownership.Object,
             identity.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
             NullLogger<RecordCreationService>.Instance);
     }
 

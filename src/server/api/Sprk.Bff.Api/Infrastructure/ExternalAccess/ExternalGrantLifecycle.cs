@@ -428,10 +428,20 @@ internal static class ExternalGrantLifecycle
 
     /// <summary>
     /// Stable reason code (422): the grantee — the contact, one of its active organizations, or the organization of an
-    /// organization-wide grant — is on this record's No Access list, or the list could not be read (fail closed).
-    /// Task 140 reuses it verbatim.
+    /// organization-wide grant — is on this record's No Access list (a matching entry). Task 140 reuses it verbatim.
+    /// Since task 142 r4 a list that could not be read is NOT this code: it is
+    /// <see cref="GranteeNoAccessUnverifiableReasonCode"/>.
     /// </summary>
     internal const string GranteeDeniedReasonCode = "sdap.access.grant.grantee_denied";
+
+    /// <summary>
+    /// Stable reason code (503, task 142 r4 · owner round 13 item 4): whether the grantee is on this record's No Access
+    /// list could not be checked — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or
+    /// referenced organizations, a fail-closed deny-list read). Nothing was granted (fail closed); retryable. The grant
+    /// routes' sibling of <c>/share-user</c>'s <c>sdap.access.user_share.no_access_unverifiable</c>. Task 140 reuses it
+    /// verbatim.
+    /// </summary>
+    internal const string GranteeNoAccessUnverifiableReasonCode = "sdap.access.grant.no_access_unverifiable";
 
     /// <summary>Stable reason code (500): the grantor's own rights on the record could not be read (the probe threw).</summary>
     internal const string CallerRightsUnreadableReasonCode = "sdap.access.grant.caller_rights_unreadable";
@@ -624,15 +634,44 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         ". Nothing was changed, so their existing access stays as it is.");
 
     /// <summary>
-    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list, or the list could not be read.
-    /// 422. The detail never names the entry or its reason (task 143's rule for refusal messages).
+    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list (a matching entry). 422. The detail
+    /// never names the entry or its reason (task 143's rule for refusal messages). A list that could not be checked is
+    /// <see cref="GranteeDenyListUnreadable"/> since task 142 r4, so this answer now means an entry and nothing else.
     /// </summary>
     public static GrantPolicyDecision GranteeDenied { get; } = new(
         false,
         ExternalGrantLifecycle.GranteeDeniedReasonCode,
         StatusCodes.Status422UnprocessableEntity,
-        "This contact or organization cannot be given access to this record: it is on the record's No Access list, " +
-        "or that list could not be checked. Nothing was granted.");
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list. " +
+        "Nothing was granted.");
+
+    /// <summary>
+    /// The No Access check could not be completed (task 142 r3 for a throw; r4 · owner round 13 item 4 for every read
+    /// fault, through <see cref="NoAccessCheckAnswer.Unverifiable"/>): refused, fail closed, and REPORTED as a fault —
+    /// 503 <see cref="ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode"/>, retryable — never absorbed into
+    /// <see cref="GranteeDenied"/>. <see cref="IsDenyListReadFault"/> lets an in-process caller tell it apart without
+    /// comparing codes: the Assigned-To materializer waits on an entry (a policy hold) and must report a fault.
+    /// </summary>
+    /// <remarks>
+    /// Before r4 this carried <see cref="GranteeDenied"/>'s code, 422 and detail, and the faults the deny-veto code
+    /// absorbed itself (an unreadable membership read, a fail-closed deny-list read) reached the grant routes as a plain
+    /// "denied" — an outage told the operator the person was on the list. The tri-state answer removes both.
+    /// </remarks>
+    public static GrantPolicyDecision GranteeDenyListUnreadable { get; } = new(
+        false,
+        ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode,
+        StatusCodes.Status503ServiceUnavailable,
+        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was " +
+        "granted. Try again in a moment.")
+    {
+        IsDenyListReadFault = true,
+    };
+
+    /// <summary>
+    /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process
+    /// only: never part of a response (<c>PolicyRefusalProblem</c> maps the code, status and detail explicitly).
+    /// </summary>
+    public bool IsDenyListReadFault { get; init; }
 
     /// <summary>The level's name as the Manage Access dialog shows it.</summary>
     internal static string DisplayName(ExternalAccessLevel level) => level switch
@@ -681,6 +720,21 @@ internal sealed class GrantCeiling
     /// </summary>
     public static GrantCeiling FromGrantorRights(AccessRights grantorRights)
         => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
+
+    /// <summary>
+    /// The ceiling of an Assigned-To auto-grant (unified-access-control-r2 task 142): exactly Collaborate, with NO
+    /// grantor-level cap. Owner round 3 A1 and round 3b: "Assigned-To auto-grants follow rule 5: always Collaborate,
+    /// uncapped" — the grantor is the owner's rule, not a person, so there is no person's level to cap at (the cap stays
+    /// for MANUAL Grant Access). Used ONLY by <c>AssignedAccessMaterializer</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never-lower is the materializer's</b> (this type's remarks): a request for exactly Collaborate is not
+    /// narrowed, so the core's never-lower rule would not fire. The materializer therefore reads the key's active rows
+    /// first and writes nothing over a row at Collaborate or above (CoveredByExisting); it calls the core only to create,
+    /// to raise a lower row, to renew its OWN unmodified row, or to put a raised row back to its prior level.</para>
+    /// </remarks>
+    public static GrantCeiling AssignedToRule { get; } =
+        new(ExternalAccessLevel.Collaborate, "owner rule 5 (task 142): Assigned-To auto-grant, uncapped Collaborate");
 
     public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
 }

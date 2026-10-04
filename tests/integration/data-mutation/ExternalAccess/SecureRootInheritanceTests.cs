@@ -449,6 +449,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
                 | AccessRights.Share),
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(), SecureChildShareWorld.NobodyWalled(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
             new DefaultHttpContext
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity(new[]

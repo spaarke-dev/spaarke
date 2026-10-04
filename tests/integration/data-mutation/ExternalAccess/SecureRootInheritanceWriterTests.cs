@@ -308,7 +308,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SecureChildShareWorld.GeneralTeam);
         return new RecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
-            IdentityNormalizationFixtures.NoLinkedContact(), _gate, NullLogger<RecordCreationService>.Instance);
+            IdentityNormalizationFixtures.NoLinkedContact(), _gate,
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<RecordCreationService>.Instance);
     }
 
     private Task<RecordCreationResult> OfficeCreateProjectFrom(Guid matter) =>

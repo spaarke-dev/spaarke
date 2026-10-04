@@ -170,29 +170,37 @@ internal sealed class UpdateRecordActionCore
             await Patch(cancellationToken);
             await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
             await SecureFiledRootAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
-            return updatePayload.Keys.ToArray();
         }
-
-        using var scope = _scopeFactory.CreateScope();
-        var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
-        var reparent = await ownership.ReparentAsync(
-            new RecordReparent
-            {
-                EntityLogicalName = input.EntityLogicalName,
-                RecordId = input.RecordId,
-                ParentChanges = parentChanges,
-                CallerSystemUserId = input.ImpersonateSystemUserId,
-            },
-            Patch,
-            cancellationToken).ConfigureAwait(false);
-        if (reparent.IsRefused)
+        else
         {
-            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
+            using var scope = _scopeFactory.CreateScope();
+            var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
+            var reparent = await ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = input.EntityLogicalName,
+                    RecordId = input.RecordId,
+                    ParentChanges = parentChanges,
+                    CallerSystemUserId = input.ImpersonateSystemUserId,
+                },
+                Patch,
+                cancellationToken).ConfigureAwait(false);
+            if (reparent.IsRefused)
+            {
+                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
+            }
+
+            // Re-stamped once the re-file has STOOD (task 156 + task 146): a re-file put back after a failed owner
+            // assignment throws above and is never re-stamped from the filing it no longer has.
+            await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
         }
 
-        // Re-stamped once the re-file has STOOD (task 156 + task 146): a re-file put back after a failed owner
-        // assignment throws above and is never re-stamped from the filing it no longer has.
-        await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
+        // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
+        // materializes the Assigned-To access now. After the PATCH committed (and, for a root filed under a secure record,
+        // after task 158 secured it); never throws and never fails this update.
+        await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopeFactory, input.EntityLogicalName, input.RecordId, updatePayload.Keys, grantorOid: null, _logger,
+            cancellationToken).ConfigureAwait(false);
 
         return updatePayload.Keys.ToArray();
     }

@@ -214,6 +214,18 @@ public static class ExternalAccessModule
         });
         services.AddScoped<NoAccessShareEnforcer>();
 
+        // unified-access-control-r2 task 142 (owner round 2 item 5 + Q5; round 3 A1/A2/R3) — the Assigned-To auto-grants.
+        //   • AssignedAccessStore — the provenance ledger (sprk_assignedaccess) and the reads no existing reader answers
+        //     (a root's registry columns, the systemusers a contact represents, an organization's state, the job's scans),
+        //     over the singleton DataverseWebApiClient. Its internal-virtual methods are the test seam.
+        //   • AssignedAccessMaterializer — the ONE invariant owner, called inline by the BFF writers (L1), by the sync
+        //     route (form post-save, client wizards, "Update Access") and by the job below (L4). Grants go through the
+        //     grant core (CreateGrantAsync), shares through the POA share seam, the wall through task 143's guard.
+        // Both UNCONDITIONAL (ADR-032): every dependency is registered unconditionally (Membership options, the identity
+        // store, the guard, the share seam, the tenant cache), so no Null-Object is needed.
+        services.AddScoped<AssignedAccessStore>();
+        services.AddScoped<AssignedAccessMaterializer>();
+
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
         // CIAM external contact AND the workforce (Teams-host) user through ONE endpoint set. The two
@@ -484,19 +496,22 @@ public static class ExternalAccessModule
         // is inactive, deactivate a membership whose end date has passed). Same host, same registration seam as
         // the reminder job above (ADR-036 A1 rule 6); ADR-052 places it in the BFF.
         //
-        // ⚠️ enabled: false IS THE SHIPPING STATE, not an oversight. Rules R2 and R3 REMOVE access that exists
-        // today, and R1 turns a row that (since task 107) confers nothing into one that confers access for 90
-        // more days. Enabling it is an owner action. It is belt AND braces: even a manual admin trigger of the
-        // disabled job writes nothing, because writes are separately gated on
-        // ExternalAccessReconciliationJob.WritesEnabledConfigKey, which defaults to report-only.
+        // POSTURE — owner decision, task 137 / owner round 7 item 1 (2026-10-02): "Enable the schedule in
+        // report-only mode now. Enable writes only after the owner has reviewed one report. Inactive contacts and
+        // inactive roots stay READ guards only, so reactivating one restores access with no data repair."
+        // So the SCHEDULE is ENABLED (the daily DefaultCronSchedule) and every tick is REPORT-ONLY: rules R2 and
+        // R3 REMOVE access that exists today, and R1 turns a row that (since task 107) confers nothing into one
+        // that confers access for 90 more days, so writes stay gated on
+        // ExternalAccessReconciliationJob.WritesEnabledConfigKey — absent, empty or unparseable = report-only.
+        // Turning writes on is the owner's next action, after one report is reviewed (DEPLOY-CHECKLIST §4.1). No
+        // writer rule exists, or is to be added, for an inactive contact or an inactive root.
         //
         // UNCONDITIONAL registration (ADR-032): every dependency — IServiceScopeFactory, TimeProvider,
         // IConfiguration, IGenericEntityService, IIdempotencyService — is itself registered unconditionally, so
-        // there is no feature flag around this line and no Null-Object is needed. The job's OWN disabled state
-        // is carried by the scheduler's registration data, not by an `if` around the registration, which is
-        // exactly what § F.1's asymmetric-registration anti-pattern asks for.
-        services.AddScheduledJob<ExternalAccessReconciliationJob>(
-            ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
+        // there is no feature flag around this line and no Null-Object is needed. The job's write switch is
+        // carried by configuration read per run, not by an `if` around the registration, which is exactly what
+        // § F.1's asymmetric-registration anti-pattern asks for.
+        services.AddScheduledJob<ExternalAccessReconciliationJob>(ExternalAccessReconciliationJob.DefaultCronSchedule);
 
         // Task 141 — the identity-link reconciliation (every licensed systemuser linked to its contact, or
         // flagged). Systemusers are created outside the product (Entra / PPAC sync), so this is the safety net
@@ -583,6 +598,17 @@ public static class ExternalAccessModule
         // rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, TimeProvider and IConfiguration are unconditional,
         // and the store/enforcer it resolves per run are registered unconditionally above.
         services.AddScheduledJob<NoAccessShareReconciliationJob>(NoAccessShareReconciliationJob.DefaultCronSchedule);
+
+        // unified-access-control-r2 task 142 (owner round 3 R3/R4: "a safety net at an interval of 5 minutes or less") —
+        // the Assigned-To reconciliation: every root with an Assigned column or a live ledger row is materialized through
+        // AssignedAccessMaterializer (grid edits, imports, flows, a failed form/wizard sync call, 141 link changes,
+        // Secure/Restricted/No Access transitions, renewal). ENABLED with writes on for create/convert/renew; its
+        // REMOVAL direction (revoke-on-change) is gated on AssignedAccessReconciliationJob.RevokeOnChangeConfigKey, which
+        // defaults to report-only in code and is turned on in dev once the live gate passes (owner answer R3 / (g)). The
+        // sync route and the L1 writers always apply revoke-on-change. ADR-052 places it in the BFF on the in-process
+        // scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, TimeProvider and IConfiguration
+        // are unconditional, and the store/materializer it resolves per run are registered unconditionally above.
+        services.AddScheduledJob<AssignedAccessReconciliationJob>(AssignedAccessReconciliationJob.DefaultCronSchedule);
 
         return services;
     }

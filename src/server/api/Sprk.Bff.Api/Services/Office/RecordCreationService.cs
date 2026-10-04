@@ -215,6 +215,7 @@ public sealed class RecordCreationService
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer _assignedAccess;
     private readonly ILogger<RecordCreationService> _logger;
 
     public RecordCreationService(
@@ -223,6 +224,7 @@ public sealed class RecordCreationService
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         ILogger<RecordCreationService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -232,8 +234,18 @@ public sealed class RecordCreationService
         // Task 158 (owner round 6): a project the Field Mapping Framework files under a secure matter or project is secured
         // through provisioning's own steps. Registered by AddCoreAncestorResolver (unconditional, §10 F.1).
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
+        _assignedAccess = assignedAccess ?? throw new ArgumentNullException(nameof(assignedAccess));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// Task 142 (L1, owner Q5 + R3 "immediate"): the created matter/project's "Assigned *" contacts — the maker's own
+    /// contact included (owner A7, <see cref="ApplyMakerAssignedInternalAsync"/>), and any column field mapping copied —
+    /// receive their Collaborate grant or share now, not at the next job tick. AFTER the create committed; the
+    /// materializer never throws and never fails this create (a fault is logged and the job repairs it).
+    /// </summary>
+    private Task MaterializeAssignedAccessAsync(string logicalName, Guid createdId, string callerOid, CancellationToken ct)
+        => _assignedAccess.AfterWriteAsync(logicalName, createdId, writtenColumns: null, grantorOid: callerOid, ct);
 
     /// <summary>
     /// Owner decision A7 (round 3, REVERSED; unified-access-control-r2 task 152, coordinated with 142 and
@@ -422,6 +434,8 @@ public sealed class RecordCreationService
             "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
             createdId, request.CallerUserId, ownerTeamId, warnings.Count);
 
+        await MaterializeAssignedAccessAsync(MatterEntity, createdId, request.CallerUserId, ct).ConfigureAwait(false);
+
         return new RecordCreationResult
         {
             RecordId = createdId,
@@ -537,6 +551,8 @@ public sealed class RecordCreationService
                 "The project is filed under a secure record but could not be made secure yet " +
                 $"({secured.ReasonCode}); it is retried automatically within a few minutes.");
         }
+
+        await MaterializeAssignedAccessAsync(ProjectEntity, createdId, request.CallerUserId, ct).ConfigureAwait(false);
 
         return new RecordCreationResult
         {

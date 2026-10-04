@@ -43,6 +43,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
@@ -728,6 +729,13 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           // treatment: say what did not happen, in copy written for the person reading it.
           provisioningWarning =
             'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
+        }
+
+        // 1e. Task 142 (owner Q5 + A3): a project created SECURE is synced only now, after provisioning, so the
+        //     Assigned-To rule sees the secure flag and suggests its people in Manage Access instead of granting them
+        //     before the record was secured. (A non-secure project was synced by ProjectService at create.)
+        if (mergedFormValues.isSecure) {
+          await syncAssignedAccess(authFetch, bffBaseUrl, 'project', projectId);
         }
 
         // 2. Upload files to SPE + create document records

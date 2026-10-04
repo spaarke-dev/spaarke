@@ -319,6 +319,9 @@ public class CallerPrincipalResolverTests
                 (IReadOnlyDictionary<Guid, RootRecordFlags>)ids.Distinct().ToDictionary(id => id, _ => limited));
         participations.Setup(s => s.ReadOrganizationMembershipsAsync(contactId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ActiveOrgMemberships.None);
+        // Task 137: the evaluator reads the contact's live state first; an active contact composes as before.
+        participations.Setup(s => s.QueryContactStateAsync(contactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ContactRecordState.Active);
         participations.Setup(s => s.GetReferencedOrganizationIdsAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, IReadOnlyCollection<Guid> ids, CancellationToken _) =>

@@ -264,6 +264,7 @@ public static class InternalShareEndpoints
         SecureChildShareSynchronizer secureChildShares,
         SecureShareNoAccessGuard noAccessGuard,
         SecureRootInheritance relatedRoots,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -438,6 +439,9 @@ public static class InternalShareEndpoints
                 "[USER-SHARE] {SystemUserId} already holds mask {Mask} on {RootType} {RootId}; nothing was written " +
                 "(caller {CallerOid}).", systemUserId, current, root.Type, root.Id, callerOid);
 
+            // Task 142: a deliberate share onto a user the Assigned-To rule shared to (or suggested) is now the operator's.
+            await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
+
             // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
             return await ChildrenIncompleteAfterShareAsync(
                        secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
@@ -484,6 +488,11 @@ public static class InternalShareEndpoints
         }
 
         var outcome = current == 0 ? OutcomeCreated : OutcomeUpdated;
+
+        // Task 142: a manual share (incl. "Grant" on a secure-record suggestion) on a user the Assigned-To ledger holds
+        // becomes ADOPTED — never revoked by the rule afterwards. Ledger-only; never thrown.
+        await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
+
         logger.LogInformation(
             "[USER-SHARE] Caller {CallerOid} shared {RootType} {RootId} with {SystemUserId}: asked {Level}, granted mask " +
             "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
@@ -515,6 +524,7 @@ public static class InternalShareEndpoints
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         ITenantCache cache,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         SecureChildShareSynchronizer secureChildShares,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -621,6 +631,11 @@ public static class InternalShareEndpoints
         logger.LogInformation(
             "[USER-SHARE] Caller {CallerOid} removed {SystemUserId}'s share on {RootType} {RootId} (it held mask {Previous}).",
             callerOid, systemUserId, root.Type, root.Id, current);
+
+        // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
+        // this user on this record become Declined, so no trigger shares again while the assignment persists. Ledger-only
+        // and never thrown: the removal above stands.
+        await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
 
         // ── Task 149: the root share is confirmed gone; now remove the user from its secure children ──
         return await ChildrenIncompleteAfterUnshareAsync(
@@ -1024,22 +1039,37 @@ public static class InternalShareEndpoints
     /// the refusing one (ADR-003).
     /// </summary>
     private static IResult? EligibilityRefusal(SystemUserRow user, HttpContext httpContext)
-    {
-        if (user.IsDisabled is not false)
-            return Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
-                UserDisabledReasonCode, "This user is disabled, so the record was not shared with them.");
-
-        if (user.ApplicationId is not null || user.AccessMode is not (>= 0 and <= LastPersonAccessMode))
-            return Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
+        => ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal) switch
+        {
+            ShareEligibility.Disabled => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
+                UserDisabledReasonCode, "This user is disabled, so the record was not shared with them."),
+            ShareEligibility.NotAPerson => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
                 UserNotAPersonReasonCode,
-                "This is an application, support or delegated-administration account, not a person, so the record was not shared with it.");
-
-        if (user.IsExternal is not false)
-            return Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
+                "This is an application, support or delegated-administration account, not a person, so the record was not shared with it."),
+            ShareEligibility.NotInternal => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
                 UserNotInternalReasonCode,
-                "This user is not confirmed as internal, so the record was not shared with them. Give an external person access with an external grant, which carries an expiry.");
+                "This user is not confirmed as internal, so the record was not shared with them. Give an external person access with an external grant, which carries an expiry."),
+            _ => null,
+        };
 
-        return null;
+    /// <summary>
+    /// The ONE share-eligibility rule (task 063), extracted for task 142's Assigned-To materializer so both ask the same
+    /// question: an existing, ENABLED PERSON (access mode Read-Write, Administrative or Read, and no application id) whose
+    /// <c>sprk_isexternal</c> confirms them internal. Checked in that order; an unreadable (null) value counts as the
+    /// refusing one (ADR-003).
+    /// </summary>
+    internal static ShareEligibility ClassifyEligibility(bool? isDisabled, int? accessMode, Guid? applicationId, bool? isExternal)
+    {
+        if (isDisabled is not false)
+            return ShareEligibility.Disabled;
+
+        if (applicationId is not null || accessMode is not (>= 0 and <= LastPersonAccessMode))
+            return ShareEligibility.NotAPerson;
+
+        if (isExternal is not false)
+            return ShareEligibility.NotInternal;
+
+        return ShareEligibility.Eligible;
     }
 
     /// <summary>The single refusal shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
@@ -1079,6 +1109,22 @@ public static class InternalShareEndpoints
             title: NotConfirmedTitle,
             detail: detail,
             extensions: extensions);
+    }
+
+    /// <summary>The outcome of <see cref="ClassifyEligibility"/>.</summary>
+    internal enum ShareEligibility
+    {
+        /// <summary>An enabled, internal person: may receive a POA share.</summary>
+        Eligible,
+
+        /// <summary>Disabled (or unreadable).</summary>
+        Disabled,
+
+        /// <summary>An application, support, non-interactive or delegated-administration account (or unreadable).</summary>
+        NotAPerson,
+
+        /// <summary>Not confirmed internal: <c>sprk_isexternal</c> is true or unreadable.</summary>
+        NotInternal,
     }
 
     /// <summary>The <c>systemuser</c> columns these routes read.</summary>

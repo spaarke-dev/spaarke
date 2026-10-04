@@ -21,19 +21,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
-/// ADR-009: Redis cache invalidation after revoke (key: sdap:external:access:{contactId}).
+/// ADR-009: Redis cache invalidation after revoke — ExternalParticipationService.InvalidateGrantSetsAsync (task 137).
 /// ADR-010: Concrete DI injections.
 /// </summary>
 public static class RevokeExternalAccessEndpoint
 {
     private const string AccessEntitySet = "sprk_externalrecordaccesses";
-    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
-    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
-    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so revoke
-    // invalidation relied on the 60s TTL. Per-Contact participation cache — not an authz decision
-    // (ADR-009); tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
-    private const int CacheVersion = ExternalParticipationService.CacheVersion;
+    // Cache invalidation (task 137): ExternalParticipationService.InvalidateGrantSetsAsync owns the key, every
+    // tenant it can be cached under, and the organization → members expansion. No private RemoveAsync copy here.
 
     /// <summary>
     /// M2 (task 024 → task 065). The reason code for the one incomplete-revoke shape this endpoint can
@@ -81,7 +76,8 @@ public static class RevokeExternalAccessEndpoint
         RevokeAccessRequest request,
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
-        ITenantCache cache,
+        ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -91,10 +87,9 @@ public static class RevokeExternalAccessEndpoint
             return ProblemDetailsHelper.ValidationError("AccessRecordId is required and must be a valid GUID.");
 
         // ContactId is OPTIONAL (task 073 #7): revoke is authoritative by AccessRecordId (root- AND
-        // grantee-agnostic). A per-contact revoke SHOULD still pass ContactId so its participation cache
-        // is invalidated immediately (Step 3); an ORGANIZATION-grant revoke has no single grantee contact
-        // — it passes an empty ContactId, the org row is deactivated by AccessRecordId, and affected
-        // members refresh within the 60s participation TTL.
+        // grantee-agnostic). Since task 137 the cache invalidation (Step 3) is keyed on the revoked ROW's grantee,
+        // so it no longer needs ContactId either: a contact grant clears that contact, an ORGANIZATION grant clears
+        // every active member. ContactId still keys the per-contact SPE cleanup (Step 2), unchanged.
         //
         // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
         // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
@@ -191,38 +186,28 @@ public static class RevokeExternalAccessEndpoint
         var (speOutcome, orgCleanup) = await RemoveSpeContainerPermissionsAsync(
             speContainerMembership, dataverseClient, request, grantKey, logger, ct);
 
-        // ── Step 3: Invalidate Redis cache ────────────────────────────────────
-        try
-        {
-            var tenantId = ExtractTenantId(httpContext);
-            if (request.ContactId == Guid.Empty)
-            {
-                // Organization-grant revoke (task 073 #7): no single grantee contact to invalidate — every
-                // active member's participation set changes. Members refresh within the 60s TTL (an
-                // org-scoped fan-out invalidation is a possible future optimization).
-                logger.LogDebug(
-                    "[EXT-REVOKE] Organization-grant revoke — no per-contact cache to invalidate; members refresh within the participation TTL.");
-            }
-            else if (!string.IsNullOrEmpty(tenantId))
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion,
-                    ct: ct);
-                logger.LogDebug("[EXT-REVOKE] Invalidated cache for Contact {ContactId}", request.ContactId);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "[EXT-REVOKE] No tenant claim found — skipping cache invalidation for Contact {ContactId}",
-                    request.ContactId);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-REVOKE] Failed to invalidate Redis cache for Contact {ContactId}. Non-critical.",
-                request.ContactId);
-        }
+        // ── Step 3: Invalidate the grant cache — the ONE routine (task 137) ───
+        // Keyed on the REVOKED ROW's grantee (the same key Step 1 swept), not on request.ContactId: a contact grant
+        // revoked without a ContactId on the request is still invalidated, and an organization grant expands to
+        // every ACTIVE member. Every tenant a grant set can be cached under is cleared — the CIAM one too, which a
+        // removal under the admin's own tid alone used to miss for the 60-second TTL. Non-fatal by construction:
+        // the routine never throws, so a failed invalidation cannot change this response.
+        await participations.InvalidateGrantSetsAsync(
+            grantKey.ContactId is { } revokedContact ? new[] { revokedContact } : Array.Empty<Guid>(),
+            grantKey.IsOrganizationGrant && grantKey.OrganizationId is { } revokedOrganization
+                ? new[] { revokedOrganization }
+                : Array.Empty<Guid>(),
+            CancellationToken.None);
+
+        // ── Task 142: an operator removal of an Assigned-To auto grant STICKS (owner round 2 item 5) ──
+        // The subject's ledger rows on this record become Declined, so no trigger re-creates the grant while the
+        // assignment persists (a manual /grant afterwards still succeeds). Ledger-only and never thrown: the revoke above
+        // stands whatever happens here, and a lost marker is repaired by the next pass's out-of-band rule. For a CONTACT
+        // auto grant the response also names the read-time terms that still bring it to the record (owner A2: standing
+        // and organization access stay) — criterion 17: never "removed" while access silently remains.
+        var residualAccessTerms = await assignedAccess.MarkGrantRevokedAsync(
+            grantKey.RootType, grantKey.RootId, grantKey.ContactId,
+            grantKey.IsOrganizationGrant ? grantKey.OrganizationId : null, CancellationToken.None);
 
         // ── M2 (task 024 → task 065): align with /close-project for the identical failure shape ──
         //
@@ -243,7 +228,7 @@ public static class RevokeExternalAccessEndpoint
                 "grantee may RETAIN file access. Reporting 500 (M2) rather than 200.",
                 request.AccessRecordId, deactivatedCount);
 
-            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup);
+            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms);
         }
 
         // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
@@ -253,7 +238,8 @@ public static class RevokeExternalAccessEndpoint
             SpeContainerMembershipRevoked: speOutcome == SpeContainerRevokeOutcome.PermissionRemoved,
             SpeContainerOutcome: speOutcome,
             DeactivatedCount: deactivatedCount,
-            SpeOrgMemberCleanup: orgCleanup));
+            SpeOrgMemberCleanup: orgCleanup,
+            ResidualAccessTerms: residualAccessTerms.Count > 0 ? residualAccessTerms : null));
     }
 
     /// <summary>
@@ -280,7 +266,8 @@ public static class RevokeExternalAccessEndpoint
         HttpContext httpContext,
         int deactivatedCount,
         SpeContainerRevokeOutcome speOutcome,
-        SpeOrgMemberCleanupSummary? orgCleanup)
+        SpeOrgMemberCleanupSummary? orgCleanup,
+        IReadOnlyList<string>? residualAccessTerms = null)
     {
         var detail = deactivatedCount > 0
             ? $"Deactivated {deactivatedCount} Dataverse access grant(s), but the SPE container " +
@@ -300,6 +287,7 @@ public static class RevokeExternalAccessEndpoint
                 ["deactivatedCount"] = deactivatedCount,
                 ["speContainerOutcome"] = speOutcome,
                 ["speOrgMemberCleanup"] = orgCleanup,
+                ["residualAccessTerms"] = residualAccessTerms is { Count: > 0 } ? residualAccessTerms : null,
                 ["traceId"] = httpContext.TraceIdentifier
             });
     }
@@ -307,14 +295,6 @@ public static class RevokeExternalAccessEndpoint
     // =========================================================================
     // Helpers
     // =========================================================================
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     /// <summary>
     /// Removes the revoked Contact's SPE container permission, and reports honestly what happened.
@@ -696,125 +676,5 @@ public static class RevokeExternalAccessEndpoint
     internal sealed class ContactEmailRow
     {
         public string? emailaddress1 { get; set; }
-    }
-}
-
-/// <summary>
-/// The ACTIVE member contacts of one <c>sprk_organization</c>, and whether that list is trustworthy.
-/// </summary>
-/// <param name="ContactIds">Distinct member contact ids. Empty when the organization has no active members.</param>
-/// <param name="ExceededBound">
-/// <c>true</c> when the organization has MORE members than one revoke request may sweep, so
-/// <paramref name="ContactIds"/> is a truncation rather than the member list. A caller must treat this as
-/// "unknown membership", never as the answer — a truncated sweep reported as success is precisely the
-/// failure this type exists to make unsayable.
-/// </param>
-internal readonly record struct OrganizationMemberSet(
-    IReadOnlyList<Guid> ContactIds,
-    bool ExceededBound);
-
-/// <summary>
-/// Reads <c>sprk_contactorganization</c> — the contact↔organization membership junction — in the
-/// organization → members direction.
-/// </summary>
-/// <remarks>
-/// <para><b>CLAUDE.md §11 justification (task 020).</b> <i>Existing</i>:
-/// <c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c> (named <c>QueryActiveOrgIdsAsync</c>
-/// until task 109) reads the same junction in the INVERSE direction (contact → organizations).
-/// <i>Extension</i>: not callable — it is private and built on a raw
-/// <c>HttpClient</c> with its own app-only token flow, whereas the revoke path holds a
-/// <c>DataverseWebApiClient</c>; reaching it would drag the participation service's token flow into the
-/// revoke path. So the QUERY SHAPE is mirrored, not the code. <i>Cost of doing nothing</i>: an
-/// organization-grant revoke deactivates the grant for every member and reports success while every one
-/// of those members keeps their SPE container permission, and therefore continued access to the
-/// project's files — a population no other code path will ever clean up (see the broker-only note on
-/// <see cref="SpeContainerMembershipService.GrantMembershipAsync"/>).</para>
-///
-/// <para><b>Deliberately the smallest surface that answers one question</b> — "who are this
-/// organization's active members" — rather than a general-purpose membership service. Task 043
-/// (FR-24/FR-25 org expansion) needs the same answer and should EXTEND this rather than write a third
-/// reader. It lives in this file only because task 020's wave-scoped modify-set is three files; nothing
-/// about it is endpoint-specific, and hoisting it to
-/// <c>Infrastructure/ExternalAccess/ExternalOrganizationMembership.cs</c> is a pure file move.</para>
-///
-/// <para><b>Schema live-verified 2026-08-26</b> (Dataverse MCP <c>describe</c>), which is not optional
-/// here: three Phase 0 tasks (070, 016, 017) turned on a stale column name, and a wrong one in a
-/// revocation query reads as "nothing to revoke" — silently. Confirmed: collection
-/// <c>sprk_contactorganizations</c>; lookups <c>sprk_contact</c> → <c>contact</c> and
-/// <c>sprk_organization</c> → <c>sprk_organization</c>, projected as <c>_sprk_contact_value</c> /
-/// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1). This confirmed the assumption
-/// that stood as a caveat comment in <c>QueryActiveOrgIdsAsync</c>; task 109 removed that caveat and cites
-/// this record instead.</para>
-/// </remarks>
-internal static class ExternalOrganizationMembership
-{
-    internal const string EntitySet = "sprk_contactorganizations";
-
-    internal const string MemberSelect = "_sprk_contact_value";
-
-    /// <summary>
-    /// The largest membership one revoke request will sweep.
-    /// </summary>
-    /// <remarks>
-    /// <para>Task 020's escalation trigger names &gt;200 members as an owner decision rather than an
-    /// implementation detail. The bound is not decoration: <c>DataverseWebApiClient.QueryAsync</c> reads
-    /// ONE page and discards <c>@odata.nextLink</c>, so an unbounded query on a large organization would
-    /// return a silently truncated list that looks exactly like a complete one. Asking for
-    /// <c>Bound + 1</c> converts that silent truncation into a detectable, reportable condition.</para>
-    /// <para>Live check 2026-08-26: the largest organization in the environment has <b>1</b> active
-    /// member, so this is a guard rail rather than a live limit.</para>
-    /// </remarks>
-    internal const int MaxMembersPerSweep = 200;
-
-    /// <summary>
-    /// The <c>$filter</c> selecting one organization's ACTIVE memberships.
-    /// </summary>
-    /// <remarks>
-    /// Mirrors the read path's junction <c>$filter</c> (<c>ExternalParticipationService
-    /// .BuildOrganizationMembershipFilter</c>), inverted: <c>statecode</c> only. It deliberately does NOT
-    /// filter on <c>sprk_enddate</c> / <c>sprk_startdate</c> — see the remarks on the caller for why a
-    /// superset of the read path's conferring set matters more than being date-correct here. (The read
-    /// filter also admits a NULL <c>statecode</c>, task 109; this one does not. Dataverse writes no null
-    /// <c>statecode</c>, so the two select the same rows — recorded rather than changed, because this
-    /// task's scope on the revoke path is comments only.)
-    /// </remarks>
-    internal static string ActiveMembersFilter(Guid organizationId)
-        => $"_sprk_organization_value eq {organizationId} and statecode eq 0";
-
-    /// <summary>
-    /// The distinct ACTIVE member contacts of an organization.
-    /// </summary>
-    /// <remarks>Exceptions propagate: "the query failed" and "the organization has no members" must never
-    /// be the same answer on a revocation path — that equivalence is the shape of finding A-13 and of the
-    /// <c>ListExternalMembersAsync</c> defect task 016 filed.</remarks>
-    internal static async Task<OrganizationMemberSet> QueryActiveMembersAsync(
-        DataverseWebApiClient dataverseClient, Guid organizationId, CancellationToken ct)
-    {
-        var rows = await dataverseClient.QueryAsync<ContactOrganizationRow>(
-            EntitySet,
-            filter: ActiveMembersFilter(organizationId),
-            select: MemberSelect,
-            top: MaxMembersPerSweep + 1,
-            cancellationToken: ct);
-
-        // The bound is checked on RAW rows, before Distinct: duplicate junction rows must not be able to
-        // collapse an over-bound organization back under the limit and hide the truncation.
-        if (rows.Count > MaxMembersPerSweep)
-            return new OrganizationMemberSet(Array.Empty<Guid>(), ExceededBound: true);
-
-        var contactIds = rows
-            .Where(r => r.ContactId.HasValue)
-            .Select(r => r.ContactId!.Value)
-            .Distinct()
-            .ToList();
-
-        return new OrganizationMemberSet(contactIds, ExceededBound: false);
-    }
-
-    /// <summary>Minimal projection of a <c>sprk_contactorganization</c> junction row.</summary>
-    internal sealed class ContactOrganizationRow
-    {
-        [JsonPropertyName("_sprk_contact_value")]
-        public Guid? ContactId { get; set; }
     }
 }

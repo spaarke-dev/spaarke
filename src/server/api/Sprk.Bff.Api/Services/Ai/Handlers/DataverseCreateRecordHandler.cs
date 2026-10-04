@@ -140,7 +140,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after a root is
+    /// created. Optional so a host composing the tool framework without the external-access module still resolves this
+    /// handler (CLAUDE.md §10 F.1); the materializer itself is looked up with GetService and skipped when absent.</param>
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
@@ -148,8 +152,10 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
-        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling)
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
+        IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
@@ -356,6 +362,16 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                         .ConfigureAwait(false);
                 }
 
+                // Task 142 (L1, owner Q5 + R3) on the owned path too (batch 4 integration): a project / matter / work
+                // assignment the application created gets its "Assigned *" contacts' grant or share now. After the create
+                // committed; never throws, never fails this create (a non-root table is a no-op).
+                if (owned.CreatedId is { } ownedId)
+                {
+                    await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                        _scopes, tablename, ownedId, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 return LogOutcome(context, tablename,
                     OwnedCreateResult(tool, tablename, forMapped, owned, startedAt, secured), stopwatch);
             }
@@ -396,6 +412,15 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             {
                 warnings.Add("The record was created but Dataverse did not echo the created row; the record id could not be determined. " +
                              "Use dataverse.search_data or dataverse.read_query to locate the new record.");
+            }
+
+            // Task 142 (L1, owner Q5 + R3): a created project/matter/work assignment's "Assigned *" contacts get their
+            // Collaborate grant or share now. After the create committed; never throws, never fails this create.
+            if (createdId is { } createdPlainRoot)
+            {
+                await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                    _scopes, tablename, createdPlainRoot, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             var citationPath = createdId.HasValue

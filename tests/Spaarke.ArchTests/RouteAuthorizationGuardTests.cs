@@ -913,7 +913,22 @@ public class RouteAuthorizationGuardTests
     //            sprk_noaccessentries row, so the caller needs Write on the ENTRY; an absent entry and an unwritable one
     //            are the same 403. Pinned through the real pipeline by
     //            tests/integration/auth/UnifiedAccessControl/NoAccessEnforceEndpointTests.cs.
-    private const int ExpectedEndpointFileCount = 121;
+    //
+    // 121 -> 122 (2026-10-03, unified-access-control-r2 task 142):
+    //
+    //   142  +1  Api/ExternalAccess/AssignedAccessSyncEndpoint.cs ADDED — POST /assigned-access/sync (applies the
+    //            Assigned-To rule to one root record: grants/shares for its "Assigned *" subjects, after re-applying
+    //            its No Access entries), GET /assigned-access (that record's Assigned-To ledger: suggestions,
+    //            provenance, residual read-time terms) and POST /assigned-access/dismiss (declines one suggestion).
+    //            Classified per the maintenance procedure: they serve NEITHER document metadata nor file bytes — they
+    //            write and report grant/share state on root records, like /user-shares (063) — so there is no
+    //            GovernedFiles entry to add; the count alone moves. Same shape as 063, 118 and 143: the routes sit in
+    //            the external-access admin group and inherit AddDelegationRuleFilter(); DelegationRuleFilter's target
+    //            map gained the AssignedAccessSyncRequest, AssignedAccessListQuery and AssignedAccessDismissRequest
+    //            cases in the same change (Write on the RECORD; an unknown id and an unwritable one are the same 403).
+    //            Pinned through the real pipeline by
+    //            tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs.
+    private const int ExpectedEndpointFileCount = 122;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

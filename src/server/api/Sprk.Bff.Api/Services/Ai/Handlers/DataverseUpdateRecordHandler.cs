@@ -85,13 +85,17 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
+    /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling)
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
+        IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -103,6 +107,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         // Task 158 (owner round 6): a work assignment or project re-filed under a secure record is secured in the same
         // call. Registered beside the restamper (AddCoreAncestorResolver, which AddToolFramework calls) — §10 F.1.
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
+        _scopes = scopes;
     }
 
     /// <inheritdoc />
@@ -267,6 +272,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             var secured = await _rootFiling
                 .SecureAfterWriteAsync(tablename, recordId, mapped.Item!.Columns, context.DecisionId.ToString("N"))
                 .ConfigureAwait(false);
+
+            // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and
+            // removes the previous one's unmodified auto access now. After the PATCH committed; never throws, never fails
+            // this update (a non-root or a non-registry column is a no-op).
+            await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, tablename, recordId, mapped.Item!.Columns, grantorOid: null, _logger, cancellationToken)
+                .ConfigureAwait(false);
+
             if (secured is { IsComplete: false })
             {
                 return LogOutcome(context, tablename, recordId,
