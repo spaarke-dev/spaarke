@@ -511,12 +511,18 @@ const RESUME_CREATOR_NO_ACCESS_UNVERIFIABLE = {
 /**
  * Round 29: the per-person warnings for task 143's skipped colleagues (`skippedPrincipals`). Not failures — the project is
  * secured and shared with everyone else; these say who was left out and why. `{name}` is the colleague's display name.
+ *
+ * `principal_share_failed` (task 150, round 33 items 1 and 5: the server names a colleague whose share failed instead of
+ * only logging it) is composed from two approved sentences — round 33 item 5's generic warning and round 29's Manage
+ * Access recovery — adjustable in UAT (owner round 27's stance).
  */
 const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>> = {
   'sdap.provision.principal_no_access': name =>
     `${name} is on this project's No Access list, so the project was not shared with them.`,
   'sdap.provision.principal_no_access_unverifiable': name =>
     `Whether ${name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access.`,
+  'sdap.provision.principal_share_failed': name =>
+    `${name} was not given access to this project. You can share it with them later from Manage Access.`,
 };
 
 /**

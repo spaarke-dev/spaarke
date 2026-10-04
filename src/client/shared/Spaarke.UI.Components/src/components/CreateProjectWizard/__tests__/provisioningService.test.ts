@@ -444,6 +444,8 @@ describe('provisionSecureProject — failure classification', () => {
     // Task 143: named colleagues skipped inside a SUCCESS — per-person warnings, not failures.
     ['sdap.provision.principal_no_access', 'per-person-warning', false],
     ['sdap.provision.principal_no_access_unverifiable', 'per-person-warning', false],
+    // Task 150 (round 33 items 1 and 5): a named colleague whose share itself failed — named, never silent.
+    ['sdap.provision.principal_share_failed', 'per-person-warning', false],
   ];
 
   const FAILURE_CODES = EMITTED.filter(([, kind]) => kind !== 'per-person-warning');
@@ -568,7 +570,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of WARNING_CODES) {
       expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
     }
-    expect(EMITTED).toHaveLength(37);
+    expect(EMITTED).toHaveLength(38);
   });
 
   // Round 29 (owner round 27's stance: the recommended wording, adjustable in UAT): task 143's five provisioning codes,
@@ -644,6 +646,7 @@ describe('provisionSecureProject — failure classification', () => {
   it('turns each skipped colleague into an authored per-person warning on the success result (round 29)', async () => {
     const walled = '55555555-5555-5555-5555-555555555555';
     const unchecked = '66666666-6666-6666-6666-666666666666';
+    const unshared = '88888888-8888-8888-8888-888888888888';
     const authFetch = jest.fn().mockResolvedValue(
       okResponse({
         ...successBody,
@@ -658,22 +661,33 @@ describe('provisionSecureProject — failure classification', () => {
             reasonCode: 'sdap.provision.principal_no_access_unverifiable',
             message: 'server prose, never shown',
           },
+          {
+            systemUserId: unshared,
+            reasonCode: 'sdap.provision.principal_share_failed',
+            message: 'server prose, never shown',
+          },
         ],
       })
     );
 
     const result = await provisionSecureProject(
-      { projectId: PROJECT_ID, sharePrincipalIds: [walled, unchecked] },
+      { projectId: PROJECT_ID, sharePrincipalIds: [walled, unchecked, unshared] },
       authFetch as never,
       BFF,
-      { [walled]: 'Dana Reyes', [unchecked]: 'Sam Ortiz' }
+      { [walled]: 'Dana Reyes', [unchecked]: 'Sam Ortiz', [unshared]: 'Lee Park' }
     );
 
     expect(result.success).toBe(true);
     expect(result.warnings).toEqual([
       "Dana Reyes is on this project's No Access list, so the project was not shared with them.",
       'Whether Sam Ortiz may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access.',
+      // Task 150 (round 33 items 1 and 5): the server names a colleague whose share failed — a KNOWN code, not the generic.
+      'Lee Park was not given access to this project. You can share it with them later from Manage Access.',
     ]);
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('for a reason this client does not know'),
+      expect.anything()
+    );
     expect(result.warnings?.join(' ')).not.toContain('server prose');
   });
 

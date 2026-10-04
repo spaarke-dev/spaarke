@@ -17,7 +17,11 @@
  *  - enable logic: Make Secure only when NOT secure and the caller may manage access; Remove Secure only when secure and
  *    the caller may; a Read-only caller sees neither (e); a failed or masked read of sprk_issecure hides BOTH (f);
  *  - the calls: Make Secure confirms first and calls the provisioning endpoint (Cancel calls nothing); Remove Secure
- *    calls the unsecure endpoint and shows the endpoint's ProblemDetails message on refusal (F3 is the server's, (c)).
+ *    confirms first too and calls the unsecure endpoint, showing the endpoint's ProblemDetails message on refusal (F3 is
+ *    the server's, (c));
+ *  - never silent (round 33 items 1 and 5): a success whose `skippedPrincipals` names someone the record was not shared
+ *    with (on Make Secure, its creator) shows a per-person warning from ONE constant — an unknown reason code the generic
+ *    one, and logged.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,13 +35,13 @@ const ASSIGNED_ACCESS_SCRIPT = path.resolve(CLIENT_ROOT, '../solutions/webresour
 const BFF = 'https://bff.example.test';
 const RECORD_ID = 'aaaaaaaa-1111-2222-3333-444444444444';
 
-/** Owner round 27, verbatim — the copy the user must see. {record} filled per table. */
-/** Round 33 item 2, verbatim — the Remove Secure confirmation. */
+/** Round 33 item 2, verbatim — the Remove Secure confirmation. {record} filled per table. */
 const REMOVE_PARAGRAPHS = (record: string) => [
   `The ${record} and its related records return to normal access: people who can see records in its business unit will be able to see them, and the individual sharing set up while it was secure is removed.`,
   'To secure it again later, use Make Secure.',
 ];
 
+/** Owner round 27, verbatim — the copy the user must see. {record} filled per table. */
 const PARAGRAPHS = (record: string) => [
   `Only the person who created this ${record} and the people it is shared with will keep access. Everyone else in your organization loses access, and external contacts keep only access granted to them directly.`,
   `Its existing documents, events, to-dos and other related records become secure too, for the same people, and its files move to the ${record}'s own secure storage. This can take a few minutes.`,
@@ -295,6 +299,20 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
     );
   });
 
+  it('a success that skipped nobody shows only the notification', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, addGlobalNotification } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    authenticatedFetch.mockResolvedValue(response(200, { recordType: 'project', skippedPrincipals: [] }));
+
+    await ribbon.makeSecure(form('sprk_project'));
+    await settle();
+
+    expect(addGlobalNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'This project is now secure.' })
+    );
+    expect(openAlertDialog).not.toHaveBeenCalled();
+  });
+
   it('Cancel calls nothing', async () => {
     const { ribbon, openConfirmDialog, authenticatedFetch } = load();
     openConfirmDialog.mockResolvedValue({ confirmed: false });
@@ -337,6 +355,130 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
       text: 'Sign-in needed - reload the page and retry. Nothing was changed.',
     });
     expect(project.data.refresh).not.toHaveBeenCalled();
+  });
+});
+
+/** Round 29 + round 33 item 5: the wizard's words with {record} — ONE constant in the script, pinned verbatim. */
+const SKIPPED = {
+  noAccess: (name: string, record: string) =>
+    `${name} is on this ${record}'s No Access list, so the ${record} was not shared with them.`,
+  unverifiable: (name: string, record: string) =>
+    `Whether ${name} may access this ${record} could not be checked, so the ${record} was not shared with them. You can share it with them later from Manage Access.`,
+  shareFailed: (name: string, record: string) =>
+    `${name} was not given access to this ${record}. You can share it with them later from Manage Access.`,
+  generic: (name: string, record: string) => `${name} was not given access to this ${record}.`,
+};
+
+const CREATOR_ID = 'cccccccc-1111-2222-3333-444444444444';
+
+describe('Make Secure — the people it was NOT shared with are named (round 33 items 1 and 5: never silent)', () => {
+  /** retrieveRecord answers the user read (systemuser fullname) from `map`; any other read is unexpected here. */
+  function names(retrieveRecord: jest.Mock, map: Record<string, string | Error>): void {
+    retrieveRecord.mockImplementation((entity: string, id: string, options: string) => {
+      if (entity !== 'systemuser' || options !== '?$select=fullname') {
+        return Promise.reject(new Error(`unexpected read ${entity} ${options}`));
+      }
+      const answer = map[id];
+      return answer instanceof Error ? Promise.reject(answer) : Promise.resolve({ fullname: answer });
+    });
+  }
+
+  it.each([
+    ['sprk_project', 'project'],
+    ['sprk_matter', 'matter'],
+    ['sprk_workassignment', 'work assignment'],
+  ])(
+    'a creator on the No Access list of a %s: the success notification, then a warning naming them',
+    async (entityName, record) => {
+      const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, addGlobalNotification, retrieveRecord } =
+        load();
+      openConfirmDialog.mockResolvedValue({ confirmed: true });
+      names(retrieveRecord, { [CREATOR_ID]: 'Dana Reyes' });
+      authenticatedFetch.mockResolvedValue(
+        response(200, {
+          skippedPrincipals: [
+            { systemUserId: CREATOR_ID, reasonCode: 'sdap.provision.principal_no_access', message: 'server prose' },
+          ],
+        })
+      );
+
+      await ribbon.makeSecure(form(entityName));
+      await settle();
+
+      expect(addGlobalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ message: `This ${record} is now secure.` })
+      );
+      expect(openAlertDialog).toHaveBeenCalledWith({
+        title: 'Make Secure',
+        text: SKIPPED.noAccess('Dana Reyes', record),
+      });
+      expect(openAlertDialog.mock.calls[0][0].text).not.toContain('server prose');
+    }
+  );
+
+  it('every skipped person is listed; a name that cannot be read shows the id; each reason has its own words', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    const unchecked = 'dddddddd-1111-2222-3333-444444444444';
+    names(retrieveRecord, { [CREATOR_ID]: new Error('read refused'), [unchecked]: 'Sam Ortiz' });
+    authenticatedFetch.mockResolvedValue(
+      response(200, {
+        skippedPrincipals: [
+          { systemUserId: CREATOR_ID, reasonCode: 'sdap.provision.principal_share_failed', message: 'x' },
+          { systemUserId: unchecked, reasonCode: 'sdap.provision.principal_no_access_unverifiable', message: 'x' },
+        ],
+      })
+    );
+
+    await ribbon.makeSecure(form('sprk_workassignment'));
+    await settle();
+
+    expect(openAlertDialog).toHaveBeenCalledTimes(1);
+    expect(openAlertDialog.mock.calls[0][0]).toEqual({
+      title: 'Make Secure',
+      text: [
+        SKIPPED.shareFailed(CREATOR_ID, 'work assignment'),
+        SKIPPED.unverifiable('Sam Ortiz', 'work assignment'),
+      ].join('\n\n'),
+    });
+  });
+
+  it('a reason code the script does not know: the generic warning, and the code logged — never dropped', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    names(retrieveRecord, { [CREATOR_ID]: 'Rui Tanaka' });
+    authenticatedFetch.mockResolvedValue(
+      response(200, {
+        skippedPrincipals: [
+          { systemUserId: CREATOR_ID, reasonCode: 'sdap.provision.principal_invented_later', message: 'x' },
+        ],
+      })
+    );
+
+    await ribbon.makeSecure(form('sprk_matter'));
+    await settle();
+
+    expect(openAlertDialog).toHaveBeenCalledWith({
+      title: 'Make Secure',
+      text: SKIPPED.generic('Rui Tanaka', 'matter'),
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining('[Access.Ribbon'),
+      expect.stringContaining('for a reason this script does not know'),
+      expect.objectContaining({ reasonCode: 'sdap.provision.principal_invented_later' })
+    );
+  });
+
+  it('is ONE frozen constant, verbatim', () => {
+    const { ribbon } = load();
+
+    expect(Object.isFrozen(ribbon.SKIPPED_PRINCIPAL_COPY)).toBe(true);
+    expect(ribbon.SKIPPED_PRINCIPAL_COPY).toEqual({
+      'sdap.provision.principal_no_access': SKIPPED.noAccess('{name}', '{record}'),
+      'sdap.provision.principal_no_access_unverifiable': SKIPPED.unverifiable('{name}', '{record}'),
+      'sdap.provision.principal_share_failed': SKIPPED.shareFailed('{name}', '{record}'),
+    });
+    expect(ribbon.SKIPPED_PRINCIPAL_GENERIC).toBe(SKIPPED.generic('{name}', '{record}'));
   });
 });
 

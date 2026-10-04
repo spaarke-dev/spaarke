@@ -13,8 +13,10 @@
  * - "Make Secure" (task 150, UX amendment; owner round 27 copy) - on a record that is NOT secure, for a caller with
  *   Write: confirms with the owner-authored copy (MAKE_SECURE_CONFIRMATION, the ONE constant), then calls the
  *   provisioning endpoint POST /api/v1/external-access/provision-project with transition "make-secure" (round 33 item 1:
- *   the server holds that path to the Write gate and shares the record to its creator too) (task 144, generalized to the three roots;
- *   task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the outcome.
+ *   the server holds that path to the Write gate and shares the record to its creator too) (task 144, generalized to the
+ *   three roots; task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the
+ *   outcome - and, when the server names someone it did not share the record with (`skippedPrincipals`: the creator on
+ *   the No Access list, unverifiable, or a failed share), a per-person warning (SKIPPED_PRINCIPAL_COPY; never silent).
  *   Shipped only where task 148's transition is deployed - an import/packaging rule, not a runtime check
  *   (infrastructure/dataverse/ribbon/AccessRibbons/README.md).
  * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: confirms with
@@ -51,7 +53,9 @@ Spaarke.Access = Spaarke.Access || {};
 Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.2.0"; // 1.1.0 - task 150: Make Secure / Remove Secure; 1.2.0 - round 33: make-secure transition, Remove Secure confirmation
+    // 1.1.0 - task 150: Make Secure / Remove Secure. 1.2.0 - round 33: the make-secure transition, the Remove Secure
+    // confirmation, per-person warnings for skippedPrincipals.
+    ns.VERSION = "1.2.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -387,8 +391,76 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         }
     }
 
+    /**
+     * The per-person warnings after a call that succeeded but did NOT share the record with someone the server named in
+     * `skippedPrincipals` - on Make Secure, the record's creator (round 33 item 1): on its No Access list, that list could
+     * not be checked, or the share itself failed. Never silent (round 33 item 5). The ONE constant: round 29's sentences and
+     * round 33 item 5's generic one, the same words the Create Project wizard shows, with {record} filled per table the way
+     * owner round 27's copy is (adjustable in UAT). {name} is the person's full name, or their id when it cannot be read.
+     */
+    ns.SKIPPED_PRINCIPAL_COPY = Object.freeze({
+        "sdap.provision.principal_no_access":
+            "{name} is on this {record}'s No Access list, so the {record} was not shared with them.",
+        "sdap.provision.principal_no_access_unverifiable":
+            "Whether {name} may access this {record} could not be checked, so the {record} was not shared with them. You " +
+            "can share it with them later from Manage Access.",
+        "sdap.provision.principal_share_failed":
+            "{name} was not given access to this {record}. You can share it with them later from Manage Access."
+    });
+
+    /** Round 33 item 5: the warning for a reason code this script does not know (the code is logged as well). */
+    ns.SKIPPED_PRINCIPAL_GENERIC = "{name} was not given access to this {record}.";
+
+    /**
+     * One person's warning, {name} and {record} filled. An unknown reason code gets the generic warning and is logged -
+     * never dropped. The server's own `message` is never shown (the wizard's rule).
+     */
+    ns.describeSkippedPrincipal = function (reasonCode, name, entityName) {
+        var known = Object.prototype.hasOwnProperty.call(ns.SKIPPED_PRINCIPAL_COPY, reasonCode);
+        if (!known) {
+            console.error(LOG, "A person was not given access, for a reason this script does not know:",
+                { reasonCode: reasonCode });
+        }
+
+        var word = ns.RECORD_WORDS[entityName] || "record";
+        var text = known ? ns.SKIPPED_PRINCIPAL_COPY[reasonCode] : ns.SKIPPED_PRINCIPAL_GENERIC;
+        return text.split("{name}").join(name).split("{record}").join(word);
+    };
+
+    /** A user's full name for a warning; their id when it cannot be read (the warning is shown either way). */
+    function personName(systemUserId) {
+        try {
+            return Promise.resolve(Xrm.WebApi.retrieveRecord("systemuser", systemUserId, "?$select=fullname"))
+                .then(function (row) {
+                    return row && typeof row.fullname === "string" && row.fullname ? row.fullname : systemUserId;
+                }, function () {
+                    return systemUserId;
+                });
+        } catch (error) {
+            return Promise.resolve(systemUserId);
+        }
+    }
+
+    /** Shows the per-person warnings for a successful call's `skippedPrincipals`, if any (an alert, after the notification). */
+    function warnSkipped(commandName, entityName, body) {
+        var skipped = body && Array.isArray(body.skippedPrincipals) ? body.skippedPrincipals : [];
+        if (skipped.length === 0) {
+            return Promise.resolve();
+        }
+
+        return Promise.all(skipped.map(function (person) {
+            var id = person && person.systemUserId ? String(person.systemUserId) : "";
+            return personName(id).then(function (name) {
+                return ns.describeSkippedPrincipal(person ? person.reasonCode : undefined, name, entityName);
+            });
+        })).then(function (lines) {
+            alert(commandName, lines.join("\n\n"));
+        });
+    }
+
     /** Runs one designation call and shows its outcome as Update Access does (a notification, or an alert). */
-    function runDesignation(primaryControl, record, commandName, path, successText, extra) {
+    function runDesignation(primaryControl, start, commandName, path, successText, extra) {
+        var record = start.record;
         return postDesignation(path, record, extra).then(function (result) {
             if (result.skipped && result.reason === "no-token") {
                 alert(commandName, "Sign-in needed - reload the page and retry. Nothing was changed.");
@@ -404,7 +476,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             }
 
             notify(successText);
-            return result;
+            return warnSkipped(commandName, start.entityName, result.body).then(function () {
+                return result;
+            });
         });
     }
 
@@ -445,7 +519,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
                 // Round 33 item 1: the transition tells the server this is Make Secure (the Write gate), not the
                 // wizards' create-then-secure path (the creator rule).
-                return runDesignation(primaryControl, start.record, "Make Secure", PROVISION_PATH,
+                return runDesignation(primaryControl, start, "Make Secure", PROVISION_PATH,
                     "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.", { transition: MAKE_SECURE_TRANSITION });
             });
         } catch (error) {
@@ -473,7 +547,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                     return null;
                 }
 
-                return runDesignation(primaryControl, start.record, "Remove Secure", UNSECURE_PATH,
+                return runDesignation(primaryControl, start, "Remove Secure", UNSECURE_PATH,
                     "This " + ns.RECORD_WORDS[start.entityName] + " is no longer secure.");
             });
         } catch (error) {

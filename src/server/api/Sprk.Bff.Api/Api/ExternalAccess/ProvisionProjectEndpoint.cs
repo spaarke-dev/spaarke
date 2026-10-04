@@ -267,6 +267,13 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonPrincipalNoAccessUnverifiable = "sdap.provision.principal_no_access_unverifiable";
 
     /// <summary>
+    /// Task 150 (round 33 items 1 and 5): a named colleague — or, on Make Secure, the record's creator — whose share could
+    /// not be written. Reported per person in <c>skippedPrincipals</c> (never silent), the others still shared; the
+    /// record stays secured and shared to the caller, who adds the person through Manage Access.
+    /// </summary>
+    internal const string ReasonPrincipalShareFailed = "sdap.provision.principal_share_failed";
+
+    /// <summary>
     /// The owner PATCH was sent but its outcome could not be read back. A share to the creator was issued — read back
     /// when the read works (<c>creatorShareConfirmed: true</c>), otherwise issued without confirmation. The next call
     /// resumes a record the team now owns — unless it keeps its own container (<c>containerKept: true</c>), which the
@@ -369,7 +376,8 @@ public static class ProvisionProjectEndpoint
     /// securing an EXISTING record (task 148's surface). That path is held to the route's Write gate only (owner R3b):
     /// the creator rule of owner round 10 item 10 (<see cref="ReasonNotRecordCreator"/>) belongs to the wizards'
     /// create-then-secure path, which sends no transition. On it the record's creator is shared to as well
-    /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27).
+    /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27). Matched
+    /// exactly (ordinal): the value relaxes a gate, so no near-miss spelling is read as it.
     /// </summary>
     internal const string TransitionMakeSecure = "make-secure";
 
@@ -506,15 +514,27 @@ public static class ProvisionProjectEndpoint
             return ProblemDetailsHelper.ValidationError(target.Error ?? "A record to provision is required.");
 
         // Task 150 (round 33 item 1): which surface asks. Omitted = the wizards' create-then-secure path (creator rule);
-        // make-secure = the form's Make Secure command (Write gate). Anything else is refused: an unrecognised value never
-        // falls back to either rule.
+        // make-secure = the form's Make Secure command (Write gate). Anything else is refused before any read or write: an
+        // unrecognised value never falls back to either rule, and only the exact token relaxes the creator rule.
         bool makeSecure;
-        if (string.IsNullOrWhiteSpace(request.Transition))
+        if (request.Transition is null)
             makeSecure = false;
-        else if (string.Equals(request.Transition.Trim(), TransitionMakeSecure, StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(request.Transition, TransitionMakeSecure, StringComparison.Ordinal))
             makeSecure = true;
         else
             return ProblemDetailsHelper.ValidationError($"Transition must be '{TransitionMakeSecure}' or omitted.");
+
+        // Make Secure names no colleagues: it shares to the caller and to the record's creator, nobody else. A Write holder
+        // who did not create the record (round 33 item 1 admits them) would otherwise widen its explicit access list through
+        // the application identity, skipping the eligibility and grantor checks Manage Access applies — the reason a
+        // resume refuses colleagues from anyone but the creator (task 133 verifier round 1). People are added through
+        // Manage Access. Refused before any read or write.
+        if (makeSecure && request.SharePrincipalIds is { Count: > 0 })
+        {
+            return ProblemDetailsHelper.ValidationError(
+                "Make Secure shares the record to you and to the person who created it, and names nobody else: add other " +
+                "people through Manage Access once it is secure. Nothing was changed.");
+        }
 
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
@@ -2896,13 +2916,18 @@ public static class ProvisionProjectEndpoint
     }
 
     /// <summary>
-    /// Shares the record with the request's named colleagues — best-effort (task 061), and only once the creator's
-    /// share is proven, so no colleague outcome changes the result of any branch.
+    /// Shares the record with the request's named colleagues — and, on Make Secure, with the record's creator
+    /// (<paramref name="recordCreator"/>) — best-effort (task 061), and only once the caller's share is proven, so no
+    /// colleague outcome changes the result of any branch.
     /// </summary>
     /// <remarks>
-    /// A colleague who already holds a share (a resumed run that got this far before) is not shared to again. If the
+    /// <para>A colleague who already holds a share (a resumed run that got this far before) is not shared to again. If the
     /// shares cannot be read, every colleague is shared to, as before task 133 — their absence is visible and fixable
-    /// through the FR-29 "+ User" path, the creator's is not.
+    /// through the FR-29 "+ User" path, the creator's is not.</para>
+    /// <para><b>Never silent</b> (task 150, round 33 items 1 and 5). Every person NOT shared to is named in the returned
+    /// list with the reason: on the No Access list, that list unverifiable (task 143), or the share itself failed
+    /// (<see cref="ReasonPrincipalShareFailed"/>) — so the client tells the caller who did not get access, and the
+    /// confirmation's "the person who created this record … will keep access" is never broken without saying so.</para>
     /// </remarks>
     private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
         IDataverseRecordShareService recordShare,
@@ -2985,11 +3010,15 @@ public static class ProvisionProjectEndpoint
             }
             catch (Exception ex)
             {
-                // Logged with the id so an operator can see exactly who was missed.
+                // Logged with the id so an operator can see exactly who was missed — and named in the response, so the
+                // caller is told too (round 33 item 5: never silent).
                 logger.LogWarning(ex,
                     "[PROVISION] Could not share {RecordType} {RecordId} with named principal {PrincipalId}. " +
                     "Provisioning continues; add them via the Manage Access surface. TraceId={TraceId}",
                     root.WireToken, recordId, principalId, traceId);
+                skipped.Add(new ProvisionSkippedPrincipal(principalId, ReasonPrincipalShareFailed,
+                    "Sharing this record with this person failed, so it was not shared with them. Add them through " +
+                    "Manage Access."));
             }
         }
 

@@ -883,7 +883,7 @@ inactive at once**:
 - The external SPA labels such a project **secure** (`ExternalDataService`); unsecure (`secure_flag_unreadable`) and the
   child-ownership pass (a NULL-flag root that is not isolated is refused, never given an ordinary team) refuse it
   rather than read "not secure". Provisioning is the exception: it treats NULL as "not yet marked" and writes the flag
-  itself (its first write), under the creator rule.
+  itself (its first write), under the creator rule (the wizards) or the Write gate (Make Secure, round 33 item 1).
 
 Nothing is mis-routed or exposed — every effect is a refusal — but every one of those records is unusable for external
 participants and for uploads until step 0's `-Apply` sets the flag. That is why step 0 comes first in EVERY environment.
@@ -906,13 +906,21 @@ Users secure and unsecure an existing project, matter or work assignment from th
 `sprk_/scripts/access_ribbon.js` 1.2.0) — never by editing the field, which no form shows and FLS locks.
 
 - **Make Secure** — shown on a record that is NOT secure, to a caller with Write. It confirms with the owner-authored
-  copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1): the server
-  holds that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and shares the record to
-  its creator as well as to the caller, so "the person who created this record … will keep access" holds (task 148's
-  transition carries the existing children; round 26 item 3 moves the files). **Release rule (acceptance (b)): Make
-  Secure is imported only into an environment whose BFF carries task 148, in the same release** —
-  `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without the switch the group ships without it and `-Verify` fails if
-  it is present.
+  copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
+  token — any other value is refused 400, and so is a Make Secure request naming `sharePrincipalIds`): the server holds
+  that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and the access afterwards is
+  exactly what the confirmation says: the record is shared to the caller (as on every forward run) and to **the person
+  who created it** (`createdby` when a person, else `sprk_createdbyperson`; read before any write — a read that fails
+  refuses 500 `record_creator_unverifiable`, a missing `sprk_createdbyperson` column where it is needed refuses 403 with
+  `creatorState: column-missing`; a disabled creator is not shared to). A creator on the record's No Access list is not
+  shared to (No Access wins, owner N6), and neither is one whose No Access check or share fails — each is NAMED in the
+  response's `skippedPrincipals` (`principal_no_access`, `principal_no_access_unverifiable`, `principal_share_failed`)
+  and the ribbon shows a per-person warning (never silent, round 33 item 5); the caller adds them through Manage Access.
+  Task 148's transition carries the existing children; round 26 item 3's relocation moves the files (task 166's
+  `DocumentContainerRelocator`, wired into this path at integration). **Release rule (acceptance (b)): Make Secure is
+  imported only into an environment whose BFF carries task 148's transition AND the wired file relocation, in the same
+  release** — `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without the switch the group ships without it and
+  `-Verify` fails if it is present.
 - **Remove Secure** — shown on a secure record, to a caller with Write. It confirms first (round 33 item 2: "Remove the
   secure designation from this {record}?"), then calls `/unsecure-project`; the SERVER decides who may (F3: Full Access
   holders and the creator) and the refusal shows the endpoint's message.

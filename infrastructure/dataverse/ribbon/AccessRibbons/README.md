@@ -18,21 +18,28 @@
 ### Make Secure is release-gated (task 150 acceptance (b); owner R3b / F7)
 
 Make Secure secures an EXISTING record, so its existing children — and, with round 26 item 3, its files — must follow
-it. That is task 148's provisioning transition. **The rule:** Make Secure is imported only into an environment whose BFF
-carries task 148's transition, in the same release — run the generator (and `Set-AccessRibbon.ps1`) with
+it: the confirmation the user accepts (owner round 27) says both happen. Children: task 148's provisioning transition.
+Files: round 26 item 3's ONE relocation service, `DocumentContainerRelocator` — built by task 166, and wired into
+provisioning's Make Secure path by the main session when 166 merges (an integration step; task 150 builds no second
+relocator). **The rule:** Make Secure is imported only into an environment whose BFF carries BOTH — task 148's transition
+and the wired relocation — in the same release: run the generator (and `Set-AccessRibbon.ps1`) with
 `-SecureTransitionDeployed` only there. Elsewhere the Access group ships Update Access and Remove Secure, and `-Verify`
-fails if Make Secure is present. Tasks 148 and 150 are integrated together (`integ/uac-r2-batch4`), so the release
-that carries this ribbon carries 148: pass `-SecureTransitionDeployed` when that BFF is deployed. It is a packaging rule
-by design — the ribbon has no reliable runtime signal of the BFF's build, and a missing command is the safe default.
+fails if Make Secure is present. Tasks 148 and 150 are integrated together (`integ/uac-r2-batch4`); the relocation
+arrives with 166's merge, so pass `-SecureTransitionDeployed` only for a BFF built after that wiring. It is a packaging
+rule by design — the ribbon has no reliable runtime signal of the BFF's build, and a missing command is the safe default.
 
 **Who may use them.** Both commands are enabled only for a caller with Write (the cached can-manage-access verdict — the
 same rule as Update Access). Make Secure needs the record NOT secure, Remove Secure needs it secure; `sprk_issecure` is
 read with `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) read hides both. Who may REMOVE the designation is
 the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
 ProblemDetails message. Make Secure confirms first with the owner-authored copy (owner round 27, the
-`MAKE_SECURE_CONFIRMATION` constant in the script) and sends `transition: "make-secure"`, which the server holds to the
-Write gate (round 33 item 1; the creator rule belongs to the wizards' create-then-secure path) while sharing the record to
-its creator too. Remove Secure confirms first too (round 33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
+`MAKE_SECURE_CONFIRMATION` constant in the script) and sends `transition: "make-secure"` (exactly; it names no
+colleagues), which the server holds to the Write gate (round 33 item 1; the creator rule belongs to the wizards'
+create-then-secure path) while sharing the record to its creator too. If the server could not share it to someone it
+names in `skippedPrincipals` — the creator on the record's No Access list, that list unverifiable, or the share itself
+failed — the script shows a per-person warning after the success notification (`SKIPPED_PRINCIPAL_COPY`; an unknown
+reason gets the generic warning and is logged — never silent, round 33 item 5). Remove Secure confirms first too (round
+33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in
@@ -80,7 +87,8 @@ second run, no command lost. That proves the transformation only — the live me
 Order matters: the BFF route and the web resources must exist before a ribbon that calls them.
 
 1. **BFF** carrying task 142 deployed (after `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` / `-Verify`) — and,
-   for Make Secure, tasks 148 + 150 (the same release).
+   for Make Secure, tasks 148 + 150 and the Make Secure file relocation (task 166's `DocumentContainerRelocator`, wired
+   at integration) in the same release.
 2. **Web resources** (dataverse-deploy skill), published:
    `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`;
    `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`.
@@ -89,7 +97,7 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    matter — Push Updates, Create Project, Create Event, Create To Do, Upload Documents, Summarize Files, Find Similar,
    Playbook Library; work assignment — Create To Do, Dark Mode.
 4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150
-   and the web resources must be `access_ribbon.js` 1.1.0):
+   and the wired relocation for `-SecureTransitionDeployed`, and the web resources must be `access_ribbon.js` 1.2.0):
    ```powershell
    pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
@@ -102,7 +110,8 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
    (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:
    the AFTER list is the BEFORE list plus `sprk.Access.*`), packs, imports with publish, and runs `-Verify` against
-   `before.json`. Omit `-SecureTransitionDeployed` only in an environment whose BFF does not carry task 148.
+   `before.json`. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition AND
+   the wired file relocation.
    Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
    user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state.
