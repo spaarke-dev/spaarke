@@ -32,6 +32,7 @@ import {
   sendCommunication,
   type ITimelineComposeBoxProps,
   type ITimelineSendPayload,
+  cleanGuid,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
@@ -79,7 +80,7 @@ function getHostRecordId(): string | undefined {
   const xrm = getXrm();
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }

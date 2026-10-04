@@ -14,6 +14,7 @@ import { getEffectiveDarkMode } from './ThemeService';
 // React-free, so this is safe under React 16/17. spaarke-modal-system P7
 // task 090 (FR-11/FR-18): single source of truth for OOB dialog dimensions.
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 
 /**
  * Envelope literal type for `searchMode`. MUST stay aligned with the
@@ -116,7 +117,7 @@ export function buildSemanticSearchEnvelope(
 
   // entityId — strip braces, omit when empty
   if (typeof f.entityId === 'string' && f.entityId.length > 0) {
-    const stripped = f.entityId.replace(/[{}]/g, '');
+    const stripped = cleanGuid(f.entityId);
     if (stripped.length > 0) {
       push('entityId', stripped);
     }
@@ -348,7 +349,7 @@ export class NavigationService {
       contact: 'contact',
     };
     const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : 'sprk_matter';
-    const cleanId = scopeId ? scopeId.replace(/[{}]/g, '').toLowerCase() : '';
+    const cleanId = cleanGuid(scopeId);
 
     // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
     // business-unit container lookup, and the `if (!containerId) return;` guard behind it.

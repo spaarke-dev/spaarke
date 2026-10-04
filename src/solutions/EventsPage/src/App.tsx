@@ -25,6 +25,7 @@ import {
   DataGridSidePaneOrchestrator,
   type DataGridParentContext,
   type HostFilterCondition,
+  cleanGuid,
 } from '@spaarke/ui-components';
 
 import { registerEventHandlers } from './registerEventHandlers';
@@ -174,7 +175,7 @@ export const App: React.FC = () => {
     // Resolve the id from whichever channel supplied it.
     const rawId = DRILL_THROUGH_PARAMS.recordId ?? DRILL_THROUGH_PARAMS.filterValue;
     if (!rawId) return undefined;
-    const cleanId = rawId.replace(/[{}]/g, '');
+    const cleanId = cleanGuid(rawId);
     const ctx: DataGridParentContext = {
       entityType: DRILL_THROUGH_PARAMS.entityName ?? '',
       id: cleanId,

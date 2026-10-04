@@ -20,6 +20,7 @@ import {
 } from "@fluentui/react-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { parseSidePaneParams } from "./utils/parseParams";
+import { cleanGuid } from '@spaarke/ui-components';
 import {
   HeaderSection,
   StatusSection,
@@ -238,7 +239,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
           ? (currVal as ILookupValue).id
           : null;
         const origRaw = original[origLookupKey] as string | null | undefined;
-        const origId = origRaw ? origRaw.replace(/[{}]/g, "").toLowerCase() : null;
+        const origId = origRaw ? cleanGuid(origRaw) : null;
         if (currId !== origId) {
           dirty[field] = currVal;
         }

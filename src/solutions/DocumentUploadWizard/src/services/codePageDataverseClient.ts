@@ -17,6 +17,7 @@ import type {
     DataverseRecordRef,
 } from "@spaarke/ui-components/services/document-upload";
 import { consoleLogger } from "@spaarke/ui-components/services/document-upload";
+import { cleanGuid } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Xrm.WebApi type shims (minimal subset used by this client)
@@ -68,7 +69,7 @@ class XrmDataverseClient implements IDataverseClient {
         id: string,
         data: Record<string, unknown>
     ): Promise<void> {
-        const sanitizedId = id.replace(/[{}]/g, '').toLowerCase();
+        const sanitizedId = cleanGuid(id);
         this.logger.info('XrmDataverseClient', `Updating ${entityLogicalName} record: ${sanitizedId}`);
         await this.webApi.updateRecord(entityLogicalName, sanitizedId, data);
         this.logger.info('XrmDataverseClient', `Updated ${entityLogicalName} record: ${sanitizedId}`);

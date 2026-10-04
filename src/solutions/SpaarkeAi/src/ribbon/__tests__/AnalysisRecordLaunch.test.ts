@@ -97,15 +97,15 @@ describe('AnalysisRecordLaunch.openNewAnalysisFromRecord', () => {
     );
   });
 
-  test('strips braces from the record GUID', () => {
+  test('strips braces from the record GUID (and lowercases via the canonical cleanGuid, task 089 / ADR-044)', () => {
     openNewAnalysisFromRecord(
       makeFormContext('{F1A2B3C4-0000-1111-2222-333344445555}') as unknown as Xrm.FormContext,
       '100000000',
     );
 
     const [params] = mockOpenSpaarkeAi.mock.calls[0];
-    expect(params.entityId).toBe('F1A2B3C4-0000-1111-2222-333344445555');
-    expect(params.regarding).toBe('F1A2B3C4-0000-1111-2222-333344445555');
+    expect(params.entityId).toBe('f1a2b3c4-0000-1111-2222-333344445555');
+    expect(params.regarding).toBe('f1a2b3c4-0000-1111-2222-333344445555');
   });
 
   test('unsaved-record guard: empty record id (no GUID) logs a warning and does NOT throw, does not open (POML ui-test #3)', () => {
@@ -183,11 +183,11 @@ describe('AnalysisRecordLaunch.openExistingAnalysis', () => {
     expect(mockOpenSpaarkeAi).toHaveBeenCalledWith({ analysisId: 'analysis-guid-1' }, 2);
   });
 
-  test('strips braces from the analysis GUID', () => {
+  test('strips braces from the analysis GUID (and lowercases via the canonical cleanGuid, task 089 / ADR-044)', () => {
     openExistingAnalysis('{A1B2C3D4-0000-1111-2222-333344445555}');
 
     expect(mockOpenSpaarkeAi).toHaveBeenCalledWith(
-      { analysisId: 'A1B2C3D4-0000-1111-2222-333344445555' },
+      { analysisId: 'a1b2c3d4-0000-1111-2222-333344445555' },
       2,
     );
   });

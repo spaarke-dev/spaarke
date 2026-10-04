@@ -38,6 +38,7 @@ import {
     consoleLogger,
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
+import { cleanGuid } from "@spaarke/ui-components";
 
 // The upload client moved OUT of @spaarke/ui-components on 2026-09-03. That package's own
 // SdapApiClient was one of three parallel upload implementations; this is the surviving one.
@@ -151,7 +152,7 @@ export interface UploadOrchestratorConfig {
  */
 export function resolveUploadTarget(parentContext: ParentContext): UploadTarget {
     const entity = parentContext.parentEntityName?.trim() ?? "";
-    const recordId = (parentContext.parentRecordId ?? "").replace(/[{}]/g, "").trim().toLowerCase();
+    const recordId = cleanGuid(parentContext.parentRecordId ?? "");
 
     if (!entity || !recordId) {
         return { kind: "no-record" };

@@ -47,6 +47,7 @@ import {
     CheckmarkCircleRegular,
 } from "@fluentui/react-icons";
 
+import { cleanGuid } from "@spaarke/ui-components";
 import type { IResolvedParentContext } from "../types";
 import { SUPPORTED_ENTITY_TYPES } from "../services/uploadOrchestrator";
 
@@ -334,7 +335,7 @@ export const AssociateToStep: React.FC<IAssociateToStepProps> = ({
             if (!results || results.length === 0) return; // User cancelled
 
             const selected = results[0];
-            const cleanId = selected.id.replace(/[{}]/g, "").toLowerCase();
+            const cleanId = cleanGuid(selected.id);
 
             // No container resolution here any more (task 076). The record IS the answer: the
             // upload names `(selectedEntityType, cleanId)` and the server derives the container

@@ -37,6 +37,7 @@ import {
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
   resolveAnalysisFilePreview,
+  cleanGuid,
 } from "@spaarke/ui-components";
 import type { AssociationResult } from "@spaarke/ui-components";
 import {
@@ -457,7 +458,7 @@ export function WorkspacePane(): React.JSX.Element {
       (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
     /* eslint-enable @typescript-eslint/no-explicit-any */
     if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
-    const userId: string = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const userId: string = cleanGuid(xrm.Utility.getGlobalContext().userSettings.userId);
     const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
     const buId = user["_businessunitid_value"] as string;
     if (!buId) throw new Error("Could not resolve business unit");
