@@ -674,7 +674,7 @@ All on `task/uac-r2-162-f1`, 2026-10-04, after the final code (the seeded runs a
 | `dotnet list package --vulnerable --include-transitive` (BFF) | "no vulnerable packages" (f1 adds no package) |
 | Live dry run `scripts/Repair-AnalysisAnchors.ps1 -Classify` (read-only) | exit 0; 221 anchorless, 0 derivable (§14.1) |
 | Bicep (`az bicep build`, every entry point using the edited modules) | all build; only pre-existing BCP036/BCP318 warnings |
-| Publish size (CLAUDE.md §10; fresh `git archive` trees on short paths; `dotnet publish -c Release`; PowerShell `Compress-Archive` Optimal over `deploy/api-publish/*`; PDBs included, 4 PDBs on every side) | PUBLISH_SIZE_PLACEHOLDER |
+| Publish size (CLAUDE.md §10; fresh `git archive` trees on short paths; `dotnet publish -c Release`; PowerShell `Compress-Archive` Optimal over `deploy/api-publish/*`; PDBs included, 4 PDBs on every side) | **Base** `91a1c1c83` (`C:\w162b`): **45.65 MB** (47 870 200 B), 212 files. **r1** `d1c5e6f34` (`C:\w162r`): **35.11 MB** (36 814 180 B), 190 files. **f1** `f86c3902b` (`C:\w162f`): **35.11 MB** (36 819 676 B), 190 files. **f1 vs r1: +5 496 B (+0.005 MB), identical file lists** (this round's own contribution). **Task 162 vs base: −10.54 MB**; the 22-file difference is exactly the deleted QuestPDF package (as the round-1 verifier found). Under the 60 MB ceiling. Re-measured by this round, not carried over (verifier item 14). |
 
 ### 14.11 Manual live gate — additions for f1 (dev; main session; read-only verification)
 

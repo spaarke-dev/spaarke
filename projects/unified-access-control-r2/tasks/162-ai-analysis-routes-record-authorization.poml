@@ -281,8 +281,8 @@ EXISTING TESTS THAT WILL MOVE. Unit: `tests/unit/Sprk.Bff.Api.Tests/Filters/Anal
         <item name="scripts/Repair-AnalysisAnchors.ps1">Existing: Backfill-CoreAncestorStamps.ps1 pattern. Extension: a new script in that pattern (owner round 15 item 3 requires a backfill). Cost: no backfill and no reproducible classification.</item>
         <item name="removed">Infra: the Export Failures metric alert and its output, the dashboard export row. Code: the promote handler's direct AuthorizeAsync call and its catch. No service, endpoint, DI registration, option, job, column or package added.</item>
       </justification-new-surface>
-      <placement>In the BFF: existing routes and the existing filter (.claude/constraints/bff-extensions.md section A). Publish size and CVE: note 14.10.</placement>
-      <tests>Note 14.10 (affected, full BFF unit, NetArchTest, both integration suites, seeds in 14.9).</tests>
+      <placement>In the BFF: existing routes and the existing filter (.claude/constraints/bff-extensions.md section A). Publish size re-measured this round from fresh git-archive trees on short paths, Compress-Archive Optimal, PDBs included: base 91a1c1c83 45.65 MB / 212 files; r1 d1c5e6f34 35.11 MB / 190 files; f1 f86c3902b 35.11 MB / 190 files; f1 vs r1 +5496 bytes with identical file lists; task 162 vs base -10.54 MB (the 22 QuestPDF files). dotnet list package --vulnerable --include-transitive: no vulnerable packages; no package added.</placement>
+      <tests>Task tests 119/119 (37 new cases). Affected 693 pass / 7 skipped (pre-existing). Full BFF unit suite 14274 pass / 54 skipped / 0 failed. NetArchTest 346/346. Sprk.Bff.Api.IntegrationTests 104/104. Spe.Integration.Tests 403 pass / 25 skipped / 0 fail. Builds green with -warnaserror. 23 seeded proofs, all red, each restored byte-identically (note 14.9). Live dry run of the backfill script: 0 derivable.</tests>
       <live-gate state="pending">Manual, main session: note section 11 items (a)-(h) and 14.11 items (i)-(m); script gate in 14.6.</live-gate>
       <note>projects/unified-access-control-r2/notes/task-162-ai-analysis-route-authorization.md section 14</note>
     </executed>
