@@ -1,5 +1,15 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-04 ~12:00Z (context-handoff, checkpoint #8, before /compact). Read with checkpoint #7 directly below (still accurate); this block only adds the deltas.
+>
+> ## ⚡ CHECKPOINT #8 — deltas since #7
+> - **Running (do NOT relaunch):** batch 4d `wf_64880481-ea0` — 150 fix2 (round 17), 148 reverify2 (148-r2 has rounds 22/24); then 147, 158. Follow-up 1 `wf_2d0a851a-5d5` — 162, 163, 165, 166, 167, 168 fixes; 140 exec on `integ/uac-r2-batch4` (branch `task/uac-r2-140-x1`); 132-f1 (share-change cache eviction); **149-f1 DONE** (`task/uac-r2-149-f1`, verify next). Journals: `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl`.
+> - **Watching after compact:** re-arm the lane monitor: `PYTHONIOENCODING=utf-8 python -u C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/journal_watch.py | grep --line-buffered -E "RESULT|START|EVENT|Error|Traceback"` (RUNS already = both runs). The note-delivery watcher `/c/tmp/notewatch.sh` is no longer needed (no more sweep fix rounds outside follow-up 1).
+> - **Answering a running agent:** append to `NOTE-FROM-MAIN.md` in its worktree (newest `.claude/worktrees/wf_*` holding its `task/uac-r2-<id>*` branch). Never SendMessage a workflow agent. The merge agent for `C:\wt4i` (Agent tool, not a workflow) MAY be resumed with SendMessage.
+> - **Integration branch `integ/uac-r2-batch4`** (`C:\wt4i`) is now pushed to origin as a backup branch (no PR). Next merges: 150 final, 148, 147, 158, 140-x1, 132-f1, 149-f1 (follow-up), then the checklist.
+> - **After follow-up 1 ends:** collect `ownerQuestionsOpen` → decide as round 26 (complete fixes, never accept/defer) → relaunch any lane not ready (continuation script, Opus pinned).
+>
+
 > **Last Updated**: 2026-10-04 ~11:30Z (checkpoint #7). **Supersedes every block below.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #7 (READ FIRST)
