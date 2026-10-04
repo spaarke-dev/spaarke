@@ -70,6 +70,11 @@ public sealed class CoreAncestorResolver
     /// <c>account</c>, <c>sprk_reportcard</c>) are intentionally unclassified for FR-26 — they confer access
     /// through other evaluator terms, never through core-ancestor inheritance. That is a distinct,
     /// non-error state; see <see cref="CoreAncestorStatus.Unclassified"/>.
+    /// <para><c>sprk_memo</c> was added by unified-access-control-r2 task 147 (owner round 2 item 6, C10 part 2). A memo
+    /// carries all four <c>sprk_regarding{core}</c> lookups (live spaarkedev1, read-only, 2026-10-04), so a record filed
+    /// under a memo now derives the memo's own core ancestor instead of reading as Unclassified. The TypeScript
+    /// <c>CHILD_RECORD_ENTITIES</c> changed in the same commit, and <c>Taxonomy_MatchesTheTypeScriptSide</c> pins the
+    /// two.</para>
     /// </remarks>
     public static readonly IReadOnlyList<string> ChildRecordEntities =
     [
@@ -79,6 +84,7 @@ public sealed class CoreAncestorResolver
         "sprk_event",
         "sprk_todo",
         "sprk_analysis",
+        "sprk_memo",
     ];
 
     /// <summary>

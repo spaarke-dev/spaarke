@@ -145,6 +145,13 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 147: lets every table be queried again (a transient Dataverse fault that has cleared).</summary>
+    public SecureChildShareWorld ClearQueryFaults()
+    {
+        _failingTables.Clear();
+        return this;
+    }
+
     /// <summary>
     /// Makes every read of ONE row by its id throw (task 149 r1: a lineage fault on one record — the walk's single-row
     /// reads of a root or an intermediate). Queries that do not name the row by id still answer.
@@ -209,6 +216,16 @@ internal sealed class SecureChildShareWorld
             row.Attributes.Remove(column);
         else
             row[column] = value;
+    }
+
+    /// <summary>
+    /// Task 147: stamps a row's <c>modifiedon</c>, as any write would (a row created or edited outside the product, which
+    /// the reconciliation job's recent-changes pass lists).
+    /// </summary>
+    public SecureChildShareWorld Modified(string table, Guid id, DateTime atUtc)
+    {
+        Set(table, id, "modifiedon", DateTime.SpecifyKind(atUtc, DateTimeKind.Utc));
+        return this;
     }
 
     /// <summary>
@@ -411,6 +428,9 @@ internal sealed class SecureChildShareWorld
         {
             ConditionOperator.Equal => Same(actual, condition.Values.Single()),
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
+            // Task 147: the reconciliation job's recent-changes pass filters on modifiedon. A row with no modifiedon
+            // (every row a test does not touch) never matches.
+            ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };
     }

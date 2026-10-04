@@ -8,7 +8,7 @@
 .DESCRIPTION
     Spaarke's unified-access-control model gives CORE records (sprk_project, sprk_matter,
     sprk_workassignment, sprk_servicerequest) direct grants, and lets CHILD records (sprk_invoice,
-    sprk_communication, sprk_document, sprk_event, sprk_todo, sprk_analysis) inherit access via a
+    sprk_communication, sprk_document, sprk_event, sprk_todo, sprk_analysis, sprk_memo) inherit access via a
     DENORMALIZED "core-ancestor stamp" written onto the child row itself — one of the four columns
     sprk_regardingproject / sprk_regardingmatter / sprk_regardingworkassignment /
     sprk_regardingservicerequest. This keeps every access chain exactly ONE hop (ADR-034), because the
@@ -83,7 +83,7 @@
     Forces a dry-run even when -Apply is also passed. Use to preview an -Apply run's plan one more time.
 
 .PARAMETER Entities
-    Restrict which child entities to scan/write (default: all six). Reads of OTHER child entities as
+    Restrict which child entities to scan/write (default: all seven). Reads of OTHER child entities as
     chain TARGETS still happen regardless of this filter — this only scopes which entities receive writes,
     for a staged rollout (e.g. one entity at a time during a UAT window).
 
@@ -110,7 +110,7 @@
 
 .EXAMPLE
     .\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
-    Dry run across all six entities. Zero writes. Full summary + log.
+    Dry run across all seven entities. Zero writes. Full summary + log.
 
 .EXAMPLE
     .\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
@@ -139,8 +139,8 @@ param(
 
     [switch]$WhatIf,
 
-    [ValidateSet('sprk_todo', 'sprk_communication', 'sprk_event', 'sprk_invoice', 'sprk_document', 'sprk_analysis')]
-    [string[]]$Entities = @('sprk_todo', 'sprk_communication', 'sprk_event', 'sprk_invoice', 'sprk_document', 'sprk_analysis'),
+    [ValidateSet('sprk_todo', 'sprk_communication', 'sprk_event', 'sprk_invoice', 'sprk_document', 'sprk_analysis', 'sprk_memo')]
+    [string[]]$Entities = @('sprk_todo', 'sprk_communication', 'sprk_event', 'sprk_invoice', 'sprk_document', 'sprk_analysis', 'sprk_memo'),
 
     [int]$PageSize = 2000,
 
@@ -160,7 +160,9 @@ $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent
 # ── Taxonomy (MUST mirror CoreAncestorResolver.cs / PolymorphicResolverService.ts — pinned by tests on
 #    both sides; if either drifts from this, this script's answer stops matching the live evaluator) ─────
 $CoreEntities = @('sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_servicerequest')
-$ChildEntities = @('sprk_invoice', 'sprk_communication', 'sprk_document', 'sprk_event', 'sprk_todo', 'sprk_analysis')
+# sprk_memo joined the CHILD set in unified-access-control-r2 task 147 (pinned by CoreAncestorResolverTests.
+# Taxonomy_MatchesTheStampBackfillScript, so this line cannot drift from the resolvers again).
+$ChildEntities = @('sprk_invoice', 'sprk_communication', 'sprk_document', 'sprk_event', 'sprk_todo', 'sprk_analysis', 'sprk_memo')
 $AncestorLookupToEntity = [ordered]@{
     'sprk_regardingproject'        = 'sprk_project'
     'sprk_regardingmatter'         = 'sprk_matter'
@@ -343,16 +345,22 @@ function Get-ChildEntitySchema {
                             (the "child-of-child" candidates). #>
     param([Parameter(Mandatory)][string]$LogicalName)
 
-    $r = Invoke-DvGetPaged "EntityDefinitions(LogicalName='$LogicalName')/ManyToOneRelationships?`$select=ReferencingAttribute,ReferencedEntity"
+    $r = Invoke-DvGetPaged "EntityDefinitions(LogicalName='$LogicalName')/ManyToOneRelationships?`$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName"
     if (-not $r.Success) { throw "ManyToOneRelationships lookup failed for '$LogicalName': $($r.Error)" }
 
+    # Task 147: also the navigation property each ancestor column is WRITTEN through. A Web API @odata.bind names the
+    # case-sensitive navigation property (sprk_RegardingProject), never the logical attribute name.
     $ancestorCols = @()
+    $ancestorNavProps = @{}
     foreach ($lookupName in $AncestorLookupToEntity.Keys) {
         $expectedTarget = $AncestorLookupToEntity[$lookupName]
-        $match = $r.Records | Where-Object {
+        $match = @($r.Records | Where-Object {
             $_.ReferencingAttribute -eq $lookupName -and $_.ReferencedEntity -eq $expectedTarget
+        })
+        if ($match.Count -gt 0) {
+            $ancestorCols += $lookupName
+            $ancestorNavProps[$lookupName] = $match[0].ReferencingEntityNavigationPropertyName
         }
-        if ($match) { $ancestorCols += $lookupName }
     }
 
     $childLookups = @()
@@ -362,7 +370,7 @@ function Get-ChildEntitySchema {
         }
     }
 
-    return @{ AncestorColumns = $ancestorCols; ChildLookups = $childLookups }
+    return @{ AncestorColumns = $ancestorCols; AncestorNavProps = $ancestorNavProps; ChildLookups = $childLookups }
 }
 
 function Resolve-TargetAncestors {
@@ -387,7 +395,8 @@ function Resolve-TargetAncestors {
     }
     $meta = $script:entityMeta[$TargetEntity]
 
-    $select = $targetSchema.AncestorColumns -join ','
+    # A lookup is selected by its Web API value property (_<attr>_value), never its logical name (task 147).
+    $select = ($targetSchema.AncestorColumns | ForEach-Object { "_${_}_value" }) -join ','
     $path = "$($meta.EntitySetName)($TargetId)?`$select=$select"
     $r = Invoke-DvGetSingle $path
     if (-not $r.Success) {
@@ -477,9 +486,12 @@ try {
         }
 
         $childLookupNames = $schema.ChildLookups.Attribute | Select-Object -Unique
-        $selectFields = @($meta.PrimaryIdAttribute) + $schema.AncestorColumns + $childLookupNames | Select-Object -Unique
-        $childOr = ($childLookupNames | ForEach-Object { "$_ ne null" }) -join ' or '
-        $ancestorOr = ($schema.AncestorColumns | ForEach-Object { "$_ eq null" }) -join ' or '
+        # Lookups are selected and filtered by their Web API value property (_<attr>_value). Until task 147 the logical
+        # name was used, so every candidate query answered 400 ("Could not find a property named
+        # 'sprk_regardingproject'") and no dry run got past this line, on any entity.
+        $selectFields = @($meta.PrimaryIdAttribute) + @(($schema.AncestorColumns + $childLookupNames) | ForEach-Object { "_${_}_value" }) | Select-Object -Unique
+        $childOr = ($childLookupNames | ForEach-Object { "_${_}_value ne null" }) -join ' or '
+        $ancestorOr = ($schema.AncestorColumns | ForEach-Object { "_${_}_value eq null" }) -join ' or '
         $filter = "($childOr) and ($ancestorOr)"
         $select = $selectFields -join ','
         $path = "$($meta.EntitySetName)?`$select=$select&`$filter=$filter"
@@ -550,7 +562,7 @@ try {
                     if (-not $currentValue) {
                         $plan.Add([pscustomobject]@{
                                 Entity          = $childEntity; EntitySet = $meta.EntitySetName; Id = $rowId
-                                LookupAttribute = $stampCol; CoreEntity = $coreEntity
+                                LookupAttribute = $stampCol; NavProperty = $schema.AncestorNavProps[$stampCol]; CoreEntity = $coreEntity
                                 CoreEntitySet   = $script:entityMeta[$coreEntity].EntitySetName; Value = $derivedGuid
                             })
                         $report.Add([pscustomobject]@{ Entity = $childEntity; Id = $rowId; Outcome = 'ToWrite'; Detail = "$stampCol = $derivedGuid" })
@@ -666,7 +678,8 @@ try {
                 }
 
                 $item = $plan[$i]
-                $body = @{ "$($item.LookupAttribute)@odata.bind" = "/$($item.CoreEntitySet)($($item.Value))" }
+                # The case-sensitive navigation property (task 147); the logical name is refused by the Web API.
+                $body = @{ "$($item.NavProperty)@odata.bind" = "/$($item.CoreEntitySet)($($item.Value))" }
                 $result = Invoke-DvPatch -RelativePath "$($item.EntitySet)($($item.Id))" -Body $body
 
                 if ($result.Success) {

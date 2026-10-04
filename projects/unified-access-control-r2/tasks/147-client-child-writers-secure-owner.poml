@@ -4,7 +4,7 @@
     <title>C10 part 2 (client) — children created or re-parented in the browser through Xrm.WebApi (wizards, Notepad memos, To Do widgets, document upload, regarding resolvers) end up secure when their parent is: inventory every client writer, decide per writer (route through the BFF per WP-3, or create-then-server-fix-up per WP-5), and turn on the scheduled reconciliation as the safety net for every write outside the product</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "client-created children")</phase>
     <gate>after 144, 145, 146, 148 and 149 are merged. Coordinate with field-mapping-server-write-path-r1 (W3/W4/W5) before building any BFF create endpoint.</gate>
-    <status>pending</status>
+    <status>escalated</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-boundary change spanning client (.ts/.tsx) and BFF (.cs) write paths; tags bff-api, auth, security, frontend; enables a scheduled job that writes ownership.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -201,5 +201,73 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Coordinate with field-mapping-server-write-path-r1 before any BFF create route is written.</protocol>
+    <run date="2026-10-04" branch="task/uac-r2-147" base="2bd0175ad" outcome="escalated">
+      <summary>ESCALATED with partial delivery. Built and tested: the L4 net and the sprk_memo taxonomy change. Stopped
+        (first-class stops): routing the client writers and switching on the schedule. Escalation triggers 1/2/3 (E1, the
+        identity model of a BFF child create) and 4 (E2, the L4 interval) fired, and owner rounds 1-13 do not answer them.
+        Full record: notes/task-147-client-child-writers.md.</summary>
+      <done>
+        <item>Census: 29 call sites in 21 files (18 creates, 11 re-files), 12 writers new since the POML's list, each with
+          file:line, parents, host, BFF reachability and a proposed decision (note section 2). Every writer is proposed
+          for A; none is final until E1.</item>
+        <item>sprk_memo added to the CHILD taxonomy in C#, TypeScript and the stamp backfill script. The new guard
+          Taxonomy_MatchesTheStampBackfillScript pins the script's copy.</item>
+        <item>scripts/Backfill-CoreAncestorStamps.ps1 had never been able to run: every candidate query returned 400
+          because lookups were named by their logical name, and -Apply bound through the logical name. Both are fixed.
+          The dry run (read-only, dev): memo 0 to write; 4 stamps to write on other tables; the script's escalation gate
+          fired on communication (28.6% unresolvable).</item>
+        <item>The recent-changes pass in SecureChildReconciliationJob. It covers every lineage child table modified
+          since a per-instance watermark and not already Secure-team-owned. The records above those rows come from
+          SecureChildShareSynchronizer.SecureRootsAboveAsync (the existing upward walk) and are reconciled first with the
+          Sweep trigger. Failures and undetermined rows are reported and fail the run. The watermark moves only past a
+          completed listing in a run that wrote.</item>
+        <item>Tests: ClientChildFixUpTests (7); the CoreAncestorResolverTests memo case and script pin; the jest memo case.
+          Nine seeds, every one bites on the final code.</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c table.</item>
+        <item>field-mapping-server-write-path-r1 was messaged (state, options, questions); replies go to the main
+          session.</item>
+      </done>
+      <stopped>
+        <item>E1 (triggers 1, 2 and 3): who creates a client-initiated child through the BFF. A1 is app-only G5 plus
+          sprk_createdbyperson (field-mapping-r1 Q2); createdby becomes the app, and it needs a column policy past FLS.
+          A2 is an impersonated create with the owner set; Core User holds Assign at Deep, but the Secure Record BU is a
+          sibling in production, so it is likely refused (probe G147-1). A3 is an impersonated create plus an inline app
+          Assign, read back, then mirror; delete on failure; a one-request window. Recommended: A3, adopted INTO
+          field-mapping-r1's pipeline, so there is one create endpoint per table. No writer was switched.</item>
+        <item>E2 (trigger 4): the L4 interval for writes outside the product. It is the ownership exposure, not the
+          2-minute share window round 11 item 2 accepted. Recommended: 2 minutes with writes on, plus hardening (c):
+          remove model-driven Create on child tables under secure parents. The job stays disabled and report-only, and
+          the exact diff is in note section 5.</item>
+      </stopped>
+      <justification-new-surface>
+        <item name="SecureChildShareSynchronizer.SecureRootsAboveAsync + Run.LineageOfReadRowAsync + SecureRootsAbove record">
+          <existing>the synchronizer's private LineageOfAsync (the one upward walk, with the resolver's follow rule).
+            Grep SecureRootsAbove: no hits before this task.</existing>
+          <extension>Yes: it exposes the existing walk for rows of any owner. A copy in the job or the reconciler would be
+            a second follow rule.</extension>
+          <cost-of-doing-nothing>a child written outside the product reaches isolation only when the capped sweep window
+            reaches its record, which takes at least ceil(secure records / 50) runs.</cost-of-doing-nothing>
+        </item>
+        <item name="recent-changes pass in SecureChildReconciliationJob (method, watermark field, two constants, additive ResultJson.recentChanges)">
+          <existing>task 148's sweep (capped, ordered); task 149's share job (Secure-owned rows only).</existing>
+          <extension>Yes: it extends the ONE job for this invariant. The POML forbids a second job class. Constants, not
+            options: the lookback and overlap are correctness margins.</extension>
+          <cost-of-doing-nothing>the same delay, and a failed window would be lost silently.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (ADR-052 "BFF, schedule"; ADR-036 IScheduledJob). No new service, DI registration, endpoint,
+          option, job, column, package or plugin. No AI code (ADR-013 not applicable).</placement>
+      </justification-new-surface>
+      <tests>Affected suites green: the ClientChildFixUpTests, SecureChildTransitionTests, SecureChildShare* and
+        CoreAncestorResolverTests classes, 157 tests in the last affected run. Jest PolymorphicResolverService: 56/56. UI
+        components full jest: 3424 passed, 14 failed. The same 8 suites (13 tests) fail on the baseline taxonomy, so the
+        failures are pre-existing and unrelated. UI components tsc build is green, once the sibling packages
+        @spaarke/auth and @spaarke/sdap-client are built locally. Final full suites (run once): BFF unit 14,845 (14,791 passed + 54
+        skipped, 0 failed); ArchTests 373/373; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 428 (403
+        passed + 25 skipped, 0 failed). CVE scan finds none; dotnet format whitespace is clean.</tests>
+      <live>READ-ONLY only (GETs): sprk_memo metadata, role privileges per business unit, the stamp backfill dry run.
+        Pending manual gates G147-1 to G147-4 are in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
   </execution>
 </task>

@@ -198,6 +198,7 @@ describe('FR-26 taxonomy', () => {
       'sprk_event',
       'sprk_todo',
       'sprk_analysis',
+      'sprk_memo',
     ]);
   });
 
@@ -277,6 +278,25 @@ describe('deriveCoreAncestorStamps', () => {
         recordId: MATTER_ID,
       },
     ]);
+  });
+
+  it('derivesTheProjectAncestorFromAMemoTarget', async () => {
+    // unified-access-control-r2 task 147: sprk_memo is a CHILD. A record filed
+    // under a memo inherits the memo's own core ancestor and no longer reads as
+    // unclassified.
+    const { webApi, calls } = buildWebApi({ _sprk_regardingproject_value: PROJECT_ID });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_memo',
+      COMM_ID,
+      metadataFetchStub({ sprk_memo: COMMUNICATION_CORE_COLUMNS })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps.map(s => [s.entityType, s.lookupAttribute, s.recordId])).toEqual([
+      ['sprk_project', 'sprk_regardingproject', PROJECT_ID],
+    ]);
+    expect(calls.filter(c => c.query.includes('_value')).map(c => c.entity)).toEqual(['sprk_memo']);
   });
 
   it('selectsOnlyTheAncestorColumnsThatExistOnTheTarget', async () => {

@@ -1430,6 +1430,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(_world).Object);
             services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(_world, shares ?? Shares, webApi!));
+            // Task 147: the job's recent-changes pass finds the records above changed rows through the synchronizer.
+            services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(_world, shares ?? Shares));
             _provider = services.BuildServiceProvider();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,

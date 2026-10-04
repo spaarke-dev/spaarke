@@ -107,6 +107,22 @@ public sealed record SecureChildMirrorRemoval(SecureChildShareSyncStatus Status,
 }
 
 /// <summary>
+/// The secure roots above a set of child rows (task 147, <see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>).
+/// <see cref="SecureChildShareSyncStatus.Completed"/> means every row was walked. NotApplicable means the environment has
+/// no Secure Record owner team. Failed means the team is ambiguous and nothing was decided.
+/// </summary>
+/// <param name="Status">How the walk ended.</param>
+/// <param name="Roots">The distinct isolated roots found, as (table, id) ordered by table then id.</param>
+/// <param name="Undetermined">Rows whose roots could not all be determined from the data, each with the reason: a missing
+/// ancestor, a root flagged secure but not isolated, or a chain deeper than the walk.</param>
+/// <param name="Detail">Why the walk was Failed or NotApplicable.</param>
+public sealed record SecureRootsAbove(
+    SecureChildShareSyncStatus Status,
+    IReadOnlyList<(string Table, Guid Id)> Roots,
+    IReadOnlyList<string> Undetermined,
+    string? Detail);
+
+/// <summary>
 /// Keeps every CHILD of a secure record shared with exactly the internal principals its secure root is shared with —
 /// never wider (unified-access-control-r2 task 149; owner round 7 item 5: "each child's principals and rights equal the
 /// root's POA share set ... never wider than the root's").
@@ -324,6 +340,59 @@ public sealed class SecureChildShareSynchronizer
         return failed
             ? new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Incomplete, revoked, $"not every mirrored share on {child} was removed")
             : new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Completed, revoked, null);
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 147: the secure roots that the given child rows sit under. These are the records whose
+    /// reconcile pass (<see cref="SecureChildReconciler.ReconcileAsync"/>) brings those rows into line. The upward walk is
+    /// the same one the mirror uses (<c>LineageOfAsync</c>): through Secure-team-owned and user-owned rows, never through an
+    /// ordinary team's, at most <see cref="MaxLineageDepth"/> levels. That is the ownership resolver's own rule, so a row is
+    /// placed under a root here exactly when the resolver would give it the Secure team. The rows' own owners do not matter.
+    /// Each row is passed as read, carrying its lineage lookups (<see cref="SecureChildLineage.Table.Lookups"/>) and owner
+    /// columns. A lookup the caller did not read counts as absent, so it can only leave a record out.
+    /// </summary>
+    /// <remarks>
+    /// The secure-child reconciliation job's recent-changes pass calls this (task 147). That pass is the L4 net for children
+    /// written outside the product (out-of-the-box forms, quick create, grid edits, imports, flows) and for every client
+    /// writer still on <c>Xrm.WebApi</c>. Fail closed: if the Secure Record owner team is ambiguous, the answer is
+    /// <see cref="SecureChildShareSyncStatus.Failed"/>, and a Dataverse fault propagates. Either way the caller decides
+    /// nothing. A row whose roots cannot all be determined is listed in <see cref="SecureRootsAbove.Undetermined"/>, never
+    /// silently dropped.
+    /// </remarks>
+    public async Task<SecureRootsAbove> SecureRootsAboveAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        foreach (var row in rows)
+        {
+            if (!SecureChildLineage.IsChild(row.LogicalName))
+                throw new ArgumentOutOfRangeException(nameof(rows), row.LogicalName, "Not a secure-child table.");
+        }
+
+        var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        if (team.Refusal is { } refusal)
+            return new SecureRootsAbove(SecureChildShareSyncStatus.Failed, Array.Empty<(string, Guid)>(), Array.Empty<string>(), refusal);
+        if (team.TeamId is not { } secureTeamId)
+        {
+            return new SecureRootsAbove(SecureChildShareSyncStatus.NotApplicable, Array.Empty<(string, Guid)>(),
+                Array.Empty<string>(), "this environment has no Secure Record owner team, so no record is secure");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        var roots = new HashSet<RowRef>();
+        var undetermined = new List<string>();
+        foreach (var entity in rows.DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id)))
+        {
+            var (reference, lineage) = await run.LineageOfReadRowAsync(entity).ConfigureAwait(false);
+            roots.UnionWith(lineage.SecureRoots);
+            if (lineage.Undetermined is { } why)
+                undetermined.Add($"{reference}: {why}");
+        }
+
+        return new SecureRootsAbove(
+            SecureChildShareSyncStatus.Completed,
+            roots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).Select(r => (r.Table, r.Id)).ToList(),
+            undetermined,
+            null);
     }
 
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)
@@ -682,6 +751,16 @@ public sealed class SecureChildShareSynchronizer
         }
 
         // ── Lineage ────────────────────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Task 147: the secure roots above ONE child row the caller has already read, whatever that row's own owner is. A
+        /// fault propagates.
+        /// </summary>
+        public async Task<(RowRef Reference, Lineage Lineage)> LineageOfReadRowAsync(Entity entity)
+        {
+            var row = ToRow(SecureChildLineage.Children[entity.LogicalName], entity);
+            return (row.Ref, await LineageOfAsync(row).ConfigureAwait(false));
+        }
 
         /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).</summary>
         private async Task<Lineage> LineageOfAsync(Row row)

@@ -848,6 +848,13 @@ export const CORE_RECORD_ENTITIES: ReadonlyArray<string> = [
  * grant) — not through core-ancestor inheritance — so no stamp is derived for
  * them. That is a distinct, non-error state; see
  * {@link CoreAncestorDerivationStatus}.
+ *
+ * `sprk_memo` joined the set in unified-access-control-r2 task 147 (owner round
+ * 2 item 6, C10 part 2). A memo carries all four core-ancestor lookups (live
+ * metadata, 2026-10-04), so a record filed under a memo now inherits the memo's
+ * own core ancestor instead of reading as unclassified. The C# mirror
+ * (`CoreAncestorResolver.ChildRecordEntities`) changed in the same commit, and
+ * the cross-language parity test pins the two.
  */
 export const CHILD_RECORD_ENTITIES: ReadonlyArray<string> = [
   'sprk_invoice',
@@ -856,6 +863,7 @@ export const CHILD_RECORD_ENTITIES: ReadonlyArray<string> = [
   'sprk_event',
   'sprk_todo',
   'sprk_analysis',
+  'sprk_memo',
 ] as const;
 
 /** True when `entityLogicalName` is a CORE record (direct grants required). */
