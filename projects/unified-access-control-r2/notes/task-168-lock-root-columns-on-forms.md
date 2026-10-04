@@ -635,7 +635,20 @@ Mode exclusivity of the new script: `-Apply -Verify`, `-Verify -SelfTest`, `-Sel
 
 ### 12.4 Tests (f1) and merge order
 
-See the execution record in the POML for the final counts (filled in after the full runs).
+| Suite | Result |
+|---|---|
+| `Lock-CoreAncestorStampColumnsOnForms.ps1 -SelfTest` | exit 0: **18 fixtures + 18 inline** (was 14 + 13) |
+| `Add-RegardingFilingPickerToForms.ps1 -SelfTest` | exit 0: **18 fixtures + 17 inline** (was 14 + 10) |
+| `Set-SpaarkeGridCustomizerOnChildGrids.ps1 -SelfTest` (new) | exit 0: **7 fixtures + 15 inline** |
+| `Add-AnalysisRegardingRecordUrlColumn.ps1 -SelfTest` | unchanged (10 inline) |
+| SpaarkeGridCustomizer jest (new) | **26 / 26**; `npm run build:prod` succeeded, again after the pre-commit Prettier pass (bundle identical to the committed copy apart from CRLF) |
+| RegardingResolver jest | not re-run: no file of that package changed since r1 (115 / 115) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **346 / 346 passed** |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
+| `tests/integration/Spe.Integration.Tests` | **403 passed, 25 skipped** (428), 0 failed |
+| BFF unit (`tests/unit/Sprk.Bff.Api.Tests`), full run | 14,390 passed, **9 failed**, 54 skipped (14,453), 28 m 41 s under concurrent load; the 9 (WebApplicationFactory contract / seam tests in Compose, Office, Documents, Ai handlers, ExternalAccess upload, PipelineHealth) **all pass on an isolated re-run (34 / 34 with theories expanded)**. No `src/server/**` or `tests/unit/**` file changed in f1: contention. |
+
+**Merge order (trigger 9), re-checked 2026-10-04:** `9544c3b01` (156) is not an ancestor of `work/unified-access-control-r2` (`73296ce14`). In-memory trial merges (`merge-tree --write-tree`) of work with 156 and of work with this branch are both conflict-free. The diff `work...task/uac-r2-168-f1` is 196 files (156's changes included); against the task base `144b36b51` it is 141 files, of which f1 adds 73 (`4ef3ca04e..`). Merge 156 first, then 168.
 
 ### 12.5 Manual live gate (main session, dev, in this order; supersedes §10.4)
 

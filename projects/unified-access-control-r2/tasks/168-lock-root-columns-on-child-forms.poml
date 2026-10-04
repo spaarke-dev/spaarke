@@ -345,5 +345,48 @@ The TypeScript stamp mirror (156 item 13a), the AI update tool's inline re-stamp
       <seeds>Q1 and Q2: each red, then restored byte-identical (note section 11.3).</seeds>
       <live-gate>Pending (main session): note section 10.4, unchanged.</live-gate>
     </record>
+    <record date="2026-10-04" branch="task/uac-r2-168-f1" base="4ef3ca04e" round="f1">
+      <rigor>FULL (TEST-MODIFYING; a PCF change; live form and grid configuration scripts). Inputs: owner/main-session round 25 item 8 (binding, read on work/unified-access-control-r2 @ 73296ce14; rounds 26-29 name no 168 item), the r2 verifier's 15 items, NOTE-FROM-MAIN.md (rounds 15/16/19/21 re-read; nothing new for 168; the note was deleted, never committed).</rigor>
+      <closed>
+        <item n="1">Round 25 (a): Add-RegardingFilingPickerToForms.ps1 hides (visible="false" on the cell, a start-tag text edit at XmlReader positions) every VISIBLE control bound to a pair column or a non-root sprk_regarding* lookup of the table, the picker's host excepted; the parse check allows exactly that one change; -Verify names each visible one. New refusals RAW_CONTROL_HOSTS_PCF, RAW_CONTROL_NOT_IN_CELL and (live) LIBRARY_SHOWS; MANAGED_FORM counts a visible raw control. Fixtures 15-18 plus 7 inline cases; 7 existing expected.xml files gain only the hidden cells (03 kept as the no-op case by hiding its input's raw cells).</item>
+        <item n="2">Round 25: SpaarkeGridCustomizer v1.0.0 to v1.1.0. It now implements the documented customizer contract (ReactControl, EventName, factory.fireEvent); RootColumnLock cancels editing of the four roots (stopEditing(true), column editable=false) and marks them read-only (columnEditable=false) for every data type; the regarding-link registry is ported and falls back to the default renderer. Version in ControlManifest.Input.xml, CUSTOMIZER_VERSION / index.ts, Solution/solution.xml, Solution/Controls ControlManifest.xml (copied from the build with bundle.js and styles.css), pack.ps1 and package.json. build:prod OK; 26 jest tests. New scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1 sets GridCustomizerControlFullName on every PowerAppsOneGrid form factor of the sprk_event and sprk_analysis grid configuration (XML only; -Verify also requires the platform-derived JSON) and makes the customizer a SpaarkeMaster component; 7 fixtures plus 15 inline cases. production-release.md no longer excludes the customizer.</item>
+        <item n="3">Round 25: the To Do main form eca59df4 is a picker target; on the live XML it gains the hidden sprk_regardingservicerequest and sprk_regardingagreement cells only. The probe: items 5 and 6.</item>
+        <item n="4">Note section 10.5 and the r1 escalations element are corrected in place (the customizer already existed; extend, not add).</item>
+        <item n="5">PICKER_WITHOUT_PRESAVE reads /form/events/event; fixture 15 (presave only in a cell's nested events) pins it; seed L1 gives the verifier's exact failure.</item>
+        <item n="6">Fixtures 16 (only another OnLoad handler), 17 (presave enabled="false"), 18 (presave on the form OnSave only); seeds L2-L4 each fail exactly one.</item>
+        <item n="7">Get-FormReadRefusal: an empty in-scope formxml is FORM_UNREADABLE (refusal; -Verify exit 1); five inline cases; seeds L5, L6.</item>
+        <item n="9, 10, 11, 12">Verifications of r2: recorded, no change.</item>
+        <item n="14">Closed by items 5 and 6.</item>
+      </closed>
+      <not-closed>
+        <item n="8, 13">Trigger 9: 9544c3b01 (156) is still not an ancestor of work/unified-access-control-r2 (73296ce14). Merge 156 first, then 168. git merge-tree of work with 156 and of work with this branch are both conflict-free. Against base 144b36b51 the scope check holds (no src/server, ArchTests, RegardingResolver / CommunicationConnections source, src/client/shared or new web resource; the presave and its jest test are r0's POML-sanctioned edits; the one PCF changed is SpaarkeGridCustomizer, decided by round 25).</item>
+        <item n="15">Live gate: note section 12.5 (supersedes 10.4), the main session's.</item>
+      </not-closed>
+      <justification>
+        <component name="scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1">
+          <existing>No script in scripts/ touches customcontroldefaultconfigs or GridCustomizerControlFullName (Grep); the lock script edits form XML only.</existing>
+          <extension>Folding it into the lock script would mix an attribute-only form transform with a grid-configuration insertion and a solution-membership write, each with its own snapshot and restore; it copies the lock script's helpers and modes instead.</extension>
+          <cost-of-doing-nothing>The sprk_event and sprk_analysis home grids keep letting a person type a secure root onto a filed row inline (round 25 item 8 unmet).</cost-of-doing-nothing>
+        </component>
+        <component name="jest, ts-jest, jest-environment-jsdom, @types/jest, scheduler (devDependencies of SpaarkeGridCustomizer)">
+          <existing>The package had no test runner and no tests (code-quality-r3 D7-05).</existing>
+          <extension>Test-only; React and Fluent stay platform libraries at runtime (ADR-022). The configuration mirrors RegardingResolver's.</extension>
+          <cost-of-doing-nothing>The grid lock could not be tested or seeded (ADR-038).</cost-of-doing-nothing>
+        </component>
+        <component name="AddSolutionComponent (componenttype 66) in the grid script's -Apply">
+          <existing>Assemble-SpaarkeMasterSolution.ps1 uses the same call and body.</existing>
+          <extension>One call reusing that body, so -Verify can require membership now rather than after the next assembly.</extension>
+          <cost-of-doing-nothing>SpaarkeMaster would ship grid configuration naming a customizer the release listed as excluded.</cost-of-doing-nothing>
+        </component>
+      </justification>
+      <placement>No BFF change (CLAUDE.md section 10 not applicable): nothing under src/server/**; no endpoint, service, registration, option, job or column. ADR-002: no plugin, no business rule. ADR-006: no new PCF and no web resource; the existing SpaarkeGridCustomizer is extended (round 25). ADR-003: every new check fails closed. ADR-021/022: Fluent v9 and React 16 platform libraries. ADR-038: every new guard seeded red. .claude/** needed no edit.</placement>
+      <conflict-check>Not invoked: no file of this round is on the hot-path watchlist (no BFF, SpaarkeAi, ci-workflows, skill directive or root CLAUDE.md). Live writers that must not interleave: the four scripts of this task, task 138's retirement script and Deploy-TodoSubgridsToElevenParentForms.ps1.</conflict-check>
+      <escalations>
+        <escalation source="f1" type="first-class stop">The raw filing columns (the pair and the non-root sprk_regarding* lookups) stay inline-editable in the sprk_event and sprk_analysis grids when a person adds them with Edit columns; round 25 item 8 names only the four roots for the grid. Complete fix: RootColumnLock covers the same column set the forms hide, by name, with the same overrides, jest cases and seeds (v1.1.1); the grid script is unchanged. Note section 12.6.</escalation>
+      </escalations>
+      <tests>Lock -SelfTest: 18 fixtures + 18 inline, exit 0. Picker -SelfTest: 18 fixtures + 17 inline, exit 0. Grid -SelfTest: 7 fixtures + 15 inline, exit 0. Schema -SelfTest unchanged (10 inline). SpaarkeGridCustomizer jest 26/26; npm run build:prod succeeded (also after the pre-commit Prettier pass; bundle identical). RegardingResolver jest not re-run: no file of that package changed since r1 (115/115). NetArchTest 346/346. Sprk.Bff.Api.IntegrationTests 104/104. Spe.Integration.Tests 403 passed / 25 skipped / 0 failed (428). BFF unit: full run 14,390 passed / 9 failed / 54 skipped (14,453) in 28 m 41 s under concurrent load from other agents; the 9 failures (WebApplicationFactory contract and seam tests: ComposeTransientKeyDedupSeamTests, ComposeOriginRoutingSeamTests, OfficeSaveSpineIdempotencyContractTests, DocumentIdentityContractTests, HandlerEndpointsTests, DocumentProfileContractTests, ExternalProjectDocumentUploadContractTests, ComposePhase1IngestSeamTests, PipelineHealthTests) all pass on an isolated re-run (34 passed / 0 failed, theories expanded). No file under src/server or tests/unit changed in this task, so this is contention.</tests>
+      <seeds>L1-L6, P14-P17, P19-P27, G1-G10, J1-J9: each red, then restored (scripts on scratch copies, jest files byte-identical by SHA-256). Note section 12.3.</seeds>
+      <live-gate>Pending (main session): note section 12.5, in order (a)-(i).</live-gate>
+    </record>
   </execution>
 </task>
