@@ -4,7 +4,7 @@
     <title>Seed dev data plus the two negative controls</title>
     <phase>0 Foundations</phase>
     <gate>004 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Data seeding; the exit condition is a gate on success criterion 2.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -81,7 +81,18 @@
     <criterion testable="true">notes/seed-data-state.md records which rows are seeded versus real.</criterion>
   </acceptance-criteria>
 
-  <notes>design.md section 8.1 (checklist) plus spec.md assumption A-3 (the two controls). Without the controls, success criterion 2 is only half-tested.</notes>
+  <notes>design.md section 8.1 (checklist) plus spec.md assumption A-3 (the two controls). Without the controls, success criterion 2 is only half-tested.
+
+COMPLETED 2026-10-04. Full record: projects/spaarke-ontology-platform-r1/notes/seed-data-state.md. Summary:
+POSITIVE = REAL-2026-123456.01 (real matter, seeded communication f00b6389-8fbf-f111-aaaf-0022482913fc classified
+"Fee / rate change" via the LIVE TRIAGE-EMAIL Action through POST /api/office/save -- escalation trigger not
+fired). NEGATIVE CONTROL 1 = REAL-2026-123456.02 (real matter, seeded communication 9848e2b0-8fbf-f111-aaaf-0022482913fc
+classified "Scope / budget change" live, PLUS seeded sprk_budgetrevision e4e5dbe6-8fbf-f111-aaaf-0022482913fc inside
+the 30-day window -- notExists conjunct fails). NEGATIVE CONTROL 2 = a new dev matter
+d14d79f4-8fbf-f111-aaaf-0022482913fc ("ONTOLOGY DEV SEED 005 - Negative Control 2") with a budget-exceeding
+sprk_spendsnapshot but zero communications -- exists conjunct fails. All three hand-evaluated against the task
+004 rulebody's actual two-clause predicate. sprk_policy.sprk_enabled re-verified false after all writes. No Do-lane
+rows seeded (task 060 scope). No sprk_signal/sprk_decisionrecord rows (evaluator, task 021, not yet built).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

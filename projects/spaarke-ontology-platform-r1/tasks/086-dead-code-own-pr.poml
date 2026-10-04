@@ -4,7 +4,7 @@
     <title>Dead and misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -93,6 +93,7 @@
     <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">PR #1120 (056254e55, 16926ecf4, 8082b03d5, b443e4779); closes #1112 and #1113. Deleted: C-19 cluster plus CommandExecutor (main session verified its only other reference on master is the barrel this PR edits), PageChrome/CommandBar and useKeyboardShortcuts, the C-21 Pillar-9 shim (owner decision), C-14, C-20, C-26 (cancelHandoff kept), C-6. C-27 recorded only. Follow-ups: stale C# doc comments corrected (main session verified comment-only, so no publish-size delta), unused @spaarke/auth removed from AI.Context. ADR-012 table updated by the main session. Found a test already red on master (register-workspace-widgets, since 0e5d0fafd), routed to task 054. ChatSessionCard formatter judged most correct; routed to task 081. Open for reviewer: ADR-020 SemVer path-A exception for removing exports from private file-linked packages.</completion>
   <notes>Largest of the wave-I PRs. The ADR-012 concise-copy edit (CommandRegistry removed from the present-tense example) and its CHANGELOG entry are pre-committed on this branch by the main session, because sub-agents cannot write .claude/.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

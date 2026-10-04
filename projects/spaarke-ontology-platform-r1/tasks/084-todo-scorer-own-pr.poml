@@ -4,7 +4,7 @@
     <title>To-Do scorer convergence, own PR (C-10, live bug)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,6 +80,7 @@
     <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">PR #1118 (47cc95987). SmartTodo 68 to 73 tests, all pass; UI.Components scoped run 182 to 188, all pass. Finding: the todoScoreMappings sha256 guard was ALREADY RED on master (pinned 2026-08-16; todoScoring.ts then changed by 8737dea124, smart-todo-r5 UAT #6, without a re-pin). Main session inspected 8737dea124: it changed a header comment, parseDueDate and computeDueLabel label text only; the weights/composite-formula region is untouched, so the re-pin blesses a reviewed change. No blocking CI check caught the red guard for seven weeks. Shared stash stack verified untouched after the agent used git stash.</completion>
   <notes>Merge this PR FIRST: it is a live user-facing bug, and on-branch task 081 (C-13) reuses the calendar-days helper in dateLocal.ts rather than writing a second one.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

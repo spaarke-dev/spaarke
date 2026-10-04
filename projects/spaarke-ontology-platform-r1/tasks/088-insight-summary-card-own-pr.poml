@@ -4,7 +4,7 @@
     <title>InsightSummaryCard dead render path, own PR (C-22)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -76,6 +76,7 @@
     <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">PR #1116 (c2c10cc01). Found that the insightCardMount.js extracted from 1c56cd29b did NOT equal the tsc output of its .ts: task 080 hand-edited the .js, and the pre-commit hook ran prettier on the .ts only (lint-staged does not cover .js). Regenerated the .js with tsc -p; a second compile diffs to zero. Line-ending-only rewrites of two sibling .js files were discarded.</completion>
   <notes>Does not build the missing @spaarke/ai-widgets browser bundle; no bundler config exists for it, so that would be new infrastructure, not cleanup.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

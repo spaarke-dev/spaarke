@@ -34,6 +34,7 @@
     <constraint source="project">Scope: the aggregate Work Item is a COMPUTED COUNT rendered in the worklist, NOT a Signal. Making it a Signal would make the association engine a policy producer, which it is not.</constraint>
     <constraint source="project">Scope: exactly ONE aggregate item. Decision 9: one needs-attention surface, not four queues. Four places to look means nobody looks.</constraint>
     <constraint source="project">Scope: reconciliation is NOT a worklist lane. Bulk triage is a different interaction from a gated single decision, and its volume would bury the Decide lane.</constraint>
+    <constraint source="project">Scope: fix the test that is already RED on master: register-workspace-widgets.test.ts, "registers communications-list exactly ONCE", fails since commit 0e5d0fafd because communications-reconciliation is also registered. Decide from the code whether the assertion is too broad (counts the reconciliation id) or the registration is genuinely duplicated, and fix the right one. Found by task 086 on 2026-10-03; it is hidden in full runs because that suite runs out of memory.</constraint>
   </constraints>
 
   <knowledge>
@@ -108,6 +109,7 @@
     <criterion testable="true">Negative: the aggregate item is not a sprk_signal row.</criterion>
     <criterion testable="true">Misresolution dismissals are recorded and queryable but do not feed suppression.</criterion>
     <criterion testable="true">The client builds and the registration test passes.</criterion>
+    <criterion testable="true">register-workspace-widgets.test.ts passes in full, including "registers communications-list exactly ONCE", and the reconciliation widget is still registered exactly once.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-29. design.md section 5.1 and decision 29.</notes>

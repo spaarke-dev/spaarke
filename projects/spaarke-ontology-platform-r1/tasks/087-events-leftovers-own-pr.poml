@@ -4,7 +4,7 @@
     <title>Events and EventsPage migration leftovers, own PR (C-2, C-24, C-25)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,6 +82,7 @@
     <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">PR #1119 (215a63006 + f18fc2d85). C-2/C-24 forks deleted with zero imports; C-25 leftovers deleted; @spaarke/events-components dropped from EventsPage. Follow-up (owner fix-now rule): @spaarke/sdap-client and @spaarke/smart-todo-components also dropped, each proven by a byte-identical vite bundle (731.62 kB), not by import absence. Baseline built with Build-AllClientComponents.ps1 -Component SharedLibs (13/13 pass on master). Shared FetchXmlService untouched. Main session verified the hand-edited EventsPage lockfile: npm --package-lock-only re-adds nothing for the removed deps; residual 7-line diff is pre-existing metadata drift.</completion>
   <notes>C-25 makes the 'remove the dependency' half of the old task 081 scope concrete.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

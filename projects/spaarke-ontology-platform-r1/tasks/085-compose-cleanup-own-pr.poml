@@ -4,7 +4,7 @@
     <title>Compose cleanup, own PR (C-5, C-16)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx source and deletes code; quality gates apply.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -76,6 +76,7 @@
     <criterion testable="true">The after-change test run has no failure that is absent from the master baseline run.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">PR #1117 (30f364ad3 + 01ae006c3). C-5 helpers deleted with zero production callers re-confirmed; C-16 comment corrected to cite the live caller (toolbar Add Comment toggle, ComposeEditor.tsx ~3820). Follow-up removed stale anchoredAnnotationsToDocxAnnotations mock keys from 7 ComposeWorkspace test suites; remaining grep hits are doc-comments only. Baseline 61/110 suites failed to load (unbuilt @spaarke/auth dist), after 56/110: five suites newly load because a dead import chain was cut; 0 test failures either run. The 7 edited suites do not load locally, so PR #1117 CI is where they actually execute.</completion>
   <notes>Compose is governed by ADR-049; this PR deletes dead helpers and corrects a comment, and changes no save-path behaviour.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

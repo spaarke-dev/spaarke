@@ -54,7 +54,7 @@
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
     <step order="1">In the worktree named in the prompt, install root and affected-package dependencies, then run the affected package tests and record the result as the master baseline.</step>
     <step order="2">Sweep the shared libraries for hard-coded colours and replace each with the semantic token that matches its role.</step>
-    <step order="3">Compare EmailCardList, MessageRow and ChatSessionCard with RecordCardShell. Where one duplicates RecordCardShell's behaviour, converge it; where behaviour genuinely differs, leave it and say why.</step>
+    <step order="3">Compare EmailCardList and MessageRow with RecordCardShell (ChatSessionCard is deleted by task 086 as having zero consumers; if 086 kept it, include it). Where one duplicates RecordCardShell's behaviour, converge it; where behaviour genuinely differs, leave it and say why.</step>
     <step order="4">Find every consumer of SECTION_REGISTRY, including outside the declaring package; delete it if none exists.</step>
     <step order="5">Run the affected package tests and builds again and compare against the baseline. Quote both outputs.</step>
     <step order="6">Commit with a conventional-commit message ending in the line: Co-Authored-By: Claude Opus 5.5 (1M context) &lt;noreply@anthropic.com&gt;. Push the branch and open a pull request against master, ready for review (not draft). The PR body states the item ids, says the work comes from the spaarke-ontology-platform-r1 reuse audit, and ends with: 🤖 Generated with [Claude Code](https://claude.com/claude-code)</step>

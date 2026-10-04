@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Every later lifecycle task depends on the writer existing and on its ownership behavior.</parallel-reason>
-    <deps>021</deps>
+    <deps>021, 006</deps>
     <tags>bff-api,dataverse,security,signals</tags>
     <estimated-effort>4-5 hours</estimated-effort>
   </metadata>
@@ -42,6 +42,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-03 (task 002 option A): the writer authenticates as the dedicated least-privileged identity provisioned by task 006, which holds only Spaarke Ontology Service. Never write Signals or Decision Records as the sysadmin BFF identity.</constraint>
   </constraints>
 
   <knowledge>

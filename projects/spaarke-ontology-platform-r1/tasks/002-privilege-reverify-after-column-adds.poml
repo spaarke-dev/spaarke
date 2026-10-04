@@ -12,7 +12,7 @@
     <effort>medium</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>001</deps>
+    <deps>001, 006</deps>
     <tags>dataverse,security,verification</tags>
     <estimated-effort>1 hour</estimated-effort>
   </metadata>

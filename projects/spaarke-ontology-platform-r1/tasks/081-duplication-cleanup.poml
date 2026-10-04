@@ -104,7 +104,7 @@
     <criterion testable="true">All affected packages build and their tests show no failure absent from the before run.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-42 remainder. Rescoped 2026-10-03: C-7 moved to 089, C-25 to 087. Owner decision: C-17 tier scheme is 3/7/10 days.</notes>
+  <notes>spec.md FR-42 remainder. Rescoped 2026-10-03: C-7 moved to 089, C-25 to 087. Owner decision: C-17 tier scheme is 3/7/10 days. Task 086 deletes the AI.Outputs chat-history ChatSessionCard (zero consumers), which held one of the five relative-time formatter copies: count four live copies. 086 REPORTED it WAS the most correct: Intl.RelativeTimeFormat, invalid-date guard, future dates, week/month buckets. Start from 62277d50a:src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx lines 30-61 and fix its two weaknesses: the hard-coded locale (en) and day buckets computed from elapsed 24h periods instead of local-midnight calendar days (use dateLocal.ts from 084).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

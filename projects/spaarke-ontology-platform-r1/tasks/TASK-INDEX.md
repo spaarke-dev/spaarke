@@ -19,10 +19,11 @@
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ 001 | [Schema: the four missing columns](001-schema-complete-missing-columns.poml) | FULL | sonnet/high | — | — | **Unblocks everything.** Two columns block a path outright |
-| 🔄 002 | [Privilege re-verify](002-privilege-reverify-after-column-adds.poml) | STANDARD | sonnet/medium | 001 | — | 🔴 **ESCALATED** — criteria 1-3 verified; the writer principal holds sysadmin. `notes/002-escalation-append-only-writer-principal.md` |
+| 🔄 002 | [Privilege re-verify](002-privilege-reverify-after-column-adds.poml) | STANDARD | sonnet/medium | 001, 006 | — | Owner chose **option A** (dedicated identity, task 006); completes when the union check passes for the new writer |
 | ✅ 003 | [ADR-040 amendment + ADR-039 exception](003-adr-040-amendment-and-039-exception.poml) | FULL | **opus/xhigh** | — | — | ⚠️ `.claude/` → **main session only**. Must merge before/alongside 031 |
 | ✅ 004 | [Seed Policy + taxonomy rows](004-seed-policy-and-taxonomy-rows.poml) | STANDARD | sonnet/medium | 001 | — | Policy stays `enabled = No` until reviewed. `sprk_policy` GUID `4d204810-61bf-f111-aaaf-0022482913fc`; `sprk_policyversion` GUID `42b3e716-61bf-f111-aaaf-0022482913fc`. Taxonomy rows already enabled (no-op) |
-| 🔲 005 | [Seed dev data + 2 negative controls](005-seed-dev-data-and-negative-controls.poml) | STANDARD | sonnet/medium | 004 | — | Criterion 2 needs the controls, not just the triple |
+| ✅ 005 | [Seed dev data + 2 negative controls](005-seed-dev-data-and-negative-controls.poml) | STANDARD | sonnet/medium | 004 | — | Live-classified via `/api/office/save`; see `notes/seed-data-state.md` for all GUIDs + seeded-vs-real |
+| 🔲 006 | [Provision the dedicated writer identity](006-provision-dedicated-writer-identity.poml) | FULL | **opus**/high | — | — | **Owner: option A** for 002. Azure changes need owner confirmation |
 
 ### Phase 1 — Cleanup that gates the row
 
@@ -38,14 +39,14 @@
 |---|---|---|---|---|---|---|
 | ✅ 020 | [`Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
 | 🔲 021 | [**The predicate compiler**](021-predicate-compiler-exists-notexists.poml) | FULL | **opus/xhigh** | 020, 005 | — | 🔴 **THE RISK ITEM.** Serial. `notExists` has no in-repo template |
-| 🔲 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | Immutability makes this the only control point |
+| 🔲 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | Owner: **validate at evaluation**, fail closed (app authoring stays) |
 | ✅ 023 | [Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
 
 ### Phase 3 — The evaluator and Signal lifecycle
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021 | — | 🔴 FR-14 owner-from-matter. One line now, a migration later |
+| 🔲 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021, 006 | — | 🔴 FR-14 owner-from-matter. One line now, a migration later |
 | 🔲 031 | [Nightly re-evaluating `IScheduledJob`](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/high | 030, 003 | — | ONE evaluator, not evaluator + sweep |
 | 🔲 032 | [Two event triggers](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish |
 | 🔲 033 | [Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | **C** | Aged-out maps to `ConditionCleared` |
@@ -99,11 +100,11 @@
 | 🔲 081 | [On-branch cleanup the worklist needs (C-8, C-11, C-13, C-17)](081-duplication-cleanup.poml) | FULL | sonnet/high | 084 | — | C-13 waits for **084 merged**; C-17 = **3/7/10 days** (owner) |
 | ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
-| 🔲 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | **Live bug.** Merge first; 081 depends on it |
-| 🔲 085 | [Compose cleanup, own PR (C-5, C-16)](085-compose-cleanup-own-pr.poml) | FULL | sonnet/high | — | I | C-5 already lost comment data |
-| 🔲 086 | [Dead + misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)](086-dead-code-own-pr.poml) | FULL | **opus**/high | — | I | C-21 **delete** (owner). Closes #1112, #1113 |
-| 🔲 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | Do **not** touch the shared `FetchXmlService` |
-| 🔲 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | Web resource: needs a deploy after merge |
+| ✅ 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1118](https://github.com/spaarke-dev/spaarke/pull/1118). **Live bug.** Merge first; 081 depends on it |
+| ✅ 085 | [Compose cleanup, own PR (C-5, C-16)](085-compose-cleanup-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1117](https://github.com/spaarke-dev/spaarke/pull/1117). C-5 already lost comment data |
+| ✅ 086 | [Dead + misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)](086-dead-code-own-pr.poml) | FULL | **opus**/high | — | I | [PR #1120](https://github.com/spaarke-dev/spaarke/pull/1120). C-21 deleted (owner). Closes #1112, #1113 |
+| ✅ 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1119](https://github.com/spaarke-dev/spaarke/pull/1119). Also dropped 2 more unused EventsPage deps |
+| ✅ 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | [PR #1116](https://github.com/spaarke-dev/spaarke/pull/1116). Web resource: needs a deploy after merge |
 | 🔲 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | `cleanGuid` ×~70 |
 | 🔲 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | Audit, then fix |
 

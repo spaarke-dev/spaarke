@@ -35,6 +35,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-03: admins may author policy rows directly in the Spaarke Platform app, which bypasses the BFF. Invalid rule bodies are therefore stopped at EVALUATION TIME, not only at save: the evaluator re-validates every policy version's body with RuleBodySchemaValidator before using it and FAILS CLOSED, so an invalid policy never produces a Signal and its error is surfaced (logged with the policy version id, and visible to admins). Any BFF write path that does exist still validates at save. The escalation trigger about non-BFF authoring paths is RESOLVED by this decision and no longer fires.</constraint>
   </constraints>
 
   <knowledge>
@@ -82,6 +83,8 @@
     <criterion testable="true">Negative: given a body whose shape does not match its declared rule type, when saved, then it is refused.</criterion>
     <criterion testable="true">Any bypass path that can still write an invalid row is documented with its mitigation.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a policy version whose rule body fails schema validation, when the evaluator runs, then it produces no Signal for that policy, records the validation failure with the policy version id, and continues evaluating the other policies.</criterion>
+    <criterion testable="true">Negative: a rule body authored directly in the model-driven app and invalid against the schema never evaluates as if valid.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-08. Immutability makes this the only point of control: a bad body saved once cannot be edited out.</notes>
