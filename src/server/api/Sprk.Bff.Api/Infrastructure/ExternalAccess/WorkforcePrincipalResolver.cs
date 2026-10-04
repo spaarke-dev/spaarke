@@ -64,7 +64,8 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     /// <summary>
     /// Cache resource for the "a link was attempted and could not be made" marker. Cached DATA, not an
     /// authorization decision (ADR-003): it only stops a collision user from paying the link-attempt reads on
-    /// every request. It never grants, and it expires with the identity cache (10 minutes).
+    /// every request. It never grants. 10 minutes — it no longer matches the identity cache, which task 132 cut to
+    /// 2 minutes; this marker caches a link ATTEMPT, not access, so it does not bound any access change.
     /// </summary>
     internal const string LinkAttemptCacheResource = "identity-link-attempt";
 
@@ -129,10 +130,15 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
             // ContactId MAY be null (a systemuser with no linked contact) — that is still a valid systemuser
             // principal; its accessible set comes from ADR-034 membership regardless (task 021/022).
             Guid? derivedContactId = null;
+
+            // Task 132 (C12): whether the derived contact is UNKNOWN (its reads failed) rather than absent. The deny
+            // veto's subject on this plane is this contact; an unknown subject must deny, never check nothing.
+            var contactUnreadable = false;
             try
             {
                 var identity = await _identity.ResolveAsync(suid, ct).ConfigureAwait(false);
                 derivedContactId = identity.ContactId;
+                contactUnreadable = identity.ContactUnreadable;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -140,22 +146,27 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
             }
             catch (Exception ex)
             {
-                // Non-fatal: a systemuser still authorizes via ADR-034 membership without a derived contact.
+                // Non-fatal: a systemuser still authorizes via ADR-034 membership without a derived contact — but the
+                // contact is UNKNOWN, so the evaluator's deny veto denies every candidate for this request (task 132).
+                contactUnreadable = true;
                 _logger.LogWarning(ex,
                     "[WF-AUTH] Failed to derive contactId for systemuser {SystemUserId}; " +
-                    "proceeding as a systemuser principal with no derived contact",
+                    "proceeding as a systemuser principal with an UNREADABLE derived contact",
                     suid);
             }
 
+            // Unchanged by task 132: the inline link runs whenever no contact was derived. If it links one, the contact
+            // is known after all and ForSystemUser drops the unreadable flag.
             derivedContactId ??= await TryLinkSystemUserAsync(suid, tenantId, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "[WF-AUTH] Resolved workforce caller oid={CallerOid} to systemuser {SystemUserId} " +
-                "(derivedContact: {HasContact})",
-                callerOid, suid, derivedContactId is not null);
+                "(derivedContact: {HasContact}, contactUnreadable: {ContactUnreadable})",
+                callerOid, suid, derivedContactId is not null, contactUnreadable);
 
             return WorkforcePrincipalResolution.ForSystemUser(
-                suid, derivedContactId, callerOid.ToString("D"), tenantId, ExtractTokenEmail(user));
+                suid, derivedContactId, callerOid.ToString("D"), tenantId, ExtractTokenEmail(user),
+                contactUnreadable: contactUnreadable);
         }
 
         // ── (b) contact-only branch — the oid binding (task 141) ──

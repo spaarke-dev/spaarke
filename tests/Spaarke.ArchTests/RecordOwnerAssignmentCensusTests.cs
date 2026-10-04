@@ -419,6 +419,11 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
             "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
+        new OwnerWriteEntry("AssignCascadeChildOwners.cs", "RestoreOneAsync", 1, OwnerWriteKind.Root,
+            "Provisioning's compensation (task 133 c1, owner round 10 item 4): after a VERIFIED move of the ROOT back, each " +
+            "row the root's Assign cascaded to (document locations, documents) is put back on the owner it had before the " +
+            "call, read from the snapshot taken before any write — the root move's own side effect, undone; never a team " +
+            "computed for a child. (Batch 4 integration: task 133 landed after 146's census.)"),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,

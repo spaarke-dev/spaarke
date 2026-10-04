@@ -24,8 +24,10 @@
 // ICallerSystemUserResolver. Latency-coupled to the per-turn bind (runs inside ContextBinder.BindAsync),
 // so it belongs in the BFF, not a separate service. Additive C# only (no new package → no new CVE;
 // ~0 publish-size delta). NFR-03: the name resolution is a per-turn hot-path read, so it is Redis-cached
-// via ITenantCache with the SAME per-systemuserid, 10-minute-TTL pattern IIdentityNormalizationService
-// uses (ADR-009). ADR-039: preference-only — MUST NOT touch AgentToolFilterContext / grounding / dispatch.
+// via ITenantCache with the SAME per-systemuserid pattern IIdentityNormalizationService uses (ADR-009), at
+// 10 minutes — the identity cache's TTL until unified-access-control-r2 task 132 cut that one to 2 minutes for
+// authorization staleness; this cache holds display names for the agent turn, not an access input.
+// ADR-039: preference-only — MUST NOT touch AgentToolFilterContext / grounding / dispatch.
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
@@ -82,7 +84,11 @@ public sealed class UserOrgContextReader : IUserOrgContextReader
     /// <summary>Cache schema version per ADR-009.</summary>
     private const int CacheVersion = 1;
 
-    /// <summary>Redis TTL — mirrors <see cref="IIdentityNormalizationService"/>'s 10-minute per-user TTL (ADR-009, NFR-03).</summary>
+    /// <summary>
+    /// Redis TTL — 10 minutes, the per-user TTL <see cref="IIdentityNormalizationService"/> had until
+    /// unified-access-control-r2 task 132 cut it to 2 minutes (ADR-009, NFR-03). Not shortened with it: these are
+    /// display names for the agent turn, not an authorization input.
+    /// </summary>
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
     private const string BusinessUnitEntity = "businessunit";

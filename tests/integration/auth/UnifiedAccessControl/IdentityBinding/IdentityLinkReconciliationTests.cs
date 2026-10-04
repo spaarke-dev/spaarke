@@ -705,7 +705,10 @@ public class IdentityLinkReconciliationTests
                 Mock.Of<TokenCredential>(),
                 Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
                 NullLogger<RegistrationDataverseService>.Instance,
-                new PerEnvironmentBinderFactory(targets)));
+                new PerEnvironmentBinderFactory(targets),
+                // Task 132: the team/BU write-path eviction hook; this suite writes no team or BU.
+                new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                    NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance)));
             services.AddSingleton<DataverseEnvironmentService>(
                 new RegistryDouble(configuration, registry ?? Array.Empty<string>(), registryFails));
         }
