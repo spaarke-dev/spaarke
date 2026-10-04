@@ -38,11 +38,25 @@
  * Mount mechanism (Phase 4 scope):
  *   Task 042 ships the mount CONTRACT — the registration + host glue. The
  *   production React bundle (esbuild/webpack-bundled @spaarke/ai-widgets +
- *   React 18 + ReactDOM as a single MDA-loadable IIFE) is shipped in Task 043
- *   ("Solution package (FormXml + web resource); deploy"). When the bundle is
- *   absent (e.g., during Phase 4 staging), this script renders a placeholder
- *   that surfaces the contract is wired correctly — diagnostic only, never
- *   blocking.
+ *   React 18 + ReactDOM as a single MDA-loadable IIFE) was SUPPOSED to ship in
+ *   Task 043 ("Solution package (FormXml + web resource); deploy") but never
+ *   did — `window.SpaarkeAiWidgets` has no producer anywhere in this repo
+ *   (confirmed by the spaarke-ontology-platform-r1 2026-10-02 reuse audit,
+ *   finding X16). `@spaarke/ai-widgets` itself has no browser-IIFE bundler
+ *   config at all (only `tsc` module output) — standing one up from scratch is
+ *   its own project, not a cleanup fix, so it is NOT attempted here (filed
+ *   instead — see notes/defer-issues.md).
+ *
+ *   Until that bundle exists, this script does NOT render a placeholder card
+ *   (spaarke-ontology-platform-r1 task 080 / C-22, 2026-10-03). It used to —
+ *   an always-visible "Matter Health insight (Phase 4 placeholder)" card that
+ *   read as a shipped, working feature forever, with no path to ever become
+ *   real without someone separately noticing and building Task 043. The
+ *   bundle-absent case now behaves exactly like the host-not-found case below:
+ *   log a diagnostic and skip the mount, leaving the host element empty. The
+ *   mount CONTRACT (FormXml host, onLoad handler, `_resolveBundle` check) is
+ *   unchanged — the day a real bundle attaches itself to `window.SpaarkeAiWidgets`,
+ *   this script mounts it with no further changes needed here.
  *
  * Source layout:
  *   - Source: src/dataverse/forms/sprk_matter/insightCardMount.ts
@@ -121,7 +135,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 // NAMESPACE
 // =============================================================================
 (function () {
-    if (typeof window === "undefined") {
+    if (typeof window === 'undefined') {
         return;
     }
     var w = window;
@@ -132,42 +146,42 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     // CONFIGURATION
     // ===========================================================================
     /** Handler version (informational; bumped per task). */
-    ns._version = "0.1.0";
+    ns._version = '0.1.0';
     /** Field name read on OnLoad to source the stored envelope (FR-17). */
-    ns._summaryField = "sprk_performancesummary";
+    ns._summaryField = 'sprk_performancesummary';
     /** Entity logical name. */
-    ns._entityName = "sprk_matter";
+    ns._entityName = 'sprk_matter';
     /** Topic identifier — aligned with `sprk_aitopicregistry.sprk_topicname`. */
-    ns._topic = "matter-health";
+    ns._topic = 'matter-health';
     /** Mode identifier — aligned with `sprk_aitopicregistry.sprk_mode`. */
-    ns._mode = "single";
+    ns._mode = 'single';
     /**
      * Canonical playbook name registered as an `insights-ask` `sprk_playbookconsumer`
      * Binding row (`sprk_consumercode`, FR-P3-01).
      * Used as the `question` field on `/api/insights/ask` per wire-shape Option (b).
      * Bare per Q-U1 — no `@v1`/`@vN` suffix.
      */
-    ns._playbookName = "matter-health-single";
+    ns._playbookName = 'matter-health-single';
     /** Subject scheme prefix per r2 multi-entity scheme. r1 uses `matter:` only. */
-    ns._subjectScheme = "matter";
+    ns._subjectScheme = 'matter';
     /** BFF endpoint — same-origin per Task 041 design. */
-    ns._invocationEndpoint = "/api/insights/ask";
+    ns._invocationEndpoint = '/api/insights/ask';
     /**
      * DOM host id for the card mount. The FormXml patch registers a custom HTML
      * web resource at this id inside the Matter Health card section. The mount
      * glue locates it via `document.getElementById`.
      */
-    ns._hostElementId = "spaarke-matter-insight-card-host";
+    ns._hostElementId = 'spaarke-matter-insight-card-host';
     // ===========================================================================
     // ENVELOPE READ — mirrors Task 040's parser; tolerates legacy R5 text.
     // ===========================================================================
     ns._parseEnvelope = function (raw) {
-        if (raw === null || raw === undefined || raw === "") {
+        if (raw === null || raw === undefined || raw === '') {
             return null;
         }
         try {
             var parsed = JSON.parse(raw);
-            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
                 return null;
             }
             return parsed;
@@ -195,36 +209,34 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
-                        url = ns._invocationEndpoint + (force === true ? "?force=true" : "");
+                        url = ns._invocationEndpoint + (force === true ? '?force=true' : '');
                         body = {
                             question: ns._playbookName,
                             subject: subject,
                             parameters: {},
                         };
                         return [4 /*yield*/, fetch(url, {
-                                method: "POST",
+                                method: 'POST',
                                 headers: {
-                                    "Content-Type": "application/json",
-                                    Accept: "application/json",
+                                    'Content-Type': 'application/json',
+                                    Accept: 'application/json',
                                 },
                                 body: JSON.stringify(body),
-                                credentials: "include",
+                                credentials: 'include',
                             })];
                     case 1:
                         response = _a.sent();
                         if (!!response.ok) return [3 /*break*/, 3];
-                        return [4 /*yield*/, response.text().catch(function () { return ""; })];
+                        return [4 /*yield*/, response.text().catch(function () { return ''; })];
                     case 2:
                         text = _a.sent();
-                        throw new Error("Insight invocation failed: HTTP " +
-                            response.status +
-                            (text ? " — " + text : ""));
+                        throw new Error('Insight invocation failed: HTTP ' + response.status + (text ? ' — ' + text : ''));
                     case 3: return [4 /*yield*/, response.json()];
                     case 4:
                         payload = (_a.sent());
                         if (payload.decline) {
-                            err = new Error(payload.decline.message || "Insufficient evidence");
-                            err.kind = "decline";
+                            err = new Error(payload.decline.message || 'Insufficient evidence');
+                            err.kind = 'decline';
                             if (payload.decline.recommendedAction) {
                                 err.recommendedAction = payload.decline.recommendedAction;
                             }
@@ -232,7 +244,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                         }
                         artifact = payload.artifact;
                         if (!artifact) {
-                            throw new Error("Insight response contained neither artifact nor decline.");
+                            throw new Error('Insight response contained neither artifact nor decline.');
                         }
                         // The BFF artifact carries body + citations; map to the envelope shape the
                         // card understands. `tldr`/`narrative` come from the persisted envelope on
@@ -260,15 +272,15 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             var assessmentId = citation.assessmentId;
             if (assessmentId) {
                 var options = {
-                    entityName: "sprk_performanceassessment",
+                    entityName: 'sprk_performanceassessment',
                     entityId: assessmentId,
                 };
                 void Xrm.Navigation.openForm(options).then(function () {
                     // Success — no action required.
                 }, function (err) {
-                    console.warn("[Matter Insight Card] v" +
+                    console.warn('[Matter Insight Card] v' +
                         ns._version +
-                        " openForm(assessment) failed: " +
+                        ' openForm(assessment) failed: ' +
                         (err instanceof Error ? err.message : String(err)));
                 });
                 return;
@@ -276,34 +288,32 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             // Document citation with SPE href → let the host open it directly
             // (window.open keeps the MDA tab context; document viewer chooses its surface).
             if (citation.speHref) {
-                window.open(citation.speHref, "_blank", "noopener");
+                window.open(citation.speHref, '_blank', 'noopener');
                 return;
             }
             // Document citation with Dataverse documentId → open `sprk_document` form.
             var documentId = citation.documentId;
             if (documentId) {
                 var options = {
-                    entityName: "sprk_document",
+                    entityName: 'sprk_document',
                     entityId: documentId,
                 };
                 void Xrm.Navigation.openForm(options).then(function () {
                     // Success — no action required.
                 }, function (err) {
-                    console.warn("[Matter Insight Card] v" +
+                    console.warn('[Matter Insight Card] v' +
                         ns._version +
-                        " openForm(document) failed: " +
+                        ' openForm(document) failed: ' +
                         (err instanceof Error ? err.message : String(err)));
                 });
                 return;
             }
             // Unknown citation shape — log only (FR-07 graceful fallback).
-            console.warn("[Matter Insight Card] v" +
-                ns._version +
-                " citation click ignored (no assessmentId / speHref / documentId): ", citation);
+            console.warn('[Matter Insight Card] v' + ns._version + ' citation click ignored (no assessmentId / speHref / documentId): ', citation);
         }
         catch (e) {
             // Defensive — citation click MUST NOT break the form.
-            console.warn("[Matter Insight Card] v" + ns._version + " citation click failed (silent):", e);
+            console.warn('[Matter Insight Card] v' + ns._version + ' citation click failed (silent):', e);
         }
     };
     // ===========================================================================
@@ -333,76 +343,20 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
      */
     ns._resolveBundle = function () {
         var bundle = window.SpaarkeAiWidgets;
-        if (bundle && typeof bundle.mountInsightSummaryCard === "function") {
+        if (bundle && typeof bundle.mountInsightSummaryCard === 'function') {
             return bundle;
         }
         return null;
     };
     // ===========================================================================
-    // PLACEHOLDER RENDER (bundle absent — Phase 4 staging only)
-    // ===========================================================================
-    /**
-     * Diagnostic placeholder rendered when the @spaarke/ai-widgets bundle is
-     * not yet loaded. Shows the resolved contract (topic / subject / mode /
-     * envelope status) so operators can verify the mount glue is wired before
-     * Task 043 ships the React bundle.
-     */
-    ns._renderPlaceholder = function (host, subject, envelope) {
-        while (host.firstChild) {
-            host.removeChild(host.firstChild);
-        }
-        var wrapper = document.createElement("div");
-        wrapper.setAttribute("data-testid", "insight-card-placeholder");
-        wrapper.style.padding = "12px";
-        wrapper.style.border = "1px dashed #c8c6c4";
-        wrapper.style.borderRadius = "4px";
-        wrapper.style.fontFamily = "Segoe UI, sans-serif";
-        wrapper.style.fontSize = "12px";
-        wrapper.style.color = "#605e5c";
-        var title = document.createElement("div");
-        title.style.fontWeight = "600";
-        title.style.marginBottom = "8px";
-        title.textContent = "Matter Health insight (Phase 4 placeholder)";
-        wrapper.appendChild(title);
-        var fact = function (k, v) {
-            var row = document.createElement("div");
-            row.style.lineHeight = "1.4";
-            var key = document.createElement("strong");
-            key.textContent = k + ": ";
-            row.appendChild(key);
-            var val = document.createElement("span");
-            val.textContent = v;
-            row.appendChild(val);
-            return row;
-        };
-        wrapper.appendChild(fact("Topic", ns._topic));
-        wrapper.appendChild(fact("Mode", ns._mode));
-        wrapper.appendChild(fact("Subject", subject));
-        wrapper.appendChild(fact("Playbook", ns._playbookName));
-        wrapper.appendChild(fact("Stored envelope", envelope === null
-            ? "(absent — pre-warm POST fires async per FR-18)"
-            : "(present — FR-19 immediate-render path active)"));
-        // FR-19: when an envelope exists, show its narrative preview inline.
-        if (envelope && (envelope.narrative || envelope.body || envelope.tldr)) {
-            var preview = document.createElement("div");
-            preview.style.marginTop = "8px";
-            preview.style.padding = "8px";
-            preview.style.background = "#f3f2f1";
-            preview.style.borderRadius = "2px";
-            preview.style.color = "#323130";
-            preview.style.whiteSpace = "pre-wrap";
-            var text = envelope.tldr ||
-                envelope.narrative ||
-                envelope.body ||
-                "(empty envelope)";
-            preview.textContent = String(text).substring(0, 500);
-            wrapper.appendChild(preview);
-        }
-        host.appendChild(wrapper);
-    };
-    // ===========================================================================
     // MOUNT — production path (bundle present)
     // ===========================================================================
+    //
+    // NOTE (spaarke-ontology-platform-r1 task 080 / C-22, 2026-10-03): there is
+    // deliberately no "bundle absent" render path here any more. See the
+    // file-header NOTE for why — the two onLoad branches below now skip the
+    // mount silently (log + return) when `_resolveBundle()` returns null,
+    // identically to the existing host-not-found branch.
     /**
      * Mount the React `InsightSummaryCard` into the host element with the
      * resolved props. FR-19 immediate-render is honoured via the
@@ -454,15 +408,13 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             var formContext = executionContext.getFormContext();
             var recordRef = formContext.data.entity.getEntityReference();
             if (!recordRef || !recordRef.id) {
-                console.log("[Matter Insight Card] v" +
-                    ns._version +
-                    " onLoad: no record id (create mode). Skipping mount.");
+                console.log('[Matter Insight Card] v' + ns._version + ' onLoad: no record id (create mode). Skipping mount.');
                 return;
             }
             var recordIdRaw = recordRef.id;
-            var recordId = recordIdRaw.replace(/[{}]/g, "");
-            var subject_1 = ns._subjectScheme + ":" + recordId;
-            var select = "?$select=" + ns._summaryField;
+            var recordId = recordIdRaw.replace(/[{}]/g, '');
+            var subject_1 = ns._subjectScheme + ':' + recordId;
+            var select = '?$select=' + ns._summaryField;
             // Resolve theme id best-effort (ADR-021 — actual Fluent v9 theme mapping
             // happens inside the @spaarke/ai-widgets bundle; we just pass the id).
             var themeId_1;
@@ -478,19 +430,17 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             Xrm.WebApi.retrieveRecord(ns._entityName, recordId, select).then(function (result) {
                 var rawValue = (result && result[ns._summaryField]) || null;
                 var envelope = ns._parseEnvelope(rawValue);
-                console.log("[Matter Insight Card] v" +
+                console.log('[Matter Insight Card] v' +
                     ns._version +
-                    " envelope read: " +
-                    (envelope === null
-                        ? "absent (will idle-render until user opens)"
-                        : "present (FR-19 immediate-render)"));
+                    ' envelope read: ' +
+                    (envelope === null ? 'absent (will idle-render until user opens)' : 'present (FR-19 immediate-render)'));
                 // Defer mount to next paint so we don't compete with MDA's own
                 // form-render frame. NFR-03 — TTI unaffected.
                 window.requestAnimationFrame(function () {
                     try {
                         var host = ns._resolveHost();
                         if (!host) {
-                            console.warn("[Matter Insight Card] v" +
+                            console.warn('[Matter Insight Card] v' +
                                 ns._version +
                                 " host element '" +
                                 ns._hostElementId +
@@ -499,43 +449,41 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                         }
                         var bundle = ns._resolveBundle();
                         if (!bundle) {
-                            console.log("[Matter Insight Card] v" +
+                            console.log('[Matter Insight Card] v' +
                                 ns._version +
-                                " @spaarke/ai-widgets bundle not loaded — rendering placeholder. " +
-                                "Production bundle ships in Task 043.");
-                            ns._renderPlaceholder(host, subject_1, envelope);
+                                ' @spaarke/ai-widgets bundle not loaded — skipping mount ' +
+                                '(no placeholder; see notes/defer-issues.md C-22). Card stays absent ' +
+                                'until the production bundle ships.');
                             return;
                         }
                         var handle = ns._mountCard(host, bundle, subject_1, envelope, themeId_1);
                         // Stash handle so a future RESET / subject-change path can call
                         // `unmount` / `update` (not used in Task 042; reserved for r2+).
                         ns._mountHandle = handle;
-                        console.log("[Matter Insight Card] v" +
+                        console.log('[Matter Insight Card] v' +
                             ns._version +
-                            " mounted. subject=" +
+                            ' mounted. subject=' +
                             subject_1 +
-                            ", topic=" +
+                            ', topic=' +
                             ns._topic +
-                            ", mode=" +
+                            ', mode=' +
                             ns._mode +
-                            ", envelope=" +
-                            (envelope === null ? "absent" : "present") +
-                            ", themeId=" +
-                            (themeId_1 === undefined ? "(unset)" : themeId_1));
+                            ', envelope=' +
+                            (envelope === null ? 'absent' : 'present') +
+                            ', themeId=' +
+                            (themeId_1 === undefined ? '(unset)' : themeId_1));
                     }
                     catch (mountErr) {
-                        console.warn("[Matter Insight Card] v" +
-                            ns._version +
-                            " mount failed (form load unaffected):", mountErr);
+                        console.warn('[Matter Insight Card] v' + ns._version + ' mount failed (form load unaffected):', mountErr);
                     }
                 });
             }, function (error) {
                 // Graceful — render with `initialEnvelope = null` so the user can
                 // still click the trigger and fetch on demand. Log only (FR-17
                 // graceful-handling pattern carried from Task 040).
-                console.warn("[Matter Insight Card] v" +
+                console.warn('[Matter Insight Card] v' +
                     ns._version +
-                    " retrieveRecord failed (continuing without initial envelope): " +
+                    ' retrieveRecord failed (continuing without initial envelope): ' +
                     (error && error.message ? error.message : String(error)));
                 window.requestAnimationFrame(function () {
                     try {
@@ -545,25 +493,20 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                         }
                         var bundle = ns._resolveBundle();
                         if (!bundle) {
-                            ns._renderPlaceholder(host, subject_1, null);
                             return;
                         }
                         var handle = ns._mountCard(host, bundle, subject_1, null, themeId_1);
                         ns._mountHandle = handle;
                     }
                     catch (mountErr) {
-                        console.warn("[Matter Insight Card] v" +
-                            ns._version +
-                            " mount-after-read-failure also failed (silent):", mountErr);
+                        console.warn('[Matter Insight Card] v' + ns._version + ' mount-after-read-failure also failed (silent):', mountErr);
                     }
                 });
             });
-            console.log("[Matter Insight Card] v" +
-                ns._version +
-                " loaded. Envelope read dispatched (non-blocking).");
+            console.log('[Matter Insight Card] v' + ns._version + ' loaded. Envelope read dispatched (non-blocking).');
         }
         catch (error) {
-            console.error("[Matter Insight Card] Error in onLoad (form load unaffected):", error);
+            console.error('[Matter Insight Card] Error in onLoad (form load unaffected):', error);
         }
     };
 })();
