@@ -65,7 +65,7 @@ public class RecordCreatorPersonStampTests
             .ReturnsAsync(Team);
         return new RecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
-            IdentityNormalizationFixtures.NoLinkedContact(), NullLogger<RecordCreationService>.Instance);
+            IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<RecordCreationService>.Instance);
     }
 
     [Theory]

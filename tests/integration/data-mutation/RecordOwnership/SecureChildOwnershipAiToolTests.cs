@@ -258,14 +258,42 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     }
 
     [Fact]
-    public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsRefused_ItMustBeSecuredByProvisioning_Task158()
+    public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsCreatedByTheAppAsAnOrdinaryRowOfTheCallersUnit_Task158()
     {
-        // Owner round 6: a work assignment under a secure root is itself secure — through provisioning (task 158), never
-        // a bare re-own by the Secure team. From chat it is refused, and nothing is created.
+        // Owner round 6 (task 158): a work assignment under a secure root is itself secure — made so by PROVISIONING, for the
+        // person who asked (creator shared first, then the named team, its own container; SecureRootInheritanceTests). So
+        // it is created exactly as an unfiled one is: owned by the caller's business-unit team, never by the Secure team
+        // (a bare re-own would leave a row nobody can see — S5) and never as the user.
         var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().BeEmpty("never owned by the individual");
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_workassignment").Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam, "the caller's business-unit team — provisioning moves it");
+        Owner(fields).Should().NotBe(Directory.SecureNamedTeam);
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AWorkAssignmentWhoseParentsFlagCannotBeRead_IsRefused_AndNothingIsCreated_Task158()
+    {
+        // Owner (task 158 constraint): "if the parent's flag cannot be read, refuse the create". The gate reads the matter
+        // app-only and finds its flag EMPTY (owner round 17 item 3: empty is never "not secure").
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                q.EntityName == "sprk_matter"
+                    ? new EntityCollection(new List<Entity> { new("sprk_matter", OrdinaryMatter) })
+                    : new EntityCollection());
+
+        var result = await CreateRecordHandler(rootFiling: SecureRootFilingGateFixtures.Over(entities.Object)).ExecuteChatAsync(
+            CreateContext("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        result.ErrorMessage.Should().Contain("NOT created");
         _appCreates.Should().BeEmpty();
         _user.Posts.Should().BeEmpty();
     }
@@ -531,12 +559,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     // Harness
     // =====================================================================================
 
+    /// <remarks>Task 158: the secure-root gate defaults to one over a Dataverse with no rows (nothing is found filed under
+    /// anything secure, so nothing is secured here); the securing itself is SecureRootInheritanceTests'.</remarks>
     private DataverseCreateRecordHandler CreateRecordHandler(
         IRecordOwnershipResolver? resolver = null,
-        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null) =>
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             resolver ?? _world.Resolver(), _appOnly.Object,
-            identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object);
+            identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
+            rootFiling ?? SecureRootFilingGateFixtures.NothingSecure());
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -552,7 +584,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
                 _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
-                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver())
+                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -587,7 +619,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     /// caller's held privileges, AppendTo per record, field-secured columns, rows the caller can see, and a record of
     /// every POST and PATCH made as the caller.
     /// </summary>
-    private sealed partial class ScriptedUserClient(Guid me) : IDataverseUserClient
+    /// <remarks>Internal (task 158): <c>SecureRootInheritanceWriterTests</c> drives the same chat tools over it.</remarks>
+    internal sealed partial class ScriptedUserClient(Guid me) : IDataverseUserClient
     {
         private static readonly Dictionary<string, string> EntitySets = new()
         {

@@ -558,6 +558,24 @@ public static class ExternalAccessModule
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob>(
             Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob.DefaultCronSchedule, enabled: false);
 
+        // unified-access-control-r2 task 158 (owner round 6) — a work assignment or project FILED UNDER a secure matter or
+        // project is itself secure: secured through /provision-project's own steps (ProvisionInheritedAsync, for its
+        // creator) and given its parents' sharees through the synchronizer above. Called by provisioning's Step 8 (a parent
+        // becoming secure), by the unsecure endpoint (the still-secure-parent rule, the related-records list), by the BFF
+        // create / re-file writers (through SecureRootFilingGate) and by the job below. Concrete (ADR-010); SCOPED because
+        // the reconciler and synchronizer it composes are. Every dependency — IGenericEntityService, DataverseWebApiClient,
+        // SpeFileStore, the POA seam, the reconciler, the synchronizer, the guard — is registered unconditionally.
+        // §10/§11: notes/task-158-secure-inherit-filed-records.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.SecureRootInheritance>();
+
+        // Task 158 — the safety net for filed records written outside the BFF (wizards, forms, imports, flows) and for a
+        // parent's later share changes. Every five minutes (owner R3/R4), ENABLED WITH WRITES: owner round 6 says such a
+        // record IS secure, every write is provisioning's own or the synchronizer's add-only mirror, and nothing here ever
+        // takes a record out of isolation. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6).
+        // UNCONDITIONAL (ADR-032): IServiceScopeFactory and TimeProvider are unconditional.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureRootInheritanceJob>(
+            Sprk.Bff.Api.Services.Access.SecureRootInheritanceJob.DefaultCronSchedule);
+
         // unified-access-control-r2 task 143 (owner Q4; round 3 R3/R4) — the No Access safety net: every 5 minutes,
         // every active entry is enforced through NoAccessShareEnforcer (out-of-band MDA shares after an entry, records
         // that became secure, links that appeared). ENABLED with writes ON, per the owner's R4 answer — it only ever

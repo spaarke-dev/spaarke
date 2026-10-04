@@ -105,7 +105,7 @@ public class RefilePathRestampTests
         var world = CommunicationWorld();
         var handler = new DataverseUpdateHandler(
             Substitute.For<IFieldMappingDataverseService>(), world.Service, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), world.Restamper,
-            NullLogger<DataverseUpdateHandler>.Instance);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,

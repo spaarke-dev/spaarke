@@ -567,7 +567,10 @@ public sealed class IncomingAssociationResolver
     /// <summary>The communication row exactly as <paramref name="fields"/> will write it (its lookups and its pair id).</summary>
     private static Entity RowAsWritten(Dictionary<string, object> fields)
     {
-        var row = new Entity(CommunicationEntity);
+        // An in-memory projection for the classification rule — never written. Built with an explicit (empty) id: a
+        // one-argument construction of a child table reads as a CREATE to RecordOwnerAssignmentCensusTests (batch 4
+        // integration, task 156 x task 146), and this row is not one.
+        var row = new Entity(CommunicationEntity, Guid.Empty);
         foreach (var (column, value) in fields)
         {
             if (value is EntityReference || (value is string && column == CoreAncestorResolver.RegardingRecordIdColumn))

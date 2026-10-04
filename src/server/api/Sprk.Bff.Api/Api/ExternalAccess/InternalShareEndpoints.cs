@@ -263,6 +263,7 @@ public static class InternalShareEndpoints
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildShareSynchronizer secureChildShares,
         SecureShareNoAccessGuard noAccessGuard,
+        SecureRootInheritance relatedRoots,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -439,7 +440,8 @@ public static class InternalShareEndpoints
 
             // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
             return await ChildrenIncompleteAfterShareAsync(
-                       secureChildShares, root, systemUserId, OutcomeUnchanged, current, httpContext, logger, callerOid, ct)
+                       secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
+                       callerOid, ct)
                    ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                        systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
         }
@@ -489,7 +491,8 @@ public static class InternalShareEndpoints
 
         // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
         return await ChildrenIncompleteAfterShareAsync(
-                   secureChildShares, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger, callerOid, ct)
+                   secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
+                   callerOid, ct)
                ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                    systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
                    outcome, narrowed));
@@ -636,6 +639,7 @@ public static class InternalShareEndpoints
     /// </summary>
     private static async Task<IResult?> ChildrenIncompleteAfterShareAsync(
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         GrantExternalAccessEndpoint.GrantRootResolution root,
         Guid systemUserId,
         string rootOutcome,
@@ -646,6 +650,13 @@ public static class InternalShareEndpoints
         CancellationToken ct)
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
+
+        // Task 158 (owner round 6: "the parent's sharees can see it"): the SECURE work assignments and projects filed under
+        // this matter or project are given the new sharee now (add-only; never thrown — the secure-root inheritance job
+        // completes what this cannot). Not part of this response's contract: the record's own share stands either way.
+        await relatedRoots.PassSharesOnAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, httpContext.TraceIdentifier, ct);
+
         if (children.IsComplete)
             return null;
 

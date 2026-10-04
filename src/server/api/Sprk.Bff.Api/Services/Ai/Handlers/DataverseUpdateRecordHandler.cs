@@ -62,6 +62,11 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// stays private to <c>CoreAncestorRestamper</c>. The queued path this tool used before (an enqueue onto
 /// <c>CoreAncestorRestampQueue</c>, run by the background job seconds later) is removed; the queue stays for the storage
 /// resolver's stale refusals. Record: the task 156 note (owner round 8 section) and the task 156 POML execution block.
+/// (3) PROPOSED (unified-access-control-r2 task 158, owner round 6 — the same reasoning as (1) and (2), awaiting the owner's
+/// confirmation as an extension of Amendment A-UAC146): when the caller's own update files a work assignment or project
+/// under a SECURE matter or project, that record is secured in the same call through
+/// <see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/> — provisioning's own app-only steps, for the person who
+/// created the record (never the caller's choice of anyone else); nothing of the caller's own write runs app-only.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
@@ -79,12 +84,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp _restamp;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
 
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership)
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -93,6 +100,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         // Task 146 r2: unconditionally registered (MetadataServiceExtensions) — no asymmetric registration (§10 F.1).
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        // Task 158 (owner round 6): a work assignment or project re-filed under a secure record is secured in the same
+        // call. Registered beside the restamper (AddCoreAncestorResolver, which AddToolFramework calls) — §10 F.1.
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
     }
 
     /// <inheritdoc />
@@ -202,6 +212,17 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // Task 158 (owner round 6): re-filing a work assignment or project — whether the record it will be filed under
+            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure").
+            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken)
+                    .ConfigureAwait(false) is { } rootRefusal)
+            {
+                return LogOutcome(context, tablename, recordId,
+                    Error(tool, $"The update was NOT written: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
+                        rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                    stopwatch);
+            }
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
                 tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
@@ -238,6 +259,22 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     "[dataverse.update_record] the core-ancestor re-stamp after the update of {Entity} {RecordId} did not finish "
                     + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
                     tablename, recordId, restamp.Failures.Count, restamp.Truncated);
+            }
+
+            // Task 158 (owner round 6; §6.5 path B proposed beside round 8 item 1 — see the class remarks): a work assignment
+            // or project the caller's own update filed under a secure matter or project is secured NOW, through provisioning's
+            // own steps, for the person who created it. Never thrown; an incomplete securing is reported, not hidden.
+            var secured = await _rootFiling
+                .SecureAfterWriteAsync(tablename, recordId, mapped.Item!.Columns, context.DecisionId.ToString("N"))
+                .ConfigureAwait(false);
+            if (secured is { IsComplete: false })
+            {
+                return LogOutcome(context, tablename, recordId,
+                    Error(tool,
+                        $"The update was written, but record {recordId:D} is now filed under a secure record and could not be made " +
+                        $"secure yet ({secured.ReasonCode}: {secured.Detail}). It is retried automatically within a few minutes.",
+                        secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt),
+                    stopwatch);
             }
 
             var result = ToolResult.Ok(

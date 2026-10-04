@@ -4,7 +4,9 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -94,6 +96,25 @@ public static class UnsecureProjectEndpoint
     /// </summary>
     internal const string ReasonCascadeChildrenUnreadable = "sdap.unsecure.cascade_children_unreadable";
 
+    /// <summary>
+    /// Task 158 (owner round 6, interpretation recorded in the POML — owner-reversible): the record is a work assignment or
+    /// project FILED UNDER a matter or project that is still secure, so it cannot be unsecured — the round-6 rule (and the
+    /// secure-root inheritance job) would secure it again. 409, nothing written; the detail names the secure record.
+    /// </summary>
+    internal const string ReasonParentStillSecure = "sdap.unsecure.parent_still_secure";
+
+    /// <summary>
+    /// Task 158: whether a matter or project the record is filed under is still secure could not be read (or read empty).
+    /// 500, nothing written (ADR-003 — an unreadable parent is never "not secure"). The same caller may call again.
+    /// </summary>
+    internal const string ReasonParentUnverifiable = "sdap.unsecure.parent_unverifiable";
+
+    /// <summary>
+    /// Task 158: an <c>alsoUnsecure</c> record is not a secure work assignment or project filed under this record — it is
+    /// left as it is and reported.
+    /// </summary>
+    internal const string ReasonNotRelated = "sdap.unsecure.not_related";
+
     public static RouteGroupBuilder MapUnsecureProjectEndpoint(this RouteGroupBuilder group)
     {
         group.MapPost("/unsecure-project", UnsecureProjectAsync)
@@ -129,6 +150,7 @@ public static class UnsecureProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildReconciler secureChildren,
+        SecureRootInheritance relatedRoots,
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -143,6 +165,228 @@ public static class UnsecureProjectEndpoint
 
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
+
+        // Task 158: the related records the caller asks to unsecure too — validated before anything is written.
+        var also = new List<(SecureRecordRoot Root, Guid Id)>();
+        foreach (var related in request.AlsoUnsecure ?? Array.Empty<RelatedRecordRef>())
+        {
+            if (related is null
+                || !ExternalGrantRoot.TryParse(related.RecordType, out var relatedType)
+                || related.RecordId == Guid.Empty
+                || !SecureRootInheritance.Inherits(ExternalGrantRoot.LogicalNameFor(relatedType))
+                || (relatedType == root.Type && related.RecordId == recordId))
+            {
+                return Problem(StatusCodes.Status400BadRequest, "Bad Request",
+                    "Each alsoUnsecure entry names a work assignment or project filed under this record (recordType " +
+                    "'workassignment' or 'project', and its recordId). Nothing was changed.", traceId);
+            }
+
+            also.Add((SecureRecordRoot.For(relatedType), related.RecordId));
+        }
+
+        var result = await UnsecureRecordAsync(
+            root, recordId, request, dataverseClient, recordShare, callerAccessProbe, secureChildren, relatedRoots,
+            configuration, httpContext, logger, traceId, ct);
+
+        // The record's own unsecure did not succeed: its answer stands, and no related record is touched.
+        if (result is not Ok<UnsecureProjectResponse> { Value: { } response } || !SecureRootInheritance.IsParent(root.LogicalName))
+        {
+            if (also.Count > 0 && result is Ok<UnsecureProjectResponse> { Value: { } plain })
+            {
+                // A work assignment has nothing filed under it for this rule: every alsoUnsecure entry is not related.
+                return TypedResults.Ok(plain with
+                {
+                    RelatedRecordsUnsecured = also.Select(a => new RelatedUnsecureOutcome(
+                        a.Root.WireToken, a.Id, "refused", ReasonNotRelated,
+                        $"Nothing is filed under a {root.DisplayLabel.ToLowerInvariant()} for this rule.")).ToList(),
+                });
+            }
+
+            return result;
+        }
+
+        return TypedResults.Ok(await WithRelatedRecordsAsync(
+            response, root, recordId, also, request, dataverseClient, recordShare, callerAccessProbe, secureChildren,
+            relatedRoots, configuration, httpContext, logger, traceId, ct));
+    }
+
+    /// <summary>
+    /// Task 158 (owner round 6: "the user can unsecure any related records") — after the record itself is no longer secure:
+    /// each <c>alsoUnsecure</c> record that is a secure work assignment or project filed under it, and that the caller may
+    /// unsecure under F3 (<see cref="SecureDesignationRemoval"/>: a Full Access holder on THAT record, or the person who
+    /// created it — owner round 3b, round 10 item 7), is unsecured through this endpoint's own steps; the rest are reported.
+    /// Then the related records that are STILL secure are listed, for the UI to offer. Never auto-unsecure: nothing is
+    /// unsecured that was not asked for.
+    /// </summary>
+    private static async Task<UnsecureProjectResponse> WithRelatedRecordsAsync(
+        UnsecureProjectResponse response,
+        SecureRecordRoot root,
+        Guid recordId,
+        IReadOnlyList<(SecureRecordRoot Root, Guid Id)> also,
+        UnsecureProjectRequest request,
+        DataverseWebApiClient dataverseClient,
+        IDataverseRecordShareService recordShare,
+        CallerRecordAccessProbe callerAccessProbe,
+        SecureChildReconciler secureChildren,
+        SecureRootInheritance relatedRoots,
+        IConfiguration configuration,
+        HttpContext httpContext,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        IReadOnlyList<FiledRootRef> filed;
+        try
+        {
+            filed = await relatedRoots.ListFiledRootsAsync(new[] { (root.LogicalName, recordId) }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[UNSECURE] The records filed under {RecordType} {RecordId} could not be read; no related record was " +
+                "unsecured and the list of those still secure is not known. TraceId={TraceId}", root.WireToken, recordId, traceId);
+            return response with
+            {
+                RelatedSecureRecordsUnreadable = true,
+                RelatedRecordsUnsecured = also.Count == 0
+                    ? null
+                    : also.Select(a => new RelatedUnsecureOutcome(a.Root.WireToken, a.Id, "failed", ReasonNotRelated,
+                        "The records filed under this one could not be read, so it was not unsecured. Try again.")).ToList(),
+            };
+        }
+
+        // Only records PROVABLY filed under this one are related (a pair whose type could not be read is not shown, and is
+        // refused below as not related).
+        var secureFiled = filed.Where(f => f.FlaggedSecure && f.Confirmed).ToList();
+        var outcomes = new List<RelatedUnsecureOutcome>();
+        var unsecured = new HashSet<(string, Guid)>();
+        var caller = SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext);
+
+        foreach (var (relatedRoot, relatedId) in also)
+        {
+            if (!secureFiled.Any(f => string.Equals(f.Table, relatedRoot.LogicalName, StringComparison.OrdinalIgnoreCase) && f.Id == relatedId))
+            {
+                outcomes.Add(new RelatedUnsecureOutcome(relatedRoot.WireToken, relatedId, "refused", ReasonNotRelated,
+                    $"It is not a secure {relatedRoot.DisplayLabel.ToLowerInvariant()} filed under this " +
+                    $"{root.DisplayLabel.ToLowerInvariant()}, so it was left as it is."));
+                continue;
+            }
+
+            // F3 — the ONE check (task 146 c1's SecureDesignationRemoval, which task 150's unsecure gate uses too): Full
+            // Access on the related record, or the person who created it. Decided before anything is written.
+            var decision = await SecureDesignationRemoval.DecideAsync(
+                await F3QuestionAsync(dataverseClient, relatedRoot, relatedId, caller, ct), ct);
+            if (!decision.IsPermitted)
+            {
+                logger.LogWarning(
+                    "[UNSECURE] Related {RecordType} {RecordId} of {ParentType} {ParentId} NOT unsecured: F3 {Outcome} ({Basis}). " +
+                    "TraceId={TraceId}", relatedRoot.WireToken, relatedId, root.WireToken, recordId, decision.Outcome,
+                    decision.Basis, traceId);
+                outcomes.Add(new RelatedUnsecureOutcome(relatedRoot.WireToken, relatedId, "refused", decision.ReasonCode,
+                    decision.Basis == SecureRemovalBasis.NotFullAccessOrCreator
+                        ? $"Only someone with Full Access to this {relatedRoot.DisplayLabel.ToLowerInvariant()}, or the person who " +
+                          "created it, can remove its secure designation. It stays secure."
+                        : $"Whether you may remove this {relatedRoot.DisplayLabel.ToLowerInvariant()}'s secure designation could " +
+                          "not be checked, so it stays secure. Try again."));
+                continue;
+            }
+
+            var relatedResult = await UnsecureRecordAsync(
+                relatedRoot, relatedId,
+                new UnsecureProjectRequest(Guid.Empty, request.ReassignToSystemUserId, relatedRoot.WireToken, relatedId),
+                dataverseClient, recordShare, callerAccessProbe, secureChildren, relatedRoots, configuration, httpContext, logger,
+                traceId, ct);
+
+            if (relatedResult is Ok<UnsecureProjectResponse>)
+            {
+                unsecured.Add((relatedRoot.LogicalName, relatedId));
+                outcomes.Add(new RelatedUnsecureOutcome(relatedRoot.WireToken, relatedId, "unsecured", null, null));
+            }
+            else if (relatedResult is ProblemHttpResult problem)
+            {
+                var code = problem.ProblemDetails.Extensions.TryGetValue("reasonCode", out var value) ? value?.ToString() : null;
+                outcomes.Add(new RelatedUnsecureOutcome(relatedRoot.WireToken, relatedId,
+                    problem.StatusCode is >= 400 and < 500 ? "refused" : "failed", code, problem.ProblemDetails.Detail));
+            }
+            else
+            {
+                outcomes.Add(new RelatedUnsecureOutcome(relatedRoot.WireToken, relatedId, "failed", null,
+                    "Its unsecure answered an unexpected result."));
+            }
+        }
+
+        return response with
+        {
+            RelatedSecureRecords = secureFiled
+                .Where(f => !unsecured.Contains((f.Table, f.Id)))
+                .Select(f => new RelatedSecureRecord(SecureRootInheritance.WireTokenFor(f.Table), f.Id, f.Name))
+                .ToList(),
+            RelatedRecordsUnsecured = also.Count == 0 ? null : outcomes,
+        };
+    }
+
+    /// <summary>
+    /// The F3 question for one related record: the caller (asked as themselves), the record itself as the secure record whose
+    /// protection ends, and its creator — <c>createdby</c>, then the BFF-stamped <c>sprk_createdbyperson</c> read on its own
+    /// (an environment without the column answers "could not tell", never "allowed").
+    /// </summary>
+    private static async Task<SecureRemovalQuestion> F3QuestionAsync(
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, SecureRemovalCaller caller, CancellationToken ct)
+    {
+        Guid? createdBy = null;
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<SecurityRow>(
+                root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: $"{root.IdColumn},_createdby_value", top: 1,
+                cancellationToken: ct);
+            createdBy = rows.FirstOrDefault()?._createdby_value;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Not read: the creator branch may still admit through the person column; otherwise Full Access decides.
+        }
+
+        return new SecureRemovalQuestion
+        {
+            Caller = caller,
+            SecuredRecords = new[] { new SecuredRecordRef(root.LogicalName, recordId) },
+            CreatedBy = createdBy,
+            ReadCreatedByPersonAsync = async token =>
+            {
+                try
+                {
+                    var rows = await dataverseClient.QueryAsync<CreatorPersonRow>(
+                        root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: root.CreatorPersonSelect, top: 1,
+                        cancellationToken: token);
+                    return CreatorPersonAnswer.Recorded(rows.FirstOrDefault()?.Person);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                {
+                    return CreatorPersonAnswer.ColumnAbsent;
+                }
+            },
+        };
+    }
+
+    /// <summary>
+    /// Removes the secure designation from ONE record — the endpoint's steps (below), for the record the request names and,
+    /// task 158, for each related record an F3 holder asks to unsecure with it.
+    /// </summary>
+    private static async Task<IResult> UnsecureRecordAsync(
+        SecureRecordRoot root,
+        Guid recordId,
+        UnsecureProjectRequest request,
+        DataverseWebApiClient dataverseClient,
+        IDataverseRecordShareService recordShare,
+        CallerRecordAccessProbe callerAccessProbe,
+        SecureChildReconciler secureChildren,
+        SecureRootInheritance relatedRoots,
+        IConfiguration configuration,
+        HttpContext httpContext,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
 
         // The legacy field names a PROJECT. For a matter or work assignment it is empty, never the matter's id.
         var legacyProjectId = root.Type == ExternalGrantRootType.Project ? recordId : Guid.Empty;
@@ -205,6 +449,40 @@ public static class UnsecureProjectEndpoint
                 RecordType: root.WireToken,
                 RecordId: recordId,
                 Children: SecureChildPassSummary.From(completing)));
+        }
+
+        // ── Step 1.5 (task 158): a record filed under a STILL-secure matter or project stays secure ──
+        //
+        // Owner round 6 (interpretation recorded in the POML, owner-reversible): a work assignment or project filed under a
+        // secure record is secure itself; unsecuring it while that record is still secure would be undone by the same rule
+        // (and the secure-root inheritance job), so it is refused, naming the secure record. Before any write. An
+        // unreadable parent refuses too (ADR-003): it is never "not secure".
+        var parents = await relatedRoots.FindSecureParentsAsync(root.LogicalName, recordId, ct);
+        if (!parents.HasSecureParent && !parents.IsKnown)
+        {
+            logger.LogWarning(
+                "[UNSECURE] {RecordType} {RecordId}: whether a record it is filed under is still secure could not be determined " +
+                "({Why}). Nothing was changed. TraceId={TraceId}", root.WireToken, recordId, parents.Unverifiable, traceId);
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"Whether the matter or project this {root.DisplayLabel.ToLowerInvariant()} is filed under is still secure could " +
+                "not be determined, so its secure designation was left in place and nothing was changed. Try again.",
+                traceId, (ReasonKey, ReasonParentUnverifiable));
+        }
+
+        if (parents.SecureParents.FirstOrDefault() is { } secureParent)
+        {
+            var parentLabel = SecureRootInheritance.WireTokenFor(secureParent.Table) == "matter" ? "matter" : "project";
+            logger.LogInformation(
+                "[UNSECURE] {RecordType} {RecordId} is filed under secure {ParentType} {ParentId}; refused (owner round 6). " +
+                "TraceId={TraceId}", root.WireToken, recordId, parentLabel, secureParent.Id, traceId);
+            return Problem(StatusCodes.Status409Conflict, "Conflict",
+                $"This {root.DisplayLabel.ToLowerInvariant()} is filed under the secure {parentLabel} " +
+                $"'{secureParent.Name ?? secureParent.Id.ToString()}', which is still secure. A record filed under a secure record " +
+                $"is secure itself, so it cannot be made ordinary while that {parentLabel} is secure — it would be secured again. " +
+                $"Remove the {parentLabel}'s secure designation first (that call can remove this one's in the same step), or file " +
+                $"this {root.DisplayLabel.ToLowerInvariant()} somewhere else. Nothing was changed.",
+                traceId, (ReasonKey, ReasonParentStillSecure),
+                ("parentRecordType", parentLabel), ("parentRecordId", secureParent.Id), ("parentName", secureParent.Name));
         }
 
         // ── Step 2: Resolve the new owner ────────────────────────────────────
@@ -636,5 +914,16 @@ public static class UnsecureProjectEndpoint
 
         [JsonPropertyName("_owninguser_value")]
         public Guid? _owninguser_value { get; set; }
+
+        /// <summary>Task 158: the creator F3 admits for a related record.</summary>
+        [JsonPropertyName("_createdby_value")]
+        public Guid? _createdby_value { get; set; }
+    }
+
+    /// <summary>Task 158: the BFF-stamped creator person of a related record (task 133's column).</summary>
+    private sealed class CreatorPersonRow
+    {
+        [JsonPropertyName(RecordCreatorPerson.ValueColumn)]
+        public Guid? Person { get; set; }
     }
 }

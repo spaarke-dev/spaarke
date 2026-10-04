@@ -73,6 +73,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <c>SharedToCreatorSystemUserId</c> is <see cref="Guid.Empty"/> — its creator's share was proven by the earlier call. Absent
 /// work, such a call still answers 409 <c>already_provisioned</c>. Additive to the JSON contract.
 /// </param>
+/// <param name="FiledRecords">
+/// Task 158 (owner round 6): the work assignments and projects FILED UNDER this matter or project, each made secure itself
+/// (its own named-team owner, container and creator share) and given this record's sharees. A successful response always
+/// carries a complete pass; one that is not complete is the <c>sdap.provision.children_incomplete</c> error. Null for a
+/// work assignment (nothing is filed under one for this rule). Additive to the JSON contract.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
@@ -86,7 +92,8 @@ public record ProvisionProjectResponse(
     bool Resumed = false,
     IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null,
     SecureChildPassSummary? Children = null,
-    bool ChildrenOnly = false);
+    bool ChildrenOnly = false,
+    SecureFiledRecordsSummary? FiledRecords = null);
 
 /// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>
 public record ProvisionSkippedPrincipal(Guid SystemUserId, string ReasonCode, string Message);

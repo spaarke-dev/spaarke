@@ -214,6 +214,7 @@ public sealed class RecordCreationService
     private readonly IFieldMappingDataverseService _fieldMappings;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<RecordCreationService> _logger;
 
     public RecordCreationService(
@@ -221,12 +222,16 @@ public sealed class RecordCreationService
         IFieldMappingDataverseService fieldMappings,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<RecordCreationService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        // Task 158 (owner round 6): a project the Field Mapping Framework files under a secure matter or project is secured
+        // through provisioning's own steps. Registered by AddCoreAncestorResolver (unconditional, §10 F.1).
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -504,11 +509,34 @@ public sealed class RecordCreationService
         // Task 133 (owner round 7 item 2): the app-only create's person, as for Matter.
         Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
 
+        // Task 158 (owner round 6): a project the field mapping filed under a matter or project (its polymorphic pair) —
+        // whether that record is secure must be readable, or nothing is created (an unreadable flag is never "not secure").
+        if (await _rootFiling.CheckAsync(ProjectEntity, null, entity.Attributes.Select(a => new KeyValuePair<string, object?>(a.Key, a.Value)), ct)
+                .ConfigureAwait(false) is { } rootRefusal)
+        {
+            return RecordCreationResult.Failed(new RecordCreationFailure(
+                RecordCreationFailureKind.OwnerUnresolved,
+                rootRefusal.RefusalCode ?? "record_owner_parent_undetermined",
+                $"The project was not created: {rootRefusal.Reason}."));
+        }
+
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
             createdId, request.CallerUserId, ownerTeamId, warnings.Count);
+
+        // Task 158: filed under a secure record → secured now, for its maker (sprk_createdbyperson), through provisioning's
+        // own steps. A securing that did not complete is reported, not hidden (the job completes it within minutes).
+        // The create's own columns: a project the mapping filed under nothing needs no read at all.
+        if (await _rootFiling.SecureAfterWriteAsync(ProjectEntity, createdId, entity.Attributes.Keys.ToArray(), request.CallerUserId)
+                .ConfigureAwait(false)
+                is { IsComplete: false } secured)
+        {
+            warnings.Add(
+                "The project is filed under a secure record but could not be made secure yet " +
+                $"({secured.ReasonCode}); it is retried automatically within a few minutes.");
+        }
 
         return new RecordCreationResult
         {

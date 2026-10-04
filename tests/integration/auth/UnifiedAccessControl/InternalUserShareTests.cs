@@ -502,7 +502,7 @@ public class InternalUserShareTests
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
             _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
         _shares.Writes.Should().BeEmpty();
@@ -1156,7 +1156,8 @@ public class InternalUserShareTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
             _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
-            _children.Synchronizer(_shares), _guard, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(), NullLogger<Program>.Instance,
+            CancellationToken.None);
 
     /// <summary>
     /// Reports fixed rights for the caller, which is what the intersection rule reads. A probe that answered

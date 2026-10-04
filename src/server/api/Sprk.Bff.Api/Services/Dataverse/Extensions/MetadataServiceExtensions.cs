@@ -99,6 +99,13 @@ public static class MetadataServiceExtensions
         // (§10 F.1). Unconditional (ADR-032).
         services.TryAddSingleton<CoreAncestorAfterWriteRestamp>();
 
+        // Task 158 (owner round 6): the two calls a BFF writer of a work assignment or project makes around a create or a
+        // re-file, so one filed under a secure matter or project is secured in the same operation. Here for the same §10
+        // F.1 reason: every composition with a writer (the tool framework's scan, the playbook nodes, the Office and
+        // finance modules) calls this method. A singleton over IServiceScopeFactory only — it resolves the scoped
+        // SecureRootInheritance (ExternalAccessModule) per call and REFUSES a filing write where it cannot. Unconditional.
+        services.TryAddSingleton<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
+
         return services;
     }
 

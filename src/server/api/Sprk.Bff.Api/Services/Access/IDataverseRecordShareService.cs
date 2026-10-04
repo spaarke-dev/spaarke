@@ -65,6 +65,20 @@ public interface IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default);
 
+    /// <inheritdoc cref="DataverseWebApiService.RetrievePrincipalRightsAsync"/>
+    /// <remarks>Task 146 c1-r1 (owner round 13 item 8): the EFFECTIVE-rights read beside the share reads — the one question
+    /// a writer that impersonates a user (and holds no token of theirs) needs for F3. Shares say who was GRANTED access;
+    /// this says what the user can DO, roles and teams included.
+    /// <para>The default body FAULTS (never "no rights", never "all rights"), so a test double that predates this member
+    /// answers F3 as "could not be checked" — fail closed — without every double having to change.</para></remarks>
+    Task<AccessRights> GetPrincipalRightsAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => Task.FromException<AccessRights>(new NotSupportedException(
+            $"{GetType().Name} does not read a principal's effective rights."));
+
     /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessForRecordsOrThrowAsync"/>
     /// <remarks>unified-access-control-r2 task 149: the strict read for many records of one table, for the secure-child
     /// share synchronizer. Every record asked about is in the answer, or the call throws.</remarks>

@@ -126,9 +126,13 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         var otherProject = Guid.NewGuid();
         world.OrdinaryRoot("sprk_project", otherProject);
         world.OrdinaryChild("sprk_document", family.OtherRecordsDocument, ("sprk_project", "sprk_project", otherProject));
+        // A ROOT of its own reachable from the record — filed under the record's EVENT. Task 158 (owner round 6) secures a
+        // work assignment filed DIRECTLY under a secure matter or project (its own provisioning; SecureRootInheritanceTests),
+        // so this decoy is filed through an intermediate, which neither the child pass (roots are never walked) nor the
+        // round-6 rule (a matter or project parent only) touches. Before task 158 it named the project directly.
         world.Add("sprk_workassignment", family.ChildRoot,
             ("owningteam", new Microsoft.Xrm.Sdk.EntityReference("team", GeneralTeam)), ("sprk_issecure", true),
-            ("sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", rootId)));
+            ("sprk_regardingevent", new Microsoft.Xrm.Sdk.EntityReference("sprk_event", family.Event)));
         world.OrdinaryChild("sprk_todo", family.ChildRootsTodo,
             ("sprk_regardingworkassignment", "sprk_workassignment", family.ChildRoot));
 

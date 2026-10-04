@@ -2,6 +2,7 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
@@ -54,6 +55,34 @@ internal static class OwnedChildWrite
         "modifiedby", "modifiedon", "modifiedonbehalfby",
         "overriddencreatedon", "importsequencenumber",
     };
+
+    /// <summary>
+    /// Task 158: every column a mapped write sets, as <see cref="SecureRootFilingGate.CheckAsync"/> reads them — each lookup
+    /// as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, each cleared column as <c>null</c>, each plain value as written
+    /// (the polymorphic pair's id is a text column) — so the gate can tell what a work assignment or project will be filed
+    /// under.
+    /// </summary>
+    internal static IReadOnlyList<KeyValuePair<string, object?>> WritesOf(DataverseWriteItemMapper.MappedItem item)
+    {
+        var writes = new List<KeyValuePair<string, object?>>();
+        foreach (var lookup in item.Lookups)
+            writes.Add(new(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId)));
+        foreach (var column in item.ClearedColumns)
+            writes.Add(new(column, null));
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (property.Name.Contains('@') || property.Value.ValueKind == JsonValueKind.Null)
+                continue; // a lookup bind (taken above) or a clear (taken above)
+
+            writes.Add(new(property.Name, property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString()
+                : property.Value.GetRawText()));
+        }
+
+        return writes;
+    }
 
     /// <summary>The ownership parents a mapped row is filed under (resolver's definition — no per-table list).</summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(DataverseWriteItemMapper.MappedItem item) =>
@@ -199,9 +228,10 @@ internal static class OwnedChildWrite
         public DataverseUserResponse? ClientFailure { get; init; }
 
         /// <summary>
-        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a root
-        /// (task 158 secures a work assignment or project filed under a secure record) or a table outside the ownership
-        /// set (the Secure Record Owner role holds no Read on it). Nothing is created.
+        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a matter (a
+        /// root, made secure only through its own Make Secure; a work assignment or project is instead created as an
+        /// ordinary row and secured by provisioning, task 158) or a table outside the ownership set (the Secure Record
+        /// Owner role holds no Read on it). Nothing is created.
         /// </summary>
         public string? SecureFilingRefused { get; init; }
 
@@ -245,9 +275,19 @@ internal static class OwnedChildWrite
             return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
 
         // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
-        // set, config/secure-record-owner-role.json). A root filed under a secure record is task 158's (it is secured
-        // through provisioning, never a bare re-own); any other table would be refused by Dataverse (no Read).
-        if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
+        // set, config/secure-record-owner-role.json). A root filed under a secure record is task 158's: a work assignment or
+        // project is CREATED owned by the caller's own business-unit team (the owner it has when filed under nothing) and
+        // then secured through provisioning's own steps — its creator shared first, then the named team — by the handler's
+        // after-create step (SecureRootFilingGate). Any other table would be refused by Dataverse (no Read).
+        if (owner.IsSecureOwner && SecureRootInheritance.Inherits(table))
+        {
+            owner = await ownership.ResolveOwnerAsync(
+                RecordOwnershipContext.ForParents(Array.Empty<RecordOwnershipParent?>(), callerObjectId, me.SystemUserId), ct)
+                .ConfigureAwait(false);
+            if (!owner.IsOwned)
+                return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
+        }
+        else if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
         {
             return new Outcome
             {

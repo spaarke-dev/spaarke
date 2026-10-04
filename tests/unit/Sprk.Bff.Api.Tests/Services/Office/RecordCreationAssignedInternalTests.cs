@@ -46,6 +46,7 @@ public class RecordCreationAssignedInternalTests
             _fieldMappings.Object,
             ownership.Object,
             identity.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             NullLogger<RecordCreationService>.Instance);
     }
 

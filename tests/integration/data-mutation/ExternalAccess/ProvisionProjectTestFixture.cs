@@ -631,6 +631,22 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
                 () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>()));
 
+            // Task 158: the REAL secure-root inheritance — it reads what work assignments and projects are filed under
+            // through the same ChildWorld, and secures one through THIS host's provisioning (its DataverseWebApiClient
+            // double, its container stub, its recording shares). With the default world (no rows) it finds nothing filed
+            // under anything, so every existing provisioning / unsecure contract is unchanged.
+            services.RemoveAll<SecureRootInheritance>();
+            services.AddScoped(sp => new SecureRootInheritance(
+                SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object,
+                sp.GetRequiredService<DataverseWebApiClient>(),
+                sp.GetRequiredService<SpeFileStore>(),
+                recordShare,
+                sp.GetRequiredService<SecureChildReconciler>(),
+                sp.GetRequiredService<SecureChildShareSynchronizer>(),
+                sp.GetRequiredService<SecureShareNoAccessGuard>(),
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<ILogger<SecureRootInheritance>>()));
+
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
                 // Moq matches a class-proxy constructor EXACTLY; the two optional credential slots are passed
@@ -865,6 +881,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         else if (record.OwningUserId is { } user)
             ChildWorld.MoveOwner(logical, record.Id, DataversePrincipalRef.User(user));
         ChildWorld.Set(logical, record.Id, "sprk_issecure", record.IsSecure);
+
+        // Task 158: the record's own container — the secure-root inheritance reads it (with the owner) to tell an isolated
+        // record from one whose provisioning has not completed.
+        ChildWorld.Set(logical, record.Id, "sprk_containerid", record.ContainerId);
     }
 
     /// <summary>Extracts the GUID from an <c>/teams(guid)</c> OData bind value.</summary>

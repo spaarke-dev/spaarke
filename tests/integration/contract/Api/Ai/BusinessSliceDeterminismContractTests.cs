@@ -154,11 +154,11 @@ public class BusinessSliceDeterminismContractTests
         var handler1 = new DataverseCreateRecordHandler(
             new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
         var handler2 = new DataverseCreateRecordHandler(
             new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
 
         var description1 = handler1.Metadata.Description;
         var description2 = handler2.Metadata.Description;

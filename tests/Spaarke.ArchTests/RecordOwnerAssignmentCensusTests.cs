@@ -433,8 +433,9 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
             "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
-        new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
-            "Un-securing hands the ROOT back to a user (task 144 / F3)."),
+        new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureRecordAsync", 1, OwnerWriteKind.Root,
+            "Un-securing hands the ROOT back to a user (task 144 / F3). Task 158: the record's own steps moved from the " +
+            "handler into UnsecureRecordAsync, which also unsecures each alsoUnsecure related record an F3 holder names."),
         // Semantic merge conflict of task 133 c1 (this primitive) with task 146 r2 (this census), surfaced when task 148
         // merged both: the row is one a ROOT's own Assign cascades to (sharepointdocumentlocation / sharepointdocument —
         // never a sprk_* child), put back on its snapshotted owner, or (task 148) on the owner SecureChildReconciler resolved

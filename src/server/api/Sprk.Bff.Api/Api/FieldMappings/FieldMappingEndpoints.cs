@@ -437,6 +437,7 @@ public static class FieldMappingEndpoints
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
         [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        [FromServices] Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -560,7 +561,8 @@ public static class FieldMappingEndpoints
                 request.TargetEntity,
                 childRecords.RecordIds,
                 logger,
-                ct);
+                ct,
+                rootFiling);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -691,7 +693,8 @@ public static class FieldMappingEndpoints
         string targetEntity,
         Guid[] childRecordIds,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -716,6 +719,31 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
+                    // whether that record is secure must be readable, or this record is not written (fail closed; a
+                    // host without the gate refuses such a write too).
+                    if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(targetEntity))
+                    {
+                        var refusal = rootFiling is not null
+                            ? await rootFiling.CheckAsync(targetEntity, childRecordId, updatePayload, ct)
+                            : Sprk.Bff.Api.Services.Access.SecureRootInheritance.FilingColumnsOf(targetEntity.Trim().ToLowerInvariant())
+                                .Overlaps(updatePayload.Keys.Select(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn))
+                                ? Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                                    "whether the record it would be filed under is secure cannot be checked here")
+                                : null;
+                        if (refusal is not null)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {refusal.Reason} ({refusal.RefusalCode})."
+                            });
+                            continue;
+                        }
+                    }
+
                     await dataverseService.UpdateRecordFieldsAsync(targetEntity, childRecordId, updatePayload, ct);
                     updated++;
 
@@ -724,6 +752,11 @@ public static class FieldMappingEndpoints
                     // the same operation. A write that cannot move a stamp reads nothing; a child that fails is logged
                     // and repaired by the reconciliation job, and never fails this push.
                     await restamper.AfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, CancellationToken.None);
+
+                    // Task 158: a work assignment or project this push filed under a secure record is secured now (never
+                    // thrown; an incomplete securing is logged and the secure-root inheritance job completes it).
+                    if (rootFiling is not null)
+                        await rootFiling.SecureAfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, traceId: null);
                 }
                 else
                 {
