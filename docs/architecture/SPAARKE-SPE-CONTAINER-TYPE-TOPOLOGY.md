@@ -317,6 +317,29 @@ a container type cannot be deleted while any container of it exists anywhere.
 | Storage per container (standard) | `maxStoragePerContainerInBytes`, set **on the container type** — type-wide, not per container |
 | Containers per **standard** container type | ⚠️ **UNDOCUMENTED** — see §8 |
 
+### Every container is bound to the business unit that owns it
+
+Because one container type serves several customers (Model 1), "a container of this config's type" is **not** "this
+customer's container". Every container therefore carries its owning Dataverse business unit as a `fileStorageContainer`
+custom property, **`spaarkeBusinessUnitId`** (canonical GUID, not searchable) — unified-access-control-r2 task 165, owner
+round 20:
+
+- **Stamped at creation** by every BFF creation path — the SPE admin plane (`POST /api/spe/containers`: the config's unit,
+  or the creating admin's for a unit-less config) and secure-record provisioning (the Secure Record unit). A stamp that
+  does not read back removes the container again. Existing containers: `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1`
+  (dry run / `-Apply` / `-Verify`) derives the owner only from authoritative records and LISTS any it cannot derive.
+- **Authorized per container** on every container, item, column, custom-property, permission, recycle-bin and bulk route:
+  a container bound to the admin's own unit or a descendant; an **unbound** container only for a **root-unit** admin; an
+  unreadable binding fails closed. Lists and searches are trimmed the same way.
+- **Server-owned**: the custom-property route refuses to set or change it.
+- **Read one container at a time**: on the containers **collection** Graph accepts `$select=customProperties`, echoes it
+  in `@odata.context`, and drops it from every row (measured 2026-10-04, beta and v1.0) — the same silent shape
+  sdap-SPE-admin-app-r2 task 028 measured for `$expand=drive`. A list read would report every container as unbound.
+
+Because sharing a type no longer exposes containers, configs of different customers may name the same container type,
+owning app and its secret; the consuming app stays per customer. The app-only container-type routes (type permissions,
+consuming-app registrations, register) refuse a write to a type that a config the admin cannot reach also carries.
+
 ---
 
 ## 7. 🔴 Known defect — `scripts/Create-NewContainerType.ps1` cannot work

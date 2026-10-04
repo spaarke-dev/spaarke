@@ -274,11 +274,13 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [Fact]
     public async Task WhenTheCallersScopeCannotBeRead_AContainerRouteIs503_AndNoGraphCallIsMade()
     {
+        // Through the UNIT-LESS Config N: the configId rule admits it without reading the hierarchy (the compatibility
+        // rule), so the 503 can only come from the per-container rule's own read of the caller's scope.
         _fixture.Dataverse.FaultQueriesOn("businessunits");
         using var client = Admin();
 
         var problem = await Problem(
-            await client.GetAsync(Url("/api/spe/containers/{c}/items", "c-own")), HttpStatusCode.ServiceUnavailable);
+            await client.GetAsync($"/api/spe/containers/c-own/items?configId={ConfigN}"), HttpStatusCode.ServiceUnavailable);
 
         problem["errorCode"].GetString().Should().Be(UnverifiableCode);
         _fixture.Graph.AllRequests.Should().BeEmpty();
@@ -592,6 +594,22 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "POST");
     }
 
+    [Fact]
+    public async Task CreateContainer_WhoseOwnerCannotBeRead_Is503_AndCreatesNothing()
+    {
+        // A unit-less config passes the filter without the hierarchy; the owner is then the creator's unit, whose read
+        // faults. Refuse — never create a container the owner of which was not established.
+        _fixture.Dataverse.FaultQueriesOn("businessunits");
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync($"/api/spe/containers?configId={ConfigN}", new { displayName = "New" }),
+            HttpStatusCode.ServiceUnavailable);
+
+        problem["errorCode"].GetString().Should().Be(UnverifiableCode);
+        _fixture.Graph.AllRequests.Should().BeEmpty("no container is created, so nothing is stamped or removed");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // App-only container-TYPE routes (round 20 item 3's consequence)
     // ─────────────────────────────────────────────────────────────────────────
@@ -668,17 +686,22 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         (await response.Content.ReadAsStringAsync()).Should().NotContain("spe.admin.deny.container_type");
     }
 
-    [Fact]
-    public async Task ATypeRoute_WhenTheScopeCannotBeRead_Is503()
+    [Theory]
+    [InlineData("GET", "/api/spe/containertypes/{t}/consumers")]
+    [InlineData("POST", "/api/spe/containertypes/{t}/consumers")]
+    public async Task ATypeRoute_WhenTheScopeCannotBeRead_Is503_AndNothingIsSent(string method, string path)
     {
+        // Through the UNIT-LESS Config N: the configId rule admits it without reading the hierarchy (the compatibility
+        // rule), so the 503 can only come from the container-type rule's own read.
         _fixture.Dataverse.FaultQueriesOn("businessunits");
         using var client = Admin();
 
         var problem = await Problem(
-            await client.SendAsync(TypeRequest("GET", "/api/spe/containertypes/{t}/consumers", TypeT, ConfigA)),
+            await client.SendAsync(TypeRequest(method, path, TypeN, ConfigN)),
             HttpStatusCode.ServiceUnavailable);
 
         problem["errorCode"].GetString().Should().Be(UnverifiableCode);
+        _fixture.Graph.AllRequests.Should().BeEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

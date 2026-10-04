@@ -39,7 +39,9 @@
       - READ-BACK: every write is re-read; Graph accepting a PATCH is not evidence of the stamp.
       - SAMPLE FIRST: -MaxWritesPerRun bounds a run.
       - Idempotent: a stamped container is no longer a candidate; a re-run reports ToStamp: 0.
-      - -Verify: read-only. Exit 1 while ANY derivable container is unstamped or carries a different stamp.
+      - -Verify: read-only. Exit 1 while ANY derivable container is unstamped or carries a different stamp, a
+        binding cannot be read, or a config's containers could not be listed at all (SKIPPED-CONFIG: an incomplete
+        config, or an owning-app secret the vault does not return) — a pass must not claim containers it never saw.
 
     AUTH — the operator's own az CLI identity reads Dataverse and the BFF Key Vault (the owning apps' secrets, never
     printed); Graph is called app-only as each config's owning app, exactly as the BFF does. No secret in this script.
@@ -345,7 +347,7 @@ if (-not $IsDryRun) {
     $manifest.Flush()
 }
 
-$stats = [ordered]@{ Containers = 0; AlreadyStamped = 0; ToStamp = 0; Stamped = 0; Failed = 0; Underivable = 0; Mismatch = 0; Foreign = 0; Malformed = 0; Unreadable = 0 }
+$stats = [ordered]@{ ConfigsSkipped = 0; Containers = 0; AlreadyStamped = 0; ToStamp = 0; Stamped = 0; Failed = 0; Underivable = 0; Mismatch = 0; Foreign = 0; Malformed = 0; Unreadable = 0 }
 $listed = [System.Collections.Generic.List[string]]::new()
 $seen = @{}
 $writes = 0
@@ -354,10 +356,16 @@ foreach ($config in $configs) {
     $cid = ConvertTo-CleanGuid $config.sprk_specontainertypeconfigid
     $type = ConvertTo-CleanGuid $config.sprk_containertypeid
     if (-not $type -or -not $config.sprk_owningappid -or -not $config.sprk_keyvaultsecretname) {
-        Write-StampLog "SKIP-CONFIG $cid ($($config.sprk_name)): incomplete (container type, owning app or secret name missing)"
+        $stats.ConfigsSkipped++
+        $listed.Add("SKIPPED-CONFIG $cid ($($config.sprk_name)): incomplete (container type, owning app or secret name missing) — its containers were NOT examined.")
         continue
     }
-    try { $token = Get-ConfigToken $config } catch { Write-StampLog "SKIP-CONFIG ${cid}: $($_.Exception.Message)"; continue }
+    try { $token = Get-ConfigToken $config }
+    catch {
+        $stats.ConfigsSkipped++
+        $listed.Add("SKIPPED-CONFIG $cid ($($config.sprk_name)): $($_.Exception.Message) — its containers were NOT examined.")
+        continue
+    }
 
     $uri = "$GraphBase/storage/fileStorage/containers?`$filter=containerTypeId eq $type&`$select=id,displayName"
     while ($uri) {
@@ -428,7 +436,8 @@ if (-not $IsDryRun) { Write-Host "Reversal manifest: $manifestPath  (undo: -Reve
 Write-Host "Log: $LogPath"
 
 if ($Verify) {
-    # Every derivable container must carry its derived unit; a mismatch is a derivable container stamped otherwise.
-    exit ([int](($stats.ToStamp + $stats.Mismatch + $stats.Unreadable) -gt 0))
+    # Every derivable container must carry its derived unit; a mismatch is a derivable container stamped otherwise. A
+    # config whose containers could not be listed fails too: nothing was proven about them.
+    exit ([int](($stats.ToStamp + $stats.Mismatch + $stats.Unreadable + $stats.ConfigsSkipped) -gt 0))
 }
 exit ([int]($stats.Failed -gt 0))

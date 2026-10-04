@@ -28,6 +28,7 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
     private static readonly Guid UnitB = Guid.Parse("1b000000-0000-0000-0000-000000000000");
     private static readonly Guid ConfigA = Guid.Parse("ca000000-0000-0000-0000-00000000000a");
     private static readonly Guid ConfigB = Guid.Parse("cb000000-0000-0000-0000-00000000000b");
+    private static readonly Guid ConfigN = Guid.Parse("c0000000-0000-0000-0000-00000000000e");
     private const string TypeT = "77777777-0000-0000-0000-000000000077";
 
     private readonly AdminSurfaceHostFixture _fixture;
@@ -83,14 +84,18 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
     [Fact]
     public async Task BulkDelete_WhenTheCallersScopeCannotBeRead_Is503_AndNothingIsEnqueued()
     {
+        // Through the UNIT-LESS Config N: the configId rule admits it without reading the hierarchy (the compatibility
+        // rule), so the 503 can only come from the bulk route's own capture of the caller's scope.
         _fixture.Dataverse.FaultQueriesOn("businessunits");
         var before = _fixture.BulkOperations.TrackedOperationCount;
         using var client = Admin();
 
         var response = await client.PostAsJsonAsync("/api/spe/bulk/delete",
-            new { containerIds = new[] { "c-own" }, configId = ConfigA.ToString() });
+            new { containerIds = new[] { "c-own" }, configId = ConfigN.ToString() });
 
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain("spe.admin.deny.scope_unverifiable");
         _fixture.BulkOperations.TrackedOperationCount.Should().Be(before);
     }
 
@@ -144,7 +149,8 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
 
         dv.Add(ConfigSet, ConfigRow(ConfigA, UnitA));
         dv.Add(ConfigSet, ConfigRow(ConfigB, UnitB));
-        _fixture.UseGraphForConfig(ConfigA, ConfigB);
+        dv.Add(ConfigSet, ConfigRow(ConfigN, null));
+        _fixture.UseGraphForConfig(ConfigA, ConfigB, ConfigN);
 
         StubContainer("c-own", UnitA.ToString());
         StubContainer("c-other", UnitB.ToString());
@@ -152,7 +158,7 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
         _fixture.Graph.StubDelete($"{ContainersPath}/c-own");
     }
 
-    private static Dictionary<string, object?> ConfigRow(Guid id, Guid unit) => new()
+    private static Dictionary<string, object?> ConfigRow(Guid id, Guid? unit) => new()
     {
         ["sprk_specontainertypeconfigid"] = id,
         ["sprk_name"] = $"Config {id.ToString()[..2]}",
