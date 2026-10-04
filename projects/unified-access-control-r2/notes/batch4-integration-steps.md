@@ -16,6 +16,8 @@ This is the running list of obligations the main session takes on while integrat
 - [x] **156 × 146 hand-merge points:** the `DataverseUpdateRecordHandler` constructor, remarks and PATCH block; the `TaskActionCore` / `ActionSeam` / `CreateTaskNodeExecutor` constructors; and `RecordOwnershipContext.ForChild` must ignore `sprk_regardingrecordtype`. 156's note lists them. **Confirmed 2026-10-04:** resolved in `d457890f9` (`DataverseUpdateRecordHandler(dataverse, restamp, logger, ownership, scopes)`). `ForChild` builds parents through `ParentsOf`, which admits only ownership-parent tables, so `sprk_recordtype_ref` is never a parent (pinned by `RecordOwnershipResolverTests`, the `sprk_regardingrecordtype` case).
 - [x] **148 merge** (`task/uac-r2-148-r2`): `UnsecureProjectEndpoint` keeps 132's eviction and 148's Step 3.5. Steps 3.5 and 4 now share ONE `finally` eviction, so a `children_incomplete` return after the record's owner moved also evicts it. Pinned by `SecureChildTransitionTests.Unsecure_WhenTheChildPassIsIncomplete_StillEvictsTheRecordsOwnerChange`. In `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-1 is HEAD's (156) row and I-2 is 148's, plus HEAD's 146 c1/c1-r1 text, the A-UAC146 amendment wording and "G146-1 applied in dev 2026-10-03".
 - [ ] **148 × 132 child evictions (do after 132-f1 merges).** 148's `SecureChildReconciler` re-owns children and removes or mirrors their shares in provisioning Step 8, unsecure Step 3.5, the unsecure-completion branch and `SecureChildReconciliationJob`. None of those calls `IMembershipCacheInvalidator`. Every child owner change must call `InvalidateRecordOwnerChangeAsync`, and every child share change must call the share-change eviction 132-f1 adds. Use `CancellationToken.None`; an eviction never fails the pass. Add a test per path, then seed one to prove the test fails without its eviction.
+- [ ] **140 merge** (`task/uac-r2-140-x1`, after its verify): `RowSelect` now also selects `_sprk_grantedbycontact_value`, so any fake that whitelists `$select` columns needs it, as `RecordShareExpiryTests` did. The external SPA now has eslint + vitest configs.
+- [ ] **External SPA type errors (pre-existing, found by 140):** `tsc --noEmit` reports 6 errors in `src/client/external-spa`: `mock-data.ts`, `OutsideCounselDashboard.tsx`, and the shared `EntityCreationService.ts`. Fix all six on the integration branch (100% rule); the vite build is green, but a type gate that fails stays unenforceable.
 - [ ] **167's ledger** (sweep integration): fill `ResolvedBy` and `ProofTest` from each fix task's "Route authorization ledger input" table, delete the Pending waivers that are now stale, and assign each UNOWNED-NEW entry to an owning task.
 
 ## `.claude/` edits (main session only; sub-agents cannot write there)
@@ -38,11 +40,14 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] **142:** the ledger schema (`sprk_assignedaccess`) and the "Update Access" ribbon.
 - [ ] **146 (round 13 item 9) — HARD PREREQUISITE before the BFF deploy:** apply 146's child-table `sprk_createdbyperson` schema script (dry run → `-Apply` → `-Verify`). 146 now stamps every app-created child unconditionally, so a missing column fails the create (gate G146-6).
 
+- [ ] **140 G-140-1 — BEFORE the BFF/PCF deploy:** run `scripts/Deploy-ExternalRecordAccessContactGrantor.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds <both ids> -Apply`, then `-Verify` (exit 0). Read back `sprk_grantedbycontact`: target contact, IsSecured, in SpaarkeCore. Convert the script to the solution-membership helper at the merge if the guard flags it.
+
 **Then:**
 - [ ] Deploy the BFF from a fresh worktree.
 - [ ] Deploy the external SPA (157), then the BFF again, in 157's documented order.
 
 **After the deploy:**
+- [ ] **140 G-140-2:** import TrackingFieldTrio v1.0.35 with the deploy, then run criterion-20 steps (a)–(h) with existing identities and record them in the 140 note §6. Mark TASK-INDEX row 140 only after G-140-1 and G-140-2 pass.
 - [ ] Run each task's manual live gate, using `uac.child.user@demo.spaarke.com` where it needs a child-BU user.
 - [ ] Ship gate (owner round 11 item 3): no record is unsecured in a shared environment until 148 is deployed.
 
