@@ -325,6 +325,11 @@ On UNSECURE, a root sharee's share is removed from a child ONLY if that child wa
 1. **Interim document-pointer check** (until round 21 item 1's BFF pointer-attach path, legacy migration of the 447 dev files, FLS apply and strict derived-container check land in the follow-up round): verify the ITEM — the driveItem's createdBy equals the document row's creator (createdby when human, else `sprk_createdbyperson`), or the BFF identity for BFF-created rows — AND accept only containers in the document owner's business unit or its customer's subtree (archive container only on the archive path); unverifiable fails closed. **Residual exposure until the strict check:** a pointer to another legitimately-uploaded item by the same creator within the owner's own subtree.
 2. **Reporting save-as:** the `pbiReportId` save-as registration path is removed (view-only embed tokens cannot create a report; it only aliased shared reports); the server-side clone stays. DELETE removes the Power BI report only for an `iscustom` row no other catalog row references.
 
+## Round 24 (2026-10-04). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 148.
+
+1. **Exact dry run (option a):** the ONE `IRecordOwnershipResolver` gains a planned-owner overlay input so report-only iterates to the same fixpoint as `-Apply`; the dry-run plan equals what apply would do (grandchildren included). Tests: dry-run plan == applied result on a 3-level tree.
+2. **No rule-driven widening (option b):** the sweep job and Write-gated provisioning never release an isolated child to its business unit without an F3 holder's act; such rows are reported as `needs-f3` and stay isolated (consistent with round 6 "never auto-unsecure" and round 10 item 7).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
