@@ -1,6 +1,35 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-04 ~12:00Z (context-handoff, checkpoint #8, before /compact). Read with checkpoint #7 directly below (still accurate); this block only adds the deltas.
+> **Last Updated**: 2026-10-04 ~14:30Z (checkpoint #9). Read #8 and #7 below (still accurate); this block adds deltas.
+>
+> ## ⚡ CHECKPOINT #9 — deltas since #8
+> - **Integration branch `C:\wt4i` (not pushed since #8)**, commits:
+>   - `7edd55c61`: merged 148-r2.
+>     - Unsecure Steps 3.5 and 4 share 132's `finally` eviction (new test, seeded).
+>     - Resolver call fixed: `ReadParentAsync(..., plannedOwningTeams: null, ...)`.
+>   - `0ff4992ed` + `f9b749538`: shared `scripts/common/DataverseSolutionMembership.ps1` plus a guard. Live read-only `-Verify` on dev:
+>     - PASS: 133, 143, identity binding, numbering.
+>     - Still need `-Apply`: the child-table creator columns and the 142 ledger.
+>   - `c95716a82`: ADR-034 A4 concise edit, CHANGELOG, spec/design exception text.
+>   - `b8a1374c2`: G146-1 verbatim refusals in the role config; duplicate census entry folded. ArchTests 600/600.
+>   - Root `npm install --ignore-scripts` was run in `C:\wt4i`. Without it, lint-staged's prettier failed and killed `dotnet format`.
+> - **Checklist (`notes/batch4-integration-steps.md`)** ticked: hygiene, schema-script verify defect, creator constant, interim stamp, 148 merge, A4, G146-1 evidence, 156×146.
+> - **New required items:**
+>   - **148 × 132 child evictions**, after 132-f1 merges: `SecureChildReconciler` re-owns and re-shares children without evicting.
+>   - **At their merges**, convert these scripts to the membership helper (the guard fails until then):
+>     - 150 `Set-SecureFlagFieldSecurity.ps1`
+>     - 166 `Set-DocumentPointerFieldSecurity.ps1`
+>     - 168 `Add-AnalysisRegardingRecordUrlColumn.ps1`
+>   - **150 merge:** also fix G-0's after-check counting slip.
+> - **Lanes now:**
+>   - 4d: 147, 158 and reverify2:150 running.
+>   - Follow-up 1:
+>     - 132-f1 and 149-f1 fixes are done; both verifies are queued.
+>     - 140, 162, 163 and 165 are running.
+>     - 166, 167 and 168 are queued.
+> - **Running in background:** the external-grid jest suite in `C:\wt4i\src\client\shared\Spaarke.UI.Components`.
+>
+> **(previous) Last Updated**: 2026-10-04 ~12:00Z (context-handoff, checkpoint #8, before /compact). Read with checkpoint #7 directly below (still accurate); this block only adds the deltas.
 >
 > ## ⚡ CHECKPOINT #8 — deltas since #7
 > - **Running (do NOT relaunch):** batch 4d `wf_64880481-ea0` — 150 fix2 (round 17), 148 reverify2 (148-r2 has rounds 22/24); then 147, 158. Follow-up 1 `wf_2d0a851a-5d5` — 162, 163, 165, 166, 167, 168 fixes; 140 exec on `integ/uac-r2-batch4` (branch `task/uac-r2-140-x1`); 132-f1 (share-change cache eviction); **149-f1 DONE** (`task/uac-r2-149-f1`, verify next). Journals: `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl`.
