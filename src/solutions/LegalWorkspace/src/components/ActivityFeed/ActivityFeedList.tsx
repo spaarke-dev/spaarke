@@ -35,7 +35,7 @@ import {
   Spinner,
 } from "@fluentui/react-components";
 import { IEvent } from "../../types/entities";
-import { formatRelativeTime } from "../NotificationPanel/notificationTypes";
+import { formatRelativeTime } from "@spaarke/ui-components";
 import { FeedItemCard } from "./FeedItemCard";
 
 // ---------------------------------------------------------------------------

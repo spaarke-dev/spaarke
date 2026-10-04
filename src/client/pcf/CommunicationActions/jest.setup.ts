@@ -44,6 +44,18 @@ Object.defineProperty(window, 'matchMedia', {
 // ---------------------------------------------------------------------------
 
 const mockXrm = {
+  // Required for the shared `getXrm()` walker (`@spaarke/ui-components`
+  // `xrmContext.ts`) to accept this frame — task 081 / C-8. `launchCreate.ts`
+  // now resolves `Xrm.Navigation.navigateTo` via `getXrm()`, which only
+  // accepts a frame whose `Xrm` has `WebApi` (matching the real Dataverse
+  // host shape where `WebApi` and `Navigation` are always present together).
+  WebApi: {
+    retrieveMultipleRecords: jest.fn(),
+    retrieveRecord: jest.fn(),
+    createRecord: jest.fn(),
+    updateRecord: jest.fn(),
+    deleteRecord: jest.fn(),
+  },
   Navigation: {
     openForm: jest.fn(),
     navigateTo: jest.fn().mockResolvedValue(undefined),

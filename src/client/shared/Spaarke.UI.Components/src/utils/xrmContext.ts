@@ -90,7 +90,30 @@ export interface EntityReference {
 export interface XrmNavigation {
   openForm(options: OpenFormOptions): Promise<OpenFormResult>;
   openUrl(url: string, options?: WindowOptions): void;
-  navigateTo(pageInput: PageInput): Promise<void>;
+  /**
+   * `navigationOptions` widened by task 081 (C-8) when `openEmailCompose.ts`
+   * / `openEmailRecord.ts` converged onto this interface from the untyped
+   * `services/xrmGlobal.ts` walker — both already called the real
+   * `Xrm.Navigation.navigateTo(pageInput, navigationOptions)` two-argument
+   * form (`target`/`position`/`width`/`height` to open as a centered modal
+   * dialog), which this interface hadn't declared because nothing typed had
+   * exercised it yet.
+   */
+  navigateTo(pageInput: PageInput, navigationOptions?: NavigateToOptions): Promise<void>;
+}
+
+/**
+ * The real `Xrm.Navigation.navigateTo` second-argument shape (target window /
+ * dialog sizing). See {@link XrmNavigation.navigateTo}.
+ */
+export interface NavigateToOptions {
+  /** `1` = inline, `2` = modal dialog. */
+  target?: number;
+  /** `1` = center (only meaningful with `target: 2`). */
+  position?: number;
+  /** Pixels, or a percentage-of-viewport object (structurally matches `OobSizeDimension`). */
+  width?: number | { value: number; unit: '%' };
+  height?: number | { value: number; unit: '%' };
 }
 
 export interface OpenFormOptions {

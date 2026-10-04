@@ -84,6 +84,11 @@ type LookupResult = Array<{ id: string; name: string; entityType?: string }>;
 
 interface WindowWithXrm extends Window {
   Xrm?: {
+    // Required for `getXrm()` (task 081 / C-8 — the shared `xrmContext.ts`
+    // frame-walk only accepts a frame whose `Xrm` has `WebApi`, matching the
+    // real Dataverse host shape where `WebApi` and `Utility` are always
+    // present together). Unused by this suite's assertions themselves.
+    WebApi?: Record<string, unknown>;
     Utility?: {
       lookupObjects?: (opts: LookupOpts) => Promise<LookupResult>;
     };
@@ -92,6 +97,7 @@ interface WindowWithXrm extends Window {
 
 function installXrm(lookupImpl?: (opts: LookupOpts) => Promise<LookupResult>) {
   (window as WindowWithXrm).Xrm = {
+    WebApi: {},
     Utility: {
       lookupObjects: lookupImpl,
     },

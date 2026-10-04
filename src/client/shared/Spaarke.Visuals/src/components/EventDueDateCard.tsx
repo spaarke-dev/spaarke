@@ -128,10 +128,15 @@ const useStyles = makeStyles({
 
 const MONTH_ABBREVS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Due-date tier cutoffs converged on 3/7 days (task 081 / C-17, owner decision
+// 2026-10-03, audit item U6) — this previously used a 3/5-day split, the one
+// other due-date tier scheme in the codebase that disagreed with the
+// SmartTodo/`todoScoring.ts` 3/7/10-day canonical (this component has no
+// "10" band since it only has three badge colours, not five tiers).
 function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'danger' | 'warning' | 'success' {
   if (isOverdue || daysUntilDue < 3) return 'danger'; // red: overdue or <3 days
-  if (daysUntilDue <= 5) return 'warning'; // yellow: 3-5 days
-  return 'success'; // green: 6+ days
+  if (daysUntilDue <= 7) return 'warning'; // yellow: 3-7 days
+  return 'success'; // green: 8+ days
 }
 
 /**
@@ -145,7 +150,7 @@ function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CS
   if (isOverdue || daysUntilDue < 3) {
     return { backgroundColor: tokens.colorPaletteRedBackground2 };
   }
-  if (daysUntilDue <= 5) {
+  if (daysUntilDue <= 7) {
     return { backgroundColor: tokens.colorPaletteYellowBackground2 };
   }
   return { backgroundColor: tokens.colorPaletteGreenBackground2 };
@@ -176,7 +181,7 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
     [handleClick]
   );
 
-  // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
+  // Urgency-based date column coloring: <3d red, 3-7d yellow, 8+d green
   const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
 
   // v1.4.8 — single-line "DD-MMM-YYYY" format (e.g., "01-JUL-2026") replaces

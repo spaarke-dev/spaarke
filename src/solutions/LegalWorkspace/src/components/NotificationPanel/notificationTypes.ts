@@ -100,35 +100,8 @@ export const MOCK_NOTIFICATIONS: INotificationItem[] = [
   },
 ];
 
-/**
- * Formats a timestamp ISO string into a relative human-readable string.
- * e.g. "2 min ago", "1 hour ago", "3 days ago"
- */
-export function formatRelativeTime(isoTimestamp: string): string {
-  const now = Date.now();
-  const then = new Date(isoTimestamp).getTime();
-  const diffMs = now - then;
-
-  if (diffMs < 0) return "just now";
-
-  const diffSeconds = Math.floor(diffMs / 1000);
-  if (diffSeconds < 60) return "just now";
-
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  if (diffMinutes < 60) {
-    return diffMinutes === 1 ? "1 min ago" : `${diffMinutes} min ago`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return diffHours === 1 ? "1 hour ago" : `${diffHours} hours ago`;
-  }
-
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 30) {
-    return diffDays === 1 ? "1 day ago" : `${diffDays} days ago`;
-  }
-
-  const diffMonths = Math.floor(diffDays / 30);
-  return diffMonths === 1 ? "1 month ago" : `${diffMonths} months ago`;
-}
+// formatRelativeTime hoisted to @spaarke/ui-components (task 081 / C-13) —
+// this previously hand-rolled its own minute/hour/day/month bucketing (and,
+// unlike the shared formatter, never handled a future timestamp — see that
+// module's header), one of five independently reimplemented copies of the
+// same idiom.

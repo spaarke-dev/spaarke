@@ -270,6 +270,34 @@ export const OOB_MODAL_SIZES = {
 };
 
 // ---------------------------------------------------------------------------
+// task 081 (C-11 / C-13): TldrSection.tsx now imports `formatRelativeTime`
+// and DailyBriefingApp.tsx now imports `EmptyState` from
+// `@spaarke/ui-components` (both hoisted off hand-rolled local copies).
+// Minimal stand-ins so ts-jest can type-check/mount against this test-local
+// mock, which is NOT the real package (see module header).
+// ---------------------------------------------------------------------------
+
+export function formatRelativeTime(isoTimestamp: string): string {
+  return isoTimestamp;
+}
+
+export interface EmptyStateProps {
+  icon?: React.ReactElement;
+  heading: string;
+  description?: string;
+  footer?: React.ReactNode;
+  ariaLabel?: string;
+}
+
+export const EmptyState: React.FC<EmptyStateProps> = ({ heading, description, footer }) => (
+  <div role="status" aria-live="polite">
+    <span>{heading}</span>
+    {description && <span>{description}</span>}
+    {footer}
+  </div>
+);
+
+// ---------------------------------------------------------------------------
 // Types referenced by the LegalWorkspace registry factory under test
 // (`createLegalWorkspaceSectionRegistry`, R2 Option D).
 // ---------------------------------------------------------------------------
