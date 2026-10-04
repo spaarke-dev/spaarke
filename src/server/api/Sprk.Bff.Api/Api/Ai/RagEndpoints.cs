@@ -248,12 +248,11 @@ public static class RagEndpoints
         {
             // No ownership check exists for session files on this route (the session-files index is
             // filtered only by tenant + the session id the caller names), and no in-repo caller sends one.
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Invalid Request",
-                Detail = "Options.SessionId is not accepted on this route.",
-                Status = 400
-            });
+            return Results.Problem(
+                statusCode: 400,
+                title: "Invalid Request",
+                detail: "Options.SessionId is not accepted on this route.",
+                extensions: RagProblemExtensions("RAG_SESSION_ID_NOT_ACCEPTED", httpContext));
         }
 
         var tenantProblem = CheckCallerTenant(httpContext, request.Options.TenantId, logger, "search", out var callerTenantId);
@@ -565,7 +564,7 @@ public static class RagEndpoints
                 statusCode: 400,
                 title: "Invalid Request",
                 detail: "KnowledgeSourceId and KnowledgeSourceName are not accepted on this route.",
-                extensions: new Dictionary<string, object?> { ["code"] = "INDEX_FILE_KNOWLEDGE_SOURCE_NOT_ACCEPTED", ["correlationId"] = httpContext.TraceIdentifier });
+                extensions: RagProblemExtensions("INDEX_FILE_KNOWLEDGE_SOURCE_NOT_ACCEPTED", httpContext));
         }
 
         var tenantProblem = CheckCallerTenant(httpContext, request.TenantId, logger, "index-file", out var callerTenantId);
@@ -603,11 +602,7 @@ public static class RagEndpoints
                         statusCode: StatusCodes.Status409Conflict,
                         title: "Conflict",
                         detail: "The request does not match the document record it names.",
-                        extensions: new Dictionary<string, object?>
-                        {
-                            ["code"] = rowProblem,
-                            ["correlationId"] = httpContext.TraceIdentifier,
-                        });
+                        extensions: RagProblemExtensions(rowProblem, httpContext));
                 }
 
                 indexRequest = indexRequest with
@@ -921,7 +916,7 @@ public static class RagEndpoints
                 statusCode: 401,
                 title: "Unauthorized",
                 detail: "Tenant identity not found in authentication token.",
-                extensions: new Dictionary<string, object?> { ["code"] = "RAG_NO_TENANT_CLAIM", ["correlationId"] = httpContext.TraceIdentifier });
+                extensions: RagProblemExtensions("RAG_NO_TENANT_CLAIM", httpContext));
         }
 
         if (!string.Equals(requestedTenantId, callerTenantId, StringComparison.OrdinalIgnoreCase))
@@ -931,11 +926,24 @@ public static class RagEndpoints
                 statusCode: 403,
                 title: "Forbidden",
                 detail: "The requested tenant does not match your authenticated tenant.",
-                extensions: new Dictionary<string, object?> { ["code"] = "RAG_TENANT_MISMATCH", ["correlationId"] = httpContext.TraceIdentifier });
+                extensions: RagProblemExtensions("RAG_TENANT_MISMATCH", httpContext));
         }
 
         return null;
     }
+
+    /// <summary>
+    /// The extensions of a problem task 163 added to this file: the stable <c>errorCode</c> ADR-019 requires, the
+    /// same value under this file's existing <c>code</c> key (the SendToIndex precedent its clients read), and the
+    /// correlation id.
+    /// </summary>
+    private static Dictionary<string, object?> RagProblemExtensions(string code, HttpContext httpContext) =>
+        new()
+        {
+            ["errorCode"] = code,
+            ["code"] = code,
+            ["correlationId"] = httpContext.TraceIdentifier,
+        };
 
     /// <summary>
     /// A 500 with a FIXED detail (ADR-019): the exception message can disclose internals and record
@@ -946,7 +954,7 @@ public static class RagEndpoints
             title: title,
             detail: detail,
             statusCode: StatusCodes.Status500InternalServerError,
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            extensions: RagProblemExtensions("RAG_INTERNAL_ERROR", httpContext));
 
     /// <summary>
     /// Trims a result page to the rows whose document the CALLER can Read (task 163, owner round 9 "lists

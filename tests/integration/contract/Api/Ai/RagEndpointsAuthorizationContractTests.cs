@@ -150,6 +150,7 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         var response = await PostSearchAsync(Options() with { SessionId = "someone-elses-session" });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await AssertErrorCodeAsync(response, "RAG_SESSION_ID_NOT_ACCEPTED");
         VerifySearchNeverRan();
     }
 
@@ -455,6 +456,12 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         var response = await PostIndexFileAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await AssertErrorCodeAsync(response, mode switch
+        {
+            "no-file" => "INDEX_FILE_DOCUMENT_HAS_NO_FILE",
+            "parent-mismatch" => "INDEX_FILE_PARENT_MISMATCH",
+            _ => "INDEX_FILE_ITEM_MISMATCH",
+        });
         _fixture.IndexedFiles.Should().BeEmpty();
         VerifyNoStamp();
     }
@@ -737,5 +744,14 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await response.Content.ReadAsStringAsync()).Should().NotContain("SECRET-internal-detail",
             "ADR-019: a 500 carries a fixed detail; the exception goes to the server log");
+        await AssertErrorCodeAsync(response, "RAG_INTERNAL_ERROR");
+    }
+
+    /// <summary>ADR-019: the problem carries the stable <c>errorCode</c> (and the file's <c>code</c> key, same value).</summary>
+    private static async Task AssertErrorCodeAsync(HttpResponseMessage response, string expected)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("errorCode").GetString().Should().Be(expected);
+        doc.RootElement.GetProperty("code").GetString().Should().Be(expected);
     }
 }
