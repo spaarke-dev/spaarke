@@ -210,7 +210,40 @@ still refuses any other 2xx without one); the response type gains `children` / `
 
 ## 10. Step 9.5 quality gates and results
 
-(filled at the end of the run)
+**Code review** (coverage-first; severity / confidence; each disposition in code unless stated):
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| R1 | First draft ran the child pass BEFORE the container: one related record the rule refuses (e.g. also filed under a record flagged secure but not isolated) would keep a secure record from ever getting storage, and resumed through 133's RESUME path | Warning / high | **Fixed**: Step 8 runs after the container; re-entry is the already-provisioned branch only (§1). Seeds S7b, S8 |
+| R2 | First draft read the sweep's resume point from the scheduler's run history | Critical (ADR) / certain | **Fixed** — `WorkloadPlacementGuardTests` (ADR-052 §5 / ADR-036 A1 rule 7) failed; the cursor is now a per-instance field, the task 143 job's precedent (path C — comply). Seed S10 re-run |
+| R3 | The platform-cascade rows were placed on the rule's owner even when no transition happened (a repeat unsecure of a never-secure record would move its SharePoint rows from the owning user to the BU team) | Warning / high | **Fixed**: they move only into isolation, out of it, or mid-unsecure; decoy + seed S18 |
+| R4 | The reconciler mutated its cached row after a re-own "so the next row's decision reads it" — the resolver reads parents FRESH, so the comment was false | Suggestion / certain | **Fixed**: removed; the shallowest-first ordering is what makes a grandchild see its parent's new owner |
+| R5 | A child's `sprk_canonicaldocument` (and other document→document links) count as ownership parents, as in `ReparentAsync`, while Compose's create excludes the canonical link | Info / medium | Recorded (handoffs): the effect can only be an under-share (a copy of a secure document pulled into isolation), never an over-share |
+| R6 | Mid-unsecure (root moved, flag still set — and kept on an incomplete pass) a NEW child create on the record is refused by the resolver (flagged-not-isolated) until the unsecure completes | Info / high | Accepted: fail closed for a short window; the unsecure's own response says how to finish |
+| R7 | `JobRunDetail.ResultJson` exposes every job's report on the admin history | Info / medium | Accepted: SystemAdmin-only routes; FR-2.8 designed ResultJson for exactly this surface; jobs already keep it small and id-only |
+| R8 | `SecureChildReconciler.cs` ≈ 650 lines | Info | Cohesive (one pass: walk → decide → assign → share → report); not decomposed (COMPONENT-COMPLEXITY.md) |
+
+No secret, no new route, no CRUD→AI dependency, no package (CVE scan: no vulnerable packages).
+
+**ADR check:** ADR-001 (no new route; handlers extended) ✓ · ADR-002 (no plugin) ✓ · ADR-003 (every unreadable read decides nothing; an incomplete pass is never a success; the unsecure flag stays set) ✓ · ADR-008 (the delegation filter unchanged; the 403 test) ✓ · ADR-010 (concrete classes, no interface; +2 registrations) ✓ · ADR-013 (no AI type) ✓ · ADR-019 (ProblemDetails + stable reason codes + traceId) ✓ · ADR-032 (unconditional registrations; the job's disabled state is scheduler data) ✓ · ADR-036 A1 (IScheduledJob via AddScheduledJob; heartbeat every attempt; throws only when the listing fails; no scheduler-store dependency — R2) ✓ · ADR-038 (no `Mock<HttpMessageHandler>`; no DI-registration test — the "registered disabled" check was written and REMOVED for this reason; no ctor null-check test; data-mutation KEEP path; every guard seeded) ✓ · ADR-052 (BFF, schedule; no BackgroundService) ✓. **No ADR conflict** (no §6.5 path needed; R2 was path C).
+
+**Results** (2026-10-04):
+
+- **Affected suites** (SecureChildTransition, RecordOwnershipResolver, JobsEndpoints, Provision*, SecureProjectShare,
+  SecureNamedOwnerTeam, SecureChild*, NoAccessShare*, RecordOwnership*, InternalUserShare*, UnsecureProject*,
+  SecureShareNoAccessGuard*, DirectThread*, *ReconciliationJob*): **743/743**.
+- **Full BFF unit suite** (`dotnet test tests/unit/Sprk.Bff.Api.Tests`): **14,805 = 14,751 passed + 54 skipped
+  (pre-existing) + 0 failed** (20 m 45 s).
+- **ArchTests** (`dotnet test tests/Spaarke.ArchTests`): **372/372** — after the census entries (§6) and R2's fix.
+- **Integration (project hard gate):** `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **428 = 403
+  passed + 25 skipped, 0 failed**.
+- **Client** (`@spaarke/ui-components`): `npm run build` (tsc) clean — with the sibling packages `@spaarke/sdap-client` and
+  `@spaarke/auth` built in this worktree (`npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` in each);
+  jest `src/components/CreateProjectWizard` **115/115** (7 suites); eslint on the two changed files: clean. Not a PCF, so
+  no `build:prod`.
+- **CVE:** `dotnet list package --vulnerable --include-transitive` — no vulnerable packages. **Publish size:** not
+  measured (instruction).
+- **POML:** well-formed XML.
 
 ## 11. `.claude/**` edits needed
 
