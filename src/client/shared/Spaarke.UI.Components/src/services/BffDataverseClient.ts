@@ -9,6 +9,15 @@
  * `IDataverseClient` contract so consumers can swap implementations without
  * code change (FR-DG-02, task 015 acceptance criterion #1).
  *
+ * ## Which BFF surface serves it (2026-10-03, unified-access-control-r2 task 160)
+ * The only in-repo instance targets the EXTERNAL module seam
+ * (`bffBaseUrl = {BFF}/api/v1/external`, see `external-spa/src/services/gridDataverseClient.ts`),
+ * whose fetch and record routes scope reads to the caller's module records. On the INTERNAL BFF base,
+ * `retrieveMultipleRecords` (`POST /api/dataverse/fetch`) and `retrieveRecord`
+ * (`GET /api/dataverse/record/...`) now answer 404: both internal routes were DELETED because
+ * they read app-only behind an entity-level check (route sweep findings #9/#10). An internal
+ * non-MDA host needs a caller-scoped read path first; do not restore an app-only passthrough.
+ *
  * ## Auth (ADR-028 — Spaarke Auth v2)
  * All HTTP calls flow through the caller-supplied `authenticatedFetch` (a
  * `(url, init?) => Promise<Response>` function). The canonical source is

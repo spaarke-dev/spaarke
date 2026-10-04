@@ -928,7 +928,20 @@ public class RouteAuthorizationGuardTests
     //            cases in the same change (Write on the RECORD; an unknown id and an unwritable one are the same 403).
     //            Pinned through the real pipeline by
     //            tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs.
-    private const int ExpectedEndpointFileCount = 122;
+    //
+    // 122 -> 120 (2026-10-04, sweep integration of unified-access-control-r2 task 160, GitHub #1099; written as
+    // 120 -> 118 on the task branch, before 142 and 143 landed here). A DOWNWARD move, the census's third firing in the
+    // delete direction:
+    //
+    //   160  -2  Api/Dataverse/FetchEndpoints.cs and Api/Dataverse/RecordEndpoints.cs DELETED — the
+    //            internal POST /api/dataverse/fetch and GET /api/dataverse/record/{entityLogicalName}/
+    //            {id:guid}. Route sweep findings #9 and #10 (both critical): each ran the caller's query
+    //            APP-ONLY behind DataverseAuthorizationFilter, which checks a table privilege at any depth
+    //            and never a record. Owner round 10 item 1: no caller in the repo, in no published API
+    //            description, so deleted rather than fixed. Neither file was in GovernedFiles and neither
+    //            had a waiver, so the count alone moves. Deny proof:
+    //            Sprk.Bff.Api.IntegrationTests.Api.Dataverse.DataverseProxyRoutesRemovedTests.
+    private const int ExpectedEndpointFileCount = 120;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
