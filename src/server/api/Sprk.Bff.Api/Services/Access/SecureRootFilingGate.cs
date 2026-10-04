@@ -3,10 +3,13 @@ using Sprk.Bff.Api.Services.Dataverse;
 namespace Sprk.Bff.Api.Services.Access;
 
 /// <summary>
-/// unified-access-control-r2 task 158 (owner round 6) — the TWO calls a BFF writer of a <c>sprk_workassignment</c> or
-/// <c>sprk_project</c> makes around a create or a re-file, so a record filed under a secure matter or project is secured
-/// in the same operation: <see cref="CheckAsync"/> BEFORE the write (an unreadable parent flag refuses, nothing written) and
-/// <see cref="SecureAfterWriteAsync"/> AFTER it (provisioning's own steps, through <see cref="SecureRootInheritance"/>).
+/// unified-access-control-r2 task 158 (owner rounds 6 and 31) — the calls a BFF writer of a <c>sprk_workassignment</c> or
+/// <c>sprk_project</c> makes around a write, so a record filed under a secure matter or project is secure in the same
+/// operation. A RE-FILE: <see cref="CheckAsync"/> BEFORE the write (an unreadable parent flag, or a recorded creator walled
+/// off the record or a secure parent, refuses — nothing written) and <see cref="SecureAfterWriteAsync"/> AFTER it
+/// (provisioning's own steps, through <see cref="SecureRootInheritance"/>). A CREATE (task 158 r1):
+/// <see cref="PlanCreateAsync"/> BEFORE it (refused, ordinary, or INTO isolation) and, for an isolated create,
+/// <see cref="CompleteIsolatedCreateAsync"/> after it.
 /// </summary>
 /// <remarks>
 /// <para><b>Why a gate and not the service itself.</b> The writers are singletons and scoped services composed in many
@@ -68,7 +71,8 @@ public sealed class SecureRootFilingGate
     /// anything (fail closed); a create that files it under nothing is ordinary and costs no scope.
     /// </summary>
     public async Task<SecureRootCreatePlan> PlanCreateAsync(
-        string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct)
+        string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct,
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!SecureRootInheritance.Inherits(table))
@@ -92,7 +96,8 @@ public sealed class SecureRootFilingGate
                 false, null, Array.Empty<SecureFilingParent>());
         }
 
-        return await inheritance.PlanCreateAsync(table, materialized, creatorSystemUserId, ct).ConfigureAwait(false);
+        return await inheritance.PlanCreateAsync(table, materialized, creatorSystemUserId, ct, callerMayFileUnder)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

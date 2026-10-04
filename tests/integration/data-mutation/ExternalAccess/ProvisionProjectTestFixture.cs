@@ -40,7 +40,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// carries (name, teamtype, isdefault). Dropping any predicate selects a decoy or the default team and a test goes red;
 /// see <see cref="RowsJsonFor"/>.</para>
 /// </remarks>
-public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
+public class ProvisionProjectTestFixture : WorkspaceTestFixture
 {
     private const string ProjectEntitySet = "sprk_projects";
     private const string MatterEntitySet = "sprk_matters";
@@ -269,6 +269,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>When false, the delegation probe reports Read only — the caller lacks Write (task 144).</summary>
     public bool CallerHoldsWrite { get; set; } = true;
+
+    /// <summary>
+    /// Task 158 r1: the caller's AppendTo on any record the probe is asked about (G5 for a create INTO isolation — AppendTo
+    /// on each secure parent). Default false, as before: every pre-r1 contract keeps the rights it was written against.
+    /// </summary>
+    public bool CallerHoldsAppendTo { get; set; }
+
+    /// <summary>Task 158 r1: the caller's answer to a table-privilege check (G5's Create on the table).</summary>
+    public bool CallerHoldsCreatePrivilege { get; set; } = true;
 
     /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
     public Guid? FailShareForPrincipal { get; set; }
@@ -591,6 +600,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
+        CallerHoldsAppendTo = false;
+        CallerHoldsCreatePrivilege = true;
         FailShareForPrincipal = null;
         FailRevokeForPrincipal = null;
         StrictShareReadSucceeds = true;
@@ -1420,10 +1431,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
             _fixture.DelegationProbes.Add((entitySet, recordId));
-            return Task.FromResult(_fixture.CallerHoldsWrite
-                ? AccessRights.Read | AccessRights.Write
-                : AccessRights.Read);
+            var rights = _fixture.CallerHoldsWrite ? AccessRights.Read | AccessRights.Write : AccessRights.Read;
+            return Task.FromResult(_fixture.CallerHoldsAppendTo ? rights | AccessRights.AppendTo : rights);
         }
+
+        /// <summary>Task 158 r1: the caller's own table privilege (G5 Create), as the OBO probe would answer it.</summary>
+        public override Task<bool> CallerHoldsPrivilegeAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+            => Task.FromResult(_fixture.CallerHoldsCreatePrivilege);
 
         /// <summary>
         /// Task 061: who provisioning shares the record back to. <c>null</c> models "the caller's Dataverse identity

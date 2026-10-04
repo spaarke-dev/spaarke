@@ -340,41 +340,31 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 }
 
                 // Task 158 r1 (owner round 31): a work assignment or project filed under a SECURE matter or project is
-                // created INTO isolation — owned by the named Secure Record Owners team, flagged in the create, for the
-                // caller (sprk_createdbyperson) — never as an ordinary row of the caller's business unit first. Decided
-                // before any write: an unreadable parent flag, or a caller walled off (or not checkable against) the No
-                // Access list of a secure parent or of the record itself, refuses with nothing created.
-                var plan = Sprk.Bff.Api.Services.Access.SecureRootCreatePlan.Ordinary;
-                var creator = Guid.Empty;
-                if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename))
-                {
-                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
-                    if (me.Failure is { } meFailure)
-                        return LogOutcome(context, tablename, MapClientError(tool, meFailure, startedAt), stopwatch);
-                    creator = me.SystemUserId;
-
-                    plan = await _rootFiling.PlanCreateAsync(tablename, OwnedChildWrite.WritesOf(forMapped), creator, cancellationToken)
-                        .ConfigureAwait(false);
-                    if (plan.Refusal is { } rootRefusal)
-                    {
-                        return LogOutcome(context, tablename,
-                            Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
-                                rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
-                            stopwatch);
-                    }
-                }
-
+                // created INTO isolation - owned by the named Secure Record Owners team, flagged in the create, for the
+                // caller (sprk_createdbyperson) - never as an ordinary row of the caller's business unit first. Decided
+                // before any write and after the caller's own G5 check: an unreadable parent flag, a caller without
+                // AppendTo on a secure parent, or a caller walled off (or not checkable against) the No Access list of a
+                // secure parent or of the record itself, refuses with nothing created.
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken, plan.Isolated ? plan : null).ConfigureAwait(false);
+                    CallerObjectId(context), cancellationToken, _rootFiling).ConfigureAwait(false);
 
-                // Created into isolation → completed now: the caller's share (read back; a share that fails deletes the row
+                if (owned.PlanRefusal is { } rootRefusal)
+                {
+                    return LogOutcome(context, tablename,
+                        Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
+                            rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                        stopwatch);
+                }
+
+                // Created into isolation -> completed now: the caller's share (read back; a share that fails deletes the row
                 // again), its own container, its secure parents' sharees.
                 Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null;
-                if (plan.Isolated && owned.CreatedId is { } createdRoot)
+                if (owned.Isolated is not null && owned.CreatedId is { } createdRoot)
                 {
+                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
                     secured = await _rootFiling.CompleteIsolatedCreateAsync(
-                            tablename, createdRoot, creator, context.DecisionId.ToString("N"))
+                            tablename, createdRoot, me.SystemUserId, context.DecisionId.ToString("N"))
                         .ConfigureAwait(false);
                 }
 

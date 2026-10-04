@@ -561,7 +561,8 @@ public sealed class RecordCreationService
         // any write: an unreadable parent flag, or a caller walled off (or not checkable against) the No Access list of a
         // secure parent or of the record itself, refuses with nothing created; then the caller's own rights (G5).
         var plan = await _rootFiling.PlanCreateAsync(
-                ProjectEntity, entity.Attributes.Select(a => new KeyValuePair<string, object?>(a.Key, a.Value)), ownerId, ct)
+                ProjectEntity, entity.Attributes.Select(a => new KeyValuePair<string, object?>(a.Key, a.Value)), ownerId, ct,
+                CallerMayCreateUnderAsync)
             .ConfigureAwait(false);
         if (plan.Refusal is { } rootRefusal)
         {
@@ -572,12 +573,7 @@ public sealed class RecordCreationService
         }
 
         if (plan.Isolated)
-        {
-            if (await CallerMayCreateIsolatedAsync(plan, ct).ConfigureAwait(false) is { } denied)
-                return RecordCreationResult.Failed(denied);
-
             IsolateProjectCreate(entity, plan);
-        }
 
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
@@ -623,11 +619,12 @@ public sealed class RecordCreationService
     /// <summary>
     /// Task 158 r1 (owner round 31 item 2, G5): AS THE CALLER, before a project is created INTO isolation — Create on
     /// <c>sprk_project</c> and AppendTo on every secure parent it will be filed under, through the OBO probe on the request's
-    /// own bearer token. The app-only create then grants nothing the caller lacks. Any "could not answer" refuses.
+    /// own bearer token. Asked by the plan once the secure parents are known and before anything else is said about them
+    /// (their No Access state); the app-only create then grants nothing the caller lacks. Any "could not answer" refuses.
     /// <c>null</c>: allowed.
     /// </summary>
-    private async Task<RecordCreationFailure?> CallerMayCreateIsolatedAsync(
-        Sprk.Bff.Api.Services.Access.SecureRootCreatePlan plan, CancellationToken ct)
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution?> CallerMayCreateUnderAsync(
+        IReadOnlyList<Sprk.Bff.Api.Services.Access.SecureFilingParent> parents, CancellationToken ct)
     {
         var token = _http?.HttpContext is { } context
             ? Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context)
@@ -637,25 +634,25 @@ public sealed class RecordCreationService
             _logger.LogError(
                 "[RECORD-CREATE] A project filed under a secure record cannot be checked against the caller's own rights here " +
                 "(probe or token unavailable). Refused (fail closed).");
-            return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingFailed, "caller_rights_unverifiable",
-                "Your permission to create a project under the secure record could not be checked, so it was not created.");
+            return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerRightsUnverifiable,
+                "your permission to create a project under the secure record could not be checked");
         }
 
         if (!await _callerAccess.CallerHoldsPrivilegeAsync(token, ProjectCreatePrivilege, ct).ConfigureAwait(false))
         {
-            return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingRefused, "caller_cannot_create",
-                "You do not have permission to create projects, so this project was not created.");
+            return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotCreate,
+                "you do not have permission to create projects");
         }
 
-        foreach (var parent in plan.SecureParents)
+        foreach (var parent in parents)
         {
             var rights = await _callerAccess.GetCallerRightsAsync(
                     token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(parent.Table), parent.Id, ct)
                 .ConfigureAwait(false);
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo))
             {
-                return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingRefused, "caller_cannot_file_under_parent",
-                    "You do not have permission to file a project under the secure record it names, so it was not created.");
+                return Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(CallerCannotFileUnderParent,
+                    "you do not have permission to file a project under the secure record it names");
             }
         }
 
@@ -673,10 +670,21 @@ public sealed class RecordCreationService
         entity[SecureFlagAttribute] = true;
     }
 
+    /// <summary>Task 158 r1: the caller lacks Create on <c>sprk_project</c> (G5). 403.</summary>
+    internal const string CallerCannotCreate = "caller_cannot_create";
+
+    /// <summary>Task 158 r1: the caller lacks AppendTo on a secure parent (G5). 403.</summary>
+    internal const string CallerCannotFileUnderParent = "caller_cannot_file_under_parent";
+
+    /// <summary>Task 158 r1: the caller's own rights could not be checked. 500.</summary>
+    internal const string CallerRightsUnverifiable = "caller_rights_unverifiable";
+
     /// <summary>The failure kind of a planning refusal: a walled or refused caller is 403, an unverifiable check 500.</summary>
     private static RecordCreationFailureKind KindFor(string? code) => code switch
     {
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess => RecordCreationFailureKind.SecureFilingRefused,
+        CallerCannotCreate or CallerCannotFileUnderParent => RecordCreationFailureKind.SecureFilingRefused,
+        CallerRightsUnverifiable => RecordCreationFailureKind.SecureFilingFailed,
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable => RecordCreationFailureKind.SecureFilingFailed,
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved => RecordCreationFailureKind.SecureFilingFailed,
         _ => RecordCreationFailureKind.OwnerUnresolved,

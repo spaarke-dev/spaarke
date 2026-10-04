@@ -378,7 +378,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
     private readonly List<Entity> _officeCreates = new();
 
-    private RecordCreationService OfficeCreator(Guid sourceMatter, Guid typeRef)
+    private RecordCreationService OfficeCreator(Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities
@@ -426,6 +426,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                         TargetField = "sprk_regardingrecordtype", TargetFieldType = 1, MappingType = 0, ExecutionOrder = 2,
                         IsActive = true,
                     },
+                    .. (extraRule is null ? Array.Empty<FieldMappingRuleEntity>() : new[] { extraRule }),
                 ],
             });
 
@@ -527,6 +528,48 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
         result.Failure.Code.Should().Be("caller_cannot_file_under_parent");
         _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>G5, Office: the caller holds no Create on projects — refused (403 kind), nothing created.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheCallerCannotCreateProjects_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _officeProbe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        result.Failure.Code.Should().Be(RecordCreationService.CallerCannotCreate);
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 158 r1: <c>sprk_issecure</c> is the BFF's own column (task 150) — a mapping rule that would copy it onto a project
+    /// created under an ORDINARY matter is skipped; the project is created unflagged and ordinary.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_AMappingRuleTargetingTheSecureFlag_IsSkipped()
+    {
+        var (_, ordinary) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+        var creator = OfficeCreator(ordinary, typeRef, extraRule: new FieldMappingRuleEntity
+        {
+            Id = Guid.NewGuid(), Name = "flag", SourceField = "", SourceFieldType = 0, TargetField = "sprk_issecure",
+            TargetFieldType = 0, MappingType = 1, ExecutionOrder = 3, DefaultValue = "true", IsActive = true,
+        });
+
+        var result = await creator.CreateAsync(new RecordCreationRequest
+        {
+            EntityType = QuickCreateEntityType.Project, Name = "Lease review", CallerUserId = "oid",
+            OwnerSystemUserId = Creator.ToString("D"), SourceEntityLogicalName = "sprk_matter", SourceRecordId = ordinary,
+        });
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        _officeCreates.Should().ContainSingle().Which.Contains("sprk_issecure").Should().BeFalse("never a value a mapping copies");
+        _fixture.IsSecureOf(result.RecordId).Should().BeFalse();
     }
 
     /// <summary>Owner round 31 item 1, Office: the maker is on the secure matter's No Access list — refused, nothing created.</summary>

@@ -225,17 +225,22 @@ public sealed record FiledRootRef(string Table, Guid Id, string? Name, bool Flag
 /// or a parent whose flag cannot be read — or reads EMPTY (owner round 17 item 3) — is never "not secure". When no OTHER
 /// parent is readably secure the record is <see cref="SecureRootInheritOutcome.Unverifiable"/>: nothing is written, a BFF
 /// create or re-file is refused (<see cref="CheckRefileAsync"/>), and the job reports it. When another parent IS readably
-/// secure, the record is secured (secure-if-any; securing is the closed direction) and only its parents' sharees are held
-/// (the intersection rule cannot be evaluated against a parent that cannot be read). A parent that does not exist is not a
-/// secure parent (it confers nothing).</para>
+/// secure, the record is secure (secure-if-any) — but the person it would be secured for cannot be checked against the
+/// unreadable parent's No Access list (owner round 31 item 1), so provisioning, a create and a re-file all refuse
+/// (<c>sdap.provision.creator_no_access_unverifiable</c>) until it can be read, and the job reports it. A parent that does
+/// not exist is not a secure parent (it confers nothing).</para>
 /// <para><b>Never auto-unsecure</b> (owner round 6 item 4): nothing here ever takes a record OUT of isolation. A record re-filed
 /// away from its secure parent, or whose parent is unsecured, stays secure; unsecuring it is the unsecure endpoint's act
 /// (F3).</para>
-/// <para><b>Triggers.</b> (1) create and (2) re-file: the BFF writers call <see cref="CheckRefileAsync"/> before the write and
-/// <see cref="SecureAfterWriteAsync"/> after it; (3) a parent becoming secure: provisioning Step 8 calls
-/// <see cref="SecureFiledRootsUnderAsync"/>; (4) writes outside the BFF: <see cref="SecureRootInheritanceJob"/> (≤ 5 min).
-/// A parent's sharees reach its secure filed records through <see cref="PassSharesOnAsync"/> — from <c>/share-user</c>, and
-/// from a project that was just given sharees itself — and through the job.</para>
+/// <para><b>Triggers.</b> (1) create: the BFF writers call <see cref="PlanCreateAsync"/> before the write and create the
+/// row INTO isolation (owner round 31 item 2), then <see cref="CompleteIsolatedCreateAsync"/>; (2) re-file: they call
+/// <see cref="CheckRefileAsync"/> before the write and <see cref="SecureAfterWriteAsync"/> after it; (3) a parent becoming
+/// secure: provisioning Step 8 calls <see cref="SecureFiledRootsUnderAsync"/>; (4) writes outside the BFF:
+/// <see cref="SecureRootInheritanceJob"/> (≤ 5 min). A parent's sharees reach its secure filed records through
+/// <see cref="PassSharesOnAsync"/> — from <c>/share-user</c>, and from a project that was just given sharees itself — and
+/// through the job; a secure parent's UNSHARE ends the inherited shares it passed on through
+/// <see cref="PassUnshareOnAsync"/> (<c>/unshare-user</c>) and the job, by the provenance recorded on task 142's
+/// <c>sprk_assignedaccess</c> ledger (owner round 30).</para>
 /// </remarks>
 public sealed class SecureRootInheritance
 {
@@ -559,8 +564,13 @@ public sealed class SecureRootInheritance
     /// </summary>
     /// <param name="writes">The create's columns, as <see cref="CheckRefileAsync"/> reads them.</param>
     /// <param name="creatorSystemUserId">The person the create is made for — the caller (their <c>sprk_createdbyperson</c>).</param>
+    /// <param name="callerMayFileUnder">The writer's own AS-THE-CALLER check (G5) on the secure parents the row would be filed
+    /// under — asked once they are known and BEFORE the No Access checks, so a caller who may not file under a secure record
+    /// learns nothing more about it (not even its No Access state). Its refusal is returned as the plan's. <c>null</c>: the
+    /// writer made its own check already.</param>
     public async Task<SecureRootCreatePlan> PlanCreateAsync(
-        string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct)
+        string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct,
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!Inherits(table))
@@ -595,6 +605,13 @@ public sealed class SecureRootInheritance
             return SecureRootCreatePlan.Refused(Refusal(ProvisionProjectEndpoint.ReasonCreatorUnresolved,
                 $"a {noun} filed under a secure record is created secure for the person who creates it, and that person could " +
                 "not be identified, so it was not created"));
+        }
+
+        // G5 on the secure parents (the writer's as-the-caller check) — before anything about them is said.
+        if (callerMayFileUnder is not null
+            && await callerMayFileUnder(answer.SecureParents, ct).ConfigureAwait(false) is { } callerRefusal)
+        {
+            return SecureRootCreatePlan.Refused(callerRefusal);
         }
 
         // Round 31 item 1: the creator honours every secure parent's No Access list AND the record's own — before the write.

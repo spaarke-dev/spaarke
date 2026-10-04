@@ -420,6 +420,52 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         _fixture.ShareMaskOf(workAssignment, DataversePrincipalRef.Team(team)).Should().Be(0);
     }
 
+    /// <summary>
+    /// A4 "a share that is also direct": the user also holds an independent (Assigned-To, task 142) ledger row on the filed
+    /// record naming them — the matter's unshare ends the inherited row but never removes the share.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_KeepsAShareAnIndependentLedgerRowAlsoJustifies()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        _fixture.InheritedLedger.SeedRow(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType.WorkAssignment, workAssignment,
+            "sprk_assignedtointernal", new AssignedSubject(AssignedSubjectKind.Contact, Guid.NewGuid()), AssignedAccessState.Shared,
+            systemUserId: Colleague);
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "the Assigned-To rule also gives it");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.KeptOtherField);
+    }
+
+    /// <summary>
+    /// A share another secure parent still passes on is kept: the work assignment was re-filed away from the matter (its
+    /// inherited row from the matter remains) and is filed under a secure project that shares the same user — the matter's
+    /// unshare ends its row without removing the share.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_KeepsAShareAnotherSecureParentStillPassesOn()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecureProject(_fixture, project, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject",
+            new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "the secure project it is filed under still passes it on");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague
+                && r.SourceField == AssignedAccessStore.InheritedSourceField("sprk_matter", matter))
+            .Reason.Should().Be(AssignedAccessReason.KeptOtherSource);
+    }
+
     /// <summary>S5 holds on the reverse rule: an inherited share that is the record's LAST reader is kept (ended without removal).</summary>
     [Fact]
     public async Task UnsharingFromTheMatter_NeverRemovesTheFiledRecordsLastReader()
