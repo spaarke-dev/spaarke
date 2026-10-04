@@ -104,7 +104,7 @@ public static class DashboardEndpoints
                 "GET /api/spe/dashboard/metrics — returning cached metrics. LastSyncedAt={LastSyncedAt}",
                 metrics.LastSyncedAt);
 
-            return Results.Ok(ProjectToReachableConfigs(metrics, reachable));
+            return Results.Ok(ProjectToReachableConfigs(metrics, reachable.Value.ConfigIds, reachable.Value.ReachesEveryConfig));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -170,7 +170,7 @@ public static class DashboardEndpoints
                 "Dashboard refresh complete. Containers: {Total}, SyncSucceeded: {SyncSucceeded}",
                 metrics.TotalContainerCount, metrics.SyncSucceeded);
 
-            return Results.Ok(ProjectToReachableConfigs(metrics, reachable));
+            return Results.Ok(ProjectToReachableConfigs(metrics, reachable.Value.ConfigIds, reachable.Value.ReachesEveryConfig));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -199,7 +199,7 @@ public static class DashboardEndpoints
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>The caller's reachable config ids, or null when they cannot be read (refuse).</summary>
-    private static async Task<IReadOnlySet<Guid>?> TryGetReachableConfigIdsAsync(
+    private static async Task<(IReadOnlySet<Guid> ConfigIds, bool ReachesEveryConfig)?> TryGetReachableConfigIdsAsync(
         SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
@@ -218,6 +218,12 @@ public static class DashboardEndpoints
         }
     }
 
+    /// <summary>
+    /// The tenant-wide completeness concern <see cref="SpeDashboardSyncService"/> records. Its reason counts
+    /// skipped config records across EVERY customer, so only a caller who reaches every config sees it.
+    /// </summary>
+    internal const string CompletenessConcern = "Dataverse config completeness";
+
     /// <summary>Matches the per-config concern name <see cref="SpeDashboardSyncService"/> records.</summary>
     private static readonly Regex GraphConcernConfigId = new(
         @"^Graph containers \(config (?<id>[0-9a-fA-F-]{36})\)$",
@@ -230,8 +236,10 @@ public static class DashboardEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A caller who reaches EVERY config named in the aggregate gets it unchanged (the root operator's view
-    /// today, and the "no configs" / "Dataverse load failed" snapshots, which name none).
+    /// A caller who reaches EVERY config in the table (<paramref name="reachesEveryConfig"/>) gets the
+    /// aggregate unchanged — the root operator's view. Anyone else gets a projection, even when every config
+    /// the aggregate happens to NAME is theirs: a config the sync skipped as incomplete is named nowhere, yet
+    /// it is counted in the completeness concern.
     /// </para>
     /// <para>
     /// <b>Storage in a partial view is reported as not reported</b> (0 bytes from 0 reporting containers),
@@ -241,13 +249,20 @@ public static class DashboardEndpoints
     /// ratchet-listed timer that migrates when next touched — recorded in the task 165 note as follow-up.
     /// </para>
     /// <para>
-    /// Concerns that name no config (the Dataverse config load, the completeness count) are platform health
-    /// and stay. A per-config concern whose config id cannot be read is dropped (fail closed).
+    /// The Dataverse config-load concern names no config and is platform health: it stays. The
+    /// <see cref="CompletenessConcern"/> is dropped from a projection — its reason is a count of skipped
+    /// config records across every customer, which a leaf admin may not see. A per-config concern whose
+    /// config id cannot be read is dropped (fail closed).
+    /// </para>
+    /// <para>
+    /// Storage is kept only when every config the aggregate counts is reachable (no other customer
+    /// contributed to the sum); otherwise it is reported as not reported (see above).
     /// </para>
     /// </remarks>
     internal static SpeDashboardSyncService.DashboardMetrics ProjectToReachableConfigs(
         SpeDashboardSyncService.DashboardMetrics metrics,
-        IReadOnlySet<Guid> reachable)
+        IReadOnlySet<Guid> reachable,
+        bool reachesEveryConfig)
     {
         bool IsReachable(string configKey) =>
             Guid.TryParse(configKey, out var id) && reachable.Contains(id);
@@ -259,21 +274,19 @@ public static class DashboardEndpoints
             return concern.Concern.StartsWith("Graph containers", StringComparison.Ordinal) ? string.Empty : null;
         }
 
-        var everyCountReachable = metrics.ContainerCountByConfig.Keys.All(IsReachable);
-        var everyConcernReachable = metrics.Concerns
-            .Select(ConcernConfigKey)
-            .All(key => key is null || IsReachable(key));
-
-        if (everyCountReachable && everyConcernReachable)
+        if (reachesEveryConfig)
         {
             return metrics;
         }
+
+        var everyCountReachable = metrics.ContainerCountByConfig.Keys.All(IsReachable);
 
         var counts = metrics.ContainerCountByConfig
             .Where(kv => IsReachable(kv.Key))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
 
         var concerns = metrics.Concerns
+            .Where(c => !string.Equals(c.Concern, CompletenessConcern, StringComparison.Ordinal))
             .Where(c => ConcernConfigKey(c) is not { } key || IsReachable(key))
             .ToList();
 
@@ -284,8 +297,8 @@ public static class DashboardEndpoints
         {
             ContainerCountByConfig = counts,
             TotalContainerCount = counts.Values.Where(v => v > 0).Sum(),
-            TotalStorageUsedInBytes = 0,
-            StorageReportingContainerCount = 0,
+            TotalStorageUsedInBytes = everyCountReachable ? metrics.TotalStorageUsedInBytes : 0,
+            StorageReportingContainerCount = everyCountReachable ? metrics.StorageReportingContainerCount : 0,
             Concerns = concerns,
             SyncHealth = health,
             SyncSucceeded = health == SpeDashboardSyncService.SyncHealth.Healthy,

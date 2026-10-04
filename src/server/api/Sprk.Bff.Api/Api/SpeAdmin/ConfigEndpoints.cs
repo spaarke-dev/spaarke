@@ -303,8 +303,9 @@ public static class ConfigEndpoints
             return ValidationProblem(kvValidation, context.TraceIdentifier);
         }
 
-        // Task 165 (sweep #74): the business unit must be one the caller administers, and no app-identity
-        // value may be borrowed from a config in a unit they do not.
+        // Task 165 (sweep #74): the business unit must be one the caller administers, the environment one
+        // they can read (round 16 item 4), and no app-identity value may be borrowed from a config in a
+        // unit they do not.
         var writeRefusal = WriteRefusal(
             await tenantScope.DecideConfigWriteAsync(
                 context.User,
@@ -313,6 +314,7 @@ public static class ConfigEndpoints
                     request.ContainerTypeId, request.OwningAppId, request.KeyVaultSecretName,
                     request.ConsumingAppId, request.ConsumingAppKeyVaultSecret),
                 excludeConfigId: null,
+                environmentId: request.EnvironmentId,
                 ct),
             context.TraceIdentifier);
 
@@ -415,18 +417,20 @@ public static class ConfigEndpoints
             // Task 165 (sweep #45). The filter confined the config being updated; these judge the values
             // the update would STORE. Identity fields are judged only where they CHANGE: the shipped client
             // sends every field on every save, unchanged ones included, and an unchanged value is not a new
-            // borrowing.
+            // borrowing. A linked environment is judged whenever sent: the config's current one is always
+            // readable (this config reaches it), so the client's unchanged re-send is never refused.
             var writeRefusal = WriteRefusal(
                 await tenantScope.DecideConfigWriteAsync(
                     context.User,
                     request.BusinessUnitId,
                     IdentityValues(
-                        Changed(request.ContainerTypeId, existing.ContainerTypeId),
-                        Changed(request.OwningAppId, existing.OwningAppId),
-                        Changed(request.KeyVaultSecretName, existing.KeyVaultSecretName),
-                        Changed(request.ConsumingAppId, existing.ConsumingAppId),
-                        Changed(request.ConsumingAppKeyVaultSecret, existing.ConsumingAppKvSecret)),
+                        Changed(SpeAdminTenantScope.IdentityColumns.ContainerTypeId, request.ContainerTypeId, existing.ContainerTypeId),
+                        Changed(SpeAdminTenantScope.IdentityColumns.OwningAppId, request.OwningAppId, existing.OwningAppId),
+                        Changed(SpeAdminTenantScope.IdentityColumns.KeyVaultSecretName, request.KeyVaultSecretName, existing.KeyVaultSecretName),
+                        Changed(SpeAdminTenantScope.IdentityColumns.ConsumingAppId, request.ConsumingAppId, existing.ConsumingAppId),
+                        Changed(SpeAdminTenantScope.IdentityColumns.ConsumingAppKvSecret, request.ConsumingAppKeyVaultSecret, existing.ConsumingAppKvSecret)),
                     excludeConfigId: configId,
+                    environmentId: request.EnvironmentId,
                     ct),
                 context.TraceIdentifier);
 
@@ -560,12 +564,16 @@ public static class ConfigEndpoints
         };
 
     /// <summary>
-    /// The requested value when it differs (trimmed, case-insensitive) from the stored one; otherwise null,
-    /// which the write check ignores.
+    /// The requested value when it differs from the stored one in the canonical comparison form
+    /// (<see cref="SpeAdminTenantScope.CanonicalIdentityColumnValue"/>: a GUID-valued id compared as a GUID,
+    /// anything else trimmed; case-insensitive); otherwise null, which the write check ignores.
     /// </summary>
-    private static string? Changed(string? requested, string? stored) =>
+    private static string? Changed(string column, string? requested, string? stored) =>
         requested is not null
-        && !string.Equals(requested.Trim(), stored?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(
+            SpeAdminTenantScope.CanonicalIdentityColumnValue(column, requested),
+            SpeAdminTenantScope.CanonicalIdentityColumnValue(column, stored),
+            StringComparison.OrdinalIgnoreCase)
             ? requested
             : null;
 
@@ -577,6 +585,12 @@ public static class ConfigEndpoints
         SpeAdminScopeDecision.BusinessUnitOutOfScope => ProblemDetailsHelper.Forbidden(
             "spe.admin.deny.business_unit_out_of_scope",
             "The business unit is not one you administer.",
+            traceId),
+
+        // One answer for an environment that does not exist and one the caller cannot read (round 16 item 4).
+        SpeAdminScopeDecision.EnvironmentOutOfScope => ProblemDetailsHelper.Forbidden(
+            "spe.admin.deny.environment_out_of_scope",
+            "The SPE environment is not one you can use.",
             traceId),
 
         // Deliberately names neither the other config nor its business unit.

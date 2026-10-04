@@ -3,8 +3,11 @@
 > **Task**: `tasks/165-admin-surfaces-operator-policy-and-tenant-scope.poml` (GitHub #1104)
 > **Branch**: `task/uac-r2-165` from `work/unified-access-control-r2` @ `e6dd48b43`
 > **Date**: 2026-10-03 · **Rigor**: FULL · **Model**: Opus 5.5
-> **Outcome**: code-complete for the nine sweep routes and three of the four amendment items;
-> **two escalations fired and stopped** (§4.1 environments scoping, §4.2 three `SearchItemsTests`).
+> **Outcome**: code-complete for the nine sweep routes and all four amendment items. The two escalations
+> that stopped round 1 (§4.1 environments scoping, §4.2 three `SearchItemsTests`) were answered by **owner
+> round 16 items 4 and 5** and are implemented in fix round r1 (branch `task/uac-r2-165-r1`, **§10**), together
+> with the adversarial verifier's findings 6, 7 and 8. Still open: publish size (instructed to skip) and the
+> manual live gates (§9).
 
 ---
 
@@ -22,7 +25,8 @@
 | amendment | `SpeAdminTenantScope` fail-open | tri-state `SpeAdminScopeDecision`; fault → 503 | done |
 | amendment | dashboard routes without business-unit scoping | `GET /api/spe/dashboard/metrics`, `POST …/refresh` project the aggregate onto reachable configs | done |
 | amendment | `containertypes/{typeId}/register` app-only token to a caller-chosen host | host must be `{tenant}-admin.sharepoint.com`, https, default port, no user info | done |
-| amendment | environment routes without business-unit scoping | — | **STOPPED — escalation §4.1** |
+| amendment | environment routes without business-unit scoping | `SpeAdminEnvironmentScopeFilter` on GET-by-id / POST / PUT / DELETE; list trimmed in-handler; config POST/PUT environment link judged by `DecideConfigWriteAsync` (owner round 16 item 4, option (a)) | done — fix round r1, §10 |
+| trigger 5 | `POST /api/spe/search/items` — three `SearchItemsTests` | tests seed an in-scope config through `FakeDataverseTables`; not-found asserts the uniform 404; no real outbound Dataverse call (owner round 16 item 5) | done — fix round r1, §10 |
 
 ---
 
@@ -113,11 +117,11 @@ aggregate, same precedent). Publish size: not measured (instructed to skip). CVE
 | 2 | a shipped consumer breaks | **not fired** — `ContainerTypeConfig.tsx:521` requires a business unit; the bulk client sends `configId` in the body with no query string (`speApiClient.ts:1409-1424`, unchanged and still accepted); the PUT client re-sends unchanged values, which are no longer judged; `register` is called by the client with neither `appId` nor `sharePointAdminUrl` (`speApiClient.ts:549-557`) — a PRE-EXISTING 400 this task does not change |
 | 3 | an automated caller of `/api/admin/record-matching/*` without the role | **not fired** — grep of `scripts/`, `.github/workflows/`, `infrastructure/`: none (only docs, tests and the endpoint file) |
 | 4 | per-container ownership needs a container → business-unit map | **not fired** — the bulk fix binds a container to the config's container TYPE (the mandated check). `businessunit.sprk_containerid` is not a unique map (root and BU1 share one id, §2), so no business-unit binding was invented. The residual (one type serving several customers, topology §3 Model 1) is §8 item 3 |
-| 5 | the fail-closed 503 / does-not-exist 404 changes an existing test or shipped flow outside the six routes | **FIRED — §4.2** |
+| 5 | the fail-closed 503 / does-not-exist 404 changes an existing test or shipped flow outside the six routes | **FIRED — §4.2; answered by owner round 16 item 5; fixed in §10** |
 | 6 | an ADR exception | **not fired** — the SystemAdmin policy change is the owner's amendment, not an ADR deviation; no per-handler `CanAccessConfigAsync` |
 | 7 | shared app identity across leaf units | **not fired** — 0 (§2) |
 
-### 4.1 STOPPED — environment routes business-unit scoping (owner amendment item)
+### 4.1 STOPPED in round 1 — environment routes business-unit scoping (owner amendment item) → RESOLVED: owner round 16 item 4 chose (a); implemented in §10
 
 🔔 **Human Input Required.** The amendment says "also fix … the SPE environments … routes without
 business-unit scoping". Not implemented: the *how* is a product decision the existing rules do not answer.
@@ -143,7 +147,7 @@ business-unit scoping". Not implemented: the *how* is a product decision the exi
   link check + tests; no client change for root operators; leaf admins lose environment edit (they should
   never have had it).
 
-### 4.2 STOPPED — `SearchItemsTests` outcomes changed by the fail-closed filter (trigger 5)
+### 4.2 STOPPED in round 1 — `SearchItemsTests` outcomes changed by the fail-closed filter (trigger 5) → RESOLVED: owner round 16 item 5; implemented in §10
 
 Route: **`POST /api/spe/search/items?configId=…`** (outside this task's six). Tests (unit suite,
 `tests/unit/Sprk.Bff.Api.Tests/SpeAdmin/SearchItemsTests.cs`, NOT a KEEP path):
@@ -281,6 +285,17 @@ listed `SpeDashboardSyncService` deliberately untouched) ✓. No §6.5 path need
 | `GET /api/spe/dashboard/metrics` (amendment) | handler decision: aggregate projected onto `GetReachableConfigIdsAsync` | `…SpeAdminConfigAndBulkTenantScopeTests.Dashboard_ForALeafAdmin_ShowsOnlyTheirConfigs_WithTotalsRecomputed` |
 | `POST /api/spe/dashboard/refresh` (amendment) | same projection | (same code path; refresh triggers a sync and is not exercised in the fake host — the GET test covers the projection) |
 | `POST /api/spe/containertypes/{typeId}/register` (amendment) | filter (`?configId`) + host allow-list | `…SpeAdminConfigAndBulkTenantScopeTests.Register_ToAHostThatIsNotASharePointAdminHost_Is400` |
+| `GET /api/spe/environments` (round 16 item 4) | handler decision: list trimmed to `SpeAdminTenantScope.GetEnvironmentReachAsync` (platform operator = all; otherwise environments linked by a reachable config); 503 when unverifiable | `Sprk.Bff.Api.Tests.Auth.SpeAdmin.SpeAdminEnvironmentScopeTests.List_ForALeafAdmin_HoldsOnlyTheEnvironmentsTheirReachableConfigsLink` |
+| `GET /api/spe/environments/{id:guid}` (round 16 item 4) | filter `SpeAdminEnvironmentScopeFilter` (Read) on the route, after the `/api/spe` group filters | `…SpeAdminEnvironmentScopeTests.GetById_ForALeafAdmin_AnswersTheSame404ForAnUnreadableAndAnUnknownEnvironment_AndReadsNeither` |
+| `POST /api/spe/environments` (round 16 item 4) | filter `SpeAdminEnvironmentScopeFilter` (Write: root business unit only) | `…SpeAdminEnvironmentScopeTests.Write_ByALeafAdmin_IsOne403_AndNothingIsReadOrWritten` (theory row POST) |
+| `PUT /api/spe/environments/{id:guid}` (round 16 item 4) | filter `SpeAdminEnvironmentScopeFilter` (Write) | same test (theory rows PUT) |
+| `DELETE /api/spe/environments/{id:guid}` (round 16 item 4) | filter `SpeAdminEnvironmentScopeFilter` (Write) | same test (theory rows DELETE) |
+
+`POST /api/spe/configs` and `PUT /api/spe/configs/{configId:guid}` (rows above) now also judge the linked
+`environmentId` in `DecideConfigWriteAsync`: deny test
+`…SpeAdminEnvironmentScopeTests.PostConfig_LinkingAnEnvironmentTheLeafAdminCannotRead_IsOne403_AndNothingIsCreated`
+and `…PutConfig_RelinkingToAnUnreadableEnvironment_Is403_AndNothingIsWritten`. The environment route templates are
+unchanged (`{id:guid}`), so no waiver key moves.
 
 None of these is a list whose query runs as the caller. No Permanent waiver is proposed for any of them.
 
@@ -322,8 +337,8 @@ not apply.
 
 ## 8. Not in this task (for the main session to file or route)
 
-1. **§4.1 environments** — owner decision, then a follow-up change.
-2. **§4.2 SearchItemsTests** — main-session decision; recommended resolution given.
+1. ~~§4.1 environments~~ — done in fix round r1 (owner round 16 item 4), §10.
+2. ~~§4.2 SearchItemsTests~~ — done in fix round r1 (owner round 16 item 5), §10.
 3. **Container → business-unit binding** — container, item, permission and recycle-bin routes (and now the bulk
    job) check the config's business unit and container TYPE, not that a container belongs to the caller's unit;
    one type can serve several customers (Model 1). Needs an authoritative container → unit map, which does not
@@ -364,6 +379,14 @@ Ids redacted to 8 characters. `$T` = an access token for the BFF (`api://1e40baa
   form's full body → **200**); start a bulk delete on a THROWAWAY container of that config's type → completes;
   the dashboard shows the whole aggregate.
 - **(e)** done during development — §2.
+- **(g)** round 16 item 4 (environments), read-only part: as the leaf admin of (b), `GET $BFF/api/spe/environments` →
+  only environments linked by a config of their unit (dev today: none → `[]`, since both dev configs are root-unit);
+  `GET $BFF/api/spe/environments/df502cb9-…` → **404** `spe.admin.deny.environment_out_of_scope`, byte-identical apart
+  from `traceId` to a random GUID. As a ROOT admin: the list holds "Spaarke Dev", GET → 200. WRITE part (owner
+  approval; throwaway only): as the leaf admin, `POST $BFF/api/spe/environments` with
+  `{"name":"probe","rootSiteUrl":"https://example.sharepoint.com"}` → **403**
+  `spe.admin.deny.environment_write_requires_platform_operator`, and `PUT`/`DELETE` on `df502cb9-…` → the same 403;
+  expect zero Dataverse change.
 - **(f)** amendment: `POST $BFF/api/spe/containertypes/<type>/register?configId=<own config>` with
   `sharePointAdminUrl: "https://example.com"` → **400** `spe.containertypes.register.sharepoint_url_not_admin_host`
   (read-only effect: refused before any token is acquired).

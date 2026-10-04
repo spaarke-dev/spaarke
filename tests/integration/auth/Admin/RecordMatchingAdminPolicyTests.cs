@@ -176,18 +176,43 @@ public sealed class SystemAdminPolicyGroupTests : IClassFixture<AdminSurfaceHost
         "/api/admin/record-matching/status",
     };
 
+    /// <summary>
+    /// One route per group, each with an answer ONLY its handler can produce — so "admitted" is proven by
+    /// the handler having run, not inferred from "not 401/403" (a routing 404 or an unrelated 500 would
+    /// pass that). The membership route is called with a blank entity type, which its handler answers
+    /// with its own 400 before touching any service.
+    /// </summary>
+    public static TheoryData<string, HttpStatusCode, string> OneRoutePerSystemAdminGroupWithItsHandlersAnswer() => new()
+    {
+        { "/api/admin/jobs", HttpStatusCode.OK, "\"jobId\"" },
+        { "/api/admin/membership/discovered/%20", HttpStatusCode.BadRequest, "entityType route parameter is required" },
+        {
+            "/api/ai/rag/admin/bulk-index/3f2504e0-4f89-11d3-9a0c-0305e82c3301/status",
+            HttpStatusCode.NotFound,
+            "Bulk indexing job '3f2504e0-4f89-11d3-9a0c-0305e82c3301' not found"
+        },
+        { "/api/admin/record-matching/status", HttpStatusCode.OK, "spaarke-records-test" },
+    };
+
     [Theory]
-    [MemberData(nameof(OneRoutePerSystemAdminGroup))]
-    public async Task ARealAdministrator_IsAdmitted(string url)
+    [MemberData(nameof(OneRoutePerSystemAdminGroupWithItsHandlersAnswer))]
+    public async Task ARealAdministrator_IsAdmitted_AndReachesTheHandler(
+        string url, HttpStatusCode handlersStatus, string handlersBodyFragment)
     {
         foreach (var role in new[] { "Admin", "SystemAdmin" })
         {
             using var client = _fixture.CreateCaller(new[] { role });
 
             var response = await client.GetAsync(url);
+            var body = await response.Content.ReadAsStringAsync();
 
-            response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "role {0} is the admin signal", role)
-                .And.NotBe(HttpStatusCode.Unauthorized);
+            response.StatusCode.Should().Be(handlersStatus, "role {0} is the admin signal; body: {1}", role, body);
+            body.Should().Contain(handlersBodyFragment, "only the route's handler produces this answer");
+        }
+
+        if (url.StartsWith("/api/admin/record-matching/", StringComparison.Ordinal))
+        {
+            _fixture.IndexSync.Calls.Should().Contain("GetStatusAsync");
         }
     }
 

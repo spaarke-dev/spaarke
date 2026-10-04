@@ -74,16 +74,55 @@ public class SpeAdminTenantScope
     /// <exception cref="Exception">THROWS when the business-unit hierarchy cannot be read.</exception>
     public async Task<IReadOnlyCollection<Guid>> GetAccessibleBusinessUnitsAsync(
         ClaimsPrincipal? user,
+        CancellationToken ct = default) =>
+        (await LoadCallerScopeAsync(user, ct).ConfigureAwait(false)).Accessible;
+
+    /// <summary>
+    /// Which SPE environments (<c>sprk_speenvironment</c>) the caller may read and whether they may write
+    /// any (unified-access-control-r2 task 165, round 16 item 4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Environments are shared tenant infrastructure</b>, not a customer's own record:
+    /// <c>sprk_speenvironment</c> has no business-unit column, and in Model 1 one environment serves every
+    /// customer's configs. So: only an admin whose OWN business unit is the root (no parent) — a Spaarke
+    /// platform operator — may create, change or delete environments, and may read every one. Any other
+    /// admin may read only the environments linked by a config they can reach (their units' configs, plus
+    /// business-unit-less configs under the compatibility rule in <see cref="DecideConfigAccessAsync"/>).
+    /// </para>
+    /// <para>
+    /// A caller who cannot be resolved to a Dataverse user reaches nothing and writes nothing.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="Exception">
+    /// THROWS on any read fault, and when the config read returns <see cref="WholeTableReadLimit"/> rows
+    /// (possible truncation). The caller must refuse (503), never fall back to "every environment".
+    /// </exception>
+    public async Task<SpeAdminEnvironmentReach> GetEnvironmentReachAsync(
+        ClaimsPrincipal? user,
         CancellationToken ct = default)
     {
-        var callerBusinessUnit = await ResolveCallerBusinessUnitAsync(user, ct).ConfigureAwait(false);
-        if (callerBusinessUnit is null)
+        var scope = await LoadCallerScopeAsync(user, ct).ConfigureAwait(false);
+        if (scope.IsPlatformOperator)
         {
-            return Array.Empty<Guid>();
+            return SpeAdminEnvironmentReach.PlatformOperator;
         }
 
-        var hierarchy = await LoadBusinessUnitHierarchyAsync(ct).ConfigureAwait(false);
-        return CollectSelfAndDescendants(callerBusinessUnit.Value, hierarchy);
+        if (scope.Accessible.Count == 0)
+        {
+            return SpeAdminEnvironmentReach.Nothing;
+        }
+
+        var rows = await LoadConfigScopeRowsAsync(ct).ConfigureAwait(false);
+        if (rows.Count >= WholeTableReadLimit)
+        {
+            throw new InvalidOperationException(
+                $"The config table read returned {rows.Count} rows (the read limit); the readable environments cannot be proven complete.");
+        }
+
+        return new SpeAdminEnvironmentReach(
+            IsPlatformOperator: false,
+            LinkedEnvironmentIds: LinkedEnvironmentIds(rows, scope.Accessible));
     }
 
     /// <summary>
@@ -174,6 +213,11 @@ public class SpeAdminTenantScope
     /// differs from the stored row. Blank values are ignored.
     /// </param>
     /// <param name="excludeConfigId">On PUT, the config being updated — its own row is not "another" config.</param>
+    /// <param name="environmentId">
+    /// The SPE environment the request would link, or null when it links none. When set it must be one the
+    /// caller can READ (<see cref="GetEnvironmentReachAsync"/>, round 16 item 4); an unknown environment and
+    /// an unreadable one get the same <see cref="SpeAdminScopeDecision.EnvironmentOutOfScope"/>.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>
     /// <para>
@@ -187,14 +231,21 @@ public class SpeAdminTenantScope
     /// <para>
     /// <b>Values are compared within a kind, across columns</b>: an app id against both app-id columns, a
     /// secret name against both secret-name columns, because naming B's owning app as one's CONSUMING app is
-    /// the same borrowing. Trimmed, case-insensitive. A row with no business unit does not block (the
-    /// compatibility rule in <see cref="DecideConfigAccessAsync"/>).
+    /// the same borrowing. A row with no business unit does not block (the compatibility rule in
+    /// <see cref="DecideConfigAccessAsync"/>).
+    /// </para>
+    /// <para>
+    /// <b>Values are compared in a canonical form</b> (<see cref="CanonicalIdentityValue"/>). A container type
+    /// id or app id that parses as a GUID is compared AS a GUID, so <c>N</c> (32 hex digits, no hyphens),
+    /// <c>B</c> (braces) and <c>P</c> forms of another unit's value are the same value, not a new one — the
+    /// columns are free text and the request is not required to send the canonical <c>D</c> form. Anything
+    /// else (secret names; a non-GUID id) is compared trimmed and case-insensitively.
     /// </para>
     /// <para>
     /// The other rows are read with ONE app-only query and compared in memory, with no caller value in the
     /// <c>$filter</c> (<see cref="DataverseWebApiClient.QueryAsync{T}"/> does not encode it). A fault, or a
     /// full page of <see cref="WholeTableReadLimit"/> rows (possible truncation), is
-    /// <see cref="SpeAdminScopeDecision.Unverifiable"/>. The business unit is checked first.
+    /// <see cref="SpeAdminScopeDecision.Unverifiable"/>. Order: business unit, environment, identity.
     /// </para>
     /// </remarks>
     public async Task<SpeAdminScopeDecision> DecideConfigWriteAsync(
@@ -202,24 +253,25 @@ public class SpeAdminTenantScope
         Guid? businessUnitId,
         IReadOnlyDictionary<string, string?> identityValues,
         Guid? excludeConfigId,
+        Guid? environmentId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(identityValues);
 
         var candidates = identityValues
             .Where(kv => IdentityKindByColumn.ContainsKey(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
-            .Select(kv => (Kind: IdentityKindByColumn[kv.Key], Value: kv.Value!.Trim()))
+            .Select(kv => (Kind: IdentityKindByColumn[kv.Key], Value: CanonicalIdentityValue(IdentityKindByColumn[kv.Key], kv.Value)))
             .ToList();
 
-        if (businessUnitId is null && candidates.Count == 0)
+        if (businessUnitId is null && environmentId is null && candidates.Count == 0)
         {
             return SpeAdminScopeDecision.Permitted;
         }
 
-        IReadOnlyCollection<Guid> accessible;
+        CallerScope scope;
         try
         {
-            accessible = await GetAccessibleBusinessUnitsAsync(user, ct).ConfigureAwait(false);
+            scope = await LoadCallerScopeAsync(user, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -228,12 +280,22 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.Unverifiable;
         }
 
+        var accessible = scope.Accessible;
+
         if (businessUnitId is { } unit && !accessible.Contains(unit))
         {
             return SpeAdminScopeDecision.BusinessUnitOutOfScope;
         }
 
-        if (candidates.Count == 0)
+        // A platform operator reads every environment, so only a non-empty id is required of them; anyone
+        // else is judged against the config rows below.
+        var environmentNeedsRows = environmentId is { } env && env != Guid.Empty && !scope.IsPlatformOperator;
+        if (environmentId is { } requested && (requested == Guid.Empty || accessible.Count == 0))
+        {
+            return SpeAdminScopeDecision.EnvironmentOutOfScope;
+        }
+
+        if (candidates.Count == 0 && !environmentNeedsRows)
         {
             return SpeAdminScopeDecision.Permitted;
         }
@@ -246,17 +308,24 @@ public class SpeAdminTenantScope
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "SpeAdmin tenant scope: could not read the config table for the identity check — refusing (unverifiable).");
+                "SpeAdmin tenant scope: could not read the config table for the write check — refusing (unverifiable).");
             return SpeAdminScopeDecision.Unverifiable;
         }
 
         if (rows.Count >= WholeTableReadLimit)
         {
             _logger.LogError(
-                "SpeAdmin tenant scope: the config table read returned {Count} rows (the read limit), so the identity " +
+                "SpeAdmin tenant scope: the config table read returned {Count} rows (the read limit), so the write " +
                 "check cannot prove it saw every row — refusing (unverifiable).",
                 rows.Count);
             return SpeAdminScopeDecision.Unverifiable;
+        }
+
+        if (environmentNeedsRows && !LinkedEnvironmentIds(rows, accessible).Contains(environmentId!.Value))
+        {
+            _logger.LogWarning(
+                "SpeAdmin tenant scope: a config write links an SPE environment the caller cannot read — refusing.");
+            return SpeAdminScopeDecision.EnvironmentOutOfScope;
         }
 
         foreach (var row in rows)
@@ -267,7 +336,9 @@ public class SpeAdminTenantScope
 
             foreach (var (kind, value) in candidates)
             {
-                if (row.ValuesOfKind(kind).Any(v => string.Equals(v?.Trim(), value, StringComparison.OrdinalIgnoreCase)))
+                if (row.ValuesOfKind(kind).Any(v =>
+                        !string.IsNullOrWhiteSpace(v)
+                        && string.Equals(CanonicalIdentityValue(kind, v), value, StringComparison.OrdinalIgnoreCase)))
                 {
                     _logger.LogWarning(
                         "SpeAdmin tenant scope: a config write names a {Kind} value that a config in an unreachable " +
@@ -285,11 +356,21 @@ public class SpeAdminTenantScope
     /// The ids of every config the caller may see: those in an accessible business unit, plus those with no
     /// business unit (the compatibility rule). Used to project the cross-config dashboard aggregate.
     /// </summary>
+    /// <remarks>
+    /// "Every config" is judged over the WHOLE table, not over the configs a cached aggregate happens to
+    /// name: a config skipped by the dashboard sync (incomplete) is named nowhere, yet it may belong to
+    /// another customer.
+    /// </remarks>
     /// <exception cref="Exception">
     /// THROWS on any read fault, and when the config read returns <see cref="WholeTableReadLimit"/> rows
     /// (possible truncation). The caller must refuse, never fall back to the unprojected aggregate.
     /// </exception>
-    public async Task<IReadOnlySet<Guid>> GetReachableConfigIdsAsync(
+    /// <returns>
+    /// The reachable config ids, and whether they are EVERY config in the table — only then may a caller see
+    /// tenant-wide figures that cannot be attributed to a config (e.g. how many config records were skipped
+    /// as incomplete).
+    /// </returns>
+    public async Task<(IReadOnlySet<Guid> ConfigIds, bool ReachesEveryConfig)> GetReachableConfigIdsAsync(
         ClaimsPrincipal? user,
         CancellationToken ct = default)
     {
@@ -302,12 +383,47 @@ public class SpeAdminTenantScope
                 $"The config table read returned {rows.Count} rows (the read limit); the reachable set cannot be proven complete.");
         }
 
-        return rows
-            .Where(r => r.ConfigId.HasValue
-                        && (r.BusinessUnitId is null || accessible.Contains(r.BusinessUnitId.Value)))
+        var reachable = rows
+            .Where(r => r.ConfigId.HasValue && IsReachable(r, accessible))
             .Select(r => r.ConfigId!.Value)
             .ToHashSet();
+
+        return (reachable, rows.All(r => IsReachable(r, accessible)));
     }
+
+    /// <summary>
+    /// The form an app-identity value is compared in: a container type id or app id that parses as a GUID is
+    /// its canonical <c>D</c> form (so <c>N</c> / <c>B</c> / <c>P</c> spellings of one GUID are equal);
+    /// anything else is the trimmed value. Compare the results case-insensitively.
+    /// </summary>
+    internal static string CanonicalIdentityValue(string kind, string? value)
+    {
+        var trimmed = value?.Trim() ?? string.Empty;
+        return kind is ContainerTypeKind or AppIdKind && Guid.TryParse(trimmed, out var id)
+            ? id.ToString("D")
+            : trimmed;
+    }
+
+    /// <summary>
+    /// <see cref="CanonicalIdentityValue(string, string?)"/> for a value of the given identity column
+    /// (<see cref="IdentityColumns"/>); an unknown column compares trimmed.
+    /// </summary>
+    internal static string CanonicalIdentityColumnValue(string column, string? value) =>
+        CanonicalIdentityValue(IdentityKindByColumn.TryGetValue(column, out var kind) ? kind : string.Empty, value);
+
+    /// <summary>A config row the caller reaches: in an accessible unit, or with no unit (compatibility rule).</summary>
+    private static bool IsReachable(ConfigScopeRow row, IReadOnlyCollection<Guid> accessible) =>
+        row.BusinessUnitId is null || accessible.Contains(row.BusinessUnitId.Value);
+
+    /// <summary>The environments linked by the configs the caller reaches.</summary>
+    private static IReadOnlySet<Guid> LinkedEnvironmentIds(
+        IEnumerable<ConfigScopeRow> rows,
+        IReadOnlyCollection<Guid> accessible) =>
+        accessible.Count == 0
+            ? new HashSet<Guid>()
+            : rows.Where(r => r.EnvironmentId is { } env && env != Guid.Empty && IsReachable(r, accessible))
+                  .Select(r => r.EnvironmentId!.Value)
+                  .ToHashSet();
 
     /// <summary>The five config columns that select an app identity (sweep finding #74).</summary>
     public static class IdentityColumns
@@ -319,18 +435,43 @@ public class SpeAdminTenantScope
         public const string ConsumingAppKvSecret = "sprk_consumingappkvsecret";
     }
 
+    private const string ContainerTypeKind = "container type";
+    private const string AppIdKind = "app id";
+    private const string SecretNameKind = "secret name";
+
     private static readonly IReadOnlyDictionary<string, string> IdentityKindByColumn = new Dictionary<string, string>
     {
-        [IdentityColumns.ContainerTypeId] = "container type",
-        [IdentityColumns.OwningAppId] = "app id",
-        [IdentityColumns.ConsumingAppId] = "app id",
-        [IdentityColumns.KeyVaultSecretName] = "secret name",
-        [IdentityColumns.ConsumingAppKvSecret] = "secret name",
+        [IdentityColumns.ContainerTypeId] = ContainerTypeKind,
+        [IdentityColumns.OwningAppId] = AppIdKind,
+        [IdentityColumns.ConsumingAppId] = AppIdKind,
+        [IdentityColumns.KeyVaultSecretName] = SecretNameKind,
+        [IdentityColumns.ConsumingAppKvSecret] = SecretNameKind,
     };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Resolution
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The caller's business unit resolved once: the accessible set (own unit + descendants; EMPTY when the
+    /// caller cannot be resolved) and whether the own unit is the root (no parent) — a platform operator.
+    /// THROWS when the hierarchy cannot be read; an unresolvable caller reads no hierarchy.
+    /// </summary>
+    private async Task<CallerScope> LoadCallerScopeAsync(ClaimsPrincipal? user, CancellationToken ct)
+    {
+        var callerBusinessUnit = await ResolveCallerBusinessUnitAsync(user, ct).ConfigureAwait(false);
+        if (callerBusinessUnit is null)
+        {
+            return new CallerScope(IsPlatformOperator: false, Accessible: Array.Empty<Guid>());
+        }
+
+        var hierarchy = await LoadBusinessUnitHierarchyAsync(ct).ConfigureAwait(false);
+        var isRoot = hierarchy.TryGetValue(callerBusinessUnit.Value, out var parent) && parent is null;
+
+        return new CallerScope(isRoot, CollectSelfAndDescendants(callerBusinessUnit.Value, hierarchy));
+    }
+
+    private readonly record struct CallerScope(bool IsPlatformOperator, IReadOnlyCollection<Guid> Accessible);
 
     /// <summary>
     /// Resolves the caller's business unit from Dataverse via their Entra object id.
@@ -407,7 +548,7 @@ public class SpeAdminTenantScope
         _dataverseClient.QueryAsync<ConfigScopeRow>(
             "sprk_specontainertypeconfigs",
             filter: null,
-            select: "sprk_specontainertypeconfigid,_sprk_businessunit_value," +
+            select: "sprk_specontainertypeconfigid,_sprk_businessunit_value,_sprk_environment_value," +
                     $"{IdentityColumns.ContainerTypeId},{IdentityColumns.OwningAppId},{IdentityColumns.KeyVaultSecretName}," +
                     $"{IdentityColumns.ConsumingAppId},{IdentityColumns.ConsumingAppKvSecret}",
             top: WholeTableReadLimit,
@@ -498,6 +639,9 @@ public class SpeAdminTenantScope
         [JsonPropertyName("_sprk_businessunit_value")]
         public Guid? BusinessUnitId { get; set; }
 
+        [JsonPropertyName("_sprk_environment_value")]
+        public Guid? EnvironmentId { get; set; }
+
         [JsonPropertyName(IdentityColumns.ContainerTypeId)]
         public string? ContainerTypeId { get; set; }
 
@@ -515,9 +659,9 @@ public class SpeAdminTenantScope
 
         public IEnumerable<string?> ValuesOfKind(string kind) => kind switch
         {
-            "container type" => new[] { ContainerTypeId },
-            "app id" => new[] { OwningAppId, ConsumingAppId },
-            "secret name" => new[] { KeyVaultSecretName, ConsumingAppKvSecret },
+            ContainerTypeKind => new[] { ContainerTypeId },
+            AppIdKind => new[] { OwningAppId, ConsumingAppId },
+            SecretNameKind => new[] { KeyVaultSecretName, ConsumingAppKvSecret },
             _ => Array.Empty<string?>()
         };
     }
@@ -555,6 +699,38 @@ public enum SpeAdminScopeDecision
     /// <summary>A body app-identity value already carried by a config in an unreachable business unit: 403.</summary>
     IdentityOutOfScope,
 
+    /// <summary>
+    /// A body <c>environmentId</c> the caller cannot read, or that is no environment (round 16 item 4): 403.
+    /// </summary>
+    EnvironmentOutOfScope,
+
     /// <summary>A Dataverse read the decision depends on failed: 503, never allow.</summary>
     Unverifiable
+}
+
+/// <summary>
+/// What a caller may do with SPE environments (<c>sprk_speenvironment</c>) — the answer of
+/// <see cref="SpeAdminTenantScope.GetEnvironmentReachAsync"/> (unified-access-control-r2 task 165, round 16
+/// item 4).
+/// </summary>
+/// <param name="IsPlatformOperator">
+/// The caller's own business unit is the root: they read every environment and may write environments.
+/// </param>
+/// <param name="LinkedEnvironmentIds">
+/// For anyone else, the environments linked by a config they can reach — the only ones they may read.
+/// </param>
+public sealed record SpeAdminEnvironmentReach(bool IsPlatformOperator, IReadOnlySet<Guid> LinkedEnvironmentIds)
+{
+    /// <summary>A root-unit admin: reads every environment, writes environments.</summary>
+    public static SpeAdminEnvironmentReach PlatformOperator { get; } = new(true, new HashSet<Guid>());
+
+    /// <summary>A caller who reaches no config (or cannot be resolved): reads and writes nothing.</summary>
+    public static SpeAdminEnvironmentReach Nothing { get; } = new(false, new HashSet<Guid>());
+
+    /// <summary>Whether the caller may create, change or delete environments.</summary>
+    public bool CanWrite => IsPlatformOperator;
+
+    /// <summary>Whether the caller may read <paramref name="environmentId"/>.</summary>
+    public bool CanRead(Guid environmentId) =>
+        environmentId != Guid.Empty && (IsPlatformOperator || LinkedEnvironmentIds.Contains(environmentId));
 }

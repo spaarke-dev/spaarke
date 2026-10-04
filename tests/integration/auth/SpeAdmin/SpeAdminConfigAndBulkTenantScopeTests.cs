@@ -306,6 +306,83 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
         _fixture.Dataverse.CallsOn(ConfigSet, "Create").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Another unit's GUID-valued identity, spelled in a non-canonical GUID form. The columns are free text
+    /// and the request need not send the canonical <c>D</c> form, so a raw string compare would let these
+    /// through as "new" values (verifier finding 6).
+    /// </summary>
+    public static TheoryData<string, string> AnotherUnitsGuidInANonCanonicalSpelling()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var format in new[] { "N", "B", "P" })
+        {
+            data.Add("containerTypeId", Guid.Parse(TypeB).ToString(format));
+            data.Add("owningAppId", Guid.Parse(AppB).ToString(format).ToUpperInvariant());
+            data.Add("consumingAppId", Guid.Parse(ConsumingAppB).ToString(format));
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(AnotherUnitsGuidInANonCanonicalSpelling))]
+    public async Task Post_BorrowingAnotherUnitsGuid_InANonCanonicalSpelling_Is403(string field, string value)
+    {
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync("/api/spe/configs", NewConfig(UnitA.ToString(), (field, value))),
+            HttpStatusCode.Forbidden);
+
+        problem["reasonCode"].GetString().Should().Be(IdentityCode);
+        _fixture.Dataverse.CallsOn(ConfigSet, "Create").Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(AnotherUnitsGuidInANonCanonicalSpelling))]
+    public async Task Put_RepointingToAnotherUnitsGuid_InANonCanonicalSpelling_Is403(string field, string value)
+    {
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PutAsJsonAsync($"/api/spe/configs/{ConfigA}", new Dictionary<string, object?> { [field] = value }),
+            HttpStatusCode.Forbidden);
+
+        problem["reasonCode"].GetString().Should().Be(IdentityCode);
+        _fixture.Dataverse.CallsOn(ConfigSet, "Update").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Post_WhenTheOtherUnitStoredItsGuidNonCanonically_TheCanonicalSpellingIsStill403()
+    {
+        // The STORED side may be the odd spelling: unit B's row holds an app id with no hyphens.
+        var storedN = Guid.Parse("b1b1b1b1-0000-0000-0000-00000000001b");
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type-n", storedN.ToString("N"), "other-secret-n"));
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsJsonAsync("/api/spe/configs", NewConfig(UnitA.ToString(), ("owningAppId", storedN.ToString("D")))),
+            HttpStatusCode.Forbidden);
+
+        problem["reasonCode"].GetString().Should().Be(IdentityCode);
+    }
+
+    [Fact]
+    public async Task Put_ReSendingItsOwnStoredGuid_InANonCanonicalSpelling_IsNotAChange_AndIsServed()
+    {
+        // Config B also carries Config A's owning app. Re-sending A's own value as {B}-braced is not a new
+        // borrowing, exactly as a case-only difference is not (D1).
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type", AppA, "other-secret"));
+        using var client = Admin();
+
+        var response = await client.PutAsJsonAsync($"/api/spe/configs/{ConfigA}", new
+        {
+            owningAppId = Guid.Parse(AppA).ToString("B"),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+    }
+
     [Theory]
     [InlineData(AppN)]   // carried only by a config with NO business unit (compatibility rule)
     [InlineData(AppA)]   // carried only by a config in a reachable unit
@@ -533,6 +610,24 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
         response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
         body.Should().NotContain(OutOfScopeCode).And.NotContain(UnverifiableCode).And.NotContain(AmbiguousCode,
             "the filter must let an in-scope ?configId= through to the handler");
+
+        // Positive proof the HANDLER ran (a routing 404 or a pre-handler 500 would satisfy the lines above):
+        // the filter only QUERIES the config table; the handler's SpeAdminGraphService.ResolveConfigAsync
+        // RETRIEVES the named config by id.
+        _fixture.Dataverse.CallsOn(ConfigSet, "Retrieve").Should().Contain(c => c.Id == ConfigA,
+            "the containers handler resolves the in-scope config it was given");
+    }
+
+    [Fact]
+    public async Task AnotherConfigScopedRoute_ForAnOutOfScopeConfig_NeverReachesItsHandler()
+    {
+        // The negative twin of the test above: same route, same probe, a config in Unit B.
+        using var client = Admin();
+
+        AssertUniformNotFound(await Problem(await client.GetAsync($"/api/spe/containers?configId={ConfigB}")), ConfigB);
+
+        _fixture.Dataverse.CallsOn(ConfigSet, "Retrieve").Should().BeEmpty(
+            "the handler's config resolution must not run for a config the caller cannot reach");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -553,7 +648,77 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
         metrics.GetProperty("totalStorageUsedInBytes").GetInt64().Should().Be(0,
             "the cached aggregate holds no per-config storage split, so a partial view reports none");
         metrics.GetRawText().Should().NotContain(ConfigB.ToString(), "Unit B's config and its failure must not leak");
+        metrics.GetRawText().Should().NotContain("Dataverse config completeness").And.NotContain(CompletenessReason,
+            "the completeness count spans every customer's config records");
         metrics.GetProperty("syncHealth").GetString().Should().Be("Healthy");
+    }
+
+    [Fact]
+    public async Task Dashboard_ForALeafAdmin_WhoReachesEveryConfigTheAggregateNames_StillDoesNotSeeTheTenantWideCount()
+    {
+        // Every config the aggregate NAMES is Unit A's or unit-less, but Unit B's config exists in the table
+        // (e.g. skipped by the sync as incomplete) — the completeness count may be counting it.
+        var cache = _fixture.Services.GetRequiredService<IDistributedCache>();
+        await cache.SetStringAsync(SpeDashboardSyncService.CacheKey, JsonSerializer.Serialize(new
+        {
+            totalContainerCount = 3,
+            totalStorageUsedInBytes = 1024L,
+            storageReportingContainerCount = 1,
+            containerCountByConfig = new Dictionary<string, int> { [ConfigA.ToString()] = 3 },
+            lastSyncedAt = DateTimeOffset.UtcNow,
+            syncSucceeded = false,
+            syncStatus = "1 of 3 concern(s) failed",
+            syncHealth = "Degraded",
+            concerns = new object[]
+            {
+                new { concern = "Dataverse container-type configs", succeeded = true },
+                new { concern = "Dataverse config completeness", succeeded = false, reason = CompletenessReason },
+                new { concern = $"Graph containers (config {ConfigA})", succeeded = true },
+            },
+        }));
+        using var client = Admin();
+
+        var metrics = await Json(await client.GetAsync("/api/spe/dashboard/metrics"));
+
+        metrics.GetRawText().Should().NotContain(CompletenessReason);
+        metrics.GetProperty("totalStorageUsedInBytes").GetInt64().Should().Be(1024,
+            "every config the storage sum covers is the caller's, so the sum is theirs to see");
+        metrics.GetProperty("syncHealth").GetString().Should().Be("Healthy");
+    }
+
+    [Fact]
+    public async Task DashboardRefresh_ForALeafAdmin_IsProjectedExactlyLikeTheRead()
+    {
+        // code-review W2 / verifier finding 8: refresh was covered only through the shared projection.
+        await SeedDashboardAsync(DateTimeOffset.UtcNow.AddMinutes(-5));
+        using var client = Admin();
+
+        var refresh = client.PostAsync("/api/spe/dashboard/refresh", content: null);
+
+        // The sync loop is not hosted in the test host; stand in for it by publishing a newer snapshot,
+        // which TriggerRefreshAsync's cache poll picks up.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        await SeedDashboardAsync(DateTimeOffset.UtcNow);
+
+        var metrics = await Json(await refresh);
+
+        metrics.GetProperty("containerCountByConfig").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(new[] { ConfigA.ToString(), ConfigN.ToString() });
+        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(5);
+        metrics.GetRawText().Should().NotContain(ConfigB.ToString()).And.NotContain(CompletenessReason);
+    }
+
+    [Fact]
+    public async Task DashboardRefresh_WhenTheScopeCannotBeRead_Is503_NeverTheUnprojectedAggregate()
+    {
+        await SeedDashboardAsync();
+        _fixture.Dataverse.FaultQueriesOn("businessunits");
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PostAsync("/api/spe/dashboard/refresh", content: null), HttpStatusCode.ServiceUnavailable);
+
+        problem["errorCode"].GetString().Should().Be(UnverifiableCode);
     }
 
     [Fact]
@@ -568,7 +733,8 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
 
         metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(12);
         metrics.GetProperty("totalStorageUsedInBytes").GetInt64().Should().Be(4096);
-        metrics.GetRawText().Should().Contain(ConfigB.ToString());
+        metrics.GetRawText().Should().Contain(ConfigB.ToString()).And.Contain(CompletenessReason,
+            "a platform operator reaches every config, so the tenant-wide count is theirs");
     }
 
     [Fact]
@@ -705,7 +871,10 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
         return request;
     }
 
-    private async Task SeedDashboardAsync()
+    private const string CompletenessReason =
+        "3 config record(s) skipped as incomplete (missing container type, owning app, secret name, or environment tenant).";
+
+    private async Task SeedDashboardAsync(DateTimeOffset? lastSyncedAt = null)
     {
         var cache = _fixture.Services.GetRequiredService<IDistributedCache>();
         var metrics = new
@@ -719,13 +888,15 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
                 [ConfigB.ToString()] = 7,
                 [ConfigN.ToString()] = 2,
             },
-            lastSyncedAt = DateTimeOffset.UtcNow,
+            lastSyncedAt = lastSyncedAt ?? DateTimeOffset.UtcNow,
             syncSucceeded = false,
             syncStatus = "1 of 4 concern(s) failed",
             syncHealth = "Degraded",
             concerns = new object[]
             {
                 new { concern = "Dataverse container-type configs", succeeded = true },
+                // Tenant-wide: counts skipped records across EVERY customer (verifier finding 8).
+                new { concern = "Dataverse config completeness", succeeded = false, reason = CompletenessReason },
                 new { concern = $"Graph containers (config {ConfigA})", succeeded = true },
                 new { concern = $"Graph containers (config {ConfigB})", succeeded = false, reason = $"Container list failed for {ConfigB}" },
                 new { concern = $"Graph containers (config {ConfigN})", succeeded = true },
