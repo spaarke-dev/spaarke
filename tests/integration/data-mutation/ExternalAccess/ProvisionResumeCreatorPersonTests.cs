@@ -281,6 +281,129 @@ public class ProvisionResumeCreatorPersonTests : IClassFixture<ProvisionProjectT
         AssertNothingWritten();
     }
 
+    // ── Owner round 14 item 3 (task 133 c1-r4): a creator read Dataverse REFUSES is an administrator's job ──────────
+    //
+    // A 401/403 (the service's sign-in, or its Read privilege on the table, refused) repeats on every call, as the cascade
+    // reads already treat it: creatorState "refused", HTTP 500, a detail that says calling again repeats it and names the
+    // Read privilege — never "the same caller may" (the wizard offered a retry that failed every time). A 503 or 429 stays
+    // the transient "unreadable". Every case writes nothing and shares to nobody instead (F8).
+
+    /// <summary>The detail's recovery for each read state: an administrator for <c>refused</c>, the caller for <c>unreadable</c>.</summary>
+    private static void AssertRecoveryFor(string state, JsonElement problem)
+    {
+        var detail = problem.GetProperty("detail").GetString();
+        if (state == "refused")
+        {
+            detail.Should().Contain("Calling again repeats this refusal").And.Contain("Read privilege")
+                .And.NotContain("(the same caller may)");
+        }
+        else
+        {
+            detail.Should().Contain("(the same caller may)").And.NotContain("repeats this refusal");
+        }
+    }
+
+    /// <summary>
+    /// The read of <c>sprk_createdbyperson</c> itself is refused 401/403: <c>refused</c>, naming the column — not
+    /// <c>column-missing</c> (only a 400 to that read means the column is absent) and not the transient <c>unreadable</c>.
+    /// Calling again with nothing changed is refused the same way.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Resume_WhenTheColumnReadIsRefused_Refuses500Refused_NotARetry(HttpStatusCode status)
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.CreatorPersonReadFailsWith = status;
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: AppUser, createdByPerson: Maker);
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await BodyOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        problem.GetProperty("creatorState").GetString().Should().Be("refused");
+        problem.GetProperty("creatorColumn").GetString().Should().Be(RecordCreatorPerson.Column);
+        problem.GetProperty("creatorPersonState").GetString().Should().Be("refused");
+        AssertRecoveryFor("refused", problem);
+        AssertNothingWritten();
+
+        var again = await ProvisionAsync(new { projectId });
+        (await BodyOf(again)).GetProperty("creatorState").GetString().Should().Be("refused",
+            "deterministic: the same call is refused the same way until an administrator acts");
+        AssertNothingWritten();
+    }
+
+    /// <summary>
+    /// <c>createdby</c>'s systemuser read fails: refused 401/403 → <c>refused</c>; 503/429 → <c>unreadable</c>. Either way
+    /// the decision stops there (createdby may be a usable person) — the person recorded in the column receives nothing.
+    /// After a transient failure the same caller's call succeeds.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "refused")]
+    [InlineData(HttpStatusCode.Forbidden, "refused")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "unreadable")]
+    [InlineData(HttpStatusCode.TooManyRequests, "unreadable")]
+    public async Task Resume_WhenCreatedBysReadFails_ClassifiesItByTheReadsStatus(HttpStatusCode status, string state)
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (false, false);
+        _fixture.SystemUserReadFailsFor = creator;
+        _fixture.SystemUserReadFailsWith = status;
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: creator, createdByPerson: Maker);
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await BodyOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        problem.GetProperty("creatorState").GetString().Should().Be(state);
+        problem.GetProperty("creatorColumn").GetString().Should().Be("createdby");
+        problem.GetProperty("createdByState").GetString().Should().Be(state);
+        AssertRecoveryFor(state, problem);
+        AssertNothingWritten();
+
+        if (state == "unreadable")
+        {
+            _fixture.SystemUserReadFailsFor = null;
+            var retry = await ProvisionAsync(new { projectId });
+            retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+            _fixture.Grants.Select(g => g.Principal.Id).Should().Equal(creator);
+        }
+    }
+
+    /// <summary>
+    /// The recorded person's systemuser read fails (createdby absent, so the column decides): refused 401/403 →
+    /// <c>refused</c>; 503/429 → <c>unreadable</c>. Zero writes either way.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, "refused")]
+    [InlineData(HttpStatusCode.Forbidden, "refused")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "unreadable")]
+    [InlineData(HttpStatusCode.TooManyRequests, "unreadable")]
+    public async Task Resume_WhenTheRecordedPersonsReadFails_ClassifiesItByTheReadsStatus(HttpStatusCode status, string state)
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Guid.Empty, createdByPerson: Maker); // createdby absent: the column decides
+        _fixture.SystemUserByIdReadSucceeds = false;
+        _fixture.SystemUserReadFailsWith = status;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await BodyOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        problem.GetProperty("creatorState").GetString().Should().Be(state);
+        problem.GetProperty("creatorColumn").GetString().Should().Be(RecordCreatorPerson.Column);
+        problem.GetProperty("creatorPersonState").GetString().Should().Be(state);
+        AssertRecoveryFor(state, problem);
+        AssertNothingWritten();
+    }
+
     /// <summary>
     /// The FORWARD path never reads the column: an environment without it still provisions a new secure record
     /// (deploy-order tolerance — only a resume that needs the column reports it unreadable).

@@ -205,11 +205,14 @@ public static class ProvisionProjectEndpoint
     /// A resume found no usable person to share to: neither <c>createdby</c> nor the server-stamped
     /// <c>sprk_createdbyperson</c> (owner round 7 item 2) is an enabled, non-application user — HTTP 409 with
     /// <c>creatorState</c> <c>absent</c> / <c>disabled</c> / <c>application-user</c> — or one of them could not be read
-    /// (HTTP 500, <c>creatorState: unreadable</c>), or <c>sprk_createdbyperson</c> does not exist in the environment
-    /// (HTTP 500, <c>creatorState: column-missing</c>, task 133 r1). The <c>creatorColumn</c> extension names which
-    /// column the state describes. Resume never shares to the caller instead (owner decision F8), and nothing is written.
-    /// Recovery, each of which works against this code: <c>unreadable</c> — the same caller calls again once the read
-    /// works; <c>column-missing</c> — an administrator applies the schema
+    /// (HTTP 500, <c>creatorState: unreadable</c>), or Dataverse REFUSED that read — a 401/403 refusing the service's
+    /// sign-in or Read privilege, or a 400 (HTTP 500, <c>creatorState: refused</c>, owner round 14 item 3) — or
+    /// <c>sprk_createdbyperson</c> does not exist in the environment (HTTP 500, <c>creatorState: column-missing</c>, task
+    /// 133 r1: a 400 to the query naming it). The <c>creatorColumn</c> extension names which column the state describes.
+    /// Resume never shares to the caller instead (owner decision F8), and nothing is written. Recovery, each of which
+    /// works against this code: <c>unreadable</c> — the same caller calls again once the read works; <c>refused</c> —
+    /// calling again repeats it: an administrator restores the service's Read privilege (users; this record's table for
+    /// <c>sprk_createdbyperson</c>) first, then calls again; <c>column-missing</c> — an administrator applies the schema
     /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>), then calls again;
     /// <c>disabled</c> — an administrator re-enables that user, then calls again (the resume shares to them); any state
     /// — an administrator ASSIGNS the record to the person who should hold it, which takes it out of the owner team, and
@@ -254,8 +257,13 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonContainerSharedWithAnotherRecord = "sdap.provision.container_shared_with_another_record";
 
     /// <summary>
-    /// The container recorded on the record could not be checked against the business units and the other secure roots
-    /// (a read failed). Refused before any mutation (500); the same caller may call again once Dataverse is reachable.
+    /// The container recorded on the record could not be checked against the business units and the other secure roots.
+    /// Refused before any mutation (500). The <c>containerOwnershipState</c> extension says which: <c>unreadable</c> (a
+    /// read failed; the same caller may call again once Dataverse is reachable) or <c>refused</c> (owner round 14 item 3:
+    /// Dataverse refused the read — a 401/403 refusing the service's sign-in or Read privilege, or a 400 — so calling again
+    /// repeats it: an administrator looks at the service's Read privilege on business units and on the project, matter and
+    /// work assignment tables first). Classified by <see cref="AssignCascadeChildOwners.IsRefusedRead"/>, the cascade
+    /// reads' rule.
     /// </summary>
     internal const string ReasonContainerOwnershipUnreadable = "sdap.provision.container_ownership_unreadable";
 
@@ -585,16 +593,27 @@ public static class ProvisionProjectEndpoint
             switch (holder.Kind)
             {
                 case RecordedContainerKind.Unreadable:
-                    logger.LogError(holder.Fault,
-                        "[PROVISION] Could not tell whether container {ContainerId} recorded on {RecordType} {RecordId} " +
-                        "belongs to it alone. Refusing before any change. TraceId={TraceId}",
-                        recorded, root.WireToken, recordId, traceId);
-                    return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                        $"The {root.DisplayLabel.ToLowerInvariant()} already records an SPE container, and whether that " +
-                        "container belongs to it alone could not be checked (a read of the business units or of the other " +
-                        "secure records failed). Nothing was changed; calling again once Dataverse is reachable repeats " +
-                        "the check (the same caller may).",
-                        traceId, (ReasonKey, ReasonContainerOwnershipUnreadable), ("speContainerId", recorded));
+                    {
+                        // Owner round 14 item 3: a read Dataverse REFUSES (400/401/403 — the cascade reads' rule) repeats on
+                        // every call, so it is an administrator's job, never offered to the same caller as a retry.
+                        var ownershipRefused = holder.Fault is not null && AssignCascadeChildOwners.IsRefusedRead(holder.Fault);
+                        var ownershipState = ownershipRefused ? ContainerOwnershipStateRefused : ContainerOwnershipStateUnreadable;
+                        logger.LogError(holder.Fault,
+                            "[PROVISION] Could not tell whether container {ContainerId} recorded on {RecordType} {RecordId} " +
+                            "belongs to it alone ({State}). Refusing before any change. TraceId={TraceId}",
+                            recorded, root.WireToken, recordId, ownershipState, traceId);
+                        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                            $"The {root.DisplayLabel.ToLowerInvariant()} already records an SPE container, and whether that " +
+                            "container belongs to it alone could not be checked " + (ownershipRefused
+                                ? "(Dataverse refused the read of the business units or of the other secure records, or the " +
+                                  "service's permission to read them). Nothing was changed. Calling again repeats this " +
+                                  "refusal: an administrator looks at the service's Read privilege on business units and on " +
+                                  "the project, matter and work assignment tables first."
+                                : "(a read of the business units or of the other secure records failed). Nothing was changed; " +
+                                  "calling again once Dataverse is reachable repeats the check (the same caller may)."),
+                            traceId, (ReasonKey, ReasonContainerOwnershipUnreadable), ("speContainerId", recorded),
+                            ("containerOwnershipState", ownershipState));
+                    }
 
                 case RecordedContainerKind.AnotherRecord:
                     // WHICH record holds it goes to the operator log, not to the caller (the TopologyRefusal precedent):
@@ -1566,6 +1585,11 @@ public static class ProvisionProjectEndpoint
     private const string CascadeChildUnreadable = "unreadable";
     private const string CascadeChildRefused = "refused";
 
+    // The containerOwnershipState values (owner round 14 item 3, task 133 c1-r4): the same split for the check of a
+    // container already recorded on the record.
+    private const string ContainerOwnershipStateUnreadable = "unreadable";
+    private const string ContainerOwnershipStateRefused = "refused";
+
     /// <summary>
     /// The recovery for a record that KEEPS its own container when a failure after its move may have left it with no
     /// confirmed creator share (task 133 r1): it reads as provisioned to every later call, so the recovery is a direct
@@ -1683,11 +1707,14 @@ public static class ProvisionProjectEndpoint
     /// wins; when it is absent, disabled or an application user the column is read, in its OWN query, so a BFF deployed
     /// before the schema still provisions forward and only a resume that needs the column reports it — as
     /// <c>column-missing</c> when Dataverse answers 400 (the column is not there: an administrator applies the schema;
-    /// calling again cannot help), as <c>unreadable</c> for any other failure (task 133 r1).</para>
+    /// calling again cannot help), as <c>refused</c> for a 401/403 (owner round 14 item 3), as <c>unreadable</c> for any
+    /// other failure (task 133 r1).</para>
     ///
     /// <para><b>An unreadable <c>createdby</c> stops the decision</b> rather than falling through to the column: it may
-    /// well be a usable person, and the rule names it first. A failed read is a 500 (transient — the same caller may
-    /// call again), never folded into "unusable for good" (ADR-003).</para>
+    /// well be a usable person, and the rule names it first. A failed read is a 500, never folded into "unusable for good"
+    /// (ADR-003): <c>refused</c> when Dataverse refused it (<see cref="AssignCascadeChildOwners.IsRefusedRead"/> — a
+    /// 400/401/403, deterministic: an administrator acts first; owner round 14 item 3), otherwise <c>unreadable</c>
+    /// (transient — the same caller may call again).</para>
     ///
     /// <para><b>A person must be usable</b>: present, enabled (an <c>isdisabled</c> read as anything but false is
     /// disabled), not an application user. When neither column names one, the resume is REFUSED —
@@ -1731,12 +1758,13 @@ public static class ProvisionProjectEndpoint
             }
             catch (Exception ex)
             {
+                var readState = ReadFailureState(ex);
                 logger.LogError(ex,
-                    "[PROVISION] The creator (createdby {CreatorId}) of {RecordType} {RecordId} could not be read. " +
-                    "TraceId={TraceId}", createdById, root.WireToken, recordId, traceId);
+                    "[PROVISION] The creator (createdby {CreatorId}) of {RecordType} {RecordId} could not be read " +
+                    "({State}). TraceId={TraceId}", createdById, root.WireToken, recordId, readState, traceId);
                 return ResumeCreatorRefused(root, recordId, ownerTeamId, logger, traceId,
-                    decidingState: UnusableUnreadable, decidingColumn: CreatedByColumn,
-                    createdByState: UnusableUnreadable, personState: null);
+                    decidingState: readState, decidingColumn: CreatedByColumn,
+                    createdByState: readState, personState: null);
             }
 
             if (state is null)
@@ -1755,8 +1783,9 @@ public static class ProvisionProjectEndpoint
         {
             // A 400 to this one-column read is how Dataverse answers a column the environment lacks (the schema has not
             // run there): deterministic, so it is NOT the transient "unreadable" a caller may retry (task 133 r1,
-            // verifier round 4 finding 10 — the wizard's retry would fail until the schema is applied).
-            var columnState = IsColumnMissing(ex) ? UnusableColumnMissing : UnusableUnreadable;
+            // verifier round 4 finding 10 — the wizard's retry would fail until the schema is applied). A 401/403 is
+            // deterministic too: "refused" (owner round 14 item 3).
+            var columnState = IsColumnMissing(ex) ? UnusableColumnMissing : ReadFailureState(ex);
             logger.LogError(ex,
                 "[PROVISION] The creator person ({Column}) of {RecordType} {RecordId} could not be read ({State}); " +
                 "createdby is {CreatedByState}. TraceId={TraceId}", RecordCreatorPerson.Column, root.WireToken, recordId,
@@ -1781,12 +1810,14 @@ public static class ProvisionProjectEndpoint
         }
         catch (Exception ex)
         {
+            var readState = ReadFailureState(ex);
             logger.LogError(ex,
-                "[PROVISION] The creator person ({Column} {PersonId}) of {RecordType} {RecordId} could not be read. " +
-                "TraceId={TraceId}", RecordCreatorPerson.Column, personId, root.WireToken, recordId, traceId);
+                "[PROVISION] The creator person ({Column} {PersonId}) of {RecordType} {RecordId} could not be read " +
+                "({State}). TraceId={TraceId}", RecordCreatorPerson.Column, personId, root.WireToken, recordId, readState,
+                traceId);
             return ResumeCreatorRefused(root, recordId, ownerTeamId, logger, traceId,
-                decidingState: UnusableUnreadable, decidingColumn: RecordCreatorPerson.Column,
-                createdByState: createdByState, personState: UnusableUnreadable);
+                decidingState: readState, decidingColumn: RecordCreatorPerson.Column,
+                createdByState: createdByState, personState: readState);
         }
 
         if (personState is not null)
@@ -1811,6 +1842,21 @@ public static class ProvisionProjectEndpoint
     private const string UnusableDisabled = "disabled";
     private const string UnusableApplicationUser = "application-user";
     private const string UnusableUnreadable = "unreadable";
+
+    /// <summary>
+    /// Dataverse REFUSED a read the decision needs — a 401/403 (the service's sign-in or Read privilege) or a 400
+    /// (owner round 14 item 3). Deterministic: calling again repeats it until an administrator acts, so the client does
+    /// not offer the same caller a retry.
+    /// </summary>
+    private const string UnusableRefused = "refused";
+
+    /// <summary>
+    /// The state a failed creator read reports: <c>refused</c> when Dataverse refused it
+    /// (<see cref="AssignCascadeChildOwners.IsRefusedRead"/>, the one rule for provisioning's reads), else the transient
+    /// <c>unreadable</c>.
+    /// </summary>
+    private static string ReadFailureState(Exception ex) =>
+        AssignCascadeChildOwners.IsRefusedRead(ex) ? UnusableRefused : UnusableUnreadable;
 
     /// <summary>
     /// <c>sprk_createdbyperson</c> does not exist in this environment — its read answered 400 (task 133 r1). Deterministic
@@ -1843,8 +1889,9 @@ public static class ProvisionProjectEndpoint
         string createdByState,
         string? personState)
     {
-        // A failed read and a missing column are environment faults (500); an unusable person is a state of the data (409).
-        var serverFault = decidingState is UnusableUnreadable or UnusableColumnMissing;
+        // A failed or refused read and a missing column are environment faults (500); an unusable person is a state of the
+        // data (409).
+        var serverFault = decidingState is UnusableUnreadable or UnusableRefused or UnusableColumnMissing;
 
         logger.LogWarning(
             "[PROVISION] Resume of {RecordType} {RecordId} refused: no usable person created it (createdby is " +
@@ -1854,12 +1901,15 @@ public static class ProvisionProjectEndpoint
         var createdByText = createdByState switch
         {
             UnusableUnreadable => "Its creator (createdby) could not be read.",
+            UnusableRefused =>
+                "Its creator (createdby) could not be read: Dataverse refused the read, or the service's permission to " +
+                "read users.",
             UnusableDisabled => "The person who created it (createdby) has a disabled user record.",
             UnusableApplicationUser => "It was created by an application (createdby is an application user).",
             _ => "It records no creator (createdby)."
         };
 
-        var personText = createdByState == UnusableUnreadable
+        var personText = createdByState is UnusableUnreadable or UnusableRefused
             ? string.Empty
             : personState switch
             {
@@ -1869,6 +1919,9 @@ public static class ProvisionProjectEndpoint
                     " The person recorded as its creator (sprk_createdbyperson) could not be read — if this repeats, an " +
                     "administrator checks that the column exists in this environment " +
                     "(scripts/Set-RecordCreatorPersonSchema.ps1 -Verify).",
+                UnusableRefused =>
+                    " The person recorded as its creator (sprk_createdbyperson) could not be read: Dataverse refused the " +
+                    "read, or the service's permission to read it.",
                 UnusableColumnMissing =>
                     " The person recorded as its creator cannot be looked up: Dataverse refused the query naming " +
                     "sprk_createdbyperson (400 Bad Request), which is how it answers when that column does not exist in " +
@@ -1883,6 +1936,9 @@ public static class ProvisionProjectEndpoint
             UnusableUnreadable =>
                 "A read failed, so this refusal is not final: calling again once Dataverse is reachable repeats the check " +
                 "(the same caller may). ",
+            UnusableRefused =>
+                "Calling again repeats this refusal until an administrator restores the service's Read privilege — on " +
+                "users (systemuser) and on this record's table — or its sign-in; then calling again repeats the check. ",
             UnusableColumnMissing =>
                 "Calling again repeats this refusal until an administrator applies the column's schema " +
                 "(scripts/Set-RecordCreatorPersonSchema.ps1 -Apply, then -Verify must pass); then the resume can share it " +

@@ -177,6 +177,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public Guid? SystemUserReadFailsFor { get; set; }
 
     /// <summary>
+    /// The HTTP status a failing systemuser read (<see cref="SystemUserByIdReadSucceeds"/> false, or
+    /// <see cref="SystemUserReadFailsFor"/>) carries, raised in the real client's shape — <see cref="HttpRequestException"/>
+    /// with the status (owner round 14 item 3, task 133 c1-r4: a 401/403 is refused, a 503/429 transient). Unset, the
+    /// failure is a non-HTTP fault, as before.
+    /// </summary>
+    public System.Net.HttpStatusCode? SystemUserReadFailsWith { get; set; }
+
+    /// <summary>
     /// Whether the environment carries <c>sprk_createdbyperson</c> (task 133 b2, owner round 7 item 2). When false, a
     /// projection naming its read form 400s, as Dataverse answers before <c>Set-RecordCreatorPersonSchema.ps1</c> runs.
     /// </summary>
@@ -187,6 +195,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>When true, every query that looks a container up by <c>sprk_containerid</c> throws (task 133 b2).</summary>
     public bool ContainerOwnershipReadFails { get; set; }
+
+    /// <summary>
+    /// When set, every query that looks a container up by <c>sprk_containerid</c> fails with this HTTP status, in the real
+    /// client's shape — <see cref="HttpRequestException"/> carrying it (owner round 14 item 3, task 133 c1-r4: a 401/403 is
+    /// refused, a 503/429 transient).
+    /// </summary>
+    public System.Net.HttpStatusCode? ContainerOwnershipReadFailsWith { get; set; }
 
     /// <summary>
     /// A RevokeAccess for this principal is accepted but NOT applied — the share stays (task 133 b2: a restore that
@@ -373,6 +388,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public Guid? IgnoreChildOwnerBindFor { get; set; }
 
     /// <summary>
+    /// Once an <c>ownerid</c> PATCH on THIS cascade child has been sent (recorded first), the row no longer reads — deleted
+    /// by someone else, or simply not returned (task 133 c1-r4): the restore's read-back after the PATCH finds NO row. The
+    /// PATCH itself is accepted, or — with <see cref="FailChildOwnerBindFor"/> on the same child — refused. The read
+    /// BEFORE the PATCH still finds the row, so it is never <c>Gone</c>: only that read decides <c>Gone</c>, and a row that
+    /// disappears after its PATCH is a failure (<c>NotApplied</c> / <c>Refused</c>), never "restored".
+    /// </summary>
+    public Guid? RemoveChildOnBindFor { get; set; }
+
+    /// <summary>
     /// A read of THIS cascade child returns its row WITHOUT its id column (task 133 c1-r2): a row the snapshot could not
     /// key a restore on, so the snapshot must refuse it — never record it under an empty id.
     /// </summary>
@@ -505,9 +529,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SystemUsers[CallerSystemUserId] = (false, false);
         SystemUserByIdReadSucceeds = true;
         SystemUserReadFailsFor = null;
+        SystemUserReadFailsWith = null;
         CreatorPersonColumnExists = true;
         BusinessUnitContainers.Clear();
         ContainerOwnershipReadFails = false;
+        ContainerOwnershipReadFailsWith = null;
         RevokeNotAppliedFor = null;
         FailOwnerReadBackAfterBindTo = null;
         _failNextOwnerReadBack = false;
@@ -519,6 +545,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         CascadeChildSnapshotReadFailsWith = null;
         FailChildOwnerBindFor = null;
         IgnoreChildOwnerBindFor = null;
+        RemoveChildOnBindFor = null;
         ChildRowReadWithoutIdFor = null;
         FailChildOwnerReadFor = null;
         FailChildOwnerReadBackAfterBindFor = null;
@@ -667,11 +694,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             && flat.TryGetValue("ownerid@odata.bind", out var childBind)
             && childBind is not null)
         {
+            // Task 133 c1-r4: the row is gone once its bind has been sent (recorded above) — whatever the PATCH reports.
+            if (RemoveChildOnBindFor == id)
+                _cascadeChildren.TryRemove(id, out _);
+
             if (FailChildOwnerBindFor == id)
                 throw new InvalidOperationException("Dataverse 403: simulated refusal of a child row's ownership assignment.");
 
-            // Task 133 c1-r2: accepted, recorded above, and silently not applied.
-            if (IgnoreChildOwnerBindFor == id)
+            // Task 133 c1-r2: accepted, recorded above, and silently not applied. Task 133 c1-r4: or accepted, with the
+            // row gone — nothing left to apply it to.
+            if (IgnoreChildOwnerBindFor == id || RemoveChildOnBindFor == id)
                 return Task.CompletedTask;
 
             if (ParseIdFromBind(childBind) is { } childOwnerId)
@@ -868,6 +900,21 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <c>isdisabled eq false</c> or <c>applicationid eq null</c> would hide a disabled or application user, and the
     /// tests that seed one would go red.</para>
     /// </remarks>
+    /// <summary>
+    /// <see cref="ContainerOwnershipReadFailsWith"/>: a container-holder read fails with that status, in the real client's
+    /// shape (task 133 c1-r4).
+    /// </summary>
+    private void ThrowIfContainerOwnershipReadFailsWithStatus()
+    {
+        if (ContainerOwnershipReadFailsWith is { } status)
+        {
+            throw new HttpRequestException(
+                $"Dataverse {(int)status}: simulated failure reading which records hold a container.",
+                inner: null,
+                statusCode: status);
+        }
+    }
+
     private string RowsJsonFor(string entitySet, string? filter, string? select = null, int? top = null)
     {
         RejectUnknownColumns(entitySet, select);
@@ -885,6 +932,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 {
                     if (ContainerOwnershipReadFails)
                         throw new InvalidOperationException("Dataverse 503: simulated failure reading container holders.");
+                    ThrowIfContainerOwnershipReadFailsWithStatus();
 
                     var excluded = ExtractGuidAfter(filter, " ne ");
                     var holderIdColumn = entitySet switch
@@ -1021,6 +1069,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 // Task 133 b2: which business unit's shared container is this?
                 if (ContainerOwnershipReadFails)
                     throw new InvalidOperationException("Dataverse 503: simulated failure reading business-unit containers.");
+                ThrowIfContainerOwnershipReadFailsWithStatus();
 
                 payload.AddRange(BusinessUnitContainers
                     .Where(b => string.Equals(b.Value, buContainer, StringComparison.Ordinal))
@@ -1097,13 +1146,20 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
             case "systemusers" when filter is not null && filter.Contains("systemuserid eq ", StringComparison.OrdinalIgnoreCase):
                 // Task 133: a resume reads the record's createdby by id.
-                if (!SystemUserByIdReadSucceeds)
-                    throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
-
-                if (SystemUserReadFailsFor is { } unreadableUser
-                    && filter.Contains(unreadableUser.ToString(), StringComparison.OrdinalIgnoreCase))
+                if (!SystemUserByIdReadSucceeds
+                    || (SystemUserReadFailsFor is { } unreadableUser
+                        && filter.Contains(unreadableUser.ToString(), StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new InvalidOperationException($"Dataverse 503: simulated read failure for systemuser {unreadableUser}.");
+                    // Task 133 c1-r4 (owner round 14 item 3): in the real client's shape when a status is set.
+                    if (SystemUserReadFailsWith is { } systemUserStatus)
+                    {
+                        throw new HttpRequestException(
+                            $"Dataverse {(int)systemUserStatus}: simulated systemuser read failure.",
+                            inner: null,
+                            statusCode: systemUserStatus);
+                    }
+
+                    throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
                 }
 
                 foreach (var (userId, (isDisabled, isApplicationUser)) in SystemUsers)

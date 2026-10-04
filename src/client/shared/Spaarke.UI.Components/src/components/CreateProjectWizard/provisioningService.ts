@@ -19,7 +19,10 @@
  * added two codes for the records Dataverse moves together with the project (SharePoint document locations and
  * documents): `cascade_children_unreadable` (refused before any change; `cascadeChildState` tells a retry from an
  * administrator's job) and `cascade_children_not_restored` (the attempt was undone, but some of those records are not
- * back with their own owners — an administrator puts them back first).
+ * back with their own owners — an administrator puts them back first). Round c1-r4 (owner round 14 item 3) applies the
+ * same split to two existing codes: `container_ownership_unreadable` now carries `containerOwnershipState`, and
+ * `resume_creator_unavailable` a `creatorState: refused` — a read Dataverse REFUSED (the service's sign-in or Read
+ * privilege) is an administrator's job, not a retry.
  *
  * CONTRACT CHANGED 2026-08-25 (BFF task 021). The backend no longer creates a business unit per
  * project, no longer creates an External Access Account, and no longer supports umbrella BU
@@ -126,7 +129,8 @@ export type ProvisioningFailureKind =
    * `shared_container_not_cleared` (task 133 r1: a shared container's link could not be removed before the move; the
    * same caller calls again):
    * `creator_unresolved` (the caller's identity could not be confirmed), `container_ownership_unreadable` (whether the
-   * container already on the record is shared could not be checked — task 133 b2), `resume_creator_unavailable` with
+   * container already on the record is shared could not be checked — task 133 b2; with `containerOwnershipState:
+   * refused` it is deterministic and not retryable — owner round 14 item 3), `resume_creator_unavailable` with
    * `creatorState: unreadable` (the record's creator could not be looked up) and `cascade_children_unreadable` with
    * `cascadeChildState: unreadable` (the records that move with it could not be read — task 133 c1; `refused` is
    * deterministic and not retryable). Deterministic refusals are not retryable —
@@ -159,7 +163,8 @@ export type ProvisioningFailureKind =
    * with no share — its creator no longer passes the Write gate), or a resume found no usable person recorded as the
    * record's creator (absent, disabled, an application user with no person recorded). For the latter an administrator
    * re-enables the creator, or assigns the record to the person who should hold it, who then secures it (task 133
-   * verifier round 2). A creator that could not be READ is not this state: see 'not-started'. Also (task 133 c1): the
+   * verifier round 2). A creator whose read FAILED (`creatorState: unreadable`) is not this state: see 'not-started'; one
+   * whose read Dataverse REFUSED (`creatorState: refused`, owner round 14 item 3) is. Also (task 133 c1): the
    * attempt was undone but records that moved together with the project are not back with their own owners
    * (`cascade_children_not_restored`) — an administrator puts them back before it is secured again.
    */
@@ -279,7 +284,9 @@ const REASON_STATES: Readonly<
     retryable: false,
   },
   // Task 133 b2: whether the container already on the project is shared storage could not be checked (a read failed).
-  // Refused before any change; the server tells the same caller they may call again.
+  // Refused before any change; the server tells the same caller they may call again. The copy here is the transient one
+  // (`containerOwnershipState: unreadable`, also used when the extension is absent); classifyProvisioningFailure swaps in
+  // the deterministic one for `containerOwnershipState: refused` (owner round 14 item 3).
   'sdap.provision.container_ownership_unreadable': {
     failureKind: 'not-started',
     errorMessage:
@@ -360,7 +367,8 @@ const REASON_STATES: Readonly<
   },
   // The copy for this code follows the server's `creatorState` extension: the message here is for a creator that cannot
   // be used (absent, disabled, an application user with no person recorded); classifyProvisioningFailure swaps in the
-  // transient state for `creatorState: unreadable`.
+  // transient state for `creatorState: unreadable`, and the deterministic read refusals for `column-missing` and
+  // `refused`.
   'sdap.provision.resume_creator_unavailable': {
     failureKind: 'needs-administrator',
     errorMessage:
@@ -391,6 +399,33 @@ const RESUME_CREATOR_COLUMN_MISSING = {
   failureKind: 'needs-administrator' as const,
   errorMessage:
     'Securing the project could not be finished, because this environment is not yet set up to record who created a project. Nothing about the project changed; an administrator needs to finish setting it up.',
+  retryable: false,
+};
+
+/**
+ * `resume_creator_unavailable` with `creatorState: refused` (owner round 14 item 3, task 133 c1-r4). Dataverse REFUSED
+ * the read of who created the project — a 401/403 refusing the service's own sign-in or its Read privilege (or a 400).
+ * Deterministic, so calling again repeats the refusal until an administrator acts: not retryable, and the copy names
+ * what the server's detail and the setup guide (§7a) send the administrator to — the service's permission to look the
+ * creator up — as the cascade refusal's copy does.
+ */
+const RESUME_CREATOR_REFUSED = {
+  failureKind: 'needs-administrator' as const,
+  errorMessage:
+    "Securing the project could not be finished, because the person who created it could not be looked up. Nothing about the project changed; an administrator needs to check the service's permission to look them up first.",
+  retryable: false,
+};
+
+/**
+ * `container_ownership_unreadable` with `containerOwnershipState: refused` (owner round 14 item 3, task 133 c1-r4).
+ * Dataverse REFUSED the read that checks whether the document container already on the project is shared — a 401/403
+ * refusing the service's own sign-in or its Read privilege (or a 400). Deterministic: not retryable, and the copy names
+ * the service's permission to make that check, as the server's detail and the setup guide (§7a) do.
+ */
+const CONTAINER_OWNERSHIP_REFUSED = {
+  failureKind: 'not-started' as const,
+  errorMessage:
+    "Securing the project did not start, because the document container already linked to it could not be checked. Nothing about the project changed; an administrator needs to look at the service's permission to check it first.",
   retryable: false,
 };
 
@@ -444,10 +479,17 @@ export interface IProvisioningFailureExtensions {
   containerKept?: boolean;
   /**
    * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
-   * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment) — all
-   * deterministic: an administrator acts — or `unreadable` (a read failed: the same caller may retry).
+   * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment), `refused` (owner
+   * round 14 item 3: Dataverse refused the read — the service's sign-in or Read privilege) — all deterministic: an
+   * administrator acts — or `unreadable` (a read failed: the same caller may retry).
    */
   creatorState?: string;
+  /**
+   * `container_ownership_unreadable` only (owner round 14 item 3, task 133 c1-r4): `unreadable` — a read failed, the same
+   * caller may retry — or `refused` — Dataverse refused the read (the service's sign-in or Read privilege), deterministic:
+   * an administrator acts.
+   */
+  containerOwnershipState?: string;
   /**
    * `cascade_children_unreadable` only (task 133 c1): `unreadable` — a read failed, the same caller may retry — or
    * `refused` — Dataverse refused the read (including a 401/403: the service's sign-in or Read privilege) or answered it
@@ -498,6 +540,17 @@ export function classifyProvisioningFailure(
 
   if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'column-missing') {
     return { ...RESUME_CREATOR_COLUMN_MISSING };
+  }
+
+  if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'refused') {
+    return { ...RESUME_CREATOR_REFUSED };
+  }
+
+  if (
+    reasonCode === 'sdap.provision.container_ownership_unreadable' &&
+    extensions?.containerOwnershipState === 'refused'
+  ) {
+    return { ...CONTAINER_OWNERSHIP_REFUSED };
   }
 
   if (reasonCode === 'sdap.provision.cascade_children_unreadable' && extensions?.cascadeChildState === 'refused') {
@@ -593,6 +646,9 @@ export async function provisionSecureProject(
         }
         if (typeof problem?.cascadeChildState === 'string') {
           extensions.cascadeChildState = problem.cascadeChildState;
+        }
+        if (typeof problem?.containerOwnershipState === 'string') {
+          extensions.containerOwnershipState = problem.containerOwnershipState;
         }
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */

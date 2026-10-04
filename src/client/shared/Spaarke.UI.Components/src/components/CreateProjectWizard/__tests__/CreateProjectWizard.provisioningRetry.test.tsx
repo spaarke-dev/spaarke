@@ -117,6 +117,29 @@ describe('SecureProvisioningOutcome — the wizard provisioning-failure state', 
     expect(screen.queryByText(/try securing it again/i)).not.toBeInTheDocument();
   });
 
+  // Owner round 14 item 3 (task 133 c1-r4): the same two codes the retry list above offers a retry for are NOT
+  // retryable when the server says Dataverse REFUSED the read (the service's sign-in or Read privilege): calling again
+  // would be refused every time, so neither the button nor the advice renders.
+  it.each<[string, IProvisioningFailureExtensions]>([
+    ['sdap.provision.container_ownership_unreadable', { containerOwnershipState: 'refused' }],
+    ['sdap.provision.resume_creator_unavailable', { creatorState: 'refused' }],
+  ])('offers no retry for %s when the read was refused (%o)', (reasonCode, extensions) => {
+    const authFetch = jest.fn();
+    renderWithProviders(
+      <SecureProvisioningOutcome
+        projectId={PROJECT_ID}
+        initialResult={failure(reasonCode, extensions)}
+        authenticatedFetch={authFetch as never}
+        bffBaseUrl={BFF}
+      />
+    );
+
+    expect(screen.getByText(failure(reasonCode, extensions).errorMessage!)).toBeInTheDocument();
+    expect(screen.getByText(/service's permission/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try securing again' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/try securing it again/i)).not.toBeInTheDocument();
+  });
+
   it('when the retry lands in a state only an administrator can finish, takes the action away', async () => {
     const authFetch = jest.fn().mockResolvedValue({
       ok: false,

@@ -167,19 +167,23 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
     }
 
     /// <summary>
-    /// The restore outcomes besides <c>Refused</c> (owner round 10 item 4: "a child whose restore fails is named").
+    /// The restore outcomes besides a plain <c>Refused</c> (owner round 10 item 4: "a child whose restore fails is named").
     /// <c>Unreadable</c>: the child's owner cannot be read before the restore, so nothing is written to it.
     /// <c>Unverified</c>: its PATCH is sent but it cannot be read back. <c>NotApplied</c> (task 133 c1-r2): its PATCH is
-    /// accepted but not applied — the read-back finds it still on the owner the undo's cascade left. Each is a failure —
-    /// never "already owned" or "restored" — named with its own owner, its outcome and the call that puts it back, in the
-    /// response and in a CRITICAL line, with no "retry" (another run would snapshot the owner it has now). The other child
-    /// is still put back.
+    /// accepted but not applied — the read-back finds it still on the owner the undo's cascade left. A row that is GONE
+    /// after its PATCH (task 133 c1-r4) — read back as no row — is <c>NotApplied</c> when the PATCH was accepted and
+    /// <c>Refused</c> when it was refused: only the read BEFORE the restore decides <c>Gone</c>, so a row that vanishes
+    /// after it is never counted back. Each is a failure — never "already owned", "restored" or "gone" — named with its own
+    /// owner, its outcome and the call that puts it back, in the response and in a CRITICAL line, with no "retry" (another
+    /// run would snapshot the owner it has now). The other child is still put back.
     /// </summary>
     [Theory]
-    [InlineData("Unreadable")]
-    [InlineData("Unverified")]
-    [InlineData("NotApplied")]
-    public async Task Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored(string outcome)
+    [InlineData("read-fails-before-restore", "Unreadable")]
+    [InlineData("read-back-fails", "Unverified")]
+    [InlineData("bind-accepted-not-applied", "NotApplied")]
+    [InlineData("row-gone-after-accepted-bind", "NotApplied")]
+    [InlineData("row-gone-after-refused-bind", "Refused")]
+    public async Task Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored(string shape, string outcome)
     {
         var projectId = Guid.NewGuid();
         var businessUnitTeam = Guid.NewGuid();
@@ -192,11 +196,26 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         _fixture.SeedCascadeChild(projectId, Location, otherLocation, otherOwner);
         _fixture.SharePointDocumentReadRefused = false;
         _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof fails → compensate
-        switch (outcome)
+        switch (shape)
         {
-            case "Unreadable": _fixture.FailChildOwnerReadFor = unknownLocation; break;              // its read BEFORE the restore throws
-            case "Unverified": _fixture.FailChildOwnerReadBackAfterBindFor = unknownLocation; break; // its read-back AFTER the PATCH throws
-            default: _fixture.IgnoreChildOwnerBindFor = unknownLocation; break;                      // its PATCH is accepted, not applied
+            case "read-fails-before-restore": // its read BEFORE the restore throws
+                _fixture.FailChildOwnerReadFor = unknownLocation;
+                break;
+            case "read-back-fails": // its read-back AFTER the PATCH throws
+                _fixture.FailChildOwnerReadBackAfterBindFor = unknownLocation;
+                break;
+            case "bind-accepted-not-applied": // its PATCH is accepted, not applied
+                _fixture.IgnoreChildOwnerBindFor = unknownLocation;
+                break;
+            case "row-gone-after-accepted-bind": // its PATCH is accepted; then no row reads back
+                _fixture.RemoveChildOnBindFor = unknownLocation;
+                break;
+            case "row-gone-after-refused-bind": // its PATCH is refused; then no row reads back
+                _fixture.RemoveChildOnBindFor = unknownLocation;
+                _fixture.FailChildOwnerBindFor = unknownLocation;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(shape), shape, "Not a shape this theory describes.");
         }
 
         var response = await ProvisionAsync(new { projectId });
@@ -230,7 +249,7 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
 
         var writesToUnknown = ChildOwnerWrites().Where(u => u.RecordId == unknownLocation).ToList();
-        if (outcome == "Unreadable")
+        if (shape == "read-fails-before-restore")
         {
             writesToUnknown.Should().BeEmpty("its owner could not be read, so nothing was written to it");
             _fixture.OwnerOfCascadeChild(unknownLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
@@ -238,14 +257,22 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
         }
         else
         {
-            writesToUnknown.Should().ContainSingle("the PATCH was sent once; only its read-back failed, or it was not applied")
+            writesToUnknown.Should().ContainSingle(
+                    "the PATCH was sent once; only its read-back failed, it was not applied, or the row was gone after it")
                 .Which.Payload["ownerid@odata.bind"].Should().Be($"/systemusers({unknownOwner.Id})");
         }
 
-        if (outcome == "NotApplied")
+        switch (shape)
         {
-            _fixture.OwnerOfCascadeChild(unknownLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
-                "the PATCH was accepted and not applied: the child is still where the undo's cascade left it");
+            case "bind-accepted-not-applied":
+                _fixture.OwnerOfCascadeChild(unknownLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
+                    "the PATCH was accepted and not applied: the child is still where the undo's cascade left it");
+                break;
+            case "row-gone-after-accepted-bind":
+            case "row-gone-after-refused-bind":
+                _fixture.OwnerOfCascadeChild(unknownLocation).Should().BeNull(
+                    "the row no longer reads after its PATCH: nothing confirms it is on its own owner, so it is not back");
+                break;
         }
     }
 

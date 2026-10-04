@@ -1310,6 +1310,12 @@ the code does: only the read BEFORE the restore decides `Gone`; a child that dis
 `Gone` itself stays untested, deliberately: no seed on it is fail-open (counting it as a failure refuses more; patching a
 missing row fails closed as `Refused`), and the item asked for wording.
 
+*Correction (round c1-r4, §20.1–20.2):* "no seed on it is fail-open" holds only for the read BEFORE the restore, which
+decides `Gone`. The read AFTER the PATCH was unpinned: seeds S13 / S16 (a row gone after its PATCH counted `Restored`) were
+fail-open and survived all 211 tests; they are now pinned. And "patching a missing row fails closed as `Refused`" assumed
+an update-only PATCH — the restore's PATCH sends no `If-Match`, so Dataverse UPSERTS a missing row (§20.2, recorded, not
+changed).
+
 The guide §7a `cascade_children_not_restored` row said the named rows "are NOT back on their own owners" — true for
 `Refused`/`NotApplied`, not known for `Unreadable`/`Unverified`, which item 1 now pins. It now says "NOT confirmed back"
 and gives each `outcome`'s meaning.
@@ -1463,6 +1469,7 @@ the old shape. `container_ownership_unreadable` and `resume_creator_unavailable`
 every failure but a 400 (the column-missing case, `IsColumnMissing`) as the same caller's retry, so a 401/403 there also
 offers a retry that fails every time. Fail closed (nothing written) in every case. Changing them is a classification
 change on reason codes the client already reads, so it is left to a decision rather than folded in here.
+*(Round c1-r4: DECIDED by owner round 14 item 3 — classify 401/403 as Refused — and implemented, §20.7.)*
 
 ### 18.5 Item 13 — gate (e) is covered (owner round 13 item 2)
 
@@ -1659,9 +1666,370 @@ Release` of `src/server/api/Sprk.Bff.Api` into each side's `deploy/api-publish`;
 Optimal` over `deploy/api-publish/*` on both sides (the `scripts/Deploy-BffApi.ps1` method); confirm equal file counts;
 report both absolute sizes, the delta and the zip tool; ≤60 MB. No package changed, so there is no CVE delta to check.
 
+*Round c1-r4 (§20.3):* the verifier of round c1-r3 MEASURED it by this procedure (against the work-branch merge base,
+not `origin/master`): **45.66 → 45.69 MB, +0.04 MB, 212 = 212 files**. Recorded there, with the PR text.
+
 ### 19.5 PR description — addition to §18.10
 
 > **Round c1-r3 (verifier on c1-r2).** Client copy only: for `cascade_children_unreadable` with `cascadeChildState:
 > refused`, the wizard now tells the user an administrator needs to look at the records "and the service's permission to
 > read them" — the check the server's detail and guide §7a name since 401/403 became `refused` (seed CL5 bites). No C#
 > changed. Publish size is the main session's measurement before merge.
+
+## 20. Round c1-r4 (2026-10-03, branch `task/uac-r2-133-c1-r3.-r2`) — the verifier's findings on round c1-r3
+
+Base: `task/uac-r2-133-c1-r3` @ **`3062d960f`** (baseSha). **Branch name:** instructed as `git switch -c
+task/uac-r2-133-c1-r3.-r2 task/uac-r2-133-c1-r3.`. The start point with its trailing period is not a ref (`git rev-parse
+--verify "task/uac-r2-133-c1-r3."` fails: a ref name cannot end in "."), so it was read as `task/uac-r2-133-c1-r3`; the new
+branch carries the instructed name exactly (`task/uac-r2-133-c1-r3.-r2`, a valid ref). This note calls the round c1-r4.
+Binding sources re-read from `work/unified-access-control-r2` (owner rounds 1–13 and the #1081 peer report), and again
+mid-round at `0c007772c`, which adds **owner round 14** (commit `9d88da386`) and rounds 15–16.
+
+The round has two parts:
+
+- **The verifier's items** (§20.1–20.6). The one code change is test coverage for a rule owner round 10 item 4 already
+  decides ("a child whose restore fails is named").
+- **Owner round 14 item 3** (§20.7, BINDING). The main session relayed it mid-round in a worktree note, and it is
+  corroborated by the work branch's decisions file. `container_ownership_unreadable` and `resume_creator_unavailable`
+  (creatorState unreadable) now classify a 401/403 as REFUSED, as the cascade reads already do; 503/429 stay
+  retryable. This part changes production C#, the client, guide §7a and the schema note.
+
+No escalation trigger fired: both parts are answered by owner decisions.
+
+| Item | Verifier finding | Disposition |
+|---|---|---|
+| 1 | Scope of c1-r3 (4 files, no C#); the `refused` copy non-retryable, no code / table / status, matches the server detail (`ProvisionProjectEndpoint.cs:1502-1505`) and guide §7a; doc comments match | Verified by the verifier; no change |
+| 2 | Seed CL5 bites (59 passed / 1 failed of `provisioningService.test.ts`) | Verified; no change |
+| 3 / 12 | LOW, fail-open in principle — "a child that disappears after its PATCH is `Refused` / `NotApplied`" is untested; seeds S13 and S16 (counted `Restored`) survive all 211 tests | **Closed** (§20.1): fixture `RemoveChildOnBindFor`; two cases on the not-restored theory; S13, S16 and three more seeds bite. §17.4's claim corrected |
+| 4 | Seed sweep: 14 of 16 bite; S13, S16 survive | S13 and S16 closed by item 3; the 14 verified; no change |
+| 5 / 11 | Publish size measured by the verifier but recorded nowhere in the note or PR | **Recorded** (§20.3, and the PR text in §20.6): the verifier's measurement, attributed. Not re-measured here (instructed to skip) |
+| 6 / 7 | The verifier's runs: both integration suites, NetArchTest, jest, build green; full unit suite 7 contention failures that pass in isolation | Verified; this round's own runs are §20.5 |
+| 8 | Hygiene (POML parses, merge-tree clean, no TASK-INDEX / current-task / `.claude/**`, 7 phrases 0 hits, 28 reason codes, script comment-only, no live write) | Re-checked for this round (§20.5) |
+| 9 | Owner decisions not contradicted (round 10 items 4–5, round 4 item 3, round 13 items 1–2, round 11) | Verified; this round touches none of them |
+| 10 | Branch-name deviation of c1-r3 acceptable | Verified; this round's own branch note is above |
+| 13 | Manual live gate (a)–(f), (g)–(j) and the `sprk_createdbyperson` dry run / -Apply / -Verify | **NOT closed — main session at integration** (owner round 11; (e) by replay covered by owner round 13 item 2). In dev (e) proves only the no-children path |
+| 14 | Step 9 (TASK-INDEX.md status cell → done) | **NOT closed — main session** (the executor may not edit TASK-INDEX.md) |
+| R14.3 | **Owner round 14 item 3** (BINDING, 2026-10-03): the endpoint's other read refusals classify 401/403 as Refused; 503/429 stay retryable (the open question carried since c1-r2, note §18.4) | **Closed** (§20.7): one rule (`AssignCascadeChildOwners.IsRefusedRead`); `containerOwnershipState`, `creatorState: refused`; client copy; guide §7a; 15 server and 6 client tests; seeds K1–K10 and CL6–CL10 bite |
+
+### 20.1 Items 3 / 12 — a child that is gone after its PATCH is pinned as a failure
+
+The production code was already correct: `RestoreOneAsync` counts a child `Restored` only when its read-back finds the row
+AND it reads as its snapshotted owner (`AssignCascadeChildOwners.cs:227`); a read-back that finds no row falls through to
+`Refused` (the PATCH threw) or `NotApplied` (it did not). Only the read BEFORE the restore decides `Gone`. Nothing pinned
+the after-PATCH half, and the fixture had no way to make a child's row stop reading after its bind. **No production code
+changed for this item.**
+
+- **Fixture** — `RemoveChildOnBindFor`: once an `ownerid` PATCH on the named cascade child has been sent (it is recorded
+  first, as every PATCH is), the row is removed, so the restore's read-back finds NO row. Alone, the PATCH is accepted;
+  with `FailChildOwnerBindFor` on the same child, the PATCH is also refused. The read before the PATCH still finds the row,
+  so the child is never `Gone`. `Reset` clears it.
+- **Test** — `Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored` now takes `(shape, outcome)`, five
+  cases: the three existing ones, renamed by shape (`read-fails-before-restore` → `Unreadable`, `read-back-fails` →
+  `Unverified`, `bind-accepted-not-applied` → `NotApplied`; their switches and assertions unchanged), plus
+  **`row-gone-after-accepted-bind` → `NotApplied`** and **`row-gone-after-refused-bind` → `Refused`**. For both new cases
+  the shared assertions hold — `cascade_children_not_restored`, `ownershipRestored: true`, `childOwnersRestored: false`,
+  exactly one named child with that `outcome` and the exact `nextCall`, the detail names it with no "retry", a CRITICAL line
+  naming `sharepointdocumentlocation {id} ({outcome})` and the call, the other child put back — plus exactly one bind to the
+  child with its own owner, and the child no longer reading at all. An unknown shape throws (no silent no-op case).
+
+**Seeds** (scratchpad `task133/perturb_c1r4.py` — each seed applied to `AssignCascadeChildOwners.cs`, the test project
+built, the whole `Sprk.Bff.Api.Tests.DataMutation.ExternalAccess` set (213 tests) run, the original bytes restored and the
+file touched; MD5 `7973cb0d…` before and after, `restored original bytes: OK`; rebuilt and re-run 213/213 afterwards):
+
+| # | Seeded violation | Result (213 tests) | Fails |
+|---|---|---|---|
+| **S13** | `!after.Exists \|\| after.Owner == child.Owner` → `Restored` (the verifier's survivor) | **BITES (2)** | both `row-gone-*` cases |
+| **S16** | only a REFUSED PATCH followed by no row → `Restored` (the verifier's narrower survivor) | **BITES (1)** | `row-gone-after-refused-bind` |
+| D1 | only an ACCEPTED PATCH followed by no row → `Restored` (S16's mirror) | BITES (1) | `row-gone-after-accepted-bind` |
+| D2 | a row gone after its PATCH reported `Gone` (counted back) | BITES (2) | both `row-gone-*` cases |
+| D3 | a refused PATCH followed by no row reported `NotApplied` (not `Refused`) | BITES (1) | `row-gone-after-refused-bind` |
+
+**5/5 bite**, each failing exactly the case(s) it targets and no other test — so without the two new cases every one of them
+survives all 211 earlier tests, as the verifier found for S13 and S16. Under S13 the response becomes `creator_share_failed`
+with `childOwnersRestored: true` and "The same caller may retry"; each new case fails on its `reasonCode`. With rounds c1
+(20), c1-r1 (4), c1-r2 (9) and c1-r3 (1), the sweep is **39/39 bite**.
+
+**§17.4 corrected** (an italic note under it): "no seed on it is fail-open" was true only for the read before the restore.
+
+### 20.2 Observation, NOT changed — the restore's PATCH upserts a deleted row
+
+Found while modelling item 3; outside the verifier's items, so recorded for the main session and task 148, not fixed.
+
+- `RestoreOneAsync` puts a child back with `DataverseWebApiClient.UpdateAsync` (`DataverseWebApiClient.cs:204-214`), a
+  PATCH with no `If-Match`. A Web API PATCH without `If-Match` **upserts**: if the id does not exist, Dataverse creates a
+  row with it. The repo already records this and fixed it for the recalculate routes (task 130,
+  `IFieldMappingDataverseService.cs:56-61`, `UpdateExistingRecordFieldsAsync` sends `If-Match: *`).
+- **The window:** a child deleted BETWEEN the restore's read (which found it) and its PATCH. The PATCH may then re-create
+  it as a row carrying only that id and the owner bind — no regarding, no name — if Dataverse accepts such a create for
+  `sharepointdocumentlocation` (unproven; not observable without a live write). The read-back finds it on its own owner and
+  reports `Restored`.
+- **Severity: LOW.** It is not fail-open on access: nothing is left on the wrong owner, and the reported state is true of
+  the row that now exists. What is wrong is a resurrected orphan row, after a race of milliseconds during a compensation
+  that is itself a failure path.
+- **The fix, for task 148 or a follow-up round:** send the child bind update-only (`If-Match: *`). A PATCH on a missing row
+  is then refused (404), and the read-back finds no row, so the outcome is `Refused`. That is exactly the
+  `row-gone-after-refused-bind` shape pinned in §20.1, so the test needs no change. It is not done here because it changes
+  production code and the primitive's client contract (`DataverseWebApiClient.UpdateAsync` takes no header; the
+  update-only method lives on `IFieldMappingDataverseService`), which the round's instruction excludes ("do not change
+  anything else").
+- §17.4's "patching a missing row fails closed as `Refused`" assumed update-only semantics; the italic correction under
+  §17.4 says so.
+
+### 20.3 Items 5 / 11 — publish size: the verifier's measurement, recorded
+
+**Measured by the verifier of round c1-r3**, by the CLAUDE.md §10 procedure (hazards three and four), and recorded here
+as reported. This executor did not re-measure (instructed to skip).
+
+| Side | Commit | Fresh detached worktree (short path) | Zip (bytes) | Zip (MB) | Files |
+|---|---|---|---|---|---|
+| Base: merge base of `work/unified-access-control-r2` and this branch | `6b243f092` | `C:\wt133m` | 47,874,537 | **45.66** | 212 |
+| Branch (round c1-r3 head) | `3062d960f` | `C:\wt133b` | 47,913,382 | **45.69** | 212 |
+| **Delta** | | | **+38,845** | **+0.04** | equal |
+
+- **Method:** `dotnet publish -c Release` of `src/server/api/Sprk.Bff.Api` on both sides, then PowerShell `Compress-Archive
+  -CompressionLevel Optimal` over `deploy/api-publish/*` (the `scripts/Deploy-BffApi.ps1` method). PDBs are included, and
+  the file counts are equal.
+- **Thresholds:** ≤60 MB ceiling, yes. Under the +5 MB single-task escalation line and the 55 MB architecture-review line.
+- **Baseline choice:** the base is NOT `origin/master`, because `origin/master` (`62277d50a`) is not an ancestor of the
+  branch. The work-branch merge base isolates this task's own contribution. That is the purpose of §10's "fresh build of
+  master" rule, which exists so that other projects' merges are not attributed to this task.
+- **Main session:** if it wants §10's literal `origin/master` baseline, it re-measures at the work-branch → master merge.
+- **For this head:** the verifier's numbers are for `3062d960f`. Round c1-r4's verifier part changes tests only, but its
+  owner-round-14 part (§20.7) changes BFF C#: `ProvisionProjectEndpoint.cs` and `AssignCascadeChildOwners.cs` gain
+  response strings and one private-to-internal predicate. There is no new type, file, registration or package, so any
+  delta is expected to be bytes. It is **not re-measured here** (instructed to skip). The main session measures the final
+  head at integration, by the §10 procedure.
+- **CVE:** re-checked this round, `git diff --name-only 6b243f092 HEAD` lists no `*.csproj`, `Directory.Packages.props`,
+  `package.json` or lock file across the whole task. No package changed, so there is no CVE delta.
+
+### 20.4 Placement and component justification (CLAUDE.md §10 / §11)
+
+No new endpoint, service, DI registration, interface, option, job, package, column, reason code or file. The verifier
+part changes tests only. The owner-round-14 part (§20.7) adds small surface, justified here:
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| Fixture switch `RemoveChildOnBindFor` | `FailChildOwnerBindFor` (the PATCH throws; the row stays), `IgnoreChildOwnerBindFor` (accepted; the row stays on its owner), `FailChildOwnerReadBackAfterBindFor` (the read-back throws → `Unverified`) — none makes the read-back find NO row | Extends the fixture's child switch set in the same shape; the refused variant combines it with `FailChildOwnerBindFor` rather than adding a second switch | S13 / S16 stay unseen: a child gone after its PATCH could be counted restored, and the caller told "The same caller may retry" while that child's owner is unconfirmed |
+| `AssignCascadeChildOwners.IsRefusedRead(Exception)` (internal) | The private `FailureOf` already held exactly this rule (400/401/403 → `Refused`); the endpoint's `IsColumnMissing` holds only the 400 | It IS the extension: `FailureOf`'s body, exposed so the endpoint reuses the one rule (`FailureOf` now calls it). No copy of the rule, no new type, no registration | Two copies of the 400/401/403 rule would drift. Owner round 14 asks for the other reads to classify "as the cascade reads already do" |
+| ProblemDetails extension `containerOwnershipState` (`unreadable` / `refused`) on the existing `container_ownership_unreadable` | `cascadeChildState` on `cascade_children_unreadable` (the same split); the code itself had no state | Follows the existing extension pattern on an existing reason code; no new reason code (the client's 28-code inventory is unchanged) | The client cannot tell a retry from an administrator's job, so it keeps offering "Try securing again" for a 401/403 that fails every time — the defect owner round 14 orders fixed |
+| `creatorState` value `refused` on `resume_creator_unavailable` | The extension exists, with `unreadable` / `column-missing` / `absent` / `disabled` / `application-user` | A new value on the existing extension | As above, for the resume's creator reads |
+| Client constants `RESUME_CREATOR_REFUSED`, `CONTAINER_OWNERSHIP_REFUSED`; `IProvisioningFailureExtensions.containerOwnershipState` | `CASCADE_CHILDREN_REFUSED`, `RESUME_CREATOR_COLUMN_MISSING` (the same swap-in pattern) | Same pattern, same file | The wizard would render a retry that cannot succeed |
+| Fixture switches `ContainerOwnershipReadFailsWith`, `SystemUserReadFailsWith` (HTTP status) | `ContainerOwnershipReadFails`, `SystemUserByIdReadSucceeds`, `SystemUserReadFailsFor`, all of which throw a non-HTTP fault; `CreatorPersonReadFailsWith` already carries a status (reused for the column read) | Status-carrying twins of the existing switches, in the real client's exception shape; the targeting switches are unchanged | No test could produce a 401/403 on those reads, so the classification would be unpinned (seeds K1–K10 would survive) |
+
+### 20.5 Quality gates and runs (round c1-r4)
+
+Rigor: **FULL** (the owner-round-14 part changes `.cs` and `.ts` production code), and TEST-MODIFYING (tests and the fixture
+changed). Both mean code-review and adr-check run.
+
+**code-review** (all severities, on the whole round's diff):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| The restore's PATCH upserts a row deleted between its read and the PATCH | LOW (production, pre-existing) | Recorded (§20.2) for the main session / task 148; not changed (outside the items) |
+| A **400** on the container check and on the resume's user reads is now `refused` too, not only the 401/403 owner round 14 names | Interpretation (owner-reversible) | Round 14 says "as the cascade reads already do", and the cascade rule is 400/401/403 (c1-r2). One rule in one place (`IsRefusedRead`) avoids a second, narrower copy. A 400 repeats on every call (a malformed query, or a missing column), so offering a retry is the same defect. The person-column read keeps its more specific `column-missing` for a 400, which is checked first. Reversing it is one predicate at two call sites |
+| `resume_creator_unavailable` + `refused` maps to the `needs-administrator` kind; `container_ownership_unreadable` + `refused` maps to `not-started` | — | Each follows its own code's deterministic peer: `column-missing` (`needs-administrator`) and `cascade_children_unreadable` + `refused` (`not-started`). Neither is retryable |
+| The theory's signature changed from `(outcome)` to `(shape, outcome)`, so the three existing cases' display names changed | Observation | Intended: two shapes now share an outcome (`NotApplied`), so the outcome alone no longer names the case; their switches and assertions are unchanged |
+| In the fixture the row is removed before the refusal throws | — | Intended: it models a row deleted while the PATCH is in flight (or an update-only PATCH refused because the row is gone); the PATCH is still recorded first |
+| `dotnet format` re-indented the new braced `case RecordedContainerKind.Unreadable:` block (+4); two lines are about 125 characters | Observation | The hook's own output, so kept as is. The seed sweep was re-run on the formatted code (§20.7) |
+| AI-smell scan: no new interface, no swallowed failure, no catch-log-rethrow, no copy that advises a retry or names a code / table / status, no assertion on a mock's call count standing in for state | — | Clean |
+
+**adr-check**:
+
+- **ADR-003 (fail closed):** a child gone after its PATCH is a failure, never "restored" or "gone", now pinned. A refused
+  read stays a refusal before any write, and only its recovery changes: it is no longer offered as a retry.
+- **ADR-019:** ProblemDetails with a stable `reasonCode`. There is no new reason code: one new extension and one new
+  extension value, mirrored in the client and guide §7a.
+- **ADR-038:** the KEEP paths are `tests/integration/data-mutation/**` and the package's `__tests__`. No
+  `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests. The fixture fails in `DataverseWebApiClient`'s real
+  exception shape.
+- **ADR-010:** no new interface or registration; `IsRefusedRead` is an internal static on an existing static helper.
+- **ADR-002 / ADR-052:** untouched.
+
+**Compliant, 0 violations.** §6.5: none.
+
+**Runs:**
+
+- **Verifier part, affected** (before round 14 arrived): `ProvisionAssignCascadeChildOwnerTests` **23/23** (21 + 2);
+  `DataMutation.ExternalAccess` **213/213** (211 + 2), before its sweep and after the restore.
+  - A full pass also ran on that code: NetArchTest 346/346, `Sprk.Bff.Api.IntegrationTests` 104/104,
+    `Spe.Integration.Tests` 403 / 0 / 25 (428).
+  - The full BFF unit suite read 14,250 / 100 / 54 (14,404), 1 h 3 m. CPU was at 92–100 % with about 270
+    dotnet/testhost processes from other agents. 99 failures were `TaskCanceledException`; the other was a
+    shared-counter tag cross-talk in `PinnedMemoryEndpointsContractTests`.
+  - The 58 failing classes re-run in isolation gave 880 / 1 / 2 (883); the 1 was another timeout, and its class then
+    passed alone, 21/21.
+  - That pass is **superseded** by the final runs below, because round 14 then changed production code.
+- **Round 14 part, affected:**
+  - The three provisioning classes it touches: **78/78**.
+  - `DataMutation.ExternalAccess`: **228/228** (213 + 15). Run before the seed sweeps and again after the restores.
+  - `Spaarke.UI.Components` jest, CreateProjectWizard + SummarizeFilesWizard: **114/114** across 8 suites (108 + 6).
+    Run before the client sweep and again after its restore.
+  - Prettier 3.8.1 (repo `.prettierrc.json`) and eslint are clean on the three changed TS files. The package build
+    (`npm run build` = `tsc`) is clean. `Spaarke.SdapClient` and `Spaarke.Auth` were built locally first; the
+    `node_modules` and `dist` they produce are git-ignored, and `git status` showed no side effect.
+  - `dotnet build` of the test project: **0 warnings / 0 errors**.
+  - The pre-commit hook's own `dotnet format --verbosity quiet --include …` changed only the endpoint's indentation (above).
+- **Then once, on the final code** (rebuilt after the last seed restore: BFF and every test project 0 errors; the BFF and
+  unit-test project 0 warnings; `Spe.Integration.Tests` shows 5 pre-existing CA2024 warnings in the untouched
+  `AnalysisEndpointsIntegrationTests.cs`):
+  - **Full BFF unit suite: 14,365 passed / 0 failed / 54 skipped (14,419 = 14,402 + 2 + 15)**, 24 m 12 s, one clean run.
+  - **NetArchTest: 346/346.**
+  - **Hard gate, both in full on this branch:** `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests`
+    **403 passed / 0 failed / 25 skipped (428)**.
+  - Client: jest **114/114** (above); package `tsc` build clean.
+
+**Hygiene:**
+
+- No edit to `TASK-INDEX.md`, `current-task.md` or `.claude/**`.
+- No live Dataverse, Azure or Entra call of any kind this round.
+- No package changed, so there is no CVE delta.
+- The POML parses (minidom).
+- The 7 stale phrases of the grep criterion return 0 hits in `src`.
+- The main session's `NOTE-FROM-MAIN.md` (its own instruction: do not commit it) was deleted before the commit.
+- The merge-tree against `work/unified-access-control-r2` is re-run on the commit and reported with the round.
+
+### 20.6 PR description — addition to §19.5
+
+> **Round c1-r4 (verifier on c1-r3).** Pinned the last unpinned restore rule. A cascaded child whose row no longer reads
+> back after its owner bind is named in `cascade_children_not_restored` as `NotApplied` (bind accepted) or `Refused` (bind
+> refused). It is never counted restored: seeds S13 and S16 were fail-open and survived every test, and now bite (a
+> fixture switch and two theory cases; no production change for it). Recorded for task 148: the child bind's PATCH has
+> no `If-Match`, so it can upsert a row deleted mid-restore (LOW; the fix is `If-Match: *`, which the new refused case
+> already covers).
+>
+> **Owner round 14 item 3.** `container_ownership_unreadable` (new extension `containerOwnershipState`) and
+> `resume_creator_unavailable` (new `creatorState: refused`) classify a read Dataverse REFUSES (401/403, and a 400, by
+> the cascade reads' one rule, `AssignCascadeChildOwners.IsRefusedRead`) as an administrator's job, not the same
+> caller's retry; 503/429 stay retryable. The wizard shows a non-retryable copy for each, naming the service's
+> permission. Guide §7a updated. 15 server + 6 client tests; seeds K1–K10 and CL6–CL10 bite. No new reason code.
+>
+> **Publish size** (measured by the round c1-r3 verifier, CLAUDE.md §10 hazards three and four). Fresh detached worktrees
+> at short paths; `dotnet publish -c Release`; PowerShell `Compress-Archive -CompressionLevel Optimal` over
+> `deploy/api-publish/*`, PDBs included. Base is the work-branch merge base `6b243f092`: **45.66 MB** (47,874,537 bytes).
+> Branch `3062d960f`: **45.69 MB** (47,913,382 bytes). **Delta +0.04 MB** (+38,845 bytes). File counts equal at 212 = 212;
+> ≤60 MB. The final head (round 14's C# strings and one predicate) is measured by the main session at
+> integration. No package changed in the whole task, so there is no new CVE.
+
+### 20.7 Owner round 14 item 3 — a read Dataverse REFUSES is an administrator's job, on every provisioning read
+
+**The decision** (BINDING, `session27-owner-decisions-and-research.md` round 14 item 3, work branch commit `9d88da386`):
+"`container_ownership_unreadable` and `resume_creator_unavailable` (creatorState unreadable) classify **401/403 as
+Refused** (an administrator must act), as the cascade reads already do; 503/429 stay retryable." It answers the
+observation carried since c1-r2 (§18.4). The main session relayed it mid-round in a worktree note, `NOTE-FROM-MAIN.md`.
+That note was not committed (its own instruction) and was checked against the work branch before acting. The note
+asked for:
+
+- the retry hint and reason classification updated;
+- the client copy, where the client branches on it;
+- tests (401 and 403 each Refused; 503/429 still retryable), with seeds;
+- the decision recorded as owner round 14.
+
+**One rule, in one place.** `AssignCascadeChildOwners.IsRefusedRead(Exception)` is the cascade reads' existing rule:
+`HttpRequestException` with 400, 401 or 403. It was the body of the private `FailureOf`, which now calls it. The endpoint
+reuses it; there is no second copy. It therefore also covers a **400** on these reads (see §20.5, an owner-reversible
+interpretation of "as the cascade reads already do").
+
+| Read | Before (c1-r3) | Now |
+|---|---|---|
+| Container check: `businessunits` / project / matter / work assignment by `sprk_containerid` | Any failure → `container_ownership_unreadable`, "the same caller may" (no state) | 400/401/403 → `containerOwnershipState: refused`; the detail says calling again repeats the refusal and an administrator checks the service's Read privilege on business units and on the three root tables. Anything else → `unreadable`, the same caller's retry (detail unchanged) |
+| Resume: `createdby`'s systemuser read | Any failure → `creatorState: unreadable` | 400/401/403 → `refused`; else `unreadable`. It still stops the decision (no fall-through to the column) |
+| Resume: the `sprk_createdbyperson` column read | 400 → `column-missing`; any other → `unreadable` | 400 → `column-missing` (unchanged, checked first); 401/403 → `refused`; else `unreadable` |
+| Resume: the recorded person's systemuser read | Any failure → `unreadable` | 400/401/403 → `refused`; else `unreadable` |
+
+A `refused` resume is HTTP 500, like `unreadable` and `column-missing` (an environment fault, not a state of the data).
+
+- **Detail:** for the read that refused, "Dataverse refused the read, or the service's permission to read users / it".
+- **Recovery:** "Calling again repeats this refusal until an administrator restores the service's Read privilege — on
+  users (systemuser) and on this record's table — or its sign-in; then calling again repeats the check." It never says
+  "the same caller may".
+- **Unchanged:** nothing is written and nobody else is shared to (F8). The extensions are the same ones
+  (`creatorState`, `creatorColumn`, `createdByState`, `creatorPersonState`).
+
+**Client** (`provisioningService.ts`):
+
+- `classifyProvisioningFailure` swaps in two deterministic states, as it already does for `cascadeChildState: refused`:
+  - **`creatorState: refused` → `RESUME_CREATOR_REFUSED`:** `needs-administrator`, not retryable. "Securing the
+    project could not be finished, because the person who created it could not be looked up. Nothing about the project
+    changed; an administrator needs to check the service's permission to look them up first."
+  - **`containerOwnershipState: refused` → `CONTAINER_OWNERSHIP_REFUSED`:** `not-started`, not retryable. "Securing the
+    project did not start, because the document container already linked to it could not be checked. Nothing about the
+    project changed; an administrator needs to look at the service's permission to check it first."
+- `provisionSecureProject` reads `containerOwnershipState` from the problem body.
+- `IProvisioningFailureExtensions` gains `containerOwnershipState`.
+- Both copies follow task 068's rules: no code, table name or HTTP status, and no "try again".
+- `unreadable` or an absent extension keeps the existing retryable copy, so a host on an older BFF sees no change.
+- No new reason code: the client's 28-code inventory test is unchanged.
+
+**Docs.** Guide §7a gives `container_ownership_unreadable` the `containerOwnershipState` split, and
+`resume_creator_unavailable` gains `refused` (HTTP 500), with its recovery. `created-by-person-schema.md` ("Who reads
+it") names `refused`.
+
+**Tests — server** (`DataMutation.ExternalAccess`, 213 → 228):
+
+- `ProvisionRecordedContainerTests.Provision_WhenTheContainerCheckIsRefusedOrFails_ClassifiesItByTheReadsStatus`, 5
+  cases:
+  - 401, 403 and 400 → `refused`: the detail says "Calling again repeats this refusal" and names the "Read privilege",
+    never "the same caller may";
+  - 503 and 429 → `unreadable`, "(the same caller may)", and the retry then succeeds.
+  - Each case writes nothing.
+- The existing non-HTTP-fault test now also asserts `containerOwnershipState: unreadable`.
+- `ProvisionResumeCreatorPersonTests`:
+  - `Resume_WhenTheColumnReadIsRefused_Refuses500Refused_NotARetry` (401, 403): `refused`, naming the column, and a
+    second call is refused the same way.
+  - `Resume_WhenCreatedBysReadFails_ClassifiesItByTheReadsStatus` (401, 403 → `refused`; 503, 429 → `unreadable`): no
+    fall-through to the column; the transient cases' retry shares to `createdby`.
+  - `Resume_WhenTheRecordedPersonsReadFails_ClassifiesItByTheReadsStatus` (the same four).
+  - Every case asserts its recovery text and zero writes.
+- The fixture gains `ContainerOwnershipReadFailsWith` and `SystemUserReadFailsWith`, both in the real client's
+  `HttpRequestException` shape. `CreatorPersonReadFailsWith` already carried a status.
+
+**Tests — client** (`Spaarke.UI.Components`, 108 → 114):
+
+- `provisioningService.test.ts` gains `creatorState=refused` (not retryable, the permission copy, no retry advice) and a
+  `containerOwnershipState` theory (`unreadable`, absent and `refused`).
+- `CreateProjectWizard.provisioningRetry.test.tsx` renders both refused states and asserts no "Try securing again"
+  button and no retry advice.
+
+**Seeds — server** (scratchpad `task133/perturb_c1r4b.py`). Each seed was applied, the test project built, the whole
+`DataMutation.ExternalAccess` set (228) run, and the original bytes restored and touched. The MD5 of both source files
+matched before and after. The sweep was **run twice**: on the pre-format code and again on the final, `dotnet format`ted
+code. Both runs gave the same result.
+
+| # | Seeded violation | Result (228) | Fails |
+|---|---|---|---|
+| **K1** | container check: only a 400 refused, 401/403 transient | **BITES (2)** | container 401, 403 |
+| **K2** | container check: never refused (the pre-round-14 behaviour) | **BITES (3)** | container 400, 401, 403 |
+| **K3** | resume: no creator read ever refused (the pre-round-14 behaviour) | **BITES (6)** | every resume 401/403 case |
+| K4 | `createdby`'s refused read reported `unreadable` | BITES (2) | `createdby` 401, 403 |
+| K5 | the recorded person's refused read reported `unreadable` | BITES (2) | person 401, 403 |
+| K6 | the column's refused read reported `unreadable` | BITES (2) | column 401, 403 |
+| **K7** | over-broad: every HTTP status refused (503/429 no longer retryable) | **BITES (11)** | every 503/429/500 case, cascade's included |
+| K8 | a refused resume answered 409, not 500 | BITES (6) | every resume 401/403 case |
+| K9 | the refused resume recovery offers "(the same caller may)" | BITES (6) | every resume 401/403 case |
+| K10 | the refused container detail offers "the same caller may" | BITES (3) | container 400, 401, 403 |
+
+**Seeds — client** (scratchpad `task133/perturb_c1r4_client.py`). Each seed was applied to `provisioningService.ts`, the
+8 suites (114) run, and the original bytes restored and touched. The MD5 matched before and after.
+
+| # | Seeded violation | Result (114) | Fails |
+|---|---|---|---|
+| CL6 | `creatorState: refused` offered as a retry | BITES (2) | the classifier case + the rendered no-retry case |
+| CL7 | `containerOwnershipState: refused` offered as a retry | BITES (2) | the same pair for the container |
+| CL8 | `containerOwnershipState` never read from the problem body | BITES (1) | the fetch-level `refused` case |
+| CL9 | `creatorState: refused` not classified (the code's default copy) | BITES (2) | classifier + rendered |
+| CL10 | `containerOwnershipState: refused` not classified (the transient, retryable copy) | BITES (2) | classifier + rendered |
+
+**15/15 bite.** The sweep across task 133's c1 series is now **54/54**:
+
+| Round | Seeds |
+|---|---|
+| c1 | 20 |
+| c1-r1 | 4 |
+| c1-r2 | 9 |
+| c1-r3 | 1 |
+| c1-r4 (verifier part) | 5 |
+| c1-r4 (round 14 part) | 15 |
+
+**Not changed (outside round 14's named scope):** `creator_unresolved`. The caller's systemuser id comes from a resolver
+that returns no HTTP status (`CallerSystemUserIdResolves`), so there is nothing to classify at the endpoint. It stays a
+retryable refusal before any write.

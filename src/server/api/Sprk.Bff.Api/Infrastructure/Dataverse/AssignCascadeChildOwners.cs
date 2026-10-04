@@ -251,21 +251,27 @@ public static class AssignCascadeChildOwners
     }
 
     /// <summary>
-    /// Deterministic — the same query is refused again until an administrator acts: a 400 (Dataverse REFUSING the read;
-    /// for <c>sharepointdocument</c>, the integration is off), and a 401 or 403 (the service's own sign-in, or its Read
-    /// privilege on the table, refused — e.g. a BFF application user without Read on <c>sharepointdocumentlocation</c>;
-    /// <c>DataverseWebApiClient</c> renews its token five minutes before expiry, so a 401 is not a stale token). Anything
-    /// else (a 5xx, a 429, a timeout) may pass on the next call. <c>DataverseWebApiClient</c> surfaces only the status
-    /// (<c>EnsureSuccessStatusCode</c>). Task 133 c1-r2 (verifier item 4): a 401/403 had been <c>Unreadable</c>, so the
-    /// caller was told to retry a read that fails every time.
+    /// True when a failed Dataverse read is DETERMINISTIC — the same query is refused again until an administrator acts:
+    /// a 400 (Dataverse REFUSING the read; for <c>sharepointdocument</c>, the integration is off), and a 401 or 403 (the
+    /// service's own sign-in, or its Read privilege on the table, refused — e.g. a BFF application user without Read on
+    /// <c>sharepointdocumentlocation</c>; <c>DataverseWebApiClient</c> renews its token five minutes before expiry, so a
+    /// 401 is not a stale token). Anything else (a 5xx, a 429, a timeout, a non-HTTP fault) may pass on the next call.
+    /// <c>DataverseWebApiClient</c> surfaces only the status (<c>EnsureSuccessStatusCode</c>).
     /// </summary>
-    private static CascadeReadFailure FailureOf(Exception ex) =>
+    /// <remarks>
+    /// Task 133 c1-r2 (verifier item 4): a 401/403 had been <c>Unreadable</c>, so the caller was told to retry a read that
+    /// fails every time. Owner round 14 item 3 (task 133 c1-r4): provisioning's OTHER read refusals —
+    /// <c>container_ownership_unreadable</c> and <c>resume_creator_unavailable</c> — classify by this same rule, so it is
+    /// the one place the rule is written.
+    /// </remarks>
+    internal static bool IsRefusedRead(Exception ex) =>
         ex is HttpRequestException
         {
             StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
-        }
-            ? CascadeReadFailure.Refused
-            : CascadeReadFailure.Unreadable;
+        };
+
+    private static CascadeReadFailure FailureOf(Exception ex) =>
+        IsRefusedRead(ex) ? CascadeReadFailure.Refused : CascadeReadFailure.Unreadable;
 
     private readonly record struct ChildOwnerRead(bool Exists, DataversePrincipalRef? Owner);
 
