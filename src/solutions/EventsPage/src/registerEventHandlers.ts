@@ -18,7 +18,7 @@
  * **Origin**: lifted from legacy App.tsx `executeBulkStatusUpdate` + `executeBulkArchive`
  */
 
-import { registerCommandHandler } from '@spaarke/ui-components';
+import { registerCommandHandler, cleanGuid } from '@spaarke/ui-components';
 import { getXrm } from './xrmHelpers';
 import { EVENT_ENTITY_NAME } from './config';
 
@@ -67,7 +67,7 @@ async function executeBulkStatusUpdate(
   const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
   if (additionalFields) Object.assign(updateData, additionalFields);
 
-  const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
+  const cleanIds = eventIds.map(id => cleanGuid(id));
 
   try {
     await Promise.all(cleanIds.map(id => xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, updateData)));
@@ -97,7 +97,7 @@ async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<bool
   const xrm = getXrm();
   if (!xrm?.WebApi) return false;
 
-  const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
+  const cleanIds = eventIds.map(id => cleanGuid(id));
 
   try {
     await Promise.all(

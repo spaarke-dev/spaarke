@@ -111,6 +111,7 @@ import {
   SprkAnalysisWorkType,
   applyFieldMappings,
   applyResolverFields,
+  cleanGuid,
   createTodoRegardingChild,
   discoverNavProps,
   resolveAnalysisFilePreview,
@@ -843,11 +844,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
           if (attorneyPick?.id) {
             payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
-              `/contacts(${attorneyPick.id.replace(/[{}]/g, '')})`;
+              `/contacts(${cleanGuid(attorneyPick.id)})`;
           }
           if (paralegalPick?.id) {
             payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
-              `/contacts(${paralegalPick.id.replace(/[{}]/g, '')})`;
+              `/contacts(${cleanGuid(paralegalPick.id)})`;
           }
         }
 
@@ -868,7 +869,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // discoverNavProps keys on the attribute logical name; fallback = PascalCase nav-prop.
           const atNavProp =
             atNavProps.find(e => e.columnName === 'sprk_agreementtype')?.navPropName ?? 'sprk_AgreementType';
-          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${agreementTypeId.replace(/[{}]/g, '')})`;
+          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${cleanGuid(agreementTypeId)})`;
         }
 
         // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
@@ -1018,8 +1019,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         if (analysisActiveWorkType && speDriveItemId && speDriveId && authFetch && bffBaseUrl) {
           // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
           // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
-          const cleanDocumentId = documentId.replace(/[{}]/g, '').toLowerCase();
-          const cleanAnalysisId = analysisId.replace(/[{}]/g, '').toLowerCase();
+          const cleanDocumentId = cleanGuid(documentId);
+          const cleanAnalysisId = cleanGuid(analysisId);
           try {
             const sessionResp = await authFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
               method: 'POST',
@@ -1071,7 +1072,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 ...(composeSessionId
                   ? {
                       composeSessionId,
-                      analysisId: analysisId.replace(/[{}]/g, '').toLowerCase(),
+                      analysisId: cleanGuid(analysisId),
                       // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector):
                       // `reviewDepth` rides alongside `autoRunReview` so ConversationPane's wizard
                       // hand-off listener can call `runExplicit` with the depth already decided —

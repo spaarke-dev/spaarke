@@ -55,7 +55,7 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES, cleanGuid } from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
@@ -144,7 +144,7 @@ type EmailDialogState =
  */
 export function buildRecordDeepLink(clientUrl: string, entityType: string, entityId: string): string {
   if (!clientUrl || !entityType || !entityId) return '';
-  const id = entityId.replace(/[{}]/g, '');
+  const id = cleanGuid(entityId);
   return `${clientUrl}/main.aspx?pagetype=entityrecord&etn=${encodeURIComponent(entityType)}&id=${encodeURIComponent(id)}`;
 }
 
@@ -331,7 +331,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Resolve current user ID
   const userId = React.useMemo<string>(() => {
     try {
-      return xrm?.Utility?.getGlobalContext()?.userSettings?.userId?.replace(/[{}]/g, '') ?? '';
+      return cleanGuid(xrm?.Utility?.getGlobalContext()?.userSettings?.userId);
     } catch {
       return '';
     }

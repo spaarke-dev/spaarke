@@ -10,6 +10,8 @@
  * the PCF context.webAPI mechanism.
  */
 
+import { cleanGuid } from '@spaarke/ui-components';
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare const Xrm: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -73,11 +75,11 @@ export function getUserId(): string {
     const ctx = xrm.Utility.getGlobalContext();
     // getUserId() returns GUID with braces: {xxxxxxxx-xxxx-...}
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? "";
-    return raw.replace(/[{}]/g, "");
+    return cleanGuid(raw);
   }
   // Fallback for userSettings directly on Xrm
   if (xrm?.userSettings?.userId) {
-    return xrm.userSettings.userId.replace(/[{}]/g, "");
+    return cleanGuid(xrm.userSettings.userId);
   }
   console.warn("[LegalWorkspace] Unable to resolve userId from Xrm");
   return "";

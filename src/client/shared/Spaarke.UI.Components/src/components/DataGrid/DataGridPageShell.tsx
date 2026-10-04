@@ -59,6 +59,7 @@ import { useSidePaneFilter, type SidePaneFilterTranslator } from './sidePane';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { resolveCodePageTheme, setupCodePageThemeListener } from '../../utils/themeStorage';
 import type { DataGridParentContext } from '../../hooks/useDataGridContext';
+import { cleanGuid } from '../../utils/guid';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Box-sizing CSS reset injection (matches the index.html contract from §2)
@@ -143,7 +144,7 @@ function parseUrlParentContext(spec: UrlParentContextSpec): DataGridParentContex
       if (data) id = tryGet(new URLSearchParams(data));
     }
     if (!id) return undefined;
-    const cleanId = id.replace(/[{}]/g, '');
+    const cleanId = cleanGuid(id);
     const ctx: DataGridParentContext = {
       entityType: spec.entityType ?? 'sprk_matter',
       id: cleanId,
@@ -183,7 +184,7 @@ function parseUrlAvailableViews(): string[] | undefined {
     if (!raw) return undefined;
     const views = raw
       .split(/[;,]/)
-      .map(g => g.trim().replace(/[{}]/g, ''))
+      .map(g => cleanGuid(g))
       .filter(g => g.length > 0);
     return views.length > 0 ? views : undefined;
   } catch {

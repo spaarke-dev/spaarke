@@ -29,6 +29,7 @@
  */
 import { getXrm } from '../../services/xrmGlobal';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Deployed web-resource name for the Email code page. Type Webpage/HTML,
@@ -66,7 +67,7 @@ export interface OpenEmailRecordOptions {
  * await openEmailRecord(row.sprk_communicationid, { single: true }); // single-record form
  */
 export async function openEmailRecord(communicationId: string, options?: OpenEmailRecordOptions): Promise<void> {
-  const id = (communicationId ?? '').replace(/[{}]/g, '').trim().toLowerCase();
+  const id = cleanGuid(communicationId);
   if (!id) {
     console.warn('[openEmailRecord] No communication id supplied — nothing to open.');
     return;
