@@ -654,6 +654,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
             ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            // Task 147 r1: the browser child-record routes' tables.
+            ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -698,6 +700,17 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_project", "sprk_project", "sprk_Project"),
             },
             ["task"] = new[] { ("regardingobjectid", "sprk_matter", "regardingobjectid_sprk_matter") },
+            // Task 147 r1 (live navigation-property casing: the schema name).
+            ["sprk_memo"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+            },
+            ["sprk_event"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
         };
 
         public HashSet<string> Held { get; } = new(StringComparer.OrdinalIgnoreCase)
@@ -706,9 +719,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreateActivity", "prvAppendActivity", "prvCreatesprk_matter", "prvAppendsprk_matter",
             "prvCreatesprk_workassignment", "prvAppendsprk_workassignment",
             "prvCreatesprk_project", "prvAppendsprk_project",
+            "prvCreatesprk_memo", "prvAppendsprk_memo", "prvCreatesprk_event", "prvAppendsprk_event",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
+        public HashSet<Guid> Missing { get; } = new();
 
         /// <summary>Records the caller holds Full Access on (Delete as well) — F3's question (task 146 c1).</summary>
         public HashSet<Guid> FullAccessOn { get; } = new();
@@ -739,6 +756,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(Target().Match(path).Groups["id"].Value);
+                if (Missing.Contains(id))
+                    return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }

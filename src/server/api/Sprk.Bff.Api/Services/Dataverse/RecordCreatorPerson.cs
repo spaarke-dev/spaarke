@@ -81,6 +81,10 @@ public static class RecordCreatorPerson
         "sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_analysis",
         "sprk_analysisoutput", "sprk_emailartifact", "sprk_attachmentartifact", "sprk_fileversion", "sprk_invoice",
         "sprk_spendsignal", "sprk_spendsnapshot",
+        // Task 147 r1 (owner round 28 item 1): the browser's memo and report-card creates are app-only too (G5), so they
+        // record the person who asked. Added to scripts/Set-ChildRecordCreatorPersonSchema.ps1 in the same change; the
+        // column lands in dev through that script's dry run / -Apply / -Verify (manual gate G147-5).
+        "sprk_memo", "sprk_reportcard",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

@@ -301,6 +301,15 @@ public class RouteAuthorizationGuardTests
             + "rewriting the caller's FetchXML against their accessible-record set — a query-shaping "
             + "mechanism with no route-level equivalent."),
 
+        new GovernedFile("Api/ChildRecordEndpoints.cs", Scope.HandlerAuthorized,
+            "unified-access-control-r2 task 147 r1 (owner round 28 item 1): POST /api/v1/child-records/{table} and PATCH "
+            + "/api/v1/child-records/{table}/{id} — the browser's child-record creates and re-files. The decision is in the "
+            + "handler, AS THE CALLER, because the records to authorize against are whatever the Web API payload binds: "
+            + "the table's Create/Append privilege, AppendTo on EVERY bound record (a record the caller cannot append to "
+            + "and one that does not exist answer the same 404), no field-secured or server-owned column; a re-file "
+            + "also needs the row readable (uniform 404) and F3 to leave a secure record. Pinned through the real "
+            + "handlers by tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs."),
+
         // ---- Compose: ONE governed file became EIGHT (compose-r8 task 070) ----
         // Api/ComposeEndpoints.cs was split by reason-to-change. It is the same route surface, keyed the
         // same way (documentSpeId / documentId / sessionId), authorized the same way (group-level
@@ -928,7 +937,15 @@ public class RouteAuthorizationGuardTests
     //            cases in the same change (Write on the RECORD; an unknown id and an unwritable one are the same 403).
     //            Pinned through the real pipeline by
     //            tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs.
-    private const int ExpectedEndpointFileCount = 122;
+    //
+    // 122 -> 123 (2026-10-04, unified-access-control-r2 task 147 r1, owner round 28 item 1):
+    //
+    //   147  +1  Api/ChildRecordEndpoints.cs ADDED — the browser's child-record writes through the BFF (G5 create,
+    //            re-file through the shared core). It writes Dataverse content keyed by caller-chosen ids, so it IS
+    //            governed: classified HandlerAuthorized above, with the reason. The re-file routes the events and
+    //            communications families gained (PATCH /api/v1/events/{id}/filing, PATCH /api/communications/{id}/filing)
+    //            live in existing files and call the same handler.
+    private const int ExpectedEndpointFileCount = 123;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

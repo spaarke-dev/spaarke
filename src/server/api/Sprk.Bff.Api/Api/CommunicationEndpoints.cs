@@ -71,6 +71,30 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // unified-access-control-r2 task 147 r1 (owner round 28 item 1: "re-files go through the existing families" — the
+        // communications family). The browser's re-file of a communication (the Communication form's Connections links,
+        // ConnectionsWriteHandler) sends its Web API payload here: the caller's own PATCH inside the ONE re-file core
+        // (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved under, F3 on a move out of a secure record, the
+        // owner decided and assigned; an unfiled communication keeps its creator, E1). Authorized in the handler, as the caller.
+        group.MapPatch("/{id:guid}/filing", (
+                Guid id,
+                [Microsoft.AspNetCore.Mvc.FromBody] System.Text.Json.JsonElement body,
+                Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+                Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                HttpContext httpContext,
+                ILogger<Program> logger,
+                CancellationToken ct) =>
+                ChildRecordEndpoints.UpdateAsync(
+                    "sprk_communication", id, body, user, ownership, restamper, httpContext, logger, ct))
+            .WithName("RefileCommunication")
+            .WithDescription("Re-file a communication (its regarding links) as the caller; the owner follows the records it is filed under")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+
         group.MapGet("/{id:guid}/status", GetCommunicationStatusAsync)
             .WithName("GetCommunicationStatus")
             .WithDescription("Get the status of a sent communication")

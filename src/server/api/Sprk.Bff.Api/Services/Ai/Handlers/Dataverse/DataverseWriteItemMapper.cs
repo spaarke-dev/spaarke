@@ -206,6 +206,126 @@ internal static partial class DataverseWriteItemMapper
         });
     }
 
+    [GeneratedRegex(@"^/?(?<set>[A-Za-z_][A-Za-z0-9_]*)\(\{?(?<id>[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\}?\)$")]
+    private static partial Regex BindValueRegex();
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): maps a BROWSER writer's Dataverse Web API payload —
+    /// the exact object a client passes to <c>Xrm.WebApi.createRecord</c> / <c>updateRecord</c> — onto the same
+    /// <see cref="MappedItem"/> the chat tools produce, so the browser's writes go through the ONE G5 core
+    /// (<see cref="OwnedChildWrite"/>) unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>Plain keys (column logical names) are kept. Each <c>{NavigationProperty}@odata.bind</c> is translated through
+    /// the table's metadata — read AS THE CALLER — into the lookup column it binds and the table it targets, and its value
+    /// <c>/{entitySet}({id})</c> must name exactly that table's entity set (a bind can never be re-pointed at another
+    /// table). A bind to <c>null</c> is a clear of that column. Any other OData annotation is refused, as the chat mapper
+    /// refuses it: the server builds every bind itself.</para>
+    /// </remarks>
+    public static async Task<MapOutcome> MapWebApiPayloadAsync(
+        IDataverseUserClient dataverse,
+        string tableLogicalName,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+            return MapOutcome.Invalid("The request body must be a JSON object of column names to values.");
+
+        var binds = payload.EnumerateObject()
+            .Where(p => p.Name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Dictionary<string, (string Attribute, string Target)>? byNavigationProperty = null;
+        if (binds.Count > 0)
+        {
+            var relationships = await dataverse.GetAsync(
+                $"EntityDefinitions(LogicalName='{tableLogicalName}')?$select=LogicalName" +
+                "&$expand=ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity)",
+                cancellationToken).ConfigureAwait(false);
+            if (!relationships.IsSuccess)
+                return MapOutcome.Failed(relationships);
+
+            byNavigationProperty = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ((attribute, target), navigationProperty) in BuildNavigationPropertyMap(relationships.Body))
+                byNavigationProperty.TryAdd(navigationProperty, (attribute, target));
+        }
+
+        var expectedSets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in payload.EnumerateObject())
+            {
+                if (property.Name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var navigationProperty = property.Name[..^BindSuffix.Length];
+                    if (!byNavigationProperty!.TryGetValue(navigationProperty, out var lookup))
+                    {
+                        return MapOutcome.Invalid(
+                            $"'{property.Name}' does not bind a lookup of table '{tableLogicalName}'.");
+                    }
+
+                    if (property.Value.ValueKind == JsonValueKind.Null)
+                    {
+                        writer.WriteNull(lookup.Attribute);
+                        continue;
+                    }
+
+                    var match = property.Value.ValueKind == JsonValueKind.String
+                        ? BindValueRegex().Match(property.Value.GetString()!.Trim())
+                        : Match.Empty;
+                    if (!match.Success || !Guid.TryParse(match.Groups["id"].Value, out var recordId) || recordId == Guid.Empty)
+                    {
+                        return MapOutcome.Invalid(
+                            $"'{property.Name}' must be '/<entity set>(<id>)' or null.");
+                    }
+
+                    if (expectedSets.ContainsKey(lookup.Attribute))
+                        return MapOutcome.Invalid($"Column '{lookup.Attribute}' is bound twice.");
+                    expectedSets[lookup.Attribute] = match.Groups["set"].Value;
+
+                    writer.WritePropertyName(lookup.Attribute);
+                    writer.WriteStartObject();
+                    writer.WriteString("relatedTable", lookup.Target);
+                    writer.WriteString("recordId", recordId.ToString("D"));
+                    writer.WriteEndObject();
+                    continue;
+                }
+
+                if (property.Name.Contains('@', StringComparison.Ordinal) || property.Name.Contains('.', StringComparison.Ordinal))
+                {
+                    return MapOutcome.Invalid(
+                        $"'{property.Name}' is an OData annotation; only column values and '@odata.bind' lookups are accepted.");
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var item = JsonDocument.Parse(stream.ToArray());
+        var mapped = await MapAsync(dataverse, tableLogicalName, item.RootElement, cancellationToken).ConfigureAwait(false);
+        if (mapped.Item is null)
+            return mapped;
+
+        // The bind named an entity set; the server bound the lookup's own target. They must be the same table.
+        foreach (var lookup in mapped.Item.Lookups)
+        {
+            if (expectedSets.TryGetValue(lookup.Column, out var set)
+                && !string.Equals(set, lookup.RelatedEntitySet, StringComparison.OrdinalIgnoreCase))
+            {
+                return MapOutcome.Invalid(
+                    $"Column '{lookup.Column}' binds '/{set}(…)', but its lookup targets '{lookup.RelatedEntitySet}'.");
+            }
+        }
+
+        return mapped;
+    }
+
     private static bool TryParseLookup(
         JsonElement value, string column, out string? relatedTable, out Guid recordId, out string? error)
     {

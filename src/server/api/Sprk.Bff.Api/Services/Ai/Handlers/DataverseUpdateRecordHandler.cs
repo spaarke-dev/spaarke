@@ -304,145 +304,40 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
     private readonly record struct RefileStep(ToolResult? Result, bool Written);
 
-    /// <summary>The caller's PATCH was refused by Dataverse inside the re-file — carried out so no owner is assigned.</summary>
-    private sealed class CallerWriteFailedException(DataverseUserResponse response) : Exception("The caller's update was refused.")
-    {
-        public DataverseUserResponse Response { get; } = response;
-    }
-
     /// <summary>
-    /// Task 146 r2 (verifier item 2). For a CHILD table, an update that sets or clears a lookup to an ownership parent is a
-    /// re-file: the caller must see the row and hold AppendTo on each record it is moved under (asked as the caller, so no
-    /// refusal answers questions about records they cannot see); then <c>ReparentAsync</c> decides the owner, applies the
-    /// caller's own PATCH, assigns the owner separately and reads it back. A refusal writes nothing. For a table outside the
-    /// ownership set (not a root), a row moved under a SECURE record is refused: it cannot be re-owned here. A root's own
-    /// ownership is provisioning's (owner S6), so a root's lookups re-own nothing — as for every generic writer.
+    /// Task 146 r2 (verifier item 2). The re-file itself is <see cref="OwnedChildWrite.RefileAsync"/> — since task 147 r1
+    /// the ONE re-file core, shared with the browser re-file routes (owner round 28 item 1). This maps its outcome onto a
+    /// tool result with the messages the tool has always returned.
     /// </summary>
     private async Task<RefileStep> RefileIfFiledAsync(
         AnalysisTool tool, string tablename, Guid recordId, string entitySetName, string? primaryIdAttribute,
         DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct)
     {
-        var isChild = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(tablename);
-        if (!isChild && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(tablename))
-        {
-            return default; // a root
-        }
-
-        var newParents = item.Lookups
-            .Where(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable))
-            .ToArray();
-        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var lookup in newParents)
-        {
-            changes[lookup.Column] = new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId);
-        }
-
-        if (isChild)
-        {
-            // A cleared column may be a cleared lookup — the row cannot tell a generic writer which (ReparentAsync reads it).
-            foreach (var column in item.ClearedColumns)
-            {
-                changes.TryAdd(column, null);
-            }
-        }
-
-        if (changes.Count == 0 || (!isChild && newParents.Length == 0))
-        {
-            return default;
-        }
-
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
-        if (me.Failure is { } whoAmIFailure)
-        {
-            return new RefileStep(MapClientError(tool, whoAmIFailure, startedAt), false);
-        }
-
-        var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, newParents, ct)
-            .ConfigureAwait(false);
-        if (appendTo.Denied is { } denied)
-        {
-            return new RefileStep(Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), false);
-        }
-
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
+        var outcome = await OwnedChildWrite.RefileAsync(
+            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct)
+            .ConfigureAwait(false);
 
-        if (!isChild)
+        return outcome switch
         {
-            var owner = await _ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                    newParents.Select(l => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(l.RelatedTable, l.RecordId)),
-                    callerOid, me.SystemUserId),
-                ct).ConfigureAwait(false);
-            return owner.IsRefused || owner.IsSecureOwner
-                ? new RefileStep(Error(tool,
-                    $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
-                    (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
-                    owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false)
-                : default;
-        }
-
-        // The caller must see the row before anything is decided about it (their own 404/403 otherwise).
-        var row = await _dataverse.GetAsync(
-            $"{entitySetName}({recordId:D})?$select={primaryIdAttribute ?? tablename + "id"}", ct).ConfigureAwait(false);
-        if (!row.IsSuccess)
-        {
-            return new RefileStep(MapClientError(tool, row, startedAt), false);
-        }
-
-        try
-        {
-            var resolution = await _ownership.ReparentAsync(
-                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
-                {
-                    EntityLogicalName = tablename,
-                    RecordId = recordId,
-                    ParentChanges = changes,
-                    CallerObjectId = callerOid,
-                    CallerSystemUserId = me.SystemUserId,
-                    // E1: a communication filed under nothing keeps its creator.
-                    WhenUnfiled = string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase)
-                        ? Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator
-                        : Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam,
-                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
-                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
-                    // before anything is written.
-                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
-                        _ => Task.FromResult<Guid?>(me.SystemUserId),
-                        (record, token) => OwnedChildWrite.RightsOnAsync(
-                            _dataverse,
-                            me.SystemUserId,
-                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
-                            record.RecordId,
-                            token)),
-                },
-                async token =>
-                {
-                    // PATCH carries If-Match: * (update-only), run AS THE CALLER — Dataverse authorizes the change itself.
-                    var response = await _dataverse.PatchAsync($"{entitySetName}({recordId:D})", item.JsonBody, token)
-                        .ConfigureAwait(false);
-                    if (!response.IsSuccess)
-                        throw new CallerWriteFailedException(response);
-                },
-                ct).ConfigureAwait(false);
-
-            return resolution switch
-            {
-                // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure
-                // endpoint's message and reason code, not an owner refusal.
-                { IsForbidden: true } => new RefileStep(Error(tool,
-                    $"The update was NOT written. {resolution.Reason}",
-                    resolution.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
-                { IsRefused: true } => new RefileStep(Error(tool,
-                    $"The update was NOT written: the record's owner could not be decided — {resolution.Reason} ({resolution.RefusalCode}).",
-                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
-                _ => new RefileStep(null, true),
-            };
-        }
-        catch (CallerWriteFailedException failed)
-        {
-            // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
-            return new RefileStep(MapClientError(tool, failed.Response, startedAt), false);
-        }
+            { NotARefile: true } => default,
+            { Written: true } => new RefileStep(null, true),
+            { ClientFailure: { } failure } => new RefileStep(MapClientError(tool, failure, startedAt), false),
+            { Denied: { } denied } => new RefileStep(Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
+            { SecureFilingRefused: { } owner } => new RefileStep(Error(tool,
+                $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
+                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
+                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
+            // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure endpoint's
+            // message and reason code, not an owner refusal.
+            { Forbidden: { } forbidden } => new RefileStep(Error(tool,
+                $"The update was NOT written. {forbidden.Reason}",
+                forbidden.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
+            { OwnerRefusal: { } refused } => new RefileStep(Error(tool,
+                $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
+                refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
+            _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+        };
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

@@ -196,6 +196,12 @@ internal static class OwnedChildWrite
         /// <summary>Refused by the caller's own rights — surfaced as the user's access error.</summary>
         public string? Denied { get; init; }
 
+        /// <summary>
+        /// Task 147 r1: the denial is about a record the row names (no AppendTo on it, or it does not exist) — the two are
+        /// indistinguishable on purpose, so an HTTP caller answers them with ONE uniform not-found.
+        /// </summary>
+        public bool ParentUnavailable { get; init; }
+
         /// <summary>Refused by the owner decision — the stable <see cref="RecordOwnerRefusal"/> code and its reason.</summary>
         public RecordOwnerResolution? OwnerRefusal { get; init; }
 
@@ -369,6 +375,7 @@ internal static class OwnedChildWrite
                 return new Outcome
                 {
                     Denied = $"You do not have permission to file this record under the {lookup.RelatedTable} it names.",
+                    ParentUnavailable = true,
                 };
             }
         }
@@ -395,6 +402,157 @@ internal static class OwnedChildWrite
             && value.ValueKind == JsonValueKind.String
                 ? DataverseAccessRightsMapper.FromAccessRightsString(value.GetString())
                 : AccessRights.None;
+    }
+
+    // ── Re-file (task 146 r2; shared since task 147 r1) ─────────────────────────────────────────────────────────────
+
+    /// <summary>What a re-file decided (task 147 r1: one outcome shape for the update tool and the HTTP routes).</summary>
+    internal sealed record RefileOutcome
+    {
+        /// <summary>The update changes no lookup to an ownership parent: an ordinary update — nothing was written.</summary>
+        public bool NotARefile { get; init; }
+
+        /// <summary>The caller's PATCH ran inside the re-file and the owner is decided and applied.</summary>
+        public bool Written { get; init; }
+
+        /// <summary>The caller's own rights refused it (no AppendTo on a record named) — nothing written.</summary>
+        public string? Denied { get; init; }
+
+        /// <summary>The denial is about a record the row is moved under (uniform not-found on HTTP).</summary>
+        public bool ParentUnavailable { get; init; }
+
+        /// <summary>F3 (owner round 10 item 7): the caller may not move the row out of a secure record — nothing written.</summary>
+        public RecordOwnerResolution? Forbidden { get; init; }
+
+        /// <summary>The owner could not be decided — nothing written.</summary>
+        public RecordOwnerResolution? OwnerRefusal { get; init; }
+
+        /// <summary>A non-child table moved under a SECURE record (it cannot be re-owned here) — nothing written.</summary>
+        public RecordOwnerResolution? SecureFilingRefused { get; init; }
+
+        /// <summary>A question or the PATCH, asked as the caller, failed at Dataverse — the caller's own error.</summary>
+        public DataverseUserResponse? ClientFailure { get; init; }
+    }
+
+    /// <summary>The caller's PATCH was refused by Dataverse inside the re-file — carried out so no owner is assigned.</summary>
+    private sealed class CallerWriteFailedException(DataverseUserResponse response) : Exception("The caller's update was refused.")
+    {
+        public DataverseUserResponse Response { get; } = response;
+    }
+
+    /// <summary>
+    /// Task 146 r2 (verifier item 2), shared by the update tool and the browser re-file routes since task 147 r1 (owner
+    /// round 28 item 1: "re-files go through the existing families" — ONE re-file core). For a CHILD table, an update that
+    /// sets or clears a lookup to an ownership parent is a re-file: the caller must see the row and hold AppendTo on each
+    /// record it is moved under (asked as the caller, so no refusal answers questions about records they cannot see);
+    /// then <c>ReparentAsync</c> decides the owner, applies the caller's own PATCH (AS THE CALLER — Dataverse authorizes
+    /// the change, field security included), assigns the owner separately and reads it back. F3 is asked AS THE CALLER
+    /// before a move out of a secure record. A refusal writes nothing. A root's own ownership is provisioning's (owner S6),
+    /// so a root's lookups re-own nothing; any other table moved under a SECURE record is refused.
+    /// </summary>
+    internal static async Task<RefileOutcome> RefileAsync(
+        IDataverseUserClient user,
+        IRecordOwnershipResolver ownership,
+        string table,
+        Guid recordId,
+        string entitySetName,
+        string? primaryIdAttribute,
+        DataverseWriteItemMapper.MappedItem item,
+        Guid? callerObjectId,
+        CancellationToken ct)
+    {
+        var isChild = RecordOwnershipResolver.IsReparentableChild(table);
+        if (!isChild && RecordOwnershipResolver.IsOwnershipParent(table))
+            return new RefileOutcome { NotARefile = true }; // a root
+
+        var newParents = item.Lookups.Where(l => RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable)).ToArray();
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var lookup in newParents)
+            changes[lookup.Column] = new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId);
+
+        if (isChild)
+        {
+            // A cleared column may be a cleared lookup — the row cannot tell a generic writer which (ReparentAsync reads it).
+            foreach (var column in item.ClearedColumns)
+                changes.TryAdd(column, null);
+        }
+
+        if (changes.Count == 0 || (!isChild && newParents.Length == 0))
+            return new RefileOutcome { NotARefile = true };
+
+        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
+        if (me.Failure is { } whoAmIFailure)
+            return new RefileOutcome { ClientFailure = whoAmIFailure };
+
+        var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, newParents, ct).ConfigureAwait(false);
+        if (appendTo.Denied is { } denied)
+            return new RefileOutcome { Denied = denied, ParentUnavailable = appendTo.ParentUnavailable };
+
+        if (!isChild)
+        {
+            var owner = await ownership.ResolveOwnerAsync(
+                RecordOwnershipContext.ForParents(
+                    newParents.Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId)), callerObjectId, me.SystemUserId),
+                ct).ConfigureAwait(false);
+            return owner.IsRefused || owner.IsSecureOwner
+                ? new RefileOutcome { SecureFilingRefused = owner }
+                : new RefileOutcome { NotARefile = true };
+        }
+
+        // The caller must see the row before anything is decided about it (their own 404/403 otherwise).
+        var row = await user.GetAsync(
+            $"{entitySetName}({recordId:D})?$select={primaryIdAttribute ?? table + "id"}", ct).ConfigureAwait(false);
+        if (!row.IsSuccess)
+            return new RefileOutcome { ClientFailure = row };
+
+        try
+        {
+            var resolution = await ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = table,
+                    RecordId = recordId,
+                    ParentChanges = changes,
+                    CallerObjectId = callerObjectId,
+                    CallerSystemUserId = me.SystemUserId,
+                    // E1: a communication filed under nothing keeps its creator.
+                    WhenUnfiled = string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
+                        ? UnfiledOwnership.KeepCreator
+                        : UnfiledOwnership.ActingUserTeam,
+                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
+                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
+                    // before anything is written.
+                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                        _ => Task.FromResult<Guid?>(me.SystemUserId),
+                        (record, token) => RightsOnAsync(
+                            user,
+                            me.SystemUserId,
+                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                            record.RecordId,
+                            token)),
+                },
+                async token =>
+                {
+                    // PATCH carries If-Match: * (update-only), run AS THE CALLER — Dataverse authorizes the change itself.
+                    var response = await user.PatchAsync($"{entitySetName}({recordId:D})", item.JsonBody, token)
+                        .ConfigureAwait(false);
+                    if (!response.IsSuccess)
+                        throw new CallerWriteFailedException(response);
+                },
+                ct).ConfigureAwait(false);
+
+            return resolution switch
+            {
+                { IsForbidden: true } => new RefileOutcome { Forbidden = resolution },
+                { IsRefused: true } => new RefileOutcome { OwnerRefusal = resolution },
+                _ => new RefileOutcome { Written = true },
+            };
+        }
+        catch (CallerWriteFailedException failed)
+        {
+            // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
+            return new RefileOutcome { ClientFailure = failed.Response };
+        }
     }
 
     /// <summary>The caller's <c>systemuserid</c> — <c>WhoAmI()</c> under their own token, which cannot name anyone else.</summary>

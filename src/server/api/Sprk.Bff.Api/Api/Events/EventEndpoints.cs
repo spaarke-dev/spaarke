@@ -90,6 +90,33 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict) // task 146: re-file refused
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // PATCH /api/v1/events/{id}/filing — unified-access-control-r2 task 147 r1 (owner round 28 item 1: "re-files go
+        // through the existing families"). The browser's re-file of an event (the RegardingResolver picker on a saved event,
+        // the event side pane's lookups) sends its Web API payload here: the caller's own PATCH inside the ONE re-file core
+        // (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved under, F3 on a move out of a secure record, the
+        // owner decided and assigned), then the core-ancestor re-stamp. Authorized in the handler, as the caller.
+        group.MapPatch("/{id:guid}/filing", (
+                Guid id,
+                [FromBody] System.Text.Json.JsonElement body,
+                Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+                Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+                [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                HttpContext httpContext,
+                ILogger<Program> logger,
+                CancellationToken ct) =>
+                Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+                    "sprk_event", id, body, user, ownership, restamper, httpContext, logger, ct))
+            .WithName("RefileEvent")
+            .WithSummary("Re-file an event as the caller")
+            .WithDescription("Applies the caller's own update of an event's lookups (as the caller). The caller needs AppendTo " +
+                "on every record it is moved under and, to move it out of a secure record, Full Access on it or to be its " +
+                "creator; the owner is re-derived and assigned. Unknown and inaccessible events get the same 404.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         // POST /api/v1/events/{id}/complete - Mark event as completed
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
             .WithName("CompleteEvent")
