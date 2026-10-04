@@ -4,7 +4,7 @@
     <title>Provision the dedicated least-privileged writer identity</title>
     <phase>0 Foundations</phase>
     <gate>owner confirms the Azure changes before they are made</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive identity and privilege change in shared Azure and Dataverse environments.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -79,6 +79,8 @@
   </acceptance-criteria>
 
   <notes>Owner decision 2026-10-03, task 002 option A. Unblocks task 002's completion (its union check must pass for the writer) and task 030 (the writer authenticates as this identity).</notes>
+
+  <completion>COMPLETED 2026-10-04 (main session). UAMI mi-ontology-writer-dev (rg-spaarke-dev, westus2), client id 69040982-612e-469e-a85f-26d5172367c5, principal 6cf6d7b6-8dc2-4cfb-a971-649df8605be6, attached to spaarke-bff-dev alongside mi-bff-api-dev (every existing credential + KV reference stays pinned to mi-bff-api-dev; /healthz and /healthz/dataverse 200 after attach; /healthz/catalog 503 is pre-existing AI catalog drift logged since 2026-09-29). Dataverse app user # mi-ontology-writer-dev (3121bf1b-9fbf-f111-aaaf-0022482913fc), root BU, ONE directly assigned role Spaarke Ontology Service. Union check (RetrieveUserPrivileges, team-inherited included): Create Signal/DecisionRecord + Assign Signal present; NO Write/Delete on sprk_decisionrecord; nothing writable on policy/policyversion. Negative test on the wire: writer create 204, update 403 0x80040220, delete 403 0x80040220; admin control 204; test rows deleted. No secret: SP type ManagedIdentity, 0 password credentials. FINDINGS for 030: (a) effective set = Ontology Service + root default team roles (Console User, Basic User, Office Add In User), 722 privileges; Write on sprk_signal and all reads come only from the default team, so 030 should decide whether to fold them into Ontology Service; (b) NOT-EXISTS over a Basic-depth table (spendsnapshot, spendsignal, document, account, contact) is vacuously true for this principal and must fail closed. Token acquisition from inside the app is proven by 030 on first write. Record: notes/security-roles.md section 9, plan: notes/006-writer-identity-plan.md.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

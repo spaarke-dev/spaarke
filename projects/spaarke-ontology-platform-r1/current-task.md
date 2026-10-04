@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-03 (by context-handoff, main session; orchestrator checkpoint)
+> **Last Updated**: 2026-10-04 03:10Z (main session; tasks 006 + 002 completed)
 > **Recovery**: read "Quick Recovery" first. This file is the MAIN SESSION's orchestrator view: several tasks
 > run as subagents in parallel, so per-task detail lives in each POML's `<completion>` element and in `notes/`.
 > Sub-agents were told not to edit this file.
@@ -11,16 +11,21 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **006 — Provision the dedicated least-privileged writer identity** (main session, FULL, opus/high, prescriptive) |
-| **Step** | **0 of 6 — not started.** Paused before any Azure change because the owner asked for a handoff |
-| **Status** | in-progress (owner APPROVED the plan; nothing executed yet) |
-| **Next Action** | Run `task-execute` on `tasks/006-provision-dedicated-writer-identity.poml`. Owner approved 2026-10-03, as proposed: (1) create user-assigned managed identity **`mi-ontology-writer-dev`** in **`rg-spaarke-dev`**; (2) attach it to App Service **`spaarke-bff-dev`** (likely restarts the dev BFF); (3) register it in **`spaarkedev1`** as a Dataverse application user holding **ONLY `Spaarke Ontology Service`**; (4) re-run the task 002 union check. **No client secret; never recreate `BFF-API-ClientSecret`.** Then record the client id in `notes/security-roles.md` for task 030 |
+| **Task** | **none active in the main session.** Last completed: **006** (dedicated writer identity) and **002** (privilege re-verify), both ✅ 2026-10-04 |
+| **Step** | — |
+| **Status** | orchestrating; waiting on background agents 021 and 089 |
+| **Next Action** | (1) When **021** reports: record it in POML + TASK-INDEX, then dispatch **030** (deps 021 + 006 now both satisfied) and **022** (held only to keep 021 alone in this worktree). (2) When **089** reports: record it, then dispatch **091**. (3) **081** waits for PRs #1118 + #1121 to merge, then merge master into this branch. Writer identity for 030: client id `69040982-612e-469e-a85f-26d5172367c5`, systemuser `3121bf1b-9fbf-f111-aaaf-0022482913fc` (see `notes/security-roles.md` §9) |
 | **Running in background** | **021** predicate compiler (opus subagent, in THIS worktree; told not to touch this file) · **089** `cleanGuid` follow-up (in `C:\wt089`, PR #1121: converge the ~40 deferred call sites + case-semantics audit). Their reports arrive as agent messages; record them in POML + TASK-INDEX |
-| **Branch / git** | `docs/ontology-platform-design` @ `9eb510a61`, **16 ahead / 0 behind** `origin/master`, in sync with its remote. One uncommitted file: `notes/seed-data-state.md` (owner "keep" decision for the spend snapshots) |
-| **Index** | 50 tasks: **17 ✅ · 1 🔄 (002) · 32 🔲**. 50 POMLs validate clean; no task-status drift |
+| **Branch / git** | `docs/ontology-platform-design`, 0 behind `origin/master`; the 006/002 records are committed and pushed with this checkpoint |
+| **Index** | 50 tasks: **19 ✅ · 0 🔄 · 31 🔲**. Drift check clean (50/50) |
 
 ### Files modified since the last commit
-- `projects/spaarke-ontology-platform-r1/notes/seed-data-state.md` — records owner decision: KEEP the two spend snapshots + NC2 budget row
+- none (all committed with this checkpoint)
+
+### Live changes made by task 006 (outside git)
+- Azure: UAMI `mi-ontology-writer-dev` (rg-spaarke-dev) created and attached to `spaarke-bff-dev` (additive; app restarted; healthy)
+- Dataverse `spaarkedev1`: app user `# mi-ontology-writer-dev` with ONE role `Spaarke Ontology Service`; two negative-test Decision Records created and deleted (0 rows remain)
+- Seen, not caused: `/healthz/catalog` 503 = AI catalog drift, logged since 2026-09-29 (owned outside this project)
 
 ### Owner decisions made 2026-10-03 (all recorded in task files)
 | Item | Decision |

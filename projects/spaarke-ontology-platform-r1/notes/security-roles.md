@@ -405,7 +405,7 @@ This matters because the defensibility claim rests on it: *"the Decision Record 
 statement about what the **system** cannot do, and §0.3 binds this project to testing what its message
 claims. Owner decision required — see `notes/002-escalation-append-only-writer-principal.md`.
 
-### 8.3 Criterion 4 (the negative test) — not yet executable
+### 8.3 Criterion 4 (the negative test) — not yet executable *(✅ executed 2026-10-04 as the task 006 writer; see §9)*
 
 The POML requires attempting an update as a non-admin holding only the Spaarke roles and confirming
 refusal. Not executable today: `sprk_decisionrecord` has **0 rows**, and the only non-admin principals
@@ -413,3 +413,105 @@ hold `Spaarke Console User`, which has no Write privilege to exercise against a 
 **Task 041 already owns this test** (*"Test as a real non-admin"*), after task 004/005 seed data. Recorded
 here rather than filed as a new defer item, because an existing task covers it.
 
+
+## 9. Task 006: the dedicated writer identity (2026-10-04): **escalation resolved, option A**
+
+Owner chose option A on 2026-10-03 (§8). Plan and the facts verified before any change are in
+`notes/006-writer-identity-plan.md`.
+
+### What exists now
+
+| Item | Value |
+|---|---|
+| User-assigned managed identity | `mi-ontology-writer-dev`, rg `rg-spaarke-dev`, `westus2`, tags `project`/`purpose` |
+| **Client id (task 030 authenticates as this)** | **`69040982-612e-469e-a85f-26d5172367c5`** |
+| Principal (object) id | `6cf6d7b6-8dc2-4cfb-a971-649df8605be6` |
+| Attached to | `spaarke-bff-dev`, **alongside** `mi-bff-api-dev` (`5967251e-…`), which remains the identity every existing credential and Key Vault reference uses |
+| Dataverse application user | `# mi-ontology-writer-dev`, systemuserid `3121bf1b-9fbf-f111-aaaf-0022482913fc`, `accessmode` 4 (non-interactive), root BU `Spaarke` |
+| Directly assigned roles | **exactly one**: `Spaarke Ontology Service` (root copy `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`) |
+| Credentials | none created. The service principal is `ManagedIdentity` type with 0 password credentials (its one key credential is the Azure-managed MI certificate). No app registration, no Key Vault secret, no app setting added. `BFF-API-ClientSecret` / `bff-api-client-secret` do not exist in `spaarke-spekvcert` |
+
+### Union check (task 002 step 4, re-run for the new principal)
+
+Method: `systemusers(3121bf1b-…)/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()`, the **effective** set,
+which includes roles inherited through team membership, resolved to privilege names.
+
+| Privilege | Effective | Required |
+|---|---|---|
+| `prvCreatesprk_Signal` | Global | ✅ required, present |
+| `prvCreatesprk_DecisionRecord` | Global | ✅ required, present |
+| `prvAssignsprk_Signal` | Global | ✅ required, present |
+| `prvWritesprk_DecisionRecord` | **absent** | ✅ must be absent |
+| `prvDeletesprk_DecisionRecord` | **absent** | ✅ must be absent |
+| Write / Delete / Share / Assign on `sprk_policy`, `sprk_policyversion` | **all absent** | ✅ so `sprk_policyversion` is no-update for the writer too |
+
+**Result: PASS.** The sentence "the writer cannot update or delete a Decision Record" is now true by
+privilege, not only by code discipline. Task 002 criterion 3 is satisfied for the writer principal.
+
+### 🟡 Finding: the effective set is wider than the one role, and that is load-bearing
+
+Every user is automatically a member of its business unit's **default team** (this cannot be removed). The root
+`Spaarke` default team holds **`Spaarke Console User`, `Spaarke Basic User`, `Spaarke Office Add In User`**, so
+the writer's effective union is **722 privileges**, not the Ontology Service role's handful. None of the three
+adds Write or Delete on the ledger (verified above).
+
+The inheritance is also **what the writer runs on**. `Spaarke Ontology Service` is Create-only by design, so the
+following come only from the default team:
+
+- **`prvWritesprk_Signal` (Global)**: the evaluator needs it to stamp `sprk_lastevaluated` and to close Signals
+  (`ConditionCleared` / `Superseded` / `PolicyRetired`, D-12).
+- **Every Read**: `sprk_policy`, `sprk_policyversion`, `sprk_signal`, `sprk_decisionrecord`, and the predicate
+  inputs.
+
+Consequence: changing the root default team's roles silently changes what the writer can do. **Task 030 should
+decide** whether to add `prvWritesprk_Signal` and the Global reads it depends on to `Spaarke Ontology Service`
+itself, so the writer no longer depends on the team. That is a role edit, which is outward-facing, so it needs the
+owner. Not changed here: task 006's scope was the identity, and the writer works today.
+
+### 🔴 Hazard for tasks 021 / 030: NOT-EXISTS over a table the writer cannot fully read
+
+Read depth for the writer, as the effective union stands:
+
+| Global (whole org) | Basic (own rows only) |
+|---|---|
+| `sprk_matter`, `sprk_communication`, `sprk_budget`, `sprk_budgetrevision`, `sprk_invoice`, `sprk_project`, `sprk_event`, `sprk_memo`, `sprk_todo` | `sprk_spendsnapshot`, `sprk_spendsignal`, `sprk_document`, `account`, `contact`, `team`, `businessunit`, `sprk_gridconfiguration` |
+
+The Path B predicate reads `sprk_communication` (EXISTS) and `sprk_budgetrevision` (NOT EXISTS): both
+**Global**, so Path B is sound.
+
+But a NOT-EXISTS clause over a **Basic**-depth table would see only the writer's own rows. That is effectively
+always empty, so the clause would be **true for every matter** and the evaluator would assert something it never
+checked. That is a §0.3 violation that produces Signals rather than an error. The predicate compiler (021) or
+the writer (030) must **fail closed** when a rule's NOT-EXISTS target is a table the evaluating principal cannot
+read at Global depth. An EXISTS clause over such a table fails the other way (silently false), which is also
+wrong but quieter.
+
+### Negative test on the wire (closes §8.3 / task 002 criterion 4)
+
+Run 2026-10-04 against `sprk_decisionrecords` as the writer, via `MSCRMCallerID: 3121bf1b-…` (impersonation
+makes Dataverse enforce **the writer's** privileges, not the caller's):
+
+| Attempt | As | Result |
+|---|---|---|
+| Create a Decision Record | writer | **HTTP 204**; owner and createdby = the writer |
+| Update `sprk_proposedaction` | writer | **HTTP 403 `0x80040220`** (privilege denied). Dataverse reports `roleCount=4, privilegeCount=722, accessMode='4 Non-interactive'`, which matches the union above |
+| Delete | writer | **HTTP 403 `0x80040220`** |
+| Update (positive control) | admin | HTTP 204, so the 403s are the privilege check, not a broken row |
+| Delete (cleanup) | admin | HTTP 204 |
+
+Two test rows were created across two runs (`9d9cf3b0-…`, `bc8b43bd-…`), both named
+"ONTOLOGY DEV TEST 006 negative test (delete me)". **Both deleted; `sprk_decisionrecord` is back to 0 rows.**
+
+The writer is a non-admin principal holding only Spaarke roles, so this is the test §8.3 said was not yet
+executable. Task 041 still tests the guarantee for **human** users in the Console.
+
+### Not verified here, and where it is verified
+
+- **Token acquisition as the new identity from inside the app**: no code uses it yet, and the Kudu SCM container
+  has no `IDENTITY_ENDPOINT` (ADR-028 E-2 note), so it cannot be exercised from outside. **Task 030** proves it on
+  first write. If it fails, task 006's escalation trigger applies: **stop**, and do not fall back to the sysadmin
+  identity.
+- **Post-attach health**: `/healthz` 200 and `/healthz/dataverse` 200 after the attach. `/healthz/catalog` returns
+  503, but that is **pre-existing** `ai-catalog-reconciliation` drift. App Insights logs the same message on
+  2026-09-29, 09-30, 10-02 and 10-03 02:25Z, all before this change at 2026-10-04 02:49Z. Owned by the AI catalog,
+  not this project.
