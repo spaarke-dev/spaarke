@@ -1,5 +1,115 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-03 ~21:05Z (checkpoint #6). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #6 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Standing instruction** | "continue autonomous". Batch owner questions into ONE AskUserQuestion round, "(Recommended)" first. Owner rounds **1-13** in `notes/session27-owner-decisions-and-research.md` (12 = 167 guard classification; 13 = batch 4c verifier questions). |
+> | **Model policy (owner, 2026-10-03)** | Opus pinned (`model: 'opus'`) on every executor/fixer/verifier in NEW scripts; effort per POML. Memory: `agent-model-selection`. |
+> | **🔴 Workflow spawn rule** | Keep the SESSION cwd at uppercase `C:/code_files/spaarke` while any workflow runs (`cd /c/code_files/spaarke`); run every other-directory command in a SUBSHELL `( cd X && ... )` or `git -C`. A lowercase `c:\...` or non-repo cwd at spawn time kills worktree-isolated agents (`WorktreeIsolationError` / "not in a git repository"). Memory: `workflow-agent-messaging`. Resume caching is PREFIX-ordered: for a pooled/DAG script write a CONTINUATION script (embed done results) instead of `resumeFromRunId`. |
+> | **Master / dev BFF** | `818840ac6` (unchanged). |
+> | **Work branch** | `8984f8a64`, pushed: + rounds 12/13 (`d7d1af61b`) + **034 COMPLETED** (`8984f8a64`). |
+>
+> ### Running (do NOT relaunch; journals under `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl`)
+> | Workflow | Run | What |
+> |---|---|---|
+> | **batch 4d** (continuation of 4c) | task `wgmjj421q`, run `wf_64880481-ea0`, script `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-batch4d.js` | fix rounds 133 (→`-c1-r2`), 150 (→`-c1-r2`), 146 (→`-c1-r1`, incl. round 13 child-table creator stamp), 149 (→`-r4`), 142 (→`-r4`, tri-state deny-veto faults), 157 (→`-c2-r2`, advisory gate); then 140 (on 142), 148 (on 149+133) → 147, 158 (on 148+156). ≤4 agents. |
+> | **sweep continuation** | task `wkvds42jg`, run `wf_9dbaa6e9-894`, script `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-sweep-cont.js` | 159 + 160 DONE (ready); 161 verify; 167 fix1 (with round 12); 162, 163 exec (fresh; killed partial work saved on `wip/uac-r2-162-killed` `e3a543e26`, `wip/uac-r2-163-killed` `b6c6a8958`); then 164, 165, 166, 168, 169. ≤4 lanes. |
+> | Monitor | `journal_watch.py` in the scratchpad (RUNS = both runs above) | re-arm every 30 min |
+>
+> ### Batch 4 integration — IN PROGRESS on `integ/uac-r2-batch4` (worktree `C:\wt4i`, local only, not pushed)
+> - Merged: 143-r2, 137-b2, 156-c1-r2, **origin/master `62277d50a`** (#1110 numbering: RecordCreationService keeps 133's stamp then `CreateNumberedAsync`), 142-r3 (×156: both after-write hooks, restamp first; doc row 142 = **I-12**, master's numbering = I-11). Seam fix `30bf4cab4`. BFF + all test projects build; 413 seam tests green.
+> - **Held:** 132-r1 (conflicts with the 133 rework in ProvisionProjectEndpoint / AccessibleRecordSetService / fixture) → merge after 133's final branch.
+> - **To merge when 4d is ready:** 133, 150, 146, 149, 142-r4 (supersedes r3), 157-c2-r2, 140, 148, 147, 158, then 132-r1; then the work branch; then every item of `notes/batch4-integration-steps.md` (incl. the schema-script verify fix: copy `Set-RecordNumberingSchema.ps1`'s rootcomponentbehavior-0 check + `Get-AllPages`), `.claude` ADR-034 A4 (exact text in 142 note §13.4), suites, publish size, CVE, PR, held live steps, deploy, live gates.
+>
+> ### Done this checkpoint
+> - **034 COMPLETED**: canary live gate PASS (59 ⊂ 61, 4/4; inversion INERT as designed); README fixed (needs `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`). **036 is unblocked.**
+> - Issue **#1115** filed to ci-cd-unit-test-remediation-r1 (router docs_only allow-list; round 13 item 12).
+> - Cleaned the refused nested worktrees under the project worktree's `.claude/worktrees`. Folders `C:/code_files/spaarke/.claude/worktrees/wf_f922c982-555-7` and `-8` are deregistered but undeletable (file lock) — housekeeping.
+>
+> ### NEXT ACTIONS
+> 1. Watch both runs; when **4d** finishes, merge its ready branches into `C:\wt4i` in dependency order (see above), then integrate per the checklist → PR → merge → deploy → live gates.
+> 2. When the **sweep** finishes: integrate 159-169 (167 ledger from each task's ledger input) on top of batch 4 → PR → task 170.
+> 3. **Batch 5** (after batch 4 integrates, base = integration tree): 036 → 105 → 064 → {066 → 067/099, 069, 087 → 088 → 089}; 054 (rewrite POML per D-4 "add the requester read" first) → 055 → 056 → 057/058; independent: 101, 110, 111, 112, 113, 114, 094, 095; 082 (read: decision task); 047 (after deploy); 153/154 (after 064/067/150 and 143/064).
+> 4. Owner manual gates still open: 003 (finance summary as non-admin), 013 (= 141 G-7/G-8), 136/037/039 + 034's 007(a)/(b) (CIAM sign-in).
+>
+
+> **Last Updated**: 2026-10-03 17:16Z (context-handoff, checkpoint #5, before /compact). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #5 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Standing instruction** | Owner: "continue autonomous". Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5). Batch owner questions into ONE AskUserQuestion round, with "(Recommended)" first; the owner has accepted every recommendation so far. |
+> | **Master / dev BFF** | `818840ac6` (#1096 batch 3 + #1097 the 141 create-by-POST fix). Dev BFF = `818840ac6`. |
+> | **Work branch** | `work/unified-access-control-r2` @ `3156888a5`, pushed, clean: master + docs + tasks 159-170 + owner rounds 8-11 + live-gate notes. |
+> | **Owner decisions** | Rounds 1-11 in `notes/session27-owner-decisions-and-research.md`: **R8** (156), **R9** (route sweep: fix all 82, plus the every-route guard), **R10** (remove unused routes; analysis picker; nine batch-4 answers), **R11** (ADR-034 A4 accepted; 149 decisions; **every dev live step for batch 4 APPROVED**; the test user). |
+> | **Test user** | `uac.child.user@demo.spaarke.com`: systemuser `d6f8f439-40bf-f111-a05b-3833c5e9614d`, Spaarke Business Unit 1, Core + Basic User, RPA on 65a3fab2 = None. The password went to the owner; it is not stored. |
+> | **141** | Live gates G-1..G-6 PASS; 9 of 11 users linked; writes on. G-7/G-8 are manual (the owner). |
+>
+> ### 🔴 Two workflows are RUNNING. Do NOT re-launch; wait for their task notifications or read the journals
+> | Workflow | Task id / run | Lanes at 17:16Z |
+> |---|---|---|
+> | **batch 4c** | `w0e2grc8f` / `wf_c4f2e9b0-1dd` | 133 verify · 142 verify · 146 fix (see the incident below) · 149 fix · 150 fix1 · 157 fix1. Then: 148 (on 149 + 133) → 147; 140 (on 142); 158 (on 148 + `task/uac-r2-156-c1-r2`). |
+> | **sweep 159-169** | `wmauzzmyj` / `wf_f922c982-555` | Pool of 4. Running: 159 exec, 160 verify, 161 exec, 167 exec. Queued: 162, 163, 164, 165, 166, 168, 169. |
+>
+> Journals: `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl` (each result line carries the full verdict, branch and findings). Results are also saved per batch in the scratchpad (`batch4-results.json`, `idor-sweep.json`, `idor-group-NNN.json`, `authored-159-169.json`, `issues-159-170.json`).
+>
+> ### ⚠️ Lesson: never SendMessage a WORKFLOW agent
+> Replying to a workflow agent's message cannot reach it. It RESUMES A DUPLICATE from the agent's transcript, in the same worktree. In 146-c1 that duplicate ran alongside the original. I stopped it with TaskStop, committed the shared state as WIP `6cd0c3f28` on `task/uac-r2-146-c1`, and left `NOTE-FROM-MAIN.md` in that worktree (it must not reach the merged tree). The original kept working. To answer a workflow agent, write a note file into its worktree or fold the answer into the next round's items.
+>
+> ### Ready-to-merge branches (verified)
+> 132 `task/uac-r2-132-r1` (contains 137) · 137 `task/uac-r2-137-b2` · 143 `task/uac-r2-143-r2` · 156 `task/uac-r2-156-c1-r2`. 133, 146, 150 and 157 are being re-done in 4c (owner round 10); 142 and 149 are in their 3rd fix round.
+>
+> ### Live steps already done on dev (`notes/batch4-live-gates-2026-10-03.md`)
+> - 133: `sprk_createdbyperson` schema APPLIED.
+> - 143: G-1 column APPLIED.
+> - 150: G-0 null repair PASS.
+> - 146: G146-1 (role 9→26, §5.4 strip, negative and positive probes) PASS; G146-2 (review-log Read) DONE.
+> - **Held for the deploy** (they change current behaviour): 143 O2, and 150's FLS lock on `sprk_issecure`.
+> - **Found:** the schema scripts' verify falsely reports MISSING in SpaarkeCore (`rootcomponentbehavior = 0`), and the null-repair after-check miscounts. Both are queued.
+>
+> ### NEXT ACTIONS
+> 1. **When batch 4c finishes:** integrate on a fresh short-path worktree, working through EVERY item in `notes/batch4-integration-steps.md`:
+>    - merge order: 133-c1, 143-r2, 150-c1, 137-b2 → 132-r1, 146-c1(+), 149-r3, 148, 147, 142-r3, 140, 156-c1-r2, 158, 157-c2;
+>    - the reconciliations (one F3 check, the 133 constant, 156×146, the schema-script verify fix);
+>    - the `.claude/` edits (ADR-034 A4, bff-deploy §9c), and copy the G146-1 evidence into the config;
+>    - run unit + arch + BOTH integration suites in full; measure publish size and run the CVE check;
+>    - PR → `Router` green and pending = 0 → merge (merge commit) → the held live steps (143 O2, 150 FLS) → deploy BFF + SPA → each task's live gate with `uac.child.user`.
+> 2. **When the sweep finishes:** integrate 159-169, reconcile 167's ledger from each task's "Route authorization ledger input", PR, then task 170.
+> 3. Collect any `ownerQuestionsOpen` from both workflows into ONE owner round.
+> 4. Housekeeping: `git worktree list`; remove consumed short-path worktrees (`C:/wtv146` and the agent worktrees under `C:/code_files/spaarke/.claude/worktrees/` once their workflows finish).
+>
+
+> **Last Updated**: 2026-10-03 (checkpoint #4). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #4
+>
+> | Field | Value |
+> |---|---|
+> | **Master / dev BFF** | Master = dev BFF = `818840ac6` (#1096 + #1097). Work branch `4751fcdc9` = master + docs + tasks 159-170. |
+> | **Owner rounds 8-11** | All recorded in `notes/session27-owner-decisions-and-research.md`. **R11 APPROVED every dev live step needed to integrate batch 4** (schema / FLS / roles / null repair / test-record probes / BFF + SPA deploys). |
+> | **Test user** | `uac.child.user@demo.spaarke.com` in Spaarke Business Unit 1 (Core + Basic User; no rights on secure project 65a3fab2). The password went to the owner; it is not stored. |
+> | **New tasks** | 159-170 (#1098-#1109): the route-sweep fixes per surface (H wave), the 167 every-route guard, 168 form lock, 169 TS stamp mirror, 170 filter rename (after integration). |
+>
+> ### Running workflows (do NOT re-launch; read the journals)
+> | Workflow | Run | What |
+> |---|---|---|
+> | **batch 4c** | `wf_c4f2e9b0-1dd` | Fix lanes: 133 (R10 item 4 snapshot/restore), 146 (R10 item 7 F3 on child move-out), 150 (R10 items 9-11), 157 (blocking CI jest gate), 142 r3 (A4 accepted), 149 r3 (merges 143, wires the guard). Then: 148 (on 149 + 133) → 147; 140 (on 142); 158 (on 148 + 156-c1-r2). |
+> | **sweep 159-169** | `wf_f922c982-555` | Pool of 4: 167, 159, 160, 161, 162, 163, 164, 165, 166, 168, 169. Each is verified, with up to 2 fix rounds. |
+>
+> ### Ready-to-merge branches (verified)
+> 132 `task/uac-r2-132-r1` · 137 `task/uac-r2-137-b2` · 143 `task/uac-r2-143-r2` · 156 `task/uac-r2-156-c1-r2` (plus 133 / 146 / 150 / 157, being re-done in 4c).
+>
+> ### NEXT ACTIONS
+> 1. When 4c ends: integrate on an integ branch (merge order: 133-c1, 143-r2, 150-c1, 137-b2 → 132-r1, 146-c1, 149-r3, 148, 147, 142-r3, 140, 156-c1-r2, 158, 157-c2). Then run BOTH integration suites in full plus unit + arch; measure publish size; open the PR (cite 143's §6.5 path A, 142's ADR-034 A4 (+ the main session's `.claude/adr` edit), and 146+149 shipped together).
+> 2. Live, before deploying that build (R11-approved): 133 schema; 143 G-1 + O2; 150 G-0 null repair + FLS (invoice included); 146 G146-1 (role 9→26) + G146-2; 142 ledger schema + ribbon. After the deploy: each task's live gates with `uac.child.user`.
+> 3. When the sweep ends: integrate 159-169 (reconcile 167's ledger from each task's "Route authorization ledger input"), then 170.
+> 4. Peer coordination: #1044 (083) has the measured 9/11. 166 records the bff-deploy skill §9c edit for the main session.
+>
+
 > **Last Updated**: 2026-10-03 ~03:00Z (checkpoint #3). **This block supersedes every block below it.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #3 (READ FIRST)
