@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-03 SESSION 32 — **T248 ✅** (MI-FIC owning app; live probe passed; dev control plane + Worker deployed). **Next: T251** — Exchange-policy sidecar (G30; owner: fix it properly). 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§2 D16–D23, §4 G30, §7 rows).
+> **Last Updated**: 2026-10-03 SESSION 32 END (context-handoff before /compact) — **T248 ✅ `b730d9310`** (pushed; tree clean). **Next: T251** — Exchange-policy sidecar (G30), owner-directed. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§2 D16–D23, §4 G28 ✅ / G30, §7 T251 row).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,7 +36,7 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 31 END, 2026-10-03)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 32 END, 2026-10-03)
 
 | Field | Value |
 |-------|-------|
@@ -46,7 +46,7 @@
 | **Next Action** | `task-execute` T251: read Listener.ps1 + H14a's sidecar client; researcher: can `Connect-ExchangeOnline -ManagedIdentity` work from an App Service sidecar (ADR-028 A4 — else KV certificate by owner decision, never a secret); present the identity options to the owner (escalation 1); then Bicep (env vars → app-setting names), code, deploy (confirm first), verify `/healthz` 200 + one Worker→sidecar call. The redeploy also ships T248's post-gate code fixes. **Also open for the owner**: the Api site `spaarke-provisioning-controlplane-dev` has a pending swap-with-preview (blocks its Bicep). Deploy note: run `Deploy-ControlPlane.ps1` with `-Confirm:$false` in non-interactive shells. |
 | **Order** | ~~T248~~ → **T251** (owner: next) → T242 → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
 
-### Completed (SESSIONS 30–31)
+### Completed (SESSIONS 30–32)
 | Item | Commit | Outcome |
 |---|---|---|
 | T245b | `5e15c128a` | L2-owned values are config/computed (artifact versions, SPE owner-credential options, L2 KV principal, vendor-key vault, H9 → BffApiUrl/BffBuildId). |
@@ -58,7 +58,7 @@
 | **T243** (S31) | `25107decf` | BFF Document Intelligence: key if configured, else the stamp UAMI; credential rejection reported plainly; `DocumentIntelligence-ApiKey` gone from catalog + customer.bicep (+ `listKeys` output). **G29**: no stamp had ever set `DocumentIntelligence__Enabled` (AI platform off on stamps) → catalog literal. **D22** T244 + T246 hard prerequisites of T186 (T186 deps updated). Publish 45.54 MB / +0.00 MB; no CVE; BFF suite 13,575 pass / 0 fail. |
 | Container type (S31) | `f4250fc0f` | `Spaarke Model 1` = `fb3817a8-…` recorded; T241 must NOT delete `rg-spaarke-shared-prod` or the Syntex billing account (billing binding permanent). |
 | D23 / T250 / PRQ-E-14 (S31) | `13cf0f2e8` | **D23** `rg-spaarke-shared-prod` = single home for shared PROD resources (Model 1 SPE billing now; prod L2 control plane from its first deploy — change `platform-controlplane.bicep`'s RG name then; group is westus2); subscription renamed "Spaarke Shared Production"; T241 also deletes the partial `rg-spaarke-trial01-prod-model1` stamp. **T250** (plan row): `SpeAdminGraphService` still signs in as each owning app with a KV client SECRET (ADR-028 E-1) → add a MI-FIC credential mode; until then NO secret-based `sprk_specontainertypeconfig` for Model 1. `sprk_credentialmode` created on spaarkedev1 (owner-approved); schema script's case-sensitive existence check fixed. |
-| **T248** (S32) | *(this commit)* | L2 signs in as the SPE owning app with MI-FIC — no certificate (D16, G28 closed). Live probe from a throwaway ACI with the Worker UAMI: FIC token `appidacr` 2; registration (already present) + containers GET 200. H0 `SpeOwnerCredential` (3 codes, no 24 h gate); T6 lists the run's container; Worker config `{ContainerTypeId, OwnerAppId}`; dev control plane + Worker deployed (Api part blocked by a pending swap; Worker 503 because of the sidecar → T251). Master merged (`cc7f76aa3`). Gates: 0 Critical / 0 violations; tests 2121 / 6 baseline; ArchTests 346. |
+| **T248** (S32) | `b730d9310` (+ master merge `cc7f76aa3`) | L2 signs in as the SPE owning app with MI-FIC — no certificate (D16, G28 closed). Live probe from a throwaway ACI with the Worker UAMI: FIC token `appidacr` 2; registration (already present) + containers GET 200. H0 `SpeOwnerCredential` (3 codes, no 24 h gate); T6 lists the run's container; Worker config `{ContainerTypeId, OwnerAppId}`; dev control plane + Worker deployed (Api part blocked by a pending swap; Worker 503 because of the sidecar → T251). Master merged (`cc7f76aa3`). Gates: 0 Critical / 0 violations; tests 2121 / 6 baseline; ArchTests 346. |
 
 ### Live changes made 2026-10-03 (operator identity `ralph.schroeder@spaarke.com`; owner-performed or owner-approved)
 - **T248 (owner-approved)**: throwaway ACI `sprk-t248-fic-probe` (rg-spaarke-platform-dev) created → probe → DELETED. `az deployment sub create` `t248-platform-controlplane-dev-20261003-205456` (Worker settings + the Exchange sidecar created; Api module failed on a pending swap; Cosmos automatic failover on→off). Worker code zip-deployed (Deploy-ControlPlane.ps1) and started; Worker 503 (sidecar). Graph Explorer's grant on the `Spaarke Model 1` registration: owner KEEP.
@@ -74,16 +74,32 @@
 - Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
 
 ### Critical Context
-Every provisioning run stops at H0 until **T248** lands (SPE owning app via MI-FIC; owning app + FIC + container type
-now exist). Model 1 also fails closed at H2a and the skill hard-stops it until **T228** (one subscription per customer).
-New stamps: secret-free BFF (H4 omits `BFF-API-ClientSecret` + `Dataverse-ClientSecret`), Document Intelligence via
-UAMI (T243), AI platform switched ON (G29) — so AI Search MI 403 (until T244) and the BFF's hard-coded dev Content
-Safety fallback (until T246) are live risks → no customer run (T186) before T244 + T246 (D22). The deployed dev Worker
-predates T249: its next deploy needs the dev control-plane Bicep FIRST (setting rename), then the code. Never delete
-`rg-spaarke-shared-prod` or its Syntex billing account. Remaining manifest pins: T246 (ContentSafety), T227 (SPE
-container ids). BFF follow-up: reconcile `DocumentIntelligence:Enabled` defaults (options class true vs DI gates false).
+H0's SPE check now works (T248): L2 signs in as the `Spaarke SPE Model 1` owning app through the Worker UAMI's
+federated credential — never add a certificate or secret to the owning app (`.claude/constraints/provisioning.md`
+§SPE owning app). The **dev Worker is DOWN (503)**: the T248 control-plane deploy created the Exchange-policy sidecar for
+the first time and it cannot start (env vars passed as literals where App Service expects app-setting NAMES; sentinel
+`Exchange-Connect-Cert`; all-zeros `exchangeConnectAppId`). The .NET Worker itself boots. Owner: fix the sidecar properly
+(T251) and bring Worker + sidecar up together; Worker down meanwhile is fine. T251 needs an OWNER DECISION on the
+sidecar's Exchange identity (managed identity preferred, ADR-028 A4; KV cert only by owner decision; never a secret).
+Model 1 still fails closed at H2a / the skill until **T228**. No customer run (T186) before T244 + T246 + T251.
+Open for the owner: the control-plane **Api** site has a pending swap-with-preview that blocks its Bicep (no T248 change
+needed it). Never delete `rg-spaarke-shared-prod` or its Syntex billing account.
 
 ## 📁 Files Modified This Session
+
+### SESSION 32 (2026-10-03) — T248 ✅ + T251 filed — ALL COMMITTED + PUSHED (`b730d9310`, tree clean)
+
+See the T248 POML `<notes>` (steps, live results, gates, follow-ups). Highlights: master merged (`cc7f76aa3`, conflicts in
+.claude/CHANGELOG.md + scripts/Register-EntraAppRegistrations.ps1 resolved); NEW `Handlers/Preflight/SpeOwnerCredentialProbe.cs`,
+`GraphContainersListAppOnlyProbe.cs` (renamed), tests `SpeOwnerCredentialProbeTests` / `GraphContainersListAppOnlyProbeTests`;
+DELETED `KeyVaultCertBootstrapProbe(.Tests)`; edited WorkerDataverseCredentialFactory, SpeConfidentialClientGraphFactory,
+SpeContainerOptions, H8 collaborators, T6 probe, H0, HandlerRunInputs, Worker Program.cs; Worker Bicep + dev bicepparam +
+platform-controlplane.json; spaarke-constants.yaml; Deploy-ControlPlane.ps1 (`--track-status false`); docs (topology runbook
+rewritten, topology doc, inventory, deployment guide, legacy script notes, retired Test-SpeCertBootstrap.ps1,
+config/spaarke-resources.yaml); `.claude` constraints/skill/ADR-028 E-1 note/CHANGELOG; spec ADR-028 + ADR-007 rows; plan G28 ✅,
+G30, T251; NEW `tasks/251-exchange-policy-sidecar-works.poml`; T186 deps += 251.
+Live (owner-approved): probe ACI created + deleted; `t248-platform-controlplane-dev-20261003-205456` deployed (Api module
+failed on the pending swap); Worker code deployed; Worker 503 (sidecar → T251).
 
 ### SESSION 31 (2026-10-02 → 03) — T249, T243, container type, D23 — ALL COMMITTED + PUSHED (tree clean)
 
