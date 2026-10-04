@@ -42,7 +42,9 @@ query {
           content { ... on Issue { number title url } }
           fieldValues(first: 30) {
             nodes {
-              # Extract: Type, Project Type, Status, Parent issue, Task Count, Tasks Completed
+              # Extract: Type, Project Type, Status, Parent issue, Task Count, Tasks Completed,
+              # AI Spend (est.) (added 2026-10-04, reuse-governance finding — estimated local-transcript
+              # cost, see devops-project-sync Step 1 and scripts/ai-cost/get-project-cost.py)
             }
           }
         }
@@ -71,6 +73,7 @@ per_epic_rollup = {
         "on_hold": count_status(epic_to_projects[epic.number], "On Hold"),
         "completed": count_status(epic_to_projects[epic.number], "Completed"),
         "cancelled": count_status(epic_to_projects[epic.number], "Cancelled"),
+        "ai_spend_est": sum_field(epic_to_projects[epic.number], "AI Spend (est.)"),  # added 2026-10-04
     } for epic in epics
 }
 ```
