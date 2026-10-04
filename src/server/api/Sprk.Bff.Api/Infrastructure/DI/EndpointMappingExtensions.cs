@@ -68,8 +68,7 @@ public static class EndpointMappingExtensions
             Predicate = registration => registration.Tags.Contains("catalog")
         }).AllowAnonymous();
 
-        // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse
-        // (mirrors the /healthz/dataverse/doc/{id} sibling below). Task 023 (B-2): added
+        // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse. Task 023 (B-2): added
         // RequireRateLimiting and stopped echoing ex.Message (see handler methods below).
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync)
             .AllowAnonymous()
@@ -78,39 +77,13 @@ public static class EndpointMappingExtensions
             .AllowAnonymous()
             .RequireRateLimiting("anonymous");
 
-        app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDocumentDataverseService dataverseService, ILogger<Program> logger) =>
-        {
-            logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
-            try
-            {
-                var doc = await dataverseService.GetDocumentAsync(id);
-                if (doc == null)
-                    return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
-
-                return Results.Ok(new
-                {
-                    status = "FOUND",
-                    documentId = doc.Id,
-                    name = doc.Name,
-                    fileName = doc.FileName,
-                    isEmailArchive = doc.IsEmailArchive,
-                    parentDocumentId = doc.ParentDocumentId,
-                    matterId = doc.MatterId,
-                    projectId = doc.ProjectId,
-                    invoiceId = doc.InvoiceId,
-                    emailConversationIndex = doc.EmailConversationIndex
-                });
-            }
-            catch (Exception ex)
-            {
-                // Task 023 (MF-3): do NOT echo ex.Message / InnerException to the anonymous
-                // caller (information disclosure). The exception is logged server-side above.
-                logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-                return Results.Ok(new { status = "ERROR", documentId = id, message = "An error occurred retrieving the document. See server logs." });
-            }
-        })
-            .AllowAnonymous()
-            .RequireRateLimiting("anonymous"); // Task AUTHV2-049 — anonymous + hits Dataverse; 10/min per IP
+        // GET /healthz/dataverse/doc/{id} REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep amendment (a),
+        // owner round 12 item 8). It was an ANONYMOUS read of any sprk_document by id — name, file name, parent,
+        // matter, project and invoice ids — app-only, behind a rate limit only. No code called it; its one consumer was
+        // the post-deploy smoke check (bff-deploy skill §9c and two dotnet-10 runbooks), which proved "MI → Dataverse".
+        // GET /healthz/dataverse above proves the same managed-identity → Dataverse path without naming a record, so
+        // the smoke check moves there (the .claude skill edit is recorded in the task 166 note for the main session).
+        // Absence: tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs.
 
         app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
@@ -237,7 +210,14 @@ public static class EndpointMappingExtensions
         app.MapOfficeCommunicationsEndpoints();
         app.MapFieldMappingEndpoints();
         app.MapEventEndpoints();
-        app.MapWorkAssignmentEndpoints();
+        // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
+        // owner round 10 item 1). Api/WorkAssignmentEndpoints.cs is DELETED. Its one route, POST
+        // /api/v1/work-assignments, created a sprk_workassignment APP-ONLY with ownerid = a caller-chosen user (records
+        // are team-owned — owner rounds 3b/5), checked no Create or AppendTo privilege, and sent an app-authored
+        // notification with caller-controlled text to any user. It was also broken (#1035: sprk_matterid /
+        // sprk_duedate do not exist). NO caller anywhere in the repository and in no published API description, so it
+        // was deleted rather than gated. Work assignments are created through the MDA / the Create Work Assignment
+        // wizard. Absence: tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs.
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
@@ -340,10 +320,13 @@ public static class EndpointMappingExtensions
         app.MapWorkspaceMatterEndpoints();
         app.MapWorkspaceProjectEndpoints();
         app.MapWorkspaceFileEndpoints();
-        // R6 Pillar 6a / D-C-03 / FR-33 (task 052) — GET /api/workspace/state.
-        // Consumes IWorkspaceStateService registered in AnalysisServicesModule (task 051).
-        // ai-context rate-limit + tid-claim tenant scope per InsightEndpoints precedent.
-        app.MapWorkspaceStateEndpoints();
+        // MapWorkspaceStateEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-82,
+        // owner round 10 item 1). Its one route, GET /api/workspace/state?sessionId=, read the workspace tabs of ANY
+        // chat session id in the caller's tenant with no session-owner check. It had NO caller in the repository (only
+        // JSDoc in WorkspaceTab.ts described a planned restore) and is in no published API description, so it was
+        // deleted rather than gated — round 10 supersedes the earlier redesign-r2 O-2 keep-list entry. IWorkspaceStateService
+        // stays: SprkChatAgentFactory reads it for the caller's OWN session prompt block. Absence:
+        // tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs.
 
         // R6 Pillar 7 / Q7 SCOPE EXPANSION / task 070 PART A — /api/memory/pins CRUD pair.
         // Consumes IPinnedContextRepository registered in AnalysisServicesModule (task 065).

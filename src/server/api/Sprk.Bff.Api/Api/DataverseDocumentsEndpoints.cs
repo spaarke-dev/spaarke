@@ -91,75 +91,22 @@ public static class DataverseDocumentsEndpoints
         .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();
 
-        // PUT /api/v1/documents/{id} - Update document
-        documentsGroup.MapPut("/{id}", async (
-            string id,
-            [FromBody] UpdateDocumentRequest request,
-            IDocumentDataverseService dataverseService,
-            ILogger<Program> logger,
-            HttpContext context) =>
-        {
-            var traceId = context.TraceIdentifier;
-
-            try
-            {
-                if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out _))
-                {
-                    return ProblemDetailsHelper.ValidationError("Document ID must be a valid GUID");
-                }
-
-                logger.LogInformation("Updating document {DocumentId}", id);
-
-                // Check if document exists
-                var existingDocument = await dataverseService.GetDocumentAsync(id);
-                if (existingDocument == null)
-                {
-                    logger.LogWarning("Document not found for update: {DocumentId}", id);
-                    return TypedResults.NotFound(new
-                    {
-                        status = 404,
-                        title = "Document Not Found",
-                        detail = $"Document with ID {id} was not found",
-                        traceId
-                    });
-                }
-
-                await dataverseService.UpdateDocumentAsync(id, request);
-
-                var updatedDocument = await dataverseService.GetDocumentAsync(id);
-
-                logger.LogInformation("Document updated successfully: {DocumentId}", id);
-
-                return TypedResults.Ok(new
-                {
-                    data = updatedDocument,
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning(ex, "Invalid document update request");
-                return ProblemDetailsHelper.ValidationError(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to update document {DocumentId}", id);
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while updating the document",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
-        // Finding H2 (task 022) — app-only tamper by GUID: any authenticated caller could rewrite any
-        // document row's fields.
-        .AddDocumentAuthorizationFilter("write")
-        .RequireAuthorization();
+        // PUT /api/v1/documents/{id} — RETIRED 2026-10-03 by unified-access-control-r2 task 166 (sweep finding S-36,
+        // owner round 10 item 1). It bound Spaarke.Dataverse.UpdateDocumentRequest straight from the body and
+        // wrote every non-null property APP-ONLY, behind a Write gate on the ROW only. That let a caller who can
+        // write ANY document row (the caller's own new row qualifies) re-point its SPE pointers
+        // (GraphDriveId / GraphItemId / ParentGraphItemId / FilePath) at any drive item — which GET /{id}/download
+        // then streams as the managed identity — and re-file it under any parent (Matter/Project/Invoice/...
+        // lookups) with no AppendTo check on the target. NO client sends a PUT here (DocumentOperations.js only
+        // declared the URL and never called it), and the Copilot OpenAPI publishes GET only for this path, so it
+        // was DELETED rather than gated. UpdateDocumentRequest itself is unchanged: server code builds it
+        // directly. Absence is asserted by tests/integration/regression/RouteAuthorization/
+        // DeadRouteRetirementTests.cs. Do not re-add a body-bound document update without refusing the
+        // resource-naming fields and checking AppendTo on any new parent.
+        //
+        // ⚠️ The pointer columns remain writable OUTSIDE the BFF (MDA form / Xrm.WebApi) by any Write holder —
+        // no field-level security covers sprk_graphdriveid / sprk_graphitemid (verified read-only 2026-10-03).
+        // That second door is escalated by task 166, not closed by this deletion.
 
         // DELETE /api/v1/documents/{id} - Delete document
         documentsGroup.MapDelete("/{id}", async (
@@ -455,6 +402,15 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        // GATED 2026-10-03 by unified-access-control-r2 task 166 (sweep finding S-66). This is the twin of
+        // GET /api/v1/containers/{containerId}/documents below — same app-only GetDocumentsByContainerAsync,
+        // same SPE pointers in the result — and it was hidden from task 074's guard by a Permanent
+        // "COLLECTION READ … result trimming" waiver, although the caller picks ONE container and no trimming
+        // exists. The SAME filter now decides it, reading the container id from the QUERY instead of the route:
+        // Read on the container's owning record, as the caller, or the uniform 403. A missing containerId is the
+        // filter's 400 (no resolver, no Dataverse call). The handler's Guid.TryParse type bug is deliberately
+        // NOT fixed here (task 078 note §4 owns it) — the gate holds whatever that bug's state.
+        .AddContainerDocumentAuthorizationFilter(queryParameter: "containerId")
         .RequireAuthorization();
 
         // GET /api/v1/containers/{containerId}/documents - List documents in a container (alternative endpoint)

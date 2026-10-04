@@ -275,17 +275,20 @@ public class GrantLifecycleCharacterizationTests
         (await Grant(client, request)).AccessRecordId;
 
     /// <summary>
-    /// ContainerId is null throughout this class, so the SPE step is never attempted and the membership
-    /// service is only a constructor argument. Task 017 swapped the handler's <c>IGraphClientFactory</c>
-    /// for <see cref="SpeContainerMembershipService"/> when the endpoint's forked (and broken) SPE matcher
-    /// was deleted in favour of the service's own — see <c>SpeRevokeMatcherTests</c>.
+    /// The project root is NON-secure throughout this class, so its derived container is the shared business-unit
+    /// container, the SPE step is never attempted, and the membership service is only a constructor argument.
+    /// (Until uac-r2 task 166 the same effect came from a null <c>ContainerId</c> on the request; the request no
+    /// longer carries one — the container is derived from the grant root.) Task 017 swapped the handler's
+    /// <c>IGraphClientFactory</c> for <see cref="SpeContainerMembershipService"/> when the endpoint's forked (and
+    /// broken) SPE matcher was deleted in favour of the service's own — see <c>SpeRevokeMatcherTests</c>.
     /// </summary>
     private static Task<IResult> Revoke(Mock<DataverseWebApiClient> client, Guid accessRecordId, Guid contactId) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
-            new RevokeAccessRequest(accessRecordId, contactId, ProjectId, ContainerId: null),
+            new RevokeAccessRequest(accessRecordId, contactId, ProjectId),
             client.Object,
             new SpeContainerMembershipService(
                 Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+            TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId),
             Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
 

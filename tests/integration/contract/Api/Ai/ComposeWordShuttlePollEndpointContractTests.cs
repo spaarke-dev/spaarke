@@ -125,6 +125,7 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         _fixture.SpeMock
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string c, CancellationToken _) => c); // a `b!` drive id resolves to itself
+        ArrangeCallerCanSee(driveId, documentSpeId);
 
         _fixture.SpeMock
             .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -136,6 +137,22 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
             .Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(docxBytes.ToArray()));
+    }
+
+    /// <summary>
+    /// uac-r2 task 166 (S-65): check-changes is authorized by an OBO metadata read of the named item in the named
+    /// container BEFORE the app-only delta. This arranges SPE answering that read for THIS item in THIS drive only —
+    /// any other item or drive answers null (Graph's "not visible to you").
+    /// </summary>
+    private void ArrangeCallerCanSee(string driveId, string documentSpeId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, documentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: documentSpeId, Name: "contract.docx", ParentId: null, Size: 64,
+                CreatedDateTime: now, LastModifiedDateTime: now, ETag: "\"v1\"",
+                IsFolder: false, WebUrl: null, DriveId: driveId));
     }
 
     private static object BuildReanchorBody(string driveId) => new
@@ -204,6 +221,7 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         _fixture.SpeMock
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string c, CancellationToken _) => c);
+        ArrangeCallerCanSee(driveId, documentSpeId);
         _fixture.SpeMock
             .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpeDeltaResult(Array.Empty<SpeDriveChange>(), DeltaLink: "delta-token-empty"));
@@ -218,6 +236,89 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         var check = await checkResponse.Content.ReadFromJsonAsync<CheckChangesWire>();
         check!.Changed.Should().BeFalse(
             "no net SPE delta ⇒ the poll reports no change — proving Changed=true in the positive test is load-bearing");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2b. uac-r2 task 166 (S-65) — check-changes is authorized BEFORE the app-only delta runs.
+    //
+    // EnumerateChangesAsync runs an APP-ONLY delta over the container the body names and creates/advances the
+    // SHARED per-container delta + eTag state. A caller who cannot see the named item gets ONE 404, and the
+    // delta never runs, so no state is created or advanced for them.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string> InvisibleShapes => new() { "not-visible", "visibility-read-throws", "container-unresolvable" };
+
+    [Theory]
+    [MemberData(nameof(InvisibleShapes))]
+    public async Task Poll_WhenTheCallerCannotSeeTheItem_Returns404_AndNeverRunsTheDeltaOrTouchesState(string shape)
+    {
+        var driveId = $"b!word-shuttle-deny-{shape}";
+        const string documentSpeId = "spe-item-someone-elses";
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => shape == "container-unresolvable" ? null! : c);
+        if (shape == "visibility-read-throws")
+        {
+            _fixture.SpeMock
+                .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Graph 403 accessDenied"));
+        }
+        // "not-visible": GetFileMetadataAsUserAsync is not arranged — the loose mock answers null, Graph's
+        // "you cannot see this item".
+        _fixture.SpeMock
+            .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange(ItemId: documentSpeId, Name: "secret-filename.docx", ETag: "\"v9\"", Deleted: false) },
+                DeltaLink: "delta-token-x"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/check-changes", new { containerId = driveId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(Sprk.Bff.Api.Api.ComposeSyncEndpoints.DocumentNotVisibleReasonCode);
+        body.Should().NotContain("secret-filename").And.NotContain(documentSpeId);
+        _fixture.SpeMock.Verify(
+            s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the app-only delta must not run for a caller who cannot see the item");
+
+        using var scope = _fixture.Services.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<SpeSyncOrchestrator>();
+        (await orchestrator.GetStateAsync(driveId, CancellationToken.None)).Should().BeNull(
+            "no per-container delta / eTag state may be created or advanced for a refused caller");
+    }
+
+    [Fact]
+    public async Task Poll_InvisibleAndThrowingVisibilityRead_AreTheSameResponse()
+    {
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => c);
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), "b!throws", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Graph 403 accessDenied"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var invisible = await client.PostAsJsonAsync("/api/compose/document/spe-a/check-changes", new { containerId = "b!invisible" });
+        var throwing = await client.PostAsJsonAsync("/api/compose/document/spe-a/check-changes", new { containerId = "b!throws" });
+
+        invisible.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        throwing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        Normalize(await invisible.Content.ReadAsStringAsync()).Should().Be(Normalize(await throwing.Content.ReadAsStringAsync()));
+    }
+
+    private static string Normalize(string problemJson)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(problemJson)!.AsObject();
+        node.Remove("correlationId");
+        node.Remove("traceId");
+        return node.ToJsonString();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

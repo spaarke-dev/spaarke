@@ -60,6 +60,23 @@ public class SessionOwnershipGuardTests
                 + "reference the caller does not own is treated exactly like a stale one: mint a new "
                 + "session rather than resume. Note ExtractUserId() there returns the literal "
                 + "\"unknown\" when the oid is absent — correct for a log line, never for ownership.",
+
+            // unified-access-control-r2 task 166 (route-authorization sweep finding S-64).
+            ["Api/ComposeMountEndpoints.cs"] =
+                "POST /api/compose/upload takes sessionId (and the uploaded documentId) in the BODY and returns "
+                + "that session's retained upload bytes, filename and projection. The handler resolves the "
+                + "session under the CLAIM tenant (ComposeActiveDocumentEndpoints.ResolveOwnedSessionAsync, as-sent "
+                + "then N then D spellings) and requires a non-empty OwnerOid equal to the caller BEFORE any "
+                + "ITenantCache read; not-owned, unknown, unowned and a store fault are the same 404 as expired bytes.",
+
+            // unified-access-control-r2 task 166 (route-authorization sweep, amendment d).
+            ["Api/ComposeSaveEndpoints.cs"] =
+                "POST /api/compose/documents/{documentSpeId}/save and /documents/create-on-save take sessionId in "
+                + "the BODY; the first-save promotion REBINDS that session's document id, create-on-save picks the "
+                + "container from its bound matter, and memory capture reads its defined terms. The handlers "
+                + "forward the session ONLY when the caller owns it (ResolveOwnedSessionAsync under the CLAIM "
+                + "tenant); otherwise the save runs UNBOUND — the Compose Load #863 rule: not-yours is treated "
+                + "exactly as not-found.",
         };
 
     /// <summary>

@@ -7,9 +7,11 @@
 // facade+store CONTRACT level: ComposeMemoryCapture.CaptureRecordInsightsAsync(...) → store.UpsertAsync
 // → store.GetForRecordAsync reads the same facts back.
 //
-// The true through-the-wire Cosmos + HTTP E2E (capture on Save, recall via
-// GET /api/memory/records/sprk_document/{id}) is dev/UAT-verified (compose E2E DoD ✅◐ E2E-pending:
-// needs Cosmos) — not runnable in CI without a Cosmos emulator tier.
+// The true through-the-wire Cosmos E2E (capture on Save, then recall) is dev/UAT-verified (compose E2E
+// DoD ✅◐ E2E-pending: needs Cosmos) — not runnable in CI without a Cosmos emulator tier. NOTE: the HTTP
+// recall route this comment used to name (GET /api/memory/records/sprk_document/{id}) was RETIRED by
+// unified-access-control-r2 task 166 (no caller; it authorized a record read with a table privilege), so a
+// live recall check reads the memory container directly or goes through in-session chat recall.
 
 using System;
 using System.Collections.Generic;

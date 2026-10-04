@@ -7,11 +7,17 @@ namespace Sprk.Bff.Api.Tests.Services;
 
 /// <summary>
 /// Verifies the remaining inline notification integration points (AnalysisEndpoints,
-/// IncomingCommunicationProcessor, WorkAssignmentEndpoints) still
-/// reference NotificationService after R3 task 023 deleted the legacy
+/// IncomingCommunicationProcessor) still reference NotificationService after R3 task 023 deleted the legacy
 /// PlaybookSchedulerService.
 ///
-/// <para><b>Was four, now three</b> — unified-access-control-r2 task 073 deleted
+/// <para><b>Was three, now two</b> — unified-access-control-r2 task 166 deleted
+/// <c>Api/WorkAssignmentEndpoints.cs</c> (route-authorization sweep finding S-76). Its one route,
+/// <c>POST /api/v1/work-assignments</c>, created an app-only work assignment owned by a caller-chosen user and sent
+/// an app-authored notification with caller-controlled text to anyone; it had NO caller anywhere in the repository
+/// and was broken by #1035, so no notification any user received has been lost. Same disposition as task 073
+/// below.</para>
+///
+/// <para><b>Was four, then three</b> — unified-access-control-r2 task 073 deleted
 /// <c>Api/UploadEndpoints.cs</c>, whose <c>PUT /api/containers/{containerId}/files/{*path}</c> handler
 /// raised the "New document uploaded" notification. That route had ZERO callers (every live upload
 /// flow uses the OBO sibling <c>PUT /api/obo/containers/{id}/files/{*path}</c>), so no notification
@@ -60,6 +66,7 @@ public class InlineNotificationIntegrationPointsTests
     /// unified-access-control-r2 task 073, which deleted that class along with its three
     /// zero-caller app-only write routes. Renamed from <c>AllFourIntegrationPoints_…</c> because the
     /// count is now three and a name that misstates its own subject is worse than a renamed test.
+    /// <c>typeof(Sprk.Bff.Api.Api.WorkAssignmentEndpoints)</c> was removed the same way on 2026-10-03 by task 166.
     /// </remarks>
     [Fact]
     public void AllRemainingIntegrationPoints_HaveNotificationServiceWiredIn()
@@ -68,7 +75,6 @@ public class InlineNotificationIntegrationPointsTests
         {
             typeof(Sprk.Bff.Api.Api.Ai.AnalysisEndpoints),
             typeof(Sprk.Bff.Api.Services.Communication.IncomingCommunicationProcessor),
-            typeof(Sprk.Bff.Api.Api.WorkAssignmentEndpoints)
         };
 
         foreach (var type in integrationPoints)

@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings.Dtos;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.FieldMapping;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Api.FieldMappings;
 
@@ -436,6 +441,12 @@ public static class FieldMappingEndpoints
     private static async Task<IResult> PushFieldMappingsAsync(
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
+        // Task 166 (S-67): the caller's own rights decide — source Read via the OBO probe, children read and
+        // written AS the caller (MSCRMCallerID impersonation). See the gate below.
+        CallerRecordAccessProbe probe,
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -448,6 +459,23 @@ public static class FieldMappingEndpoints
         if (validationErrors.Count > 0)
         {
             return Results.ValidationProblem(validationErrors);
+        }
+
+        // ── Task 166 (S-67): authorize the SOURCE as the caller, and establish who the caller IS, BEFORE anything ──
+        //
+        // This route read the source's mapped fields app-only, queried up to 500 children app-only, and PATCHed each
+        // one app-only — for any source id any signed-in caller named. It was latent only because a doubled
+        // `_…_value` wrap made the child query 400; fixing that bug without this gate would have made it a mass
+        // write over children of records the caller cannot see. So the gate and the fix land together, gate first:
+        //   (1) the caller must hold Read on the SOURCE record (CallerRecordAccessProbe, as the caller);
+        //   (2) the caller's systemuserid must resolve (WhoAmI on their own token), because every child read and
+        //       write below runs IMPERSONATED as that user — Dataverse then shows and writes only children THEY may.
+        // An unmapped source type, an unreadable or non-existent source, a missing token, an unresolvable caller and
+        // a probe fault are ONE 404, and no profile query, source read, child query or write has happened.
+        var callerSystemUserId = await AuthorizePushSourceAsync(request, probe, httpContext, logger, ct);
+        if (callerSystemUserId is null)
+        {
+            return SourceRecordNotFound();
         }
 
         try
@@ -505,19 +533,18 @@ public static class FieldMappingEndpoints
                     "Source record not found. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}",
                     request.SourceEntity, request.SourceRecordId);
 
-                return Results.Problem(
-                    detail: $"Source record '{request.SourceRecordId}' not found in entity '{request.SourceEntity}'.",
-                    statusCode: 404,
-                    title: "Source Record Not Found",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                return SourceRecordNotFound();
             }
 
-            // Step 3: Query all child records related to source (limit 500)
+            // Step 3: Query the child records related to source (limit 500) — AS THE CALLER (task 166), so a child
+            // they cannot read never enters the set, the counts, the errors or the field results.
             var childRecords = await QueryChildRecordsAsync(
-                dataverseService,
+                impersonatedQuery,
+                entityService,
                 request.SourceEntity,
                 request.SourceRecordId,
                 request.TargetEntity,
+                callerSystemUserId.Value,
                 MaxChildRecordsPerPush,
                 ct);
 
@@ -557,6 +584,7 @@ public static class FieldMappingEndpoints
                 sourceValues,
                 request.TargetEntity,
                 childRecords.RecordIds,
+                callerSystemUserId.Value,
                 logger,
                 ct);
 
@@ -639,26 +667,128 @@ public static class FieldMappingEndpoints
     }
 
     /// <summary>
-    /// Queries child records related to the source record.
+    /// The ONE "source not found" answer (task 166): an unknown source id, a source the caller cannot read, an
+    /// unmapped source type, a missing token, an unresolvable caller and a probe fault all return exactly this. It
+    /// names neither the id nor the entity, so the route cannot be used to learn which records exist.
     /// </summary>
+    internal static IResult SourceRecordNotFound() =>
+        Results.Problem(
+            detail: "Source record not found.",
+            statusCode: 404,
+            title: "Source Record Not Found",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+
+    /// <summary>
+    /// Task 166 (S-67): the caller's Read on the push SOURCE, then the caller's systemuserid. Returns the
+    /// systemuserid to impersonate for every child read and write, or <see langword="null"/> — DENY — when any
+    /// step cannot establish it.
+    /// </summary>
+    /// <remarks>
+    /// Reuses, does not fork: the entity set comes from <see cref="EntityAccessFilter.TryResolveEntitySet"/> (a miss
+    /// denies — a type whose per-record access cannot be evaluated is a type this route must not push from), the
+    /// rights from <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/> under the existing <c>"read"</c> key,
+    /// and the identity from <see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/> (WhoAmI on the caller's
+    /// own token — the one identity path that cannot be fooled). The try covers the decision only.
+    /// </remarks>
+    private static async Task<Guid?> AuthorizePushSourceAsync(
+        PushFieldMappingsRequest request,
+        CallerRecordAccessProbe probe,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!EntityAccessFilter.TryResolveEntitySet(request.SourceEntity, out var sourceEntitySet))
+        {
+            logger.LogWarning(
+                "[FIELD-MAPPING-PUSH] Denied: source entity '{SourceEntity}' is not in EntityAccessFilter's map, so the "
+                + "caller's rights on it cannot be evaluated. Answered 404.", request.SourceEntity);
+            return null;
+        }
+
+        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        try
+        {
+            var rights = await probe.GetCallerRightsAsync(token, sourceEntitySet, request.SourceRecordId, ct);
+            if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
+            {
+                logger.LogWarning(
+                    "[FIELD-MAPPING-PUSH] Denied: caller holds {Rights} on {EntitySet}({SourceRecordId}); Read required. "
+                    + "Answered 404 — nothing read or written.", rights, sourceEntitySet, request.SourceRecordId);
+                return null;
+            }
+
+            var callerSystemUserId = await probe.GetCallerSystemUserIdAsync(token, ct);
+            if (callerSystemUserId is null || callerSystemUserId == Guid.Empty)
+            {
+                logger.LogWarning(
+                    "[FIELD-MAPPING-PUSH] Denied: the caller's Dataverse systemuserid could not be resolved, so children "
+                    + "cannot be read or written as the caller. Answered 404 (no app-only fallback).");
+                return null;
+            }
+
+            return callerSystemUserId;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[FIELD-MAPPING-PUSH] The source authorization check faulted for {EntitySet}({SourceRecordId}); denying "
+                + "(404).", sourceEntitySet, request.SourceRecordId);
+            return null;
+        }
+    }
+
+    /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record.</summary>
+    private const string ReadOperation = "read";
+
+    /// <summary>
+    /// Builds the child-record query issued AS THE CALLER (task 166). The <c>_…_value</c> wrap is applied EXACTLY
+    /// ONCE: <see cref="DetermineParentLookupField"/> already returns the <c>_sprk_regarding{base}_value</c> form,
+    /// and the old path handed it to <c>QueryChildRecordIdsAsync</c>, which wrapped it a second time
+    /// (<c>__sprk_regardingmatter_value_value</c>) — Dataverse answered 400 and the route always 500ed.
+    /// </summary>
+    /// <remarks><c>internal</c> so a test can pin the exact string — the double prefix must not come back.</remarks>
+    internal static string BuildChildRecordQuery(string sourceEntity, Guid sourceRecordId, string targetEntity, int top)
+        => $"$filter={DetermineParentLookupField(sourceEntity)} eq {sourceRecordId:D}"
+           + $"&$select={targetEntity}id&$top={top}";
+
+    /// <summary>
+    /// Queries child records related to the source record, AS THE CALLER (task 166): Dataverse returns only the
+    /// children the caller may read, so a child they cannot see never reaches the counts, errors or field results.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the app-only <c>IFieldMappingDataverseService.QueryChildRecordIdsAsync</c> call (which also carried
+    /// the double-prefix bug). No app-only fallback: an impersonation fault surfaces as the route's 500, never as an
+    /// unscoped read.
+    /// </remarks>
     private static async Task<(Guid[] RecordIds, int TotalCount)> QueryChildRecordsAsync(
-        IFieldMappingDataverseService dataverseService,
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
         string sourceEntity,
         Guid sourceRecordId,
         string targetEntity,
+        Guid callerSystemUserId,
         int maxRecords,
         CancellationToken ct)
     {
-        // Determine the parent lookup field based on source entity
-        // Convention: sprk_regarding{sourceEntity} without prefix (e.g., sprk_regardingmatter)
-        var parentLookupField = DetermineParentLookupField(sourceEntity);
+        var entitySet = await entityService.GetEntitySetNameAsync(targetEntity, ct);
+        var odataQuery = BuildChildRecordQuery(sourceEntity, sourceRecordId, targetEntity, maxRecords + 1);
 
-        // Query child record IDs
-        var recordIds = await dataverseService.QueryChildRecordIdsAsync(
-            targetEntity,
-            parentLookupField,
-            sourceRecordId,
-            ct);
+        var rows = await impersonatedQuery.QueryAsync(entitySet, odataQuery, callerSystemUserId, ct);
+
+        var idColumn = $"{targetEntity}id";
+        var recordIds = rows
+            .Select(row => row.TryGetValue(idColumn, out var value)
+                           && value.ValueKind == System.Text.Json.JsonValueKind.String
+                           && Guid.TryParse(value.GetString(), out var id)
+                ? id
+                : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
 
         // Return with count (limit to maxRecords + 1 for checking if more exist)
         var limitedRecordIds = recordIds.Take(maxRecords + 1).ToArray();
@@ -686,6 +816,7 @@ public static class FieldMappingEndpoints
         Dictionary<string, object?> sourceValues,
         string targetEntity,
         Guid[] childRecordIds,
+        Guid callerSystemUserId,
         ILogger logger,
         CancellationToken ct)
     {
@@ -712,7 +843,10 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
-                    await dataverseService.UpdateRecordFieldsAsync(targetEntity, childRecordId, updatePayload, ct);
+                    // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
+                    // so no app-only child write remains on this route.
+                    await dataverseService.UpdateRecordFieldsAsync(
+                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
                     updated++;
                 }
                 else

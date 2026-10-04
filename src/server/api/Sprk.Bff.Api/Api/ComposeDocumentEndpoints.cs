@@ -8,13 +8,23 @@ using static Sprk.Bff.Api.Api.ComposeEndpoints;
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
-/// Compose <b>persisted-document lifecycle</b> routes: open
-/// (<c>GET /documents/{documentSpeId}</c>), give an ephemeral drive-item its <c>sprk_document</c>
-/// identity (<c>.../promote</c>), and re-run the Document Profile (<c>.../refresh-profile</c>).
+/// Compose <b>persisted-document lifecycle</b> routes: open (<c>GET /documents/{documentSpeId}</c>) and
+/// re-run the Document Profile (<c>.../refresh-profile</c>).
 ///
 /// <para><b>Reason to change</b>: the identity + resume contract of a document that already lives in
 /// SPE — which session a reopen resumes, which record id a drive-item maps to, and what the open
 /// path seeds (change-detection subscription, profile).</para>
+///
+/// <para><b>RETIRED 2026-10-03 — <c>POST /documents/{documentSpeId}/promote</c></b> (unified-access-control-r2
+/// task 166, sweep finding S-63, owner round 10 item 1). It took the TENANT and SESSION from the request
+/// body, never resolved the caller, made no OBO read of the drive item, and handed both to
+/// <c>IComposeService.PromoteIfEphemeralAsync</c> — which looked the item up app-only (a drive-item → record
+/// id oracle), created a root-owned <c>sprk_document</c> app-only for ANY drive-item id (squatting the
+/// <c>sprk_graphitemid_uk</c> key), and rebound ANY (tenant, session) pair's document id with no owner check.
+/// It had NO client caller (every <c>/promote</c> call in <c>src/</c> is <c>/api/ai/analysis/promote</c>) and
+/// is in no published API description, so it was deleted rather than gated. The SERVICE method stays: the
+/// save path's first-save promotion uses it internally, behind <c>ComposeSaveEndpoints</c>' session-owner
+/// check. Absence is asserted by <c>tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs</c>.</para>
 /// </summary>
 internal static class ComposeDocumentEndpoints
 {
@@ -32,15 +42,8 @@ internal static class ComposeDocumentEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        // (4) POST /api/compose/documents/{documentSpeId}/promote — explicit promotion
-        group.MapPost("/documents/{documentSpeId}/promote", Promote)
-            .WithName("ComposePromoteDocument")
-            .WithSummary("Idempotently promote an ephemeral SPE drive-item to a sprk_document row (FR-06)")
-            .RequireRateLimiting("ai-context")
-            .Produces<PromoteComposeDocumentResponse>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status500InternalServerError);
+        // (4) POST /api/compose/documents/{documentSpeId}/promote — RETIRED by uac-r2 task 166 (see the class
+        // summary). Do not re-add it: create-on-save promotes internally behind the session-owner check.
 
         // G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand.
         // Fire-and-forget best-effort (202): reuses IComposeService.RefreshProfileAsync → the SAME
@@ -242,58 +245,6 @@ internal static class ComposeDocumentEndpoints
         }
     }
 
-    private static async Task<IResult> Promote(
-        string documentSpeId,
-        [FromBody] PromoteComposeDocumentBody body,
-        IComposeService composeService,
-        ILoggerFactory loggerFactory,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
-
-        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
-        if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required for the ephemeral→promoted rebind.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required for multi-tenant isolation.");
-
-        logger.LogInformation(
-            "Compose promote: tenant={TenantId} item={DocumentSpeId} session={SessionId} TraceId={TraceId}",
-            body.TenantId, documentSpeId, body.SessionId, httpContext.TraceIdentifier);
-
-        try
-        {
-            var request = new PromoteComposeDocumentRequest
-            {
-                DocumentSpeId = documentSpeId,
-                SessionId = body.SessionId,
-                TenantId = body.TenantId,
-                DisplayName = body.DisplayName,
-            };
-
-            var result = await composeService.PromoteIfEphemeralAsync(request, httpContext, ct).ConfigureAwait(false);
-
-            return Results.Ok(new PromoteComposeDocumentResponse(
-                DocumentSpeId: result.DocumentSpeId,
-                SessionId: result.SessionId,
-                DocumentRecordId: result.DocumentRecordId,
-                WasCreated: result.WasCreated,
-                CorrelationId: httpContext.TraceIdentifier));
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Compose promote: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "An unexpected error occurred while promoting the document.");
-        }
-    }
-
     // G10 (FR-09, task 040): the manual "Refresh Profile" leg. Delegates to
     // IComposeService.RefreshProfileAsync → the SAME fire-and-forget DispatchBackgroundProfile pipeline the
     // save-hook + reload re-trigger use (never a second trigger). Best-effort 202 (the profile runs in the
@@ -409,20 +360,6 @@ public sealed record LoadComposeDocumentResponse(
     // server refuse honestly, because a guessed limit is exactly how "your file is fine" becomes a
     // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
     [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
-
-/// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
-public sealed record PromoteComposeDocumentBody(
-    [property: JsonPropertyName("sessionId")] string SessionId,
-    [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("displayName")] string? DisplayName = null);
-
-/// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
-public sealed record PromoteComposeDocumentResponse(
-    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
-    [property: JsonPropertyName("sessionId")] string SessionId,
-    [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId,
-    [property: JsonPropertyName("wasCreated")] bool WasCreated,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{documentRecordId}/refresh-profile</c>
 /// (FR-09 / G10). The <c>sprk_documentid</c> rides the route; the body carries the tenant + optional SPE

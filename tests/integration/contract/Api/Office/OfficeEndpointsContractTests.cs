@@ -767,8 +767,21 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // ComposeServiceCollaborators.Probe() is CallerRecordAccessProbe's own designated test seam
             // (its type doc: "public virtual precisely so tests can substitute the authorization answer
             // without mocking its HttpClient transport" — ADR-038 §4), already built for exactly this.
+            //
+            // uac-r2 task 166 (owner G5 / amendment (c) + S-69): the To Do and quick-create routes now ALSO ask the
+            // caller's table Create privilege through the same probe (CallerHoldsPrivilegeAsync — its virtual
+            // seam). This shared host models a caller who holds it, so every pre-existing Office test keeps its
+            // meaning; the "not held" cases live in OfficeTodoSourceAuthorizationContractTests and
+            // OfficeQuickCreateContractTests.
             services.RemoveAll<CallerRecordAccessProbe>();
-            services.AddScoped(_ => ComposeServiceCollaborators.Probe().Object);
+            services.AddScoped(_ =>
+            {
+                var probe = ComposeServiceCollaborators.Probe();
+                probe.Setup(p => p.CallerHoldsPrivilegeAsync(
+                        It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+                return probe.Object;
+            });
         });
     }
 }

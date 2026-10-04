@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -81,6 +82,8 @@ public static class RevokeExternalAccessEndpoint
         RevokeAccessRequest request,
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
+        // Task 166 (amendment b): the container is derived from the grant's ROOT — never from the request.
+        RecordContainerResolver containerResolver,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -189,7 +192,7 @@ public static class RevokeExternalAccessEndpoint
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
         var (speOutcome, orgCleanup) = await RemoveSpeContainerPermissionsAsync(
-            speContainerMembership, dataverseClient, request, grantKey, logger, ct);
+            speContainerMembership, dataverseClient, containerResolver, request, grantKey, logger, ct);
 
         // ── Step 3: Invalidate Redis cache ────────────────────────────────────
         try
@@ -337,24 +340,48 @@ public static class RevokeExternalAccessEndpoint
     /// versions or by admins outside Spaarke — not the counterpart of a grant-time write. That is why
     /// <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> is the ordinary, healthy answer rather
     /// than a problem.</para>
+    ///
+    /// <para><b>WHICH container — task 166 (route-authorization sweep amendment (b)).</b> It used to be
+    /// <c>request.ContainerId</c>, a client-chosen value, while <c>DelegationRuleFilter</c> authorized the grant
+    /// row's ROOT — the same "authorized against one id, mutates another" shape as close-project (S-39). The field
+    /// is deleted and the container is derived from the grant's root through
+    /// <see cref="ProjectClosureEndpoint.DeriveRecordOwnContainerAsync"/>: a SECURE root's own container is cleaned;
+    /// a non-secure root's derived container is the SHARED business-unit container, which a single revoke must not
+    /// sweep (the grantee may hold other grants it serves), so that case is <c>NotAttempted</c>; an undecidable
+    /// container is <c>Failed</c> (→ the M2 500). Note the shipped Manage Access modal never sent a container, so
+    /// until this change secure-root revokes never cleaned up SPE at all.</para>
     /// </remarks>
     private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
         RemoveSpeContainerPermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
+            RecordContainerResolver containerResolver,
             RevokeAccessRequest request,
             ExternalGrantKey grantKey,
             ILogger logger,
             CancellationToken ct)
     {
-        if (!request.ContainerId.HasValue)
+        var (derivedContainerId, decided) = await ProjectClosureEndpoint.DeriveRecordOwnContainerAsync(
+            containerResolver, ExternalGrantRoot.LogicalNameFor(grantKey.RootType), grantKey.RootId, logger, ct);
+
+        if (!decided)
+        {
+            logger.LogError(
+                "[EXT-REVOKE] The container of grant root {RootType} {RootId} could not be determined; the SPE "
+                + "permission cleanup cannot run and the grantee may RETAIN file access.",
+                grantKey.RootType, grantKey.RootId);
+            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null);
+        }
+
+        if (derivedContainerId is null)
         {
             logger.LogInformation(
-                "[EXT-REVOKE] No ContainerId provided — no SPE container permission to remove.");
+                "[EXT-REVOKE] Grant root {RootType} {RootId} is not a secure record with its own container — no "
+                + "record-owned container permission to remove.", grantKey.RootType, grantKey.RootId);
             return (SpeContainerRevokeOutcome.NotAttempted, null);
         }
 
-        var containerId = request.ContainerId.Value.ToString();
+        var containerId = derivedContainerId;
 
         // ── Which grantee? The ROW decides, not the request ───────────────────
         //
@@ -391,7 +418,7 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] Contact-grant revoke with no ContactId on the request — no identity key to " +
                 "match; SPE container permission removal not attempted for container {ContainerId}.",
-                request.ContainerId);
+                containerId);
             return (SpeContainerRevokeOutcome.NotAttempted, null);
         }
 
@@ -682,8 +709,10 @@ public static class RevokeExternalAccessEndpoint
     /// <remarks>
     /// Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
     /// contact-email service: one column on one row, and the client is already injected (CLAUDE.md §11).
+    /// <c>internal</c> since task 166: project closure removes the revoked grantees' container permissions by the
+    /// SAME identity key, so it reuses this rather than a second copy.
     /// </remarks>
-    private static async Task<string?> ResolveContactEmailAsync(
+    internal static async Task<string?> ResolveContactEmailAsync(
         DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
     {
         var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(

@@ -301,7 +301,7 @@ internal static class ComposeActiveDocumentEndpoints
     /// Resolves a chat session, probing the client-sent id then its GUID "N"/"D" normalizations —
     /// the same tolerance the Compose upload path applies, since a client may send either spelling.
     /// </summary>
-    private static async Task<(ChatSession? Session, string? Key)> ResolveSessionAsync(
+    internal static async Task<(ChatSession? Session, string? Key)> ResolveSessionAsync(
         ChatSessionManager sessionManager, string tenantId, string sessionId, CancellationToken ct)
     {
         foreach (var candidate in EnumerateSessionIdForms(sessionId))
@@ -312,7 +312,41 @@ internal static class ComposeActiveDocumentEndpoints
         return (null, null);
     }
 
-    private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
+    /// <summary>
+    /// The body-scoped session-ownership decision (issue #863), shared by every Compose route that takes a
+    /// session id in its BODY — unified-access-control-r2 task 166 moved it here from this file's own handler
+    /// so <c>ComposeMountEndpoints</c> (<c>POST /upload</c>) and <c>ComposeSaveEndpoints</c> (<c>/save</c>,
+    /// <c>/create-on-save</c>) ask the SAME question the SAME way rather than three hand copies drifting.
+    /// </summary>
+    /// <returns>
+    /// The session and the spelling it was found under when — and only when — it exists under
+    /// <paramref name="tenantId"/>, carries a NON-EMPTY <c>OwnerOid</c>, and that owner equals
+    /// <paramref name="callerOid"/> (ordinal). Otherwise <c>(null, null)</c>: not found, someone else's, an
+    /// unowned (pre-#863) session, and a caller with no oid are deliberately ONE answer, so a caller cannot use
+    /// the route to learn which session ids exist. Spellings are probed in <see cref="EnumerateSessionIdForms"/>
+    /// order (as sent, "N", "D"); the FIRST session found decides — a later spelling is never tried to find a
+    /// session the caller happens to own.
+    /// </returns>
+    /// <remarks>A session-store fault PROPAGATES: the caller folds it into its own uniform answer, so a fault
+    /// is not distinguishable from a refusal either, and is never read as "owned".</remarks>
+    internal static async Task<(ChatSession? Session, string? Key)> ResolveOwnedSessionAsync(
+        ChatSessionManager sessionManager, string tenantId, string sessionId, string? callerOid, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(callerOid) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return (null, null);
+        }
+
+        var (session, key) = await ResolveSessionAsync(sessionManager, tenantId, sessionId, ct).ConfigureAwait(false);
+
+        return session is not null
+            && !string.IsNullOrWhiteSpace(session.OwnerOid)
+            && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal)
+                ? (session, key)
+                : (null, null);
+    }
+
+    internal static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
     {
         yield return sessionId;
         if (Guid.TryParse(sessionId, out var g))

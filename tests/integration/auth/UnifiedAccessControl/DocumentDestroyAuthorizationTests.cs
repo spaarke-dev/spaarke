@@ -166,38 +166,30 @@ public class DocumentDestroyAuthorizationTests
     // H2 — the mutate/disclose pair on /api/v1/documents/{id}
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task PutDataverseDocument_ForCallerWithoutWriteRight_IsDeniedAndWritesNothing()
+    /// <summary>
+    /// ✅ RE-BASED BY uac-r2 TASK 166 (sweep finding F0, owner round 10 item 1) — was
+    /// <c>PutDataverseDocument_ForCallerWithoutWriteRight_IsDeniedAndWritesNothing</c> and its Write-holder twin.
+    /// The route is DELETED: its whole-entity body let a Write-holder rewrite the SPE pointers
+    /// (<c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>) that app-only downloads trust, it had no caller in the
+    /// repo (the one web-resource helper, <c>DocumentOperations.updateDocument</c>, was itself uncalled and now throws)
+    /// and it is in no published API description. Even a caller holding Write now reaches no handler — the path's GET
+    /// and DELETE remain, so routing answers 405 — and nothing is written.
+    /// </summary>
+    [Theory]
+    [InlineData("ReadAccess")]
+    [InlineData("ReadAccess,WriteAccess")]
+    public async Task PutDataverseDocument_IsRetired_NoCallerReachesAWrite(string rights)
     {
-        using var client = _fixture.CreateClientWithRights("ReadAccess");
+        using var client = _fixture.CreateClientWithRights(rights);
 
         var response = await client.PutAsJsonAsync(
-            $"/api/v1/documents/{DocumentId}", new { name = "renamed-by-anyone.pdf" });
+            $"/api/v1/documents/{DocumentId}",
+            new { name = "renamed.pdf", graphDriveId = "b!another-container", graphItemId = "01OTHERITEM" });
 
+        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed,
+            "GET and DELETE remain on this path, so a PUT finds no endpoint");
         _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty(
-            "H2: the PUT was app-only tamper by GUID — any authenticated caller could rewrite any " +
-            "document row's fields");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("sdap.access.deny.insufficient_rights");
-        body.Should().NotContain("unknown_operation",
-            "an unknown_operation denial would mean the \"write\" key is missing — which denies the " +
-            "callers who legitimately hold Write too");
-    }
-
-    [Fact]
-    public async Task PutDataverseDocument_ForCallerWithWriteRight_IsAllowedAndWrites()
-    {
-        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
-
-        var response = await client.PutAsJsonAsync(
-            $"/api/v1/documents/{DocumentId}", new { name = "renamed-by-owner.pdf" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        _fixture.UpdatedDataverseDocumentIds.Should().ContainSingle()
-            .Which.Should().Be(DocumentId.ToString());
+            "the retired PUT was the one door that rewrote a document row's SPE pointers by GUID");
     }
 
     /// <summary>

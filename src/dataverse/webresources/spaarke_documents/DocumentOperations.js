@@ -98,9 +98,15 @@ Spaarke.Documents.Config = {
                 "managed identity. Use the document-id-keyed delete in " +
                 "Api/DocumentOperationsEndpoints.cs, which reads DriveId/ItemId off the authorized row.");
         },
-        // These two remain live: /api/v1/documents/{id} is document-id-keyed, i.e. it names a RECORD.
+        // GET /api/v1/documents/{id} remains live: it is document-id-keyed, i.e. it names a RECORD.
         getDocument: (docId) => `/api/v1/documents/${docId}`,
-        updateDocument: (docId) => `/api/v1/documents/${docId}`
+        updateDocument: () => {
+            // Never called in this file; kept so a stale caller fails loudly instead of 405-ing.
+            throw new Error(
+                "PUT /api/v1/documents/{id} was retired 2026-10-03 (unified-access-control-r2 task 166). " +
+                "It wrote any body field — including the SPE pointer and parent lookups — app-only. " +
+                "Update document fields through the form (Xrm) instead.");
+        }
     },
 
     // File constraints

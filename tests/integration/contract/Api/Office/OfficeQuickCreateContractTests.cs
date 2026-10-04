@@ -489,6 +489,102 @@ public class OfficeQuickCreateContractTests
             .Which.CallerSystemUserId.Should().Be(OwnerId, "a new matter is filed against nothing, so the caller's unit decides");
     }
 
+    // ── uac-r2 task 166 (S-69, owner G5): the TARGET table's Create privilege ─────────────────────────────
+
+    /// <summary>
+    /// The live privilege names (spaarkedev1 <c>privileges</c>, read-only 2026-10-03). A typo would make the probe ask
+    /// about a privilege nobody holds and every quick-create of that type would 403.
+    /// </summary>
+    [Theory]
+    [InlineData("matter", "prvCreatesprk_Matter")]
+    [InlineData("project", "prvCreatesprk_Project")]
+    [InlineData("invoice", "prvCreatesprk_Invoice")]
+    public void CreatePrivilegeFor_IsTheLiveDataversePrivilegeName(string entityType, string privilege)
+    {
+        QuickCreateFieldRequirements.TryParse(entityType, out var parsed).Should().BeTrue();
+        Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.CreatePrivilegeFor(parsed).Should().Be(privilege);
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("contact")]
+    public void CreatePrivilegeFor_TypesThisRouteNeverCreates_AskNoPrivilege(string entityType)
+    {
+        QuickCreateFieldRequirements.TryParse(entityType, out var parsed).Should().BeTrue();
+        Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.CreatePrivilegeFor(parsed).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("matter", "prvCreatesprk_Matter")]
+    [InlineData("project", "prvCreatesprk_Project")]
+    [InlineData("invoice", "prvCreatesprk_Invoice")]
+    public async Task Post_QuickCreate_WhenTheCallerLacksTheTablesCreatePrivilege_Returns403_AndCreatesNothing(
+        string entityType, string privilege)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Remove(privilege);
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "No create privilege" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_009");
+        problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        factory.PrivilegeQuestions.Should().Equal(new[] { privilege }, "asked AS THE CALLER, by its exact live name");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_WhenThePrivilegeCheckThrows_FailsClosed_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable"));
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Fault" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReadProblemAsync(response)).Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_Matter_AnUnreadableSourceIsRefusedFirst_AndNoPrivilegeIsAsked()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeSourceRights(factory, AccessRights.AppendTo); // not Read
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, SourceContextRequest("Source first", "sprk_project"));
+
+        await AssertSourceDeniedAsync(factory, response, "insufficient_rights");
+        factory.PrivilegeQuestions.Should().BeEmpty("the source half (task 030) runs first and is unchanged");
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("contact")]
+    public async Task Post_QuickCreate_OfATypeThisRouteNeverCreates_AsksNoPrivilege(string entityType)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Clear();
+        ArrangeResolvedCaller(factory);
+
+        await factory.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "Not created here" });
+
+        factory.PrivilegeQuestions.Should().BeEmpty();
+        AssertNothingCreated(factory);
+    }
+
     // ── Negative: validation ────────────────────────────────────────────────────────────────────────────
 
     [Theory]
@@ -685,6 +781,37 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
         new ConfigurationBuilder().Build(),
         NullLogger<CallerRecordAccessProbe>.Instance,
         null!);
+
+    /// <summary>Every Create-privilege question the quick-create filter asked, in order (uac-r2 task 166, S-69).</summary>
+    public List<string> PrivilegeQuestions { get; } = new();
+
+    /// <summary>
+    /// The table Create privileges the caller holds. Defaults to the three quick-create creates (matter, project,
+    /// invoice) so every pre-existing test keeps its meaning; a test removes one to model a caller without it.
+    /// </summary>
+    public HashSet<string> HeldPrivileges { get; } = new(StringComparer.Ordinal)
+    {
+        "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice",
+    };
+
+    public OfficeQuickCreateTestWebAppFactory()
+    {
+        // uac-r2 task 166 (S-69): the filter's second half asks the CALLER's table Create privilege through the
+        // probe's virtual privilege seam. Answered from HeldPrivileges. (The Office test clients send no bearer
+        // token — TestAuthHandler authenticates without one — so the seam does not model the real probe's
+        // "no token = not held"; that rule is the real probe's own and is covered at the probe.)
+        AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? _, string privilege, CancellationToken __) =>
+            {
+                lock (PrivilegeQuestions)
+                {
+                    PrivilegeQuestions.Add(privilege);
+                }
+
+                return HeldPrivileges.Contains(privilege);
+            });
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

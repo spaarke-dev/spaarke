@@ -4,7 +4,7 @@
     <title>Route authorization sweep, group 166: Memory, Compose and the remaining surfaces (17 findings). Every route decides on the caller's OWN rights over the exact record, session or catalog row it acts on, fails closed with one answer for unknown and denied, and dead surface is deleted rather than gated</title>
     <phase>Session 27: route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>escalated</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes on 17 live, unconditionally mapped BFF routes (tags bff-api, auth, security). Several findings are app-only writes on caller-chosen records: pin injection into other users' AI context, child-record mass write, container permission deletion, record creation without privilege. The task also modifies tests/**, so the TEST-MODIFYING override row applies.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -366,5 +366,15 @@ Task 167 had not been authored when this POML was written; the main session reco
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; the Step 9.5 code-review and adr-check are mandatory (FULL, and TEST-MODIFYING).</protocol>
+    <run date="2026-10-04" branch="task/uac-r2-166" base="e6dd48b43" rigor="FULL" outcome="escalated">
+      <summary>Every route in scope is fixed or deleted except the reporting module (STOPPED on escalation trigger 5). Owner round 10 item 1 deleted six routes with no caller and no published description: POST /api/compose/documents/{documentSpeId}/promote, POST /api/v1/work-assignments, GET /api/memory/records/{entityLogicalName}/{id:guid}, PUT /api/v1/documents/{id}, GET /api/workspace/state, GET /healthz/dataverse/doc/{id} (census 120 -&gt; 118). Fixed: upload (session owner), check-changes (OBO item visibility before the delta), GET /api/v1/documents (container filter on the query), annotations (claim tenant), save and create-on-save (claim tenant; session bound only when owned), pins (AppendTo via the new memory.pin_matter key; uniform 404 on PUT/DELETE per round 12 item 4), field-mappings push (source Read + impersonated child query and writes, single _value wrap), quick-create (table Create privilege), office to-do (prvCreatesprk_Todo), close-project and revoke (container derived from the authorized root; close-project removes exactly the revoked grantees; RemoveAllExternalMembersAsync deleted).</summary>
+      <escalations>Trigger 1 (F0 second door: no field-level security on sprk_graphdriveid / sprk_graphitemid; recommended FLS written only by the BFF). Trigger 5 (reporting: client sends the catalog row id and no workspaceId, PATCH vs PUT, 0 catalog rows, the bu RLS claim never exists; F14-F16 and amendment f STOPPED). Trigger 4 partial (sprk_invoice has no sprk_regardingmatter for the active Matter to Invoice profile; that push fails closed). Not fired: 2, 3, 6.</escalations>
+      <guard>Task 167 not landed: branch (b). Ledger input and per-route table are in the note, sections 9 and 10.</guard>
+      <tests>Full BFF unit suite 14294 passed / 54 skipped / 0 failed; NetArchTest 346 passed; Sprk.Bff.Api.IntegrationTests 104 passed; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed. New: MemoryRecordAndPinAuthorizationContractTests (18), ComposeSessionAndContainerAuthorizationContractTests (17), DocumentPointerAndContainerListAuthorizationContractTests (10), FieldMappingPushAuthorizationContractTests (9), DeadRouteRetirementTests (11). CVE check: no vulnerable packages.</tests>
+      <seeding>13 seeds in one build; 51 of 227 targeted tests went red, each naming its route; all restored (note section 6).</seeding>
+      <justification>One new OperationAccessPolicy key (memory.pin_matter = AppendTo) and one internal record struct (GranteeRemoval, replacing the deleted SpeBulkRemovalResult); three-question answers in the note section 14. No new service, DI registration, package, option or column.</justification>
+      <live-gates>Pending, main session: note section 17 (a)-(f), (h). The .claude/skills/bff-deploy/SKILL.md section 9c edit is in note section 12.</live-gates>
+      <note>projects/unified-access-control-r2/notes/task-166-memory-compose-remaining-route-authorization.md</note>
+    </run>
   </execution>
 </task>

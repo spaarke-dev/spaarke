@@ -20,7 +20,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 public enum SpeContainerRevokeOutcome
 {
     /// <summary>
-    /// No removal was attempted — no <c>ContainerId</c> was supplied.
+    /// No removal was attempted — the grant's root is not a secure record with its own container (task 166: the
+    /// container is derived from the root, never supplied by the client), or a contact-grant revoke named no
+    /// contact to match.
     /// </summary>
     /// <remarks>
     /// <para><b>Task 020 narrowed this.</b> It used to ALSO mean "this was an organization-grant revoke",

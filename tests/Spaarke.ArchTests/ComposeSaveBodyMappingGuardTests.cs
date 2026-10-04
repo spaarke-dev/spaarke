@@ -60,6 +60,13 @@ public sealed class ComposeSaveBodyMappingGuardTests
             "LEGACY detection-only. A payload still carrying the retired paragraph-diff shape is REJECTED " +
             "with a ProblemDetails (client too old) rather than forwarded — the property exists so a stale " +
             "payload is a clean 400 instead of a 500. Reading it into the request would defeat that.",
+
+        // unified-access-control-r2 task 166 (route-authorization sweep, amendment d).
+        ["TenantId"] =
+            "SECURITY — deliberately NOT read. Both save routes now take the tenant from the caller's tid CLAIM " +
+            "(TenantResolution.ResolveTenantId); forwarding the BODY tenant let a caller aim the first-save " +
+            "session rebind at another tenant's (tenant, session) pair. The property stays on the DTO only so " +
+            "the shipped client's payload still binds. Mapping it back would reopen that defect.",
     };
 
     private static string EndpointSource =>

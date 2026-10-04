@@ -150,6 +150,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice")] // task 130: Operation = "…" initialiser in FinanceEndpoints' resolvers
     [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
     [InlineData("entity.associate_document")]
+    [InlineData("memory.pin_matter")] // task 166: HasRequiredRights(rights, PinMatterOperation) const indirection
     public void SourceScan_DiscoversKnownCallSiteOperation(string operation)
     {
         var discovered = DiscoverCallSites().Select(c => c.Operation).ToHashSet(StringComparer.Ordinal);
@@ -241,6 +242,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice", AccessRights.AppendTo)] // task 130
     [InlineData("finance.link_invoice", AccessRights.Write | AccessRights.Append)] // task 130, owner G5: the document HOLDS the lookup
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
+    [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
     public void RegressionA3A20_Operation_ResolvesWithLeastPrivilegeRights(
         string operation, AccessRights expected)
     {
@@ -265,6 +267,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice")] // task 130
     [InlineData("finance.link_invoice")] // task 130, owner G5
     [InlineData("entity.associate_document")]
+    [InlineData("memory.pin_matter")] // task 166
     public void RegressionA3A20_Operation_DoesNotRequireDeleteOrShare(string operation)
     {
         var rights = OperationAccessPolicy.GetRequiredRights(operation);

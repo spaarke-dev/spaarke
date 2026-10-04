@@ -222,41 +222,33 @@ public class SpeContainerPagingTests
     }
 
     /// <summary>
-    /// But the bulk removal must still remove everyone it DID see. Aborting leaves strictly MORE access
-    /// in place — the same reasoning tasks 016/017 used for not aborting on a per-member failure.
+    /// But the removal must still remove everyone it DID see. Aborting leaves strictly MORE access in place — the
+    /// same reasoning tasks 016/017 used for not aborting on a per-member failure.
     /// </summary>
+    /// <remarks>
+    /// ✅ RE-BASED BY uac-r2 TASK 166 (amendment e) — was
+    /// <c>RemoveAllExternalMembers_OnAnIncompleteRead_StillRemovesWhatItSawAndReportsNotCleared</c> (and its
+    /// complete-read twin, now covered by <c>RemoveMemberships_ReadsTheContainerOnce_RegardlessOfMemberCount</c>).
+    /// The whole-container sweep was deleted — it removed internal users too; close-project now calls
+    /// <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> with exactly the revoked grantees. The
+    /// "not cleared" half lives on the unseen grantee's failed result, which close-project counts as unresolved.
+    /// </remarks>
     [Fact]
-    public async Task RemoveAllExternalMembers_OnAnIncompleteRead_StillRemovesWhatItSawAndReportsNotCleared()
+    public async Task RemoveMemberships_OnAnIncompleteRead_StillRemovesTheGranteesItSaw()
     {
         var pages = Enumerable
             .Range(0, SpeContainerMembershipService.MaxPermissionPages + 2)
             .Select(i => Page(NextLink, UserPermission($"perm-{i}", $"member{i}@client-firm.com")))
             .ToArray();
 
-        var result = await ServiceOver(pages).RemoveAllExternalMembersAsync(ContainerId);
+        var results = await ServiceOver(pages)
+            .RemoveMembershipsAsync(ContainerId, ["member0@client-firm.com", "ghost@client-firm.com"]);
 
-        result.Removed.Should().BeGreaterThan(0, "removing the members we could see is strictly better");
-        result.EnumerationComplete.Should().BeFalse();
-        result.IsComplete.Should().BeFalse(
-            "ProjectClosureEndpoint maps IsComplete onto container_not_cleared — a guard that could not "
-            + "finish its check must report failure, because a clean report gets acted on");
-    }
-
-    /// <summary>
-    /// And the ordinary complete read still reports cleared, so the fix does not turn "nothing to do"
-    /// into a permanent failure.
-    /// </summary>
-    [Fact]
-    public async Task RemoveAllExternalMembers_OnACompleteRead_ReportsCleared()
-    {
-        var result = await ServiceOver(
-                Page(NextLink, UserPermission("perm-1", "a@client-firm.com")),
-                Page(null, UserPermission("perm-2", "b@client-firm.com")))
-            .RemoveAllExternalMembersAsync(ContainerId);
-
-        result.Removed.Should().Be(2);
-        result.EnumerationComplete.Should().BeTrue();
-        result.IsComplete.Should().BeTrue();
+        results["member0@client-firm.com"].Success.Should().BeTrue(
+            "a grantee the read DID see is removed — an unread tail cannot retract a deletion that happened");
+        results["ghost@client-firm.com"].Success.Should().BeFalse();
+        results["ghost@client-firm.com"].Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
+            "a grantee the read never reached is UNSEEN, not absent — close-project reports container_not_cleared");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -414,14 +406,9 @@ public class SpeContainerPagingTests
         result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // SpeBulkRemovalResult — both conjuncts of IsComplete are load-bearing.
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void BulkResult_WithNoFailuresButAnIncompleteRead_IsNotComplete() =>
-        new SpeBulkRemovalResult(5, 0, EnumerationComplete: false).IsComplete.Should().BeFalse(
-            "members nobody enumerated cannot fail to be removed, so Failed == 0 alone was a false clean");
+    // SpeBulkRemovalResult (and its IsComplete truth test) was DELETED by uac-r2 task 166 with
+    // RemoveAllExternalMembersAsync. ProjectClosureEndpoint.GranteeRemoval.Complete replaces it; its "unseen is
+    // unresolved" half is the incomplete-read test above.
 
     // ═════════════════════════════════════════════════════════════════════════════
     // The fake Kiota adapter.

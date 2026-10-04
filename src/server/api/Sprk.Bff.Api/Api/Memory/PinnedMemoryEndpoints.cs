@@ -3,6 +3,12 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json.Serialization;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Memory;
 using Sprk.Bff.Api.Services.Ai.Memory;
 
@@ -21,31 +27,40 @@ namespace Sprk.Bff.Api.Api.Memory;
 /// <list type="bullet">
 ///   <item><c>GET /api/memory/pins?matterId={matterId?}</c> — list the caller's pinned items.</item>
 ///   <item><c>POST /api/memory/pins</c> — create a new pinned item (201).</item>
-///   <item><c>PUT /api/memory/pins/{pinId}</c> — update an existing pinned item (200; 404 not-found; 403 not-owned).</item>
-///   <item><c>DELETE /api/memory/pins/{pinId}</c> — delete a pinned item (204; 404 not-found; 403 not-owned).</item>
+///   <item><c>PUT /api/memory/pins/{pinId}</c> — update an existing pinned item (200; ONE 404 for unknown AND not-owned).</item>
+///   <item><c>DELETE /api/memory/pins/{pinId}</c> — delete a pinned item (204; ONE 404 for unknown AND not-owned).</item>
 /// </list>
 /// </para>
 /// <para>
 /// <b>Tenant isolation (NFR-16 / ADR-014)</b>: tenant is derived ONLY from the caller's
 /// <c>tid</c> claim — the endpoint NEVER accepts a <c>tenantId</c> from the request body
 /// or query string. Cross-tenant reads/writes are structurally impossible. A missing
-/// <c>tid</c> claim returns 401 ProblemDetails (mirrors <see cref="Workspace.WorkspaceStateEndpoints"/>
-/// + <c>InsightEndpoints.Ask</c> precedent).
+/// <c>tid</c> claim returns 401 ProblemDetails (mirrors the <c>InsightEndpoints.Ask</c> precedent).
 /// </para>
 /// <para>
 /// <b>Ownership (Q7 Pillar 7 requirement)</b>: PUT/DELETE callers MUST own the pin. The
 /// endpoint loads the pin via <see cref="IPinnedContextRepository.GetByIdAsync"/>, then
 /// compares the pin's <see cref="PinnedContextItem.UserId"/> to the caller's <c>oid</c>
-/// claim; mismatch returns 403. Matter-fact pins fall back to the same UserId check because
-/// the existing <see cref="PinnedContextItem"/> contract anchors ownership on
-/// <c>UserId</c>; a richer matter-access check (delegating to <c>AuthorizationService</c>)
-/// is documented as a follow-up but not required for PART A.
+/// claim. <b>A pin the caller does not own gets the SAME 404 as a pin that does not exist</b>
+/// (unified-access-control-r2 task 166, owner round 12 item 4): the earlier 403-for-not-yours /
+/// 404-for-unknown split told any caller which pin ids existed for other users — an existence oracle.
+/// </para>
+/// <para>
+/// <b>The MATTER a pin names is authorized as the CALLER (task 166, findings S-43 / S-68).</b> A pin
+/// carrying a <c>matterId</c> is not private to its author: <c>PinnedContextRepository.GetByMatterAsync</c>
+/// returns EVERY user's pins for that matter, and <c>ContextBinder</c> injects them into the prompt of
+/// every user who chats on the matter as "authoritative context". Writing one is therefore attaching
+/// content TO the matter, so it costs the caller's own <see cref="AccessRights.AppendTo"/> on
+/// <c>sprk_matters(matterId)</c> — operation key <see cref="PinMatterOperation"/> — asked through
+/// <see cref="CallerRecordAccessProbe"/> (OBO <c>RetrievePrincipalAccess</c>) BEFORE the repository
+/// write, for EVERY pinType that carries a matter id (not only <c>matter-fact</c>), and on PUT for the
+/// NEW matter id in the body. A non-GUID matter id is a 400 with no probe. An unknown matter and a
+/// forbidden one get the identical 403 (the probe answers <see cref="AccessRights.None"/> for both).
 /// </para>
 /// <para>
 /// <b>Auth model</b> (ADR-008): group-level <c>RequireAuthorization()</c> gates the 401
-/// path; per-handler tid+oid claim extraction gates the 401-missing-claim path. No new
-/// endpoint filter — group-level auth + per-handler claim extraction mirrors
-/// <see cref="Workspace.WorkspaceStateEndpoints"/>.
+/// path; per-handler tid+oid claim extraction gates the 401-missing-claim path. The matter check
+/// lives in the handler because its subject is a BODY id no route-value filter can read.
 /// </para>
 /// <para>
 /// <b>Rate limit</b> (ADR-016): <c>ai-context</c> sliding window — 60 req/min per caller.
@@ -122,6 +137,23 @@ public static class PinnedMemoryEndpoints
     /// <summary>Hard ceiling on the pin content length — mirrors <see cref="PinnedContextRepository.MaxContentLength"/>.</summary>
     internal const int MaxContentLength = 1000;
 
+    /// <summary>
+    /// The <see cref="OperationAccessPolicy"/> key a pin's MATTER costs: AppendTo on <c>sprk_matters(matterId)</c>
+    /// (unified-access-control-r2 task 166). A pin is injected into every other user's prompt for that matter,
+    /// which is attaching content to the matter — the same right <c>entity.associate_document</c> demands for a
+    /// document. A separate key so a deny log names the act it refused.
+    /// </summary>
+    internal const string PinMatterOperation = "memory.pin_matter";
+
+    /// <summary>The Dataverse logical name whose entity set the pin's matter id is authorized against.</summary>
+    private const string MatterLogicalName = "sprk_matter";
+
+    /// <summary>The ONE detail every refused matter carries, whether it is unknown or merely forbidden.</summary>
+    internal const string PinMatterDeniedDetail = "You do not have permission to pin content to this matter.";
+
+    /// <summary>The ONE detail a pin the caller cannot reach carries, whether it is unknown or someone else's.</summary>
+    internal const string PinNotFoundDetail = "The pin was not found.";
+
     /// <summary>Supported pinType wire strings (kebab-case, mirrors <see cref="PinType"/> JSON discriminators).</summary>
     internal static readonly HashSet<string> SupportedPinTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -164,6 +196,7 @@ public static class PinnedMemoryEndpoints
             .Produces<PinResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -171,8 +204,9 @@ public static class PinnedMemoryEndpoints
             .WithName("UpdatePinnedMemoryItem")
             .WithSummary("Update an existing pinned memory item (R6 Pillar 7 / FR-47 Q7).")
             .WithDescription(
-                "Caller MUST own the pin (UserId match against the caller's 'oid' claim). 404 if pin " +
-                "not found; 403 if the caller does not own the pin (per Pillar 7 ownership invariant).")
+                "Caller MUST own the pin (UserId match against the caller's 'oid' claim). An unknown pin and " +
+                "another user's pin get the SAME 404. A matterId in the body costs the caller's AppendTo on that " +
+                "matter (403 otherwise).")
             .Produces<PinResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -185,11 +219,10 @@ public static class PinnedMemoryEndpoints
             .WithName("DeletePinnedMemoryItem")
             .WithSummary("Delete a pinned memory item (R6 Pillar 7 / FR-47 Q7).")
             .WithDescription(
-                "Caller MUST own the pin (UserId match against the caller's 'oid' claim). 404 if pin " +
-                "not found; 403 if the caller does not own the pin.")
+                "Caller MUST own the pin (UserId match against the caller's 'oid' claim). An unknown pin and " +
+                "another user's pin get the SAME 404 (owner round 12 item 4 — no existence oracle).")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -267,6 +300,7 @@ public static class PinnedMemoryEndpoints
     private static async Task<IResult> CreatePinAsync(
         HttpContext httpContext,
         IPinnedContextRepository repository,
+        CallerRecordAccessProbe probe,
         TimeProvider timeProvider,
         ILogger<PinResponse> logger,
         CreatePinRequest? request,
@@ -280,6 +314,14 @@ public static class PinnedMemoryEndpoints
         if (!TryValidateCreateRequest(request, out var validationProblem, out var pinType))
         {
             return validationProblem!;
+        }
+
+        // Task 166 (S-43): the matter a pin names is authorized AS THE CALLER, before the repository write,
+        // whatever the pinType. A request with no matterId is a private pin and is unchanged.
+        var matterDenied = await AuthorizePinMatterAsync(request!.MatterId, probe, httpContext, logger, ct);
+        if (matterDenied is not null)
+        {
+            return matterDenied;
         }
 
         // request is non-null after TryValidateCreateRequest succeeds.
@@ -356,6 +398,7 @@ public static class PinnedMemoryEndpoints
     private static async Task<IResult> UpdatePinAsync(
         HttpContext httpContext,
         IPinnedContextRepository repository,
+        CallerRecordAccessProbe probe,
         TimeProvider timeProvider,
         ILogger<PinResponse> logger,
         string pinId,
@@ -386,26 +429,26 @@ public static class PinnedMemoryEndpoints
             var existing = await repository.GetByIdAsync(tenantId, pinId, ct);
             if (existing is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    detail: $"Pin '{pinId}' not found.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                return PinNotFound();
             }
 
-            // Pillar 7 ownership invariant — caller's oid MUST match the pin's UserId.
-            // Matter-fact pins share the same userId-anchored ownership in the current model;
-            // a richer matter-access check (delegating to AuthorizationService) is a follow-up.
+            // Pillar 7 ownership invariant — caller's oid MUST match the pin's UserId. Not-yours is answered
+            // EXACTLY as not-found (task 166, owner round 12 item 4): a 403 here confirmed that another user's
+            // pin existed under that id. No matter probe is made for a pin the caller does not own.
             if (!string.Equals(existing.UserId, userId, StringComparison.Ordinal))
             {
                 logger.LogWarning(
-                    "[PINNED-MEMORY] update refused_not_owned tenant={TenantId} caller={CallerUserId} owner={OwnerUserId} pinId={PinId}",
+                    "[PINNED-MEMORY] update refused_not_owned tenant={TenantId} caller={CallerUserId} owner={OwnerUserId} pinId={PinId} (answered 404)",
                     tenantId, userId, existing.UserId, pinId);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Forbidden",
-                    detail: "Caller does not own this pin.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+                return PinNotFound();
+            }
+
+            // Task 166 (S-68): the NEW matter in the body is authorized as the caller on every update that
+            // carries one — re-pointing an owned pin at a matter is the same attach as creating one there.
+            var matterDenied = await AuthorizePinMatterAsync(request!.MatterId, probe, httpContext, logger, ct);
+            if (matterDenied is not null)
+            {
+                return matterDenied;
             }
 
             var now = timeProvider.GetUtcNow();
@@ -499,23 +542,17 @@ public static class PinnedMemoryEndpoints
             var existing = await repository.GetByIdAsync(tenantId, pinId, ct);
             if (existing is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    detail: $"Pin '{pinId}' not found.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                return PinNotFound();
             }
 
+            // Owner round 12 item 4 (task 166): another user's pin is answered EXACTLY as an unknown one. The
+            // former 404/403 split was a pin-existence oracle across users.
             if (!string.Equals(existing.UserId, userId, StringComparison.Ordinal))
             {
                 logger.LogWarning(
-                    "[PINNED-MEMORY] delete refused_not_owned tenant={TenantId} caller={CallerUserId} owner={OwnerUserId} pinId={PinId}",
+                    "[PINNED-MEMORY] delete refused_not_owned tenant={TenantId} caller={CallerUserId} owner={OwnerUserId} pinId={PinId} (answered 404)",
                     tenantId, userId, existing.UserId, pinId);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "Forbidden",
-                    detail: "Caller does not own this pin.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+                return PinNotFound();
             }
 
             await repository.DeleteAsync(tenantId, pinId, ct);
@@ -645,15 +682,105 @@ public static class PinnedMemoryEndpoints
         }
         pinType = WireToPinType(request.PinType);
 
-        // Matter-fact pins MUST carry a matterId. Other pinTypes ignore the field.
+        // Matter-fact pins MUST carry a matterId.
         if (pinType == PinType.MatterFact && string.IsNullOrWhiteSpace(request.MatterId))
         {
             problem = ValidationProblem("'matterId' is required when pinType = 'matter-fact'.");
             return false;
         }
 
+        // Task 166: a matterId — on ANY pinType — must be a GUID, because it is authorized against
+        // sprk_matters(matterId) as the caller before anything is written. Refused here, before the pin
+        // lookup and before any probe, so a malformed id costs nothing and discloses nothing.
+        if (!string.IsNullOrWhiteSpace(request.MatterId) && !Guid.TryParse(request.MatterId, out _))
+        {
+            problem = Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["matterId"] = ["'matterId' must be the GUID of a matter."],
+                },
+                title: "Bad Request",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            return false;
+        }
+
         return true;
     }
+
+    /// <summary>
+    /// Task 166 (S-43 / S-68): when a pin request names a matter, the CALLER must hold
+    /// <see cref="AccessRights.AppendTo"/> on <c>sprk_matters(matterId)</c> (operation
+    /// <see cref="PinMatterOperation"/>). Returns <see langword="null"/> to proceed, or the 403 to return.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>No matter, no check.</b> A pin without a matter id is private to its author and is
+    /// unchanged by this task.</para>
+    /// <para><b>One answer.</b> An unknown matter, a matter the caller cannot see, a caller holding Read and
+    /// Write but not AppendTo, a missing bearer token and a probe fault all return the SAME 403 — the probe
+    /// already collapses "could not answer" to <see cref="AccessRights.None"/>, and a throw is folded in here
+    /// rather than reaching the handler's 500. The id is never echoed.</para>
+    /// <para>The stored matter id stays the string as sent (validated as a GUID upstream), so existing pins
+    /// keep matching <c>PinnedContextRepository.GetByMatterAsync</c>'s ordinal equality.</para>
+    /// </remarks>
+    internal static async Task<IResult?> AuthorizePinMatterAsync(
+        string? matterIdText,
+        CallerRecordAccessProbe probe,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(matterIdText))
+        {
+            return null;
+        }
+
+        // Validated as a GUID by TryValidateCreateRequest; parsed again here so this helper cannot be the
+        // weak link if a future caller skips validation — an unparseable id DENIES.
+        if (!Guid.TryParse(matterIdText, out var matterId) || matterId == Guid.Empty
+            || !EntityAccessFilter.TryResolveEntitySet(MatterLogicalName, out var entitySet))
+        {
+            return PinMatterDenied(httpContext);
+        }
+
+        AccessRights rights;
+        try
+        {
+            rights = await probe.GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), entitySet, matterId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The DECISION only — the repository write is never reached on this path.
+            logger.LogError(ex,
+                "[PINNED-MEMORY] matter rights probe threw for {EntitySet}({MatterId}); denying. CorrelationId={CorrelationId}",
+                entitySet, matterId, httpContext.TraceIdentifier);
+            return PinMatterDenied(httpContext);
+        }
+
+        if (!OperationAccessPolicy.HasRequiredRights(rights, PinMatterOperation))
+        {
+            logger.LogWarning(
+                "[PINNED-MEMORY] pin refused: caller lacks AppendTo on {EntitySet}({MatterId}); holds {Rights}. CorrelationId={CorrelationId}",
+                entitySet, matterId, rights, httpContext.TraceIdentifier);
+            return PinMatterDenied(httpContext);
+        }
+
+        return null;
+    }
+
+    private static IResult PinMatterDenied(HttpContext httpContext)
+        => ProblemDetailsHelper.Forbidden("insufficient_rights", PinMatterDeniedDetail, httpContext.TraceIdentifier);
+
+    private static IResult PinNotFound()
+        => Results.Problem(
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Not Found",
+            detail: PinNotFoundDetail,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
 
     private static bool TryValidateUpdateRequest(
         UpdatePinRequest? request,

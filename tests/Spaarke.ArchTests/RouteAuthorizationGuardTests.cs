@@ -134,8 +134,12 @@ public class RouteAuthorizationGuardTests
             + "with it (read)."),
 
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
-            "/api/v1/documents/* — document rows plus a byte download, and a container-keyed document "
-            + "listing. The download route is the sibling task 001 pinned against /api/documents/download."),
+            "/api/v1/documents/* — document rows plus a byte download, and two container-keyed document "
+            + "listings. The download route is the sibling task 001 pinned against /api/documents/download. "
+            + "Task 166: PUT /{id} was DELETED (no caller; it re-pointed a row's SPE pointers and parent lookups "
+            + "app-only), and GET /api/v1/documents?containerId= now carries "
+            + "AddContainerDocumentAuthorizationFilter(queryParameter: \"containerId\") — its former Permanent "
+            + "'collection read' waiver was false (the caller names ONE container)."),
 
         new GovernedFile("Api/DocumentOperationsEndpoints.cs", Scope.RouteLevelGate,
             "checkout / checkin / discard / delete / analyze on a single document. All six gated by task 022."),
@@ -218,8 +222,11 @@ public class RouteAuthorizationGuardTests
             + "reaches the handler with no per-record check — an owner-confirmed required use case, tracked "
             + "on #1025, where the authorization subject is the destination container rather than a record. "
             + "(2) QuickCreateSourceAccessFilter gates only the SOURCE read and passes through when no source "
-            + "is named; whether the caller holds CREATE privilege for the entity type is not checked, and "
-            + "the write runs on the app identity — a privilege question outside Rule A's per-resource subject."),
+            + "is named; since task 166 (S-69) the SAME filter also requires the caller's live CREATE privilege "
+            + "for the target table — prvCreatesprk_Matter / prvCreatesprk_Project / prvCreatesprk_Invoice, via "
+            + "CallerRecordAccessProbe.CallerHoldsPrivilegeAsync — for matter, project and invoice; account and "
+            + "contact create no row. The create itself stays app-only and team-owned (owner G5). POST /todo's "
+            + "TodoSourceAccessFilter likewise requires prvCreatesprk_Todo since task 166 (amendment c)."),
 
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — three routes reading sprk_communication, candidate record "
@@ -298,36 +305,51 @@ public class RouteAuthorizationGuardTests
         // which is the census's whole subject. Eight entries cost eight lines and make a ninth file fail
         // loudly until someone classifies it.
         new GovernedFile("Api/ComposeDocumentEndpoints.cs", Scope.HandlerAuthorized,
-            "GET /documents/{documentSpeId} (load), promote, refresh-profile — the document read/lifecycle "
-            + "cluster. Serves SPE document bytes and metadata; the handler resolves the caller and the "
-            + "document together."),
+            "GET /documents/{documentSpeId} (load) and refresh-profile. Load reads the SPE bytes AS THE CALLER "
+            + "(OBO) under the claim tenant and resumes only a session the caller owns (#863). POST "
+            + "/documents/{documentSpeId}/promote was DELETED by task 166 (S-63): it took tenant and session from "
+            + "the BODY, never resolved the caller, created app-only rows for any drive item and rebound any "
+            + "session — and had no client."),
 
         new GovernedFile("Api/ComposeSaveEndpoints.cs", Scope.HandlerAuthorized,
-            "POST /documents/{documentSpeId}/save and /documents/create-on-save — the write path. "
-            + "create-on-save has no pre-existing document to authorize against, which is the same "
-            + "content-CREATION shape waived on OBOEndpoints rather than a gap unique to Compose."),
+            "POST /documents/{documentSpeId}/save and /documents/create-on-save — the write path. The SPE write "
+            + "is OBO; create-on-save has no pre-existing document to authorize against (the content-CREATION "
+            + "shape waived on OBOEndpoints). Since task 166 (amendment d) both take the tenant from the CLAIM and "
+            + "bind the body session ONLY when the caller owns it (ComposeActiveDocumentEndpoints."
+            + "ResolveOwnedSessionAsync) — otherwise the save runs unbound: no rebind, no session-derived "
+            + "container, no session state read. Also in SessionOwnershipGuardTests.BodyScopedSessionRoutes."),
 
         new GovernedFile("Api/ComposeAnnotationEndpoints.cs", Scope.HandlerAuthorized,
-            "pull/reanchor annotations keyed by documentSpeId, plus GET/POST /sessions/{sessionId}/"
-            + "annotations. The two session-scoped routes DO carry a route-level gate as of #863 "
-            + "(.AddSessionOwnershipFilter()); the file stays HandlerAuthorized because the "
-            + "documentSpeId-keyed pair does not."),
+            "pull/reanchor annotations keyed by documentSpeId (the SPE read is OBO, so SPE decides), plus "
+            + "GET/POST /sessions/{sessionId}/annotations. The two session-scoped routes DO carry a route-level "
+            + "gate as of #863 (.AddSessionOwnershipFilter()); since task 166 (S-80) the POST writes to the SAME "
+            + "claim tenant that filter authorized (it used the BODY tenant), and no handler here reads "
+            + "body.TenantId. The file stays HandlerAuthorized because the documentSpeId-keyed pair carries no "
+            + "route filter."),
 
         new GovernedFile("Api/ComposeCheckoutEndpoints.cs", Scope.HandlerAuthorized,
             "checkout / checkin / heartbeat keyed by documentId. Mutates lock state on a document row, so "
             + "the decision is per-document and lives with the lock logic."),
 
         new GovernedFile("Api/ComposeMountEndpoints.cs", Scope.HandlerAuthorized,
-            "POST /upload and POST /project. /upload is content CREATION (no prior document). /project is "
-            + "the stateless projection endpoint — it renders bytes the caller supplies and persists "
-            + "nothing, so there is no stored resource to authorize against."),
+            "POST /upload and POST /project. /upload READS another resource — the retained bytes of a file "
+            + "uploaded into a chat session — so it is authorized by the session it names: since task 166 (S-64) "
+            + "the handler requires the BODY sessionId to be a session the caller owns "
+            + "(ComposeActiveDocumentEndpoints.ResolveOwnedSessionAsync, #863) BEFORE any cache read; not-owned, "
+            + "unknown, unowned and a lookup fault are the same 404 as expired bytes. Also in "
+            + "SessionOwnershipGuardTests.BodyScopedSessionRoutes. /project is the stateless projection endpoint "
+            + "— it renders bytes the caller supplies and persists nothing, so there is no stored resource to "
+            + "authorize against."),
 
         new GovernedFile("Api/ComposeTemplateEndpoints.cs", Scope.HandlerAuthorized,
             "POST /documents/{documentSpeId}/apply-template — writes template content into an existing "
             + "document; authorized against that document in the handler."),
 
         new GovernedFile("Api/ComposeSyncEndpoints.cs", Scope.HandlerAuthorized,
-            "POST /document/{documentSpeId}/check-changes (authenticated etag poll) AND the ONE anonymous "
+            "POST /document/{documentSpeId}/check-changes — an app-only Graph delta over the body's container, "
+            + "authorized since task 166 (S-65) by an OBO metadata read of THAT item in THAT container as the caller "
+            + "(ISpeFileOperations.GetFileMetadataAsUserAsync) BEFORE the delta: not visible, unknown or an "
+            + "unresolvable container is one 404 and no delta / eTag state is created or advanced — AND the ONE anonymous "
             + "route in the Compose surface: POST /api/compose/webhooks/spe-doc-changed, registered on "
             + "`routes` not `group`, .AllowAnonymous() because Graph's own contract sends the validation "
             + "handshake and notifications unauthenticated. It is not ungoverned: HMAC-SHA256 over the raw "
@@ -575,10 +597,13 @@ public class RouteAuthorizationGuardTests
             + "to check. The meaningful control is validation of the PARENT record reference in the handler, "
             + "which is a different mechanism and a different task."),
 
-        new Waiver("GET /api/v1/documents", WaiverKind.Permanent, "-",
-            "COLLECTION READ. Correctness here is RESULT TRIMMING, not a per-record gate — a per-resource "
-            + "filter has no single resource to check. Trimming the collection to the caller's accessible "
-            + "record set is Wave 3's subject (AccessibleRecordSetService), not a waiver-able gate."),
+        // "GET /api/v1/documents" Permanent waiver DELETED 2026-10-03 by task 166 (sweep finding S-66). It said
+        // "COLLECTION READ … result trimming", which was never true: the handler REQUIRES ?containerId= and lists that
+        // ONE container app-only — the same data path as GET /api/v1/containers/{containerId}/documents, which task
+        // 078 gated — and no trimming exists. The route now carries
+        // .AddContainerDocumentAuthorizationFilter(queryParameter: "containerId"), so Rule A sees it as gated.
+        // NoWaiverIsStale would NOT have caught this: it fails only PENDING waivers on gated routes, so a false
+        // Permanent waiver outlives its premise silently — deleting it is the fixing task's job.
 
         // ---------- task 120 (GitHub #1015): the Office surface, first time it is inside the guard ----------
         //
@@ -872,7 +897,23 @@ public class RouteAuthorizationGuardTests
     //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
     //            affordance would vanish for every user. Both directions are pinned by
     //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 118 (2026-10-03, unified-access-control-r2 task 166, route-authorization sweep). A DOWNWARD move — two
+    // route files DELETED, each because its only route had no caller in the repository and is in no published API
+    // description (owner round 10 item 1):
+    //
+    //   166  -1  Api/WorkAssignmentEndpoints.cs — POST /api/v1/work-assignments (S-76): app-only create with
+    //            ownerid = a caller-chosen user, no Create/AppendTo check, app-authored notification to anyone.
+    //   166  -1  Api/Workspace/WorkspaceStateEndpoints.cs — GET /api/workspace/state (S-82): read any chat session's
+    //            workspace tabs with no session-owner check.
+    //
+    // Neither file was in GovernedFiles, so this is a pure count move. Other routes task 166 deleted sat in files
+    // that keep routes and so do not move the census: POST /api/compose/documents/{documentSpeId}/promote
+    // (ComposeDocumentEndpoints.cs), PUT /api/v1/documents/{id} (DataverseDocumentsEndpoints.cs),
+    // GET /api/memory/records/{entityLogicalName}/{id:guid} (MemoryGovernanceEndpoints.cs) and
+    // GET /healthz/dataverse/doc/{id} (Infrastructure/DI/EndpointMappingExtensions.cs). Rule A and
+    // NoWaiverIsStale are what see those; DeadRouteRetirementTests asserts all six stay gone.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

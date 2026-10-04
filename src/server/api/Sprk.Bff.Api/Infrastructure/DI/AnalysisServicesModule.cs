@@ -321,8 +321,8 @@ public static class AnalysisServicesModule
         // is BINDING per ADR-014 + NFR-16.
         //
         // §F.1 asymmetric-registration audit: UNCONDITIONAL registration. The consumers
-        // are (a) GET /api/workspace/state endpoint (task 052, unconditional mapping in
-        // R6 Pillar 6a) and (b) SprkChatAgentFactory per-turn snapshot (task 053). The
+        // are SprkChatAgentFactory's per-turn snapshot (task 053) and AssistantSuggestionService
+        // (GET /api/workspace/state, the third, was deleted by unified-access-control-r2 task 166). The
         // service has ZERO AI-internal constructor deps (cache + Cosmos + config + logger
         // only), so the asymmetric-registration anti-pattern does NOT apply — registration
         // is symmetric with endpoint mapping (both unconditional). No Null peer needed.
