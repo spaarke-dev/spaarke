@@ -682,7 +682,7 @@ The Secure Project step must be reworked to §5. Independently, its current copy
 
 ## 7. Attestation
 
-Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model.
+Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model. The one exception is Assigned-To access (ADR-034 A4, task 142): the owner requires it to be a removable entry on the grant-access list, so it is written as ordinary grants/shares, each grant change captured by the FR-32 event log; the ledger `sprk_assignedaccess` records why each exists.
 
 - **Append-only access event log** for grant/deny state changes — few, exact, legally defensible.
 - **Evaluator replay** for derived access: it is a pure function of record lookups, org junctions, flags and deny entries, all already covered by Dataverse field audit. No new storage; the evaluator must be **versioned** so historical answers remain reproducible.
