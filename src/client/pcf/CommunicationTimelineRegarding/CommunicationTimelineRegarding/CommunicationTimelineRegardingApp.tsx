@@ -23,7 +23,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody, Text } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { CommunicationTimeline, type CommunicationTimelineProps } from '@spaarke/ui-components';
+import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveRegardingContext } from './hostContext';
@@ -74,7 +74,7 @@ function getHostRecordId(): string | undefined {
   const xrm = getXrm();
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }

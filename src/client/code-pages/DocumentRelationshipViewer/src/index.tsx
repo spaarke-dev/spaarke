@@ -18,7 +18,7 @@
 
 import { createRoot } from 'react-dom/client';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
-import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components';
+import { resolveCodePageTheme, setupCodePageThemeListener, cleanGuid } from '@spaarke/ui-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { initializeAuth, getAuthProvider } from './services/authInit';
@@ -37,7 +37,7 @@ if (!params.get('documentId')) {
     const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
     if (xrm) {
       const formContext = xrm.Page;
-      const entityId = formContext?.data?.entity?.getId?.()?.replace(/[{}]/g, '');
+      const entityId = cleanGuid(formContext?.data?.entity?.getId?.());
       if (entityId) params.set('documentId', entityId);
     }
   } catch {

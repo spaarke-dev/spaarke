@@ -34,6 +34,13 @@ import { AttachmentType, IAttachmentItem, IAttachmentRecord, IDocumentRecord } f
 const DOC_VALUE = '_sprk_document_value';
 const DOC_FORMATTED = '_sprk_document_value@OData.Community.Display.V1.FormattedValue';
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate,
+// deliberately, rather than importing the canonical `cleanGuid` from
+// `@spaarke/ui-components`. This module is documented (file header + the
+// `logic/attachments` barrel) as Layer-1, React-agnostic, dependency-light logic
+// reused across hosts (NFR-05) — pulling in the React/Fluent-heavy UI component
+// package for a 2-line string helper would add a real runtime dependency edge for
+// every future consumer, not a free convergence.
 /** Strip Dataverse braces from a GUID. */
 export function cleanGuid(id: string | null | undefined): string {
   return (id ?? '').replace(/[{}]/g, '').trim();

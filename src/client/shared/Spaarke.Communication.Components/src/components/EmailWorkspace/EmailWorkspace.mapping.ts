@@ -13,7 +13,7 @@
  * No React import (this file is safe to unit-test without a DOM/provider).
  */
 import type { IDataService } from '@spaarke/ui-components';
-import { sanitizeEmailHtml } from '@spaarke/ui-components';
+import { sanitizeEmailHtml, cleanGuid } from '@spaarke/ui-components';
 import {
   COMMUNICATION_REGARDING_FIELDS,
   derivePrimaryReview,
@@ -170,8 +170,8 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
       const nm = raw[`_${field}_value@OData.Community.Display.V1.FormattedValue`];
       filed.push({
         entityType,
-        recordId: val.replace(/[{}]/g, '').toLowerCase(),
-        recordName: typeof nm === 'string' && nm ? nm : val.replace(/[{}]/g, '').toLowerCase(),
+        recordId: cleanGuid(val),
+        recordName: typeof nm === 'string' && nm ? nm : cleanGuid(val),
       });
     }
   }

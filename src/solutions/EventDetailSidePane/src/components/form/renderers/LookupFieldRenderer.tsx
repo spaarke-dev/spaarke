@@ -28,6 +28,7 @@ import {
   SearchRegular,
   DismissCircleRegular,
 } from "@fluentui/react-icons";
+import { cleanGuid } from '@spaarke/ui-components';
 import type {
   IFieldConfig,
   ILookupValue,
@@ -107,7 +108,7 @@ async function openLookupDialog(
     const result = await xrm.Utility.lookupObjects(lookupOptions);
     if (result && result.length > 0) {
       return {
-        id: result[0].id.replace(/[{}]/g, "").toLowerCase(),
+        id: cleanGuid(result[0].id),
         name: result[0].name ?? "Unknown",
         entityType: result[0].entityType ?? targets[0],
       };
@@ -156,7 +157,7 @@ function resolveLookupValue(
     const entityType = allValues?.[entityKey] as string | undefined;
 
     return {
-      id: value.replace(/[{}]/g, "").toLowerCase(),
+      id: cleanGuid(value),
       name: name ?? "Unknown",
       entityType: entityType ?? "",
     };

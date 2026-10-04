@@ -14,6 +14,7 @@
 import * as React from "react";
 import { getXrm } from "../utils/xrmAccess";
 import { parseFormConfig, type IFormConfig } from "../types/FormConfig";
+import { cleanGuid } from '@spaarke/ui-components';
 import { FALLBACK_FORM_CONFIG } from "../config/fallbackConfig";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ export function useFormConfig(
       }
 
       try {
-        const normalizedId = eventTypeId!.replace(/[{}]/g, "").toLowerCase();
+        const normalizedId = cleanGuid(eventTypeId);
 
         const record = await xrm.WebApi.retrieveRecord(
           EVENT_TYPE_ENTITY,

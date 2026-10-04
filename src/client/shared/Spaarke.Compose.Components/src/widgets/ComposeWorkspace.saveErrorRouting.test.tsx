@@ -216,7 +216,6 @@ jest.mock('./useComposeWordShuttle', () => ({
   useComposePullAnnotations: () => ({ pull: jest.fn() }),
   useComposeCheckChanges: () => ({ checkChanges: jest.fn() }),
   anchoredAnnotationsToPriorAnchors: () => [],
-  anchoredAnnotationsToDocxAnnotations: () => [],
 }));
 jest.mock('./useComposeReanchor', () => ({
   useComposeReanchor: () => ({ summary: null, reanchor: jest.fn(), reset: jest.fn() }),

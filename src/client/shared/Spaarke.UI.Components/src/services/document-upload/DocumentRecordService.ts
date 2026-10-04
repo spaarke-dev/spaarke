@@ -26,6 +26,7 @@ import type {
   EntityDocumentConfig,
 } from './types';
 import { consoleLogger } from './types';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Function that resolves an EntityDocumentConfig for a given entity name.
@@ -128,7 +129,7 @@ export class DocumentRecordService {
    */
   async updateSummary(documentId: string, summary: string): Promise<boolean> {
     try {
-      const sanitizedGuid = documentId.replace(/[{}]/g, '').toLowerCase();
+      const sanitizedGuid = cleanGuid(documentId);
 
       const payload: Record<string, unknown> = {
         sprk_filesummary: summary,
@@ -312,7 +313,7 @@ export class DocumentRecordService {
     searchIndexId?: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
-    const sanitizedGuid = parentContext.parentRecordId.replace(/[{}]/g, '').toLowerCase();
+    const sanitizedGuid = cleanGuid(parentContext.parentRecordId);
 
     const payload: Record<string, unknown> = {
       // Document name (use form input or file name as fallback)

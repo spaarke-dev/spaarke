@@ -2,7 +2,6 @@ import React from 'react';
 import { makeStyles, tokens, TabList, Tab } from '@fluentui/react-components';
 import {
   SaveRegular,
-  TaskListAddRegular,
   SearchRegular,
   // V1: Disabled icons - uncomment for future releases
   // ShareRegular,
@@ -10,6 +9,7 @@ import {
   // DocumentSearchRegular,
 } from '@fluentui/react-icons';
 import type { HostType } from './TaskPaneHeader';
+import { MicrosoftToDoIcon } from './icons/MicrosoftToDoIcon';
 
 /**
  * TaskPaneNavigation — tab DATA + the (unmounted) tab-row component for the Office
@@ -97,9 +97,14 @@ const TAB_CONFIGS: TabConfig[] = [
     // also changing `TaskPaneNavigation.test.tsx`'s "renders only the Save tab for Word" test, which
     // its own hard rule against weakening a test blocked. Task 049 changes the gate and the test
     // together (that test now asserts Save + Find + Create To Do for Word, renamed accordingly).
+    //
+    // Task 091 (UAT-2, owner 2026-10-03): the tab's own value/underlying capability is unchanged
+    // (`createTodo`) — only the LABEL ("To Do", was "Create To Do") and ICON (the Microsoft To Do blue
+    // check, `active` so it renders brand blue regardless of selection state — matches the Smart To Do
+    // surfaces' own fixed usage, e.g. `KanbanHeader.tsx:169`) changed, per the owner's UAT feedback.
     value: 'createTodo',
-    label: 'Create To Do',
-    icon: <TaskListAddRegular />,
+    label: 'To Do',
+    icon: <MicrosoftToDoIcon active />,
     availableFor: ['outlook', 'word'],
   },
   {

@@ -8,6 +8,8 @@
  * @see projects/events-workspace-apps-UX-r1/notes/Events-View-GUIDS.md
  */
 
+import { cleanGuid } from '@spaarke/ui-components';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Type to Form GUID Mapping
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,7 +119,7 @@ export function getFormGuidForEventType(eventTypeGuid: string | undefined): stri
   }
 
   // Normalize GUID (remove braces, lowercase)
-  const normalizedGuid = eventTypeGuid.replace(/[{}]/g, "").toLowerCase();
+  const normalizedGuid = cleanGuid(eventTypeGuid);
 
   const mapping = EVENT_TYPE_FORM_MAPPINGS.find(
     (m) => m.eventTypeGuid.toLowerCase() === normalizedGuid

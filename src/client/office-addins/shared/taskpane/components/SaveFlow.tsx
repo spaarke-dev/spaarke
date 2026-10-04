@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   Text,
-  Body1,
   Spinner,
   MessageBar,
   MessageBarBody,
@@ -20,7 +19,6 @@ import {
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
-  ArrowResetRegular,
   CheckmarkCircleRegular,
   ErrorCircleRegular,
   OpenRegular,
@@ -33,7 +31,7 @@ import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
-import type { RelatedRecordView } from '../hooks/useRelatedRecord';
+import { useRelatedRecord, type RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
   useSaveFlow,
   type SaveFlowContext,
@@ -50,11 +48,13 @@ import {
   warningsIndicateMatterTypeNotFound,
   type MatterTypeChoice,
 } from '../services/matterTypeLookupService';
-import { openRecord } from '../services/openRecordLauncher';
+import { openFileUrl, openRecord } from '../services/openRecordLauncher';
 import { cleanGuid } from '../utils/cleanGuid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+// Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
+import { stripDocumentExtension } from '../utils/documentFileName';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
 function isBrowserTestMode(): boolean {
@@ -63,16 +63,6 @@ function isBrowserTestMode(): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Task 020 (FR-06): strips a trailing `.docx`/`.doc` extension (case-insensitive) from a display name,
- * for deriving the default Document Name from the filename-shaped `itemName` prop. A value with no such
- * extension (e.g. Word's "Untitled Document" fallback) is returned unchanged — this is normalization,
- * not a requirement that an extension be present.
- */
-function stripDocumentExtension(name: string): string {
-  return name.replace(/\.docx?$/i, '');
 }
 
 /**
@@ -217,6 +207,25 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
+    flexWrap: 'wrap',
+  },
+  // Task 088 (UAT-7): the footer's right-hand group — Open Document immediately left of Save / Saved.
+  footerEnd: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+    marginLeft: 'auto',
+  },
+  // Task 088 (UAT-6): the gray, disabled "Saved" button — copied from CreateTodoView's `savedBtn` (not
+  // imported: the two views share no module and should not start to). Foreground3 on Background5 keeps the
+  // label legible (well above 4.5:1 in the web light and dark themes) where Fluent's own disabled colours are
+  // deliberately faint (ADR-021).
+  savedBtn: {
+    backgroundColor: tokens.colorNeutralBackground5,
+    color: tokens.colorNeutralForeground3,
+    ':hover': { backgroundColor: tokens.colorNeutralBackground5, color: tokens.colorNeutralForeground3 },
   },
   errorActions: {
     display: 'flex',
@@ -252,20 +261,18 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  successCard: {
-    textAlign: 'center',
-    padding: tokens.spacingVerticalL,
+  savedBarDetail: {
+    display: 'block',
+    marginTop: tokens.spacingVerticalXXS,
   },
-  successIcon: {
-    fontSize: '48px',
-    color: tokens.colorPaletteGreenForeground1,
-    marginBottom: tokens.spacingVerticalM,
+  collisionNote: {
+    display: 'block',
+    marginTop: tokens.spacingVerticalXS,
   },
-  successActions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    justifyContent: 'center',
-    marginTop: tokens.spacingVerticalM,
+  collisionError: {
+    display: 'block',
+    marginTop: tokens.spacingVerticalXS,
+    color: tokens.colorStatusDangerForeground1,
   },
   duplicateCard: {
     padding: tokens.spacingVerticalM,
@@ -276,6 +283,36 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalM,
   },
 });
+
+/**
+ * Task 088: what the record a save was filed to looks like to the confirmation bar. A string names it; `null`
+ * means the save was filed to NO record (a document-only save); `undefined` means the pane cannot know (a
+ * version save of a document whose filing it never resolved) — the bar then says nothing about a record.
+ */
+type FiledTo = string | null | undefined;
+
+/** Task 088: taken when a save is SUBMITTED, committed to {@link SavedDocumentState} when it completes. */
+interface PendingSaveSnapshot {
+  /** The Document Name field's value at submission — "Saved" again once the field is reverted to it. */
+  name: string;
+  filedTo: FiledTo;
+  mode: SaveTarget['mode'];
+}
+
+/** Task 088: the document this pane session last saved — the target of the next "Save version". */
+interface SavedDocumentState {
+  /** Canonical (ADR-044) `sprk_document` id. */
+  documentId: string;
+  savedName: string;
+  filedTo: FiledTo;
+  /** Whether the save that produced this state created the document or added a version to it. */
+  lastSave: SaveTarget['mode'];
+}
+
+/** Task 088: the confirmation bar's name for the record a resolved document is filed to. */
+function relatedRecordLabel(view: RelatedRecordView): string {
+  return view.displayName || view.number || view.type;
+}
 
 /**
  * Stage display names.
@@ -405,8 +442,9 @@ export interface SaveFlowProps {
   onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
-  /** Callback when view document is clicked */
-  onViewDocument?: (documentUrl: string) => void;
+  // Task 088 (UAT-1): `onViewDocument` (a callback taking the stored file's Graph webUrl) is REMOVED. View
+  // Document now opens the Spaarke document RECORD through `openRecordLauncher` — no path in this pane
+  // opens the Word-for-the-web file URL any more.
   /** Callback to navigate to different view */
   onNavigate?: (view: 'save' | 'status') => void;
   /** Entity types allowed for association */
@@ -470,7 +508,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     apiBaseUrl = '',
     onComplete,
     onSaved,
-    onViewDocument,
     showDocumentInfo = true,
     className,
   } = props;
@@ -478,12 +515,35 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
 
+  // ── Task 088 (UAT-6/7, owner 2026-10-03 "Keep the form"): the SAVED state ──────────────────────────
+  // After a successful save the pane stays on the form: a confirmation bar, the document's name and profile,
+  // and a footer whose primary button reads a gray, disabled "Saved" until the name is edited or a profile
+  // is re-generated — then "Save version", a version save of THIS document (FR-11's existing path, never a
+  // second mode). `savedDocument` is that state; `null` = not saved in this pane session (or Cancelled).
+  // It is committed in the hook's onComplete, in the same render as flowState 'complete' (React batches
+  // both), from the snapshot `pendingSaveRef` took when the save was submitted.
+  const [savedDocument, setSavedDocument] = useState<SavedDocumentState | null>(null);
+  const [profileRegenerated, setProfileRegenerated] = useState(false);
+  const pendingSaveRef = useRef<PendingSaveSnapshot | null>(null);
+  // task 027 / FR-10 return-path signal for the Profile section; task 088 also bumps it after every save so a
+  // version save's re-profiling (task 029) shows as Pending rather than the previous version's profile.
+  const [profileRefreshSignal, setProfileRefreshSignal] = useState(0);
+
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
     () => ({
       apiBaseUrl,
       getAccessToken,
       onComplete: (docId, docUrl) => {
+        const pending = pendingSaveRef.current;
+        setSavedDocument({
+          documentId: cleanGuid(docId) || docId,
+          savedName: pending?.name ?? '',
+          filedTo: pending?.filedTo,
+          lastSave: pending?.mode ?? 'create',
+        });
+        setProfileRegenerated(false);
+        setProfileRefreshSignal(signal => signal + 1);
         announce('Document saved successfully', 'polite');
         onComplete?.(docId, docUrl);
       },
@@ -514,6 +574,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     retry,
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
+
+  // Task 088: the open document's own filing, from the SAME resolved identity the related-record card reads
+  // (no second call) — used to name the record in the confirmation bar after a version save.
+  const resolvedRelatedRecord = useRelatedRecord(documentIdentity);
+
+  // Task 088 (NFR-10): a "Save version" needs document BYTES to send. Whether this pane has them is decided by
+  // the host's capability upstream (SaveView passes `captureDocumentContent` only when the adapter reports
+  // `canGetDocumentContent`), never by `hostType`. Without bytes — an Outlook email, which is immutable and
+  // has no version path — the saved state stays "Saved" and its name is shown read-only.
+  const canSaveNewVersion = Boolean(captureDocumentContent) || Boolean(documentContentBase64);
 
   // Local state for document metadata fields.
   //
@@ -738,7 +808,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // do nothing when clicked; hide it instead. The deploy workflow sets ORG_URL.
   const openRecordAvailable = canOpenRecord && Boolean(process.env.ORG_URL);
   const hasOpenedExternalRecordRef = useRef(false);
-  const [profileRefreshSignal, setProfileRefreshSignal] = useState(0);
 
   const handleOpenRelatedRecord = useCallback((record: RelatedRecordView) => {
     const result = openRecord({
@@ -751,17 +820,22 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     }
   }, []);
 
-  const handleOpenDocumentRecord = useCallback(() => {
-    if (!resolvedDocumentId) return;
+  // Task 088 (UAT-1/7): View Document, Open Document and the duplicate card's View Existing Document all open
+  // the Spaarke `sprk_document` RECORD — in the Spaarke app, by the launcher's `appname=` (SPAARKE_APP_NAME) —
+  // never the stored file's Graph webUrl. One handler, so the three cannot drift apart.
+  const openDocumentRecord = useCallback((documentId: string) => {
     const result = openRecord({
       orgUrl: process.env.ORG_URL,
       entityType: 'sprk_document',
-      recordId: resolvedDocumentId,
+      recordId: documentId,
     });
     if (result.opened) {
       hasOpenedExternalRecordRef.current = true;
     }
-  }, [resolvedDocumentId]);
+  }, []);
+
+  // The document "Open Document" opens: the one this pane just saved, else the one identity resolution found.
+  const openableDocumentId = savedDocument?.documentId ?? resolvedDocumentId;
 
   // Return path (Spike-2 §d): an unmodified Dataverse form never calls `messageParent`, so every
   // option Spike-2 compared — including this one — falls back to a focus/visibility-triggered
@@ -785,12 +859,55 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     };
   }, [onRetryDocumentIdentity, announce]);
 
+  // Task 088: what the next Save sends. In the SAVED state it is always a new version of the document this pane
+  // just saved — the FR-11 version path (existingDocumentId + isNewVersion), reused, not a second mode — or
+  // nothing at all when this pane has no document bytes to version (see canSaveNewVersion). Before any save,
+  // it is task 024's identity-derived mode, unchanged.
+  const activeTarget = useMemo<SaveTarget | null>(() => {
+    if (savedDocument) {
+      return canSaveNewVersion ? { mode: 'version', existingDocumentId: savedDocument.documentId } : null;
+    }
+    return saveMode.target;
+  }, [savedDocument, canSaveNewVersion, saveMode.target]);
+
+  // Task 088 (UAT-6): the saved state's primary button reads "Saved" (gray, disabled) until there is something
+  // to save — the name differs from what was saved (reverting it makes it "Saved" again), or a profile was
+  // re-generated since. Never true on a pane without document bytes: there is nothing to version.
+  const savedNameChanged = savedDocument !== null && documentName.trim() !== savedDocument.savedName.trim();
+  const hasUnsavedChanges = savedDocument !== null && canSaveNewVersion && (savedNameChanged || profileRegenerated);
+
+  // Task 088: the record a save to `target` is filed to, as the confirmation bar will name it.
+  const filingOf = useCallback(
+    (target: SaveTarget): FiledTo => {
+      if (target.mode === 'create') {
+        return selectedEntity?.name ?? null;
+      }
+      if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
+        return savedDocument.filedTo; // a version never re-files the document (task 023 D-4/D-5)
+      }
+      if (resolvedRelatedRecord.kind === 'associated') return relatedRecordLabel(resolvedRelatedRecord);
+      if (resolvedRelatedRecord.kind === 'unassociated') return null;
+      return undefined;
+    },
+    [selectedEntity, savedDocument, resolvedRelatedRecord]
+  );
+
+  // Task 088: every submission records what the confirmation bar and the "Saved" comparison will need once it
+  // completes. `retry()` resends the last context, so the snapshot taken for that context still applies.
+  const submitSave = useCallback(
+    (context: SaveFlowContext, filedTo: FiledTo) => {
+      pendingSaveRef.current = { name: documentName, filedTo, mode: context.saveTarget?.mode ?? 'create' };
+      void startSave(context);
+    },
+    [documentName, startSave]
+  );
+
   // Build save context
   const buildSaveContext = useCallback(
     (): SaveFlowContext => ({
       hostType,
       attachments,
-      ...(saveMode.target ? { saveTarget: saveMode.target } : {}),
+      ...(activeTarget ? { saveTarget: activeTarget } : {}),
       ...(itemId !== undefined ? { itemId } : {}),
       ...(itemName !== undefined ? { itemName } : {}),
       ...(documentName ? { documentName } : {}),
@@ -821,21 +938,23 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       documentUrl,
       documentContentBase64,
       captureDocumentContent,
-      saveMode.target,
+      activeTarget,
     ]
   );
 
   // Handle save button click. A null target means the save mode is not settled (identity still checking,
-  // a conflict, or an undetermined identity with no explicit choice) — the button is disabled then, and this
-  // guard makes sure nothing is sent even if it were not.
+  // a conflict, or an undetermined identity with no explicit choice; or, task 088, a saved document this pane
+  // cannot version) — the button is disabled then, and this guard makes sure nothing is sent even if it were not.
   const handleSave = useCallback(() => {
-    if (!saveMode.target) return;
-    setSubmittedTarget(saveMode.target);
-    startSave(buildSaveContext());
-  }, [buildSaveContext, saveMode.target, startSave]);
+    if (!activeTarget) return;
+    setSubmittedTarget(activeTarget);
+    submitSave(buildSaveContext(), filingOf(activeTarget));
+  }, [activeTarget, buildSaveContext, filingOf, submitSave]);
 
   // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
-  // the identity's default.
+  // the identity's default. Task 088: in the saved state it also leaves that state — the pane returns to an
+  // empty form (what "Save Another" did before the success card was replaced), so Outlook can still save the
+  // same email again, e.g. with other attachments.
   const handleCancel = useCallback(() => {
     setSelectedEntity(null);
     setDocumentName('');
@@ -844,12 +963,30 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     setDocumentNameTouched(false);
     setIsEditingDocumentName(false);
     setSaveModeChoice(null);
+    setSavedDocument(null);
+    setProfileRegenerated(false);
+    pendingSaveRef.current = null;
     reset();
   }, [setSelectedEntity, reset]);
 
+  // Task 088 (UAT-6): a Generate Profile the server ACCEPTED re-enables the saved state's button as
+  // "Save version". Before any save there is no saved state to re-enable, so it changes nothing.
+  const handleProfileGenerated = useCallback(() => {
+    if (!savedDocument) return;
+    setProfileRegenerated(true);
+    if (canSaveNewVersion) {
+      announce('Profile regenerated. Save version is available.', 'polite');
+    }
+  }, [savedDocument, canSaveNewVersion, announce]);
+
   // A refused VERSION save whose cause is the existing document (task 024): switch to "a new document" so
   // the user can choose where to file it and save. Deliberately does not save on its own.
+  // Task 088: also reachable from the SAVED state — a "Save version" of the document this pane just created can
+  // be refused (e.g. OFFICE_009 if the caller may not write that file; notes/025 Q6). Leaving the saved state is
+  // what makes the switch take effect there, since the saved state always targets a version.
   const handleSaveAsNewInstead = useCallback(() => {
+    setSavedDocument(null);
+    setProfileRegenerated(false);
     setSaveModeChoice('new');
     clearError();
     announce('Save mode: a new document. Choose where to file it, then select Save.', 'polite');
@@ -861,20 +998,83 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // instead of refusing again.
   const handleKeepBoth = useCallback(() => {
     clearError();
-    startSave({ ...buildSaveContext(), allowRename: true });
+    submitSave({ ...buildSaveContext(), allowRename: true }, selectedEntity?.name ?? null);
     announce('Saving under a new name.', 'polite');
-  }, [buildSaveContext, clearError, startSave, announce]);
+  }, [buildSaveContext, clearError, submitSave, selectedEntity, announce]);
 
   // Task 025: the pane's "Save as new version" choice after a refused CREATE collision — resubmits
   // through the ALREADY-SHIPPED FR-11 version-save path, targeting the document the server's refusal
-  // resolved. No-op if the server could not resolve one (the button is hidden in that case).
+  // resolved. Task 088: offered ONLY on the server's `canSaveAsVersion` flag (that document is filed to the
+  // record this save targets — #1005), never on the id's presence; the guard repeats the button's rule.
   const handleSaveAsVersionInstead = useCallback(() => {
     const existingDocumentId = error?.collisionExistingDocumentId;
-    if (!existingDocumentId) return;
+    if (!existingDocumentId || error?.collisionCanSaveAsVersion !== true) return;
     clearError();
-    startSave({ ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } });
+    // canSaveAsVersion means that document is filed to the selected record, so the bar can name it.
+    submitSave(
+      { ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } },
+      selectedEntity?.name ?? null
+    );
     announce('Saving as a new version of the existing document.', 'polite');
-  }, [buildSaveContext, clearError, startSave, announce, error]);
+  }, [buildSaveContext, clearError, submitSave, selectedEntity, announce, error]);
+
+  // ── Task 088 (UAT-5): "Open" on the name-collision prompt ─────────────────────────────────────────
+  // Opens the file that already holds the name, through the EXISTING `GET /api/documents/{id}/open-links`
+  // (no new route; its endpoint filter re-checks Read, so this can never open more than the server's own
+  // redaction already let the pane name). It launches the response's https `webUrl`: the `desktopUrl`
+  // (`ms-word:…`) cannot be launched by either supported call — `openBrowserWindow` accepts http/https only
+  // (documented; OfficeDev/office-js#2820 closed "by design") and `window.open` of an Office URI from a task
+  // pane is undocumented — so the POML's escalation rule applies: WebUrl everywhere (notes/088 §3). WHICH
+  // opener runs is decided by capability (`canOpenRecord` = canOpenBrowserWindow), never by hostType. A failed
+  // call shows its reason in the prompt; the pane never builds a file URL itself.
+  const [openFileBusy, setOpenFileBusy] = useState(false);
+  const [openFileError, setOpenFileError] = useState<string | null>(null);
+  useEffect(() => {
+    setOpenFileError(null);
+    setOpenFileBusy(false);
+  }, [error]);
+
+  const handleOpenCollisionFile = useCallback(async () => {
+    const documentId = error?.collisionExistingDocumentId;
+    if (!documentId) return;
+    setOpenFileBusy(true);
+    setOpenFileError(null);
+    try {
+      if (!apiBaseUrl) {
+        throw new Error("Couldn't open the file: the pane isn't fully configured. Reload and try again.");
+      }
+      let res: Response;
+      try {
+        const token = await getAccessToken();
+        res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/documents/${encodeURIComponent(cleanGuid(documentId))}/open-links`,
+          { headers: { 'Content-Type': 'application/json' } },
+          token,
+          { getRetryToken: getAccessToken }
+        );
+      } catch {
+        throw new Error("Couldn't reach Spaarke to open the file. Check your connection and try again.");
+      }
+      if (!res.ok) {
+        throw new Error((await describeFetchFailure(res)).message);
+      }
+      const links = (await res.json()) as { webUrl?: string | null };
+      if (!links.webUrl) {
+        throw new Error('Spaarke did not return a link for this file.');
+      }
+      const result = openFileUrl(links.webUrl, canOpenRecord);
+      if (!result.opened) {
+        throw new Error(result.reason ?? "Couldn't open the file.");
+      }
+      announce(`Opened ${error?.collisionExistingDocumentName ?? 'the existing file'}.`, 'polite');
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : "Couldn't open the file.";
+      setOpenFileError(message);
+      announce(message, 'assertive');
+    } finally {
+      setOpenFileBusy(false);
+    }
+  }, [error, apiBaseUrl, getAccessToken, canOpenRecord, announce]);
 
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
@@ -1073,14 +1273,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [apiBaseUrl, getAccessToken]
   );
 
-  // Handle view document
-  const handleViewDocument = useCallback(() => {
-    if (savedDocumentUrl) {
-      onViewDocument?.(savedDocumentUrl);
-    }
-  }, [savedDocumentUrl, onViewDocument]);
-
-  // Handle copy link
+  // Handle copy link. Task 088: unchanged on purpose (owner, 2026-10-03) — it copies what it always copied, the
+  // saved file's link; only View Document moved to the Spaarke record.
   const handleCopyLink = useCallback(async () => {
     if (savedDocumentUrl) {
       try {
@@ -1147,38 +1341,51 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     );
   };
 
-  // Render success state
-  const renderSuccessState = () => (
-    <Card className={styles.successCard}>
-      <CheckmarkCircleRegular className={styles.successIcon} aria-hidden="true" />
-      <Text size={500} weight="semibold">
-        {submittedTarget?.mode === 'version' ? 'New Version Saved' : 'Document Saved'}
-      </Text>
-      <Body1 style={{ marginTop: tokens.spacingVerticalS }}>
-        {submittedTarget?.mode === 'version' ? (
-          <>
-            A new version of <Text weight="semibold">{saveMode.documentLabel ?? 'the document'}</Text> was saved to
-            Spaarke.
-          </>
-        ) : (
-          <>
-            Your document has been saved to Spaarke and associated with{' '}
-            <Text weight="semibold">{selectedEntity?.name}</Text>.
-          </>
+  // Task 088 (UAT-1/6, owner 2026-10-03 "Keep the form"): the confirmation bar at the top of the SAVED state.
+  // Replaces the full-screen success card. Names the record the document is filed to — or says it is filed to
+  // none — with View Document (the Spaarke record, in the Spaarke app) and Copy Link (unchanged).
+  const renderSavedBar = (saved: SavedDocumentState) => (
+    <MessageBar intent="success" layout="multiline">
+      <MessageBarBody>
+        <MessageBarTitle>
+          {saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke'}
+        </MessageBarTitle>
+        {saved.filedTo !== undefined && (
+          <Text size={200} className={styles.savedBarDetail}>
+            {saved.filedTo === null ? (
+              'Not filed to a record.'
+            ) : (
+              <>
+                Filed to <Text weight="semibold">{saved.filedTo}</Text>.
+              </>
+            )}
+          </Text>
         )}
-      </Body1>
-      <div className={styles.successActions}>
-        <Button appearance="primary" icon={<OpenRegular />} onClick={handleViewDocument} disabled={!savedDocumentUrl}>
-          View Document
-        </Button>
-        <Button appearance="outline" icon={<CopyRegular />} onClick={handleCopyLink} disabled={!savedDocumentUrl}>
+      </MessageBarBody>
+      <MessageBarActions>
+        {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set — never rendered
+            disabled (AC4). */}
+        {openRecordAvailable && (
+          <Button
+            appearance="outline"
+            size="small"
+            icon={<OpenRegular />}
+            onClick={() => openDocumentRecord(saved.documentId)}
+          >
+            View Document
+          </Button>
+        )}
+        <Button
+          appearance="outline"
+          size="small"
+          icon={<CopyRegular />}
+          onClick={handleCopyLink}
+          disabled={!savedDocumentUrl}
+        >
           Copy Link
         </Button>
-        <Button appearance="subtle" icon={<ArrowResetRegular />} onClick={reset}>
-          Save Another
-        </Button>
-      </div>
-    </Card>
+      </MessageBarActions>
+    </MessageBar>
   );
 
   // Render duplicate state
@@ -1191,13 +1398,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </MessageBarBody>
       </MessageBar>
       <div className={styles.duplicateActions}>
-        <Button
-          appearance="primary"
-          icon={<OpenRegular />}
-          onClick={() => duplicateInfo && onViewDocument?.(duplicateInfo.documentId)}
-        >
-          View Existing Document
-        </Button>
+        {/* Task 088: this used to hand a document ID to a callback that expected a URL — a broken link. It now
+            opens the existing document's Spaarke record, through the same opener and gate as View Document. */}
+        {openRecordAvailable && duplicateInfo && (
+          <Button
+            appearance="primary"
+            icon={<OpenRegular />}
+            onClick={() => openDocumentRecord(duplicateInfo.documentId)}
+          >
+            View Existing Document
+          </Button>
+        )}
         <Button
           appearance="outline"
           onClick={() => {
@@ -1229,7 +1440,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             Retry
           </Button>
         )}
-        {error?.offerSaveAsNew && saveMode.view === 'version' && (
+        {error?.offerSaveAsNew && (saveMode.view === 'version' || savedDocument !== null) && (
           <Button appearance="outline" size="small" onClick={handleSaveAsNewInstead}>
             Save as new document
           </Button>
@@ -1248,48 +1459,74 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // — per the shipped wizard's own copy convention. Dismissing (the Dismiss button, same clearError as
   // every other error state) writes nothing further: the refusal itself already left no bytes and no
   // sprk_document row (server-side; task 025's non-destructive invariant).
-  const renderCollisionState = () => (
-    <MessageBar intent="warning">
-      <MessageBarBody>
-        <MessageBarTitle>{error?.title || 'Name Already Exists'}</MessageBarTitle>
-        {error?.message}
-        {/* Task 055 (#1005): NAME the document the version retry would write into. Offering that retry
-            against an opaque id is what let a document be written as a new version of an unrelated one
-            that merely shared Word's default file name. Absent when the server withheld it (the caller
-            cannot read that document) — and then no version retry is offered either. */}
-        {error?.collisionExistingDocumentName && (
-          <Text
-            size={200}
-            style={{
-              display: 'block',
-              marginTop: tokens.spacingVerticalXS,
-              fontWeight: tokens.fontWeightSemibold,
-            }}
-          >
-            That name belongs to: {error.collisionExistingDocumentName}
+  //
+  // Task 088 (UAT-5): the choices are now Keep both · Save as new version (only on the server's
+  // `canSaveAsVersion`) · Open (whenever the server identified a document the caller can read) · Dismiss.
+  const renderCollisionState = () => {
+    const existingDocumentId = error?.collisionExistingDocumentId;
+    const offerVersion = Boolean(existingDocumentId) && error?.collisionCanSaveAsVersion === true;
+    return (
+      <MessageBar intent="warning">
+        <MessageBarBody>
+          <MessageBarTitle>{error?.title || 'Name Already Exists'}</MessageBarTitle>
+          {error?.message}
+          {/* Task 055 (#1005): NAME the document that holds the name. Offering a retry against an opaque id is
+              what let a document be written as a new version of an unrelated one that merely shared Word's
+              default file name. Absent when the server withheld it (the caller cannot read that document) —
+              and then neither "Open" nor a version retry is offered. */}
+          {error?.collisionExistingDocumentName && (
+            <Text
+              size={200}
+              style={{
+                display: 'block',
+                marginTop: tokens.spacingVerticalXS,
+                fontWeight: tokens.fontWeightSemibold,
+              }}
+            >
+              That name belongs to: {error.collisionExistingDocumentName}
+            </Text>
+          )}
+          <Text size={200} className={styles.collisionNote}>
+            {offerVersion
+              ? 'Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this file as its latest version.'
+              : 'Keep both uploads this file under a new name.'}
+            {existingDocumentId ? ' Open shows the existing file.' : ''}
           </Text>
-        )}
-        <Text size={200} style={{ display: 'block', marginTop: tokens.spacingVerticalXS }}>
-          {error?.collisionExistingDocumentId
-            ? 'Keep both uploads this file under a new name. Save as new version keeps the existing document and adds this file as its latest version.'
-            : 'Keep both uploads this file under a new name.'}
-        </Text>
-      </MessageBarBody>
-      <MessageBarActions>
-        <Button appearance="primary" size="small" onClick={handleKeepBoth}>
-          Keep both
-        </Button>
-        {error?.collisionExistingDocumentId && (
-          <Button appearance="secondary" size="small" onClick={handleSaveAsVersionInstead}>
-            Save as new version
+          {/* Shown in the prompt; screen readers already get it from the assertive live region (announce),
+              so no second role="alert" here. */}
+          {openFileError && (
+            <Text size={200} className={styles.collisionError}>
+              {openFileError}
+            </Text>
+          )}
+        </MessageBarBody>
+        <MessageBarActions>
+          <Button appearance="primary" size="small" onClick={handleKeepBoth}>
+            Keep both
           </Button>
-        )}
-        <Button appearance="subtle" size="small" onClick={clearError}>
-          Dismiss
-        </Button>
-      </MessageBarActions>
-    </MessageBar>
-  );
+          {offerVersion && (
+            <Button appearance="secondary" size="small" onClick={handleSaveAsVersionInstead}>
+              Save as new version
+            </Button>
+          )}
+          {existingDocumentId && (
+            <Button
+              appearance="secondary"
+              size="small"
+              icon={openFileBusy ? <Spinner size="tiny" /> : <OpenRegular />}
+              onClick={() => void handleOpenCollisionFile()}
+              disabled={openFileBusy}
+            >
+              Open
+            </Button>
+          )}
+          <Button appearance="subtle" size="small" onClick={clearError}>
+            Dismiss
+          </Button>
+        </MessageBarActions>
+      </MessageBar>
+    );
+  };
 
   // Render main form
   //
@@ -1368,13 +1605,74 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </div>
 
           {/* Document Metadata Fields */}
-          <div className={styles.section}>
-            <div className={styles.sectionTitle}>
-              <EditRegular />
-              <Text weight="semibold">Document Details</Text>
-            </div>
-            <Card>
-              <div className={styles.fieldContainer}>
+          {renderDocumentDetails(true)}
+        </>
+      )}
+
+      {/* Profile — task 021 / FR-07. Read-only AI profile (sprk_filesummary, sprk_filetldr,
+          sprk_filekeywords, sprk_documenttype) for the document identity task 013 resolved, or an
+          honest per-status / no-identity state. Threaded down rather than re-resolved.
+          `refreshSignal` is the task 027 / FR-10 return-path re-read (see the effect above). Task 088: the
+          Document-record affordance that sat here moved to the footer as "Open Document" (UAT-7). */}
+      <div className={styles.section}>
+        <DocumentProfileSection
+          {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})}
+          refreshSignal={profileRefreshSignal}
+          onProfileGenerated={handleProfileGenerated}
+        />
+      </div>
+
+      {/* Attachment Selector (Outlook only) */}
+      {hostType === 'outlook' && attachments.length > 0 && (
+        <AttachmentSelector
+          attachments={attachments}
+          selectedIds={selectedAttachmentIds}
+          onSelectionChange={setSelectedAttachmentIds}
+          disabled={isSaving}
+          showHeader
+          label="Attachments"
+        />
+      )}
+
+      {/* AI processing (Profile Summary + Search Index) is mandatory for all content
+          saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
+          (UI feedback 2026-09-02). */}
+
+      {/* FR-11 save mode (task 024) — in the footer area, directly above Cancel / Save: a resolved
+          document defaults to "a new version", with an explicit "a new document" override; every other
+          identity outcome states what happens and what the user can do. Inline, not a modal (narrow pane). */}
+      <SaveModeSection
+        identity={documentIdentity}
+        resolution={saveMode}
+        onChoiceChange={handleSaveModeChange}
+        {...(onRetryDocumentIdentity ? { onRetryIdentity: onRetryDocumentIdentity } : {})}
+        disabled={isSaving}
+      />
+
+      {renderFooter()}
+    </>
+  );
+
+  // The Document Name field (task 020 / FR-06), shared by the pre-save form and the saved state (task 088).
+  // `editable` false shows the name as plain text — the saved state of a pane that cannot version (no
+  // document bytes), where an edit could never be saved.
+  function renderDocumentDetails(editable: boolean): React.ReactElement {
+    const shownName = documentName || itemName || 'Untitled Document';
+    return (
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>
+          <EditRegular />
+          <Text weight="semibold">Document Details</Text>
+        </div>
+        <Card>
+          <div className={styles.fieldContainer}>
+            {!editable ? (
+              <>
+                <Text className={styles.fieldLabel}>Document Name</Text>
+                <Text className={styles.documentNameText}>{shownName}</Text>
+              </>
+            ) : (
+              <>
                 <Label htmlFor="document-name" className={styles.fieldLabel}>
                   Document Name
                 </Label>
@@ -1416,82 +1714,80 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                     rows={2}
                   />
                 )}
-              </div>
-            </Card>
+              </>
+            )}
           </div>
-        </>
-      )}
-
-      {/* Profile — task 021 / FR-07. Read-only AI profile (sprk_filesummary, sprk_filetldr,
-          sprk_filekeywords, sprk_documenttype) for the document identity task 013 resolved, or an
-          honest per-status / no-identity state. Threaded down rather than re-resolved.
-          `refreshSignal` is the task 027 / FR-10 return-path re-read (see the effect above). */}
-      <div className={styles.section}>
-        <DocumentProfileSection
-          {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})}
-          refreshSignal={profileRefreshSignal}
-        />
-        {/* task 027 / FR-10: the Document-record affordance — opens the `sprk_document` record
-            itself, the same browser-tab escape hatch and the SAME capability gate (NFR-10) as the
-            related-record card above. Only rendered once there is a resolved document to open. */}
-        {openRecordAvailable && resolvedDocumentId && (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<OpenRegular />}
-            onClick={handleOpenDocumentRecord}
-            aria-label="Open this document's record in Dataverse"
-          >
-            Open document record
-          </Button>
-        )}
+        </Card>
       </div>
+    );
+  }
 
-      {/* Attachment Selector (Outlook only) */}
-      {hostType === 'outlook' && attachments.length > 0 && (
-        <AttachmentSelector
-          attachments={attachments}
-          selectedIds={selectedAttachmentIds}
-          onSelectionChange={setSelectedAttachmentIds}
-          disabled={isSaving}
-          showHeader
-          label="Attachments"
-        />
-      )}
-
-      {/* AI processing (Profile Summary + Search Index) is mandatory for all content
-          saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
-          (UI feedback 2026-09-02). */}
-
-      {/* FR-11 save mode (task 024) — in the footer area, directly above Cancel / Save: a resolved
-          document defaults to "a new version", with an explicit "a new document" override; every other
-          identity outcome states what happens and what the user can do. Inline, not a modal (narrow pane). */}
-      <SaveModeSection
-        identity={documentIdentity}
-        resolution={saveMode}
-        onChoiceChange={handleSaveModeChange}
-        {...(onRetryDocumentIdentity ? { onRetryIdentity: onRetryDocumentIdentity } : {})}
-        disabled={isSaving}
-      />
-
-      {/* Footer actions — wizard pattern: Cancel (left), Save (right). Save stays disabled while the save
-          mode is unsettled (identity checking, a conflict, or an undetermined identity with no choice). */}
+  // Footer actions — wizard pattern: Cancel (left); Open Document then Save (right). Task 088 (UAT-6/7):
+  // - "Open Document" (the `sprk_document` record, in the Spaarke app) sits immediately left of Save whenever
+  //   there is a document to open — the one just saved, else the resolved one — and the host can open a tab
+  //   with ORG_URL set (NFR-10). It replaces task 027's subtle "Open document record" link in the Profile.
+  // - In the saved state the primary button is a gray, disabled "Saved" until there is something to save,
+  //   then "Save version". Save stays disabled while the save mode is unsettled (identity checking, a
+  //   conflict, or an undetermined identity with no choice).
+  function renderFooter(): React.ReactElement {
+    const showSaved = savedDocument !== null && !hasUnsavedChanges && !isSaving;
+    const versionLabel = savedDocument !== null || isVersionMode;
+    return (
       <div className={styles.footer}>
         <Button appearance="secondary" onClick={handleCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid || !saveMode.target}>
-          {isSaving ? 'Saving...' : isVersionMode ? 'Save version' : 'Save'}
-        </Button>
+        <div className={styles.footerEnd}>
+          {openRecordAvailable && openableDocumentId && (
+            <Button
+              appearance="secondary"
+              icon={<OpenRegular />}
+              onClick={() => openDocumentRecord(openableDocumentId)}
+              disabled={isSaving}
+            >
+              Open Document
+            </Button>
+          )}
+          {showSaved ? (
+            <Button className={styles.savedBtn} disabled>
+              Saved
+            </Button>
+          ) : (
+            <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid || !activeTarget}>
+              {isSaving ? 'Saving...' : versionLabel ? 'Save version' : 'Save'}
+            </Button>
+          )}
+        </div>
       </div>
+    );
+  }
+
+  // Task 088 (owner 2026-10-03, "Keep the form"): the SAVED state — confirmation bar, the document's name, its
+  // profile, and the footer. Host-neutral: an Outlook save lands here too (NFR-10); what differs is only what
+  // the capability allows (no document bytes → the name is read-only and the button stays "Saved").
+  const renderSavedForm = (saved: SavedDocumentState) => (
+    <>
+      {renderSavedBar(saved)}
+      {renderDocumentDetails(canSaveNewVersion)}
+      <div className={styles.section}>
+        <DocumentProfileSection
+          documentId={saved.documentId}
+          refreshSignal={profileRefreshSignal}
+          onProfileGenerated={handleProfileGenerated}
+        />
+      </div>
+      {renderFooter()}
     </>
   );
+
+  // The form for the current state: the saved state once this pane has saved, else the pre-save form.
+  const renderCurrentForm = () => (savedDocument ? renderSavedForm(savedDocument) : renderForm());
 
   // Determine what to render based on flow state
   const renderContent = () => {
     switch (flowState) {
       case 'complete':
-        return renderSuccessState();
+        return renderCurrentForm();
       case 'duplicate':
         return renderDuplicateState();
       case 'uploading':
@@ -1510,13 +1806,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         return (
           <>
             {error?.offerCollisionChoice ? renderCollisionState() : renderErrorState()}
-            {renderForm()}
+            {renderCurrentForm()}
           </>
         );
       case 'idle':
       case 'selecting':
       default:
-        return renderForm();
+        return renderCurrentForm();
     }
   };
 

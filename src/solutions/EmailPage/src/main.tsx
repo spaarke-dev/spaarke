@@ -43,6 +43,7 @@ import {
   XrmDataverseClient,
   getXrm,
   ensureNavigatorSidePane,
+  cleanGuid,
   type OpenEmailComposeMode,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
@@ -158,7 +159,7 @@ function resolveEmailLaunch(): {
   compose?: { mode: OpenEmailComposeMode; sourceId?: string };
 } {
   const normalizeId = (raw: string | null | undefined): string | undefined => {
-    const v = (raw ?? '').replace(/[{}]/g, '').trim().toLowerCase();
+    const v = cleanGuid(raw ?? '');
     return v.length > 0 ? v : undefined;
   };
   const isSingleFlag = (params: URLSearchParams): boolean =>

@@ -19,6 +19,15 @@
  * runnable wherever a jest-compatible runner is available.
  */
 
+// `searchIndexResolver.ts` imports `cleanGuid` from `@spaarke/ui-components` (task 089 /
+// ADR-044). The package's `main`/`module` entry is a compiled ESM `dist/index.js`, which
+// ts-jest's default transformIgnorePatterns skips (node_modules) — so without a mock the
+// suite fails to load with `SyntaxError: Unexpected token 'export'`. Mock with the real
+// implementation (not just the signature) so brace/case-normalization assertions stay honest.
+jest.mock("@spaarke/ui-components", () => ({
+    cleanGuid: (id: string | null | undefined) => (id ?? "").replace(/[{}]/g, "").trim().toLowerCase(),
+}));
+
 import {
     resolveSearchIndexNameForRecord,
     isNonEmptyIndexName,

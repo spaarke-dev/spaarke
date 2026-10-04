@@ -131,30 +131,47 @@ public record SaveError
 
     /// <summary>
     /// Task 025 (OFFICE_020 name-collision only): the <c>sprk_document</c> that already holds
-    /// <see cref="FileName"/> in the target drive, when it could be resolved (Document saves only — the
-    /// only content type FR-11's version-save can target). <c>null</c> when the lookup found no row (an
-    /// unowned SPE item) or was unavailable (fail-open, per <c>OfficeDocumentPersistence.FindDocumentIdByLocationAsync</c>).
-    /// When present, the pane may retry as a version save of this document (<c>ExistingDocumentId</c> +
-    /// <c>IsNewVersion: true</c>) instead of a second create.
+    /// <see cref="FileName"/> in the target drive, when it could be resolved. <c>null</c> when the lookup
+    /// found no row (an unowned SPE item), was unavailable (fail-open, per
+    /// <c>OfficeDocumentPersistence.FindDocumentIdByLocationAsync</c>), or the caller holds no <c>Read</c> on
+    /// that document (stripped at the endpoint — see <see cref="ExistingDocumentName"/>).
     /// </summary>
+    /// <remarks>
+    /// Task 088 (UAT-5): its PRESENCE no longer means "a version retry is offered" — the pane uses it to offer
+    /// <b>Open</b> (the other file, through <c>GET /api/documents/{id}/open-links</c>, which re-checks
+    /// <c>Read</c>). Whether "Save as new version" is offered is <see cref="CanSaveAsVersion"/>'s alone.
+    /// </remarks>
     public Guid? ExistingDocumentId { get; init; }
 
     /// <summary>
     /// Task 055 (OFFICE_020 name-collision only; #1005 / ISS-006): the DISPLAY NAME
     /// (<c>sprk_documentname</c> — not <see cref="FileName"/>; task 020 split them) of the document that
-    /// already holds the collided name, so the pane can say WHICH document "Save as new version" would
-    /// write into instead of offering that retry against an opaque id.
+    /// already holds the collided name, so the pane can say WHICH document it is instead of an opaque id.
     /// </summary>
     /// <remarks>
-    /// <para><b>Withheld in two cases, and then <see cref="ExistingDocumentId"/> is withheld with it.</b>
-    /// (1) The colliding document is filed to a record OTHER than the one the caller is filing to — a
-    /// version retry there would silently discard the caller's chosen record, which is the #1005 defect.
-    /// Decided in <c>OfficeService.ResolveNameCollisionAsync</c>, which is a pure comparison, not an
-    /// authorization decision. (2) The caller does not hold <c>Read</c> on that document — decided at the
-    /// ENDPOINT (ADR-008), because a name plus what it is filed to is the description of a document and is
-    /// materially more disclosive than an opaque id.</para>
-    /// <para>Both cases land the pane in its already-shipped "Keep both only" state, so neither needs new
-    /// client behaviour.</para>
+    /// <para><b>Travels with <see cref="ExistingDocumentId"/>, never without it, and both are withheld when the
+    /// caller does not hold <c>Read</c> on that document</b> — decided at the ENDPOINT (ADR-008), because a
+    /// name plus what it is filed to is the description of a document and is materially more disclosive than
+    /// an opaque id. The pane then shows "Keep both" only.</para>
+    /// <para>Task 088 (UAT-5): no longer withheld merely because the document is filed to a DIFFERENT record
+    /// than the one the caller is filing to. That rule (task 055's #1005 fix) governs the version retry, and
+    /// is now carried by <see cref="CanSaveAsVersion"/> instead of by withholding the identity — so a caller
+    /// who can read the other document can still open it.</para>
     /// </remarks>
     public string? ExistingDocumentName { get; init; }
+
+    /// <summary>
+    /// Task 088 (OFFICE_020 name-collision only; UAT-5): whether the pane may offer "Save as new version" of
+    /// <see cref="ExistingDocumentId"/>. <c>true</c> only when the colliding document is EDITABLE content (a
+    /// Document — FR-11's version save is Document-only) AND is filed to the record this save targets (task
+    /// 055's #1005 rule: a version retry against a document filed elsewhere silently discards the caller's
+    /// chosen record).
+    /// </summary>
+    /// <remarks>
+    /// A pure comparison decided in <c>OfficeService.ResolveNameCollisionAsync</c>, not an authorization
+    /// decision. Forced back to <c>false</c> at the endpoint whenever the caller's missing <c>Read</c> strips the
+    /// identity, and emitted on the wire only alongside an id — so a caller who cannot read the other document
+    /// receives exactly the payload it received before task 088.
+    /// </remarks>
+    public bool CanSaveAsVersion { get; init; }
 }

@@ -50,6 +50,7 @@ import {
   type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
+  cleanGuid,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
@@ -217,7 +218,7 @@ function getHostRecordId(): string | undefined {
   const xrm = getXrm();
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -350,7 +351,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         for (const m of COMMUNICATION_REGARDING_FIELDS) {
           const val = recAny[`_${m.field}_value`];
           if (typeof val !== 'string' || val.length === 0) continue;
-          const entityId = val.replace(/[{}]/g, '').toLowerCase();
+          const entityId = cleanGuid(val);
           const entityType =
             (recAny[`_${m.field}_value@Microsoft.Dynamics.CRM.lookuplogicalname`] as string) ?? m.entityType;
           const entityName = recAny[`_${m.field}_value@OData.Community.Display.V1.FormattedValue`] as
@@ -405,7 +406,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
   const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
     interface XrmLike {
-      Utility?: { lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string }>> };
+      Utility?: { lookupObjects?: (o: unknown) => Promise<{ id: string; name: string }[]> };
     }
     const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
     const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
@@ -417,7 +418,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     });
     if (!results || results.length === 0) return null;
     const picked = results[0];
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(String(picked.id));
     const base = resolveDataverseUrl();
     return {
       entityType,
@@ -434,7 +435,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
       interface XrmLike {
         Utility?: {
-          lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
+          lookupObjects?: (o: unknown) => Promise<{ id: string; name: string; entityType: string }[]>;
         };
       }
       const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
@@ -450,7 +451,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       for (const p of results) {
         const field = EMAIL_FIELD[p.entityType];
         if (!field) continue;
-        const id = String(p.id).replace(/[{}]/g, '');
+        const id = cleanGuid(String(p.id));
         try {
           const rec = await context.webAPI.retrieveRecord(p.entityType, id, `?$select=${field}`);
           const email = rec?.[field];
@@ -479,7 +480,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const handleAddRelationship = React.useCallback(async (): Promise<IPickedRecord | null> => {
     interface XrmLike {
       Utility?: {
-        lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
+        lookupObjects?: (o: unknown) => Promise<{ id: string; name: string; entityType: string }[]>;
       };
     }
     const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
@@ -488,7 +489,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];
     if (!picked?.id || !picked?.entityType) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(String(picked.id));
     const base = resolveDataverseUrl();
     return {
       entityType: picked.entityType,

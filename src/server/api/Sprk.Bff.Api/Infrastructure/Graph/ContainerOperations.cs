@@ -31,7 +31,10 @@ public class ContainerOperations
         string? description = null,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "CreateContainer");
         activity?.SetTag("containerTypeId", containerTypeId.ToString());
 
@@ -86,7 +89,10 @@ public class ContainerOperations
 
     public async Task<ContainerDto?> GetContainerDriveAsync(string containerId, CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetContainerDrive");
         activity?.SetTag("containerId", containerId);
 
@@ -159,7 +165,10 @@ public class ContainerOperations
 
     public async Task<IList<ContainerDto>?> ListContainersAsync(Guid containerTypeId, CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListContainers");
         activity?.SetTag("containerTypeId", containerTypeId.ToString());
 
@@ -222,7 +231,10 @@ public class ContainerOperations
         Guid containerTypeId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListContainersAsUser");
         activity?.SetTag("containerTypeId", containerTypeId.ToString());
 

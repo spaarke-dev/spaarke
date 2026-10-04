@@ -572,6 +572,19 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * @inheritdoc
+   *
+   * Outlook has no open document to mark — task 089's identity-stamp write is Word-only, same reasoning as
+   * {@link readDocumentStamp}. Rejects with a typed `CAPABILITY_NOT_SUPPORTED` `HostAdapterError`.
+   */
+  async writeDocumentStamp(_documentId: string): Promise<'written' | 'unchanged'> {
+    throw createHostAdapterError(
+      'CAPABILITY_NOT_SUPPORTED',
+      'Outlook has no open document. writeDocumentStamp() is only supported in Word.'
+    );
+  }
+
+  /**
+   * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
     const hasMailbox18 = this.isMailboxSupported('1.8');
@@ -591,6 +604,8 @@ export class OutlookAdapter implements IHostAdapter {
       canGetDocumentUrl: false,
       // No open document in Outlook — FR-02 client half / task 051 is Word-only
       canReadDocumentStamp: false,
+      // No open document in Outlook — task 089's stamp write is Word-only
+      canWriteDocumentStamp: false,
       // PDF conversion is server-side, so we can indicate support
       canSaveAsPdf: true,
       // EML saving requires Mailbox 1.8 for full attachment support

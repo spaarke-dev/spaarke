@@ -74,6 +74,8 @@
  * @see projects/spaarkeai-compose-r1/design.md §14 row 3 — Path A entry UX (locked)
  */
 
+import { cleanGuid } from '@spaarke/ui-components';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -229,11 +231,11 @@ export function buildLaunchUrl(
 
   if (params.entityId) {
     // Strip braces that Dataverse adds to GUIDs: {abc-123} → abc-123
-    record["entityId"] = params.entityId.replace(/^\{|\}$/g, "");
+    record["entityId"] = cleanGuid(params.entityId);
   }
 
   if (params.matterId) {
-    record["matterId"] = params.matterId.replace(/^\{|\}$/g, "");
+    record["matterId"] = cleanGuid(params.matterId);
   }
 
   // Analysis entry-matrix params (ai-advanced-capabilities-analysis-hub-r1 task 052,
@@ -242,13 +244,13 @@ export function buildLaunchUrl(
   // three-pane shell `openSpaarkeAi` already opens — no new modal-open primitive. When
   // absent, non-Analysis launches keep their existing wire format byte-for-byte.
   if (params.analysisId) {
-    record["analysisId"] = params.analysisId.replace(/^\{|\}$/g, "");
+    record["analysisId"] = cleanGuid(params.analysisId);
   }
   if (params.worktype) {
     record["worktype"] = params.worktype;
   }
   if (params.regarding) {
-    record["regarding"] = params.regarding.replace(/^\{|\}$/g, "");
+    record["regarding"] = cleanGuid(params.regarding);
   }
   // ai-advanced-capabilities-agreements-r1 task 022 (FR-09): agreement sub-domain hint for the
   // cold-load/deep-link door. Not a GUID — no brace-stripping (mirrors `worktype`'s handling).
@@ -264,7 +266,7 @@ export function buildLaunchUrl(
     record["composeMode"] = composeParams.composeMode;
   }
   if (composeParams.sprkDocumentId) {
-    record["sprkDocumentId"] = composeParams.sprkDocumentId.replace(/^\{|\}$/g, "");
+    record["sprkDocumentId"] = cleanGuid(composeParams.sprkDocumentId);
   }
   if (composeParams.speDriveItemId) {
     record["speDriveItemId"] = composeParams.speDriveItemId;
