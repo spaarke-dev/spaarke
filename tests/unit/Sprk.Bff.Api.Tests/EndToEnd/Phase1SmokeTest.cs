@@ -117,10 +117,12 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         {
             question = PredictMatterCostPlaybookId.ToString(),
             subject = Subject("M-FIXTURE-001"),
+            // Task 163 (owner round 16 item 3): parameters pass task 164's SHARED playbook-parameter policy, a declared
+            // allow-list. matterType / lookBackYears are on none of its lists (no Insights playbook node consumes
+            // them), so they would be a 400; the declared text key a synthesis prompt consumes is used instead.
             parameters = new Dictionary<string, string>
             {
-                ["matterType"] = "ip-licensing",
-                ["lookBackYears"] = "3"
+                ["matterDescription"] = "IP licensing matter, 3-year look-back"
             }
         };
 
@@ -182,7 +184,7 @@ public class Phase1SmokeTest : IClassFixture<Phase1SmokeTestFixture>
         {
             question = PredictMatterCostPlaybookId.ToString(),
             subject = Subject("M-FIXTURE-004"),
-            parameters = new Dictionary<string, string> { ["matterType"] = "rare-tort" }
+            parameters = new Dictionary<string, string> { ["matterDescription"] = "rare-tort matter" }
         };
 
         // Act
@@ -566,6 +568,11 @@ public class Phase1SmokeTestFixture : WebApplicationFactory<Program>
             services.AddSingleton(routing.Object);
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
+            // Task 163 (owner round 16 item 1): the route reads the playbook's node list to decide whether Write on the
+            // subject is needed; predict-matter-cost writes nothing, so its shape keeps the reader's Read sufficient.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.INodeService>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Api.Ai.RouteSweepNodeShapes.NonPersistingNodeService());
 
             services.RemoveAll<IHostedService>();
 

@@ -110,7 +110,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
         {
             question = SampleQuestion.ToString(),
             subject = SampleSubject,
-            parameters = new Dictionary<string, string> { ["lookBackYears"] = "3" }
+            // Task 163 (owner round 16 item 3): parameters go through the SHARED playbook-parameter policy, a declared
+            // allow-list. "lookBackYears" is on none of its lists (no Insights playbook node references it), so it is
+            // now a 400; "matterDescription" is a declared text key and must pass through unchanged.
+            parameters = new Dictionary<string, string> { ["matterDescription"] = "IP licensing dispute" }
         };
 
         // Act
@@ -139,7 +142,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
                 && r.TenantId == InsightEndpointsTestFixture.TestTenantId
                 && !string.IsNullOrWhiteSpace(r.AccessibleScopeHash)
                 && r.Parameters != null
-                && r.Parameters["lookBackYears"] == "3"),
+                && r.Parameters["matterDescription"] == "IP licensing dispute"),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -783,6 +786,13 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
             // InsightsRouteAuthorizationContractTests).
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
+            // Task 163 (owner round 16 item 1): the route reads the playbook's node list to decide whether the run
+            // can write to the subject (then Write is asked, not Read). These wire-contract tests drive a reader, so
+            // every playbook here is non-persisting (the predict-matter-cost shape); the Write rule is pinned by
+            // InsightsRouteAuthorizationContractTests.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.INodeService>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Api.Ai.RouteSweepNodeShapes.NonPersistingNodeService());
 
             // Remove background hosted services that depend on external infrastructure.
             services.RemoveAll<IHostedService>();

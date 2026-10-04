@@ -6,8 +6,11 @@ using FluentAssertions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Api.Ai;
 using Xunit;
@@ -15,12 +18,13 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Api.Insights;
 
 /// <summary>
-/// <b>Insights route authorization</b> — unified-access-control-r2 task 163 (sweep findings #17, #40, #41).
-/// Drives the REAL Insights route maps through <see cref="RouteSweepAuthorizationFixture"/>: the subject
-/// record is authorized for Read AS THE CALLER before <see cref="IInsightsAi"/> or the playbook cache is
-/// reached; an unreadable and an absent subject get the identical uniform 404. On /ask the handler also
-/// refuses raw playbook GUIDs that are not bound as insights-ask, and identifier parameters other than the
-/// subject's own matterId.
+/// <b>Insights route authorization</b> — unified-access-control-r2 task 163 (sweep findings #17, #40, #41; owner round 16
+/// items 1 and 3, round 25 item 3). Drives the REAL Insights route maps through <see cref="RouteSweepAuthorizationFixture"/>:
+/// the subject record is authorized AS THE CALLER before <see cref="IInsightsAi"/> or the playbook cache is reached; an
+/// unreadable and an absent subject get the identical uniform 404. On /ask the route runs only a playbook registered as
+/// an insights-ask Binding, applies task 164's SHARED playbook-parameter policy, and asks for Write on the subject when a
+/// node that can write reaches it ("Read suffices only for non-persisting playbooks"). On /assistant/query the caller's
+/// Write on the subject is asked when a playbook may run, and the run carries the answer.
 /// </summary>
 [Trait("category", "authorization")]
 public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<RouteSweepAuthorizationFixture>
@@ -29,23 +33,33 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
 
     private static readonly Guid Readable = Guid.Parse("16300000-0000-0000-0000-0000000c0001");
     private static readonly Guid Unreadable = Guid.Parse("16300000-0000-0000-0000-0000000c0002");
+    private static readonly Guid Writable = Guid.Parse("16300000-0000-0000-0000-0000000c0003");
+    private static readonly Guid OtherReadableMatter = Guid.Parse("16300000-0000-0000-0000-0000000c0004");
+    private static readonly Guid OtherWritableMatter = Guid.Parse("16300000-0000-0000-0000-0000000c0005");
+    private static readonly Guid ReadableProject = Guid.Parse("16300000-0000-0000-0000-0000000c0006");
     private static readonly Guid NonExistent = Guid.Parse("16300000-0000-0000-0000-0000000cffff");
+
+    /// <summary>Bound as insights-ask "matter-health-single": PERSISTS onto the subject (its UpdateRecord recordId is {{matterId}}).</summary>
     private static readonly Guid MatterHealthPlaybook = Guid.Parse("16300000-0000-0000-0000-0000000d0001");
+
+    /// <summary>Bound as insights-ask "predict-matter-cost": writes nothing (no writing node references the subject).</summary>
+    private static readonly Guid PredictCostPlaybook = Guid.Parse("16300000-0000-0000-0000-0000000d0002");
 
     public InsightsRouteAuthorizationContractTests(RouteSweepAuthorizationFixture fixture)
     {
         _fixture = fixture;
         _fixture.ResetBoundaries();
-        _fixture.Access.Grant(Readable, AccessRights.Read);
+        _fixture.Access
+            .Grant(Readable, AccessRights.Read)
+            .Grant(Writable, AccessRights.Read | AccessRights.Write)
+            .Grant(OtherReadableMatter, AccessRights.Read)
+            .Grant(OtherWritableMatter, AccessRights.Read | AccessRights.Write)
+            .Grant(ReadableProject, AccessRights.Read);
 
-        _fixture.Routing
-            .Setup(r => r.ResolveBindingAsync(ConsumerTypes.InsightsAsk, "matter-health-single",
-                It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Binding
-            {
-                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk,
-                ConsumerCode = "matter-health-single", PlaybookId = MatterHealthPlaybook,
-            });
+        BindInsightsAsk("matter-health-single", MatterHealthPlaybook);
+        BindInsightsAsk("predict-matter-cost", PredictCostPlaybook);
+        ArrangeNodes(MatterHealthPlaybook, MatterHealthSingleNodes());
+        ArrangeNodes(PredictCostPlaybook, PredictMatterCostNodes());
 
         _fixture.InsightsAi
             .Setup(i => i.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
@@ -65,7 +79,7 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     }
 
     // =====================================================================================================
-    // POST /api/insights/ask — finding #17
+    // POST /api/insights/ask — finding #17; owner round 16 items 1 and 3
     // =====================================================================================================
 
     [Theory]
@@ -83,8 +97,8 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     [Fact]
     public async Task Ask_UnreadableAndAbsentMatters_AreTheIdenticalUniform404_AndTheFacadeIsNeverReached()
     {
-        var unreadable = await AskAsync(LiveShape(Unreadable));
-        var absent = await AskAsync(LiveShape(NonExistent));
+        var unreadable = await AskAsync(Shape("predict-matter-cost", Unreadable));
+        var absent = await AskAsync(Shape("predict-matter-cost", NonExistent));
 
         await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(unreadable);
         (await RouteSweepAuthorizationFixture.NormalizedProblemAsync(absent))
@@ -94,12 +108,177 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     }
 
     [Fact]
-    public async Task Ask_TheRightsQuestionIsReadOnTheMatter_AsTheCaller()
+    public async Task Ask_NonPersistingPlaybook_TheRightsQuestionIsReadOnTheMatter_AsTheCaller_AndTheRunCarriesNoWrite()
     {
-        await AskAsync(LiveShape(Readable));
+        var response = await AskAsync(Shape("predict-matter-cost", Readable));
 
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "Read suffices for a playbook that cannot write to its subject");
         _fixture.Access.RecordChecks.Should().ContainSingle()
             .Which.Should().Be((RouteSweepAuthorizationFixture.CallerObjectId, "sprk_matters", Readable, RouteSweepAuthorizationFixture.BearerToken));
+        _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
+            It.Is<InsightsAgentRequest>(r => r.Question == PredictCostPlaybook && !r.SubjectWriteAuthorized),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ask_PersistingPlaybook_AReaderWithoutWrite_GetsTheSameUniform404_AndNothingRuns()
+    {
+        var readerOnly = await AskAsync(Shape("matter-health-single", Readable));
+        var absent = await AskAsync(Shape("matter-health-single", NonExistent));
+
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(readerOnly);
+        (await RouteSweepAuthorizationFixture.NormalizedProblemAsync(readerOnly))
+            .Should().Be(await RouteSweepAuthorizationFixture.NormalizedProblemAsync(absent));
+        VerifyAskNeverRan();
+    }
+
+    [Fact]
+    public async Task Ask_PersistingPlaybook_ACallerWithWrite_Runs_AndTheRunCarriesTheEstablishedWrite()
+    {
+        var response = await AskAsync(Shape("matter-health-single", Writable));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Access.RecordChecks.Should().ContainSingle().Which.RecordId.Should().Be(Writable);
+        _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
+            It.Is<InsightsAgentRequest>(r => r.Question == MatterHealthPlaybook && r.SubjectWriteAuthorized),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("no nodes (the Legacy run mode, which writes)")]
+    [InlineData("an unclassifiable node that names the subject")]
+    public async Task Ask_ANodeListThatCannotBeShownNotToWriteTheSubject_NeedsWrite(string shape)
+    {
+        ArrangeNodes(PredictCostPlaybook, shape.StartsWith("no nodes", StringComparison.Ordinal)
+            ? []
+            : [Node(null, "{\"recordId\":\"{{matterId}}\"}")]);
+
+        var reader = await AskAsync(Shape("predict-matter-cost", Readable));
+        var writer = await AskAsync(Shape("predict-matter-cost", Writable));
+
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(reader);
+        writer.StatusCode.Should().Be(HttpStatusCode.OK, shape);
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("null")]
+    public async Task Ask_ANodeListThatCannotBeRead_IsTheUniform404_EvenForAWriter(string mode)
+    {
+        var setup = _fixture.Nodes.Setup(n => n.GetNodesAsync(PredictCostPlaybook, It.IsAny<CancellationToken>()));
+        if (mode == "throws")
+        {
+            setup.ThrowsAsync(new InvalidOperationException("simulated Dataverse fault"));
+        }
+        else
+        {
+            setup.ReturnsAsync((PlaybookNodeDto[])null!);
+        }
+
+        var response = await AskAsync(Shape("predict-matter-cost", Writable));
+
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(response);
+        _fixture.Access.RecordChecks.Should().BeEmpty("the rights cannot be decided, so none is asked");
+        VerifyAskNeverRan();
+    }
+
+    [Theory]
+    [InlineData("tenantId", "guid")]
+    [InlineData("USERID", "guid")]
+    [InlineData("run.userId", "guid")]
+    [InlineData("userPreferences.locale", "en")]
+    [InlineData("lookBackYears", "3")]
+    [InlineData("timeWindowHours", "abc")]
+    [InlineData("matterId", "not-a-guid")]
+    [InlineData("matterDescription", "guid")]
+    public async Task Ask_AParameterTheSharedPolicyRefuses_Is400_ItsBody_BeforeAnyLookupOrRightsQuery(string key, string value)
+    {
+        var parameterValue = value == "guid" ? Guid.NewGuid().ToString() : value;
+
+        var response = await AskAsync(new
+        {
+            question = "predict-matter-cost",
+            subject = $"matter:{Writable}",
+            parameters = new Dictionary<string, string> { [key] = parameterValue },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("errorCode").GetString().Should().Be("playbook.parameter-rejected",
+            "/ask answers with the SAME body /execute and /run-playbook do — the shared policy, not a fork");
+        body.GetProperty("detail").GetString().Should().Contain($"'{key}'");
+        if (value == "guid")
+        {
+            body.GetRawText().Should().NotContain(parameterValue, "a refused record id is never echoed");
+        }
+
+        _fixture.Access.RecordChecks.Should().BeEmpty();
+        _fixture.Routing.Verify(r => r.ResolveBindingAsync(
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        VerifyAskNeverRan();
+    }
+
+    [Theory]
+    [InlineData("predict-matter-cost", "projectId", "unreadable-project", false)]
+    [InlineData("predict-matter-cost", "projectId", "readable-project", true)]
+    [InlineData("predict-matter-cost", "matterId", "other-readable-matter", true)]
+    [InlineData("matter-health-single", "matterId", "other-readable-matter", false)]
+    [InlineData("matter-health-single", "matterId", "other-writable-matter", true)]
+    public async Task Ask_ARecordParameterIsAuthorizedAsTheCaller_ByTheSharedRule(
+        string playbook, string key, string record, bool allowed)
+    {
+        var recordId = record switch
+        {
+            "unreadable-project" => Unreadable,
+            "readable-project" => ReadableProject,
+            "other-readable-matter" => OtherReadableMatter,
+            _ => OtherWritableMatter,
+        };
+
+        var response = await AskAsync(new
+        {
+            question = playbook,
+            subject = $"matter:{Writable}",
+            parameters = new Dictionary<string, string> { [key] = recordId.ToString() },
+        });
+
+        if (allowed)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
+                It.Is<InsightsAgentRequest>(r => r.Parameters != null && r.Parameters[key] == recordId.ToString()),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(response);
+            VerifyAskNeverRan();
+        }
+
+        _fixture.Access.RecordChecks.Select(c => (c.EntitySetName, c.RecordId))
+            .Should().Contain((key == "projectId" ? "sprk_projects" : "sprk_matters", recordId), "the parameter's record is asked about, as the caller");
+    }
+
+    [Fact]
+    public async Task Ask_TheSubjectsOwnMatterIdAndDeclaredParameters_ReachTheFacadeUnchanged_AndTheMatterIsAskedOnce()
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["matterId"] = Readable.ToString().ToUpperInvariant(),
+            ["matterDescription"] = "IP licensing dispute",
+            ["todayUtc"] = "2026-10-04",
+        };
+
+        var response = await AskAsync(new { question = "predict-matter-cost", subject = $"matter:{Readable}", parameters });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Access.RecordChecks.Should().ContainSingle("the subject's own matterId folds into the subject's check");
+        _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
+            It.Is<InsightsAgentRequest>(r => r.Parameters != null
+                && r.Parameters.Count == 3
+                && r.Parameters["matterDescription"] == "IP licensing dispute"
+                && r.Parameters["todayUtc"] == "2026-10-04"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -112,85 +291,60 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
             .Setup(r => r.GetBindingByPlaybookIdAsync(rawGuid, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mode == "absent" ? null : new Binding { BindingId = Guid.NewGuid(), ConsumerType = "ai-summary", PlaybookId = rawGuid });
 
-        var byGuid = await AskAsync(new { question = rawGuid.ToString(), subject = $"matter:{Readable}", parameters = new { } });
-        var byUnknownName = await AskAsync(new { question = rawGuid.ToString().Replace('-', '_'), subject = $"matter:{Readable}", parameters = new { } });
+        var byGuid = await AskAsync(new { question = rawGuid.ToString(), subject = $"matter:{Writable}", parameters = new { } });
+        var byUnknownName = await AskAsync(new { question = rawGuid.ToString().Replace('-', '_'), subject = $"matter:{Writable}", parameters = new { } });
 
         byGuid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         byUnknownName.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var guidBody = await byGuid.Content.ReadFromJsonAsync<JsonElement>();
         guidBody.GetProperty("title").GetString().Should().Be("Bad Request");
         guidBody.GetProperty("detail").GetString().Should().Contain("registered as an enabled sprk_playbookconsumer row");
+        _fixture.Access.RecordChecks.Should().BeEmpty();
         VerifyAskNeverRan();
     }
 
     [Fact]
-    public async Task Ask_RawPlaybookGuidBoundAsInsightsAsk_IsAccepted()
+    public async Task Ask_RawPlaybookGuidBoundAsInsightsAsk_IsAccepted_AndThatPlaybookIsTheOneRun()
     {
         _fixture.Routing
-            .Setup(r => r.GetBindingByPlaybookIdAsync(MatterHealthPlaybook, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = MatterHealthPlaybook });
+            .Setup(r => r.GetBindingByPlaybookIdAsync(PredictCostPlaybook, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = PredictCostPlaybook });
 
-        var response = await AskAsync(new { question = MatterHealthPlaybook.ToString(), subject = $"matter:{Readable}", parameters = new { } });
+        var response = await AskAsync(new { question = PredictCostPlaybook.ToString(), subject = $"matter:{Readable}", parameters = new { } });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Nodes.Verify(n => n.GetNodesAsync(PredictCostPlaybook, It.IsAny<CancellationToken>()), Times.Once);
         _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
-            It.Is<InsightsAgentRequest>(r => r.Question == MatterHealthPlaybook), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Theory]
-    [InlineData("matterId", "other-matter")]
-    [InlineData("tenantId", "x")]
-    [InlineData("documentId", "x")]
-    [InlineData("PROJECTID", "x")]
-    public async Task Ask_IdentifierParameterOtherThanTheSubjectsOwn_Is400_ParametersNotAccepted(string key, string value)
-    {
-        var parameterValue = value == "other-matter" ? Unreadable.ToString() : Guid.NewGuid().ToString();
-
-        var response = await AskAsync(new
-        {
-            question = "matter-health-single",
-            subject = $"matter:{Readable}",
-            parameters = new Dictionary<string, string> { [key] = parameterValue },
-        });
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        body.GetProperty("reasonCode").GetString().Should().Be("insights.parameters.not_accepted");
-        VerifyAskNeverRan();
+            It.Is<InsightsAgentRequest>(r => r.Question == PredictCostPlaybook), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Ask_SubjectsOwnMatterIdAndTuningParameters_ReachTheFacadeUnchanged()
+    public async Task Ask_TheMatterFormsLiveShape_RunsForACallerWithWrite_AndIsTheUniform404ForAReader()
     {
-        var parameters = new Dictionary<string, string>
-        {
-            ["matterId"] = Readable.ToString().ToUpperInvariant(),
-            ["lookBackYears"] = "3",
-            ["currency"] = "USD",
-            ["matterType"] = "IP licensing",
-        };
+        var writer = await AskAsync(Shape("matter-health-single", Writable));
+        var reader = await AskAsync(Shape("matter-health-single", Readable));
 
-        var response = await AskAsync(new { question = "matter-health-single", subject = $"matter:{Readable}", parameters });
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        writer.StatusCode.Should().Be(HttpStatusCode.OK);
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(reader);
         _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
-            It.Is<InsightsAgentRequest>(r => r.Parameters != null
-                && r.Parameters.Count == 4
-                && r.Parameters["lookBackYears"] == "3"
-                && r.Parameters["currency"] == "USD"
-                && r.Parameters["matterType"] == "IP licensing"),
+            It.Is<InsightsAgentRequest>(r => r.Question == MatterHealthPlaybook && r.Subject == $"matter:{Writable}"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Ask_TheMatterFormsLiveShape_FromAReader_Is200()
+    public async Task Ask_TheFacadesRunGuardRefusal_IsTheSameUniform404()
     {
-        var response = await AskAsync(LiveShape(Readable));
+        _fixture.InsightsAi
+            .Setup(i => i.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SdapProblemException(
+                InsightsAgentRequest.SubjectWriteRequiredCode, "Write on the subject is required", "x", 404));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        _fixture.InsightsAi.Verify(i => i.AnswerQuestionAsync(
-            It.Is<InsightsAgentRequest>(r => r.Question == MatterHealthPlaybook && r.Subject == $"matter:{Readable}"),
-            It.IsAny<CancellationToken>()), Times.Once);
+        var refused = await AskAsync(Shape("predict-matter-cost", Readable));
+        var absent = await AskAsync(Shape("predict-matter-cost", NonExistent));
+
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(refused);
+        (await RouteSweepAuthorizationFixture.NormalizedProblemAsync(refused))
+            .Should().Be(await RouteSweepAuthorizationFixture.NormalizedProblemAsync(absent));
     }
 
     [Theory]
@@ -200,18 +354,19 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     {
         _fixture.Access.ThrowOnCheck = mode == "seam-throws";
 
-        var response = await AskAsync(LiveShape(Readable), _fixture.CreateCallerClient(withBearer: mode != "no-bearer"));
+        var response = await AskAsync(Shape("matter-health-single", Writable), _fixture.CreateCallerClient(withBearer: mode != "no-bearer"));
 
         await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(response);
         VerifyAskNeverRan();
     }
 
     [Fact]
-    public async Task Ask_WithNoOid_Is401_AndTheFacadeIsNeverReached()
+    public async Task Ask_WithNoOid_Is401_AndNothingIsLookedUpOrRun()
     {
-        var response = await AskAsync(LiveShape(Readable), _fixture.CreateCallerClient(withOid: false));
+        var response = await AskAsync(Shape("matter-health-single", Writable), _fixture.CreateCallerClient(withOid: false));
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _fixture.Nodes.Verify(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         VerifyAskNeverRan();
     }
 
@@ -275,6 +430,104 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
         }
     }
 
+    [Theory]
+    [InlineData(null, "writer", true)]
+    [InlineData(null, "reader", false)]
+    [InlineData("playbook", "writer", true)]
+    [InlineData("playbook", "reader", false)]
+    public async Task Assistant_WhenAPlaybookMayRun_TheCallersWriteOnTheSubjectIsAskedAsTheCaller_AndCarried(
+        string? forceMode, string caller, bool expected)
+    {
+        var subject = caller == "writer" ? Writable : Readable;
+
+        var response = await _fixture.CreateCallerClient()
+            .PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{subject}", forceMode });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "Read is the route's gate; Write only decides which playbooks may run");
+        _fixture.Access.RecordChecks.Should().HaveCount(2, "Read, then the Write question — both as the caller")
+            .And.AllSatisfy(c => c.Should().Be((RouteSweepAuthorizationFixture.CallerObjectId, "sprk_matters", subject, RouteSweepAuthorizationFixture.BearerToken)));
+        _fixture.InsightsAi.Verify(i => i.AssistantQueryAsync(
+            It.Is<AssistantQueryFacadeRequest>(r => r.SubjectWriteAuthorized == expected), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("seam-throws-on-write")]
+    [InlineData("no-bearer")]
+    public async Task Assistant_TheWriteQuestion_FailsClosedToNoWrite(string mode)
+    {
+        if (mode == "no-bearer")
+        {
+            // Without a forwarded token the Read gate itself denies — no playbook question is reached.
+            var denied = await _fixture.CreateCallerClient(withBearer: false)
+                .PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{Writable}" });
+            await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(denied);
+            _fixture.InsightsAi.VerifyNoOtherCalls();
+            return;
+        }
+
+        // The Read gate's question (check 1) is answered; the Write question (check 2) faults.
+        _fixture.Access.ThrowFromCheckNumber = 2;
+        var response = await _fixture.CreateCallerClient()
+            .PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{Writable}" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a faulting Write question answers 'no Write', never an error or an allow");
+        _fixture.Access.RecordChecks.Should().HaveCount(2);
+        _fixture.InsightsAi.Verify(i => i.AssistantQueryAsync(
+            It.Is<AssistantQueryFacadeRequest>(r => !r.SubjectWriteAuthorized), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Assistant_ForceModeRag_AsksNoWriteQuestion_AndTheRunCarriesNoWrite()
+    {
+        var response = await _fixture.CreateCallerClient()
+            .PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{Writable}", forceMode = "rag" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Access.RecordChecks.Should().ContainSingle("no playbook can run on the RAG path, so Write is never asked");
+        _fixture.InsightsAi.Verify(i => i.AssistantQueryAsync(
+            It.Is<AssistantQueryFacadeRequest>(r => !r.SubjectWriteAuthorized), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Assistant_TheFacadesRunGuardRefusal_BeforeAnyFrame_IsTheUniform404(bool sse)
+    {
+        var refusal = new SdapProblemException(InsightsAgentRequest.SubjectWriteRequiredCode, "Write on the subject is required", "x", 404);
+        _fixture.InsightsAi
+            .Setup(i => i.AssistantQueryAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(refusal);
+        _fixture.InsightsAi
+            .Setup(i => i.AssistantQueryStreamAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ThrowingStream(refusal, chunksFirst: 0));
+
+        var client = _fixture.CreateCallerClient(accept: sse ? "text/event-stream" : null);
+        var refused = await client.PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{Readable}", forceMode = "playbook" });
+        var absent = await client.PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{NonExistent}", forceMode = "playbook" });
+
+        await RagEndpointsAuthorizationContractTests.AssertUniformNotFoundAsync(refused);
+        refused.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        (await RouteSweepAuthorizationFixture.NormalizedProblemAsync(refused))
+            .Should().Be(await RouteSweepAuthorizationFixture.NormalizedProblemAsync(absent));
+    }
+
+    [Fact]
+    public async Task Assistant_TheFacadesRunGuardRefusal_MidStream_IsAnErrorFrame_WithItsCode_AndNoRecordId()
+    {
+        var refusal = new SdapProblemException(InsightsAgentRequest.SubjectWriteRequiredCode, "Write on the subject is required", "x", 404);
+        _fixture.InsightsAi
+            .Setup(i => i.AssistantQueryStreamAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ThrowingStream(refusal, chunksFirst: 1));
+
+        var response = await _fixture.CreateCallerClient(accept: "text/event-stream")
+            .PostAsJsonAsync("/api/insights/assistant/query", new { query = "q", subject = $"matter:{Readable}" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("event: error").And.Contain(InsightsAgentRequest.SubjectWriteRequiredCode).And.Contain("data: [DONE]");
+        body.Should().NotContain(Readable.ToString());
+    }
+
     // =====================================================================================================
     // POST /api/insights/search — finding #41
     // =====================================================================================================
@@ -327,8 +580,46 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     // Harness
     // =====================================================================================================
 
-    private static object LiveShape(Guid matterId) =>
-        new { question = "matter-health-single", subject = $"matter:{matterId}", parameters = new { } };
+    private void BindInsightsAsk(string canonicalName, Guid playbookId) =>
+        _fixture.Routing
+            .Setup(r => r.ResolveBindingAsync(ConsumerTypes.InsightsAsk, canonicalName,
+                It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = canonicalName, PlaybookId = playbookId,
+            });
+
+    private void ArrangeNodes(Guid playbookId, PlaybookNodeDto[] nodes) =>
+        _fixture.Nodes.Setup(n => n.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync(nodes);
+
+    private static PlaybookNodeDto Node(ExecutorType? type, string configJson) =>
+        new() { Id = Guid.NewGuid(), SprkExecutortype = type, ConfigJson = configJson, Name = type?.ToString() ?? "unclassified" };
+
+    /// <summary>The executor shape of the repo's matter-health-single.playbook.json (the node kinds and the {{matterId}} uses).</summary>
+    private static PlaybookNodeDto[] MatterHealthSingleNodes() =>
+    [
+        Node(ExecutorType.LiveFact, "{\"subject\":\"matter:{{matterId}}\"}"),
+        Node(ExecutorType.QueryDataverse, "{\"fetchXml\":\"<condition attribute='sprk_matter' operator='eq' value='{{matterId}}' />\"}"),
+        Node(ExecutorType.IndexRetrieve, "{\"filter\":\"matterId eq '{{matterId}}'\"}"),
+        Node(ExecutorType.AgentService, "{\"tenantId\":\"{{tenantId}}\",\"templateParameters\":{\"matterId\":\"{{matterId}}\"}}"),
+        Node(ExecutorType.ReturnInsightArtifact, "{\"subject\":\"matter:{{matterId}}\"}"),
+        Node(ExecutorType.UpdateRecord, "{\"entityLogicalName\":\"sprk_matter\",\"recordId\":\"{{matterId}}\"}"),
+    ];
+
+    /// <summary>The executor shape of the repo's predict-matter-cost.playbook.json: no node that can write references {{matterId}}.</summary>
+    private static PlaybookNodeDto[] PredictMatterCostNodes() =>
+    [
+        Node(ExecutorType.LiveFact, "{\"subject\":\"matter:{{matterId}}\"}"),
+        Node(ExecutorType.IndexRetrieve, "{\"filter\":\"matterId eq '{{matterId}}'\"}"),
+        Node(ExecutorType.EvidenceSufficiency, "{}"),
+        Node(ExecutorType.AgentService, "{\"tenantId\":\"{{tenantId}}\"}"),
+        Node(ExecutorType.GroundingVerify, "{}"),
+        Node(ExecutorType.ReturnInsightArtifact, "{\"subject\":\"matter:{{matterId}}\"}"),
+    ];
+
+    private static object Shape(string question, Guid matterId) =>
+        new { question, subject = $"matter:{matterId}", parameters = new { } };
 
     private Task<HttpResponseMessage> AskAsync(object body, HttpClient? client = null) =>
         (client ?? _fixture.CreateCallerClient()).PostAsJsonAsync("/api/insights/ask", body);
@@ -349,5 +640,17 @@ public sealed class InsightsRouteAuthorizationContractTests : IClassFixture<Rout
     {
         await Task.Yield();
         yield return new AssistantQueryChunk { Type = "progress", Step = "started" };
+    }
+
+    private static async IAsyncEnumerable<AssistantQueryChunk> ThrowingStream(
+        Exception refusal, int chunksFirst, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Yield();
+        for (var i = 0; i < chunksFirst; i++)
+        {
+            yield return new AssistantQueryChunk { Type = "progress", Step = "classifier_started" };
+        }
+
+        throw refusal;
     }
 }

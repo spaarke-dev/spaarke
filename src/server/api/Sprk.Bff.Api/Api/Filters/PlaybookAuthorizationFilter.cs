@@ -497,9 +497,10 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
 
     /// <summary>
     /// The 400 for a refused parameter. It names the caller's own key and the rule — never a record, and it does not
-    /// depend on whether any record exists, so it is not an oracle.
+    /// depend on whether any record exists, so it is not an oracle. Public so every HTTP entry that applies the shared
+    /// policy answers with the SAME body (task 163: <c>POST /api/insights/ask</c>).
     /// </summary>
-    private static IResult ParameterRejected(HttpContext httpContext, PlaybookParameterPolicy.Evaluation evaluation) =>
+    public static IResult ParameterRejected(HttpContext httpContext, PlaybookParameterPolicy.Evaluation evaluation) =>
         Results.Problem(
             statusCode: StatusCodes.Status400BadRequest,
             title: "Bad Request",
@@ -518,10 +519,108 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// UpdateRecord <c>recordId: {{matterId}}</c>); otherwise <c>"read"</c>.
     /// </summary>
     internal static string RecordParameterOperation(IReadOnlyCollection<PlaybookNodeDto> nodes, string parameterName) =>
-        nodes.Any(n => (n.SprkExecutortype is not { } executorType || ExecutorSideEffects.IsSideEffecting(executorType))
-                       && PlaybookParameterPolicy.ReferencesParameter(n.ConfigJson, parameterName))
-            ? "write"
-            : "read";
+        ExecutorSideEffects.CanWriteThroughParameter(nodes, parameterName) ? "write" : "read";
+
+    /// <summary>
+    /// The checks a run of <paramref name="playbookId"/> needs AS THE CALLER when its entry route binds it to a SUBJECT
+    /// record (unified-access-control-r2 task 163: <c>POST /api/insights/ask</c>; owner round 16 items 1 and 3), for the
+    /// route's <see cref="FinanceAuthorizationFilter"/> evaluation:
+    /// <list type="bullet">
+    ///   <item>the subject: the run reaches it through the parameter the subject is bound to
+    ///   (<paramref name="subjectParameterName"/> — <c>matterId</c> for <c>matter:{id}</c>, set by the Insights
+    ///   orchestrator), so it gets the SAME rule as any record parameter: <c>"write"</c> when a node that can write
+    ///   references that parameter (<see cref="ExecutorSideEffects.CanWriteThroughParameter"/> — e.g.
+    ///   <c>matter-health-single</c>'s UpdateRecord <c>recordId: {{matterId}}</c> onto
+    ///   <c>sprk_matter.sprk_performancesummary</c>), otherwise <c>"read"</c> (e.g. <c>predict-matter-cost</c>, which
+    ///   writes nothing). Round 16 item 1: "Read suffices only for non-persisting playbooks". An EMPTY node list (the
+    ///   Legacy run mode, which writes) is <c>"write"</c> — fail closed;</item>
+    ///   <item>every record parameter the shared policy returned (<see cref="PlaybookParameterPolicy.Evaluate"/>): the
+    ///   SAME rule as this filter's run mode — Read, plus Write when a node that can write references it
+    ///   (<see cref="RecordParameterOperation"/>) — on its entity set from the existing allow-list.</item>
+    /// </list>
+    /// A record parameter naming the subject itself folds into the subject's check (the stronger right wins), so the
+    /// caller is asked once per record. The subject check's <see cref="FinanceAuthorizationCheck.Operation"/> is what the
+    /// route then passes on as the run's established subject right (<c>InsightsAgentRequest.SubjectWriteAuthorized</c>).
+    /// </summary>
+    /// <remarks>
+    /// <b>The AI engine is not registered</b> (no <see cref="INodeService"/>: the compound AI gate is off, ADR-032): no
+    /// playbook can run — the facade is its kill-switch Null peer — so every record is asked for Read and the subject's
+    /// Write is NOT established. The facade's run guard refuses any run that can write without it (defence in depth),
+    /// and the route keeps its kill-switch 503 instead of turning it into a deny.
+    /// </remarks>
+    /// <returns>The checks, subject first.</returns>
+    /// <exception cref="InvalidOperationException">The node list cannot be read, or a record parameter's entity has no
+    /// entity set. The caller DENIES on any exception (ADR-003).</exception>
+    public static async Task<IReadOnlyList<FinanceAuthorizationCheck>> BuildSubjectRunChecksAsync(
+        IServiceProvider services,
+        Guid playbookId,
+        string subjectEntitySet,
+        Guid subjectId,
+        string subjectParameterName,
+        IReadOnlyList<PlaybookParameterPolicy.RecordParameter> recordParameters,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectEntitySet);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectParameterName);
+        ArgumentNullException.ThrowIfNull(recordParameters);
+
+        // The SAME source PlaybookOrchestrationService dispatches from. Null only when the engine is not registered.
+        IReadOnlyCollection<PlaybookNodeDto>? nodes = null;
+        var nodeService = services.GetService<INodeService>();
+        if (nodeService is not null)
+        {
+            nodes = await nodeService.GetNodesAsync(playbookId, cancellationToken)
+                ?? throw new InvalidOperationException("The playbook's node list could not be read.");
+        }
+
+        var checks = new List<FinanceAuthorizationCheck>
+        {
+            new()
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = subjectEntitySet,
+                RecordId = subjectId,
+                Operation = nodes is not null && (nodes.Count == 0 || ExecutorSideEffects.CanWriteThroughParameter(nodes, subjectParameterName))
+                    ? "write"
+                    : "read",
+                Source = "body.subject",
+            },
+        };
+
+        foreach (var parameter in recordParameters)
+        {
+            if (!SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet(parameter.EntityLogicalName, out var entitySet))
+            {
+                throw new InvalidOperationException(
+                    $"Record parameter '{parameter.Name}' names an entity with no entity set; the run's rights cannot be decided.");
+            }
+
+            var operation = nodes is null ? "read" : RecordParameterOperation(nodes, parameter.Name);
+            var existing = checks.FindIndex(c =>
+                string.Equals(c.EntitySetName, entitySet, StringComparison.Ordinal) && c.RecordId == parameter.RecordId);
+            if (existing >= 0)
+            {
+                if (operation == "write")
+                {
+                    checks[existing] = checks[existing] with { Operation = "write" };
+                }
+
+                continue;
+            }
+
+            checks.Add(new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = entitySet,
+                RecordId = parameter.RecordId,
+                Operation = operation,
+                Source = "body.parameters." + parameter.Name,
+            });
+        }
+
+        return checks;
+    }
 
     /// <summary>
     /// The playbook-use decision (<see cref="BuildPlaybookUseCheckAsync(IPlaybookService, Guid, string, CancellationToken)"/>)

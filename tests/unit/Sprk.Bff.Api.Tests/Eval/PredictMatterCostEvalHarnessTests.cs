@@ -221,12 +221,15 @@ public class PredictMatterCostEvalHarnessTests : IClassFixture<PredictMatterCost
 
         // Invoke the endpoint.
         //
-        // Task 163 (unified-access-control-r2): the subject id must be a GUID (the route's declaration filter
-        // authorizes Read on sprk_matters(id) as the caller), and the only identifier parameter /ask accepts is
-        // matterId EQUAL to the subject. The golden tuples carry display ids ("M-FIXTURE-001"), so each is mapped
-        // to a stable GUID used for BOTH the subject and the matterId parameter; the tuning keys pass unchanged.
+        // Task 163 (unified-access-control-r2): the subject id must be a GUID (the route filter authorizes the
+        // subject matter as the caller). The golden tuples carry display ids ("M-FIXTURE-001"), so each is mapped to a
+        // stable GUID used for BOTH the subject and the matterId parameter. Parameters pass task 164's SHARED
+        // playbook-parameter policy (owner round 16 item 3), a declared allow-list: the tuples' tuning keys
+        // (lookBackYears, currency, matterType) are on none of its lists — no predict-matter-cost node consumes them
+        // (its prompt inputs are liveFacts / cohortObservations / precedents, resolved by earlier nodes) — so only the
+        // subject's own record parameter is sent. The golden dataset itself is unchanged (it is evaluation input).
         var subjectMatterId = SubjectGuidFor(matterId);
-        var parameters = new Dictionary<string, string>(tuple.Parameters) { ["matterId"] = subjectMatterId.ToString() };
+        var parameters = new Dictionary<string, string> { ["matterId"] = subjectMatterId.ToString() };
 
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new
@@ -763,6 +766,11 @@ public class PredictMatterCostEvalHarnessFixture : WebApplicationFactory<Program
             services.AddSingleton(routing.Object);
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
+            // Task 163 (owner round 16 item 1): the route reads the playbook's node list to decide whether Write on the
+            // subject is needed; predict-matter-cost writes nothing, so its shape keeps the reader's Read sufficient.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.INodeService>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Api.Ai.RouteSweepNodeShapes.NonPersistingNodeService());
 
             services.RemoveAll<IHostedService>();
 

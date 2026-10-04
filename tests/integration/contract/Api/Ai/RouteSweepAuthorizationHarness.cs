@@ -52,6 +52,12 @@ public sealed class CallerAccessSeam : IAccessDataSource
     /// <summary>When set, every question throws — the fault every fail-closed path must turn into a deny.</summary>
     public bool ThrowOnCheck { get; set; }
 
+    /// <summary>
+    /// When set, the record-scoped question with this 1-based ordinal and every later one throw — so a test can let an
+    /// earlier question (e.g. a route's Read gate) answer and fault a later one (e.g. the Write question).
+    /// </summary>
+    public int? ThrowFromCheckNumber { get; set; }
+
     public CallerAccessSeam Grant(Guid recordId, AccessRights rights)
     {
         _rights[recordId] = rights;
@@ -72,6 +78,7 @@ public sealed class CallerAccessSeam : IAccessDataSource
         _rights.Clear();
         _everything = null;
         ThrowOnCheck = false;
+        ThrowFromCheckNumber = null;
         RecordChecks.Clear();
         DocumentChecks.Clear();
     }
@@ -80,7 +87,7 @@ public sealed class CallerAccessSeam : IAccessDataSource
         string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
     {
         RecordChecks.Add((userId, entitySetName, recordId, userAccessToken));
-        if (ThrowOnCheck)
+        if (ThrowOnCheck || RecordChecks.Count >= ThrowFromCheckNumber)
         {
             throw new InvalidOperationException("simulated RetrievePrincipalAccess fault");
         }
@@ -106,6 +113,37 @@ public sealed class CallerAccessSeam : IAccessDataSource
 
     private static AccessSnapshot Snapshot(string userId, string resourceId, AccessRights rights) =>
         new() { UserId = userId, ResourceId = resourceId, AccessRights = rights };
+}
+
+/// <summary>
+/// Playbook node shapes for hosts that drive <c>POST /api/insights/ask</c> (task 163): the route reads the node list to
+/// decide whether the run can write to its subject (owner round 16 item 1).
+/// </summary>
+public static class RouteSweepNodeShapes
+{
+    /// <summary>
+    /// The repo's predict-matter-cost shape — no node that can write references the subject's <c>{{matterId}}</c> — so a
+    /// reader of the subject may run it. For wire-contract hosts whose callers are readers.
+    /// </summary>
+    public static INodeService NonPersistingNodeService()
+    {
+        var nodes = new Mock<INodeService>();
+        nodes.Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new Sprk.Bff.Api.Models.Ai.PlaybookNodeDto
+                {
+                    SprkExecutortype = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.LiveFact,
+                    ConfigJson = "{\"subject\":\"matter:{{matterId}}\"}",
+                },
+                new Sprk.Bff.Api.Models.Ai.PlaybookNodeDto
+                {
+                    SprkExecutortype = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AgentService,
+                    ConfigJson = "{\"tenantId\":\"{{tenantId}}\"}",
+                },
+            ]);
+        return nodes.Object;
+    }
 }
 
 /// <summary>
@@ -173,6 +211,13 @@ public sealed class RouteSweepAuthorizationFixture : WebApplicationFactory<Progr
 
     public Mock<IConsumerRoutingService> Routing { get; } = new(MockBehavior.Loose);
 
+    /// <summary>
+    /// A playbook's node list — the source the route filter reads to decide whether a run can write (task 163, owner
+    /// round 16 item 1). Reset to "no playbook has nodes" (an empty list, which the one rule treats as CAN write — fail
+    /// closed), so a test states the node shape it relies on.
+    /// </summary>
+    public Mock<INodeService> Nodes { get; } = new(MockBehavior.Loose);
+
     /// <summary>Every request that actually reached the file-indexing pipeline.</summary>
     public List<FileIndexRequest> IndexedFiles { get; } = [];
 
@@ -188,6 +233,8 @@ public sealed class RouteSweepAuthorizationFixture : WebApplicationFactory<Progr
         Entities.Reset();
         InsightsAi.Reset();
         Routing.Reset();
+        Nodes.Reset();
+        Nodes.Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         IndexedFiles.Clear();
         AiAuthorization.Reset();
 
@@ -389,6 +436,9 @@ public sealed class RouteSweepAuthorizationFixture : WebApplicationFactory<Progr
 
             services.RemoveAll<IConsumerRoutingService>();
             services.AddSingleton(Routing.Object);
+
+            services.RemoveAll<INodeService>();
+            services.AddSingleton(Nodes.Object);
         });
     }
 }
