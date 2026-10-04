@@ -121,6 +121,13 @@ public interface IMembershipCacheInvalidator
     /// ownership keeps it for the identity + membership TTLs after it is secured (over-grant).</para>
     /// <para>Per-entity eviction is a keyspace SCAN; it runs only on these rare owner-changing writes, never on a
     /// read path (dev keyspace measured at ≤ 178 keys over 7 days, task 132 notes).</para>
+    /// <para><b>Only caches that can hold the type are scanned</b> (task 132 integration residual): the membership
+    /// pattern only for a type the resolver caches (<c>MembershipResolverService.CachesEntityType</c>), the root-set
+    /// pattern only for the three root types (<c>ImpersonatedRootSetSource.CachesEntityType</c>), the record snapshot
+    /// only for a set the decorator caches (<c>CachedAccessDataSource.CachesRecordEntitySet</c>), plus the document
+    /// snapshot for a <c>sprk_documents</c> record. A child an Assign cascade re-owns (<c>sharepointdocumentlocation</c>,
+    /// <c>sharepointdocument</c>) is cached by none of them, so its restore builds no pattern and touches Redis not at
+    /// all.</para>
     /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>
     /// </remarks>
     /// <param name="entityLogicalName">The root's logical name, e.g. <c>sprk_project</c> — the membership and root-set key segment.</param>
@@ -130,6 +137,36 @@ public interface IMembershipCacheInvalidator
     /// <param name="ct">Not honoured (see remarks); accepted for signature symmetry.</param>
     Task InvalidateRecordOwnerChangeAsync(
         string entityLogicalName,
+        string entitySetName,
+        Guid recordId,
+        string? correlationId,
+        CancellationToken ct);
+
+    /// <summary>
+    /// 🔴 <b>THE hook every BFF write of a POA SHARE calls</b> — a grant, a rights change or a revoke on a record, for a
+    /// user or a team (task 132 integration residual: share-only changes stale the access caches exactly as owner
+    /// changes do). Evicts, under EVERY tenant segment: every user's impersonated root-set entry for the record's root
+    /// type (the set is answered by an impersonated query, which sees shares; a TEAM share changes every member's set,
+    /// so the eviction is per type, not per sharee), and every user's access snapshot of the record (record-scoped, and
+    /// document-scoped for a <c>sprk_documents</c> record).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Who calls it</b>: the ONE POA seam, <c>DataverseRecordShareService</c>, after every
+    /// <c>GrantAccessAsync</c> / <c>ModifyAccessAsync</c> / <c>RevokeAccessAsync</c> — whether the write succeeded or
+    /// threw (a write that reports failure can have committed). So every share writer is covered by construction:
+    /// <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and error paths
+    /// included), <c>UnsecureProjectEndpoint</c>'s revocations, <c>SecureChildShareSynchronizer</c>'s child fan-out,
+    /// the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing.
+    /// <c>PoaShareClientSingletonGuardTests</c> fails the build on a POA write that does not go through the seam.</para>
+    /// <para>Membership resolution is NOT evicted: it is computed from lookup columns and ownership only — a share is
+    /// not a membership term.</para>
+    /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>
+    /// </remarks>
+    /// <param name="entitySetName">The shared record's entity SET name, as the POA write addressed it (<c>sprk_projects</c>).</param>
+    /// <param name="recordId">The shared record.</param>
+    /// <param name="correlationId">Optional correlation id for the log lines.</param>
+    /// <param name="ct">Not honoured (see remarks); accepted for signature symmetry.</param>
+    Task InvalidateRecordShareChangeAsync(
         string entitySetName,
         Guid recordId,
         string? correlationId,

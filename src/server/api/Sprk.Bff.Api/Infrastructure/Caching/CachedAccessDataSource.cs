@@ -16,8 +16,13 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 ///
 /// Cache key scheme (unified-access-control-r2 task 132 · defect C12 — moved onto <see cref="ITenantCache"/>,
 /// ADR-009 path C; on-wire keys carry the configured <c>InstanceName</c> in front):
-/// - Document access: <c>tenant:{tid}:auth-access:{authMode}:{userOid}:{documentId}:v1</c>       TTL 60 s
-/// - Record access:   <c>tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v1</c> TTL 60 s
+/// - Document access: <c>tenant:{tid}:auth-access:{authMode}:{userOid}:{documentId}:v2</c>       TTL 60 s
+/// - Record access:   <c>tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v2</c> TTL 60 s
+///
+/// Both are evicted for EVERY user of a record by <c>IMembershipCacheInvalidator</c> on the BFF's owner changes
+/// (<c>InvalidateRecordOwnerChangeAsync</c>) and share changes (<c>InvalidateRecordShareChangeAsync</c>, called by the
+/// one POA seam on every grant / modify / revoke) — task 132. A table re-owned silently by an Assign cascade is never
+/// cached (<see cref="CachesRecordEntitySet"/>).
 ///
 /// The former user-level role and team keys (<c>sdap:</c>-prefixed, 2-minute) are GONE: they were written on every
 /// miss and read by nothing in the repo (task 132 removed them with their TTLs).
@@ -73,7 +78,12 @@ public class CachedAccessDataSource : IAccessDataSource
     internal const string RecordAccessResource = "auth-record-access";
 
     /// <summary>Cache schema version (ADR-009). v1 of the tenant-scoped keys; the old <c>sdap:</c> keys are orphaned.</summary>
-    internal const int CacheVersion = 1;
+    /// <remarks>
+    /// <b>Bumped 1 → 2</b> (task 132 integration residual): the document id segment is now normalised
+    /// (<see cref="DocumentIdSegment"/>), so the share/owner-change eviction can address it. A v1 entry may carry a
+    /// differently-cased id the eviction pattern would not match; the bump makes every v1 entry unreachable instead.
+    /// </remarks>
+    internal const int CacheVersion = 2;
 
     /// <summary>TTL for per-resource access cache (most sensitive, shortest TTL).</summary>
     internal static readonly TimeSpan ResourceAccessTtl = TimeSpan.FromSeconds(60);
@@ -112,6 +122,31 @@ public class CachedAccessDataSource : IAccessDataSource
     /// <summary>The record id segment, in the one format both the reader and the eviction pattern use.</summary>
     internal static string RecordIdSegment(Guid recordId) => recordId.ToString("D");
 
+    /// <summary>
+    /// The document id segment of a document-access key: a GUID in the one format <see cref="RecordIdSegment"/> uses
+    /// (callers pass route text, whose casing and braces vary), anything else verbatim. Shared with the eviction
+    /// pattern (<c>MembershipCacheInvalidator</c>, task 132), so an owner or share change on a document reaches every
+    /// snapshot of it however the id was spelled on the request that cached it.
+    /// </summary>
+    internal static string DocumentIdSegment(string resourceId)
+        => Guid.TryParse(resourceId, out var id) ? RecordIdSegment(id) : resourceId;
+
+    /// <summary>
+    /// Whether <paramref name="entitySetName"/> is the set the document-scoped <see cref="GetUserAccessAsync"/> answers for
+    /// — its snapshot key carries no set, so the eviction must add the document-access pattern for such a record.
+    /// </summary>
+    internal static bool IsDocumentEntitySet(string entitySetName)
+        => string.Equals(entitySetName?.Trim(), DataverseAccessDataSource.DocumentEntitySetName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a record snapshot of <paramref name="entitySetName"/> is cached at all — the ONE predicate this reader and
+    /// the eviction hook share. False only for a table Dataverse re-owns as a side effect of a secure root's Assign
+    /// cascade (<c>AssignCascadeChildOwners.IsReownedByCascadeEntitySet</c>, task 132 integration residual): no BFF
+    /// write can evict after those owner changes, so such a snapshot is always read live.
+    /// </summary>
+    internal static bool CachesRecordEntitySet(string entitySetName)
+        => !Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.IsReownedByCascadeEntitySet(entitySetName);
+
     /// <summary>The request's tenant (<c>tid</c>), or null — in which case nothing is read from or written to the cache.</summary>
     internal static string? TenantFor(ClaimsPrincipal? user)
         => user?.FindFirst("tid")?.Value
@@ -141,7 +176,7 @@ public class CachedAccessDataSource : IAccessDataSource
             return await _inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
         }
 
-        var cacheId = DocumentAccessCacheId(authMode, userId, resourceId);
+        var cacheId = DocumentAccessCacheId(authMode, userId, DocumentIdSegment(resourceId));
         var cached = await TryGetAsync(tenantId, DocumentAccessResource, cacheId, ct);
         if (cached is not null)
         {
@@ -177,8 +212,9 @@ public class CachedAccessDataSource : IAccessDataSource
         }
 
         var tenantId = TenantFor(_httpContextAccessor?.HttpContext?.User);
-        if (tenantId is null)
+        if (tenantId is null || !CachesRecordEntitySet(entitySetName))
         {
+            // No tid (ADR-009), or a table re-owned silently by an Assign cascade (task 132): read live, never cached.
             return await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
         }
 

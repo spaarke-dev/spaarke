@@ -33,7 +33,7 @@ public sealed class NullMembershipCacheInvalidator : IMembershipCacheInvalidator
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _logger.LogWarning(
             "NullMembershipCacheInvalidator active — EVERY membership / access cache invalidation is a no-op " +
-            "(junction pub/sub AND the BFF write-path team/BU/owner evictions, task 132): the distributed cache is " +
+            "(junction pub/sub AND the BFF write-path team/BU/owner/share evictions, task 132): the distributed cache is " +
             "in-memory (Redis:Enabled=false), which cannot be scanned. TTL backstop: identity/membership/root-set " +
             "entries clear within {Ttl}. Set Redis:Enabled=true to activate eviction.",
             MembershipResolverService.CacheTtl);
@@ -75,6 +75,19 @@ public sealed class NullMembershipCacheInvalidator : IMembershipCacheInvalidator
         _logger.LogDebug(
             "NullMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync no-op — {EntityLogicalName} {RecordId} correlationId={CorrelationId} (TTL backstop active)",
             entityLogicalName, recordId, correlationId);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task InvalidateRecordShareChangeAsync(
+        string entitySetName,
+        Guid recordId,
+        string? correlationId,
+        CancellationToken ct)
+    {
+        _logger.LogDebug(
+            "NullMembershipCacheInvalidator.InvalidateRecordShareChangeAsync no-op — {EntitySet} {RecordId} correlationId={CorrelationId} (TTL backstop active)",
+            entitySetName, recordId, correlationId);
         return Task.CompletedTask;
     }
 }

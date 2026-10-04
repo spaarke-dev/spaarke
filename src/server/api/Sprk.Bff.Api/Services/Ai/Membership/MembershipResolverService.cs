@@ -237,7 +237,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── Cache lookup ────────────────────────────────────────────────────
         var tenantId = GetTenantId();
-        var cacheId = BuildCacheId(systemUserId, normalizedEntity, effectiveOptions);
+        // Task 132 integration residual: a table an Assign cascade re-owns silently is never cached (null id = no read,
+        // no write) — see CachesEntityType.
+        var cacheId = CachesEntityType(normalizedEntity) ? BuildCacheId(systemUserId, normalizedEntity, effectiveOptions) : null;
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
@@ -497,7 +499,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── Cache lookup (contact-namespaced id, disjoint from systemuser path) ─
         var tenantId = GetTenantId();
-        var cacheId = BuildContactCacheId(contactId, normalizedEntity, effectiveOptions);
+        var cacheId = CachesEntityType(normalizedEntity) ? BuildContactCacheId(contactId, normalizedEntity, effectiveOptions) : null;
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
@@ -1747,6 +1749,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
     internal static string ComposeCacheId(string subject, string entityType, string optionsHash)
         => $"{subject}:{entityType}:{optionsHash}";
 
+    /// <summary>
+    /// Whether a membership resolution for <paramref name="normalizedEntity"/> is cached at all — the ONE predicate the
+    /// reader (both planes) and the eviction hook (<see cref="IMembershipCacheInvalidator"/>, which builds no
+    /// per-entity membership pattern for an uncached type) share. False only for a table Dataverse re-owns as a side
+    /// effect of a secure root's Assign cascade (<c>AssignCascadeChildOwners.IsReownedByCascade</c> — task 132
+    /// integration residual): those owner changes have no BFF write to evict after, so the answer is always read live.
+    /// </summary>
+    internal static bool CachesEntityType(string normalizedEntity)
+        => !Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.IsReownedByCascade(normalizedEntity);
+
     /// <summary>The subject segment of a systemuser-plane cache id (task 132 — shared with the eviction patterns).</summary>
     internal static string SystemUserSubject(Guid systemUserId) => systemUserId.ToString("D");
 
@@ -1855,8 +1867,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return string.Join(",", sorted);
     }
 
-    private async Task<MembershipResponse?> TryGetFromCacheAsync(string tenantId, string cacheId, CancellationToken ct)
+    private async Task<MembershipResponse?> TryGetFromCacheAsync(string tenantId, string? cacheId, CancellationToken ct)
     {
+        if (cacheId is null)
+        {
+            return null; // an uncached entity type (CachesEntityType) — always resolved live
+        }
+
         try
         {
             return await _cache.GetAsync<MembershipResponse>(
@@ -1885,7 +1902,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// The systemuser path's ONE cache gate (task 132 · C12): a response built over a faulted read is not stored.
     /// </summary>
     private async Task TrySetCacheUnlessFaultedAsync(
-        string tenantId, string cacheId, MembershipResponse response, bool faulted, Guid systemUserId, CancellationToken ct)
+        string tenantId, string? cacheId, MembershipResponse response, bool faulted, Guid systemUserId, CancellationToken ct)
     {
         if (faulted)
         {
@@ -1899,8 +1916,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
         await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
     }
 
-    private async Task TrySetCacheAsync(string tenantId, string cacheId, MembershipResponse response, CancellationToken ct)
+    private async Task TrySetCacheAsync(string tenantId, string? cacheId, MembershipResponse response, CancellationToken ct)
     {
+        if (cacheId is null)
+        {
+            return; // an uncached entity type (CachesEntityType)
+        }
+
         try
         {
             await _cache.SetAsync(

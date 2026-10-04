@@ -61,8 +61,8 @@ The primary cache layer. All services inject **`ITenantCache`** (not `IDistribut
 
 | TTL | Cache Type | Key Pattern | Rationale |
 |-----|-----------|-------------|-----------|
-| 60s | Authorization document access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-access:{authMode}:{userOid}:{documentId}:v1` | Most security-sensitive; short TTL reduces stale permission risk. A FAULTED or degraded snapshot is never cached (task 132) |
-| 60s | Authorization record access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-record-access:{entitySet}:{userOid}:{recordId}:v1` | Same; evicted for ALL users of a record on a BFF re-own (task 132) |
+| 60s | Authorization document access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-access:{authMode}:{userOid}:{documentId}:v2` | Most security-sensitive; short TTL reduces stale permission risk. A FAULTED or degraded snapshot is never cached (task 132). The document id is normalised (`D` format) so an eviction reaches it however the request spelled it; evicted for ALL users of the document on a BFF re-own or share write |
+| 60s | Authorization record access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-record-access:{entitySet}:{userOid}:{recordId}:v2` | Same; evicted for ALL users of a record on a BFF re-own or share write (task 132). A table an Assign cascade re-owns (`sharepointdocumentlocation`, `sharepointdocument`) is never cached |
 | 60s | External grant set (`ExternalParticipationService`) | `spaarke:tenant:{tenantId}:external-access-grant:{contactId}:v5` | Grant data; evicted by every BFF grant write (task 137); a fault-derived set is never cached (task 132) |
 | 2 min | Membership identity (`IdentityNormalizationService`) | `spaarke:tenant:{tenantId}:membership-identity:{systemUserId}:v2` | Teams, BU, linked contact; was 10 min until task 132; evicted by BFF team / BU writes |
 | 2 min | Membership resolution (`MembershipResolverService`) | `spaarke:tenant:{tenantId}:membership-resolved:{subject}:{entityType}:{optionsHash}:v5` | Was 5 min until task 132; evicted per user (team / BU writes) and per entity type (re-own) |
@@ -233,7 +233,7 @@ These remain explicit non-goals for the current Phase 1 remediation; the wrapper
 | Version-based key rotation | DistributedCacheExtensions, GraphMetadataCache, membership identity (v2) / resolution (v5) | New ETag/version creates new key; old key expires naturally. Task 132 bumped the two membership versions so no pre-fix (possibly fault-derived) entry is served |
 | Fire-and-forget cache write | CachedAccessDataSource, ExternalParticipationService | Snapshot / grant set cached asynchronously after the Dataverse fetch — **unless it is FAULTED** (task 132): a failed read, a 429 / 5xx / timeout, or a degraded probe-derived answer is returned to its request and never stored |
 | Token removal | GraphTokenCache | On logout or token invalidation via `RemoveTokenAsync` |
-| BFF write-path eviction (SCAN + DEL) | `IMembershipCacheInvalidator.InvalidateUserAccessAsync` / `InvalidateRecordOwnerChangeAsync` (task 132) | Team add / remove and BU bind (per user: identity, membership, root sets); re-own (per entity type: membership, root sets; per record: snapshots). Every tenant segment; no HttpContext needed; patterns built from the readers' own key builders. Active whenever Redis is the cache — independent of the junction channel switch |
+| BFF write-path eviction (SCAN + DEL) | `IMembershipCacheInvalidator.InvalidateUserAccessAsync` / `InvalidateRecordOwnerChangeAsync` / `InvalidateRecordShareChangeAsync` (task 132) | Team add / remove and BU bind (per user: identity, membership, root sets); re-own (per entity type: membership, root sets; per record: snapshots); every POA share write — grant, rights change, revoke — made by the ONE POA seam `DataverseRecordShareService` (per root type: root sets; per record: snapshots). Every tenant segment; no HttpContext needed; patterns built from the readers' own key builders, and only for a cache that can hold the type (a child an Assign cascade re-owns gets no pattern and no SCAN). Active whenever Redis is the cache — independent of the junction channel switch |
 | Pub/Sub broadcast invalidation | `MembershipCacheInvalidator.PublishInvalidationAsync` + `MembershipCacheInvalidationSubscriber` (junction-row writes) | Redis Pub/Sub channel, only with `Membership:CacheInvalidator:Enabled=true`; no-op in in-memory dev mode |
 
 ## Data Flow
@@ -358,7 +358,7 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 - **Pub/Sub silent in local dev**: In-memory mode's Null-Object `IConnectionMultiplexer.Subscribe(...)` is a no-op. Multi-instance local testing of Pub/Sub-dependent features (job status fan-out, future cross-instance invalidation) requires a deployed dev environment with real Redis.
 - **IConnectionMultiplexer singleton coupling**: A single `ConnectionMultiplexer` serves both `IDistributedCache` and Pub/Sub (used by `JobStatusService`). Connection issues affect both caching and real-time job status simultaneously.
 - **Embedding cache size**: 1536-float vectors at 4 bytes each = ~6KB per cached embedding. High-volume workloads can accumulate significant Redis memory; the 7-day TTL provides natural eviction; monitor against the SKU-undersize alert threshold above.
-- **Authorization cache staleness**: a change made OUTSIDE the BFF (MDA Assign / Change BU, admin UI, flows) can take up to the bounds in § Access cache residual staleness to take effect — at most 4 minutes (identity 2 min + membership 2 min, stacked). The BFF's own team / BU / owner writes evict immediately. Signed off by the owner (rounds 3 R3/R4).
+- **Authorization cache staleness**: a change made OUTSIDE the BFF (MDA Assign / Change BU, admin UI, flows) can take up to the bounds in § Access cache residual staleness to take effect — at most 4 minutes (identity 2 min + membership 2 min, stacked). The BFF's own team / BU / owner / share writes evict immediately. Signed off by the owner (rounds 3 R3/R4).
 - **System-level allow-list creep**: Each new entry on the System-Level Exception Allow-List weakens tenant isolation defense-in-depth. Treat additions as architecture decisions, not routine code changes.
 - **Tenant-ID resolution in background work**: `ServiceBusJobProcessor` and other background paths must explicitly pass `tenantId` to `ITenantCache` (no ambient `HttpContext`). Reuse the event payload's tenant claim.
 
@@ -373,12 +373,14 @@ Dataverse admin UI, MDA Assign / Change BU, flows, imports. **Owner sign-off: ro
 | 1 | External grant set | 60 s | grant / revoke / close / expiry (every tenant; organization members fanned out — task 137) | 60 s | after a removal the old access persists ≤ bound (over-grant); after an addition new access appears ≤ bound (under-grant) |
 | 2 | Membership identity (teams, BU, linked contact) | 2 min | team add / remove, BU bind | 2 min | same |
 | 3 | Membership resolution | 2 min | the user's team / BU writes (per user); every re-own of the entity type (per entity) | **4 min** (identity + membership stacked) | same |
-| 4 | Access snapshots (RetrievePrincipalAccess answers) | 60 s | every re-own of the record (all users) | 60 s — includes BFF share / unshare and a user's team change (keyed by Entra oid, not evicted) | same |
-| 5 | Impersonated root sets | 2 min | per user on a POA share change; per user on team add / remove; all users of the entity type on a re-own | 2 min | same |
+| 4 | Access snapshots (RetrievePrincipalAccess answers) | 60 s | every re-own of the record and every BFF share write on it — grant / rights change / revoke, through the one POA seam (all users) | 60 s — includes a user's team change (keyed by Entra oid, not evicted) | same |
+| 5 | Impersonated root sets | 2 min | all users of the root type on every BFF share write (the POA seam) and on a re-own; per user on team add / remove | 2 min | same |
 | 6 | Fault-derived results | never cached | — | — | a fault denies one request, never a TTL |
 
 A read that started before an eviction and writes after it can re-cache a pre-change answer for one TTL (inherent to
-cache-aside eviction). Record: `projects/unified-access-control-r2/notes/task-132-access-cache-faults-and-staleness.md`.
+cache-aside eviction). The rows an Assign cascade re-owns as a side effect (`sharepointdocumentlocation`,
+`sharepointdocument`) are held by no access cache at all — no BFF write follows the cascade's owner changes, so they are
+read live (batch 4 integration residual). Record: `projects/unified-access-control-r2/notes/task-132-access-cache-faults-and-staleness.md`.
 
 ## Related
 

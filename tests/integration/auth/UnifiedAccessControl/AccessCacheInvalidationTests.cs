@@ -52,7 +52,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// the real endpoints in the <see cref="ProvisionProjectTestFixture"/> host with only the invalidator registration
 /// replaced by the production invalidator over the key space.</para>
 /// </remarks>
-public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjectTestFixture>
+public sealed partial class AccessCacheInvalidationTests : IClassFixture<ProvisionProjectTestFixture>
 {
     private const string TenantA = "13200000-aaaa-4aaa-8aaa-00000000000a";
     private const string TenantB = "13200000-bbbb-4bbb-8bbb-00000000000b";
@@ -371,6 +371,7 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
     {
         public const string ProjectEntity = "sprk_project";
         public const string MatterEntity = "sprk_matter";
+        public const string CascadeChildEntity = "sharepointdocumentlocation";
         public static readonly Guid Project = Guid.Parse("13200000-0000-0000-0000-0000000003b1");
         private static readonly Guid BusinessUnitTeam = Guid.Parse("13200000-0000-0000-0000-0000000004c1");
 
@@ -380,6 +381,7 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
         private readonly Mock<IMembershipFieldDiscoveryService> _discovery = new();
         private int _membershipQueries;
         private int _rootSetReads;
+        private int _snapshotReads;
 
         public AccessCacheWorld()
         {
@@ -413,7 +415,9 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
                     return rows;
                 });
 
-            foreach (var entity in new[] { ProjectEntity, MatterEntity })
+            // Task 132 batch 4 residual: a table an Assign cascade re-owns is discoverable like any other — the membership
+            // resolver must still decline to cache it.
+            foreach (var entity in new[] { ProjectEntity, MatterEntity, CascadeChildEntity })
             {
                 _discovery
                     .Setup(d => d.DiscoverAsync(entity, It.IsAny<CancellationToken>()))
@@ -430,6 +434,9 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
         public int MembershipQueries => Volatile.Read(ref _membershipQueries);
 
         public int RootSetReads => Volatile.Read(ref _rootSetReads);
+
+        /// <summary>Calls that reached the inner (Dataverse) access source — a cache miss or an uncached read.</summary>
+        public int SnapshotReads => Volatile.Read(ref _snapshotReads);
 
         /// <summary>The four production readers, as a request in <paramref name="tenant"/> sees them.</summary>
         public ReaderSet Readers(string tenant)
@@ -451,7 +458,7 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
             var rootSets = new ImpersonatedRootSetSource(
                 new RootQuery(this), cache, NullLogger<ImpersonatedRootSetSource>.Instance, accessor);
             var snapshots = new CachedAccessDataSource(
-                new AnsweringInner(), cache, accessor, NullLogger<CachedAccessDataSource>.Instance);
+                new AnsweringInner(this), cache, accessor, NullLogger<CachedAccessDataSource>.Instance);
             return new ReaderSet(identity, membership, rootSets, snapshots);
         }
 
@@ -471,7 +478,16 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
         public Task WarmSnapshotAsync(string oid, string entitySet, Guid recordId, string tenant)
             => Readers(tenant).Snapshots.GetRecordAccessAsync(oid, entitySet, recordId, "user-token");
 
+        /// <summary>
+        /// Caches one DOCUMENT-access snapshot through the production decorator, with the document id spelled as the
+        /// request spelled it (route text: any casing, braces).
+        /// </summary>
+        public Task WarmDocumentSnapshotAsync(string oid, string documentIdAsSent, string tenant)
+            => Readers(tenant).Snapshots.GetUserAccessAsync(oid, documentIdAsSent, "user-token");
+
         internal void CountRootSetRead() => Interlocked.Increment(ref _rootSetReads);
+
+        internal void CountSnapshotRead() => Interlocked.Increment(ref _snapshotReads);
 
         public sealed record ReaderSet(
             IdentityNormalizationService Identity,
@@ -492,13 +508,19 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
             }
         }
 
-        private sealed class AnsweringInner : IAccessDataSource
+        private sealed class AnsweringInner(AccessCacheWorld world) : IAccessDataSource
         {
             public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
-                => Task.FromResult(new AccessSnapshot { UserId = userId, ResourceId = resourceId, AccessRights = AccessRights.Read });
+            {
+                world.CountSnapshotRead();
+                return Task.FromResult(new AccessSnapshot { UserId = userId, ResourceId = resourceId, AccessRights = AccessRights.Read });
+            }
 
             public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
-                => Task.FromResult(new AccessSnapshot { UserId = userId, ResourceId = recordId.ToString(), AccessRights = AccessRights.Read | AccessRights.Write });
+            {
+                world.CountSnapshotRead();
+                return Task.FromResult(new AccessSnapshot { UserId = userId, ResourceId = recordId.ToString(), AccessRights = AccessRights.Read | AccessRights.Write });
+            }
         }
     }
 

@@ -101,6 +101,35 @@ public static class AssignCascadeChildOwners
     };
 
     /// <summary>
+    /// Every owner-bearing table an Assign of ANY secure root re-owns as a side effect — the union of
+    /// <see cref="TablesFor"/> over the roots, <see cref="CascadeChildRead.NoOwner"/> tables excluded (an Assign cannot
+    /// re-own them).
+    /// </summary>
+    private static readonly IReadOnlyList<CascadeChildTable> ReownedByCascadeTables =
+        new[] { "sprk_project", "sprk_matter", "sprk_workassignment" }
+            .SelectMany(TablesFor)
+            .Where(t => t.Read != CascadeChildRead.NoOwner)
+            .Distinct()
+            .ToArray();
+
+    /// <summary>
+    /// 🔴 unified-access-control-r2 task 132 (integration residual): whether <paramref name="entityLogicalName"/> is a
+    /// table whose rows Dataverse re-owns as a SIDE EFFECT of an Assign of a secure root (<c>sharepointdocumentlocation</c>,
+    /// <c>sharepointdocument</c>). <b>No access cache stores anything keyed by such a table</b> — the membership resolver,
+    /// the impersonated root-set source and the record-access snapshot decorator all read it live — because the
+    /// cascade's owner changes happen with no BFF write to evict after (the forward Assign into the secure owner team
+    /// re-owns them silently). Consequence, and the reason the rule lives HERE beside <see cref="TablesFor"/>: a child
+    /// restore needs no eviction (the eviction hook builds no pattern for these tables, so it scans nothing), and a new
+    /// cascading relationship added to <see cref="TablesFor"/> is uncached the moment it is listed.
+    /// </summary>
+    internal static bool IsReownedByCascade(string entityLogicalName) =>
+        ReownedByCascadeTables.Any(t => string.Equals(t.LogicalName, entityLogicalName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The entity-SET form of <see cref="IsReownedByCascade"/> (the record-access snapshot key carries the set).</summary>
+    internal static bool IsReownedByCascadeEntitySet(string entitySetName) =>
+        ReownedByCascadeTables.Any(t => string.Equals(t.EntitySet, entitySetName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// Reads every owner-bearing child an Assign of the root re-owns, with its own owner. Read-only. Either the whole
     /// set or a failure naming the table that could not be read completely — never a partial snapshot.
     /// </summary>

@@ -532,6 +532,11 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
             OwnerChanges.Enqueue((entityLogicalName, entitySetName, recordId));
             return Task.CompletedTask;
         }
+
+        // Share-change evictions are made by the POA seam (DataverseRecordShareService), which this host replaces with
+        // the fixture's share table — so none reaches here; not recorded.
+        public Task InvalidateRecordShareChangeAsync(string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+            => Task.CompletedTask;
     }
 
     private async Task<(HttpResponseMessage Response, RecordingInvalidator Evictions)> ProvisionRecordingEvictionsAsync(object body)

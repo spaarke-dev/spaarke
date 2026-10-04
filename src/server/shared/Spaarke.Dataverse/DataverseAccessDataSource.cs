@@ -396,7 +396,10 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>The entity set targeted by the document-scoped <see cref="GetUserAccessAsync"/> path.</summary>
-    private const string DocumentEntitySetName = "sprk_documents";
+    /// <remarks>Public since unified-access-control-r2 task 132's share-change eviction: the BFF's snapshot decorator keys
+    /// a document snapshot WITHOUT the set (the path is document-only), so an owner or share change on a record of this
+    /// set must also evict that key — and it learns "this set is the document path" from here, not from a copy.</remarks>
+    public const string DocumentEntitySetName = "sprk_documents";
 
     /// <inheritdoc />
     public async Task<AccessSnapshot> GetRecordAccessAsync(

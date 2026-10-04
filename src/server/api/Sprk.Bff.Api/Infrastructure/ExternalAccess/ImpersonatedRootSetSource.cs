@@ -131,6 +131,33 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// <summary>The three root entity types this source can answer for.</summary>
     internal static IReadOnlyCollection<string> SupportedEntityTypes => (IReadOnlyCollection<string>)Bindings.Keys;
 
+    /// <summary>
+    /// Whether this source can hold a cached set for <paramref name="entityType"/> — only the three root types: any other
+    /// type is refused by <see cref="GetAsync"/> before the cache is touched. The eviction hook
+    /// (<c>IMembershipCacheInvalidator</c>, task 132) builds a root-set pattern only when this is true, so a child's
+    /// owner or share change never scans the key space for a key that cannot exist.
+    /// </summary>
+    internal static bool CachesEntityType(string entityType) => Bindings.ContainsKey(entityType);
+
+    /// <summary>
+    /// The root type whose entity SET is <paramref name="entitySetName"/> (<c>sprk_projects</c> → <c>sprk_project</c>), for
+    /// the share-change eviction, whose writer (the POA seam) knows only the set. False for any non-root set.
+    /// </summary>
+    internal static bool TryGetEntityTypeForSet(string entitySetName, out string entityType)
+    {
+        foreach (var (type, binding) in Bindings)
+        {
+            if (string.Equals(binding.EntitySet, entitySetName?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                entityType = type;
+                return true;
+            }
+        }
+
+        entityType = string.Empty;
+        return false;
+    }
+
     /// <inheritdoc />
     public async Task<RootIdSet> GetAsync(Guid systemUserId, string entityType, CancellationToken ct = default)
     {

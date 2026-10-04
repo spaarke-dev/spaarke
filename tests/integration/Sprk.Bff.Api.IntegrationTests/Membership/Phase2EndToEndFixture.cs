@@ -885,6 +885,12 @@ public sealed class SpyMembershipCacheInvalidator : IMembershipCacheInvalidator
         string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
         => Task.CompletedTask;
 
+    /// <inheritdoc />
+    /// <remarks>The POA seam's share-change eviction (task 132 batch 4 residual); no Phase 2 path shares, so it is not recorded.</remarks>
+    public Task InvalidateRecordShareChangeAsync(
+        string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        => Task.CompletedTask;
+
     /// <summary>Reset between tests.</summary>
     public void Reset() => _invocations.Clear();
 }

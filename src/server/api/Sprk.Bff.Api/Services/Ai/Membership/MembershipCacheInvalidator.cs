@@ -11,7 +11,8 @@
 //     and logs at Warning — never throws (FR-2P2.8 resilience contract)
 //
 // unified-access-control-r2 task 132 (defect C12) adds the BFF write-path access-cache evictions
-// (InvalidateUserAccessAsync / InvalidateRecordOwnerChangeAsync). They delete keys in the SHARED Redis directly
+// (InvalidateUserAccessAsync / InvalidateRecordOwnerChangeAsync; InvalidateRecordShareChangeAsync since the batch 4
+// integration residual — called by the one POA seam on every share write). They delete keys in the SHARED Redis directly
 // (SCAN + DEL, the same mechanism MembershipCacheInvalidationSubscriber already uses), so every BFF instance sees
 // the eviction at once with no pub/sub hop, and they run whether or not the junction channel switch
 // (Membership:CacheInvalidator:Enabled) is on. That switch now gates the junction PUBLISH only.
@@ -234,6 +235,27 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
             correlationId);
     }
 
+    /// <inheritdoc />
+    public Task InvalidateRecordShareChangeAsync(
+        string entitySetName,
+        Guid recordId,
+        string? correlationId,
+        CancellationToken ct)
+    {
+        if (recordId == Guid.Empty || string.IsNullOrWhiteSpace(entitySetName))
+        {
+            _logger.LogWarning(
+                "MembershipCacheInvalidator.InvalidateRecordShareChangeAsync called without a record ({EntitySet}/{RecordId}) — nothing evicted (correlationId={CorrelationId})",
+                entitySetName, recordId, correlationId);
+            return Task.CompletedTask;
+        }
+
+        return EvictAsync(
+            RecordShareChangePatterns(_instanceName, entitySetName, recordId),
+            $"{entitySetName} {recordId:D} (share change)",
+            correlationId);
+    }
+
     // ── Eviction patterns (task 132) ────────────────────────────────────────────────────────────────────────
     //
     // Every pattern is built by the READERS' own key builders — TenantCache.BuildKey (tenant segment = "*") over each
@@ -268,8 +290,10 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
 
     /// <summary>
     /// The on-wire patterns <see cref="InvalidateRecordOwnerChangeAsync"/> removes: every user's membership-resolution
-    /// entries for the entity type, every user's impersonated root-set entry for it, and every user's record-access
-    /// snapshot for the record — each under every tenant segment.
+    /// entries for the entity type, every user's impersonated root-set entry for it, and every user's access snapshots
+    /// of the record — each under every tenant segment, and each ONLY when its cache can hold that type (task 132
+    /// integration residual: a pattern for a type no reader caches would scan the whole key space for nothing). A table
+    /// an Assign cascade re-owns (<c>sharepointdocumentlocation</c> / <c>sharepointdocument</c>) gets no pattern at all.
     /// </summary>
     internal static IReadOnlyList<string> RecordOwnerChangePatterns(
         string? instanceName, string entityLogicalName, string entitySetName, Guid recordId)
@@ -279,25 +303,76 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
         // matches nothing.
         var entity = entityLogicalName.Trim().ToLowerInvariant();
 
-        return new[]
+        var patterns = new List<string>();
+        if (MembershipResolverService.CachesEntityType(entity))
         {
-            TenantCache.OnWire(instanceName, TenantCache.BuildKey(
+            patterns.Add(TenantCache.OnWire(instanceName, TenantCache.BuildKey(
                 TenantCache.AnyTenant,
                 MembershipResolverService.CacheResource,
                 MembershipResolverService.ComposeCacheId(AnySegment, entity, AnySegment),
-                MembershipResolverService.CacheVersion)),
-            TenantCache.OnWire(instanceName, TenantCache.BuildKey(
-                TenantCache.AnyTenant,
-                ImpersonatedRootSetSource.CacheResource,
-                ImpersonatedRootSetSource.CacheId(AnySegment, entity),
-                ImpersonatedRootSetSource.CacheVersion)),
-            TenantCache.OnWire(instanceName, TenantCache.BuildKey(
+                MembershipResolverService.CacheVersion)));
+        }
+
+        if (ImpersonatedRootSetSource.CachesEntityType(entity))
+        {
+            patterns.Add(RootSetPattern(instanceName, entity));
+        }
+
+        patterns.AddRange(RecordSnapshotPatterns(instanceName, entitySetName, recordId));
+        return patterns;
+    }
+
+    /// <summary>
+    /// The on-wire patterns <see cref="InvalidateRecordShareChangeAsync"/> removes: every user's impersonated root-set
+    /// entry for the record's root type (when the set is a root's), and every user's access snapshots of the record —
+    /// each under every tenant segment, and each only when its cache can hold that set. No membership pattern: a share is
+    /// not a membership term.
+    /// </summary>
+    internal static IReadOnlyList<string> RecordShareChangePatterns(string? instanceName, string entitySetName, Guid recordId)
+    {
+        var patterns = new List<string>();
+        if (ImpersonatedRootSetSource.TryGetEntityTypeForSet(entitySetName, out var rootType))
+        {
+            patterns.Add(RootSetPattern(instanceName, rootType));
+        }
+
+        patterns.AddRange(RecordSnapshotPatterns(instanceName, entitySetName, recordId));
+        return patterns;
+    }
+
+    /// <summary>Every user's impersonated root-set entry for one root type.</summary>
+    private static string RootSetPattern(string? instanceName, string rootType) =>
+        TenantCache.OnWire(instanceName, TenantCache.BuildKey(
+            TenantCache.AnyTenant,
+            ImpersonatedRootSetSource.CacheResource,
+            ImpersonatedRootSetSource.CacheId(AnySegment, rootType),
+            ImpersonatedRootSetSource.CacheVersion));
+
+    /// <summary>
+    /// Every user's access snapshots of one record: the record-scoped snapshot (when the decorator caches the set), and —
+    /// for a <c>sprk_documents</c> record — the document-scoped snapshot, whose key carries no set and either auth mode.
+    /// </summary>
+    private static IEnumerable<string> RecordSnapshotPatterns(string? instanceName, string entitySetName, Guid recordId)
+    {
+        var set = entitySetName.Trim();
+        if (CachedAccessDataSource.CachesRecordEntitySet(set))
+        {
+            yield return TenantCache.OnWire(instanceName, TenantCache.BuildKey(
                 TenantCache.AnyTenant,
                 CachedAccessDataSource.RecordAccessResource,
-                CachedAccessDataSource.RecordAccessCacheId(
-                    entitySetName.Trim(), AnySegment, CachedAccessDataSource.RecordIdSegment(recordId)),
-                CachedAccessDataSource.CacheVersion)),
-        };
+                CachedAccessDataSource.RecordAccessCacheId(set, AnySegment, CachedAccessDataSource.RecordIdSegment(recordId)),
+                CachedAccessDataSource.CacheVersion));
+        }
+
+        if (CachedAccessDataSource.IsDocumentEntitySet(set))
+        {
+            yield return TenantCache.OnWire(instanceName, TenantCache.BuildKey(
+                TenantCache.AnyTenant,
+                CachedAccessDataSource.DocumentAccessResource,
+                CachedAccessDataSource.DocumentAccessCacheId(
+                    AnySegment, AnySegment, CachedAccessDataSource.DocumentIdSegment(recordId.ToString("D"))),
+                CachedAccessDataSource.CacheVersion));
+        }
     }
 
     /// <summary>
@@ -307,6 +382,15 @@ public sealed class MembershipCacheInvalidator : IMembershipCacheInvalidator
     /// </summary>
     private async Task EvictAsync(IReadOnlyList<string> patterns, string subject, string? correlationId)
     {
+        if (patterns.Count == 0)
+        {
+            // No cache can hold an entry for this record's type (task 132 integration residual) — nothing to scan.
+            _logger.LogDebug(
+                "[ACCESS-EVICT] Nothing to evict for {Subject}: no access cache holds that type (correlationId={CorrelationId})",
+                subject, correlationId);
+            return;
+        }
+
         var deleted = 0;
         var failed = 0;
 

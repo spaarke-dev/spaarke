@@ -1,4 +1,5 @@
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -27,6 +28,11 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <see cref="GetPrincipalAccessOrThrowAsync"/> is the complete answer or an exception. A caller that decides a
 /// WRITE from the current shares (the FR-29 "+ User" endpoints) must use it: "no share" and "the read failed" call
 /// for different writes, and the soft read cannot tell them apart.</para>
+///
+/// <para><b>Every write evicts the access caches it stales</b> (task 132, batch 4 integration residual): the production
+/// implementation, <see cref="DataverseRecordShareService"/>, calls
+/// <see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/> after
+/// each grant / modify / revoke. A writer therefore needs no eviction of its own — and must not reach POA any other way.</para>
 /// </remarks>
 public interface IDataverseRecordShareService
 {
@@ -90,43 +96,109 @@ public interface IDataverseRecordShareService
 
 /// <summary>
 /// Default <see cref="IDataverseRecordShareService"/> — a pass-through to the shared
-/// <see cref="DataverseWebApiService"/> POA primitives. Holds no state; safe as a singleton over the
-/// singleton <see cref="DataverseWebApiService"/>.
+/// <see cref="DataverseWebApiService"/> POA primitives that also evicts the access caches every share WRITE makes stale.
+/// Holds no state; safe as a singleton over the singleton <see cref="DataverseWebApiService"/>.
 /// </summary>
+/// <remarks>
+/// <para><b>Share writes evict (unified-access-control-r2 task 132, batch 4 integration residual).</b> A grant, a
+/// rights change or a revoke changes who can read the record exactly as an owner change does, so after each one —
+/// whether it returned or threw (a write that reports failure can have committed) — this seam calls
+/// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>: every user's impersonated root set for the
+/// record's root type and every user's access snapshots of the record. The eviction lives HERE, in the one POA client,
+/// rather than at each writer, so no share writer can be born without it (<c>PoaShareClientSingletonGuardTests</c> fails
+/// the build on a POA write that bypasses this seam). It is not bound to the caller's token
+/// (<see cref="CancellationToken.None"/>) and never fails or changes the write's own outcome: the hook does not throw, and
+/// a defect that made it throw is caught and logged here. Reads evict nothing.</para>
+/// </remarks>
 public sealed class DataverseRecordShareService : IDataverseRecordShareService
 {
     private readonly DataverseWebApiService _dataverse;
+    private readonly IMembershipCacheInvalidator _accessCacheInvalidator;
+    private readonly ILogger<DataverseRecordShareService> _logger;
 
-    public DataverseRecordShareService(DataverseWebApiService dataverse)
+    public DataverseRecordShareService(
+        DataverseWebApiService dataverse,
+        IMembershipCacheInvalidator accessCacheInvalidator,
+        ILogger<DataverseRecordShareService> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _accessCacheInvalidator = accessCacheInvalidator ?? throw new ArgumentNullException(nameof(accessCacheInvalidator));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
-    public Task GrantAccessAsync(
+    public async Task GrantAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-        => _dataverse.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+    {
+        try
+        {
+            await _dataverse.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await EvictAfterShareWriteAsync(entitySetName, recordId, "grant").ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
-    public Task ModifyAccessAsync(
+    public async Task ModifyAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-        => _dataverse.ModifyAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+    {
+        try
+        {
+            await _dataverse.ModifyAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await EvictAfterShareWriteAsync(entitySetName, recordId, "modify").ConfigureAwait(false);
+        }
+    }
 
     /// <inheritdoc />
-    public Task RevokeAccessAsync(
+    public async Task RevokeAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
         CancellationToken ct = default)
-        => _dataverse.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+    {
+        try
+        {
+            await _dataverse.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await EvictAfterShareWriteAsync(entitySetName, recordId, "revoke").ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The share-change eviction, after a write that returned OR threw. Never throws (the write's own outcome — its
+    /// return or its exception — is what the caller sees) and is not bound to the caller's token: the write may already
+    /// have committed, and a caller that went away must not leave the clean-up undone.
+    /// </summary>
+    private async Task EvictAfterShareWriteAsync(string entitySetName, Guid recordId, string write)
+    {
+        try
+        {
+            await _accessCacheInvalidator
+                .InvalidateRecordShareChangeAsync(entitySetName, recordId, $"share:{write}", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ACCESS-EVICT] The share-change eviction for {EntitySet} {RecordId} ({Write}) threw; the share write's own " +
+                "outcome stands and the cached entries lapse on their TTLs.", entitySetName, recordId, write);
+        }
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
