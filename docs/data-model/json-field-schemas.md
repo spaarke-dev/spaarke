@@ -423,7 +423,7 @@ Defines which fields are visible/required for each event type's side pane form:
 }
 ```
 
-Parsed in `EventDetailSidePane/src/types/FormConfig.ts` (line 186) and `EntityConfigurationService.ts` (line 24).
+Parsed in `EventDetailSidePane/src/types/FormConfig.ts` (line 186).
 
 ---
 
