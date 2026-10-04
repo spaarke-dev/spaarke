@@ -130,7 +130,7 @@ param artifactsStorageContainerUri string
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
-@description('Container image reference for the DS-1b Exchange ApplicationAccessPolicy sidecar (task 114 built the Dockerfile; task 115 wires CI build+push to the platform ACR). Defaults to a public placeholder per this task POML escalation-trigger guidance -- REPLACE with the real ACR tag (e.g. {acrLoginServer}/sprk-provisioning-sidecar:{tag}) once task 115 lands; do not leave the placeholder in a live deploy.')
+@description('Container image of the Exchange sidecar (H14a apply + H13 T4 read, RBAC for Applications -- task 251), e.g. {acrLoginServer}/provisioning-sidecar:{tag}, built by .github/workflows/build-provisioning-sidecar.yml or az acr build. The default is a public placeholder that serves none of the sidecar routes -- never deploy it.')
 param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 
 @description('ACR authentication mode for the sitecontainer pull. Anonymous is correct ONLY for the public MCR placeholder default above. Switch to UserAssigned (with userManagedIdentityClientId = uamiClientId) once acrImageTag points at the platform ACR (task 115) -- the UAMI needs AcrPull RBAC on that registry, granted alongside task 110 and task 111 other RBAC grants.')

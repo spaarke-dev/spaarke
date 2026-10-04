@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "5380486564974638054"
+      "templateHash": "2870582324052520616"
     }
   },
   "parameters": {
@@ -1514,7 +1514,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "6092684834651833351"
+              "templateHash": "318380570468748976"
             }
           },
           "parameters": {
@@ -1622,7 +1622,7 @@
               "type": "string",
               "defaultValue": "mcr.microsoft.com/appsvc/staticsite:latest",
               "metadata": {
-                "description": "Container image reference for the DS-1b Exchange ApplicationAccessPolicy sidecar (task 114 built the Dockerfile; task 115 wires CI build+push to the platform ACR). Defaults to a public placeholder per this task POML escalation-trigger guidance -- REPLACE with the real ACR tag (e.g. {acrLoginServer}/sprk-provisioning-sidecar:{tag}) once task 115 lands; do not leave the placeholder in a live deploy."
+                "description": "Container image of the Exchange sidecar (H14a apply + H13 T4 read, RBAC for Applications -- task 251), e.g. {acrLoginServer}/provisioning-sidecar:{tag}, built by .github/workflows/build-provisioning-sidecar.yml or az acr build. The default is a public placeholder that serves none of the sidecar routes -- never deploy it."
               }
             },
             "sidecarAuthType": {
