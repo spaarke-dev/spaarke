@@ -579,6 +579,23 @@ public static class ExternalAccessModule
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob>(
             Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 148 (C10 part 2, transitions + backfill) — the ONE engine that brings every EXISTING
+        // child of a root into the state task 146's rule gives it (re-owned through IRecordOwnershipResolver, sharees mirrored
+        // through the synchronizer above, the platform-cascade rows placed through AssignCascadeChildOwners). Called by
+        // /provision-project, /unsecure-project and the sweep below. Concrete (ADR-010: one implementation); SCOPED because
+        // the synchronizer it composes is. Every dependency — IGenericEntityService, IRecordOwnershipResolver, the
+        // synchronizer, DataverseWebApiClient — is registered unconditionally. §10/§11: notes/task-148-secure-child-backfill.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+
+        // Task 148 — the sweep over every sprk_issecure = true root: the one-time backfill (scripts/Invoke-SecureChildBackfill.ps1)
+        // and, once task 147 schedules it, the L4 safety net. ⚠️ enabled: false IS THE SHIPPING STATE and writes are
+        // separately gated on SecureChild:Reconciliation:WritesEnabled (absent = report-only) — the
+        // ExternalAccessReconciliationJob posture: it MOVES ownership of existing rows, so enabling it is an owner action.
+        // ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032):
+        // IServiceScopeFactory, IBackgroundJobStore, TimeProvider and IConfiguration are unconditional.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob>(
+            Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob.DefaultCronSchedule, enabled: false);
+
         // unified-access-control-r2 task 143 (owner Q4; round 3 R3/R4) — the No Access safety net: every 5 minutes,
         // every active entry is enforced through NoAccessShareEnforcer (out-of-band MDA shares after an entry, records
         // that became secure, links that appeared). ENABLED with writes ON, per the owner's R4 answer — it only ever

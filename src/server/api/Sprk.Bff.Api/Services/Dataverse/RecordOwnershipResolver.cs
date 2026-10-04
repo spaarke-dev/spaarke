@@ -265,6 +265,30 @@ public sealed record RecordOwnershipContext
     /// </summary>
     public bool KeepCreatorUnlessTargetIsTeamOwned { get; init; }
 
+    /// <summary>
+    /// unified-access-control-r2 task 148 — the ONE root an unsecure transition is taking out of isolation, named by the
+    /// only caller allowed to name it (<c>SecureChildReconciler</c>, after <c>/unsecure-project</c> has moved the root off
+    /// the Secure Record owner team and read the move back). Its <c>sprk_issecure</c> flag is still <c>true</c> — the
+    /// endpoint clears it LAST, and keeps it when the child pass does not complete — so without this the flag-but-not-
+    /// isolated refusal (C11) would refuse every one of its children, and the transition could never re-own them. For
+    /// THAT root only, the flag is not read as "a provisioning that did not complete": its ownership decides, exactly as
+    /// for any ordinary parent. Every other parent keeps every rule (secure-if-any, the refusal). <c>null</c> everywhere
+    /// else.
+    /// </summary>
+    public RecordOwnershipParent? UnsecuringRoot { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 148 r2 — the owners a REPORT-ONLY pass of <c>SecureChildReconciler</c> has planned
+    /// for rows it does not write: row → the owning team it would give that row. A parent named here is read as owned by
+    /// that team (its owning business unit is the team's) instead of by its stored owner; its existence and its
+    /// <c>sprk_issecure</c> flag are still read. So a dry run decides a grandchild against the owner its parent WOULD have
+    /// — the plan a writing pass carries out — and lists every change a writing pass would make, not only the first level.
+    /// The rule itself is unchanged: only the facts it reads for a planned row are the planned ones. A planned team whose
+    /// row cannot be read refuses (<see cref="RecordOwnerRefusal.ParentUnresolved"/>), as any unreadable parent does.
+    /// Set by nothing that writes; <c>null</c> everywhere else.
+    /// </summary>
+    public IReadOnlyDictionary<RecordOwnershipParent, Guid>? PlannedOwningTeams { get; init; }
+
     /// <summary>True when a target record was supplied — i.e. the preferred source is available.</summary>
     public bool HasTarget =>
         !string.IsNullOrWhiteSpace(TargetEntityLogicalName)
@@ -1251,7 +1275,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
                 if (SecureFlaggedRoots.Contains(node.EntityLogicalName))
                 {
-                    var fact = await ReadParentAsync(node, ct).ConfigureAwait(false);
+                    // Live facts only: F3 asks which secure roots the row leaves NOW (no planned-owner overlay).
+                    var fact = await ReadParentAsync(node, plannedOwningTeams: null, ct).ConfigureAwait(false);
                     if (fact is not null && (fact.FlaggedSecure || (secureBuId is { } sbu && fact.BusinessUnitId == sbu)))
                         roots.Add(node);
                 }
@@ -1455,7 +1480,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var facts = new List<ParentFacts>(parents.Count);
         foreach (var parent in parents)
         {
-            var fact = await ReadParentAsync(parent, ct).ConfigureAwait(false);
+            var fact = await ReadParentAsync(parent, context.PlannedOwningTeams, ct).ConfigureAwait(false);
             if (fact is null)
             {
                 // ⛔ REFUSE — do NOT fall back to the acting user when a parent WAS named but could not be
@@ -1517,7 +1542,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // now for every context: an analysis of such a document, a Compose promote, a grandchild of any writer). The
         // ancestors only take part in the secure decision; an ordinary row still takes the PRIMARY parent's unit, so
         // nothing changes for a child of ordinary records.
-        var lineage = await ReadUnownedChildLineageAsync(facts, ct).ConfigureAwait(false);
+        var lineage = await ReadUnownedChildLineageAsync(facts, context.PlannedOwningTeams, ct).ConfigureAwait(false);
         if (lineage.Unresolved is { } unresolved)
         {
             return lineage.TooDeep
@@ -1544,7 +1569,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // A root flagged secure but not owned in the Secure Record BU is a failed or interrupted provisioning (C11).
         // Its ownership says "ordinary"; its flag says "secure". Fail closed: refuse, never the ordinary team.
-        var notIsolated = decisive.FirstOrDefault(f => f.FlaggedSecure && f.BusinessUnitId != secureBu.Id);
+        // Task 148: the one root an unsecure transition names (UnsecuringRoot) is mid-transition, not a failed provisioning —
+        // its ownership has already been moved off the Secure team and read back, and its flag is cleared last.
+        var unsecuring = context.UnsecuringRoot is { IsSpecified: true } u
+            ? u with { EntityLogicalName = u.EntityLogicalName.Trim().ToLowerInvariant() }
+            : null;
+        var notIsolated = decisive.FirstOrDefault(f =>
+            f.FlaggedSecure && f.BusinessUnitId != secureBu.Id && f.Parent != unsecuring);
         if (notIsolated is not null)
         {
             _logger.LogError(
@@ -1585,7 +1616,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// (<see cref="RecordOwnerRefusal.ParentUnresolved"/>).
     /// </remarks>
     private async Task<(IReadOnlyList<ParentFacts> Facts, RecordOwnershipParent? Unresolved, bool TooDeep)> ReadUnownedChildLineageAsync(
-        IReadOnlyList<ParentFacts> facts, CancellationToken ct)
+        IReadOnlyList<ParentFacts> facts, IReadOnlyDictionary<RecordOwnershipParent, Guid>? plannedOwningTeams, CancellationToken ct)
     {
         var lineage = new List<ParentFacts>();
         var seen = new HashSet<RecordOwnershipParent>(facts.Select(f => f.Parent));
@@ -1607,7 +1638,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     if (!seen.Add(ancestor))
                         continue;
 
-                    var fact = await ReadParentAsync(ancestor, ct).ConfigureAwait(false);
+                    var fact = await ReadParentAsync(ancestor, plannedOwningTeams, ct).ConfigureAwait(false);
                     if (fact is null)
                     {
                         return (lineage, ancestor, false);
@@ -1664,7 +1695,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// — and the caller refuses. A Dataverse FAULT is not an answer: it propagates, so a throttled or timed-out read
     /// surfaces as the caller's retryable 5xx instead of a permanent refusal that tells the user to check the record.
     /// </summary>
-    private async Task<ParentFacts?> ReadParentAsync(RecordOwnershipParent parent, CancellationToken ct)
+    /// <remarks>
+    /// Task 148 r2: a parent in <paramref name="plannedOwningTeams"/> (a report-only pass's planned owner) is read as owned
+    /// by that team — its owning business unit is the team's, read from the team row — while its existence and flag are
+    /// still read from the parent's own row. A planned team that cannot be found answers "no team" (the caller refuses).
+    /// </remarks>
+    private async Task<ParentFacts?> ReadParentAsync(
+        RecordOwnershipParent parent, IReadOnlyDictionary<RecordOwnershipParent, Guid>? plannedOwningTeams, CancellationToken ct)
     {
         var isSecureFlaggedRoot = SecureFlaggedRoots.Contains(parent.EntityLogicalName);
         var columns = isSecureFlaggedRoot
@@ -1696,6 +1733,30 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // NULL sprk_issecure is "No" — owner decision Q1 (2026-10-01) sets every NULL to No and defaults the column
         // to No; it is not read as secure. A flagged root that IS isolated takes the secure branch anyway by its BU.
         var flaggedSecure = isSecureFlaggedRoot && row.GetAttributeValue<bool?>(IsSecureColumn) == true;
+
+        if (plannedOwningTeams is not null
+            && plannedOwningTeams.TryGetValue(
+                parent with { EntityLogicalName = parent.EntityLogicalName.Trim().ToLowerInvariant() }, out var plannedTeam))
+        {
+            var teamQuery = new QueryExpression(TeamEntity)
+            {
+                ColumnSet = new ColumnSet(BusinessUnitColumn),
+                TopCount = 1,
+                NoLock = true
+            };
+            teamQuery.Criteria.AddCondition("teamid", ConditionOperator.Equal, plannedTeam);
+            var plannedBu = (await _dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false))
+                .Entities.FirstOrDefault()?.GetAttributeValue<EntityReference>(BusinessUnitColumn)?.Id;
+            if (plannedBu is null || plannedBu == Guid.Empty)
+            {
+                _logger.LogWarning(
+                    "The team {TeamId} planned for {EntityLogicalName} {RecordId} does not exist or has no business unit.",
+                    plannedTeam, parent.EntityLogicalName, parent.RecordId);
+                return null;
+            }
+
+            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure);
+        }
 
         return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure);
     }

@@ -1056,6 +1056,28 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
 
+### `Invoke-SecureChildBackfill.ps1`
+**Purpose:** One-time backfill of the EXISTING children of every secure project, matter and work assignment (C10 part 2): drives the BFF's `secure-child-reconciliation` job, which re-owns each child into the `Secure Record Owners` team by the ownership rule and mirrors the record's sharees. The script computes NOTHING itself — the rule is the BFF's (`SecureChildReconciler` → `IRecordOwnershipResolver` + `SecureChildShareSynchronizer`); it triggers the job through `/api/admin/jobs`, reads each run's report (`resultJson`), repeats until the pass completes, and saves the reports.
+**Usage:** 🔴 One-time (per environment) after the BFF carrying task 148 is deployed; re-runnable (idempotent).
+**Lifecycle:** ✅ Maintained (added 2026-10-04 by `unified-access-control-r2` task 148)
+**Dependencies:** Azure CLI (`az login` as a user the BFF's `SystemAdmin` policy admits; for `-Apply`, rights to change the App Service settings), PowerShell 7+
+**Owner:** UAC Team (`unified-access-control-r2`)
+**Last Used:** Author-time parse check only — **not run against a live environment** (a manual gate for the main session).
+
+**Command:**
+```powershell
+# Dry run (default, report-only): the planned changes with each row's current owner — the same plan the apply carries
+# out (grandchildren included). A report lists 200 changes per run and counts all; the script warns when it lists fewer,
+# and on NeedsF3 rows (isolated rows only Unsecure may release — the sweep never does, owner round 24).
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default
+# Apply: SecureChild__Reconciliation__WritesEnabled=true for the run, removed again afterwards (restarts the app).
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Apply -ResourceGroup <rg> -AppName <app>
+# Verify: exit 0 only when a full pass plans zero changes and refuses / fails nothing.
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Verify
+```
+
+Runbook: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7c.1.
+
 ### `Backfill-RecordOwnership.ps1`
 **Purpose:** Re-owns EXISTING **app-owned** `sprk_document` / `sprk_todo` rows to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for write-path invariant **I-6**. Before task 080 every BFF-created record was owned by the BFF application user in the ROOT business unit, which no child-business-unit user can read at Deep depth. The team comes from the record the row is filed against (document: `sprk_matter` → `sprk_project` → `sprk_invoice` → `sprk_workassignment`; To Do: record regarding → document → communication), mirroring `RecordOwnershipResolver`. Rows filed against nothing are **reported, never written** — the create was app-only, so the data does not record who made it ("we can't guess").
 **Usage:** 🔴 One-time (per environment); idempotent — re-owned rows are no longer candidates.

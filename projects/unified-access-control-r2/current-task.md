@@ -1,5 +1,41 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-03 ~21:05Z (checkpoint #6). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #6 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Standing instruction** | "continue autonomous". Batch owner questions into ONE AskUserQuestion round, "(Recommended)" first. Owner rounds **1-13** in `notes/session27-owner-decisions-and-research.md` (12 = 167 guard classification; 13 = batch 4c verifier questions). |
+> | **Model policy (owner, 2026-10-03)** | Opus pinned (`model: 'opus'`) on every executor/fixer/verifier in NEW scripts; effort per POML. Memory: `agent-model-selection`. |
+> | **🔴 Workflow spawn rule** | Keep the SESSION cwd at uppercase `C:/code_files/spaarke` while any workflow runs (`cd /c/code_files/spaarke`); run every other-directory command in a SUBSHELL `( cd X && ... )` or `git -C`. A lowercase `c:\...` or non-repo cwd at spawn time kills worktree-isolated agents (`WorktreeIsolationError` / "not in a git repository"). Memory: `workflow-agent-messaging`. Resume caching is PREFIX-ordered: for a pooled/DAG script write a CONTINUATION script (embed done results) instead of `resumeFromRunId`. |
+> | **Master / dev BFF** | `818840ac6` (unchanged). |
+> | **Work branch** | `8984f8a64`, pushed: + rounds 12/13 (`d7d1af61b`) + **034 COMPLETED** (`8984f8a64`). |
+>
+> ### Running (do NOT relaunch; journals under `C:/Users/RalphSchroeder/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/subagents/workflows/<run>/journal.jsonl`)
+> | Workflow | Run | What |
+> |---|---|---|
+> | **batch 4d** (continuation of 4c) | task `wgmjj421q`, run `wf_64880481-ea0`, script `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-batch4d.js` | fix rounds 133 (→`-c1-r2`), 150 (→`-c1-r2`), 146 (→`-c1-r1`, incl. round 13 child-table creator stamp), 149 (→`-r4`), 142 (→`-r4`, tri-state deny-veto faults), 157 (→`-c2-r2`, advisory gate); then 140 (on 142), 148 (on 149+133) → 147, 158 (on 148+156). ≤4 agents. |
+> | **sweep continuation** | task `wkvds42jg`, run `wf_9dbaa6e9-894`, script `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/uac-sweep-cont.js` | 159 + 160 DONE (ready); 161 verify; 167 fix1 (with round 12); 162, 163 exec (fresh; killed partial work saved on `wip/uac-r2-162-killed` `e3a543e26`, `wip/uac-r2-163-killed` `b6c6a8958`); then 164, 165, 166, 168, 169. ≤4 lanes. |
+> | Monitor | `journal_watch.py` in the scratchpad (RUNS = both runs above) | re-arm every 30 min |
+>
+> ### Batch 4 integration — IN PROGRESS on `integ/uac-r2-batch4` (worktree `C:\wt4i`, local only, not pushed)
+> - Merged: 143-r2, 137-b2, 156-c1-r2, **origin/master `62277d50a`** (#1110 numbering: RecordCreationService keeps 133's stamp then `CreateNumberedAsync`), 142-r3 (×156: both after-write hooks, restamp first; doc row 142 = **I-12**, master's numbering = I-11). Seam fix `30bf4cab4`. BFF + all test projects build; 413 seam tests green.
+> - **Held:** 132-r1 (conflicts with the 133 rework in ProvisionProjectEndpoint / AccessibleRecordSetService / fixture) → merge after 133's final branch.
+> - **To merge when 4d is ready:** 133, 150, 146, 149, 142-r4 (supersedes r3), 157-c2-r2, 140, 148, 147, 158, then 132-r1; then the work branch; then every item of `notes/batch4-integration-steps.md` (incl. the schema-script verify fix: copy `Set-RecordNumberingSchema.ps1`'s rootcomponentbehavior-0 check + `Get-AllPages`), `.claude` ADR-034 A4 (exact text in 142 note §13.4), suites, publish size, CVE, PR, held live steps, deploy, live gates.
+>
+> ### Done this checkpoint
+> - **034 COMPLETED**: canary live gate PASS (59 ⊂ 61, 4/4; inversion INERT as designed); README fixed (needs `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`). **036 is unblocked.**
+> - Issue **#1115** filed to ci-cd-unit-test-remediation-r1 (router docs_only allow-list; round 13 item 12).
+> - Cleaned the refused nested worktrees under the project worktree's `.claude/worktrees`. Folders `C:/code_files/spaarke/.claude/worktrees/wf_f922c982-555-7` and `-8` are deregistered but undeletable (file lock) — housekeeping.
+>
+> ### NEXT ACTIONS
+> 1. Watch both runs; when **4d** finishes, merge its ready branches into `C:\wt4i` in dependency order (see above), then integrate per the checklist → PR → merge → deploy → live gates.
+> 2. When the **sweep** finishes: integrate 159-169 (167 ledger from each task's ledger input) on top of batch 4 → PR → task 170.
+> 3. **Batch 5** (after batch 4 integrates, base = integration tree): 036 → 105 → 064 → {066 → 067/099, 069, 087 → 088 → 089}; 054 (rewrite POML per D-4 "add the requester read" first) → 055 → 056 → 057/058; independent: 101, 110, 111, 112, 113, 114, 094, 095; 082 (read: decision task); 047 (after deploy); 153/154 (after 064/067/150 and 143/064).
+> 4. Owner manual gates still open: 003 (finance summary as non-admin), 013 (= 141 G-7/G-8), 136/037/039 + 034's 007(a)/(b) (CIAM sign-in).
+>
+
 > **Last Updated**: 2026-10-03 17:16Z (context-handoff, checkpoint #5, before /compact). **This block supersedes every block below it.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #5 (READ FIRST)

@@ -400,6 +400,97 @@ public class RecordOwnershipResolverTests
         directory.QueriedEntities.Should().NotContain("team", "a refusal is decided before any team is looked up");
     }
 
+    /// <summary>
+    /// Task 148: the ONE root an unsecure transition names (<see cref="RecordOwnershipContext.UnsecuringRoot"/>) is
+    /// mid-transition — moved off the Secure team, its flag cleared last — so its children resolve from its ownership like an
+    /// ordinary record's, to its business unit's team. Any OTHER flagged-not-isolated parent still refuses.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOwner_ForTheRootBeingUnsecured_ResolvesFromItsOwnership_ButAnotherFlaggedParentStillRefuses()
+    {
+        var directory = Directory()
+            .WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true)
+            .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: true);
+        var unsecuring = new RecordOwnershipParent("sprk_project", FlaggedProjectId);
+
+        var alone = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { Parents = new[] { unsecuring }, UnsecuringRoot = unsecuring },
+            CancellationToken.None);
+        var besideAnother = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { unsecuring, new RecordOwnershipParent("sprk_matter", MatterId) },
+                UnsecuringRoot = unsecuring,
+            },
+            CancellationToken.None);
+
+        alone.OwningTeamId.Should().Be(ChildTeam, "the unsecured record's own business unit decides its children");
+        besideAnother.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated,
+            "the exemption names one record; every other flagged-not-isolated parent keeps failing closed");
+    }
+
+    /// <summary>
+    /// Task 148 r2: a report-only pass's planned owner (<see cref="RecordOwnershipContext.PlannedOwningTeams"/>) is read as
+    /// that parent's owner — INTO isolation (an ordinary document planned onto the named team makes its child secure) and OUT
+    /// of it (an isolated document planned onto an ordinary team no longer makes its child secure) — while a parent not
+    /// named keeps its stored owner. The rule is the same; only the facts of a planned row are the planned ones.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOwner_WithAPlannedOwningTeam_ReadsThatParentAsOwnedByIt()
+    {
+        var ordinaryDocument = Guid.NewGuid();
+        var isolatedDocument = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_document", ordinaryDocument, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", isolatedDocument, SecureBu, owningTeam: SecureNamedTeam);
+        var ordinaryParent = new RecordOwnershipParent("sprk_document", ordinaryDocument);
+        var isolatedParent = new RecordOwnershipParent("sprk_document", isolatedDocument);
+
+        var stored = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { Parents = new[] { ordinaryParent } }, CancellationToken.None);
+        var plannedIn = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { ordinaryParent },
+                PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid> { [ordinaryParent] = SecureNamedTeam },
+            },
+            CancellationToken.None);
+        var plannedOut = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { isolatedParent },
+                PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid> { [isolatedParent] = ChildTeam },
+            },
+            CancellationToken.None);
+
+        stored.OwningTeamId.Should().Be(ChildTeam, "without a plan the stored owner decides");
+        plannedIn.OwningTeamId.Should().Be(SecureNamedTeam, "planned onto the named team, the parent is isolated");
+        plannedOut.OwningTeamId.Should().Be(ChildTeam, "planned onto an ordinary team, the parent no longer isolates its child");
+    }
+
+    /// <summary>
+    /// Task 148 r2, fail closed: a planned owner whose team cannot be found is an unreadable parent — the resolver refuses,
+    /// it never falls back to the parent's stored owner (which could be the wrong side of the isolation boundary).
+    /// </summary>
+    [Fact]
+    public async Task ResolveOwner_WhenAPlannedTeamCannotBeFound_Refuses_NeverTheStoredOwner()
+    {
+        var document = Guid.NewGuid();
+        var directory = Directory().WithRecord("sprk_document", document, SecureBu, owningTeam: SecureNamedTeam);
+        var parent = new RecordOwnershipParent("sprk_document", document);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { parent },
+                PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid> { [parent] = Guid.NewGuid() },
+            },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Refused);
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
     [Fact]
     public async Task ResolveOwner_WhenAFlaggedRootIsIsolated_OwnsTheChildByTheNamedTeam()
     {

@@ -1,6 +1,6 @@
 # Task 034 — NFR-04 impersonation negative canary (merge gate for task 036)
 
-> **Status**: implemented · **Date**: 2026-09-03 · **Rigor**: FULL
+> **Status**: COMPLETED — manual live gate PASSED 2026-10-03 (§8) · **Date**: 2026-09-03 (built), 2026-10-03 (live run) · **Rigor**: FULL
 > **Deliverables**: `tests/integration/auth/UnifiedAccessControl/ImpersonationNegativeCanary.cs`,
 > `…/ImpersonationCanaryEnvironment.cs`, `…/ImpersonationNegativeCanaryTests.cs`,
 > `tests/integration/auth/README.md` § "NFR-04 impersonation negative canary"
@@ -109,24 +109,20 @@ today. It does not block *this* task — the mechanism is complete and proven �
 proceed until the canary can run truthfully against a provisioned user.** The provisioning procedure is
 in `tests/integration/auth/README.md`.
 
-## 5. Live-tenant verification checklist — NOT PERFORMED
+## 5. Live-tenant verification checklist — RECORDED 2026-10-03 (dev, read-only)
 
-Tasks 005, 007 and 008 each appended live-tenant observations to this task on the premise that 034
-"is the first task that has a real tenant". **It is not.** This execution had no Dataverse access, no
-provisioned canary user, and no ability to create one (a new systemuser + custom security role is a
-change to the customer's dev environment and an owner action). The following remain **open and
-unverified**, and should be re-homed onto whichever task actually acquires tenant access:
+The checklist tasks 005, 007 and 008 parked here, executed in the same manual session as §8. Caller for
+every read: `ralph.schroeder@spaarke.com` (systemuser `1d02f31c-1872-f011-b4cb-7c1e52671ad0`, System
+Administrator) through `az`; canary = `uac.child.user@demo.spaarke.com` (`d6f8f439-40bf-f111-a05b-3833c5e9614d`).
 
-- **From task 005** — (a) a caller with Write/Create gets those flags in the `RetrievePrincipalAccess`
-  snapshot, not just Read; (b) grep BFF logs for `RPA-FALLBACK` (if firing, the Read ceiling is silently
-  back); (c) the BFF app user holds the privileges RPA needs on the app-only path.
-- **From task 008** — (a) `WhoAmI()` returns the CALLER's systemuserid under an OBO Dataverse token;
-  (b) RPA answers for a `sprk_project` target, not only `sprk_documents`; (c) grep for
-  `DELEGATION-RPA-UNAVAILABLE` as well as `RPA-FALLBACK`.
-- **From task 007** — (a) a past-dated grant disappears from `GET /api/v1/external/me`; (b) a grant
-  expiring TODAY still confers access (the `ge` not `gt` decision); (c) a grant with no expiry is
-  unaffected — **check this one first**, it is an access outage if broken; and confirm no 400 (a 400
-  surfaces as an empty grant set, i.e. a silent outage).
+| Item | Observation (2026-10-03T20:55Z) | Verdict |
+|---|---|---|
+| **005(a)** RPA flags beyond Read | `RetrievePrincipalAccess` for the canary on BU1 matter `491b1efe-e562-f111-ab0c-000d3a4d8152` = `ReadAccess, WriteAccess, AppendAccess, AppendToAccess, CreateAccess, DeleteAccess, ShareAccess, AssignAccess` | PASS — the snapshot carries every flag, not only Read |
+| **005(b) / 008(c)** `RPA-FALLBACK`, `DELEGATION-RPA-UNAVAILABLE` in BFF logs | Application Insights `spe-insights-dev-67e2xz` (role `spaarke-bff-dev`): **0** of each, but the store only held traces since **2026-10-03T19:56Z** (3,915 traces) | PASS within a ~1-hour window only. **Re-check after the batch-4 deploy** over a full day |
+| **005(c)** the BFF app user's privileges | `# mi-bff-api-dev`, `# spaarke-bff-api-prod`, `SDAP-BFF-SPE-API` (+ Delegate, Spaarke Ontology Service) hold **System Administrator**, which holds `prvActOnBehalfOfAnotherUser` at depth **8 (Global)**. ⚠️ `# Spaarke DMS-SPE Dev 1` (named in amendment 4) is **disabled** | PASS. Correction to amendment 4: the DMS-SPE Dev 1 user is disabled, so it is not a holder in practice |
+| **008(a)** `WhoAmI()` under a delegated token | `WhoAmI` with the caller's delegated user token returned `1d02f31c-1872-f011-b4cb-7c1e52671ad0` = the caller | PASS for a delegated token (the token class an OBO exchange yields); the BFF's own OBO path is exercised by the post-deploy gates |
+| **008(b)** RPA on a `sprk_project` target | canary on BU1 project `e070fa52-e662-f111-ab0c-000d3a4d8152` = the full flag set above; on SECURE project `65a3fab2-77a5-f111-aaad-70a8a590c51c` = **None** | PASS |
+| **007(a,b,c)** grant expiry | The BFF's `ExpiryPredicate` filter (`statecode eq 0 and sprk_expiresdate ge 2026-10-03`) runs live with **HTTP 200** (no 400, so no silent empty-set outage). Dev holds 31 active grants: all 31 future-dated; **0** past, **0** expiring today, **0** with no expiry, so (a) and (b) cannot be exercised on live data, and (c) is **superseded by owner D-1 A** (a null expiry confers NOTHING). The rule is pinned by the in-memory mirror's unit tests | Query shape PASS; (a)/(b) through `GET /api/v1/external/me` need a signed-in CIAM user → the owner's CIAM manual gates (with 136/037/039) |
 
 ## 6. Residual (filed, not done)
 
@@ -141,3 +137,51 @@ agent holds it for task 076, and overwriting it would destroy that agent's recov
 `.claude/`, `Api/OBOEndpoints.cs`, `EntityCreationService.ts`, the DocumentUploadWizard, or
 `Services/Communication/**` was touched. No file under `src/server/**` was modified (POML constraint) —
 verified by `git status`.
+
+## 8. Manual live gate — RUN 2026-10-03 (amendments 1-5)
+
+**Result: all four live tests PASS.** Run from the batch-4 integration worktree (`C:\wt4i`, branch
+`integ/uac-r2-batch4`, the canary code unchanged since 2026-09-03) at 2026-10-03T20:47:35Z:
+
+| Test | Result |
+|---|---|
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS — impersonated **59** ⊂ app-only **61** |
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsExactlyTheSeededMatters` | PASS — impersonated = the independently derived 59 |
+| `RetrieveMultipleImpersonatedAsync_OnTheLiveConfiguredService_RefusesAnEmptyCaller` | PASS |
+| `HelperStampedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS — 59 ⊂ 61 |
+
+All 10 tenant-free tests in the class also pass, including the config tripwire. None halted as NOT RUN
+(`SPAARKE_CANARY_REQUIRED=true`).
+
+**The canary (amendment 2: an existing user; none created, relocated or re-roled for this run).**
+`uac.child.user@demo.spaarke.com`, systemuser `d6f8f439-40bf-f111-a05b-3833c5e9614d`, business unit
+**Spaarke Business Unit 1**. It was created on 2026-10-03 under owner round 11 as the batch-4 child-BU test
+user, before and independently of this run.
+- Direct roles: **Spaarke Basic User**, **Spaarke Core User** (BU1 copies).
+- Team: **Spaarke Business Unit 1** (default team) → Spaarke Reporting Access Viewer, Spaarke Basic User,
+  Spaarke AI Analysis User, Spaarke Office Add In User.
+- `prvReadsprk_matter` depth: Basic User **4**, Core User **4**, Office Add In User **4** (Deep); the other
+  two roles hold none. **No Organization depth** anywhere (amendment 3 satisfied).
+- Hierarchy security: `ishierarchicalsecuritymodelenabled = false`, `usepositionhierarchy = false`.
+
+**Expected set derivation (amendment 2 / the exactness criterion), app-only, never from the impersonated
+read.** Deep read = matters whose `owningbusinessunit` is BU1 or a descendant (BU1 has none) → **59**;
+plus `principalobjectaccess` rows with the Read bit for the user or its team → **0**. Total **59** of the
+org's **61**. The two outside it are owned in the ROOT business unit "Spaarke":
+`0ee64da4-9dbe-f111-aaaf-0022482913fc` (owner Ralph Schroeder) and `ced2c3d9-47bf-f111-aaaf-0022482913fc`
+(owner the Spaarke team). Margin: 2 rows.
+
+**Inversion check (POML step 4), 2026-10-03T20:48:08Z.** With `SPAARKE_CANARY_SYSTEMUSERID` pointed at the
+admin caller (`1d02f31c…`), Tests 1 and 4 both **FAILED** with "IMPERSONATION IS INERT: the impersonated
+read returned the SAME 61 row(s) as the app-only read". The gate sees the failure it exists to catch.
+
+**Credential note — the README was incomplete.** The unit test assembly's `TestOutboundNetworkGuard`
+restricts `DefaultAzureCredential` to `EnvironmentCredential` and blocks outbound HTTP, so a run that
+follows the old README fails every live test with `CredentialUnavailableException`. The run needs
+`AZURE_TOKEN_CREDENTIALS=AzureCliCredential` and `SPAARKE_TESTS_ALLOW_OUTBOUND=1`; the README now says so.
+The ambient credential was the operator's `az` login (System Administrator), not the BFF application
+user, so the app user's own `prvActOnBehalfOfAnotherUser` is evidenced by role (§5, 005(c)) and by the
+deployed BFF's impersonated reads, not by this run.
+
+**Consequence:** task 036 is unblocked. The live layer must be re-run (same procedure) before 036 merges
+if the canary code or the impersonation primitive changes, and before every FR-20 rollout.

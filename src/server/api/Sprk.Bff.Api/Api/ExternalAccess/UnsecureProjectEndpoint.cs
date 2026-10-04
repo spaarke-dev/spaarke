@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -18,9 +19,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// nice-to-have.
 ///
 /// Sequence:
-///   1. Read the record; a record that is not secure returns 200 having changed nothing (idempotent)
+///   1. Read the record; a record that is not secure changes nothing about the record itself (idempotent) — but its
+///      related records are reconciled (task 148: an earlier unsecure may have left them isolated)
 ///   2. Resolve the new owner — request, else configuration, else the calling user
+///   2.5 Snapshot the rows the record's Assign cascades to (task 133's primitive) — refuse before any write if they
+///      cannot be read
 ///   3. Assign ownership to that user, and verify by read-back
+///   3.5 Re-own every EXISTING related record OUT of the Secure Record owner team to the owner the ownership rule gives a
+///      child of an ordinary record, then remove its mirrored shares (task 148) — a pass that does not complete stops
+///      here: the record's own shares and its flag are left for the next call to finish
 ///   4. Revoke every POA share on the record
 ///   5. Clear <c>sprk_issecure</c>
 ///
@@ -71,16 +78,35 @@ public static class UnsecureProjectEndpoint
     internal const string ReasonOwnerAssignmentNotApplied = "sdap.unsecure.owner_assignment_not_applied";
     internal const string ReasonFlagNotCleared = "sdap.unsecure.flag_not_cleared";
 
+    /// <summary>
+    /// Task 148 (ADR-003): the record's existing related records were not all taken out of isolation (re-owned to their
+    /// business unit's team, mirrored shares removed). 500 with <c>childrenReowned</c>, <c>childrenRemaining</c> and
+    /// <c>childTables</c>. On a record still flagged secure, its own shares are NOT revoked and <c>sprk_issecure</c> is NOT
+    /// cleared (the flag keeps meaning "related records may still be isolated"); the ownership move already made stands.
+    /// Calling again completes it.
+    /// </summary>
+    internal const string ReasonChildrenIncomplete = "sdap.unsecure.children_incomplete";
+
+    /// <summary>
+    /// Task 148 (task 133's handoff): the rows the record's Assign cascades to (SharePoint document locations and documents)
+    /// could not be read BEFORE the ownership move, so where each one ends up could not be recorded. Refused before any
+    /// write, as provisioning refuses the same read (<c>cascadeChildState</c>: <c>unreadable</c> = the next call may pass;
+    /// <c>refused</c> = deterministic, an administrator acts).
+    /// </summary>
+    internal const string ReasonCascadeChildrenUnreadable = "sdap.unsecure.cascade_children_unreadable";
+
     public static RouteGroupBuilder MapUnsecureProjectEndpoint(this RouteGroupBuilder group)
     {
         group.MapPost("/unsecure-project", UnsecureProjectAsync)
             .WithName("UnsecureProject")
             .WithSummary("Remove the secure designation from a project, matter or work assignment")
             .WithDescription(
-                "Reassigns ownership off the Secure Record business unit's named owner team, revokes the " +
-                "record's explicit shares and clears sprk_issecure. Accepts recordType + recordId " +
+                "Reassigns ownership off the Secure Record business unit's named owner team, re-owns the record's " +
+                "existing related records out of isolation and removes their mirrored shares, revokes the record's " +
+                "explicit shares and clears sprk_issecure. Accepts recordType + recordId " +
                 "(project | matter | workassignment) or the legacy projectId. Idempotent: a record that is " +
-                "already not secure returns 200 having changed nothing.")
+                "already not secure returns 200 having changed nothing about the record itself (related records an " +
+                "earlier unsecure left isolated are completed).")
             .Produces<UnsecureProjectResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -103,6 +129,7 @@ public static class UnsecureProjectEndpoint
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
+        SecureChildReconciler secureChildren,
         IConfiguration configuration,
         IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
@@ -153,9 +180,19 @@ public static class UnsecureProjectEndpoint
         // ("this record should not be secure") is already satisfied — a repeat is not a conflict.
         if (record.sprk_issecure != true)
         {
+            // Task 148: the record is not secure, but its related records may still be — an unsecure from before task 148
+            // left them owned by the memberless Secure team (owner round 11 item 3's ship gate). Completing that is this
+            // call's job ("re-invoking unsecure ... completes the pass instead of returning 200-no-op"). Only children the
+            // Secure team owns are moved; nothing about the record itself changes.
+            var completing = await secureChildren.ReconcileAsync(
+                root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.UnsecureCompletion, ct);
+            if (!completing.IsComplete)
+                return ChildrenIncomplete(completing, root, recordId, flagStillSet: false, logger, traceId);
+
             logger.LogInformation(
-                "[UNSECURE] {RecordType} {RecordId} is already not secure; nothing to do. TraceId={TraceId}",
-                root.WireToken, recordId, traceId);
+                "[UNSECURE] {RecordType} {RecordId} is already not secure; nothing to do to the record itself " +
+                "(related records re-owned: {Reowned}). TraceId={TraceId}",
+                root.WireToken, recordId, completing.ChildrenReowned, traceId);
 
             return TypedResults.Ok(new UnsecureProjectResponse(
                 ProjectId: legacyProjectId,
@@ -168,7 +205,8 @@ public static class UnsecureProjectEndpoint
                 // be told "complete sweep of zero" while the surviving rows are still in place.
                 SweepComplete: null,
                 RecordType: root.WireToken,
-                RecordId: recordId));
+                RecordId: recordId,
+                Children: SecureChildPassSummary.From(completing)));
         }
 
         // ── Step 2: Resolve the new owner ────────────────────────────────────
@@ -187,6 +225,41 @@ public static class UnsecureProjectEndpoint
                 "No owner could be determined for the un-secured record. Name one in the request, or " +
                 $"configure '{UnsecureOwnerUserIdConfigKey}'.",
                 traceId, (ReasonKey, ReasonOwnerUnresolved));
+        }
+
+        // ── Step 2.5 (task 148, task 133's handoff): the rows the ownership move cascades to, read first ──
+        //
+        // The move below cascades Assign to the record's SharePoint document locations / documents (live metadata). Step 3.5
+        // places them by the ownership rule (owner round 13 item 1), which needs them readable; a move whose cascaded rows
+        // cannot even be read is not made — the same fail-closed rule provisioning applies before ITS move. The snapshot
+        // is also the record of each row's owner before this call (reversal evidence), logged here.
+        var cascade = await AssignCascadeChildOwners.SnapshotAsync(dataverseClient, root.LogicalName, recordId, ct);
+        if (cascade.Snapshot is not { } cascadeBefore)
+        {
+            var refused = cascade.Failure == CascadeReadFailure.Refused;
+            logger.LogError(cascade.Fault,
+                "[UNSECURE] The {Table} rows {RecordType} {RecordId}'s ownership move cascades to could not be read ({State}). " +
+                "Refusing before any change. TraceId={TraceId}",
+                cascade.FailedTable?.LogicalName, root.WireToken, recordId, cascade.Failure, traceId);
+
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The records Dataverse moves together with the {root.DisplayLabel.ToLowerInvariant()} " +
+                $"({cascade.FailedTable?.LogicalName}) could not be read, so the secure designation was left in place and " +
+                "nothing was changed. " + (refused
+                    ? "Calling again repeats this refusal: an administrator looks at those records, and the service's " +
+                      "permission to read them, first."
+                    : "Calling again once Dataverse is reachable repeats the check."),
+                traceId, (ReasonKey, ReasonCascadeChildrenUnreadable),
+                ("childTable", cascade.FailedTable?.LogicalName),
+                ("cascadeChildState", refused ? "refused" : "unreadable"));
+        }
+
+        foreach (var child in cascadeBefore.Children)
+        {
+            logger.LogInformation(
+                "[UNSECURE] Before the move: {Table} {ChildId} of {RecordType} {RecordId} is owned by {OwnerKind} {OwnerId}. " +
+                "TraceId={TraceId}", child.LogicalName, child.Id, root.WireToken, recordId, child.Owner.Kind, child.Owner.Id,
+                traceId);
         }
 
         // ── Step 3: Assign ownership, and verify it applied ──────────────────
@@ -255,25 +328,43 @@ public static class UnsecureProjectEndpoint
                 "in place.", traceId, (ReasonKey, ReasonOwnerAssignmentNotApplied));
         }
 
-        // ── Step 4: Revoke the explicit shares ───────────────────────────────
+        // ── Step 3.5 (task 148): the record's EXISTING related records leave isolation ──
         //
-        // Task 149: deliberately NO fan-out to the children here. From Step 3 the record is no longer secure, and the
-        // secure-child synchronizer never touches the children of a non-secure record. Its children stay owned by the
-        // Secure Record Owners team, readable by the people their mirrored shares name, until task 148 re-owns them into
-        // the record's business unit (owner round 6: there is no unsecure cascade for secured child roots either).
-        // Revoking those child shares here, before the re-own, would leave the children readable by nobody. Owner round 11
-        // item 3 (2026-10-03) makes this a SHIP GATE: no record is unsecured in a shared environment until task 148 is
-        // deployed (guide SECURE-PROJECT-ENVIRONMENT-SETUP.md §7a).
+        // Ownership first, for the children too: each related record the Secure Record owner team owns is re-owned to the
+        // owner the ownership rule gives a child of an ordinary record (its business unit's team — task 146's rule, the
+        // resolver told this ONE record is mid-unsecure, its flag still set), and only then are its mirrored shares removed
+        // (task 149's synchronizer). So no related record is ever reachable by nobody. The rows the move above cascaded to
+        // are placed by the same rule (owner round 13 item 1), not left with the new owner. Owner round 6: related records
+        // that are ROOTS of their own (a secure work assignment under this project) stay secure — they are not children.
+        //
+        // A pass that does not complete STOPS here (ADR-003): the record's own shares stay (its sharees keep reaching the
+        // related records that are still isolated) and sprk_issecure stays set — the flag keeps meaning "related records
+        // may still be isolated". The ownership move above stands. Calling again completes the pass.
+        //
+        // Steps 3.5 and 4 share one eviction (task 132 · C12, Step 4.5 below): the record's owner changed in Step 3, so an
+        // incomplete child pass that returns here must evict exactly as a completed one does.
         ShareSweep sweep;
+        SecureChildReconcileReport childPass;
         try
         {
+            childPass = await secureChildren.ReconcileAsync(
+                root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, ct);
+            if (!childPass.IsComplete)
+                return ChildrenIncomplete(childPass, root, recordId, flagStillSet: true, logger, traceId,
+                    ("newOwnerSystemUserId", newOwnerId));
+
+            // ── Step 4: Revoke the explicit shares ───────────────────────────────
+            //
+            // After Step 3.5 every related record is out of isolation and carries none of the record's sharees, so
+            // revoking the record's own shares now leaves nothing reachable by nobody (owner round 11 item 3: 148 re-owns
+            // the children before the record's shares go).
             sweep = await RevokeAllSharesAsync(
                 recordShare, root, recordId, logger, traceId, ct);
         }
         finally
         {
-            // ── Step 4.5 (task 132 · C12): the owner changed and the shares went — evict, before any return ──
-            // The record now sits with a user in a normal business unit, so that unit's colleagues gain it by
+            // ── Step 4.5 (task 132 · C12): the owner changed (and, past Step 4, the shares went) — evict, before any
+            // return ── The record now sits with a user in a normal business unit, so that unit's colleagues gain it by
             // ownership, and every former sharee loses it. Their cached membership, impersonated root sets and access
             // snapshots would otherwise keep the old answer for the TTLs.
             await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
@@ -330,7 +421,54 @@ public static class UnsecureProjectEndpoint
             AlreadyUnsecure: false,
             SweepComplete: sweep.Complete,
             RecordType: root.WireToken,
-            RecordId: recordId));
+            RecordId: recordId,
+            Children: SecureChildPassSummary.From(childPass)));
+    }
+
+    /// <summary>
+    /// Task 148 — a child pass that did not complete (ADR-003: never a success, never a bare 500): per-table counts in the
+    /// detail and the extensions. <paramref name="flagStillSet"/> says whether the record is still flagged secure — then its
+    /// own shares were not revoked and its flag not cleared, which the detail states.
+    /// </summary>
+    private static IResult ChildrenIncomplete(
+        SecureChildReconcileReport pass,
+        SecureRecordRoot root,
+        Guid recordId,
+        bool flagStillSet,
+        ILogger logger,
+        string traceId,
+        params (string Key, object? Value)[] more)
+    {
+        var summary = SecureChildPassSummary.From(pass);
+        var perTable = string.Join(", ", summary.Tables
+            .Where(t => t.Reowned + t.Refused + t.Failed > 0)
+            .Select(t => $"{t.Table}: {t.Reowned} re-owned, {t.Refused + t.Failed} not"));
+
+        logger.LogError(
+            "[UNSECURE] {RecordType} {RecordId}: its related records were not all taken out of isolation: status={Status} " +
+            "reowned={Reowned} remaining={Remaining} ({PerTable}) detail={Detail} flagStillSet={FlagStillSet}. TraceId={TraceId}",
+            root.WireToken, recordId, pass.Status, summary.Reowned, summary.Remaining, perTable, pass.Detail, flagStillSet,
+            traceId);
+
+        var extensions = new List<(string Key, object? Value)>
+        {
+            (ReasonKey, ReasonChildrenIncomplete),
+            ("childrenReowned", summary.Reowned),
+            ("childrenRemaining", summary.Remaining),
+            ("childTables", summary.Tables),
+        };
+        extensions.AddRange(more);
+
+        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()}'s existing related records (documents, events, to-dos, " +
+            $"communications, memos) were not all taken out of isolation: {summary.Reowned} re-owned, {summary.Remaining} " +
+            "remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") + (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            (flagStillSet
+                ? ". Its ownership was reassigned, but its shares were NOT revoked and it still reads as secure, so the people " +
+                  "shared on it keep reaching the related records that are still isolated. Calling again completes it."
+                : ". Calling again completes it."),
+            traceId,
+            extensions.ToArray());
     }
 
     /// <summary>
