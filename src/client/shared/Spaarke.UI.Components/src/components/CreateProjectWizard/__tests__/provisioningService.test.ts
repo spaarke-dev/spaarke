@@ -246,7 +246,9 @@ describe('provisionSecureProject — failure classification', () => {
 
   // Task 133 c1 (owner round 10 item 4): `cascade_children_unreadable` follows the server's `cascadeChildState`.
   // `unreadable` (or absent) is a failed read — the same caller may call again; `refused` is Dataverse refusing the read
-  // (or answering it incompletely), deterministic — a "Try securing again" would fail every time.
+  // (or answering it incompletely), deterministic — a "Try securing again" would fail every time. Since round c1-r2 a
+  // 401/403 (the service's sign-in or Read privilege refused) is `refused` too, so the refused copy names the service's
+  // permission to read those records beside the records themselves, as the server's detail and guide §7a do (c1-r3).
   it.each([
     ['unreadable', true],
     [undefined, true],
@@ -271,6 +273,7 @@ describe('provisionSecureProject — failure classification', () => {
       expect(result.errorMessage).not.toMatch(/administrator/i);
     } else {
       expect(result.errorMessage).toMatch(/administrator needs to look at those records/i);
+      expect(result.errorMessage).toMatch(/the service's permission to read them/i);
     }
   });
 

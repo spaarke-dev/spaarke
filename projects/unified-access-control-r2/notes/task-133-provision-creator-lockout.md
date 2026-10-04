@@ -1450,7 +1450,8 @@ failed every time. Both outcomes were fail-closed (nothing written); only the re
   rows, or the service's permission to read them", and the administrator looks at the `childTable` rows "and the
   service's Read privilege on that table" first. The reason-code doc says the same.
 - **Client** — unchanged: `cascadeChildState: refused` already maps to the non-retryable "an administrator needs to look
-  at those records first" copy (round c1, CL1).
+  at those records first" copy (round c1, CL1). *(Round c1-r3, §19.1: the copy now also names the service's permission
+  to read them — the verifier's item 10.)*
 - **Guide §7a** — the `cascade_children_unreadable` row lists the 401/403 cause and the privilege check, and "a row came
   back without an id or an owner".
 - **Test** — `Provisioning_WhenTheCascadedRowsCannotBeRead_RefusesBeforeAnyWrite` gains 401 and 403 → `refused` (now 5
@@ -1554,3 +1555,113 @@ changed (no CVE delta). Publish size: not measured (main session).
 > `refused` (an administrator checks the BFF's Read privilege), not a retry that fails every time. Recorded: owner round
 > 13 item 2 (gate (e) replay covered by round 11) and item 1 (unsecure re-owns location rows by the task-146 rule — for
 > task 148).
+
+## 19. Round c1-r3 (2026-10-03, branch `task/uac-r2-133-c1-r3`) — the verifier's findings on round c1-r2
+
+Base: `task/uac-r2-133-c1-r2` @ **`02710b6bb`** (baseSha). **Branch name:** the round was instructed as `git switch -c
+task/uac-r2-133-c1-r1 task/uac-r2-133-c1-r2`. That name already exists — it is round c1-r1 (`fde7441f7`, an ancestor of
+c1-r2, checked out in another worktree) — so `git switch -c` refused it ("a branch named … already exists"), and
+re-pointing it would rewrite an existing round's branch. This round therefore runs on **`task/uac-r2-133-c1-r3`**, branched
+from c1-r2 exactly as instructed; c1-r1 and c1-r2 are untouched. Binding sources re-read from
+`work/unified-access-control-r2` (owner rounds 1–13 and the #1081 peer report). No escalation trigger fired: the one change
+is client copy inside owner round 10 item 4's already-decided `refused` state.
+
+| Item | Verifier finding | Disposition |
+|---|---|---|
+| 1 | No executor code fix remains; the publish-size half of the build criterion is unmeasured, so the verdict is needs-fixes; the fix is a main-session measurement before merge | **NOT closed — main session, by instruction** ("skip publish-size measurement"). The exact procedure is in §19.4. No package changed in any round of this task's c1 series (no CVE delta) |
+| 2 | Item 1/10 (`NotApplied`) closed — seeds A1–A3 bite; `IgnoreChildOwnerBindFor` is a genuine model, not tautological | Verified by the verifier; no change |
+| 3 | Item 2 (id-less row) closed — A4, A5 bite | Verified; no change |
+| 4 | Item 3 (no snapshot where nothing cascades) closed — A10, A11 bite | Verified; no change |
+| 5 | Item 4 (401/403 → `Refused`) closed — A6–A9 bite; the client needs no change for retryability | Verified; no change. Re-checked: `DataverseWebApiClient.GetAccessTokenAsync` (`:121-149`) renews the token 5 minutes before expiry (`:124`, `:138`); `cascadeChildState: refused` maps to the non-retryable `CASCADE_CHILDREN_REFUSED` (its swap in `classifyProvisioningFailure`) |
+| 6 | Regression seed A12 (snapshot failure ignored) fails 9 tests | Verified; no change |
+| 7 | The verifier's own runs on `02710b6bb` | Recorded; this round's runs are §19.3 |
+| 8 | Hygiene (merge-tree clean, 8 files, no TASK-INDEX / current-task / `.claude/**`, POML parses, 7 phrases 0 hits, script comment-only, no live write) | Re-checked for this round (§19.3) |
+| 9 | Owner decisions respected (round 10 item 4, round 13 items 1–2, round 4 item 3) | Verified; this round's change touches none of them |
+| 10 | MINOR (copy precision): for a 401/403 the client's `CASCADE_CHILDREN_REFUSED` copy does not mention the service's Read privilege, which the server detail and guide §7a name | **Closed** (§19.1) |
+| 11 | Criterion "BFF build green … publish size … ≤60 MB; no new HIGH CVE": publish size unmeasured | **Publish size NOT closed — main session** (as item 1). The rest of the criterion is met on this branch (§19.3); no package changed |
+| 12 | Criterion "MANUAL LIVE GATE (a)–(f)" plus (g)–(j) and the `sprk_createdbyperson` dry run / -Apply / -Verify | **NOT closed — main session at integration** (owner round 11; (e) by replay covered by owner round 13 item 2). In dev (e) proves only the no-children path |
+| 13 | Step 9 (TASK-INDEX.md status cell → done) | **NOT closed — main session** (the executor may not edit TASK-INDEX.md) |
+
+### 19.1 Item 10 — the `refused` copy names the service's permission to read the records
+
+| | Copy (`CASCADE_CHILDREN_REFUSED.errorMessage`) |
+|---|---|
+| Before (round c1) | "Securing the project did not start, because the records linked to it that move together with it could not be read. Nothing about the project changed; an administrator needs to look at those records first." |
+| After (round c1-r3) | "… Nothing about the project changed; an administrator needs to look at those records, **and the service's permission to read them**, first." |
+
+- **Why both checks, not a 401/403-only message.** The client receives only `cascadeChildState: refused`; the server folds a
+  400, a 401, a 403, a full page and a row without an id or owner into it, and its `refused` detail names BOTH checks for
+  every one of them ("an administrator looks at the record's {table} rows, and the service's Read privilege on that table,
+  first"), as guide §7a does. The copy therefore says what the administrator looks at — true for every cause — and does
+  not claim which cause happened. It says "the service" as the server detail does; no code, table name or HTTP status
+  reaches the user (task 068's copy rules). Still non-retryable, still no "try again" (the existing never-advise-retry
+  test covers it).
+- **Doc comments**: `CASCADE_CHILDREN_REFUSED` now states what `refused` covers since c1-r2 (a 400, or a 401/403 refusing
+  the service's sign-in or Read privilege, or an incomplete answer) and why the copy names both checks;
+  `IProvisioningFailureExtensions.cascadeChildState` names the 401/403 case.
+- **Test**: `provisioningService.test.ts` — `reads cascadeChildState=%s from the problem body for
+  cascade_children_unreadable`: the `refused` case now also asserts `/the service's permission to read them/i`; its comment
+  says why. No new test (the suite count is unchanged at 108).
+- **Seed CL5** (round c1's copy put back): **BITES** — exactly `…cascadeChildState=refused…` fails (107 passed / 1 failed
+  of 108 across the CreateProjectWizard + SummarizeFilesWizard suites). Restored from a byte copy: MD5 `11a2a3d8…`
+  identical to before the seed, file touched. With rounds c1 (20), c1-r1 (4) and c1-r2 (9) the sweep is **34/34 bite**.
+- Line anchors quoted by earlier rounds and by the verifier for `provisioningService.ts` (`:425-430`, `:499-500`) move by
+  +3 lines (the longer doc comment); the code they point at is unchanged.
+
+### 19.2 Placement and component justification (CLAUDE.md §10 / §11)
+
+No new surface of any kind: no endpoint, service, registration, interface, option, job, package, column, reason code,
+ProblemDetails extension, component or copy constant — one existing constant's text and two doc comments changed. **No C#
+changed this round** (the BFF code is round c1-r2's, byte-identical). Publish size: not measured (main session, §19.4).
+No package changed → no CVE delta (`npm install` was run only to test; its incidental `package.json` / lock-file and
+`.husky/_` edits were reverted before commit).
+
+### 19.3 Quality gates and runs (round c1-r3)
+
+Rigor: FULL inherited (a `.ts` change on the task) and TEST-MODIFYING (tag `testing`; a test file changed), so code-review
+and adr-check run.
+
+**code-review** (all severities, on the diff):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| The copy names the service's permission for every `refused` cause, not only a 401/403 | Observation | Intended: the client cannot tell the causes apart, and the server detail / guide §7a send the administrator to both checks for every `refused` case. Phrased as what to look at, not as the cause — not false for any cause |
+| Earlier rounds' line anchors in `provisioningService.ts` shift by +3 | Observation | History not rewritten; noted in §19.1 |
+| AI-smell scan: no new export, no swallowed failure, no copy that advises a retry, no code in user-facing copy | — | Clean |
+
+**adr-check**: ADR-003 (the `refused` state stays non-retryable and fail closed; no classification changed); ADR-019 (no
+server change; the client still keys on `reasonCode` + `cascadeChildState`); ADR-038 (jest under the package's
+`__tests__`, no banned shapes; the assertion pins user-facing truth, as the surrounding FR-31 tests do). **Compliant, 0
+violations.** §6.5: none.
+
+**Runs** (on this branch; the C# under test is byte-identical to `02710b6bb`):
+
+- Affected first — `Spaarke.UI.Components` jest, CreateProjectWizard + SummarizeFilesWizard: **108/108** (8 suites), on
+  the final source (before the seed, and again after the MD5-identical restore). Prettier 3.8.1 (repo `.prettierrc.json`)
+  and eslint clean on the two changed TS files; the package build (`npm run build` = `tsc`) clean. (`Spaarke.SdapClient`
+  and `Spaarke.Auth` were built locally first — the package's jest resolves `@spaarke/sdap-client` from their `dist`.)
+- Then once, by instruction (no C# changed this round): `dotnet build` of `tests/unit/Sprk.Bff.Api.Tests` **0 warnings /
+  0 errors**; **full BFF unit suite 14,348 passed / 0 failed / 54 skipped (14,402)**, 31 m 33 s, one clean run; NetArchTest
+  **346/346**; **hard gate**, both in full: `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **403
+  passed / 0 failed / 25 skipped (428)**.
+
+**Hygiene**: no edit to `TASK-INDEX.md`, `current-task.md` or `.claude/**`; no live Dataverse / Azure / Entra call of any
+kind this round; the 7 stale phrases of the criterion return 0 hits in `src`; the POML parses (minidom); the `npm install`
+side effects (`package.json` gained a stray `"spaarke": "file:../../../.."`, the lock file, five `.husky/_` files, a
+`node_modules/spaarke` link to the worktree root) were reverted / removed before commit, so the commit holds only the four
+files of this round (the client, its test, this note, the POML).
+
+### 19.4 Main session — the publish-size measurement (items 1 / 11)
+
+Per CLAUDE.md §10 (hazards three and four): a fresh worktree of `origin/master` and a fresh worktree of this branch's head,
+each at a SHORT path (e.g. `C:\wt133m`, `C:\wt133b` — never this agent worktree or a scratchpad path); `dotnet publish -c
+Release` of `src/server/api/Sprk.Bff.Api` into each side's `deploy/api-publish`; `Compress-Archive -CompressionLevel
+Optimal` over `deploy/api-publish/*` on both sides (the `scripts/Deploy-BffApi.ps1` method); confirm equal file counts;
+report both absolute sizes, the delta and the zip tool; ≤60 MB. No package changed, so there is no CVE delta to check.
+
+### 19.5 PR description — addition to §18.10
+
+> **Round c1-r3 (verifier on c1-r2).** Client copy only: for `cascade_children_unreadable` with `cascadeChildState:
+> refused`, the wizard now tells the user an administrator needs to look at the records "and the service's permission to
+> read them" — the check the server's detail and guide §7a name since 401/403 became `refused` (seed CL5 bites). No C#
+> changed. Publish size is the main session's measurement before merge.

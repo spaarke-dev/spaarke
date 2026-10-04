@@ -419,13 +419,16 @@ const RESUMABLE_CONTAINER_KEPT =
 
 /**
  * `cascade_children_unreadable` with `cascadeChildState: refused` (task 133 c1). Dataverse REFUSED the read of the records
- * that move together with the project (or answered it incompletely) — deterministic, so calling again repeats the
- * refusal. Not retryable: a "Try securing again" here would fail every time.
+ * that move together with the project — a 400, or (since task 133 c1-r2) a 401/403 refusing the service's own sign-in or
+ * its Read privilege on that table — or answered it incompletely. Deterministic, so calling again repeats the refusal.
+ * Not retryable: a "Try securing again" here would fail every time. The copy names both things the server's detail and
+ * the setup guide (§7a) send the administrator to: those records, and the service's permission to read them (task 133
+ * c1-r3).
  */
 const CASCADE_CHILDREN_REFUSED = {
   failureKind: 'not-started' as const,
   errorMessage:
-    'Securing the project did not start, because the records linked to it that move together with it could not be read. Nothing about the project changed; an administrator needs to look at those records first.',
+    "Securing the project did not start, because the records linked to it that move together with it could not be read. Nothing about the project changed; an administrator needs to look at those records, and the service's permission to read them, first.",
   retryable: false,
 };
 
@@ -447,7 +450,8 @@ export interface IProvisioningFailureExtensions {
   creatorState?: string;
   /**
    * `cascade_children_unreadable` only (task 133 c1): `unreadable` — a read failed, the same caller may retry — or
-   * `refused` — Dataverse refused the read or answered it incompletely, deterministic: an administrator acts.
+   * `refused` — Dataverse refused the read (including a 401/403: the service's sign-in or Read privilege) or answered it
+   * incompletely, deterministic: an administrator acts.
    */
   cascadeChildState?: string;
 }
