@@ -105,6 +105,100 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         childShare.AccessRightsCsv.Should().NotContain("ShareAccess");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 149 Step 8 on EVERY successful path (integration residual found merging 132, 2026-10-04)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A record ALREADY recording its own container (task 133 b2): kept, so Steps 6 + 7 create nothing.</summary>
+    private const string KeptOwnContainer = "b!its-own-container";
+
+    private void SeedRoot(string recordType, Guid recordId, string? containerId)
+    {
+        switch (recordType)
+        {
+            case "project": _fixture.SeedProject(recordId, containerId: containerId); break;
+            case "matter": _fixture.SeedMatter(recordId, containerId: containerId); break;
+            default: _fixture.SeedWorkAssignment(recordId, containerId: containerId); break;
+        }
+    }
+
+    /// <summary>
+    /// The integration residual found merging task 132 (2026-10-04): Step 8 ran only after Steps 6 + 7 created and
+    /// recorded a NEW container, so a secure record that KEPT its own container (task 133 b2) returned 200 with its
+    /// secure children still missing the shares Step 5.5 had just written. Both successful paths — container kept and
+    /// container created — now fan out exactly once, through the same synchronizer, for every root type, and never with
+    /// Share.
+    /// </summary>
+    [Theory]
+    [InlineData("project", true)]
+    [InlineData("matter", true)]
+    [InlineData("workassignment", true)]
+    [InlineData("project", false)]
+    [InlineData("matter", false)]
+    [InlineData("workassignment", false)]
+    public async Task Provisioning_FansTheNewSharesOutToTheSecureChildren_WhetherTheContainerIsKeptOrCreated(
+        string recordType, bool keepsItsOwnContainer)
+    {
+        var recordId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var rootTable = "sprk_" + recordType;
+        SeedRoot(recordType, recordId, keepsItsOwnContainer ? KeptOwnContainer : null);
+        _fixture.ChildWorld = SecureChildShareWorld.Standard()
+            .SecureRoot(rootTable, recordId)
+            .SecureChild("sprk_document", documentId, (rootTable, rootTable, recordId));
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using (var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            body.RootElement.GetProperty("speContainerId").GetString().Should().Be(
+                keepsItsOwnContainer ? KeptOwnContainer : ProvisionProjectTestFixture.ProvisionedContainerId,
+                "the theory must exercise the path it names");
+        }
+        _fixture.CreatedContainerDisplayNames.Should().HaveCount(keepsItsOwnContainer ? 0 : 1);
+
+        var childShare = _fixture.Grants.Should().ContainSingle(g => g.RecordId == documentId,
+            "the record's secure child follows the creator share Step 5.5 wrote, on the kept-container path as on the " +
+            "new-container path").Subject;
+        childShare.EntitySet.Should().Be("sprk_documents");
+        childShare.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        childShare.AccessRightsCsv.Should().NotContain("ShareAccess");
+    }
+
+    /// <summary>
+    /// On either path, a child pass that cannot complete is reported, never a success (task 148, ADR-003; it supersedes
+    /// 149-f1's "log and succeed"): the record IS provisioned with its kept or created container, the answer is 500
+    /// children_incomplete, and the child table was queried — proof the pass runs on that path. A repeat call completes it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Provisioning_WhenTheChildPassCannotComplete_IsChildrenIncomplete_OnBothContainerPaths(
+        bool keepsItsOwnContainer)
+    {
+        var projectId = Guid.NewGuid();
+        SeedRoot("project", projectId, keepsItsOwnContainer ? KeptOwnContainer : null);
+        _fixture.ChildWorld = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_project", projectId)
+            .SecureChild("sprk_document", Guid.NewGuid(), ("sprk_project", "sprk_project", projectId))
+            .FailingQueriesOf("sprk_document");
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using (var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        _fixture.ContainerIdOf(projectId).Should().Be(
+            keepsItsOwnContainer ? KeptOwnContainer : ProvisionProjectTestFixture.ProvisionedContainerId,
+            "the record's own steps stand; only its related records are left to complete");
+        _fixture.ChildWorld.QueriedTables.Should().Contain("sprk_document",
+            "the child pass runs on this path and asks for the record's children");
+        _fixture.Grants.Should().OnlyContain(g => g.RecordId == projectId, "no child share is written from an unreadable read");
+    }
+
     [Fact]
     public async Task Provisioning_GivesTheCreatorShareAccess_SoTheyCanAddColleaguesWithoutAnAdministrator()
     {
