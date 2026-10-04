@@ -45,24 +45,19 @@ export type {
 // (2026-06-03). The new framework's auto-derived filter chips supersede the
 // hand-rolled filter components, and the EventsPage host (rewritten in
 // task 031) no longer mounts them. Re-exports removed; directories deleted.
-// `useAssignedToFilter` + `useStatusFilter` hooks live in
-// `context/EventsPageContext.tsx` and remain available via that barrel.
 //
 // GridSection — RETIRED in task 033b (2026-06-03). Its last consumer
 // (`widgets/CalendarWorkspaceWidget`) migrated to `<DataGrid configId hostFilters/>`
 // (the @spaarke/ui-components DataGrid framework). Directory deleted; barrel
 // re-exports removed. See projects/spaarke-datagrid-framework-r1/notes/drafts/033b-deviations.md.
-
-export { ColumnFilterHeader } from './ColumnFilterHeader';
-export type { ColumnFilterHeaderProps, ColumnFilterType, ColumnFilterOption } from './ColumnFilterHeader';
-
-export { ColumnHeaderMenu } from './ColumnHeaderMenu';
-export type {
-  ColumnHeaderMenuProps,
-  ColumnMenuFilterType,
-  ColumnMenuFilterOption,
-  SortDirection,
-} from './ColumnHeaderMenu';
-
-export { ViewSelectorDropdown, useViewSelection, EVENT_VIEWS, DEFAULT_VIEW_ID } from './ViewSelectorDropdown';
-export type { ViewSelectorDropdownProps, SavedView } from './ViewSelectorDropdown';
+//
+// ColumnFilterHeader, ColumnHeaderMenu, ViewSelectorDropdown — DELETED (task 087,
+// C-2/C-24/C-25, 2026-10-03). Pre-DataGrid-framework forks that collided by name
+// with the live `@spaarke/ui-components` DataGrid column-header primitives of the
+// same names; EventsPage was rewritten onto that framework (task 031) and stopped
+// importing this package's forks, leaving them orphaned and reachable only by
+// name-collision autocomplete into a non-functional header. The ColumnHeaderMenu
+// fork additionally lacked the live version's dark-mode portal fix (NFR-03/ADR-021).
+// See projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md
+// §8.2 D1 / §8.8 X20/X21. `useAssignedToFilter` + `useStatusFilter` selector hooks
+// (also dead, same migration) were removed from `context/EventsPageContext.tsx`.
