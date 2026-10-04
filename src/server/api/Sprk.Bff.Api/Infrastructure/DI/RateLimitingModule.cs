@@ -108,11 +108,12 @@ public static class RateLimitingModule
             //     unified-access-control-r2 task 167). They stay rate limited per client IP (round 12 item 1:
             //     an anonymous route's compensating control is mandatory), but on a budget no legitimate
             //     poller reaches: the App Service health check (1/min/instance), the slot-swap warm-up ping
-            //     (a 429 there STOPS the swap), and the deploy pollers at a 5-second cadence
-            //     (deploy-bff-api.yml 12 x 5 s, Deploy-BffApi.ps1 and the control plane's H9 probe 24 x 5 s
+            //     (a 429 there STOPS the swap), and the pollers at a 5-second cadence (deploy-bff-api.yml
+            //     12 x 5 s; Deploy-BffApi.ps1, the control plane's H9 probe and Rotate-RedisKey.ps1 24 x 5 s
             //     = 12/min). Under "anonymous" (10/min fixed window) a 5-second poller lost its 11th and 12th
-            //     polls of a window, so a production verify could roll back a good deploy that turned healthy
-            //     in its last ~10 s. Sliding window, no queue: a probe is answered or refused at once, never
+            //     polls of a window, so a production verify could roll back a good deploy (or a Redis key
+            //     rotation roll itself back) when the app turned healthy in the poller's last ~10 s.
+            //     Sliding window, no queue: a probe is answered or refused at once, never
             //     held. Every other anonymous route keeps the strict "anonymous" policy above — the guard
             //     (RouteAuthorizationGuardTests) pins this policy to exactly these three routes.
             options.AddPolicy("health-probe", context =>
