@@ -397,6 +397,16 @@ These codes are emitted by `ProvisionProjectEndpoint` but have no client entry, 
 | `sdap.provision.principal_no_access` | per-person warning | — | {name} is on this project's No Access list, so the project was not shared with them. |
 | `sdap.provision.principal_no_access_unverifiable` | per-person warning | — | Whether {name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access. |
 
+## Round 30 (2026-10-04). BINDING. Main-session decision under round 15. Task 158 Q1.
+
+1. **A sharee removed from a secure parent is also removed from the secure records filed under it, but ONLY where their access there came from the parent.**
+   - **Option (c), provenance.** (a) add-only leaves a former sharee with access they should have lost. (b) a blind revoke on the parent's unshare would also remove people shared DIRECTLY on the filed record.
+   - **No new table: the provenance extends task 142's `sprk_assignedaccess` ledger** (CLAUDE.md §11).
+     - Each share 158 passes from a secure parent to a filed secure root is recorded as a ledger row on that root, with source `inherited:{parentTable}:{parentId}` and the subject (user, or team — add a `sprk_subjectteam` lookup to the ledger schema script: dry-run/-Apply/-Verify, through the solution-membership helper).
+     - It carries the mask written, under A4's rules: never lower existing access; on the parent's unshare, remove only the inherited share that is still UNMODIFIED; an operator's removal on the filed record is recorded `Declined` and is never re-added while the parent share persists; a share that is also direct (an independent row, or a raised mask) is kept.
+     - Fan-out happens in the same place 158 already calls `relatedRoots.PassSharesOnAsync`, and in the reverse direction on unshare. Failures report through `children_incomplete`, as 149's do. The L4 job also reconciles provenance.
+   - Tests + seeds per path (share, unshare-inherited, unshare-also-direct, operator-removed-then-parent-reshared, fault).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
