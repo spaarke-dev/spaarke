@@ -216,6 +216,39 @@ jobs:
         # make `npm ci` fail outright on most of these packages.
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
+      # TEMPORARY diagnostic (task 092, 2026-10-04) — investigating a CI-only
+      # TS2307 "Cannot find module" failure for @fluentui/react-components /
+      # @fluentui/react-icons / @spaarke/auth that does not reproduce locally
+      # even with an exact-sequence fresh install. To be reverted before this
+      # PR merges once the root cause is understood.
+      - name: DIAGNOSTIC — module resolution
+        if: always()
+        continue-on-error: true
+        working-directory: ${{ matrix.pcf }}
+        shell: bash
+        run: |
+          echo "::group::npm ls (top-level + all)"
+          npm ls @fluentui/react-components @fluentui/react-icons @spaarke/auth @spaarke/ui-components 2>&1 || true
+          echo "---all---"
+          npm ls @fluentui/react-components @fluentui/react-icons @spaarke/auth @spaarke/ui-components --all 2>&1 || true
+          echo "::endgroup::"
+          echo "::group::require.resolve"
+          node -e "for (const m of ['@fluentui/react-components','@fluentui/react-icons','@spaarke/auth']) { try { console.log(m, '->', require.resolve(m)); } catch (e) { console.log(m, '-> FAILED:', e.message); } }" || true
+          echo "::endgroup::"
+          echo "::group::node_modules presence (own vs shared libs)"
+          for p in '@fluentui/react-components' '@fluentui/react-icons' '@spaarke/auth'; do
+            if [ -d "node_modules/$p" ]; then echo "OWN node_modules/$p: present"; else echo "OWN node_modules/$p: MISSING"; fi
+          done
+          for shared in SdapClient Auth UI.Components; do
+            d="../../shared/Spaarke.$shared/node_modules"
+            for p in '@fluentui/react-components' '@fluentui/react-icons' '@spaarke/auth'; do
+              if [ -d "$d/$p" ]; then echo "Spaarke.$shared/node_modules/$p: present"; else echo "Spaarke.$shared/node_modules/$p: MISSING"; fi
+            done
+          done
+          echo "::endgroup::"
+          node --version
+          npm --version
+
       - name: Build (production)
         id: build
         continue-on-error: true
