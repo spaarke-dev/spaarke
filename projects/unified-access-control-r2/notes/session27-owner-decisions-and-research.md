@@ -282,6 +282,13 @@ Owner: *"we need this to be properly fixed so that we do not have the issue — 
 6. **167:** the passed branch `task/uac-r2-167-r2` predates round 14; round 14 items 1-2 (dedicated `health-probe` policy; runtime FallbackPolicy + guard rule) are still owed by 167.
 7. Integration order for the sweep: 162 before 164 (164 builds on it), 164 before 163's parameter consumer.
 
+## Round 17 (2026-10-03). BINDING. Main-session decisions under the owner's standing directive (round 15). Task 150's open questions.
+
+1. A missing `sprk_createdbyperson` column (400) in the provisioning creator rule answers **unverifiable** (403 `permission_unverifiable`), aligned with task 146's F3 helper — not `not_record_creator`.
+2. An anomalous unflagged RESUME (record already owned by the Secure Record owner team) gets **resume-neutral copy** for row 8 and for task 133's `creator_unresolved` client string, in the manner of row 2's option D. Each string pinned by a test.
+3. The app-only readers that map an EMPTY `sprk_issecure` to "not secure" (ExternalParticipationService, ExternalDataService, InternalShareEndpoints, ExternalGrantLifecycle, SubjectStandingGrantReader, RecordOwnershipResolver) **fail closed** on an absent flag, exactly as `RecordContainerResolver` does. Owned by task 150; tests + seeds per reader.
+4. Task 150 also closes its two LOW items: the stale "still DRAFT" note sentence, and a committed regression check for `scripts/Repair-SecureFlagNulls.ps1`'s after-count.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
