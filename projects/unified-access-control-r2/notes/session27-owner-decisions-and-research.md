@@ -407,6 +407,15 @@ These codes are emitted by `ProvisionProjectEndpoint` but have no client entry, 
      - Fan-out happens in the same place 158 already calls `relatedRoots.PassSharesOnAsync`, and in the reverse direction on unshare. Failures report through `children_incomplete`, as 149's do. The L4 job also reconciles provenance.
    - Tests + seeds per path (share, unshare-inherited, unshare-also-direct, operator-removed-then-parent-reshared, fault).
 
+## Round 31 (2026-10-04). BINDING. Main-session decisions under round 15. Task 158, from its first verification.
+
+1. **The creator of a record that inherits security honours BOTH No Access lists: the record's own and every secure PARENT's.** It is the same rule the sharee mirror already applies (owner N6, round 3b: refuse to provision). The check runs on the inherited path as well, BEFORE any write; it must not depend on the flag being set first. A walled creator, or an unverifiable answer, refuses the create, with the existing No Access reason codes and round 29's copy.
+2. **A record created under a secure parent is created INTO isolation, with no business-unit-visible window** (round 28 E1 rejected such windows).
+   - **The create:** made by the application, owned by the named Secure Record Owners team (G5: as-caller pre-check first), with `sprk_createdbyperson` = the caller and the flag set in the create.
+   - **Then:** the creator's share is added and read back (133's share-first rule); then the container. A creator share that fails deletes the just-created row (read back) and refuses — never a row nobody can open, never a BU-visible row.
+   - Container or child steps that do not complete leave a PROVISIONED-but-incomplete record, which the existing re-entry branch completes.
+   - The out-of-band path (rows written outside the BFF) stays with the job, which secures them (ADR-002 WP-5).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
