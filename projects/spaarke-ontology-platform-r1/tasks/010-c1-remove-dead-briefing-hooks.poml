@@ -122,5 +122,7 @@
   projects/spaarke-ontology-platform-r1/notes/task-010-remove-dead-briefing-hooks-deviations.md.
   </notes>
 
+  <completion>2026-10-04: criterion 5 cannot be checked on dev until a Console built from this branch is deployed (dev runs master's build; the owner confirmed the widget renders there, which is the baseline). Verification moved to task 055 as an acceptance criterion.</completion>
+
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -100,14 +100,15 @@
 | 🔲 081 | [On-branch cleanup the worklist needs (C-8, C-11, C-13, C-17)](081-duplication-cleanup.poml) | FULL | sonnet/high | 084 | — | C-13 waits for **084 merged**; C-17 = **3/7/10 days** (owner) |
 | ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
-| ✅ 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1118](https://github.com/spaarke-dev/spaarke/pull/1118). **Live bug.** Merge first; 081 depends on it |
-| ✅ 085 | [Compose cleanup, own PR (C-5, C-16)](085-compose-cleanup-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1117](https://github.com/spaarke-dev/spaarke/pull/1117). C-5 already lost comment data |
+| ✅ 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1118](https://github.com/spaarke-dev/spaarke/pull/1118) **merged** `b5b0c0ce0`. **Live bug.** Merge first; 081 depends on it |
+| ✅ 085 | [Compose cleanup, own PR (C-5, C-16)](085-compose-cleanup-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1117](https://github.com/spaarke-dev/spaarke/pull/1117) **merged** `aad1c877f`. C-5 already lost comment data |
 | ✅ 086 | [Dead + misleading code, own PR (C-19, C-21, C-14, C-20, C-26, C-6, C-27)](086-dead-code-own-pr.poml) | FULL | **opus**/high | — | I | [PR #1120](https://github.com/spaarke-dev/spaarke/pull/1120). C-21 deleted (owner). Closes #1112, #1113 |
-| ✅ 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1119](https://github.com/spaarke-dev/spaarke/pull/1119). Also dropped 2 more unused EventsPage deps |
-| ✅ 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | [PR #1116](https://github.com/spaarke-dev/spaarke/pull/1116). Web resource: needs a deploy after merge |
-| ✅ 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1121](https://github.com/spaarke-dev/spaarke/pull/1121). All ~40 deferred sites converged; case-semantics audit in PR body. #1118 and #1121 must merge before 081 |
-| ✅ 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1122](https://github.com/spaarke-dev/spaarke/pull/1122). 4 colour violations fixed; 3 cards documented as different; SECTION_REGISTRY kept with consumer cited |
+| ✅ 087 | [Events leftovers, own PR (C-2, C-24, C-25)](087-events-leftovers-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1119](https://github.com/spaarke-dev/spaarke/pull/1119) **merged** `e24ad4d20`. Also dropped 2 more unused EventsPage deps |
+| ✅ 088 | [InsightSummaryCard, own PR (C-22)](088-insight-summary-card-own-pr.poml) | FULL | sonnet/medium | — | I | [PR #1116](https://github.com/spaarke-dev/spaarke/pull/1116) **merged** `71394e0d3`. Web resource: needs a deploy after merge |
+| ✅ 089 | [Shared building blocks, own PR (C-7, C-12, C-15)](089-shared-building-blocks-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1121](https://github.com/spaarke-dev/spaarke/pull/1121) **merged** `ec7211aaf`. All ~40 deferred sites converged; case-semantics audit in PR body. #1118 and #1121 must merge before 081 |
+| ✅ 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1122](https://github.com/spaarke-dev/spaarke/pull/1122) **merged** `48d4fad04`. 4 colour violations fixed; 3 cards documented as different; SECTION_REGISTRY kept with consumer cited |
 | ✅ 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | [PR #1123](https://github.com/spaarke-dev/spaarke/pull/1123). 6 PCF builds fixed (broken since the 2026-08-14 CVE bump); 17 failing suites fixed or evidenced; **one user-visible fix** (FR-02 section height) |
+| 🔲 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | Owner decision 2026-10-04 (from 092's CI finding). Advisory, nightly, no PR trigger |
 
 ### Phase 9 — Wrap-up
 

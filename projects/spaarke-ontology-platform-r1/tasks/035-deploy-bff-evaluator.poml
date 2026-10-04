@@ -36,6 +36,7 @@
     <constraint source="project">Scope: hash-verify PASS plus health-check timeout means the deploy is CORRECT and the app is still booting (Linux cold start is 90-120s). Do NOT redeploy in that case.</constraint>
     <constraint source="project">Scope: use pwsh, not powershell. Windows PowerShell 5.x in some harnesses does not auto-load Get-FileHash.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-04: no silent failure. The writer fails closed by design, so a broken credential, a refused privilege or a dead job would otherwise look exactly like 'no conditions found'. As part of this deploy, add two alert rules to infrastructure/bicep/modules/alerts.bicep using its existing pattern and action group: (1) CRITICAL when ontology.writer.failures &gt; 0 in a 15-minute window; (2) CRITICAL when no ontology.evaluator.runs with outcome=succeeded in 26 hours (nightly cadence plus margin). Deploying the alert rules is an Azure change: confirm with the owner before applying, as with any deploy.</constraint>
   </constraints>
 
   <knowledge>
@@ -82,6 +83,8 @@
     <criterion testable="true">Publish size is reported as both absolute sides plus the delta, measured against a fresh master build, with file counts equal on both sides and the zip tool named.</criterion>
     <criterion testable="true">Negative: no endpoint behind RequireAuthorization returns 404 (which would indicate an incomplete package); they return 401.</criterion>
     <criterion testable="true">The branch was merged up to master before deploying.</criterion>
+    <criterion testable="true">Both alert rules exist on dev and are wired to the existing action group.</criterion>
+    <criterion testable="true">Negative: with the writer client id app setting temporarily blanked on dev, the writer-failure alert fires (then restore the setting and confirm the next run succeeds). This is also the first real proof that the writer's managed-identity token path works when the setting is present.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md NFR-01. CLAUDE.md section 10 bullet 4 and its four hazards.</notes>

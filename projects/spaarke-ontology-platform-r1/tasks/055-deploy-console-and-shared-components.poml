@@ -35,6 +35,7 @@
     <constraint source="project">Scope: verify against REAL Dataverse with at least one create plus read. A mock or prototype harness is NOT sufficient.</constraint>
     <constraint source="project">Scope: for Vite solutions use npm install --legacy-peer-deps --no-audit --no-fund, not npm ci, which fails on most of them.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">Carried from task 010 (2026-10-04): task 010 deleted dead Daily Briefing hooks; its criterion 5 (the Daily Briefing widget still renders with no console errors) can only be checked once a Console built from this branch is deployed. The owner confirmed the widget renders on the CURRENT dev build (the baseline).</constraint>
   </constraints>
 
   <knowledge>
@@ -94,6 +95,7 @@
     <criterion testable="true">Negative: verification was NOT performed against a mock or prototype harness; the environment is named in the log.</criterion>
     <criterion testable="true">The branch was merged up to master before deploying.</criterion>
     <criterion testable="true">No console errors on load.</criterion>
+    <criterion testable="true">After this deploy, the Daily Briefing widget renders its sections with no console errors (task 010 criterion 5).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-24 through FR-29. push-to-github Step 1.7 requires the real-Dataverse confirmation for Dataverse-querying UI changes.</notes>

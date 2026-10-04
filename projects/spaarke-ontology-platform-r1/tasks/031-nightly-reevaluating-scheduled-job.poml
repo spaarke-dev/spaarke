@@ -40,6 +40,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-04: no silent failure. The writer fails closed by design, so a broken credential, a refused privilege or a dead job would otherwise look exactly like 'no conditions found'. The evaluator therefore (a) emits an App Insights custom metric per run (ontology.evaluator.runs, dimension outcome = succeeded|failed, plus signals written/updated/closed counts), following the existing custom-metric pattern the alerts in infrastructure/bicep/modules/alerts.bicep consume; (b) logs every writer refusal (credential, token, privilege, escalation) at Error with a stable EventId and increments ontology.writer.failures (dimension reason); (c) records the time of the last SUCCESSFUL run and exposes it on a DIAGNOSTIC health check tagged so it lands on /healthz/catalog-style diagnostics, NOT on the /healthz liveness probe (a stale evaluator must not recycle instances).</constraint>
   </constraints>
 
   <knowledge>
@@ -103,6 +104,8 @@
     <criterion testable="true">Negative: the job is an IScheduledJob and no new timer BackgroundService was added.</criterion>
     <criterion testable="true">The job is registered and visible via the admin jobs endpoint.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given the writer refuses (e.g. empty writer client id), when the job runs, then the run is recorded with outcome=failed, an Error log carries the stable EventId, and ontology.writer.failures increments; it is never recorded as a successful run with zero Signals.</criterion>
+    <criterion testable="true">Given no successful run for longer than the threshold, when the diagnostic health check is read, then it reports Unhealthy with the last-success time, and /healthz (liveness) is unaffected.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-11, FR-12 and FR-15. design.md section 8.3 carries the reasoning, including the four-transition table. The ADR-040 amendment (task 003) must be merged before or alongside this task.</notes>
