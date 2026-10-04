@@ -70,7 +70,9 @@ public static class DispatchSessionEndpoint
     private const string ErrorCodeOidMissing = "auth.oid-missing";
     private const string ErrorCodeSessionIdRequired = "sessionId.required";
     private const string ErrorCodeSessionIdInvalid = "sessionId.invalid";
-    private const string ErrorCodeBindingRequired = "dispatch.binding-required";
+    // internal (task 164): AiAuthorizationFilter answers a null dispatch body with the SAME 400 this handler would.
+    internal const string ErrorCodeBindingRequired = "dispatch.binding-required";
+    internal const string BindingRequiredDetail = "'bindingId' is required in the request body.";
     private const string ErrorCodeBindingIdInvalid = "dispatch.binding-id-invalid";
     private const string ErrorCodeInvalidArgs = "dispatch.invalid-args";
     // Issue #863: reachable only on an expiry RACE now. SessionOwnershipFilter loads and
@@ -177,7 +179,7 @@ public static class DispatchSessionEndpoint
         {
             await SummarizeSessionEndpoint.WriteProblemDetailsAsync(
                 response, StatusCodes.Status400BadRequest, "Bad Request",
-                "'bindingId' is required in the request body.",
+                BindingRequiredDetail,
                 ErrorCodeBindingRequired, correlationId, cancellationToken);
             return;
         }

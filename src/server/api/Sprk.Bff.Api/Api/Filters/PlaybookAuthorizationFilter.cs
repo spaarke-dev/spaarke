@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -44,8 +45,9 @@ public static class PlaybookAuthorizationFilterExtensions
 
     /// <summary>
     /// Adds the run decision for <c>POST /api/ai/playbooks/{id:guid}/execute</c> and
-    /// <c>POST /api/agent/run-playbook</c> (<see cref="PlaybookAuthorizationMode.Run"/>): the playbook-use decision
-    /// (uniform 404), then the caller's own rights on every document the run reads or writes (uniform 403).
+    /// <c>POST /api/agent/run-playbook</c> (<see cref="PlaybookAuthorizationMode.Run"/>): the shared playbook-parameter
+    /// policy's syntax half (400), the playbook-use decision (uniform 404), then the caller's own rights on every document
+    /// and every record parameter the run reads or writes (uniform 403); the run's user is the caller's systemuserid.
     /// </summary>
     public static TBuilder AddPlaybookRunAuthorizationFilter<TBuilder>(
         this TBuilder builder) where TBuilder : IEndpointConventionBuilder
@@ -88,7 +90,7 @@ public enum PlaybookAuthorizationMode
     /// <summary>
     /// <c>POST /api/ai/playbooks/{id:guid}/execute</c> and <c>POST /api/agent/run-playbook</c> (task 164): the
     /// playbook-use decision (uniform 404), then Read — or Write, when the run can write to them — on every
-    /// document the run is given (uniform 403).
+    /// document the run is given and every record parameter (uniform 403), after the parameter policy's 400s.
     /// </summary>
     Run
 }
@@ -135,8 +137,10 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// </returns>
     /// <remarks>
     /// Deliberately does NOT compare <c>playbook.OwnerId</c> (a Dataverse systemuserid) with the caller's Entra oid:
-    /// the two GUID spaces differ, which is the defect in <see cref="InvokeAsync"/>'s owner branch (owner round 12
-    /// item 6, task 164). A fault in the lookup propagates; every caller denies on it (ADR-003).
+    /// the two GUID spaces differ. That comparison was the pre-164 defect in this filter's owner branch, which task 164
+    /// fixed (owner round 12 item 6): OwnerOnly now resolves the caller's systemuserid
+    /// (<see cref="ResolveCallerSystemUserIdAsync"/>) and compares THAT with the owner. A fault in the lookup propagates;
+    /// every caller denies on it (ADR-003).
     /// </remarks>
     public static async Task<FinanceAuthorizationCheck?> BuildPlaybookUseCheckAsync(
         IPlaybookService playbookService, Guid playbookId, string source, CancellationToken cancellationToken)
@@ -373,19 +377,23 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
 
     /// <summary>
     /// Run (<c>POST /api/ai/playbooks/{id:guid}/execute</c>, <c>POST /api/agent/run-playbook</c>): the ids come from
-    /// the SAME argument the handler binds. Validation 400s first (no rights query), then the playbook-use decision
-    /// (uniform 404), then every document (uniform 403). The handler writes SSE headers only after this passes.
+    /// the SAME argument the handler binds. Validation 400s first (no rights query) — including the syntax half of the
+    /// shared playbook-parameter policy — then the playbook-use decision (uniform 404), then every document and every
+    /// record parameter (uniform 403), then the run's user. The handler writes SSE headers only after this passes.
     /// </summary>
     /// <remarks>
     /// <para><b>Documents: Read, or Write when the run can write them.</b> The same rule task 162 applies to
     /// <c>POST /api/ai/analysis/execute</c> (<see cref="AnalysisAuthorizationFilter.RunCanWriteDocuments"/>): no
     /// nodes (Legacy mode writes the document's profile outputs), a node with no executor type, or any
     /// side-effecting node requires Write; otherwise Read. One rule for one question.</para>
-    /// <para><b>Playbook <c>Parameters</c> are NOT decided here yet.</b> Task 164 escalation trigger 4 (parameter
-    /// vocabulary) fired: live playbook nodes put non-identity caller parameters (<c>timeWindowHours</c>,
-    /// <c>todayUtc</c>) into app-only FetchXML positions, and the identity / record-parameter map needs an owner
-    /// decision before it can be enforced. TRACKED: GitHub #1103 — see
-    /// <c>projects/unified-access-control-r2/notes/task-164-ai-route-authorization.md</c> §4.</para>
+    /// <para><b>Parameters</b> (owner round 16 item 3): <see cref="PlaybookParameterPolicy.Evaluate"/> refuses a
+    /// server-owned key, a record key that is not a GUID, a typed key of the wrong type and an undeclared GUID (400).
+    /// Each record parameter is then authorized as the caller: Read, plus Write when a node that can write references it
+    /// (<see cref="RecordParameterOperation"/>). Values are escaped wherever they land in query text, at the substitution
+    /// point (<see cref="PlaybookTemplateContextBuilder.EscapeForQueryText"/>).</para>
+    /// <para><b>The run's user is the caller</b>, set server-side: the caller's systemuserid (WhoAmI over OBO) is published
+    /// for the handler (<see cref="GetRunUserId"/> → <see cref="PlaybookRunRequest.RunUserId"/>), so <c>run.userId</c>
+    /// and every <c>eq-userid</c> query act for the caller. An unresolvable caller denies (uniform 403).</para>
     /// </remarks>
     private async ValueTask<object?> AuthorizeRunAsync(
         EndpointFilterInvocationContext context, EndpointFilterDelegate next, string userId)
@@ -394,6 +402,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
         Guid playbookId;
         IReadOnlyList<Guid> documentIds;
         string source;
+        IReadOnlyDictionary<string, string>? parameters;
 
         var agentRequest = context.Arguments.OfType<AgentPlaybookRequest>().FirstOrDefault();
         var executeRequest = context.Arguments.OfType<ExecutePlaybookRequest>().FirstOrDefault();
@@ -413,6 +422,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
             playbookId = agentRequest.PlaybookId;
             documentIds = [agentRequest.DocumentId];
             source = "body.playbookId";
+            parameters = agentRequest.Parameters;
         }
         else if (executeRequest is not null && TryGetRouteGuid(httpContext, out playbookId))
         {
@@ -426,6 +436,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
 
             documentIds = requested.Distinct().ToArray();
             source = "route.id";
+            parameters = executeRequest.Parameters;
         }
         else
         {
@@ -434,51 +445,148 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
             return UniformPlaybookNotFound(httpContext);
         }
 
+        // 0. The shared playbook-parameter policy, syntax half — a 400 that depends on no record, before any rights query.
+        var parameterEvaluation = PlaybookParameterPolicy.Evaluate(parameters);
+        if (!parameterEvaluation.IsValid)
+        {
+            _logger?.LogWarning(
+                "Playbook run REFUSED for caller {UserId}: parameter {Key} not accepted ({Reason})",
+                userId, parameterEvaluation.RejectedKey, parameterEvaluation.Reason);
+            return ParameterRejected(httpContext, parameterEvaluation);
+        }
+
         // 1. The playbook-use decision — the playbook-id kind answers the uniform 404.
         if (!await IsPlaybookUseAllowedAsync(httpContext, playbookId, source, userId))
         {
             return UniformPlaybookNotFound(httpContext);
         }
 
-        // 2. Every document, as the caller — the record kind answers the uniform 403.
-        if (!await AreRunDocumentsAllowedAsync(httpContext, playbookId, documentIds, userId))
+        // 2. Every document and every record parameter, as the caller — the record kind answers the uniform 403.
+        if (!await AreRunRecordsAllowedAsync(httpContext, playbookId, documentIds, parameterEvaluation.RecordParameters, userId))
         {
             return UniformRecordAccessDenied(httpContext);
         }
 
+        // 3. The run's user: the authenticated caller's systemuserid, never a caller value (owner round 16 item 3).
+        var runUserId = await ResolveCallerSystemUserIdAsync(httpContext, httpContext.RequestAborted);
+        if (runUserId is not { } resolvedRunUserId || resolvedRunUserId == Guid.Empty)
+        {
+            _logger?.LogWarning("Playbook run DENIED for caller {UserId}: the caller's systemuserid could not be resolved", userId);
+            return UniformRecordAccessDenied(httpContext);
+        }
+
+        httpContext.Items[RunUserIdItemKey] = resolvedRunUserId;
         return await next(context);
     }
+
+    /// <summary>The <see cref="HttpContext.Items"/> key under which the run mode publishes the caller's systemuserid.</summary>
+    private const string RunUserIdItemKey = "Sprk.PlaybookAuthorizationFilter.RunUserId";
+
+    /// <summary>
+    /// The run's user (the caller's Dataverse systemuserid) the run mode resolved and published, for the handler to put on
+    /// <see cref="PlaybookRunRequest.RunUserId"/>; <c>null</c> when the run-mode filter did not pass on this request.
+    /// </summary>
+    public static Guid? GetRunUserId(HttpContext httpContext)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        return httpContext.Items.TryGetValue(RunUserIdItemKey, out var value) && value is Guid id ? id : null;
+    }
+
+    /// <summary>The stable <c>errorCode</c> of a refused playbook parameter (400).</summary>
+    public const string ParameterRejectedErrorCode = "playbook.parameter-rejected";
+
+    /// <summary>
+    /// The 400 for a refused parameter. It names the caller's own key and the rule — never a record, and it does not
+    /// depend on whether any record exists, so it is not an oracle.
+    /// </summary>
+    private static IResult ParameterRejected(HttpContext httpContext, PlaybookParameterPolicy.Evaluation evaluation) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Bad Request",
+            detail: $"Playbook parameter '{evaluation.RejectedKey}' is not accepted: {evaluation.Reason}.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = ParameterRejectedErrorCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+
+    /// <summary>
+    /// The right a run needs on a record parameter: <c>"write"</c> when a node that can write — a side-effecting
+    /// executor, or one with no executor type (unclassifiable, fail closed) — references the parameter anywhere in its
+    /// ConfigJson (<see cref="PlaybookParameterPolicy.ReferencesParameter"/>; e.g. <c>matter-health-single</c>'s
+    /// UpdateRecord <c>recordId: {{matterId}}</c>); otherwise <c>"read"</c>.
+    /// </summary>
+    internal static string RecordParameterOperation(IReadOnlyCollection<PlaybookNodeDto> nodes, string parameterName) =>
+        nodes.Any(n => (n.SprkExecutortype is not { } executorType || ExecutorSideEffects.IsSideEffecting(executorType))
+                       && PlaybookParameterPolicy.ReferencesParameter(n.ConfigJson, parameterName))
+            ? "write"
+            : "read";
 
     /// <summary>
     /// The playbook-use decision (<see cref="BuildPlaybookUseCheckAsync(IPlaybookService, Guid, string, CancellationToken)"/>)
     /// evaluated as the caller: public → allowed; otherwise the caller's own Dataverse rights on the row must carry
     /// <see cref="PlaybookUseOperation"/>. Any fault, a missing token or a missing service answers false.
     /// </summary>
-    private async Task<bool> IsPlaybookUseAllowedAsync(HttpContext httpContext, Guid playbookId, string source, string userId)
+    private Task<bool> IsPlaybookUseAllowedAsync(HttpContext httpContext, Guid playbookId, string source, string userId) =>
+        EvaluatePlaybookUseAsync(_playbookService, _authorizationService, httpContext, playbookId, source, userId, _logger);
+
+    /// <summary>
+    /// The playbook-use decision AS THE CALLER, for a route OUTSIDE this filter that binds a caller-chosen playbook — the
+    /// chat session's <c>PlaybookId</c> (task 164: <c>AiAuthorizationFilter</c>'s chat-context evaluation; the definition
+    /// reaches the prompt app-only through <c>PlaybookChatContextProvider</c>). The same rule as this filter's own routes:
+    /// <see cref="BuildPlaybookUseCheckAsync(IPlaybookService, Guid, string, CancellationToken)"/>, then the caller's own
+    /// Dataverse rights on the row. A missing oid, token or service, and any fault, answer false (ADR-003).
+    /// </summary>
+    public static Task<bool> IsPlaybookUseAllowedForCallerAsync(HttpContext httpContext, Guid playbookId, string source)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var services = httpContext.RequestServices;
+        var playbookService = services.GetService<IPlaybookService>();
+        if (string.IsNullOrEmpty(userId) || playbookService is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        return EvaluatePlaybookUseAsync(
+            playbookService, services.GetService<AuthorizationService>(), httpContext, playbookId, source, userId,
+            services.GetService<ILogger<PlaybookAuthorizationFilter>>());
+    }
+
+    private static async Task<bool> EvaluatePlaybookUseAsync(
+        IPlaybookService playbookService,
+        AuthorizationService? authorizationService,
+        HttpContext httpContext,
+        Guid playbookId,
+        string source,
+        string userId,
+        ILogger? logger)
     {
         var ct = httpContext.RequestAborted;
         try
         {
-            var check = await BuildPlaybookUseCheckAsync(_playbookService, playbookId, source, ct);
+            var check = await BuildPlaybookUseCheckAsync(playbookService, playbookId, source, ct);
             if (check is null)
             {
                 return true;
             }
 
-            if (_authorizationService is null || check.Path != FinanceCheckPath.Record || check.RecordId == Guid.Empty)
+            if (authorizationService is null || check.Path != FinanceCheckPath.Record || check.RecordId == Guid.Empty)
             {
-                _logger?.LogWarning(
+                logger?.LogWarning(
                     "Playbook-use DENIED for caller {UserId} [{Source}]: no evaluable check (service registered: {HasService})",
-                    userId, source, _authorizationService is not null);
+                    userId, source, authorizationService is not null);
                 return false;
             }
 
-            var snapshot = await _authorizationService.GetCallerRecordAccessAsync(
+            var snapshot = await authorizationService.GetCallerRecordAccessAsync(
                 userId, check.EntitySetName, check.RecordId, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
             var allowed = OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, check.Operation);
             if (!allowed)
             {
-                _logger?.LogWarning(
+                logger?.LogWarning(
                     "Playbook-use DENIED: caller {UserId} on {EntitySet}({PlaybookId}) [{Source}] rights {Rights}",
                     userId, check.EntitySetName, playbookId, source, snapshot.AccessRights);
             }
@@ -491,7 +599,7 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Playbook-use decision faulted for caller {UserId} [{Source}]; denying (fail closed)", userId, source);
+            logger?.LogError(ex, "Playbook-use decision faulted for caller {UserId} [{Source}]; denying (fail closed)", userId, source);
             return false;
         }
     }
@@ -499,10 +607,16 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     /// <summary>
     /// Read — or Write when <see cref="AnalysisAuthorizationFilter.RunCanWriteDocuments"/> says the run can write
     /// them — on EVERY document, as the caller (the document path of <see cref="AuthorizationService.AuthorizeAsync"/>,
-    /// OBO). Any denial, missing id, missing token, missing service or fault answers false.
+    /// OBO); then <see cref="RecordParameterOperation"/> on EVERY record parameter (the entity-generic record path,
+    /// <see cref="AuthorizationService.GetCallerRecordAccessAsync"/>). Any denial, missing id, missing token, missing
+    /// service, a record entity with no entity set, or a fault answers false.
     /// </summary>
-    private async Task<bool> AreRunDocumentsAllowedAsync(
-        HttpContext httpContext, Guid playbookId, IReadOnlyList<Guid> documentIds, string userId)
+    private async Task<bool> AreRunRecordsAllowedAsync(
+        HttpContext httpContext,
+        Guid playbookId,
+        IReadOnlyList<Guid> documentIds,
+        IReadOnlyList<PlaybookParameterPolicy.RecordParameter> recordParameters,
+        string userId)
     {
         var ct = httpContext.RequestAborted;
         try
@@ -542,6 +656,30 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
                     _logger?.LogWarning(
                         "Playbook run documents DENIED: caller {UserId} lacks {Operation} on document {DocumentId} (reason {Reason})",
                         userId, operation, documentId, result.ReasonCode);
+                    return false;
+                }
+            }
+
+            // Record parameters (owner round 16 item 3): the entity set comes from the existing allow-list, never by
+            // pluralizing; a parameter whose entity has no set is a configuration fault and denies.
+            foreach (var parameter in recordParameters)
+            {
+                if (!SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet(parameter.EntityLogicalName, out var entitySet))
+                {
+                    _logger?.LogError(
+                        "Playbook run DENIED for caller {UserId}: record parameter {Parameter} names {Entity}, which has no entity set",
+                        userId, parameter.Name, parameter.EntityLogicalName);
+                    return false;
+                }
+
+                var parameterOperation = RecordParameterOperation(nodes, parameter.Name);
+                var snapshot = await _authorizationService.GetCallerRecordAccessAsync(
+                    userId, entitySet, parameter.RecordId, callerToken, ct);
+                if (!OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, parameterOperation))
+                {
+                    _logger?.LogWarning(
+                        "Playbook run DENIED: caller {UserId} lacks {Operation} on {EntitySet}({RecordId}) named by parameter {Parameter}",
+                        userId, parameterOperation, entitySet, parameter.RecordId, parameter.Name);
                     return false;
                 }
             }

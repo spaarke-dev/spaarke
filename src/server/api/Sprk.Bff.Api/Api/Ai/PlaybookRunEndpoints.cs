@@ -54,6 +54,8 @@ public static class PlaybookRunEndpoints
         // 404 for unknown / denied / fault) and the caller's own Read (or Write, when the run can write them) on
         // every DocumentIds entry (one uniform 403) — runs BEFORE the handler writes SSE headers. The route's {id}
         // is a PLAYBOOK id and is never authorized as a document (do not add AddAiAuthorizationFilter here).
+        // Fix round 1 (owner round 16 item 3): the caller's Parameters pass the shared PlaybookParameterPolicy (400),
+        // record parameters are authorized as the caller (403), and the run acts for the caller's systemuserid.
         playbookGroup.MapPost("/execute", ExecutePlaybook)
             .AddPlaybookRunAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
@@ -187,7 +189,10 @@ public static class PlaybookRunEndpoints
                 PlaybookId = id,
                 DocumentIds = request.DocumentIds,
                 UserContext = request.UserContext,
-                Parameters = request.Parameters
+                Parameters = request.Parameters,
+                // Owner round 16 item 3 (task 164): the run acts for the authenticated caller — the systemuserid the
+                // run-mode filter resolved (WhoAmI over OBO) — never for a caller-supplied userId.
+                RunUserId = PlaybookAuthorizationFilter.GetRunUserId(context)
             };
 
             await foreach (var evt in orchestrationService.ExecuteAsync(runRequest, context, cancellationToken))

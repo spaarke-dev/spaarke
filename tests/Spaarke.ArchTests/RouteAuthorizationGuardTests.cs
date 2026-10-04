@@ -1243,9 +1243,10 @@ public class RouteAuthorizationGuardTests
                 + "token and denies without either — an IDENTITY PRECONDITION only. It decides nothing about "
                 + "records, and the agent routes DO reach document and playbook data: the per-record decisions "
                 + "are made by other filters in the same chain (POST /run-playbook: PlaybookAuthorizationFilter "
-                + "run mode, the playbook-use decision plus Read/Write on the document, task 164), and the "
-                + "status route's run-owner comparison is in its handler. POST /message's document and stored "
-                + "session context are task 164's open chat-family item (escalation trigger 3).",
+                + "run mode — the playbook-use decision, Read/Write on the document and the record parameters; "
+                + "POST /message: AiAuthorizationFilter's chat-context evaluation of the body document and the "
+                + "resumed session's stored context; task 164), and the status route's run-owner comparison is "
+                + "in its handler.",
             ["CommunicationAuthorizationFilter"] =
                 "Gates SENDING a communication, not reading a record. Its own summary is explicit that "
                 + "Phase 1 permits any authenticated user with a valid oid, so it does not misrepresent "

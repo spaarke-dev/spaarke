@@ -141,8 +141,9 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     public const string CreateAnalysisPrivilege = "prvCreatesprk_analysis";
 
     /// <summary>
-    /// <c>sprk_analysis</c>'s entity set per live metadata (spaarkedev1, 2026-10-03: <c>sprk_analysises</c>). Used
-    /// ONLY as the Privilege check's deny-log label; it reaches no URL.
+    /// <c>sprk_analysis</c>'s entity set per live metadata (spaarkedev1, 2026-10-03: <c>sprk_analysises</c>) — the ONE
+    /// constant for it. Here it is the Privilege check's deny-log label; task 164's
+    /// <c>AiAuthorizationFilter.AnalysisEntitySet</c> aliases it as the entity set of the chat analysis-host Read check.
     /// </summary>
     public const string AnalysisEntitySetLabel = "sprk_analysises";
 

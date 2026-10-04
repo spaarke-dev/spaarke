@@ -59,6 +59,7 @@ public class PlaybookRouteAuthorizationContractTests
     private const string Playbooks = "sprk_analysisplaybooks";
 
     private const string Documents = "sprk_documents";
+    private const string Matters = "sprk_matters";
     private const string CallerOid = "6f0c1a52-0000-4000-8000-000000000164";
     private const string OtherOid = "6f0c1a52-0000-4000-8000-0000000001ff";
 
@@ -501,6 +502,260 @@ public class PlaybookRouteAuthorizationContractTests
     }
 
     // =========================================================================================
+    // Playbook parameters on execute and agent run-playbook — the shared policy (owner round 16 item 3, task 164 r1)
+    // =========================================================================================
+
+    [Theory]
+    [InlineData("userId")]
+    [InlineData("USERID")]
+    [InlineData("TenantId")]
+    [InlineData("run.userId")]
+    [InlineData("start.channels")]
+    [InlineData("userPreferences.timeWindow")]
+    public async Task Execute_ServerOwnedParameter_InAnyLetterCase_Is400_BeforeAnyRightsQuery_AndNothingRuns(string key)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+
+        var response = await host.SendAsync(Execute(playbookId, new Dictionary<string, string> { [key] = Guid.NewGuid().ToString() }, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>()
+            .Should().Be(PlaybookAuthorizationFilter.ParameterRejectedErrorCode);
+        host.Access.Calls.Should().BeEmpty("a parameter refusal depends on no record, so it precedes every rights query");
+        host.Playbooks.VerifyNoOtherCalls();
+        host.VerifyNothingRan();
+    }
+
+    [Theory]
+    [InlineData("matterId", "not-a-guid")]
+    [InlineData("documentOwnerId", "6f0c1a52-0000-4000-8000-000000000999")]
+    [InlineData("tone", "formal")]
+    [InlineData("focus", "6f0c1a52-0000-4000-8000-000000000999")]
+    [InlineData("timeWindowHours", "24'/><condition attribute='ownerid' operator='ne' value='x")]
+    [InlineData("todayUtc", "2026-10-04' or")]
+    public async Task Execute_ParameterOfTheWrongShape_Is400_AndNothingRuns(string key, string value)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+
+        var response = await host.SendAsync(Execute(playbookId, new Dictionary<string, string> { [key] = value }, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        host.Access.Calls.Should().BeEmpty();
+        host.VerifyNothingRan();
+    }
+
+    [Fact]
+    public async Task Execute_RecordParameter_UnknownDeniedAndFaulting_AreOneUniform403_AndNothingRuns()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+        var deniedMatter = Guid.NewGuid();
+        host.Access.Grant(Matters, deniedMatter, AccessRights.AppendTo);
+
+        var unknown = await host.SendAsync(Execute(playbookId, MatterParameter(Guid.NewGuid()), documentId));
+        var denied = await host.SendAsync(Execute(playbookId, MatterParameter(deniedMatter), documentId));
+
+        unknown.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var unknownBody = Normalize(await unknown.Content.ReadAsStringAsync());
+        unknownBody.Should().Be(Normalize(await denied.Content.ReadAsStringAsync()));
+        DetailAndExtensions(await denied.Content.ReadAsStringAsync()).Should().NotContain(deniedMatter.ToString());
+        host.Access.Calls.Should().Contain(new AccessCall(AccessPath.Record, Matters, deniedMatter, HasToken: true),
+            "the record parameter is decided by the caller's own rights on the matter");
+        host.VerifyNothingRan();
+    }
+
+    [Fact]
+    public async Task Execute_RecordParameter_ASeamFault_IsTheSameUniform403()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+        var reference = await host.SendAsync(Execute(playbookId, MatterParameter(Guid.NewGuid()), documentId));
+
+        host.Access.ThrowOnRecordCalls = new HttpRequestException("RetrievePrincipalAccess failed");
+        var fault = await host.SendAsync(Execute(playbookId, MatterParameter(Guid.NewGuid()), documentId));
+
+        fault.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        Normalize(await fault.Content.ReadAsStringAsync()).Should().Be(Normalize(await reference.Content.ReadAsStringAsync()));
+        host.VerifyNothingRan();
+    }
+
+    [Fact]
+    public async Task Execute_RecordParameterAWritingNodeUses_RequiresWrite_ReadSufficesOtherwise()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var documentId = host.ReadableDocument();
+        var readOnlyMatter = Guid.NewGuid();
+        var writableMatter = Guid.NewGuid();
+        host.Access.Grant(Matters, readOnlyMatter, AccessRights.Read);
+        host.Access.Grant(Matters, writableMatter, AccessRights.Read | AccessRights.Write);
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.RunSucceeds();
+
+        // A playbook whose UpdateRecord node writes to {{matterId}} (the matter-health-single shape).
+        var persisting = Guid.NewGuid();
+        host.PublicPlaybook(persisting);
+        host.NodesWithConfig(persisting,
+            (ExecutorType.AiAnalysis, "{}"),
+            (ExecutorType.UpdateRecord, "{\"entityLogicalName\":\"sprk_matter\",\"recordId\":\"{{matterId}}\"}"));
+
+        (await host.SendAsync(Execute(persisting, MatterParameter(readOnlyMatter), documentId)))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, "Read on the matter does not let the run write to it");
+        host.VerifyNothingRan();
+        (await host.SendAsync(Execute(persisting, MatterParameter(writableMatter), documentId)))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // A read-only playbook that only reads the matter: Read suffices.
+        var reading = Guid.NewGuid();
+        host.PublicPlaybook(reading);
+        host.NodesWithConfig(reading,
+            (ExecutorType.QueryDataverse, "{\"fetchXml\":\"<fetch><entity name='sprk_kpiassessment'><filter><condition attribute='sprk_matter' operator='eq' value='{{matterId}}'/></filter></entity></fetch>\"}"));
+        (await host.SendAsync(Execute(reading, MatterParameter(readOnlyMatter), documentId)))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Execute_ReaderWithAcceptedParameters_RunsAsTheCaller_TheirSystemUserIdIsTheRunUser()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+        var matter = Guid.NewGuid();
+        host.Access.Grant(Matters, matter, AccessRights.Read);
+        host.RunSucceeds();
+        var parameters = new Dictionary<string, string>
+        {
+            ["matterId"] = matter.ToString(),
+            ["timeWindowHours"] = "48",
+            ["focus"] = "termination clauses",
+        };
+
+        var response = await host.SendAsync(Execute(playbookId, parameters, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Orchestration.Verify(o => o.ExecuteAsync(
+            It.Is<PlaybookRunRequest>(r => r.RunUserId == host.Probe.SystemUserId
+                                           && r.Parameters!.Count == 3
+                                           && r.Parameters["matterId"] == matter.ToString()),
+            It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task Execute_CallerWhoseSystemUserIdCannotBeResolved_Is403_AndNothingRuns()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+        host.Probe.SystemUserId = null;
+
+        var response = await host.SendAsync(Execute(playbookId, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNothingRan();
+    }
+
+    [Fact]
+    public async Task AgentRunPlaybook_ParameterPolicy_AppliesTheSame_AndTheRunUserIsTheCaller()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.ReadableDocument();
+        var unreadableMatter = Guid.NewGuid();
+        host.RunSucceeds();
+
+        var serverOwned = await host.SendAsync(RunPlaybook(playbookId, documentId, new Dictionary<string, string> { ["userId"] = Guid.NewGuid().ToString() }));
+        var unreadable = await host.SendAsync(RunPlaybook(playbookId, documentId, MatterParameter(unreadableMatter)));
+        host.VerifyNothingRan();
+        var allowed = await host.SendAsync(RunPlaybook(playbookId, documentId, new Dictionary<string, string> { ["focus"] = "risk" }));
+
+        serverOwned.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        unreadable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        allowed.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        host.Orchestration.Verify(o => o.ExecuteAsync(
+            It.Is<PlaybookRunRequest>(r => r.RunUserId == host.Probe.SystemUserId),
+            It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    // =========================================================================================
+    // GET /api/agent/playbooks/status/{jobId:guid} — a lookup fault is the same uniform 404 (task 164 r1)
+    // =========================================================================================
+
+    [Fact]
+    public async Task AgentStatus_ALookupFault_IsTheSameUniform404_AsAnUnknownRun()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var unknownRun = Guid.NewGuid();
+        var faultingRun = Guid.NewGuid();
+        host.Orchestration.Setup(o => o.GetRunStatusAsync(unknownRun, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlaybookRunStatus?)null);
+        host.Orchestration.Setup(o => o.GetRunStatusAsync(faultingRun, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("run store unavailable"));
+
+        var unknown = await host.SendAsync(Get($"/api/agent/playbooks/status/{unknownRun}"));
+        var faulting = await host.SendAsync(Get($"/api/agent/playbooks/status/{faultingRun}"));
+
+        faulting.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var faultingBody = await faulting.Content.ReadAsStringAsync();
+        faultingBody.Should().NotContain(faultingRun.ToString()).And.NotContain("run store unavailable");
+        Normalize(faultingBody).Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()));
+    }
+
+    // =========================================================================================
+    // Owner round 12 item 6 — the caller's systemuserid on the agent list and on share / unshare (task 164 r1)
+    // =========================================================================================
+
+    [Fact]
+    public async Task AgentOwnedPlaybookList_FiltersByTheCallersSystemUserId_NotTheEntraOid()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        host.Playbooks.Setup(p => p.ListUserPlaybooksAsync(It.IsAny<Guid>(), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookListResponse { Items = [], TotalCount = 0, Page = 1, PageSize = 50 });
+        host.Playbooks.Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookListResponse { Items = [], TotalCount = 0, Page = 1, PageSize = 50 });
+
+        (await host.SendAsync(Get("/api/agent/playbooks"))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        host.Playbooks.Verify(p => p.ListUserPlaybooksAsync(systemUserId, It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()), Times.Once());
+        host.Playbooks.Verify(p => p.ListUserPlaybooksAsync(Guid.Parse(CallerOid), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Share_And_Unshare_PassTheCallersSystemUserId_NotTheEntraOid()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        var playbookId = Guid.NewGuid();
+        host.Playbooks.Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = false, OwnerId = systemUserId });
+        host.Sharing.Setup(s => s.SharePlaybookAsync(playbookId, It.IsAny<SharePlaybookRequest>(), It.IsAny<Guid>()))
+            .ReturnsAsync(new ShareOperationResult { Success = true });
+        host.Sharing.Setup(s => s.RevokeShareAsync(playbookId, It.IsAny<RevokeShareRequest>(), It.IsAny<Guid>()))
+            .ReturnsAsync(new ShareOperationResult { Success = true });
+        var teamId = Guid.NewGuid();
+
+        var share = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/share", CallerOid);
+        share.Content = JsonContent.Create(new { teamIds = new[] { teamId } });
+        var unshare = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/unshare", CallerOid);
+        unshare.Content = JsonContent.Create(new { teamIds = new[] { teamId } });
+
+        (await host.SendAsync(share)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await host.SendAsync(unshare)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        host.Sharing.Verify(s => s.SharePlaybookAsync(playbookId, It.IsAny<SharePlaybookRequest>(), systemUserId), Times.Once());
+        host.Sharing.Verify(s => s.RevokeShareAsync(playbookId, It.IsAny<RevokeShareRequest>(), systemUserId), Times.Once());
+        host.Sharing.Verify(s => s.SharePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SharePlaybookRequest>(), Guid.Parse(CallerOid)), Times.Never());
+        host.Sharing.Verify(s => s.RevokeShareAsync(It.IsAny<Guid>(), It.IsAny<RevokeShareRequest>(), Guid.Parse(CallerOid)), Times.Never());
+    }
+
+    // =========================================================================================
     // Helpers
     // =========================================================================================
 
@@ -520,6 +775,22 @@ public class PlaybookRouteAuthorizationContractTests
         request.Content = JsonContent.Create(new { playbookId, documentId });
         return request;
     }
+
+    private static HttpRequestMessage Execute(Guid playbookId, IReadOnlyDictionary<string, string> parameters, params Guid[] documentIds)
+    {
+        var request = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/execute", CallerOid);
+        request.Content = JsonContent.Create(new { documentIds, parameters });
+        return request;
+    }
+
+    private static HttpRequestMessage RunPlaybook(Guid playbookId, Guid documentId, IReadOnlyDictionary<string, string> parameters)
+    {
+        var request = Authenticated(HttpMethod.Post, "/api/agent/run-playbook", CallerOid);
+        request.Content = JsonContent.Create(new { playbookId, documentId, parameters });
+        return request;
+    }
+
+    private static Dictionary<string, string> MatterParameter(Guid matterId) => new() { ["matterId"] = matterId.ToString() };
 
     private static HttpRequestMessage Authenticated(HttpMethod method, string path, string callerOid)
     {
@@ -581,6 +852,9 @@ public class PlaybookRouteAuthorizationContractTests
 
         public Exception? ThrowOnEveryCall { get; set; }
 
+        /// <summary>A fault on the entity-generic RECORD path only (documents still answer).</summary>
+        public Exception? ThrowOnRecordCalls { get; set; }
+
         public void Grant(string set, Guid id, AccessRights rights) => _rights[(null, set, id)] = rights;
 
         public void GrantFor(string oid, string set, Guid id, AccessRights rights) => _rights[(oid, set, id)] = rights;
@@ -597,7 +871,9 @@ public class PlaybookRouteAuthorizationContractTests
             string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
         {
             Calls.Add(new AccessCall(AccessPath.Record, entitySetName, recordId, !string.IsNullOrEmpty(userAccessToken)));
-            return Answer(userId, entitySetName, recordId);
+            return ThrowOnRecordCalls is not null
+                ? Task.FromException<AccessSnapshot>(ThrowOnRecordCalls)
+                : Answer(userId, entitySetName, recordId);
         }
 
         private Task<AccessSnapshot> Answer(string userId, string set, Guid id)
@@ -640,6 +916,7 @@ public class PlaybookRouteAuthorizationContractTests
         public Mock<IPlaybookLookupService> Lookup { get; } = new(MockBehavior.Strict);
         public Mock<INodeService> Nodes { get; } = new(MockBehavior.Strict);
         public Mock<IPlaybookOrchestrationService> Orchestration { get; } = new(MockBehavior.Strict);
+        public Mock<IPlaybookSharingService> Sharing { get; } = new(MockBehavior.Strict);
 
         public static async Task<PlaybookAuthHost> StartAsync()
         {
@@ -684,7 +961,7 @@ public class PlaybookRouteAuthorizationContractTests
                 new EndpointResponseCache(new MemoryCache(Options.Create(new MemoryCacheOptions()))));
 
             // Handler parameter types of routes these tests never call (the mappers need them to be services).
-            builder.Services.AddSingleton(new Mock<IPlaybookSharingService>(MockBehavior.Strict).Object);
+            builder.Services.AddSingleton(Sharing.Object);
             builder.Services.AddSingleton(new Mock<IChatClient>(MockBehavior.Strict).Object);
             builder.Services.AddScoped<ChatSessionManager>(_ =>
                 throw new InvalidOperationException("POST /api/agent/message is not exercised by this host"));
@@ -729,6 +1006,12 @@ public class PlaybookRouteAuthorizationContractTests
             Nodes.Setup(n => n.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(executorTypes
                     .Select(t => new PlaybookNodeDto { Id = Guid.NewGuid(), PlaybookId = playbookId, SprkExecutortype = t })
+                    .ToArray());
+
+        public void NodesWithConfig(Guid playbookId, params (ExecutorType Type, string ConfigJson)[] nodes) =>
+            Nodes.Setup(n => n.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(nodes
+                    .Select(n => new PlaybookNodeDto { Id = Guid.NewGuid(), PlaybookId = playbookId, SprkExecutortype = n.Type, ConfigJson = n.ConfigJson })
                     .ToArray());
 
         public Guid ReadableDocument()

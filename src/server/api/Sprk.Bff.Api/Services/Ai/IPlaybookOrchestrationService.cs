@@ -138,6 +138,16 @@ public record PlaybookRunRequest
     /// so all nodes share the same extracted text without re-downloading from SPE.
     /// </summary>
     public DocumentContext? Document { get; init; }
+
+    /// <summary>
+    /// The Dataverse <c>systemuserid</c> the run acts for — <c>run.userId</c>, the <c>eq-userid</c> FetchXML substitution
+    /// and the default notification recipient (<see cref="PlaybookRunContext.UserId"/>). Set ONLY by an HTTP entry route,
+    /// from the AUTHENTICATED caller (WhoAmI over the caller's OBO token, resolved by <c>PlaybookAuthorizationFilter</c>),
+    /// never from caller input: a caller-supplied <c>userId</c> parameter is refused by
+    /// <see cref="PlaybookParameterPolicy"/> (unified-access-control-r2 task 164, owner round 16 item 3). <c>null</c> on
+    /// every other path, which then behaves as before.
+    /// </summary>
+    public Guid? RunUserId { get; init; }
 }
 
 /// <summary>

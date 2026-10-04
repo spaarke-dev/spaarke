@@ -39,8 +39,13 @@ public static class AgentEndpoints
             .WithTags("Agent Gateway");
 
         // POST /api/agent/message — receive agent message, route to existing services
+        // unified-access-control-r2 task 164 (sweep #18): AgentAuthorizationFilter establishes the caller identity;
+        // AiAuthorizationFilter (chat-context evaluation, keyed on AgentMessageRequest) then decides on the exact records
+        // the turn uses, as the caller — the body DocumentId and, for a resumed session the caller owns, its stored
+        // host record, documents and playbook — before any session is created or resumed (one uniform 403).
         group.MapPost("/message", HandleMessageAsync)
             .AddAgentAuthorizationFilter()
+            .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("AgentMessage")
             .WithSummary("Process a message from the M365 Copilot agent")
@@ -69,7 +74,9 @@ public static class AgentEndpoints
         // unified-access-control-r2 task 164 (sweep #19): AgentAuthorizationFilter establishes the caller identity;
         // PlaybookAuthorizationFilter (run mode) then decides on the exact records the run uses, as the caller:
         // the body PlaybookId (playbook-use decision, one uniform 404) and the body DocumentId (Read, or Write when
-        // the run can write it; one uniform 403) — before IPlaybookOrchestrationService.ExecuteAsync.
+        // the run can write it; one uniform 403) — before IPlaybookOrchestrationService.ExecuteAsync. Fix round 1
+        // (owner round 16 item 3): Parameters pass the shared PlaybookParameterPolicy, record parameters are authorized
+        // as the caller, and the run acts for the caller's systemuserid (PlaybookRunRequest.RunUserId).
         group.MapPost("/run-playbook", RunPlaybookAsync)
             .AddAgentAuthorizationFilter()
             .AddPlaybookRunAuthorizationFilter()
@@ -426,7 +433,10 @@ public static class AgentEndpoints
             {
                 PlaybookId = request.PlaybookId,
                 DocumentIds = new[] { request.DocumentId },
-                Parameters = request.Parameters
+                Parameters = request.Parameters,
+                // Owner round 16 item 3 (task 164): the run acts for the authenticated caller — the systemuserid the
+                // run-mode filter resolved (WhoAmI over OBO) — never for a caller-supplied userId.
+                RunUserId = PlaybookAuthorizationFilter.GetRunUserId(httpContext)
             };
 
             // Consume the execution stream to capture the RunId from the first event
@@ -534,14 +544,16 @@ public static class AgentEndpoints
 
             return Results.Ok(response);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[AGENT] Failed to get playbook status for job {JobId}", jobId);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to retrieve playbook execution status",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+            // Task 164 r1: a fault while loading the run is the SAME uniform 404 as an unknown, ownerless or foreign run
+            // (goal (2) / ADR-003) — a distinct 500 would tell the caller that this jobId reached a real lookup.
+            logger.LogError(ex, "[AGENT] Failed to get playbook status for job {JobId}; uniform 404 (fail closed)", jobId);
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
     }
 

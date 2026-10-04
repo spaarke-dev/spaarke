@@ -138,7 +138,10 @@ public static class ChatEndpoints
             .ProducesProblem(404);
 
         // PATCH /api/ai/chat/sessions/{sessionId}/context — switch document/playbook context
-        group.MapMethods("/sessions/{sessionId}/context", ["PATCH"], SwitchContextAsync)
+        // unified-access-control-r2 task 164 (sweep #23): MapPatch (was MapMethods, which the route guard's scanner
+        // cannot see). AiAuthorizationFilter's chat-context evaluation authorizes every id the body writes into the
+        // session (DocumentId, AdditionalDocumentIds, HostContext, PlaybookId) as the caller before the handler runs.
+        group.MapPatch("/sessions/{sessionId}/context", SwitchContextAsync)
             .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SwitchChatContext")
@@ -447,12 +450,15 @@ public static class ChatEndpoints
             "Creating chat session for tenant={TenantId}, document={DocumentId}, playbook={PlaybookId}",
             tenantId, request.DocumentId, request.PlaybookId);
 
+        // unified-access-control-r2 task 164 (sweep #24): AiAuthorizationFilter has authorized the body's DocumentId,
+        // HostContext and PlaybookId as the caller. A host context of a type outside the authorizable kinds is DROPPED
+        // (owner round 16 item 2): the session is created without it, so nothing is ever keyed on an unchecked record.
         var session = await sessionManager.CreateSessionAsync(
             tenantId,
             ownerOid,
             request.DocumentId,
             request.PlaybookId,
-            request.HostContext,
+            AiAuthorizationFilter.IsHostContextDropped(httpContext) ? null : request.HostContext,
             cancellationToken);
 
         logger.LogInformation("Chat session created: {SessionId}", session.SessionId);
@@ -1383,7 +1389,10 @@ public static class ChatEndpoints
         {
             DocumentId = request.DocumentId ?? session.DocumentId,
             PlaybookId = request.PlaybookId ?? session.PlaybookId,
-            HostContext = request.HostContext ?? session.HostContext,
+            // Task 164: an unauthorizable host type is DROPPED (the session no longer carries a host), never kept.
+            HostContext = AiAuthorizationFilter.IsHostContextDropped(httpContext)
+                ? null
+                : request.HostContext ?? session.HostContext,
             AdditionalDocumentIds = request.AdditionalDocumentIds ?? session.AdditionalDocumentIds,
             LastActivity = DateTimeOffset.UtcNow
         };
