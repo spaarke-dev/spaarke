@@ -36,9 +36,12 @@ public static class AnalysisEndpoints
             .RequireAuthorization()
             .WithTags("AI Analysis");
 
-        // POST /api/ai/analysis/create - Create analysis record and associate N:N scopes
+        // POST /api/ai/analysis/create - Create analysis record and associate N:N scopes.
+        // Task 162 f1 (owner/main-session round 25 item 2): G5, matching promote — the row is created APP-ONLY, so the
+        // filter checks, as the caller, the Create privilege on sprk_analysis, "analysis.attach" (Read + AppendTo) on
+        // the document, the playbook-use decision for a body PlaybookId and Read on each associated scope row.
         group.MapPost("/create", CreateAnalysis)
-            .AddAnalysisExecuteAuthorizationFilter()
+            .AddAnalysisCreateAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("CreateAnalysis")
             .WithSummary("Create analysis record with scope associations")
@@ -127,22 +130,11 @@ public static class AnalysisEndpoints
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        // The same validator the authorization filter runs first (task 162 f1).
+        var invalid = ValidateCreateRequest(request);
+        if (invalid is not null)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: "Analysis name is required.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
-        }
-
-        if (request.DocumentId == Guid.Empty)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: "A valid documentId is required.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            return invalid;
         }
 
         logger.LogInformation(
@@ -1006,8 +998,10 @@ public static class AnalysisEndpoints
     /// SessionOwnershipGuardTests.BodyScopedSessionRoutes): the session must be the caller's — a session
     /// owned by someone else, or with no owner, answers exactly like a missing one, and that check runs BEFORE
     /// the already-bound 400 so the 400 cannot reveal another user's session — and, when the body names no
-    /// document, "analysis.attach" on the session's own document. The session-derived PlaybookId is NOT
-    /// checked here: it was chosen at session create (task 164's surface).
+    /// document, "analysis.attach" on the session's own document — the same check as the body document's, evaluated
+    /// by the same evaluator (<see cref="AnalysisAuthorizationFilter.EvaluateOutsideFilterAsync"/>), so its deny is the
+    /// identical body. The session-derived PlaybookId is NOT checked here: it was chosen at session create (task 164's
+    /// surface).
     /// </para>
     /// </summary>
     private static async Task<IResult> PromoteSession(
@@ -1015,7 +1009,6 @@ public static class AnalysisEndpoints
         IAnalysisDataverseService analysisService,
         ChatSessionManager sessionManager,
         IGenericEntityService entityService,
-        Spaarke.Core.Auth.AuthorizationService authorizationService,
         HttpContext httpContext,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
@@ -1099,37 +1092,24 @@ public static class AnalysisEndpoints
         }
 
         // Task 162 (G5) — the filter checked a BODY document; a session-derived one is checked here, as the
-        // caller, with the same operation and the same 403 body. A deny or a fault writes nothing.
+        // caller, with the SAME check (AttachDocumentCheck) evaluated by the SAME evaluator the filter uses, so its deny
+        // is byte-identical to a body-document deny in every case — a missing right, a missing row, a rights-query
+        // fault (task 162 f1, verifier items 7 and 9). A deny or a fault writes nothing.
         if (documentIsSessionDerived)
         {
-            bool allowed;
-            try
-            {
-                var decision = await authorizationService.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
-                {
-                    UserId = callerOid,
-                    ResourceId = documentId!.Value.ToString(),
-                    Operation = AnalysisAuthorizationFilter.AnalysisAttachOperation,
-                    CorrelationId = correlationId,
-                    UserAccessToken = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext),
-                }, cancellationToken);
-                allowed = decision.IsAllowed;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Promote: session-document authorization faulted for session {SessionId}; denying (fail closed) (corr={CorrelationId})",
-                    request.SessionId, correlationId);
-                allowed = false;
-            }
+            var denied = await AnalysisAuthorizationFilter.EvaluateOutsideFilterAsync(
+                httpContext,
+                FinanceAuthorizationTargets.Authorize(
+                    AnalysisAuthorizationFilter.AttachDocumentCheck(documentId!.Value, "session.documentId")),
+                FinanceDenial.Forbidden,
+                logger);
 
-            if (!allowed)
+            if (denied is not null)
             {
                 logger.LogWarning(
-                    "Promote DENIED: caller lacks analysis.attach on the session's document (session {SessionId}, corr={CorrelationId})",
+                    "Promote DENIED: analysis.attach on the session's document was refused (session {SessionId}, corr={CorrelationId})",
                     request.SessionId, correlationId);
-                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(
-                    FinanceAuthorizationFilter.InsufficientRightsReasonCode, traceId: correlationId);
+                return denied;
             }
         }
 
@@ -1202,6 +1182,27 @@ public static class AnalysisEndpoints
                 "Promote: COMPENSATION FAILED — Analysis {AnalysisId} may be orphaned; manual cleanup required (corr={CorrelationId})",
                 analysisId, correlationId);
         }
+    }
+
+    /// <summary>
+    /// The /create body validation, run by BOTH the handler and AnalysisAuthorizationFilter's create mode (task 162 f1)
+    /// so a malformed body gets its 400 before any rights query and the two can never drift. The texts are the
+    /// handler's existing ones. (The filter first answers a body with no document with the 400 it always gave, so
+    /// every malformed body's response is unchanged.)
+    /// </summary>
+    internal static IResult? ValidateCreateRequest(CreateAnalysisRequest? request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "Analysis name is required.");
+        }
+
+        if (request.DocumentId == Guid.Empty)
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A valid documentId is required.");
+        }
+
+        return null;
     }
 
     /// <summary>

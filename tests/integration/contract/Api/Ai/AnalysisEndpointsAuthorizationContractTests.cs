@@ -245,6 +245,334 @@ public class AnalysisEndpointsAuthorizationContractTests
     }
 
     // =============================================================================================
+    // GET — an analysis with NO anchor is PERSONAL (owner round 15 item 4; task 162 f1)
+    // =============================================================================================
+
+    private const string ReadAnalysisPrivilege = "prvReadsprk_analysis"; // live privileges(name), 2026-10-04
+    private static readonly Guid CallerSystemUserId = Guid.Parse("d6f8f439-0000-4000-8000-000000000162");
+    private static readonly Guid BffApplicationUserId = Guid.Parse("a1a1a1a1-0000-4000-8000-000000000162");
+
+    [Fact(DisplayName = "162 f1 GET: a no-anchor analysis whose createdby IS the caller's systemuserid (WhoAmI) is 200 — the creator needs only the Read privilege, never a row Read")]
+    public async Task Get_NoAnchor_CreatorByCreatedBy_Is200()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+        host.Probe.CallerSystemUserId = CallerSystemUserId;
+        host.Probe.Hold(ReadAnalysisPrivilege);
+        host.Orchestration
+            .Setup(o => o.GetAnalysisAsync(analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisDetailResult { Id = analysisId, Status = "Completed", WorkingDocument = "# mine" });
+
+        var response = await host.SendAsync(Get(analysisId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["workingDocument"]!.GetValue<string>().Should().Be("# mine");
+        host.Probe.Calls.Should().ContainSingle(c => c.Privilege == ReadAnalysisPrivilege && c.HasToken);
+        host.Access.Calls.Should().BeEmpty("the personal branch never asks Dataverse for a row Read on the analysis");
+    }
+
+    [Fact(DisplayName = "162 f1 GET: a no-anchor analysis the BFF created as the application is the caller's when its server-stamped sprk_createdbyperson is the caller (task 146) — 200")]
+    public async Task Get_NoAnchor_CreatorByStampedPerson_Is200()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        host.SeedAnalysis(analysisId, new(), e =>
+        {
+            e["createdby"] = new EntityReference("systemuser", BffApplicationUserId);
+            e["sprk_createdbyperson"] = new EntityReference("systemuser", CallerSystemUserId);
+        });
+        host.Probe.CallerSystemUserId = CallerSystemUserId;
+        host.Probe.Hold(ReadAnalysisPrivilege);
+        host.Orchestration
+            .Setup(o => o.GetAnalysisAsync(analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisDetailResult { Id = analysisId, Status = "Completed", WorkingDocument = "# asked for" });
+
+        var response = await host.SendAsync(Get(analysisId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    public static TheoryData<string> PersonalDenyCases => new()
+    {
+        "a-colleague-created-it", "app-created-no-person-recorded", "person-column-not-yet-deployed",
+        "caller-systemuserid-unresolvable", "creator-without-the-read-privilege", "createdby-equals-the-callers-entra-oid",
+        "creator-identity-read-faults",
+    };
+
+    [Theory(DisplayName = "162 f1 GET: a no-anchor analysis is the uniform 404 for anyone but its creator, and whenever the creator cannot be verified — never by the Entra oid, never by a row Read")]
+    [MemberData(nameof(PersonalDenyCases))]
+    public async Task Get_NoAnchor_NotTheVerifiedCreator_IsUniform404(string denyCase)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        host.Probe.CallerSystemUserId = CallerSystemUserId;
+        host.Probe.Hold(ReadAnalysisPrivilege);
+        switch (denyCase)
+        {
+            case "a-colleague-created-it":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", Guid.NewGuid()));
+                break;
+            case "app-created-no-person-recorded":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", BffApplicationUserId));
+                break;
+            case "person-column-not-yet-deployed":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", BffApplicationUserId));
+                host.CreatorPersonColumnMissing(analysisId);
+                break;
+            case "caller-systemuserid-unresolvable":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+                host.Probe.CallerSystemUserId = null;
+                break;
+            case "creator-without-the-read-privilege":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+                host.Probe.Release(ReadAnalysisPrivilege);
+                break;
+            case "createdby-equals-the-callers-entra-oid":
+                // The creator column holds the caller's Entra OID (a different GUID space). A rule that compared the oid
+                // would admit this caller; the systemuserid rule must not.
+                host.SeedAnalysis(analysisId, new(), e =>
+                    e["createdby"] = new EntityReference("systemuser", Guid.Parse(AnalysisAuthzTestAuthHandler.CallerObjectId)));
+                break;
+            case "creator-identity-read-faults":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+                host.Probe.ThrowOnEveryCall = new TimeoutException("WhoAmI unavailable");
+                break;
+        }
+
+        var response = await host.SendAsync(Get(analysisId));
+
+        await AssertUniform404Async(response, analysisId);
+        host.Orchestration.VerifyNoOtherCalls();
+        host.Access.Calls.Should().NotContain(c => c.Set == "sprk_analysises", "never a row Read on the analysis");
+    }
+
+    [Fact(DisplayName = "162 f1 GET: an ANCHORED analysis is decided by its anchors alone — its creator gets no bypass")]
+    public async Task Get_Anchored_CreatorGetsNoBypass()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        host.SeedAnalysis(analysisId, new() { ["sprk_documentid"] = ("sprk_document", Guid.NewGuid()) },
+            e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+        host.Probe.CallerSystemUserId = CallerSystemUserId;
+        host.Probe.Hold(ReadAnalysisPrivilege);
+
+        var response = await host.SendAsync(Get(analysisId));
+
+        await AssertUniform404Async(response, analysisId);
+        host.Probe.SystemUserIdCalls.Should().Be(0, "the personal branch applies only to an analysis with no anchor");
+    }
+
+    [Theory(DisplayName = "162 f1: the shared analysis-read evaluation (task 164's chat analysis host) decides exactly as GET — anchored, personal creator, colleague")]
+    [InlineData("anchored-readable", true)]
+    [InlineData("anchored-unreadable", false)]
+    [InlineData("personal-creator", true)]
+    [InlineData("personal-colleague", false)]
+    public async Task IsAnalysisReadable_DecidesExactlyAsGet(string shape, bool expected)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        host.Probe.CallerSystemUserId = CallerSystemUserId;
+        host.Probe.Hold(ReadAnalysisPrivilege);
+        switch (shape)
+        {
+            case "anchored-readable":
+                host.SeedAnalysis(analysisId, new() { ["sprk_documentid"] = ("sprk_document", documentId) });
+                host.Access.Grant(Documents, documentId, AccessRights.Read);
+                break;
+            case "anchored-unreadable":
+                host.SeedAnalysis(analysisId, new() { ["sprk_documentid"] = ("sprk_document", documentId) });
+                break;
+            case "personal-creator":
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", CallerSystemUserId));
+                break;
+            default:
+                host.SeedAnalysis(analysisId, new(), e => e["createdby"] = new EntityReference("systemuser", Guid.NewGuid()));
+                break;
+        }
+
+        var readable = await host.WithCallerContextAsync(ctx => AnalysisAuthorizationFilter.IsAnalysisReadableAsync(ctx, analysisId, logger: null));
+
+        readable.Should().Be(expected, shape);
+        host.Orchestration
+            .Setup(o => o.GetAnalysisAsync(analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisDetailResult { Id = analysisId, Status = "Completed" });
+        var viaGet = await host.SendAsync(Get(analysisId));
+        (viaGet.StatusCode == HttpStatusCode.OK).Should().Be(expected, "the chat host and GET share ONE rule");
+    }
+
+    [Fact(DisplayName = "162 f1: the shared evaluation denies when the evaluator cannot be resolved — never an allow")]
+    public async Task IsAnalysisReadable_EvaluatorUnavailable_IsFalse()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync(services =>
+            services.AddScoped<AuthorizationService>(_ => throw new InvalidOperationException("evaluator dependency missing")));
+        var analysisId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        host.SeedAnalysis(analysisId, new() { ["sprk_documentid"] = ("sprk_document", documentId) });
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+
+        var readable = await host.WithCallerContextAsync(ctx => AnalysisAuthorizationFilter.IsAnalysisReadableAsync(ctx, analysisId, logger: null));
+
+        readable.Should().BeFalse();
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    // =============================================================================================
+    // POST /api/ai/analysis/create — G5, matching promote (owner/main-session round 25 item 2; task 162 f1)
+    // =============================================================================================
+
+    private const string Skills = "sprk_analysisskills";         // live EntityDefinitions, 2026-10-04
+    private const string Knowledge = "sprk_analysisknowledges";  // live EntityDefinitions, 2026-10-04
+    private const string Tools = "sprk_analysistools";           // live EntityDefinitions, 2026-10-04
+
+    private static HttpRequestMessage Create(object body) => Json(HttpMethod.Post, "/api/ai/analysis/create", body);
+
+    [Fact(DisplayName = "162 f1 create: with the Create privilege, Read+AppendTo on the document and Read on every scope row is 201, and the new row is anchored to the document")]
+    public async Task Create_WithTheG5Rights_Is201AndAnchorsTheDocument()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        var skill = Guid.NewGuid();
+        var knowledge = Guid.NewGuid();
+        var tool = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        host.Access.Grant(Skills, skill, AccessRights.Read);
+        host.Access.Grant(Knowledge, knowledge, AccessRights.Read);
+        host.Access.Grant(Tools, tool, AccessRights.Read);
+        var playbookId = host.PublicPlaybook();
+
+        var response = await host.SendAsync(Create(new
+        {
+            name = "Analysis - NDA.pdf", documentId, playbookId,
+            skillIds = new[] { skill }, knowledgeIds = new[] { knowledge }, toolIds = new[] { tool },
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Analysis.Verify(a => a.CreateAnalysisAsync(documentId, "Analysis - NDA.pdf", playbookId, null, It.IsAny<CancellationToken>()),
+            Times.Once, "the analysis created in a document's context records that document as its anchor");
+        host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(),
+            It.Is<IEnumerable<Guid>>(s => s.Single() == skill), It.Is<IEnumerable<Guid>>(k => k.Single() == knowledge),
+            It.Is<IEnumerable<Guid>>(t => t.Single() == tool), It.IsAny<CancellationToken>()), Times.Once);
+        host.Probe.Calls.Should().ContainSingle(c => c.Privilege == CreateAnalysisPrivilege && c.HasToken);
+        host.Access.Calls.Should().Contain(new[]
+        {
+            new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Document, Documents, documentId, true),
+            new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Skills, skill, true),
+            new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Knowledge, knowledge, true),
+            new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Tools, tool, true),
+        });
+        host.Access.Calls.Should().NotContain(c => c.Set == Playbooks, "a public playbook needs no Read on its row");
+    }
+
+    [Fact(DisplayName = "162 f1 create: without the Create privilege on sprk_analysis is 403 insufficient_privilege and creates nothing")]
+    public async Task Create_WithoutCreatePrivilege_Is403()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        host.Probe.Release(CreateAnalysisPrivilege);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_privilege");
+        host.VerifyCreateWroteNothing();
+    }
+
+    [Theory(DisplayName = "162 f1 create: a document the caller cannot Read AND AppendTo (or that does not exist) is 403 insufficient_rights and creates nothing")]
+    [MemberData(nameof(InsufficientAttachRights))]
+    public async Task Create_DocumentWithoutAttachRights_Is403(string _, AccessRights rights)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, rights);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+        host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Document, Documents, documentId, true));
+        host.VerifyCreateWroteNothing();
+    }
+
+    [Theory(DisplayName = "162 f1 create: a body playbook that is not public and not readable, or does not exist, is the same 403")]
+    [InlineData("private-unreadable")]
+    [InlineData("nonexistent")]
+    public async Task Create_UnusablePlaybook_Is403(string playbookCase)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = Guid.NewGuid();
+        host.SetPlaybook(playbookId, playbookCase == "nonexistent" ? null : new PlaybookResponse { Id = playbookId, IsPublic = false });
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+        host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Playbooks, playbookId, true));
+        host.VerifyCreateWroteNothing();
+    }
+
+    [Theory(DisplayName = "162 f1 create: a skill, knowledge or tool row the caller cannot Read (or that does not exist) is 403, asked of its own entity set, and creates nothing")]
+    [InlineData("skillIds", Skills)]
+    [InlineData("knowledgeIds", Knowledge)]
+    [InlineData("toolIds", Tools)]
+    public async Task Create_UnreadableScopeRow_Is403(string property, string expectedSet)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var scopeId = Guid.NewGuid();
+        var body = new Dictionary<string, object> { ["name"] = "A", ["documentId"] = documentId, [property] = new[] { scopeId } };
+
+        var response = await host.SendAsync(Create(body));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+        host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, expectedSet, scopeId, true));
+        host.VerifyCreateWroteNothing();
+    }
+
+    public static TheoryData<string, object, string> MalformedCreateBodies => new()
+    {
+        { "no-document", new { name = "A" }, "No document identifier found in request" },
+        { "empty-document", new { name = "A", documentId = Guid.Empty }, "No document identifier found in request" },
+        { "empty-name", new { name = " ", documentId = Guid.NewGuid() }, "Analysis name is required." },
+        { "both-empty", new { name = "", documentId = Guid.Empty }, "No document identifier found in request" },
+    };
+
+    [Theory(DisplayName = "162 f1 create: a malformed body gets exactly the 400 it got before, with no rights query at all")]
+    [MemberData(nameof(MalformedCreateBodies))]
+    public async Task Create_MalformedBody_IsTheExisting400WithNoRightsQuery(string _, object body, string detail)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+
+        var response = await host.SendAsync(Create(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["detail"]!.GetValue<string>().Should().Be(detail);
+        host.Access.Calls.Should().BeEmpty();
+        host.Probe.Calls.Should().BeEmpty();
+        host.VerifyCreateWroteNothing();
+    }
+
+    [Fact(DisplayName = "162 f1 create: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and creates nothing")]
+    public async Task Create_CheckDeclarationFault_Denies()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = Guid.NewGuid();
+        host.PlaybookService
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("playbooks unavailable"));
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.error.system_failure");
+        host.VerifyCreateWroteNothing();
+    }
+
+    // =============================================================================================
     // POST /api/ai/analysis/promote — finding #22 (G5)
     // =============================================================================================
 
@@ -416,6 +744,58 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.ChatRepo.Bound.Should().ContainSingle();
+        host.Analysis.Verify(a => a.CreateAnalysisAsync(null, "Related", It.IsAny<Guid?>(),
+            It.Is<AnalysisRegardingTarget?>(r => r != null && r.EntityLogicalName == "sprk_matter" && r.RecordId == matterId),
+            It.IsAny<CancellationToken>()), Times.Once,
+            "an analysis promoted in a matter's context records that matter as its anchor (task 162 f1, owner round 15 item 2)");
+    }
+
+    [Fact(DisplayName = "162 f1 promote: a rights-query FAULT on the session document is the same 403 (system_failure) as the same fault on a body document — one evaluator, one body — and nothing is written")]
+    public async Task Promote_SessionDocumentFault_IsTheBodyDocumentFault403()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var session = await host.SeedOwnSessionAsync(Guid.NewGuid());
+        host.Access.ThrowOnEveryCall = new TimeoutException("RetrievePrincipalAccess unavailable");
+
+        var sessionFault = await host.SendAsync(Promote(new { sessionId = session.SessionId, name = "A" }));
+        var bodyFault = await host.SendAsync(Promote(new { sessionId = session.SessionId, name = "A", documentId = Guid.NewGuid() }));
+
+        await AssertForbiddenAsync(sessionFault, "sdap.access.error.system_failure");
+        (await NormalizedBodyAsync(sessionFault)).Should().Be(await NormalizedBodyAsync(bodyFault));
+        host.VerifyPromoteWroteNothing();
+    }
+
+    [Fact(DisplayName = "162 f1 promote: an exception that ESCAPES the authorization service during the session-document check denies 403 and writes nothing (verifier item 7)")]
+    public async Task Promote_SessionDocumentCheckException_Denies()
+    {
+        var failing = new FinanceAuthz.RecordingAccessDataSource { ThrowOnEveryCall = new TimeoutException("data source down") };
+        await using var host = await AnalysisAuthHost.StartAsync(services =>
+            // AuthorizationService catches a data-source fault and logs it; a logger that throws on that error is the one way
+            // an exception leaves AuthorizeAsync — the branch the handler must still deny on.
+            services.AddScoped(sp => new AuthorizationService(failing, sp.GetServices<IAuthorizationRule>(), new ThrowingOnErrorLogger())));
+        var session = await host.SeedOwnSessionAsync(Guid.NewGuid());
+
+        var response = await host.SendAsync(Promote(new { sessionId = session.SessionId, name = "A" }));
+
+        await AssertForbiddenAsync(response, "sdap.access.error.system_failure");
+        failing.Calls.Should().ContainSingle(c => c.Path == FinanceAuthz.AccessPath.Document);
+        host.VerifyPromoteWroteNothing();
+    }
+
+    /// <summary>An <see cref="ILogger{T}"/> that throws when asked to log an error — so an exception escapes the service.</summary>
+    private sealed class ThrowingOnErrorLogger : ILogger<AuthorizationService>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Error)
+            {
+                throw new InvalidOperationException("logging sink unavailable");
+            }
+        }
     }
 
     [Theory(DisplayName = "162 promote: a body playbook that is not public and not readable, or does not exist, is the same 403; a public one needs no Read on its row")]
@@ -810,14 +1190,15 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
     public CapturingChatDataverseRepository ChatRepo { get; } = new();
     public ChatSessionManager Sessions { get; private set; } = null!;
 
-    public static async Task<AnalysisAuthHost> StartAsync()
+    /// <param name="configure">Registrations added LAST (so they win) — e.g. an AuthorizationService built with a fault.</param>
+    public static async Task<AnalysisAuthHost> StartAsync(Action<IServiceCollection>? configure = null)
     {
         var host = new AnalysisAuthHost();
-        await host.InitializeAsync();
+        await host.InitializeAsync(configure);
         return host;
     }
 
-    private async Task InitializeAsync()
+    private async Task InitializeAsync(Action<IServiceCollection>? configure)
     {
         Probe.Hold("prvCreatesprk_analysis");
 
@@ -887,6 +1268,7 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             persistence: null,
             cleanupSignal: null);
         builder.Services.AddSingleton(Sessions);
+        configure?.Invoke(builder.Services);
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -934,6 +1316,45 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
                 }
                 return selected;
             });
+    }
+
+    /// <summary>
+    /// Like Dataverse BEFORE task 146's schema script: a select naming <c>sprk_createdbyperson</c> faults, because the
+    /// column does not exist yet (live spaarkedev1, 2026-10-04).
+    /// </summary>
+    public void CreatorPersonColumnMissing(Guid analysisId) =>
+        EntityService
+            .Setup(e => e.RetrieveAsync("sprk_analysis", analysisId,
+                It.Is<string[]>(c => c.Contains("sprk_createdbyperson")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147217149 },
+                new FaultReason("'sprk_analysis' entity doesn't contain attribute with Name = 'sprk_createdbyperson'")));
+
+    /// <summary>
+    /// Runs <paramref name="action"/> with an HttpContext shaped like an authenticated request to this host (the caller's
+    /// oid, tid and bearer token, the host's request services) — for a shared decision a non-route caller makes.
+    /// </summary>
+    public async Task<T> WithCallerContextAsync<T>(Func<HttpContext, Task<T>> action)
+    {
+        await using var scope = _app!.Services.CreateAsyncScope();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = scope.ServiceProvider,
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim("oid", AnalysisAuthzTestAuthHandler.CallerObjectId), new Claim("tid", TenantId) },
+                AnalysisAuthzTestAuthHandler.SchemeName)),
+            TraceIdentifier = "shared-decision",
+        };
+        httpContext.Request.Headers.Authorization = "Bearer caller-token";
+        return await action(httpContext);
+    }
+
+    public void VerifyCreateWroteNothing()
+    {
+        Analysis.Verify(a => a.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
+            It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
+            It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     public Task<ChatSession> SeedOwnSessionAsync(Guid? documentId) =>

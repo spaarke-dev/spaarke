@@ -493,6 +493,28 @@ public class AnalysisAuthorizationFilterTests
         AnalysisAuthorizationFilter.AnalysisEntitySetLabel.Should().Be("sprk_analysises");
     }
 
+    [Fact(DisplayName = "162 f1: the analysis-read rule's ONE retrieve selects the anchors plus createdby — every column live; the stamped person is never in it")]
+    public void ReadRuleRetrieve_SelectsAnchorsPlusCreatedBy_AllLive()
+    {
+        AnalysisAuthorizationFilter.ReadRuleColumns.Should().BeEquivalentTo(
+            AnalysisAuthorizationFilter.AnchorColumns.Append("createdby"));
+        AnalysisAuthorizationFilter.ReadRuleColumns.Should().OnlyContain(c => LiveLookupSnapshot.ContainsKey(c),
+            "a selected column that does not exist live faults every read and denies every honest caller");
+        AnalysisAuthorizationFilter.ReadRuleColumns.Should().NotContain(Spaarke.Dataverse.RecordCreatorPersonColumn.LogicalName,
+            "sprk_createdbyperson does not exist on sprk_analysis until task 146's schema script runs — it is read in its own query");
+    }
+
+    [Fact(DisplayName = "162 f1: the personal branch's Read privilege, the scope entity sets and the creator column are pinned to their live names")]
+    public void PersonalAndCreateNames_AreTheLiveNames()
+    {
+        // spaarkedev1, 2026-10-04: privileges(name) and EntityDefinitions.EntitySetName.
+        AnalysisAuthorizationFilter.ReadAnalysisPrivilege.Should().Be("prvReadsprk_analysis");
+        AnalysisAuthorizationFilter.SkillEntitySet.Should().Be("sprk_analysisskills");
+        AnalysisAuthorizationFilter.KnowledgeEntitySet.Should().Be("sprk_analysisknowledges");
+        AnalysisAuthorizationFilter.ToolEntitySet.Should().Be("sprk_analysistools");
+        Spaarke.Dataverse.RecordCreatorPersonColumn.LogicalName.Should().Be("sprk_createdbyperson");
+    }
+
     #endregion
 
     #region Playbook-use decision (task 162; shared with task 164)
@@ -579,5 +601,6 @@ public class AuthorizationModeTests
         ((int)AuthorizationMode.AnalysisAccess).Should().Be(1);
         ((int)AuthorizationMode.AnalysisPromote).Should().Be(2);
         ((int)AuthorizationMode.AnalysisRun).Should().Be(3);
+        ((int)AuthorizationMode.AnalysisCreate).Should().Be(4);
     }
 }

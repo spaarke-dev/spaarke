@@ -3,7 +3,11 @@
 > **Task**: `tasks/162-ai-analysis-routes-record-authorization.poml` (GitHub #1101; closes GitHub #233 **item 1 only**)
 > **Branch**: `task/uac-r2-162` off `work/unified-access-control-r2` @ `91a1c1c83`
 > **Sweep findings**: #1 export (critical), #2 GET (critical), #22 promote (high), #50 save (medium), #51 fork (medium), #52 execute (medium)
-> **Outcome**: code complete and tested; **one escalation trigger fired and is OPEN** (§3, the 221 analyses with no anchor) — the GET rule is implemented fail-closed as the constraint states, but must not be integrated until the owner answers §3.
+> **Outcome**: code complete and tested. The §3 escalation (221 analyses with no anchor) is **DECIDED** by owner round 15 and
+> **implemented** in fix round f1 (§14): classified (every one lost its anchor AFTER creation — no writer drops it), every
+> writer proven + tested, an anchor backfill script (dry run: 0 derivable), and the PERSONAL (creator-only, by systemuserid)
+> branch of the ONE analysis-read rule. Round 25 item 2 (POST /create adopts G5) is implemented (§14.4). The manual live
+> gate (§11, updated in §14.11) is the only open criterion.
 
 ---
 
@@ -137,7 +141,11 @@ constructor by hand (146 adds `IRecordOwnershipResolver`; 162 removes `ExportSer
 
 ---
 
-## 3. 🔔 Escalation trigger 1 FIRED — 221 active analyses have NO anchor (OPEN)
+## 3. Escalation trigger 1 FIRED — 221 active analyses have NO anchor (DECIDED: owner round 15; implemented in §14)
+
+> **Superseded.** The options table below was the round-1 stop. Owner round 15 REJECTED "accept the 404", "row-Read
+> fallback" and "backfill only" as partial, and decided the complete fix; round 25 item 2 confirmed it. What was built is in
+> §14. The text below is kept as the record of the stop.
 
 > Trigger: "Step 0 finds … rows with no anchor at all … This task would make them unreadable for everyone. STOP and
 > report the counts."
@@ -238,10 +246,10 @@ routes) and record the ledger rows below.
 
 | Route key | Mechanism that decides now | Deny test |
 |---|---|---|
-| `GET /api/ai/analysis/{analysisId:guid}` | filter: `AnalysisAuthorizationFilter` (AnalysisAccess) → `FinanceAuthorizationFilter` (Read on every anchor, Document + Record paths, OBO) | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.Get_ReadableDocumentUnreadableMatter_IsUniform404` |
+| `GET /api/ai/analysis/{analysisId:guid}` | filter: `AnalysisAuthorizationFilter` (AnalysisAccess) → the ONE analysis-read rule `ResolveAnalysisReadTargetsAsync` → `FinanceAuthorizationFilter` (Read on every anchor, Document + Record paths, OBO; no anchor → creator by WhoAmI systemuserid + the Read privilege, f1) | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.Get_ReadableDocumentUnreadableMatter_IsUniform404`; personal: `…Get_NoAnchor_NotTheVerifiedCreator_IsUniform404` |
 | `POST /api/ai/analysis/promote` | filter: `AnalysisAuthorizationFilter` (AnalysisPromote) → `FinanceAuthorizationFilter` (Privilege + analysis.attach + playbook-use) + handler session-owner / session-document checks | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.Promote_BodyDocumentWithoutAttachRights_Is403` |
 | `POST /api/ai/analysis/execute` | filters: `AnalysisAuthorizationFilter` (DocumentAccess, `IAiAuthorizationService`) then (AnalysisRun) → `FinanceAuthorizationFilter` | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.Execute_ProfileBranchWithoutWrite_Is403BeforeAnyWrite` |
-| `POST /api/ai/analysis/create` | filter: `AnalysisAuthorizationFilter` (DocumentAccess) — unchanged, not a finding | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.EveryMappedAnalysisRoute_HasADenyCase_AndDeniesACallerWithNoRights` |
+| `POST /api/ai/analysis/create` | filter: `AnalysisAuthorizationFilter` (AnalysisCreate, f1; round 25 item 2) → `FinanceAuthorizationFilter` (G5: Create privilege + analysis.attach on the document + playbook-use + Read on each scope row) | `Sprk.Bff.Api.Tests.Api.Ai.AnalysisEndpointsAuthorizationContractTests.Create_DocumentWithoutAttachRights_Is403` |
 | `POST /api/ai/analysis/fork` | **DELETED** (no caller, not published — §2) | n/a |
 | `POST /api/ai/analysis/{analysisId:guid}/save` | **DELETED** (§2) | n/a |
 | `POST /api/ai/analysis/{analysisId:guid}/export` | **DELETED** (§2) | n/a |
@@ -334,7 +342,9 @@ Adjusted from the POML for the deleted routes. Ids redacted to 8 characters in t
 - [ ] (a) For an analysis anchored to a document U1 cannot read: `GET /api/ai/analysis/{id}` as U1 → 404 with
       `reasonCode sdap.access.deny.record_unavailable`; a random GUID → the identical body.
 - [ ] (b) A user with Read on that document (and every other anchor) → 200 on GET.
-- [ ] (c) **After the owner answers §3**: an anchorless analysis (one of the 221) → per the chosen option.
+- [ ] (c) **Owner round 15 (decided; f1)**: an anchorless analysis (one of the 221) → `GET` as a user who did NOT create it →
+      the identical uniform 404; as Ralph Schroeder (its `createdby` for 155 of them) → 200. An app-created one (`createdby` =
+      `SDAP-BFF-SPE-API` / `# mi-bff-api-dev`, 66 rows, no person recorded) → 404 for everyone. Steps (i)-(l) in §14.11.
 - [ ] (d) U1 promoting its own session with `regardingEntityId` = a matter U1 cannot read → 403; no `sprk_analysis`
       with that name exists afterwards.
 - [ ] (e) U1 promoting ANOTHER user's session id → 404 "Session not found"; that session's
@@ -398,3 +408,331 @@ and `EvaluateAsync` changed from static to instance so it can log.
 | **NetArchTest** | 346/346 pass |
 | **Sprk.Bff.Api.IntegrationTests** (full) | 104/104 pass |
 | **Spe.Integration.Tests** (full) | 403 pass, 25 skipped (already skipped before this task), 0 fail |
+
+---
+
+## 14. Fix round f1 — owner round 15, round 25 item 2, verifier round 2 (branch `task/uac-r2-162-f1` off `task/uac-r2-162-r1` @ `d1c5e6f34`)
+
+Binding inputs read on `work/unified-access-control-r2` (`dee2d506b`): session-27 note rounds 1–25 (round 15 = this task's
+anchorless-analysis decision; round 16 item 7 = 162 integrates before 164; round 25 item 2 = `/create` adopts G5; round 25
+item 4 = 164's chat analysis host is decided by THIS task's analysis-read rule, one shared declaration) and the worktree's
+`NOTE-FROM-MAIN.md` (escalations decided; never defer, never offer accept/sideline). Live Dataverse was read only (GETs,
+`RetrieveAuditDetails`, `RetrievePrincipalAccess`, `RetrieveRolePrivilegesRole`); nothing was written live.
+
+### 14.1 Round 15 item 1 — WHY the 221 analyses have no anchor (live, spaarkedev1, 2026-10-04)
+
+Reproducible with `scripts/Repair-AnalysisAnchors.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Classify`
+(read-only; output below). 996 active `sprk_analysis` rows; **221 have no anchor** — the same 221 as round 1.
+
+**The cause is parent deletion, not a writer.** The relationship `sprk_document_analysis_document`
+(`sprk_analysis.sprk_documentid` → `sprk_document`) has **Delete = RemoveLink** (live `ManyToOneRelationships` metadata;
+so do all 19 anchor/config lookups of `sprk_analysis`, and all 15 `sprk_document` → child relationships). Deleting a
+document therefore **clears** its analyses' `sprk_documentid`. Attribute auditing is off for `sprk_documentid`, but entity
+auditing is on for `sprk_document`: the audit log holds **452 deleted documents** (2025-09-29 → 2026-10-02), each with its
+old name via `RetrieveAuditDetails`. Matching each anchorless analysis to them (by the document-id prefix the writer put in
+the analysis name, by the document name, or by creation within 10 minutes of the document's create — the document-profile
+pattern):
+
+| Writer (inferred from the name pattern + creator) | parent deleted — proven (exactly one deleted document) | parent deleted — several candidates | no audit match | total |
+|---|---|---|---|---|
+| Playbook Library / Analysis Builder create, earlier direct client create (`"Analysis - <document>"`, createdby Ralph Schroeder) | 67 | 73 | 7 | **147** |
+| Playbook Library / Analysis Builder via `POST /api/ai/analysis/create` (BFF app identity) | 1 | 0 | 3 | **4** |
+| `AppOnlyAnalysisService` document profile / `AnalysisResultPersistence` (`"Document Profile - <ts>"`, `SDAP-BFF-SPE-API` 60 + `# mi-bff-api-dev` 1) | 25 | 2 | 34 | **61** |
+| Create Analysis wizard (user-named, client `Xrm.WebApi`, createdby Ralph Schroeder) | 4 | 0 | 4 | **8** |
+| `/promote` or `/create`, user-named, BFF app identity | 0 | 1 | 0 | **1** |
+| **total** | **97** | **76** | **48** | **221** |
+
+Per creator: Ralph Schroeder 155, `SDAP-BFF-SPE-API` 65, `# mi-bff-api-dev` 1. The newest row
+(`6d0851cb`, "Document Profile - 2026-10-02 13:18:49", `# mi-bff-api-dev`) belongs to the restart-probe test documents the
+BFF itself deleted at 13:28 that day (`restart-probe-10021222`, `restart-midflight-10021225`, `restart-kill2-10021322`) —
+"something still creates anchorless analyses" is test-document deletion, not a writer.
+
+**Classes per round 15:** (i) *created in a record's context by a writer that failed to record the anchor* = **0** (every
+writer records it — §14.2); (i′) *created in a record's context, anchor cleared later by the parent's deletion* = **173**
+proven or consistent, **48** with no audit match (their writers' code also always binds a document); (ii) *genuinely
+standalone* = **0 identified** — no live writer can create one (the shared seam's FR-D9 guard, the wizard's guard, the MDA
+form holds `sprk_documentid` ApplicationRequired). The analysis-read rule cannot tell (i′) from (ii) at request time and does
+not need to: **every anchorless row is PERSONAL** (§14.3).
+
+**Derivable anchors: 0.** The dry run checked every authoritative source: the polymorphic pair (0 rows carry it), the
+analysis's chat sessions (`sprk_aichatsummary.sprk_documentid`; 2 sessions, one names a deleted document, one none), the
+output document (`sprk_outputfileid` is itself an anchor, so no anchorless row has it). A source naming a deleted row is
+reported, never written.
+
+```
+Repair-AnalysisAnchors — DRY RUN — https://spaarkedev1.crm.dynamics.com
+Active analyses: 996; with no anchor: 221
+Audit: 452 deleted documents
+   73  Playbook Library / Analysis Builder create (earlier direct client create), parent-deleted (ambiguous)
+   67  Playbook Library / Analysis Builder create (earlier direct client create), parent-deleted (proven)
+   34  AppOnlyAnalysisService document profile / AnalysisResultPersistence (BFF app identity), unattributed
+   25  AppOnlyAnalysisService document profile / AnalysisResultPersistence (BFF app identity), parent-deleted (proven)
+    7  Playbook Library / Analysis Builder create (earlier direct client create), unattributed
+    4  Create Analysis wizard (client Xrm.WebApi, user-named), parent-deleted (proven)
+    4  Create Analysis wizard (client Xrm.WebApi, user-named), unattributed
+    3  Playbook Library / Analysis Builder create (POST /api/ai/analysis/create), unattributed
+    2  AppOnlyAnalysisService document profile / AnalysisResultPersistence (BFF app identity), parent-deleted (ambiguous)
+    1  Playbook Library / Analysis Builder create (POST /api/ai/analysis/create), parent-deleted (proven)
+    1  POST /api/ai/analysis/promote or /create (user-named, BFF app identity), parent-deleted (ambiguous)
+Derivable anchors (the -Apply plan): 0 row(s)
+  note e8f49896: its chat session names a document that no longer exists
+DRY RUN — nothing written. Re-run with -Apply to write the plan.
+```
+
+### 14.2 Round 15 item 2 — every writer records its anchor (ADR-002 WP-1), each pinned by a test that fails if it is dropped
+
+Writers found by grep of `src/**` (`CreateAnalysisAsync(`, `new Entity("sprk_analysis")`, `createRecord('sprk_analysis'`,
+`sprk_analysises`) — there are no others:
+
+| Writer | Anchor it records | Test that reddens if the anchor is dropped |
+|---|---|---|
+| `DataverseServiceClientImpl.CreateAnalysisAsync` — the shared seam (the one server-side invariant owner) | refuses a create with neither a document nor a regarding target (FR-D9 `ArgumentException`), binds `sprk_documentid`, stages the typed regarding lookup | `AnalysisRegardingWriteTests` (the stager); every BFF writer below goes through this seam |
+| `AppOnlyAnalysisService.AnalyzeDocumentAsync` (document profile, the 65 app-created rows' main writer) | `sprk_documentid` = the profiled document | `AnalysisWriterAnchorTests.DocumentProfile_AnchorsTheAnalysisToItsDocument` (seed W1) |
+| `AppOnlyAnalysisService.AnalyzeEmailAsync` | `sprk_documentid` = the .eml document | `AnalysisWriterAnchorTests.EmailAnalysis_AnchorsTheAnalysisToTheEmailDocument` (W2) |
+| `AnalysisResultPersistence.StoreDocumentProfileOutputsAsync` (create branch) | `sprk_documentid` | `AnalysisWriterAnchorTests.ProfileOutputStorage_CreateBranch_AnchorsTheAnalysisToItsDocument` (W3) |
+| `POST /api/ai/analysis/create` | `sprk_documentid` = the body document | `AnalysisEndpointsAuthorizationContractTests.Create_WithTheG5Rights_Is201AndAnchorsTheDocument` (W4) |
+| `POST /api/ai/analysis/promote` | body/session document and/or the regarding matter/project | `Promote_OwnSessionReviewedDocumentShape_Is201` (document) and `Promote_OwnSessionWithRegardingMatter_Is201` (regarding, W5) |
+| Insights observation mirror (`ObservationMirrorMapper` / `DataverseObservationMirror`) | `sprk_documentid` (BuildEntity throws on an empty id) | `DataverseObservationMirrorTests` (asserts `sprk_documentid`) |
+| Create Analysis wizard (client, `Xrm.WebApi`) | `sprk_documentid@odata.bind` (refuses to finish without a document) | `CreateAnalysisWizardWidget.test.tsx` (asserts the bind) |
+| MDA form | — | `sprk_documentid` RequiredLevel = ApplicationRequired (live) |
+
+**Deleting a document clears the lookup — checked, and handled.** That is the source of every anchorless row (§14.1). The
+row it leaves is decided by round 15 item 4 (personal; unverifiable → uniform 404), which is what §14.3 implements. Whether
+an analysis should instead be DELETED with its document is a separate data-lifecycle question, recorded as finding
+F-162-f1-1 in §14.8 with its complete fix; it changes no access answer.
+
+### 14.3 Round 15 items 4–5 — the ONE analysis-read rule, with the PERSONAL branch
+
+`AnalysisAuthorizationFilter.ResolveAnalysisReadTargetsAsync(HttpContext, Guid analysisId, ILogger?)` — the **same name and
+signature** task 164 r1 extracted and already calls (`AiAuthorizationFilter`, chat analysis host) — is the only place the
+rule is declared:
+
+1. No caller token → uniform 404 (no app-only read is spent).
+2. ONE app-only retrieve of `ReadRuleColumns` = every anchor column + `createdby` (all live; pinned by
+   `ReadRuleRetrieve_SelectsAnchorsPlusCreatedBy_AllLive`).
+3. Any populated anchor → Read on EVERY anchor (unchanged; an unmapped anchor type rejects).
+4. **No anchor → PERSONAL** (`BuildCreatorTargetsAsync`): the caller's Dataverse **systemuserid** comes from
+   `CallerRecordAccessProbe.GetCallerSystemUserIdAsync` (WhoAmI on the caller's OWN OBO token — it cannot name anyone else;
+   never the Entra oid). The caller is the creator when that id equals `createdby`, or — for a row the BFF created as the
+   application — the server-stamped `sprk_createdbyperson` (task 146 / owner round 13 item 9), read in its OWN query so a BFF
+   deployed before that column exists still serves every anchored analysis and answers "cannot tell" (404) for this branch.
+   The verified creator gets ONE check: the TABLE privilege `prvReadsprk_analysis` (live name; Core/Basic User Deep, AI
+   Analysis User Basic), evaluated as the caller on the Privilege path — **never a row Read on the analysis** (a
+   business-unit-depth row Read would expose one user's analysis to colleagues; `Get_NoAnchor_*` assert no `sprk_analysises`
+   record call is ever made).
+5. No probe, no systemuserid, a WhoAmI fault, a creator-column fault, a colleague, an app-created row with no person, or a
+   creator without the privilege → the identical uniform 404 (`Get_NoAnchor_NotTheVerifiedCreator_IsUniform404`, 7 rows).
+   An ANCHORED analysis gives its creator no bypass (`Get_Anchored_CreatorGetsNoBypass`).
+
+Effect on the live 221 rows: Ralph Schroeder reads his 155 through `GET` (and the Copilot `getAnalysis`); the 66
+app-created rows have no recorded person (they predate task 146's stamp) and answer 404 for everyone — round 15 item 4's
+"anything that cannot be verified fails closed". After 146 is integrated, every NEW app-created analysis records its
+requester, so an analysis that later loses its anchor stays readable by that person.
+
+`sprk_createdbyperson` is spelled once: `src/server/shared/Spaarke.Dataverse/RecordCreatorPersonColumn.cs` is added here
+**byte-identical** to task 146's file (blob `64acd27a`, as on `integ/uac-r2-batch4`), so the two branches add the same file and
+merge without a conflict.
+
+**Shared evaluation for task 164 (round 25 item 4).** The personal branch hands the evaluator a Privilege check. Task 164 r1's
+private `AiAuthorizationFilter.IsAnalysisReadableAsync` evaluates only the Document and Record paths and treats any other path
+as a deny (fail closed, so nothing is over-granted — but a creator's personal analysis would be refused as a chat host). f1
+adds `AnalysisAuthorizationFilter.IsAnalysisReadableAsync(HttpContext, Guid, ILogger?)`, which evaluates the rule with the ONE
+evaluator on all three paths (`IsAnalysisReadable_DecidesExactlyAsGet`, 4 rows: chat host and GET agree). **Integration edit
+(main session, when 164 merges onto this):** replace the body of 164's private `IsAnalysisReadableAsync(HttpContext
+httpContext, AuthorizationService authorizationService, Guid analysisId, string userId, string? token, CancellationToken ct)`
+with exactly:
+
+```csharp
+        => await AnalysisAuthorizationFilter.IsAnalysisReadableAsync(httpContext, analysisId, _logger);
+```
+
+(its now-unused parameters may stay or go; its caller is unchanged). 164's `ResolveAnalysisReadTargetsAsync` extraction and
+f1's are the same refactor; on conflict take f1's (a superset: it adds the personal branch).
+
+### 14.4 Round 25 item 2 — `POST /api/ai/analysis/create` adopts G5 (matching promote)
+
+New `AuthorizationMode.AnalysisCreate` (= 4, appended; pinned) + `AddAnalysisCreateAuthorizationFilter()` replace the old
+Read-only DocumentAccess filter on `/create`. As the caller, before the app-only create: (1) the existing 400 for a body with
+no document, then the handler's own validation (`AnalysisEndpoints.ValidateCreateRequest`, shared with the handler) — every
+malformed body gets exactly the 400 it got before, with no rights query (`Create_MalformedBody_*`, 4 rows); (2) the Create
+privilege `prvCreatesprk_analysis`; (3) `analysis.attach` (Read + AppendTo) on the document — `AttachDocumentCheck`, the same
+check promote uses; (4) the playbook-use decision for a body PlaybookId (promote's); (5) **Read on every skill, knowledge and
+tool row** the handler associates app-only — caller-chosen ids `/create` consumes (POML constraint: "scope found during
+execution … is added to this task"); the same "may this caller use this configuration row" question as the playbook-use
+decision; live: the child-BU test user has ReadAccess on all 31 skills, 33 knowledge and 51 tool rows, and Core/Basic hold
+Read on the three tables at Deep, so no shipped flow loses access. `ActionId` is not consumed by the handler, so it is not
+checked. Denies are the evaluator's 403 with `detail` "Access denied"; a declaration fault is 403 `system_failure`. Tests:
+`Create_*` (7 facts/theories, 15 cases). Entity sets `sprk_analysisskills` / `sprk_analysisknowledges` / `sprk_analysistools`
+are per-route constants read from live metadata (no map), pinned by `PersonalAndCreateNames_AreTheLiveNames`.
+
+### 14.5 Verifier items 7 and 9 — the promote session-document check uses the SAME evaluator
+
+The handler's direct `AuthorizationService.AuthorizeAsync` call and its own `catch { allowed = false; }` are gone. The session
+document is checked with `AttachDocumentCheck(…, "session.documentId")` through
+`AnalysisAuthorizationFilter.EvaluateOutsideFilterAsync` — the unchanged `FinanceAuthorizationFilter` evaluated outside a
+filter chain, returning its own deny response. So a session-document deny is byte-identical to a body-document deny in EVERY
+case — missing right, missing row, rights-query fault — not only "under normal conditions" (item 9). Tests:
+`Promote_SessionDocumentFault_IsTheBodyDocumentFault403` (fault on both, identical bodies, `system_failure`, nothing written)
+and `Promote_SessionDocumentCheckException_Denies` (item 7: an exception that ESCAPES `AuthorizationService` — its logger
+throws while logging the data-source fault — denies 403 and writes nothing). The POML's handler constraint said a deny or an
+exception returns `insufficient_rights`; for a missing right or row that is still exactly what is returned. A FAULT now carries
+`sdap.access.error.system_failure` — the code the filter already gives the same fault on a body document — because the
+constraint's purpose ("the same 403 body the filter's 403 carries") can only hold in every case if both go through one
+renderer. Recorded here for the main session's review.
+
+### 14.6 Round 15 item 3 — the backfill script
+
+`scripts/Repair-AnalysisAnchors.ps1` (the repo's data-script pattern: dry run default, `-Apply` writes, `-Verify` exits 1 on any
+derivable anchor left unwritten; `-Classify` adds the audit evidence; read-only metadata decides navigation properties and
+entity sets — nothing pluralized). Its anchor list is pinned to `AnalysisAuthorizationFilter.AnchorColumns` by
+`AnalysisAnchorRepairScriptAgreementTests` (seed A1). Dry run on dev: 0 derivable (§14.1). **Manual gate** for the main
+session (dev; it writes only if a derivable anchor appears before it runs):
+
+```powershell
+.\scripts\Repair-AnalysisAnchors.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Classify   # dry run
+.\scripts\Repair-AnalysisAnchors.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply      # only if the plan is non-empty
+.\scripts\Repair-AnalysisAnchors.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify     # expect exit 0
+```
+
+### 14.7 Verifier item 8 — documentation AND infrastructure drift
+
+Closed in this round, not left for doc-drift-audit: `docs/guides/AI-MONITORING-DASHBOARD.md` (export row, export alert row,
+`ai.format` dimension, export KQL removed; rows renumbered), `docs/guides/MONITORING-AND-ALERTING-GUIDE.md` (export metric
+table, alert 7 row + detail, dashboard row, customer export KQL, triage line removed; dashboard is 4 rows),
+`docs/architecture/sdap-component-interactions.md` (the three rows now name only `DocxExportService` / `ChatWordExportEndpoints`).
+**Found while checking:** the deleted metrics were still referenced by deployable infrastructure — `infrastructure/bicep/modules/
+alerts.bicep` created a metric alert "Export Failures" on `customMetrics/ai.export.requests`, and `modules/dashboard.bicep` a
+4-chart export row; `stacks/model2-full.json` (the compiled ARM template, identical to a fresh `az bicep build` before this
+change) carried both. An alert on a metric that is no longer emitted never evaluates meaningfully, and Azure validates a
+custom-metric alert's metric at create time. Removed: the alert resource and its `exportFailureAlertId` output, the dashboard
+row (the cache row moves up from y 14/15 to 10/11), and `model2-full.json` regenerated with `az bicep build` (diff = the
+removed resources, three `templateHash` values and the moved y positions). Every bicep entry point that uses the modules
+builds (`alerts.bicep`, `customer.bicep`, `platform.bicep`, `model1-shared.bicep`, `model2-full.bicep`, `ai-foundry-stack.bicep`;
+only pre-existing BCP036/BCP318 warnings). No live deployment was made; the next stack deployment drops the alert.
+
+### 14.8 Finding F-162-f1-1 (data lifecycle; changes no access answer) — complete fix proposed
+
+Deleting a document leaves its AI analyses (and their `sprk_analysisoutput` rows, also RemoveLink) behind with the deleted
+document's content in `sprk_workingdocument` / outputs. Access is already correct (round 15: personal, or 404). The complete
+fix for the lifecycle, for the owner's product decision because it deletes data on every future document delete: set
+`sprk_document_analysis_document` (`sprk_documentid`) and `sprk_analysis_analysisoutput` to **Delete = Cascade** (working
+versions, chat messages and email metadata already cascade), probe with a non-admin test user that deleting a TEST document
+with a team-owned analysis still succeeds (a cascade that the deleting user's rights block would make documents undeletable),
+then delete the 97 analyses whose deleted parent is proven by audit, as a dry-run/`-Apply`/`-Verify` script. Not built in
+this round: it is outside the decided round-15 scope and is a data-deletion decision.
+
+### 14.9 Seeded proofs (f1)
+
+Each seed was applied by a runner (scratchpad `seeds_f1.py`) to the named file (exactly one occurrence), the BFF + test
+assembly rebuilt, the task's tests run (contract, filter unit, mode pin, writer anchors, script agreement — 119 cases), and the
+file restored byte-identically (SHA-256 asserted) and touched; `git status` afterwards showed only this round's intended edits.
+**All 23 seeds turned at least one named test red.**
+
+| Seed | Change applied | Red cases | Tests turned red |
+|---|---|---|---|
+| P1 | personal branch admits any caller (creator check skipped) | 5 | `Get_NoAnchor_NotTheVerifiedCreator_IsUniform404`; `IsAnalysisReadable_DecidesExactlyAsGet` |
+| P2 | creator matched by the caller's Entra **oid** instead of the WhoAmI systemuserid | 4 | `Get_NoAnchor_NotTheVerifiedCreator_IsUniform404` (the oid row); `Get_NoAnchor_CreatorByCreatedBy_Is200`; `Get_NoAnchor_CreatorByStampedPerson_Is200`; `IsAnalysisReadable_DecidesExactlyAsGet` |
+| P3 | the creator handed a ROW Read on the analysis instead of the table privilege | 4 | `Get_NoAnchor_CreatorByCreatedBy_Is200`; `Get_NoAnchor_CreatorByStampedPerson_Is200`; `Get_NoAnchor_NotTheVerifiedCreator_IsUniform404`; `IsAnalysisReadable_DecidesExactlyAsGet` |
+| P4 | an unreadable `sprk_createdbyperson` (column not yet deployed) treated as the creator | 1 | `Get_NoAnchor_NotTheVerifiedCreator_IsUniform404` (person-column-not-yet-deployed) |
+| P5 | the server-stamped person branch removed (createdby only) | 1 | `Get_NoAnchor_CreatorByStampedPerson_Is200` |
+| P6 | an unresolvable caller systemuserid admitted | 1 | `Get_NoAnchor_NotTheVerifiedCreator_IsUniform404` (caller-systemuserid-unresolvable) |
+| P7 | anchors ignored: every analysis decided by the personal branch | 4 | `Get_ReadOnEveryAnchor_Returns200AndAsksEachAnchorOnItsPath`; `Get_ReadableDocumentUnreadableMatter_IsUniform404`; `Get_Anchored_CreatorGetsNoBypass`; `IsAnalysisReadable_DecidesExactlyAsGet` |
+| C1 | `/create`: the Create-privilege check removed | 2 | `Create_WithoutCreatePrivilege_Is403`; `Create_WithTheG5Rights_Is201AndAnchorsTheDocument` |
+| C2 | `/create`: `analysis.attach` weakened to Read on the document | 1 | `Create_DocumentWithoutAttachRights_Is403` (read-only row) |
+| C3 | `/create`: the playbook-use check removed | 3 | `Create_UnusablePlaybook_Is403` (2 rows); `Create_CheckDeclarationFault_Denies` |
+| C4 | `/create`: the scope-row Read checks removed | 4 | `Create_UnreadableScopeRow_Is403` (3 rows); `Create_WithTheG5Rights_Is201AndAnchorsTheDocument` |
+| C5 | `/create` back on the old Read-only document filter | 13 | completeness + every `Create_*` test |
+| C6 | `/create`: body validation no longer runs before the rights queries | 1 | `Create_MalformedBody_IsTheExisting400WithNoRightsQuery` (empty-name) |
+| C7 | `/create`: a check-declaration fault calls next | 1 | `Create_CheckDeclarationFault_Denies` |
+| E1 | the shared evaluation fails open on any non-allow outcome | 5 | `Promote_SessionDocumentFault_IsTheBodyDocumentFault403`; `Promote_SessionDocumentCheckException_Denies`; `Promote_SessionDocumentWithoutAttachRights_Is403WithTheBodyDocumentDenyBody`; `IsAnalysisReadable_DecidesExactlyAsGet` |
+| E2 | the promote handler ignores the session-document deny (item 7's fail-open, in its new form) | 3 | `Promote_SessionDocumentFault_IsTheBodyDocumentFault403`; `Promote_SessionDocumentCheckException_Denies`; `Promote_SessionDocumentWithoutAttachRights_Is403WithTheBodyDocumentDenyBody` |
+| E3 | the shared evaluation allows when the evaluator cannot be resolved | 1 | `IsAnalysisReadable_EvaluatorUnavailable_IsFalse` |
+| W1 | document-profile writer drops the document anchor | 1 | `AnalysisWriterAnchorTests.DocumentProfile_AnchorsTheAnalysisToItsDocument` |
+| W2 | email-analysis writer drops the document anchor | 1 | `AnalysisWriterAnchorTests.EmailAnalysis_AnchorsTheAnalysisToTheEmailDocument` |
+| W3 | profile-output storage drops the document anchor | 1 | `AnalysisWriterAnchorTests.ProfileOutputStorage_CreateBranch_AnchorsTheAnalysisToItsDocument` |
+| W4 | `/create` handler drops the document anchor | 1 | `Create_WithTheG5Rights_Is201AndAnchorsTheDocument` |
+| W5 | promote drops the regarding anchor | 1 | `Promote_OwnSessionWithRegardingMatter_Is201` |
+| A1 | the backfill script's anchor list drops `sprk_regardingmatter` | 1 | `AnalysisAnchorRepairScriptAgreementTests.TheScript_UsesExactlyTheReadRulesAnchorColumns` |
+
+Seeds P4, P6, C1, C3, C4, C7, E3, W1–W4 were first skipped by the runner because the files are CRLF and the multi-line
+search text was LF ("found 0 times" — the runner refuses rather than guess); the runner then normalized line endings and the
+whole set was re-run from scratch. The results above are that second, complete run.
+
+### 14.10 Tests (f1)
+
+All on `task/uac-r2-162-f1`, 2026-10-04, after the final code (the seeded runs are in §14.9).
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api -warnaserror` / `dotnet build tests/unit/Sprk.Bff.Api.Tests -warnaserror` | Build succeeded, 0 warnings |
+| Task tests (contract, filter unit, mode pin, writer anchors, script agreement) | 119/119 pass (37 new cases this round) |
+| Affected (`~Analysis` / `~ReviewMemo` / `~Promote` / `~PlaybookAuthorizationFilter` / `~OperationAccessPolicy` / `~ObservationMirror` / `~ExecutorSideEffect` / `~FinanceEndpointsAuthorization` / mode pin) | 693 pass, 7 skipped (pre-existing), 0 fail |
+| **Full BFF unit suite** `dotnet test tests/unit/Sprk.Bff.Api.Tests` | **14 274 pass, 54 skipped, 0 failed** (27 m 32 s; four other agents' testhosts were running, no timeouts this time) |
+| **NetArchTest** `dotnet test tests/Spaarke.ArchTests` | 346/346 pass |
+| **Integration** `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | 104/104 pass |
+| **Integration** `tests/integration/Spe.Integration.Tests` (full) | 403 pass, 25 skipped (pre-existing), 0 fail |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | "no vulnerable packages" (f1 adds no package) |
+| Live dry run `scripts/Repair-AnalysisAnchors.ps1 -Classify` (read-only) | exit 0; 221 anchorless, 0 derivable (§14.1) |
+| Bicep (`az bicep build`, every entry point using the edited modules) | all build; only pre-existing BCP036/BCP318 warnings |
+| Publish size (CLAUDE.md §10; fresh `git archive` trees on short paths; `dotnet publish -c Release`; PowerShell `Compress-Archive` Optimal over `deploy/api-publish/*`; PDBs included, 4 PDBs on every side) | PUBLISH_SIZE_PLACEHOLDER |
+
+### 14.11 Manual live gate — additions for f1 (dev; main session; read-only verification)
+
+- [ ] (i) `GET /api/ai/analysis/{id}` for one of Ralph Schroeder's 155 anchorless analyses: as Ralph → 200; as
+      `uac.child.user` → the uniform 404 (identical to a random GUID).
+- [ ] (j) The same for one of the 66 app-created anchorless analyses → 404 for both users.
+- [ ] (k) `POST /api/ai/analysis/create` as `uac.child.user` on a document it can Read and AppendTo, with the Playbook Library's
+      usual scopes → 201; on a document it cannot read → 403 `insufficient_rights`; no `sprk_analysis` with that name exists
+      afterwards.
+- [ ] (l) Playbook Library / Analysis Builder "create analysis" still completes for a Core User.
+- [ ] (m) `scripts/Repair-AnalysisAnchors.ps1` dry run → 0 derivable; `-Verify` → exit 0.
+
+### 14.12 Placement, justification, conflicts
+
+- **Placement (CLAUDE.md §10):** in the BFF — existing routes and the existing filter; no new service, endpoint, DI registration,
+  option, job, column or package (`.claude/constraints/bff-extensions.md` §A).
+- **New surface (CLAUDE.md §11), three questions each:** `AuthorizationMode.AnalysisCreate` + `AddAnalysisCreateAuthorizationFilter`
+  (existing: the filter's modes; extension: one more mode on it, declaring checks only; cost: `/create` stays the weaker sibling
+  round 25 rejected); `ReadAnalysisPrivilege`, three scope entity-set constants, `ReadRuleColumns`, `NoDocumentIdentifierDetail`
+  (existing: `CreateAnalysisPrivilege` precedent; extension: constants in the same filter; cost: the personal branch and the
+  scope checks have nothing to evaluate); `ResolveAnalysisReadTargetsAsync` / `IsAnalysisReadableAsync` / `EvaluateOutsideFilterAsync`
+  / `AttachDocumentCheck` (existing: 164 r1 extracted the first, the evaluator exists; extension: static members of the existing
+  filter over the unchanged evaluator — no second evaluation loop; cost: 164 and the promote handler would each re-implement
+  evaluation and drift, as items 7/9 showed); `AnalysisEndpoints.ValidateCreateRequest` (existing: `ValidatePromoteRequest`;
+  extension: the same pattern; cost: filter and handler 400s drift); `RecordCreatorPersonColumn` (existing: task 146's file,
+  byte-identical); `scripts/Repair-AnalysisAnchors.ps1` (existing: `Backfill-CoreAncestorStamps.ps1` pattern; cost: round 15
+  item 3 has no backfill). Removed: the export alert/dashboard row (infra) and the handler's direct `AuthorizeAsync` call.
+- **ADRs:** ADR-002 (no plugins; one server-side owner per invariant — the seam's FR-D9 guard), ADR-003 (every new branch fails
+  closed; seeds prove it), ADR-008 (checks in the route's filter; the session-derived check in the handler per #863, now
+  through the same evaluator), ADR-010 (no new interface/registration), ADR-019 (reasonCode on every deny), ADR-038 (no
+  `Mock<HttpMessageHandler>`, no DI-registration or ctor tests; the evaluator-unavailable and throwing-logger tests assert
+  HTTP behaviour at module boundaries). `FinanceAuthorizationFilter.cs`, `PlaybookAuthorizationFilter.cs`,
+  `EntityAccessFilter`, `SemanticSearchAuthorizationFilter` are unchanged in this round.
+- **Integration (main session):** 162 before 164 (round 16 item 7) — §14.3's one-line edit to 164. Task 146 (`integ/uac-r2-batch4`)
+  edits the same `/create` and `/promote` handlers: keep 146's owner resolution and `CreateAnalysisAsync(…, owningTeamId,
+  createdByPersonId)` arguments AND f1's `ValidateCreateRequest` call; in `PromoteSession`'s parameter list drop 162-r1's
+  `AuthorizationService authorizationService` (f1 removed it) and keep 146's `IRecordOwnershipResolver ownership`. Task 168 /
+  round 19 item 4 adds `sprk_regardingrecordurl` (a String, not a Lookup) to `sprk_analysis` — no change to `LookupColumns`; a
+  new Lookup would redden `EveryLiveAnalysisLookup_IsClassifiedExactlyOnce` until classified.
+- **Observation (not authorization; for the main session):** the published Copilot `createAnalysis` schema
+  (`spaarke-bff-openapi.yaml` `CreateAnalysisRequest`) has `documentId`, `playbookId`, `matterId` but no `name`, which the
+  handler requires (400 "Analysis name is required." before and after this task).
+
+### 14.13 Verifier round 2 — item by item
+
+| # | Item | Disposition |
+|---|---|---|
+| 1 | Round 15 complete fix | **Done**: §14.1 classification (per writer, per class), §14.2 writers + tests, §14.6 script (dry run 0 derivable), §14.3 personal rule in the ONE declaration 164 calls. |
+| 2 | Round 25 item 2: `/create` adopts G5 | **Done**: §14.4; tests + seeds C1–C7, W4. |
+| 3 | Sweep findings closed, real-host negative tests | Confirmed; still green (§14.10). |
+| 4 | Round-10 deletions independently checked | Confirmed — and the deleted metrics' infra references found and removed (§14.7). |
+| 5 | Suites green, contention timeouts | Re-run in full this round (§14.10). |
+| 6 | 13 of 14 seeds red | Confirmed. V1's target code no longer exists (item 7). |
+| 7 | V1 survived: promote's fail-open catch untested | **Closed**: the catch is gone; the check goes through the shared evaluator; a test where an exception escapes `AuthorizationService` denies 403 and writes nothing; seeds E1/E2 redden it. |
+| 8 | Doc drift | **Closed** in the three docs AND the two bicep modules + compiled ARM template (§14.7). |
+| 9 | Promote reasonCode divergence | **Closed**: one evaluator, identical body in every case incl. faults (§14.5). |
+| 10 | Behaviour checked and correct | Confirmed; `AnalysisCreate` added to the fail-closed switch. |
+| 11 | No ADR-038 bans | Confirmed for the new tests (§14.12). |
+| 12 | Client consumers not broken | Confirmed; `/create`'s consumer (Playbook Library / Analysis Builder `analysisService.ts`) needs rights ordinary users hold (§14.4); live gate (k)/(l). |
+| 13 | Manual live gate pending | Still pending (main session): §11 (a)–(h) + §14.11 (i)–(m); item (c) is now decided. |
+| 14 | Publish size and CVE not re-verified | **Re-measured** this round (§14.10). |
