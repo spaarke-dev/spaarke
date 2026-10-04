@@ -266,50 +266,22 @@ public sealed class BulkOperationService : BackgroundService
             return;
         }
 
-        // Process each container sequentially — error per item does not stop the batch
+        // Process each container sequentially — error per item does not stop the batch.
+        // Every write goes through DeleteContainerOfConfigTypeAsync, which refuses a container that is
+        // not of the config's container type (task 165).
         foreach (var containerId in request.ContainerIds)
         {
             ct.ThrowIfCancellationRequested();
 
-            try
+            var error = await DeleteContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct);
+            if (error is null)
             {
-                // Soft-delete: move to recycle bin (not permanent delete).
-                // GraphCallScope translates ODataError -> SpaarkeStorageException inside
-                // Infrastructure.Graph, so this file catches a Spaarke-domain type (ADR-007 §1).
-                await GraphCallScope.Run(
-                    () => _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct),
-                    $"SoftDeleteContainer({containerId})");
-
                 status.Completed++;
-
-                _logger.LogDebug(
-                    "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' soft-deleted ({Done}/{Total}).",
-                    operationId, containerId, status.Completed, status.Total);
             }
-            catch (OperationCanceledException)
+            else
             {
-                throw;
-            }
-            catch (SpaarkeStorageException storageEx)
-            {
-                var msg = ProblemDetailsHelper.Redact(storageEx.Message)
-                    ?? $"Graph API error (HTTP {storageEx.StatusCode})";
-
-                _logger.LogWarning(
-                    "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed: {Error}",
-                    operationId, containerId, msg);
-
                 status.Failed++;
-                status.Errors.Add(new BulkOperationItemError(containerId, msg));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed with unexpected error.",
-                    operationId, containerId);
-
-                status.Failed++;
-                status.Errors.Add(new BulkOperationItemError(containerId, ex.Message));
+                status.Errors.Add(error);
             }
         }
 
@@ -369,50 +341,22 @@ public sealed class BulkOperationService : BackgroundService
             return;
         }
 
-        // Process each container sequentially — error per item does not stop the batch
+        // Process each container sequentially — error per item does not stop the batch.
+        // Every grant goes through GrantOnContainerOfConfigTypeAsync (task 165).
         foreach (var containerId in request.ContainerIds)
         {
             ct.ThrowIfCancellationRequested();
 
-            try
+            var error = await GrantOnContainerOfConfigTypeAsync(
+                graphClient, config, containerId, request.UserId, request.GroupId, request.Role, operationId, ct);
+            if (error is null)
             {
-                // See the delete path above — GraphCallScope keeps the ODataError inside
-                // Infrastructure.Graph so this file stays ADR-007 §1 clean.
-                await GraphCallScope.Run(
-                    () => _graphService.GrantContainerPermissionAsync(
-                        graphClient, containerId, request.UserId, request.GroupId, request.Role, ct),
-                    $"GrantContainerPermission({containerId})");
-
                 status.Completed++;
-
-                _logger.LogDebug(
-                    "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' permission granted ({Done}/{Total}).",
-                    operationId, containerId, status.Completed, status.Total);
             }
-            catch (OperationCanceledException)
+            else
             {
-                throw;
-            }
-            catch (SpaarkeStorageException storageEx)
-            {
-                var msg = ProblemDetailsHelper.Redact(storageEx.Message)
-                    ?? $"Graph API error (HTTP {storageEx.StatusCode})";
-
-                _logger.LogWarning(
-                    "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed: {Error}",
-                    operationId, containerId, msg);
-
                 status.Failed++;
-                status.Errors.Add(new BulkOperationItemError(containerId, msg));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed with unexpected error.",
-                    operationId, containerId);
-
-                status.Failed++;
-                status.Errors.Add(new BulkOperationItemError(containerId, ex.Message));
+                status.Errors.Add(error);
             }
         }
 
@@ -423,6 +367,194 @@ public sealed class BulkOperationService : BackgroundService
             "BulkOperationService: Permissions job {OperationId} finished — {Completed}/{Total} succeeded, {Failed} failed.",
             operationId, status.Completed, status.Total, status.Failed);
     }
+
+    // =========================================================================
+    // Per-item processing (task 165) — the ONLY call sites of the two Graph writes
+    // =========================================================================
+
+    /// <summary>
+    /// The per-item error for a container this job will not touch. ONE text for "not found", "of another
+    /// container type", "unparseable type id" and "the read failed", so a refused item's status does not
+    /// tell the caller which of those it was.
+    /// </summary>
+    internal const string ContainerNotOfConfigTypeError =
+        "The container was not found under this configuration's container type; it was not changed.";
+
+    /// <summary>
+    /// Soft-deletes <paramref name="containerId"/> ONLY if it is of <paramref name="config"/>'s container
+    /// type. Returns null on success, or the item's error.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why</b> (unified-access-control-r2 task 165, sweep finding #44). The job runs with no caller
+    /// context and an app-only Graph client for the config's owning app. The tenant-scope filter confines
+    /// the CONFIG to the caller's business units, but the container ids are caller-chosen, and the owning
+    /// app may be registered on other container types too. Read first, compare, then write — or refuse.
+    /// </para>
+    /// <para>
+    /// The check binds a container to the config's container TYPE, not to a business unit: one type can
+    /// serve several customers (container-type topology §3, Model 1) and no authoritative container →
+    /// business-unit map exists. See the task 165 note, escalation 4.
+    /// </para>
+    /// </remarks>
+    internal async Task<BulkOperationItemError?> DeleteContainerOfConfigTypeAsync(
+        Microsoft.Graph.GraphServiceClient graphClient,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        string containerId,
+        Guid operationId,
+        CancellationToken ct)
+    {
+        if (!await IsContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct))
+        {
+            return new BulkOperationItemError(containerId, ContainerNotOfConfigTypeError);
+        }
+
+        try
+        {
+            // Soft-delete: move to recycle bin (not permanent delete).
+            // GraphCallScope translates ODataError -> SpaarkeStorageException inside
+            // Infrastructure.Graph, so this file catches a Spaarke-domain type (ADR-007 §1).
+            await GraphCallScope.Run(
+                () => _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct),
+                $"SoftDeleteContainer({containerId})");
+
+            _logger.LogDebug(
+                "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' soft-deleted.",
+                operationId, containerId);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (SpaarkeStorageException storageEx)
+        {
+            var msg = ProblemDetailsHelper.Redact(storageEx.Message)
+                ?? $"Graph API error (HTTP {storageEx.StatusCode})";
+
+            _logger.LogWarning(
+                "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed: {Error}",
+                operationId, containerId, msg);
+            return new BulkOperationItemError(containerId, msg);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "BulkOperationService: Delete job {OperationId} — container '{ContainerId}' failed with unexpected error.",
+                operationId, containerId);
+            return new BulkOperationItemError(containerId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Grants <paramref name="role"/> on <paramref name="containerId"/> ONLY if it is of
+    /// <paramref name="config"/>'s container type (sweep finding #72). Returns null on success, or the
+    /// item's error. See <see cref="DeleteContainerOfConfigTypeAsync"/> for why.
+    /// </summary>
+    internal async Task<BulkOperationItemError?> GrantOnContainerOfConfigTypeAsync(
+        Microsoft.Graph.GraphServiceClient graphClient,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        string containerId,
+        string? userId,
+        string? groupId,
+        string role,
+        Guid operationId,
+        CancellationToken ct)
+    {
+        if (!await IsContainerOfConfigTypeAsync(graphClient, config, containerId, operationId, ct))
+        {
+            return new BulkOperationItemError(containerId, ContainerNotOfConfigTypeError);
+        }
+
+        try
+        {
+            // See the delete path — GraphCallScope keeps the ODataError inside
+            // Infrastructure.Graph so this file stays ADR-007 §1 clean.
+            await GraphCallScope.Run(
+                () => _graphService.GrantContainerPermissionAsync(
+                    graphClient, containerId, userId, groupId, role, ct),
+                $"GrantContainerPermission({containerId})");
+
+            _logger.LogDebug(
+                "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' permission granted.",
+                operationId, containerId);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (SpaarkeStorageException storageEx)
+        {
+            var msg = ProblemDetailsHelper.Redact(storageEx.Message)
+                ?? $"Graph API error (HTTP {storageEx.StatusCode})";
+
+            _logger.LogWarning(
+                "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed: {Error}",
+                operationId, containerId, msg);
+            return new BulkOperationItemError(containerId, msg);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "BulkOperationService: Permissions job {OperationId} — container '{ContainerId}' failed with unexpected error.",
+                operationId, containerId);
+            return new BulkOperationItemError(containerId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// True only when the container can be read AND both its container type id and the config's parse as
+    /// GUIDs AND they are equal. Every other outcome — not found, another type, an unparseable id on either
+    /// side, a read fault — is false (fail closed, ADR-003).
+    /// </summary>
+    private async Task<bool> IsContainerOfConfigTypeAsync(
+        Microsoft.Graph.GraphServiceClient graphClient,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        string containerId,
+        Guid operationId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var container = await GraphCallScope.Run(
+                () => _graphService.GetContainerAsync(graphClient, containerId, ct),
+                $"GetContainer({containerId})");
+
+            var matches = container is not null
+                && Guid.TryParse(container.ContainerTypeId, out var actualType)
+                && Guid.TryParse(config.ContainerTypeId, out var expectedType)
+                && actualType == expectedType;
+
+            if (!matches)
+            {
+                _logger.LogWarning(
+                    "BulkOperationService: job {OperationId} — container '{ContainerId}' is not of config {ConfigId}'s " +
+                    "container type (or was not found); refused without a write.",
+                    operationId, containerId, config.ConfigId);
+            }
+
+            return matches;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "BulkOperationService: job {OperationId} — could not read container '{ContainerId}' to verify its " +
+                "container type; refused without a write.",
+                operationId, containerId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The number of operations currently tracked. Read-only, for tests: the service is sealed, and
+    /// "a refused request enqueued nothing" cannot otherwise be asserted deterministically.
+    /// </summary>
+    internal int TrackedOperationCount => _statuses.Count;
 
     /// <summary>
     /// Removes a completed operation's status record after the retention window expires.

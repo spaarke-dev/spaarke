@@ -213,7 +213,9 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default)
+    // virtual: test seam only (unified-access-control-r2 task 165 asserts "no delete ran"), the same seam
+    // RetrieveAsync / CreateAsync / UpdateAsync / QueryAsync already carry. No behaviour change.
+    public virtual async Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default)
     {
         var url = $"{entitySetName}({id})";
 

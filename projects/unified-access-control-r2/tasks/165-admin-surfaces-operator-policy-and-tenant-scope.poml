@@ -4,7 +4,7 @@
     <title>Admin surfaces (route sweep, 9 routes): put the record-matching admin routes behind the existing "SystemAdmin" policy, and make the SPE admin tenant-scope boundary actually run on /api/spe/configs CRUD and /api/spe/bulk/delete + /bulk/permissions (route param named "id", configId carried in the body, unscoped business unit and unscoped app identity on create/update, fail-open scope lookup)</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>code-complete-escalated</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live BFF routes (tags bff-api, auth, security). Closes an operator job any signed-in user can trigger, and a cross-business-unit read, rewrite and delete of SPE container-type configs, a cross-business-unit config create that borrows another unit's container type or app identity, and a cross-business-unit bulk container delete and owner grant.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -248,5 +248,30 @@ THE ROUTE GUARD. `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (task
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL).</protocol>
+    <outcome date="2026-10-03" branch="task/uac-r2-165">
+CODE-COMPLETE FOR THE NINE SWEEP ROUTES + THREE OF FOUR AMENDMENT ITEMS; TWO ESCALATIONS STOPPED; LIVE GATES PENDING. Full record: notes/task-165-admin-surfaces.md (§0 summary, §1 167 state, §2 read-only live facts, §3 change map + placement + justification, §4 escalations, §5 tests + seeding proofs, §6 ledger input, §7 decisions, §8 not in this task, §9 manual live gate).
+
+BRANCH: task/uac-r2-165 from work/unified-access-control-r2 @ e6dd48b43.
+
+167: NOT landed (no "165" waivers). Per amendment 3: no waivers, ledger entries or GovernedFiles edits; ledger-input table in note §6. The config template changed {id:guid} -&gt; {configId:guid}: a waiver keyed on the old template must be deleted.
+
+DONE: record-matching group behind "SystemAdmin" + redacted 500s (#47 #48 #77); SpeAdminTenantScopeFilter reads query (every value), route value and bound body (ISpeAdminConfigScopedRequest), 400 on disagreement, ONE 404 for unknown and out-of-scope, 503 when unverifiable (#73 #75, fail-open amendment); config routes renamed to {configId:guid}; POST requires businessUnitId; POST/PUT business-unit intersection + app-identity check (PUT judges changed fields only) (#45 #74); bulk routes confined via the body + per-item container-type check in the job (#44 #72); SystemAdmin policy scope-substring branch removed (amendment); dashboard GET/refresh projected onto reachable configs (amendment); register host allow-list {tenant}-admin.sharepoint.com (amendment).
+
+ESCALATIONS (stopped, reported, not resolved): (1) environment routes business-unit scoping (amendment item) — sprk_speenvironment has no business-unit column and is shared tenant infrastructure; options + recommendation (a) in note §4.1. (2) Trigger 5 FIRED: three SearchItemsTests (POST /api/spe/search/items) now get 503 from the fail-closed filter (they ran a real outbound Dataverse call and passed only because the filter failed open; one asserts the unknown-config oracle). Recommended test change in note §4.2. Triggers 1, 2, 3, 4, 6, 7: not fired (live counts §2: 2 configs, both root unit, 0 BU-less, 0 shared identity).
+
+PLACEMENT (CLAUDE.md §10): in the BFF; existing routes, existing group filter, existing SpeAdminTenantScope, existing BulkOperationService, existing policy. No new endpoint, filter class, policy, service, DI registration, option, job, package or column. DataverseWebApiClient.DeleteAsync made virtual (test seam only).
+
+JUSTIFICATION (CLAUDE.md §11), new types/members — full table in note §3.3: enum SpeAdminScopeDecision (a bool cannot carry "unverifiable"; cost: fail-open); interface ISpeAdminConfigScopedRequest (cost: the next body-carried configId bypasses the boundary as the two bulk records did; guarded by SpeAdminConfigScopedBodyGuardTests); SpeAdminTenantScopeFilter.ConfigNotFound/ScopeUnverifiable (cost: differing 404 shapes = existence oracle); SpeAdminTenantScope.DecideConfigWriteAsync/GetReachableConfigIdsAsync/IdentityColumns (cost: #74/#45 and cross-customer dashboard); BulkOperationService per-item methods + TrackedOperationCount (cost: no-write/no-enqueue unassertable on a sealed class; caller-chosen containers of another type written app-only); ContainerTypeEndpoints.IsSharePointAdminHost (cost: app-only token sent to a caller-chosen host).
+
+ROUTES DELETED: none (all nine have callers or are documented operator routes in deployed smoke baselines).
+
+SEEDING: 18 seeds (1, 2, 3, 4, 5, 6, 7, 8, 9a, 9b, 9c, 10a, 10b, 10c, 11, 12, 13, 14), each RED on the named tests, sources restored from a byte copy and touched (note §5.2).
+
+TESTS: full BFF unit suite 14,315 passed / 3 failed / 54 skipped (the 3 = escalation 2); NetArchTest 347 / 0 / 0; Sprk.Bff.Api.IntegrationTests 104 / 0 / 0; Spe.Integration.Tests 403 / 0 / 25 skipped. New: 106 BFF-suite tests + 1 arch test. No package change (no CVE delta). Publish size not measured (instructed).
+
+STEP 9.5: code-review no Critical (W1 Model-1 shared container type vs identity check = note D5b; W2 refresh projection covered via the shared projection). adr-check clean (ADR-001/002/003/007/008/010/019/038/052).
+
+PENDING MANUAL GATES (main session; exact commands note §9): (a) record-matching 403/200 on dev if the flag is on; (b)-(d) need an SPE admin OUTSIDE the root unit (none exists — owner to grant the Admin app role to a Business Unit 1 test user), write probes on throwaway data only with owner approval; (f) register host 400.
+    </outcome>
   </execution>
 </task>

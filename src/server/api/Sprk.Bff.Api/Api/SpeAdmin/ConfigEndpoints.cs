@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Api.Filters;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -12,12 +13,18 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 ///
 /// Endpoints:
 ///   GET    /api/spe/configs          — list configs, optionally filtered by BU and/or environment
-///   GET    /api/spe/configs/{id}     — single config detail
+///   GET    /api/spe/configs/{configId} — single config detail
 ///   POST   /api/spe/configs          — create new config (audit logged)
-///   PUT    /api/spe/configs/{id}     — update config (audit logged)
-///   DELETE /api/spe/configs/{id}     — delete config (audit logged)
+///   PUT    /api/spe/configs/{configId} — update config (audit logged)
+///   DELETE /api/spe/configs/{configId} — delete config (audit logged)
 ///
-/// Authorization: Inherited from /api/spe route group (SpeAdminAuthorizationFilter — System Admin only).
+/// Authorization: Inherited from /api/spe route group (SpeAdminAuthorizationFilter — System Admin only —
+/// then SpeAdminTenantScopeFilter, which confines {configId} to the caller's business units). The route
+/// parameter is named <c>configId</c> so that filter reads it: until task 165 it was <c>{id}</c>, the
+/// filter found no configId, and any SPE admin could read, rewrite or delete any business unit's config.
+/// POST and PUT also judge the BODY values the write would store (business unit; app identity) via
+/// <see cref="SpeAdminTenantScope.DecideConfigWriteAsync"/> — they are not the config being acted on, so
+/// the filter cannot judge them (a POST has no configId at all).
 /// Follows ADR-001: Minimal API; ADR-019: ProblemDetails for all errors.
 /// </summary>
 public static class ConfigEndpoints
@@ -66,7 +73,7 @@ public static class ConfigEndpoints
             .Produces<IReadOnlyList<ConfigSummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        configs.MapGet("/{id:guid}", GetConfigAsync)
+        configs.MapGet("/{configId:guid}", GetConfigAsync)
             .WithName("GetSpeConfig")
             .WithSummary("Get a single container type config by ID")
             .Produces<ConfigDetailDto>(StatusCodes.Status200OK)
@@ -78,17 +85,21 @@ public static class ConfigEndpoints
             .WithSummary("Create a new container type config")
             .Produces<ConfigDetailDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
-        configs.MapPut("/{id:guid}", UpdateConfigAsync)
+        configs.MapPut("/{configId:guid}", UpdateConfigAsync)
             .WithName("UpdateSpeConfig")
             .WithSummary("Update an existing container type config")
             .Produces<ConfigDetailDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
-        configs.MapDelete("/{id:guid}", DeleteConfigAsync)
+        configs.MapDelete("/{configId:guid}", DeleteConfigAsync)
             .WithName("DeleteSpeConfig")
             .WithSummary("Delete a container type config")
             .Produces(StatusCodes.Status204NoContent)
@@ -192,11 +203,11 @@ public static class ConfigEndpoints
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/spe/configs/{id}
+    // GET /api/spe/configs/{configId}
     // ─────────────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> GetConfigAsync(
-        Guid id,
+        Guid configId,
         DataverseWebApiClient dataverseClient,
         ILogger<Program> logger,
         HttpContext context,
@@ -206,7 +217,7 @@ public static class ConfigEndpoints
         {
             var row = await dataverseClient.RetrieveAsync<ConfigDataverseRow>(
                 EntitySet,
-                id,
+                configId,
                 select: DetailSelect,
                 cancellationToken: ct);
 
@@ -214,34 +225,26 @@ public static class ConfigEndpoints
             {
                 logger.LogInformation(
                     "GetSpeConfig: not found. id={Id} correlationId={CorrelationId}",
-                    id, context.TraceIdentifier);
+                    configId, context.TraceIdentifier);
 
-                return TypedResults.Problem(
-                    detail: $"Container type config '{id}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ConfigNotFound(configId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
                 "GetSpeConfig: retrieved config {Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             return TypedResults.Ok(row.ToDetail());
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return TypedResults.Problem(
-                detail: $"Container type config '{id}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.ConfigNotFound(configId, context.TraceIdentifier);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
                 "GetSpeConfig failed. id={Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
                 detail: ProblemDetailsHelper.Explain("Failed to retrieve the container type config.", ex),
@@ -258,6 +261,7 @@ public static class ConfigEndpoints
     private static async Task<IResult> CreateConfigAsync(
         CreateConfigRequest request,
         DataverseWebApiClient dataverseClient,
+        SpeAdminTenantScope tenantScope,
         SpeAuditService auditService,
         ILogger<Program> logger,
         HttpContext context,
@@ -284,11 +288,37 @@ public static class ConfigEndpoints
             return ValidationProblem("'keyVaultSecretName' is required.", context.TraceIdentifier);
         }
 
+        // Task 165: a config with no business unit is visible to EVERY admin (the compatibility rule in
+        // SpeAdminTenantScope.DecideConfigAccessAsync). Existing rows keep that rule; new ones may not
+        // be created into it.
+        if (request.BusinessUnitId is null || request.BusinessUnitId == Guid.Empty)
+        {
+            return ValidationProblem("'businessUnitId' is required.", context.TraceIdentifier);
+        }
+
         // Validate Key Vault secret name format
         var kvValidation = ValidateKeyVaultSecretName(request.KeyVaultSecretName);
         if (kvValidation != null)
         {
             return ValidationProblem(kvValidation, context.TraceIdentifier);
+        }
+
+        // Task 165 (sweep #74): the business unit must be one the caller administers, and no app-identity
+        // value may be borrowed from a config in a unit they do not.
+        var writeRefusal = WriteRefusal(
+            await tenantScope.DecideConfigWriteAsync(
+                context.User,
+                request.BusinessUnitId,
+                IdentityValues(
+                    request.ContainerTypeId, request.OwningAppId, request.KeyVaultSecretName,
+                    request.ConsumingAppId, request.ConsumingAppKeyVaultSecret),
+                excludeConfigId: null,
+                ct),
+            context.TraceIdentifier);
+
+        if (writeRefusal is not null)
+        {
+            return writeRefusal;
         }
 
         try
@@ -340,13 +370,14 @@ public static class ConfigEndpoints
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PUT /api/spe/configs/{id}
+    // PUT /api/spe/configs/{configId}
     // ─────────────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> UpdateConfigAsync(
-        Guid id,
+        Guid configId,
         UpdateConfigRequest request,
         DataverseWebApiClient dataverseClient,
+        SpeAdminTenantScope tenantScope,
         SpeAuditService auditService,
         ILogger<Program> logger,
         HttpContext context,
@@ -369,7 +400,7 @@ public static class ConfigEndpoints
             try
             {
                 existing = await dataverseClient.RetrieveAsync<ConfigDataverseRow>(
-                    EntitySet, id, select: DetailSelect, cancellationToken: ct);
+                    EntitySet, configId, select: DetailSelect, cancellationToken: ct);
             }
             catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -378,34 +409,53 @@ public static class ConfigEndpoints
 
             if (existing == null)
             {
-                return TypedResults.Problem(
-                    detail: $"Container type config '{id}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ConfigNotFound(configId, context.TraceIdentifier);
+            }
+
+            // Task 165 (sweep #45). The filter confined the config being updated; these judge the values
+            // the update would STORE. Identity fields are judged only where they CHANGE: the shipped client
+            // sends every field on every save, unchanged ones included, and an unchanged value is not a new
+            // borrowing.
+            var writeRefusal = WriteRefusal(
+                await tenantScope.DecideConfigWriteAsync(
+                    context.User,
+                    request.BusinessUnitId,
+                    IdentityValues(
+                        Changed(request.ContainerTypeId, existing.ContainerTypeId),
+                        Changed(request.OwningAppId, existing.OwningAppId),
+                        Changed(request.KeyVaultSecretName, existing.KeyVaultSecretName),
+                        Changed(request.ConsumingAppId, existing.ConsumingAppId),
+                        Changed(request.ConsumingAppKeyVaultSecret, existing.ConsumingAppKvSecret)),
+                    excludeConfigId: configId,
+                    ct),
+                context.TraceIdentifier);
+
+            if (writeRefusal is not null)
+            {
+                return writeRefusal;
             }
 
             var payload = BuildUpdatePayload(request);
-            await dataverseClient.UpdateAsync(EntitySet, id, payload, ct);
+            await dataverseClient.UpdateAsync(EntitySet, configId, payload, ct);
 
             logger.LogInformation(
                 "UpdateSpeConfig: updated config {Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             // Audit log
             _ = auditService.LogOperationAsync(
                 operation: "UpdateContainerTypeConfig",
                 category: AuditCategory,
-                targetResource: id.ToString(),
+                targetResource: configId.ToString(),
                 responseStatus: StatusCodes.Status200OK,
-                configId: id,
+                configId: configId,
                 environmentId: request.EnvironmentId ?? existing.EnvironmentId,
                 businessUnitId: request.BusinessUnitId ?? existing.BusinessUnitId,
                 cancellationToken: CancellationToken.None);
 
             // Return the updated record
             var updated = await dataverseClient.RetrieveAsync<ConfigDataverseRow>(
-                EntitySet, id, select: DetailSelect, cancellationToken: ct);
+                EntitySet, configId, select: DetailSelect, cancellationToken: ct);
 
             return TypedResults.Ok(updated?.ToDetail() ?? existing.ToDetail());
         }
@@ -413,7 +463,7 @@ public static class ConfigEndpoints
         {
             logger.LogError(ex,
                 "UpdateSpeConfig failed. id={Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
                 detail: ProblemDetailsHelper.Explain("Failed to update the container type config.", ex),
@@ -424,11 +474,11 @@ public static class ConfigEndpoints
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // DELETE /api/spe/configs/{id}
+    // DELETE /api/spe/configs/{configId}
     // ─────────────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> DeleteConfigAsync(
-        Guid id,
+        Guid configId,
         DataverseWebApiClient dataverseClient,
         SpeAuditService auditService,
         ILogger<Program> logger,
@@ -442,7 +492,7 @@ public static class ConfigEndpoints
             try
             {
                 existing = await dataverseClient.RetrieveAsync<ConfigDataverseRow>(
-                    EntitySet, id,
+                    EntitySet, configId,
                     select: "sprk_specontainertypeconfigid,_sprk_businessunit_value,_sprk_environment_value",
                     cancellationToken: ct);
             }
@@ -453,26 +503,22 @@ public static class ConfigEndpoints
 
             if (existing == null)
             {
-                return TypedResults.Problem(
-                    detail: $"Container type config '{id}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ConfigNotFound(configId, context.TraceIdentifier);
             }
 
-            await dataverseClient.DeleteAsync(EntitySet, id, ct);
+            await dataverseClient.DeleteAsync(EntitySet, configId, ct);
 
             logger.LogInformation(
                 "DeleteSpeConfig: deleted config {Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             // Audit log
             _ = auditService.LogOperationAsync(
                 operation: "DeleteContainerTypeConfig",
                 category: AuditCategory,
-                targetResource: id.ToString(),
+                targetResource: configId.ToString(),
                 responseStatus: StatusCodes.Status204NoContent,
-                configId: id,
+                configId: configId,
                 environmentId: existing.EnvironmentId,
                 businessUnitId: existing.BusinessUnitId,
                 cancellationToken: CancellationToken.None);
@@ -483,7 +529,7 @@ public static class ConfigEndpoints
         {
             logger.LogError(ex,
                 "DeleteSpeConfig failed. id={Id} correlationId={CorrelationId}",
-                id, context.TraceIdentifier);
+                configId, context.TraceIdentifier);
 
             return TypedResults.Problem(
                 detail: ProblemDetailsHelper.Explain("Failed to delete the container type config.", ex),
@@ -492,6 +538,57 @@ public static class ConfigEndpoints
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 165: write-scope helpers (POST / PUT)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The app-identity values a write would store, keyed by Dataverse column.</summary>
+    private static IReadOnlyDictionary<string, string?> IdentityValues(
+        string? containerTypeId,
+        string? owningAppId,
+        string? keyVaultSecretName,
+        string? consumingAppId,
+        string? consumingAppKvSecret) =>
+        new Dictionary<string, string?>
+        {
+            [SpeAdminTenantScope.IdentityColumns.ContainerTypeId] = containerTypeId,
+            [SpeAdminTenantScope.IdentityColumns.OwningAppId] = owningAppId,
+            [SpeAdminTenantScope.IdentityColumns.KeyVaultSecretName] = keyVaultSecretName,
+            [SpeAdminTenantScope.IdentityColumns.ConsumingAppId] = consumingAppId,
+            [SpeAdminTenantScope.IdentityColumns.ConsumingAppKvSecret] = consumingAppKvSecret,
+        };
+
+    /// <summary>
+    /// The requested value when it differs (trimmed, case-insensitive) from the stored one; otherwise null,
+    /// which the write check ignores.
+    /// </summary>
+    private static string? Changed(string? requested, string? stored) =>
+        requested is not null
+        && !string.Equals(requested.Trim(), stored?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            ? requested
+            : null;
+
+    /// <summary>Maps a write-scope decision to its refusal, or null when the write may proceed.</summary>
+    private static IResult? WriteRefusal(SpeAdminScopeDecision decision, string traceId) => decision switch
+    {
+        SpeAdminScopeDecision.Permitted => null,
+
+        SpeAdminScopeDecision.BusinessUnitOutOfScope => ProblemDetailsHelper.Forbidden(
+            "spe.admin.deny.business_unit_out_of_scope",
+            "The business unit is not one you administer.",
+            traceId),
+
+        // Deliberately names neither the other config nor its business unit.
+        SpeAdminScopeDecision.IdentityOutOfScope => ProblemDetailsHelper.Forbidden(
+            "spe.admin.deny.config_identity_out_of_scope",
+            "A container type, app or secret named in this configuration is already used by a configuration " +
+            "outside the business units you administer.",
+            traceId),
+
+        // Unverifiable — and any case this method does not recognise — refuses (ADR-003 fail closed).
+        _ => SpeAdminTenantScopeFilter.ScopeUnverifiable(traceId),
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Step 7: Key Vault secret name validation

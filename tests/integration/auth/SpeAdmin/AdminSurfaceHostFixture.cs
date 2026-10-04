@@ -1,0 +1,375 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Reflection;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.RecordMatching;
+using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Tests.Integration.Workspace;
+
+namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
+
+/// <summary>
+/// unified-access-control-r2 task 165 — a real BFF host for the operator surfaces this task gates:
+/// <c>/api/spe/**</c> (SPE admin, business-unit tenant scope), <c>/api/admin/record-matching/**</c> and the
+/// other groups behind the "SystemAdmin" policy.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why a real host.</b> The defects closed here are about WHETHER a gate runs on a route (a filter that
+/// never saw the configId; a group with a bare <c>RequireAuthorization()</c>), and
+/// <c>AddEndpointFilter</c> leaves no endpoint metadata to reflect over (see
+/// <c>SpeAdminContainerItemRouteGateTests</c>). Only a request through the real pipeline observes it.
+/// </para>
+/// <para>
+/// <b>The caller.</b> Chosen per request by headers: <see cref="RolesHeader"/> (app roles, or
+/// <see cref="NoRoles"/> for a signed-in caller holding none) and <see cref="ScopesHeader"/> (the delegated
+/// scope claim). No roles header = anonymous. The oid is fixed (<see cref="CallerOid"/>); which business
+/// unit it belongs to is DATA in <see cref="Dataverse"/>, so a test states the caller's unit by seeding a
+/// <c>systemusers</c> row.
+/// </para>
+/// <para>
+/// <b>Dataverse</b> is substituted at the <see cref="DataverseWebApiClient"/> class boundary (ADR-038 §4,
+/// the <c>DelegationRuleTestFixture</c> pattern — never <c>Mock&lt;HttpMessageHandler&gt;</c>), backed by
+/// <see cref="FakeDataverseTables"/>: in-memory rows serialized through the production row types, so the
+/// production query → deserialize → decide path is what runs. <b>Record matching</b> is substituted at
+/// <see cref="IDataverseIndexSyncService"/> by a recording fake.
+/// </para>
+/// </remarks>
+public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
+{
+    internal const string RolesHeader = "X-Test-App-Roles";
+    internal const string ScopesHeader = "X-Test-Scopes";
+    internal const string NoRoles = "(none)";
+    internal const string ScopeClaimType = "http://schemas.microsoft.com/identity/claims/scope";
+
+    /// <summary>The caller's Entra object id (the <c>oid</c> claim).</summary>
+    public static readonly Guid CallerOid = Guid.Parse("0b7d1f60-9c3a-4d21-8f5e-2a6b7c8d9e01");
+
+    public FakeDataverseTables Dataverse { get; } = new();
+
+    public RecordingIndexSyncService IndexSync { get; } = new();
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = AdminSurfaceAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = AdminSurfaceAuthHandler.SchemeName;
+            })
+            .AddScheme<AuthenticationSchemeOptions, AdminSurfaceAuthHandler>(
+                AdminSurfaceAuthHandler.SchemeName, _ => { });
+
+            services.RemoveAll<DataverseWebApiClient>();
+            services.AddSingleton(Dataverse.CreateClient());
+
+            // Registered only when DocumentIntelligence:RecordMatchingEnabled is true (it is, in the base
+            // host configuration), so the routes are mapped; the recording fake replaces the real service.
+            services.RemoveAll<IDataverseIndexSyncService>();
+            services.AddSingleton<IDataverseIndexSyncService>(IndexSync);
+        });
+    }
+
+    /// <summary>A signed-in caller holding exactly these app roles (none by default) and optional scopes.</summary>
+    public HttpClient CreateCaller(string[]? roles = null, string? scopes = null)
+    {
+        var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add(RolesHeader, roles is { Length: > 0 } ? string.Join(",", roles) : NoRoles);
+        if (scopes is not null)
+        {
+            client.DefaultRequestHeaders.Add(ScopesHeader, scopes);
+        }
+
+        return client;
+    }
+
+    /// <summary>A caller who is not signed in.</summary>
+    public HttpClient CreateAnonymous() =>
+        CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+    /// <summary>The live singleton the bulk endpoints enqueue into (hosted loop removed by the base host).</summary>
+    public BulkOperationService BulkOperations => Services.GetRequiredService<BulkOperationService>();
+
+    /// <summary>Clears every row, fault, recorded call and sync-service behaviour.</summary>
+    public void Reset()
+    {
+        Dataverse.Reset();
+        IndexSync.Reset();
+    }
+}
+
+/// <summary>Authenticates from the <see cref="AdminSurfaceHostFixture"/> headers. No roles header = anonymous.</summary>
+internal sealed class AdminSurfaceAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+{
+    public const string SchemeName = "AdminSurfaceAuth";
+
+    public AdminSurfaceAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder)
+        : base(options, logger, encoder)
+    {
+    }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (!Request.Headers.TryGetValue(AdminSurfaceHostFixture.RolesHeader, out var rolesHeader))
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
+        var oid = AdminSurfaceHostFixture.CallerOid.ToString("D");
+        var claims = new List<Claim>
+        {
+            new("oid", oid),
+            new(ClaimTypes.NameIdentifier, oid),
+            new(ClaimTypes.Name, "Admin Surface Test Caller"),
+            new("tid", "11111111-2222-3333-4444-555555555555"),
+        };
+
+        claims.AddRange(
+            rolesHeader.ToString()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(role => role != AdminSurfaceHostFixture.NoRoles)
+                .Select(role => new Claim("roles", role)));
+
+        if (Request.Headers.TryGetValue(AdminSurfaceHostFixture.ScopesHeader, out var scopes))
+        {
+            // The claim type the JwtBearer handler maps "scp" to — the type the "SystemAdmin" policy read.
+            claims.Add(new Claim(AdminSurfaceHostFixture.ScopeClaimType, scopes.ToString()));
+        }
+
+        var identity = new ClaimsIdentity(claims, SchemeName, ClaimTypes.Name, "roles");
+        return Task.FromResult(AuthenticateResult.Success(
+            new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
+    }
+}
+
+/// <summary>
+/// In-memory Dataverse tables behind a Moq class mock of <see cref="DataverseWebApiClient"/>
+/// (<c>CallBase = false</c>; the five data methods are virtual). Rows are dictionaries keyed by OData
+/// attribute name and are round-tripped through JSON into whatever row type the production code asks
+/// for, so the private production row shapes are exercised unchanged.
+/// </summary>
+public sealed class FakeDataverseTables
+{
+    private readonly ConcurrentDictionary<string, List<Dictionary<string, object?>>> _tables = new();
+
+    /// <summary>Every call, in order.</summary>
+    public ConcurrentQueue<DataverseCall> Calls { get; } = new();
+
+    /// <summary>Entity sets whose QueryAsync throws (a simulated Dataverse fault).</summary>
+    public ConcurrentDictionary<string, bool> FaultingQueries { get; } = new();
+
+    public void Reset()
+    {
+        _tables.Clear();
+        Calls.Clear();
+        FaultingQueries.Clear();
+    }
+
+    public void Add(string entitySet, Dictionary<string, object?> row) =>
+        _tables.GetOrAdd(entitySet, _ => new List<Dictionary<string, object?>>()).Add(row);
+
+    public void FaultQueriesOn(string entitySet) => FaultingQueries[entitySet] = true;
+
+    public IReadOnlyList<DataverseCall> CallsOn(string entitySet, params string[] operations) =>
+        Calls.Where(c => c.EntitySet == entitySet && (operations.Length == 0 || operations.Contains(c.Operation)))
+             .ToList();
+
+    internal DataverseWebApiClient CreateClient()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+            // Takes the managed-identity branch, whose credential is constructed lazily and never
+            // authenticates — this client is fully stubbed (same as DelegationRuleTestFixture).
+            ["Graph:ManagedIdentity:Enabled"] = "true",
+            ["API_APP_ID"] = "00000000-0000-0000-0000-0000000000aa",
+            ["API_CLIENT_SECRET"] = "test-secret",
+            ["TENANT_ID"] = "00000000-0000-0000-0000-0000000000bb"
+        }).Build();
+
+        // Positional null! for the two optional credential slots: Moq selects class-proxy ctors exactly.
+        var mock = new Mock<DataverseWebApiClient>(
+            configuration, NullLogger<DataverseWebApiClient>.Instance, null!, null!)
+        { CallBase = false };
+
+        mock.Setup(c => c.QueryAsync<It.IsAnyType>(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .Returns(new InvocationFunc(Query));
+
+        mock.Setup(c => c.RetrieveAsync<It.IsAnyType>(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(new InvocationFunc(Retrieve));
+
+        mock.Setup(c => c.CreateAsync(It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns((string set, object _, CancellationToken _) =>
+            {
+                Calls.Enqueue(new DataverseCall("Create", set, null, null));
+                return Task.FromResult(Guid.NewGuid());
+            });
+
+        mock.Setup(c => c.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns((string set, Guid id, object _, CancellationToken _) =>
+            {
+                Calls.Enqueue(new DataverseCall("Update", set, id, null));
+                return Task.CompletedTask;
+            });
+
+        mock.Setup(c => c.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((string set, Guid id, CancellationToken _) =>
+            {
+                Calls.Enqueue(new DataverseCall("Delete", set, id, null));
+                return Task.CompletedTask;
+            });
+
+        return mock.Object;
+    }
+
+    private object Query(IInvocation invocation)
+    {
+        var rowType = invocation.Method.GetGenericArguments()[0];
+        var entitySet = (string)invocation.Arguments[0];
+        var filter = (string?)invocation.Arguments[1];
+        var top = (int?)invocation.Arguments[3];
+
+        Calls.Enqueue(new DataverseCall("Query", entitySet, null, filter));
+
+        if (FaultingQueries.ContainsKey(entitySet))
+        {
+            throw new HttpRequestException(
+                $"Simulated Dataverse fault on {entitySet}.", null, HttpStatusCode.ServiceUnavailable);
+        }
+
+        var rows = Rows(entitySet).Where(row => Matches(row, filter));
+        if (top is { } limit) rows = rows.Take(limit);
+
+        var listType = typeof(List<>).MakeGenericType(rowType);
+        var list = JsonSerializer.Deserialize(JsonSerializer.Serialize(rows.ToList()), listType)!;
+        return FromResult(listType, list);
+    }
+
+    private object Retrieve(IInvocation invocation)
+    {
+        var rowType = invocation.Method.GetGenericArguments()[0];
+        var entitySet = (string)invocation.Arguments[0];
+        var id = (Guid)invocation.Arguments[1];
+
+        Calls.Enqueue(new DataverseCall("Retrieve", entitySet, id, null));
+
+        var key = PrimaryKey(entitySet);
+        var row = Rows(entitySet).FirstOrDefault(r =>
+            r.TryGetValue(key, out var value) && string.Equals(value?.ToString(), id.ToString("D"), StringComparison.OrdinalIgnoreCase));
+
+        var result = row is null ? null : JsonSerializer.Deserialize(JsonSerializer.Serialize(row), rowType);
+        return FromResult(rowType, result);
+    }
+
+    private IEnumerable<Dictionary<string, object?>> Rows(string entitySet) =>
+        _tables.TryGetValue(entitySet, out var rows) ? rows.ToList() : Enumerable.Empty<Dictionary<string, object?>>();
+
+    /// <summary>"sprk_specontainertypeconfigs" → "sprk_specontainertypeconfigid".</summary>
+    private static string PrimaryKey(string entitySet) =>
+        (entitySet.EndsWith("s", StringComparison.Ordinal) ? entitySet[..^1] : entitySet) + "id";
+
+    /// <summary>
+    /// Supports exactly the filters the code under test sends: null, or <c>field eq value</c> clauses
+    /// joined by <c>and</c>. Anything else fails loudly rather than matching silently.
+    /// </summary>
+    private static bool Matches(Dictionary<string, object?> row, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter)) return true;
+
+        foreach (var clause in filter.Split(" and ", StringSplitOptions.TrimEntries))
+        {
+            var parts = clause.Split(" eq ", StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || parts[0].Contains('(') || parts[0].Contains(' '))
+            {
+                throw new NotSupportedException($"FakeDataverseTables does not support the filter clause '{clause}'.");
+            }
+
+            var expected = parts[1].Trim('\'');
+            if (!row.TryGetValue(parts[0], out var actual)
+                || !string.Equals(actual?.ToString(), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static object FromResult(Type resultType, object? value) =>
+        typeof(Task).GetMethod(nameof(Task.FromResult), BindingFlags.Public | BindingFlags.Static)!
+            .MakeGenericMethod(resultType)
+            .Invoke(null, new[] { value })!;
+}
+
+public sealed record DataverseCall(string Operation, string EntitySet, Guid? Id, string? Filter);
+
+/// <summary>Records every call; returns canned results, or throws <see cref="ThrowOnCall"/> when set.</summary>
+public sealed class RecordingIndexSyncService : IDataverseIndexSyncService
+{
+    public ConcurrentQueue<string> Calls { get; } = new();
+
+    public Exception? ThrowOnCall { get; set; }
+
+    public void Reset()
+    {
+        Calls.Clear();
+        ThrowOnCall = null;
+    }
+
+    public Task<IndexSyncResult> BulkSyncAsync(IEnumerable<string>? recordTypes = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Enqueue(nameof(BulkSyncAsync));
+        if (ThrowOnCall is { } ex) throw ex;
+        return Task.FromResult(new IndexSyncResult { Success = true, RecordsProcessed = 3, RecordsIndexed = 3 });
+    }
+
+    public Task<IndexSyncResult> IncrementalSyncAsync(DateTimeOffset since, IEnumerable<string>? recordTypes = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Enqueue(nameof(IncrementalSyncAsync));
+        if (ThrowOnCall is { } ex) throw ex;
+        return Task.FromResult(new IndexSyncResult { Success = true, RecordsProcessed = 1, RecordsIndexed = 1 });
+    }
+
+    public Task SyncRecordAsync(string entityName, Guid recordId, CancellationToken cancellationToken = default)
+    {
+        Calls.Enqueue(nameof(SyncRecordAsync));
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveRecordAsync(string entityName, Guid recordId, CancellationToken cancellationToken = default)
+    {
+        Calls.Enqueue(nameof(RemoveRecordAsync));
+        return Task.CompletedTask;
+    }
+
+    public Task<IndexSyncStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+    {
+        Calls.Enqueue(nameof(GetStatusAsync));
+        if (ThrowOnCall is { } ex) throw ex;
+        return Task.FromResult(new IndexSyncStatus { IndexName = "spaarke-records-test", DocumentCount = 3, IsHealthy = true });
+    }
+}

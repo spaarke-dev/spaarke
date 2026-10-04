@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.RecordMatching;
 
 namespace Sprk.Bff.Api.Api.Admin;
@@ -6,12 +7,21 @@ namespace Sprk.Bff.Api.Api.Admin;
 /// Admin endpoints for Record Matching service management.
 /// These endpoints allow administrators to sync Dataverse records to the Azure AI Search index.
 /// </summary>
+/// <remarks>
+/// <b>Operator routes: the "SystemAdmin" policy is the whole decision</b> (unified-access-control-r2 task 165,
+/// sweep findings #47, #48, #77). Until task 165 the group carried a bare <c>RequireAuthorization()</c>, which
+/// in this BFF means "any signed-in caller" (no DefaultPolicy / FallbackPolicy override), so any user could
+/// start a full app-only re-read of every matter, project and invoice plus a MergeOrUpload into the shared
+/// records index, on demand and repeatably, and read the index's name and document counts. The routes take
+/// no record id, so there is no per-record decision to make: whether the caller is an administrator is the
+/// question. Same policy and placement as <c>/api/admin/jobs</c>.
+/// </remarks>
 public static class RecordMatchingAdminEndpoints
 {
     public static IEndpointRouteBuilder MapRecordMatchingAdminEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/admin/record-matching")
-            .RequireAuthorization()
+            .RequireAuthorization("SystemAdmin")
             .WithTags("Admin");
 
         // POST /api/admin/record-matching/sync - Trigger a bulk sync of all records
@@ -21,6 +31,7 @@ public static class RecordMatchingAdminEndpoints
             .WithDescription("Syncs all supported Dataverse record types (Matters, Projects, Invoices) to Azure AI Search index.")
             .Produces<IndexSyncResult>(StatusCodes.Status200OK)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         // POST /api/admin/record-matching/sync-incremental - Trigger an incremental sync
@@ -31,6 +42,7 @@ public static class RecordMatchingAdminEndpoints
             .Produces<IndexSyncResult>(StatusCodes.Status200OK)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         // GET /api/admin/record-matching/status - Get index sync status
@@ -40,6 +52,7 @@ public static class RecordMatchingAdminEndpoints
             .WithDescription("Returns the current state of the Azure AI Search index including document counts by record type.")
             .Produces<IndexSyncStatus>(StatusCodes.Status200OK)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         return app;
@@ -67,7 +80,8 @@ public static class RecordMatchingAdminEndpoints
             logger.LogError(ex, "Bulk sync failed");
             return Results.Problem(
                 title: "Bulk sync failed",
-                detail: ex.Message,
+                // Redacted (bearer tokens, JWTs, client_secret= values) — never the raw ex.Message.
+                detail: ProblemDetailsHelper.Explain("Bulk sync failed", ex),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -98,7 +112,8 @@ public static class RecordMatchingAdminEndpoints
             logger.LogError(ex, "Incremental sync failed");
             return Results.Problem(
                 title: "Incremental sync failed",
-                detail: ex.Message,
+                // Redacted (bearer tokens, JWTs, client_secret= values) — never the raw ex.Message.
+                detail: ProblemDetailsHelper.Explain("Incremental sync failed", ex),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -121,7 +136,8 @@ public static class RecordMatchingAdminEndpoints
             logger.LogError(ex, "Failed to get sync status");
             return Results.Problem(
                 title: "Failed to get sync status",
-                detail: ex.Message,
+                // Redacted (bearer tokens, JWTs, client_secret= values) — never the raw ex.Message.
+                detail: ProblemDetailsHelper.Explain("Failed to get sync status", ex),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

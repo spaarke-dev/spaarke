@@ -577,6 +577,23 @@ public static class ContainerTypeEndpoints
     }
 
     /// <summary>
+    /// True when <paramref name="uri"/> is a SharePoint Online admin host — <c>{tenant}-admin.sharepoint.com</c>
+    /// over HTTPS on the default port, with no user info. The register route sends an app-only bearer token
+    /// to this host, so nothing else may pass (task 165).
+    /// </summary>
+    internal static bool IsSharePointAdminHost(Uri uri) =>
+        uri.IsAbsoluteUri
+        && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+        && uri.IsDefaultPort
+        && string.IsNullOrEmpty(uri.UserInfo)
+        && SharePointAdminHost.IsMatch(uri.IdnHost);
+
+    private static readonly System.Text.RegularExpressions.Regex SharePointAdminHost = new(
+        @"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?-admin\.sharepoint\.com$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
+
+    /// <summary>
     /// POST /api/spe/containertypes/{typeId}/register?configId={id}
     ///
     /// Registers a container type by granting the consuming application (identified by appId in the request body)
@@ -589,7 +606,8 @@ public static class ContainerTypeEndpoints
     ///   - configId must be present and a valid non-empty GUID.
     ///   - config must exist in the sprk_specontainertypeconfig Dataverse table.
     ///   - request.appId must not be null or whitespace and must be a valid GUID.
-    ///   - request.sharePointAdminUrl must not be null or whitespace and must be a valid HTTPS URL.
+    ///   - request.sharePointAdminUrl must not be null or whitespace and must be a valid HTTPS URL whose host
+    ///     is a SharePoint admin host ({tenant}-admin.sharepoint.com), with no user info and no explicit port.
     ///   - At least one permission must be supplied (delegatedPermissions or applicationPermissions).
     ///   - All permission names must be valid values from <see cref="ContainerTypePermissions.ValidPermissions"/>.
     ///
@@ -675,6 +693,23 @@ public static class ContainerTypeEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.register.sharepoint_url_invalid" });
+        }
+
+        // Task 165: the host must be a SharePoint admin host. The handler acquires an APP-ONLY token for
+        // scope "{host}/.default" with the config's owning-app credential and sends it, as a bearer, to that
+        // host. Before task 165 any absolute HTTPS URL passed, so an admin could point the BFF's credential —
+        // and the token it minted — at a host of their choosing.
+        if (!IsSharePointAdminHost(spAdminUri))
+        {
+            logger.LogWarning(
+                "POST /api/spe/containertypes/{TypeId}/register — sharePointAdminUrl host '{Host}' is not a SharePoint admin host. TraceId: {TraceId}",
+                typeId, spAdminUri.Host, context.TraceIdentifier);
+            return Results.Problem(
+                detail: "The 'sharePointAdminUrl' must be the tenant's SharePoint admin URL " +
+                        "(https://{tenant}-admin.sharepoint.com), with no user info and no explicit port.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.register.sharepoint_url_not_admin_host" });
         }
 
         // Validate at least one permission is supplied

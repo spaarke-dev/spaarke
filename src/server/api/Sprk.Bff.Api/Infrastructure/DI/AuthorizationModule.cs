@@ -359,22 +359,23 @@ public static class AuthorizationModule
             });
 
             // Admin Policies
+            //
+            // "SystemAdmin" admits ONLY the Admin or SystemAdmin app role. Until unified-access-control-r2
+            // task 165 it also admitted any token whose delegated scope claim CONTAINED the substring
+            // "admin" (case-insensitive, matched against the whole space-separated scp string), so a future
+            // scope such as "Files.ReadAdmin" — or any API's scope name with "admin" in it — would have
+            // unlocked every operator surface sharing this policy (/api/admin/jobs, /api/admin/membership,
+            // /api/admin/record-matching, /api/ai/rag/admin). No delegated scope the BFF registrations expose
+            // contains "admin" (verified 2026-10-03), so the branch admitted nobody legitimate; an administrator is
+            // identified by the app role, the same signal SpeAdminAuthorizationFilter checks.
             options.AddPolicy("SystemAdmin", p =>
             {
                 p.RequireAuthenticatedUser();
                 p.RequireAssertion(context =>
-                {
-                    var hasAdminRole = context.User.IsInRole("Admin") ||
-                                       context.User.IsInRole("SystemAdmin") ||
-                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
-                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin");
-
-                    var hasAdminScope = context.User.HasClaim(c =>
-                        c.Type == "http://schemas.microsoft.com/identity/claims/scope" &&
-                        c.Value.Contains("admin", StringComparison.OrdinalIgnoreCase));
-
-                    return hasAdminRole || hasAdminScope;
-                });
+                    context.User.IsInRole("Admin") ||
+                    context.User.IsInRole("SystemAdmin") ||
+                    context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
+                    context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin"));
             });
         });
 
