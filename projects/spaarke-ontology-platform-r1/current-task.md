@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-04 03:10Z (main session; tasks 006 + 002 completed)
+> **Last Updated**: 2026-10-04 (orchestrator checkpoint) — was: 2026-10-04 03:10Z (main session; tasks 006 + 002 completed)
 > **Recovery**: read "Quick Recovery" first. This file is the MAIN SESSION's orchestrator view: several tasks
 > run as subagents in parallel, so per-task detail lives in each POML's `<completion>` element and in `notes/`.
 > Sub-agents were told not to edit this file.
@@ -11,13 +11,13 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active in the main session.** Recently completed: 021 (commit eafcd3b2d), 006, 002, 089 (PR #1121) |
+| **Task** | **none active in the main session.** Recently completed: 030 (9b8259d36), 093 (#1282 merged), 091, 092 (PR #1123 open), 089, 021, 006, 002 |
 | **Step** | — |
-| **Status** | orchestrating three background agents |
-| **Next Action** | Record each agent report when it arrives (verify claims, then POML + TASK-INDEX ✅ + drift check; for 030 also review and commit its files on this branch). After **030** reports, dispatch **022** in this worktree. **081** waits for PRs #1118 + #1121 to merge. Owner decision pending from 030: whether to fold Write on sprk_signal + Global reads into Spaarke Ontology Service (security-roles §9 finding a) |
-| **Running in background** | **task-030** Signal writer (sonnet, THIS worktree; must not commit or edit this file) · **task-091** C-18 sweeps (C:\wt091, branch chore/shared-lib-sweeps, own PR) · **task-092** master build/test failures (C:\wt092, branch fix/master-build-test-baseline, own PR) |
-| **Branch / git** | `docs/ontology-platform-design`, 20 ahead / 0 behind `origin/master`, in sync with its remote |
-| **Index** | 51 tasks: **21 ✅ · 0 🔄 · 30 🔲**. Drift check clean |
+| **Status** | orchestrating |
+| **Next Action** | (1) When #1120 merges (background merge running): merge origin/master into this branch again; expected conflict in `Spaarke.Visuals/src/components/index.ts`: keep `VisualMetricCard`/`IVisualMetricCardProps`, drop the TrendCard lines; rebuild Visuals + VisualHost tsc. (2) Then dispatch **022** in this worktree and **081** in its own worktree off this branch (C:\wt081, branch ontology/081-cleanup; merge back after). (3) 092 is re-investigating: the pdfjs build break is environment-dependent (passes on Linux/Node 20 CI, fails on Windows/Node 22 locally; VisualHost affected too) + ScopeConfigEditor missing eslint; merge #1123 only after its re-verification |
+| **Running in background** | **task-092** (C:\wt092: environment root cause + ScopeConfigEditor) · #1120 wait-and-merge |
+| **Branch / git** | `docs/ontology-platform-design` @ a4288276d (master merged in), 29 ahead / 0 behind, pushed |
+| **Index** | 52 tasks: **25 ✅ · 0 🔄 · 27 🔲**. Drift check clean |
 
 ### Files modified since the last commit
 - none (all committed with this checkpoint)
