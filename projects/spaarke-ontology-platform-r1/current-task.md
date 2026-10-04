@@ -14,9 +14,9 @@
 | **Task** | **none active in the main session.** Recently completed: 030 (9b8259d36), 093 (#1282 merged), 091, 092 (PR #1123 open), 089, 021, 006, 002 |
 | **Step** | — |
 | **Status** | orchestrating |
-| **Next Action** | (1) When #1120 merges (background merge running): merge origin/master into this branch again; expected conflict in `Spaarke.Visuals/src/components/index.ts`: keep `VisualMetricCard`/`IVisualMetricCardProps`, drop the TrendCard lines; rebuild Visuals + VisualHost tsc. (2) Then dispatch **022** in this worktree and **081** in its own worktree off this branch (C:\wt081, branch ontology/081-cleanup; merge back after). (3) 092 is re-investigating: the pdfjs build break is environment-dependent (passes on Linux/Node 20 CI, fails on Windows/Node 22 locally; VisualHost affected too) + ScopeConfigEditor missing eslint; merge #1123 only after its re-verification |
-| **Running in background** | **task-092** (C:\wt092: environment root cause + ScopeConfigEditor) · #1120 wait-and-merge |
-| **Branch / git** | `docs/ontology-platform-design` @ a4288276d (master merged in), 29 ahead / 0 behind, pushed |
+| **Next Action** | Record agent reports as they arrive. **022**: get an independent code-review/adr-check, then commit. **081**: review branch `ontology/081-cleanup` (C:\wt081), then merge it into this branch. **092**: merge #1123 only after it explains the environment-dependent pdfjs break (Linux/Node20 CI passes; Windows/Node22 fails; VisualHost too) and fixes ScopeConfigEditor. Owner decisions pending: writer privileges into Spaarke Ontology Service + move the app user to the customer BU (BU1 in dev); prototype round-2 review before 051 |
+| **Running in background** | **task-022** (THIS worktree, BFF) · **task-081** (C:\wt081, branch ontology/081-cleanup) · **task-092** (C:\wt092, PR #1123 follow-up) |
+| **Branch / git** | `docs/ontology-platform-design` @ df54bf4ec (master incl. #1120 merged in), 31 ahead / 0 behind, pushed |
 | **Index** | 52 tasks: **25 ✅ · 0 🔄 · 27 🔲**. Drift check clean |
 
 ### Files modified since the last commit
