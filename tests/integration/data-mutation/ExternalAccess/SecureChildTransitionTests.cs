@@ -518,6 +518,10 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         var usersOwn = Guid.NewGuid();
         _fixture.ChildWorld.UserOwnedChild("sprk_document", usersOwn, ("sprk_project", "sprk_project", rootId));
         _fixture.SeedShare(usersOwn, DataversePrincipalRef.User(Outsider), RecordShareLevels.ViewOnlyRights);
+        // An ordinary record's SharePoint location on its owning user: no transition, so not moved.
+        var location = Guid.NewGuid();
+        _fixture.SharePointDocumentReadRefused = false;
+        _fixture.SeedCascadeChild(rootId, "sharepointdocumentlocation", location, DataversePrincipalRef.User(Creator));
 
         var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(UnsecureRoute, new { projectId = rootId });
 
@@ -530,6 +534,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.ChildWorld.OwnerOf("sprk_document", usersOwn).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
             "an ordinary row the rule would hand another ordinary team never crossed the isolation boundary");
         _fixture.ShareMaskOf(usersOwn, Outsider).Should().NotBe(0, "a share on an ordinary row is not the mirror's");
+        _fixture.OwnerOfCascadeChild(location).Should().Be(DataversePrincipalRef.User(Creator),
+            "a repeat unsecure is no transition for the record's own SharePoint rows");
     }
 
     /// <summary>

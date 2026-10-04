@@ -699,6 +699,18 @@ public sealed class SecureChildReconciler
                     continue;
                 }
 
+                // Only a transition moves these rows: into isolation, out of it, or — mid-unsecure — off the owning USER
+                // the root's own Assign just cascaded them to (owner round 13 item 1). An ordinary record's rows on another
+                // ordinary owner are not this pass's (a repeat unsecure on a record that was never secure changes nothing).
+                var crossing = target == _secureTeamId
+                    || child.Owner == DataversePrincipalRef.Team(_secureTeamId)
+                    || _unsecuring;
+                if (!crossing)
+                {
+                    Count(child.LogicalName, Untouched);
+                    continue;
+                }
+
                 if (_mode == SecureChildReconcileMode.ReportOnly)
                 {
                     Count(child.LogicalName, WouldChange);
