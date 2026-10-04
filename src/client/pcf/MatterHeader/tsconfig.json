@@ -1,5 +1,5 @@
 {
-  "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
+  "extends": "pcf-scripts/tsconfig_base.json",
   "compilerOptions": {
     "typeRoots": ["node_modules/@types"],
     "skipLibCheck": true,
@@ -16,11 +16,5 @@
   // the jest.mock factories' `require('react')` (untyped => TS2347 on
   // `React.useState<T>()`). Mirrors RegardingResolver + VisualHost, the two
   // sibling PCFs that also keep a __tests__ folder next to the control.
-  "exclude": [
-    "node_modules",
-    "out",
-    "__tests__",
-    "**/*.test.ts",
-    "**/*.test.tsx"
-  ]
+  "exclude": ["node_modules", "out", "__tests__", "**/*.test.ts", "**/*.test.tsx"]
 }
