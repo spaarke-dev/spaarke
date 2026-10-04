@@ -55,7 +55,8 @@ public class ExternalDataService
         public List<T>? Value { get; set; }
     }
 
-    private sealed class ProjectRow
+    /// <summary>The project columns the external SPA reads (internal so <see cref="MapProject"/> is testable).</summary>
+    internal sealed class ProjectRow
     {
         [JsonPropertyName("sprk_projectid")] public string? SprkProjectid { get; set; }
         [JsonPropertyName("sprk_projectname")] public string? SprkName { get; set; }
@@ -188,6 +189,7 @@ public class ExternalDataService
         var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_projectname asc";
 
         var rows = await GetCollectionAsync<ProjectRow>(url, ct);
+        WarnOnEmptySecureFlag(rows);
         return rows.Select(MapProject).ToList();
     }
 
@@ -198,7 +200,9 @@ public class ExternalDataService
         var url = $"{GetApiUrl()}/sprk_projects({projectId})?$select={select}";
 
         var row = await GetSingleAsync<ProjectRow>(url, ct);
-        return row is null ? null : MapProject(row);
+        if (row is null) return null;
+        WarnOnEmptySecureFlag(new[] { row });
+        return MapProject(row);
     }
 
     // ---------------------------------------------------------------------------
@@ -1234,13 +1238,34 @@ public class ExternalDataService
     // Row → DTO mappers
     // ---------------------------------------------------------------------------
 
-    private static ExternalProjectDto MapProject(ProjectRow r) => new()
+    /// <summary>Logs every project row whose <c>sprk_issecure</c> came back EMPTY (shown as secure).</summary>
+    private void WarnOnEmptySecureFlag(IEnumerable<ProjectRow> rows)
+    {
+        var empty = rows.Where(r => r.SprkIssecure is null).Select(r => r.SprkProjectid ?? "(no id)").ToList();
+        if (empty.Count == 0) return;
+
+        _logger.LogError(
+            "[EXT-DATA] sprk_issecure came back EMPTY on {Count} project(s) ({ProjectIds}); shown as SECURE (fail closed). "
+            + "This service has likely lost its field-level-security Read on the column "
+            + "(scripts/Set-SecureFlagFieldSecurity.ps1 -Verify), or the row predates the backfill "
+            + "(scripts/Repair-SecureFlagNulls.ps1).",
+            empty.Count, string.Join(", ", empty));
+    }
+
+    /// <remarks>
+    /// <b>An EMPTY <c>sprk_issecure</c> maps to <c>true</c></b> (task 150, round 17 item 3: fail closed, never "not
+    /// secure"). Every row holds true or false since the task 150 backfill, and the column is field-secured, so an
+    /// empty value means this app identity's field-level Read was lost and the real value was masked. The external SPA
+    /// uses the value only to label the project; labelling a possibly-secure project as secure is the safe direction,
+    /// and <see cref="WarnOnEmptySecureFlag"/> names the cause in the log.
+    /// </remarks>
+    internal static ExternalProjectDto MapProject(ProjectRow r) => new()
     {
         SprkProjectid = r.SprkProjectid ?? "",
         SprkName = r.SprkName ?? "",
         SprkReferencenumber = r.SprkReferencenumber,
         SprkDescription = r.SprkDescription,
-        SprkIssecure = r.SprkIssecure,
+        SprkIssecure = r.SprkIssecure ?? true,
         SprkStatus = r.SprkStatus,
         Createdon = r.Createdon,
         Modifiedon = r.Modifiedon,

@@ -794,6 +794,32 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
+    public async Task ComposeAsync_ContactStandingMembershipOnARecordWhoseSecureFlagReadsEmpty_IsSuppressed()
+    {
+        // Task 150, round 17 item 3: the flag column is field-secured, so a row read back with sprk_issecure EMPTY has
+        // had its true value masked. Mapped by the ONE flag reader, it must suppress the standing-grant term exactly as
+        // a secure record does — never read as "not secure". The explicit-No record is the control.
+        var masked = MemberRecordA;
+        var open = MemberRecordB;
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, masked, open));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[masked] = ExternalParticipationService.FlagsFrom(isSecure: null, accessPermission: null, stateCode: 0);
+        participations.Flags[open] = ExternalParticipationService.FlagsFrom(isSecure: false, accessPermission: null, stateCode: 0);
+
+        var sut = CreateSut(membership.Object, participations, AlwaysStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Contains(masked).Should().BeFalse(
+            "a record whose secure flag could not be seen is never opened to a derived-member term");
+        set.Contains(open).Should().BeTrue("a record stored as not secure still comes through the same term");
+    }
+
+    [Fact]
     public async Task ComposeAsync_SystemUserWhoseContactHoldsStandingGrant_GetsNoDerivedAccessToSecureRecord()
     {
         // FR-22 acceptance, the Type 1 case (register C-10): a systemuser must not derive access to a secure

@@ -19,7 +19,10 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 public interface ISecurableEntityRegistry
 {
     /// <summary>
-    /// The logical names of every entity carrying the <c>sprk_issecure</c> attribute, lower-cased.
+    /// The logical names of every entity carrying the <c>sprk_issecure</c> attribute, lower-cased — except an entity
+    /// whose flag the owner ruled is not a security input (<c>sprk_invoice</c>: an invoice follows its matter; task 150,
+    /// <see cref="SecurableEntityRegistry.FlagIsNotASecurityInput"/>), which classifies as
+    /// <see cref="EntitySecurability.NotSecurable"/>.
     /// </summary>
     /// <exception cref="Exception">
     /// Propagates any metadata-retrieval failure. Callers MUST NOT catch-and-default to "not securable".

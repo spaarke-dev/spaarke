@@ -121,6 +121,13 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld FlaggedNotIsolatedRoot(string table, Guid id) =>
         Add(table, id, ("owningteam", TeamRef(GeneralTeam)), ("sprk_issecure", true));
 
+    /// <summary>
+    /// A root owned by an ordinary team whose <c>sprk_issecure</c> comes back EMPTY — the field-secured value masked from
+    /// this identity (task 150, round 17 item 3): the row carries no value for the column at all.
+    /// </summary>
+    public SecureChildShareWorld MaskedFlagNotIsolatedRoot(string table, Guid id) =>
+        Add(table, id, ("owningteam", TeamRef(GeneralTeam)));
+
     /// <summary>A child owned by the Secure team, filed through the given lookups (column, target table, target id).</summary>
     public SecureChildShareWorld SecureChild(string table, Guid id, params (string Column, string Target, Guid TargetId)[] lookups) =>
         Child(table, id, ("owningteam", TeamRef(OwnerTeam)), lookups);

@@ -941,9 +941,14 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         _fixture.Updates.Should().BeEmpty();
     }
 
-    /// <summary>A non-secure project is rejected — provisioning is only for secure projects.</summary>
+    /// <summary>
+    /// CONVERTED by task 150 (was "a non-secure project is rejected 400"). <c>sprk_issecure</c> is field-secured and
+    /// provisioning is now its only writer, so a project from the client arrives UNFLAGGED and provisioning marks it
+    /// secure as its first write. The full contract — first write, read-back, the flagged-already path, every refusal —
+    /// is pinned in <see cref="SecureFlagEndpointWriteTests"/>.
+    /// </summary>
     [Fact]
-    public async Task ProvisionProject_WhenTheProjectIsNotSecure_IsRejectedAndWritesNothing()
+    public async Task ProvisionProject_WhenTheProjectIsNotYetFlagged_MarksItSecureAndProvisions()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId, isSecure: false);
@@ -951,9 +956,10 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
 
         var response = await ProvisionAsync(client, projectId);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        _fixture.Updates.Should().BeEmpty();
-        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(projectId).Should().BeTrue();
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

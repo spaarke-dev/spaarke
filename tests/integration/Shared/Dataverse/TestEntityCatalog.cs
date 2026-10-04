@@ -7,7 +7,9 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 /// registry doubles that stand in for live metadata (unified-access-control-r2 task 151 review).
 /// </summary>
 /// <remarks>
-/// Mirrors the production rule — trim + lower-case, securable wins (securable ⊆ known), otherwise known →
+/// Mirrors the production rule — trim + lower-case, securable wins (securable ⊆ known) unless the owner ruled the entity's
+/// flag is not a security input (<see cref="SecurableEntityRegistry.FlagIsNotASecurityInput"/>: <c>sprk_invoice</c>, task
+/// 150), otherwise known →
 /// <see cref="EntitySecurability.NotSecurable"/>, otherwise <see cref="EntitySecurability.NotAnEntity"/> — so
 /// each double states only its WORLD (which entities exist, which are securable), never a private copy of the
 /// classification. A double that drifted from this rule would test the resolver against an answer the real
@@ -27,7 +29,7 @@ internal static class TestEntityCatalog
 
         var normalized = name.Trim().ToLowerInvariant();
 
-        if (isSecurable(normalized))
+        if (isSecurable(normalized) && !SecurableEntityRegistry.FlagIsNotASecurityInput.Contains(normalized))
         {
             return EntitySecurability.Securable;
         }

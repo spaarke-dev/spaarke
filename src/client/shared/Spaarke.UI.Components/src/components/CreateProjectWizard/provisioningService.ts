@@ -54,7 +54,10 @@
 // ---------------------------------------------------------------------------
 
 export interface IProvisionProjectRequest {
-  /** The sprk_project GUID that has just been created with sprk_issecure = true. */
+  /**
+   * The sprk_project GUID that has just been created. It arrives NOT flagged secure (task 150): `sprk_issecure` is
+   * field-secured, and this call is what marks it secure — the server's first write.
+   */
   projectId: string;
   /**
    * Optional. Short project reference code (e.g. "P-2024-0042"), used only as a fallback for the
@@ -251,8 +254,10 @@ const ENVIRONMENT_REASON_CODES: ReadonlySet<string> = new Set([
  *
  * Copy rules, both learned from what FR-31 had to repair:
  *  - **Never assert a state the client cannot observe.** Each message says only what the endpoint's response for that
- *    code establishes. `sprk_issecure` is written `true` before provisioning and never cleared on refusal, so no
- *    message calls the project "a normal project".
+ *    code establishes. Since task 150 `sprk_issecure` is the server's FIRST write (the client never writes it): a
+ *    refusal before it leaves the project not marked secure ("did not start … nothing changed"), and one after it
+ *    leaves it marked secure with uploads refused ("not secured … documents cannot be added"). No message calls the
+ *    project "a normal project" — whether it later becomes secure is still open.
  *  - **Never advise trying again in the message.** A retry is offered by the host that renders the action, keyed on
  *    `retryable` — so the advice and the button cannot come apart.
  */
@@ -277,10 +282,13 @@ const REASON_STATES: Readonly<
       'This project was secured by an earlier mechanism that gave it its own business unit. Moving it onto the current one is a manual administrator step.',
     retryable: false,
   },
+  // Resume-neutral (task 150, round 17 item 2): this code also answers a RESUME of an unflagged record that the Secure
+  // Record owner team already owns, where "did not start" would be false. Like row 2's option D, the copy claims neither
+  // a first call nor a resume: securing could not be finished, and this call changed nothing.
   'sdap.provision.creator_unresolved': {
     failureKind: 'not-started',
     errorMessage:
-      'Securing the project did not start, because your account could not be confirmed. Nothing about the project changed.',
+      'Securing the project could not be finished, because your account could not be confirmed. Nothing about the project changed.',
     retryable: true,
   },
   // Not retryable (task 133 verifier round 1): the row was read without an owner, which is deterministic for that row —
@@ -345,6 +353,36 @@ const REASON_STATES: Readonly<
     errorMessage:
       'The project could not be shared back to you, so this attempt to secure it was undone and its ownership is as it was before the attempt. Some records linked to it could not be returned to their own owners; an administrator needs to put them back before it is secured.',
     retryable: false,
+  },
+  // Task 150: marking the project secure is the server's FIRST write, and it could not be set (or did not read back).
+  // Nothing else changed; the server tells the same caller they may call again. Copy: owner round 10 item 9 (F6 row 3,
+  // option A — notes/task-150-issecure-lock.md §6).
+  'sdap.provision.secure_flag_not_set': {
+    failureKind: 'not-started',
+    errorMessage:
+      'The project could not be marked secure, so securing it stopped before anything else changed: its ownership, sharing and document storage are as they were.',
+    retryable: true,
+  },
+  // Task 150 (owner round 10 item 10): a record NOT yet marked secure is secured through this call only by the person
+  // who created it, and the caller is not that person. Refused before any change; deterministic for that caller. The
+  // two wizards secure only a record their user has just created, so neither reaches this in normal use. A RESUME of an
+  // unflagged record is held to the same rule (verifier c1 item 4).
+  // Copy: owner round 13 item 10 (F6 row 7, option B — notes/task-150-issecure-lock.md §6).
+  'sdap.provision.not_record_creator': {
+    failureKind: 'not-started',
+    errorMessage: 'Only the person who created this project can secure it this way. Nothing about the project changed.',
+    retryable: false,
+  },
+  // Task 150 (owner round 10 item 10): whether the caller created the record could not be checked (a read failed).
+  // Refused before any change; the server tells the same caller they may call again. Copy: owner round 13 item 10 (F6
+  // row 8, option B), made resume-neutral by round 17 item 2 — an unflagged RESUME meets this code with the record
+  // already owned by the Secure Record owner team, so "it was not secured" would describe a first call only. With
+  // `creatorState: column-missing` (round 17 item 1) the same code is deterministic: see CREATOR_COLUMN_MISSING.
+  'sdap.provision.record_creator_unverifiable': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Who created this project could not be checked, so securing it could not be finished. Nothing about the project changed.',
+    retryable: true,
   },
   'sdap.provision.creator_share_failed': {
     failureKind: 'share-failed',
@@ -423,12 +461,14 @@ const RESUME_CREATOR_UNREADABLE = {
 };
 
 /**
- * `resume_creator_unavailable` with `creatorState: column-missing` (task 133 r1, verifier finding 10). The column that
- * records the person who created the project does not exist in this environment yet — the server's 400 is
- * deterministic, so calling again repeats the refusal until an administrator applies the schema. Not retryable: a
- * "Try securing again" here would fail every time.
+ * `creatorState: column-missing` — the column that records the person who created the project does not exist in this
+ * environment yet. Answered on `resume_creator_unavailable` (task 133 r1, verifier finding 10) and, since task 150 round
+ * 17 item 1, on `record_creator_unverifiable` (the creator rule for an unflagged record: unverifiable, not "not the
+ * creator"). The server's 400 is deterministic, so calling again repeats the refusal until an administrator applies the
+ * schema. Not retryable: a "Try securing again" here would fail every time. One environment fact, one message — and it
+ * is resume-neutral ("could not be finished"), true of a first call and of a resume alike.
  */
-const RESUME_CREATOR_COLUMN_MISSING = {
+const CREATOR_COLUMN_MISSING = {
   failureKind: 'needs-administrator' as const,
   errorMessage:
     'Securing the project could not be finished, because this environment is not yet set up to record who created a project. Nothing about the project changed; an administrator needs to finish setting it up.',
@@ -511,10 +551,11 @@ export interface IProvisioningFailureExtensions {
    */
   containerKept?: boolean;
   /**
-   * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
+   * `resume_creator_unavailable` (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
    * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment), `refused` (owner
    * round 14 item 3: Dataverse refused the read — the service's sign-in or Read privilege) — all deterministic: an
-   * administrator acts — or `unreadable` (a read failed: the same caller may retry).
+   * administrator acts — or `unreadable` (a read failed: the same caller may retry). Also read on
+   * `record_creator_unverifiable` (task 150 round 17 item 1), where only `column-missing` changes the state.
    */
   creatorState?: string;
   /**
@@ -547,10 +588,15 @@ export function classifyProvisioningFailure(
   retryable: boolean;
 } {
   if (reasonCode != null && ENVIRONMENT_REASON_CODES.has(reasonCode)) {
+    // Task 150: on a FIRST call every environment refusal comes before the server marks the project secure, so it was
+    // created and is not secured. On a RESUME (a retry after a partial run), or for a row an older client flagged, the
+    // project is already flagged — and on a resume already owned by the secure team. The response does not say which
+    // case applies, so the copy claims neither: owner round 10 item 9 chose the resume-neutral option D for this row
+    // (F6 row 2, notes/task-150-issecure-lock.md §6).
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
-        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created and marked secure, but nothing about its ownership changed and documents cannot be added to it until it is secured; an administrator can secure it once the setup is fixed.',
+        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could not be finished; an administrator can finish securing it once the setup is fixed.',
       retryable: false,
     };
   }
@@ -571,8 +617,12 @@ export function classifyProvisioningFailure(
     return { ...RESUME_CREATOR_UNREADABLE };
   }
 
-  if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'column-missing') {
-    return { ...RESUME_CREATOR_COLUMN_MISSING };
+  if (
+    (reasonCode === 'sdap.provision.resume_creator_unavailable' ||
+      reasonCode === 'sdap.provision.record_creator_unverifiable') &&
+    extensions?.creatorState === 'column-missing'
+  ) {
+    return { ...CREATOR_COLUMN_MISSING };
   }
 
   if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'refused') {
@@ -600,6 +650,28 @@ export function classifyProvisioningFailure(
       'The project was created, but securing it did not finish. Its current state needs checking — an administrator can see how far it got and finish securing it.',
     retryable: false,
   };
+}
+
+/**
+ * Task 150: the line a host shows when it HELD BACK what the user asked to add to a secure-requested record, because
+ * securing it did not finish. Since the server — not the client — marks a record secure, a record whose provisioning
+ * stopped before that write is an ordinary record, and a file, child record or email added to it now would land in
+ * shared storage that cannot be taken back. `items` are short noun phrases in the order the host skipped them
+ * ("the files you attached", "the event"); `undefined` when nothing was held back.
+ *
+ * Copy: owner round 10 item 9 (F6 row 1, option A — notes/task-150-issecure-lock.md §6). Never advises trying again
+ * (the retry is the host's action).
+ */
+export function describeHeldBackForSecure(items: readonly string[]): string | undefined {
+  if (items.length === 0) return undefined;
+
+  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+  const one = items.length === 1;
+  return (
+    `Because securing the project did not finish, ${one ? 'this was' : 'these were'} not added to it, so nothing ` +
+    `reached shared storage: ${list}. Add ${one ? 'it' : 'them'} once the project is secured.`
+  );
 }
 
 // ---------------------------------------------------------------------------

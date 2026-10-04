@@ -1178,6 +1178,36 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md).
 
+### `Repair-SecureFlagNulls.ps1`
+**Purpose:** One-time cleanup: every NULL `sprk_issecure` on `sprk_project` / `sprk_matter` / `sprk_workassignment` becomes No, and the column default is No (owner decision Q1). Records the before/after counts and every record id in a JSON report.
+**Usage:** 🔴 One-time per environment, BEFORE deploying a BFF carrying task 150 (that BFF refuses an empty flag); idempotent. `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 150, GitHub #1067)
+**Dependencies:** Azure CLI (`az login`), PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-03, `-Apply` against `spaarkedev1` (gate G-0, owner round 11): 42 NULL rows → No (9 projects, 18 matters, 11 work assignments, 4 invoices — it discovers every entity carrying the column); `-Verify` PASS (`projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md`).
+
+```powershell
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"            # dry run (ids + counts)
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply     # PATCH If-Match:*, report
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = no NULL, default No
+```
+
+### `Set-SecureFlagFieldSecurity.ps1`
+**Purpose:** Locks `sprk_issecure` on the three secure roots (and `sprk_invoice`, owner round 10 item 11) with field-level security — only the BFF application user(s) can write it, every business unit's default team reads it — REUSING task 133's `Spaarke BFF-Managed Field Readers/Writers` profiles (it never creates them or edits their membership). Lists every System Administrator holder (owner decision F4).
+**Usage:** 🔴 One-time per environment (task 150 step 6), AFTER the BFF and the client that stops writing the flag are deployed; `-Apply` refuses unless the profiles, every default team, the writer membership and the NULL cleanup are in place and `-ClientNoLongerWritesFlag` is passed. `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 150, GitHub #1067)
+**Dependencies:** Azure CLI (`az login`) with System Administrator, PowerShell 7+; `Set-RecordCreatorPersonSchema.ps1 -Apply` run first
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-02, **dry run only** against `spaarkedev1`: both profiles missing (task 133's schema gate not yet run), NULL rows present. **No `-Apply` has been run.**
+
+```powershell
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids>             # dry run
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids> -ClientNoLongerWritesFlag -Apply
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids> -Verify
+```
+
+Detail: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7d.
+
 ### `Migrate-SecureRecordsToNamedOwnerTeam.ps1`
 **Purpose:** One-time move of every secure project, matter and work assignment off the Secure Record business unit's DEFAULT owner team and onto its NAMED, non-default, memberless owner team (`Secure Record Owners`). Secure rows outside the business unit are reported as NOT ISOLATED and never touched.
 **Usage:** 🔴 One-time per environment, during the setup-guide §4.3 cutover; idempotent (a second run plans nothing). `-Verify` any time.

@@ -401,6 +401,38 @@ public class RecordOwnershipResolverTests
     }
 
     /// <summary>
+    /// Task 150, round 17 item 3: a parent root whose <c>sprk_issecure</c> comes back EMPTY (field-level security masked it
+    /// from the BFF) fails CLOSED — refused exactly as a flagged-not-isolated parent, never resolved to an ordinary team.
+    /// The explicit-<c>false</c> twin below is the control.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOwner_WhenAParentRootsSecureFlagReadsEmpty_RefusesLikeAFlaggedParent_NeverAnOrdinaryTeam()
+    {
+        var directory = Directory().WithMaskedSecureFlag("sprk_project", FlaggedProjectId, ChildBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = FlaggedProjectId },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Refused);
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAParentRootIsExplicitlyFlaggedNo_ResolvesToItsBusinessUnitsTeam()
+    {
+        var directory = Directory().WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: false);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = FlaggedProjectId },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().BeNull();
+        resolution.OwningTeamId.Should().Be(ChildTeam, "an ordinary root's children belong with its business unit");
+    }
+
+    /// <summary>
     /// Task 148: the ONE root an unsecure transition names (<see cref="RecordOwnershipContext.UnsecuringRoot"/>) is
     /// mid-transition — moved off the Secure team, its flag cleared last — so its children resolve from its ownership like an
     /// ordinary record's, to its business unit's team. Any OTHER flagged-not-isolated parent still refuses.

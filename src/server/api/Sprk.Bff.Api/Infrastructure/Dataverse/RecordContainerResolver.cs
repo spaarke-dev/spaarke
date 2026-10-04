@@ -47,8 +47,10 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <c>container_ancestor_ambiguous</c> (409: two different secure roots anywhere above it, a row's typed and
 /// polymorphic regarding disagree, or an Office carrier's root differs from its direct link while a secure record is
 /// involved), <c>container_ancestor_unverifiable</c> (409: a service request, or an intermediate on a record that
-/// carries no copy) and — task 156 — <c>container_ancestor_stale</c> (409: a child's copy of its intermediate's root
-/// differs from that intermediate's LIVE root; the stale row is enqueued for re-stamping).</para>
+/// carries no copy), — task 156 — <c>container_ancestor_stale</c> (409: a child's copy of its intermediate's root
+/// differs from that intermediate's LIVE root; the stale row is enqueued for re-stamping); and
+/// <c>secure_flag_unreadable</c> (503, task 150: <c>sprk_issecure</c> came back absent on the record or a root above
+/// it — the field-secured value was masked from this identity).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
 /// <see cref="IDocumentStorageResolver"/>). Unconditional registration is deliberate: a feature-gated
@@ -361,20 +363,18 @@ public sealed class RecordContainerResolver
 
         if (isSecurable)
         {
-            // ABSENT is not the same as FALSE, and the distinction is worth a log line even though it is not
-            // (yet) an error. Dataverse omits null-valued properties from Web API responses, and FIELD-LEVEL
-            // SECURITY on sprk_issecure returns the row with the attribute masked out rather than failing — both
-            // yield "absent", and GetAttributeValue<bool> maps absent to false, i.e. the shared container. A
-            // blanket throw would be wrong (a securable entity legitimately has NULL rows and that must not fail
-            // every upload), so this is logged distinguishably and the live assertion that sprk_issecure is
-            // neither field-secured nor NULL on any securable row belongs with task 047.
+            // ABSENT is not FALSE, and since task 150 it REFUSES (owner decision, recorded in the task 150 note: the
+            // standing fail-closed directive, ADR-003). The invariant: sprk_issecure is FIELD-SECURED on every
+            // securable root, this service's application user holds Read on it through the "Spaarke BFF-Managed Field
+            // Writers" profile (and every user through the readers profile on each business unit's default team), every
+            // row holds true or false (the one-time NULL backfill, scripts/Repair-SecureFlagNulls.ps1, and the column's
+            // No default), and the standing assertion SecureFlagFieldSecurityAssertion checks the grants. Under that
+            // invariant an absent value means this identity LOST its field-level Read — Dataverse returns the row with
+            // a secured column masked out rather than failing — and reading that as "not secure" would route a secure
+            // record's content to shared storage, which SPE cannot take back. So it is refused, never guessed.
             if (!record.Contains(SecurableEntityRegistry.SecureFlagAttribute))
             {
-                _logger.LogWarning(
-                    "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Entity} {RecordId}. Treating as "
-                    + "non-secure. Absent means either an unset column or FIELD-LEVEL SECURITY masking the value "
-                    + "for this caller — the latter would silently route content to the shared container.",
-                    SecurableEntityRegistry.SecureFlagAttribute, normalizedEntity, recordId);
+                throw SecureFlagUnreadable(normalizedEntity, recordId, normalizedEntity, recordId);
             }
 
             isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
@@ -825,13 +825,11 @@ public sealed class RecordContainerResolver
     {
         if (!row.Contains(SecurableEntityRegistry.SecureFlagAttribute))
         {
-            // Same posture as the record path: NULL flags are legitimate and common (live dev 2026-10-01: 9 projects and
-            // 18 matters carry NULL sprk_issecure — a Two Options column is not back-filled), so absent reads as
-            // non-secure, but distinguishably. The walk still continues above it.
-            _logger.LogWarning(
-                "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Ancestor} {AncestorId}, above {Entity} "
-                + "{RecordId} ({Via}). Treating it as non-secure.",
-                SecurableEntityRegistry.SecureFlagAttribute, hop.Entity, hop.Id, normalizedEntity, recordId, hop.Via);
+            // Same posture as the record path since task 150: an ABSENT flag on a root above the record refuses. (Before
+            // it, NULL flags were common — live dev 2026-10-01: 9 projects, 18 matters and 11 work assignments, every one
+            // created before the column existed — and were read as non-secure. The one-time backfill sets them to No and
+            // the column defaults to No, so absent now means the field-secured value was masked from this identity.)
+            throw SecureFlagUnreadable(hop.Entity, hop.Id, normalizedEntity, recordId, hop.Via);
         }
 
         if (row.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute))
@@ -1209,6 +1207,42 @@ public sealed class RecordContainerResolver
     /// </summary>
     private static bool IsCallerCancellation(Exception ex, CancellationToken ct)
         => ex is OperationCanceledException && ct.IsCancellationRequested;
+
+    /// <summary>
+    /// Problem code (task 150): <c>sprk_issecure</c> came back ABSENT on a securable root — the record itself, or one
+    /// above it — so whether its content belongs in a secure container cannot be told.
+    /// </summary>
+    internal const string SecureFlagUnreadableCode = "secure_flag_unreadable";
+
+    /// <summary>
+    /// The task 150 refusal for an ABSENT <c>sprk_issecure</c>. 503: the cause is this identity's field-level Read on
+    /// the column (an administrator restores it), and an upload retried once it is restored succeeds.
+    /// </summary>
+    /// <param name="flagEntity">The securable root whose flag was absent — the record itself, or a root above it.</param>
+    /// <param name="flagRecordId">That root's id: logged for the operator, never returned to the caller.</param>
+    /// <param name="via">The column path to that root, when it is above the record.</param>
+    private SdapProblemException SecureFlagUnreadable(
+        string flagEntity, Guid flagRecordId, string normalizedEntity, Guid recordId, string? via = null)
+    {
+        _logger.LogError(
+            "[SECURE-CONTAINER] REFUSED {Entity} {RecordId} ({Code}): '{Attribute}' was ABSENT on {FlagEntity} {FlagRecordId}"
+            + "{Via}. Every securable row holds true or false once the NULL backfill has run, so absent means this "
+            + "service cannot READ the field-secured column — its application user has lost the field security profile "
+            + "(scripts/Set-SecureFlagFieldSecurity.ps1 -Verify; SecureFlagFieldSecurityAssertion). Refusing rather than "
+            + "reading it as not secure, which would put a secure record's content in shared storage.",
+            normalizedEntity, recordId, SecureFlagUnreadableCode, SecurableEntityRegistry.SecureFlagAttribute,
+            flagEntity, flagRecordId, via is null ? string.Empty : $" (above it, via {via})");
+
+        return new SdapProblemException(
+            code: SecureFlagUnreadableCode,
+            title: "Cannot resolve a storage container",
+            detail: (via is null
+                        ? $"Whether this {normalizedEntity} is secure could not be read"
+                        : $"Whether the {flagEntity} this {normalizedEntity} belongs to is secure could not be read")
+                    + ", so its content is not stored in a shared container on a guess. An administrator needs to check "
+                    + "the secure-record setup; uploading again afterwards will work.",
+            statusCode: 503);
+    }
 
     /// <param name="reason">Response-safe: names entity TYPES only, never another record's id.</param>
     /// <param name="logDetail">Ids and columns for the operator; logged, never returned to the caller.</param>
@@ -1616,7 +1650,10 @@ public sealed class RecordContainerResolver
                 ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks,
                     parties: CoreAncestorResolver.PartyRegardingColumns["sprk_event"]),
                 // Typed sprk_project / sprk_matter are its OWN root links; sprk_regardingagreement is an intermediate
-                // (f3). An invoice carries no copy, so a set sprk_regardingagreement stays HELD (task 156).
+                // (f3). An invoice carries no copy, so a set sprk_regardingagreement stays HELD (task 156). Task 150 (owner
+                // round 10 item 11): these links are the ONLY thing that decides an invoice — its own sprk_issecure is not
+                // a security input (SecurableEntityRegistry.FlagIsNotASecurityInput), so it is never read for a flag or a
+                // container.
                 ["sprk_invoice"] = new(polymorphic: true,
                 [
                     ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
@@ -2245,7 +2282,7 @@ public sealed class RecordContainerResolver
                         // is NULL is EXCLUDED by it. Those rows are legitimate and expected — Dataverse does
                         // not back-fill a Two Options column on existing rows, and field-level security
                         // returns the row with the attribute masked rather than erroring (the same fact the
-                        // absent-flag warning in ResolveForRecordAsync exists to surface). Excluding them
+                        // secure_flag_unreadable refusal in ResolveForRecordAsync fails closed on, task 150). Excluding them
                         // makes a NULL-flagged non-secure claimant invisible, so co-mingling goes undetected
                         // and the secure record is reported as sole owner of a shared container.
                         new FilterExpression(LogicalOperator.Or)
@@ -2332,7 +2369,8 @@ public sealed class RecordContainerResolver
     /// classification silently stops working and the raw fault escapes — which is the very condition the
     /// normalization exists to prevent. And it is over-broad: <i>"Attribute sprk_issecure was not found"</i>
     /// is a schema or field-level-security error, and reporting it to an operator as "the record does not
-    /// exist" misdiagnoses precisely the masked-attribute case the absent-flag warning exists to surface.
+    /// exist" misdiagnoses precisely the masked-attribute case the secure_flag_unreadable refusal (task 150)
+    /// fails closed on.
     /// The error code is stable and locale-independent.</para>
     ///
     /// <para><c>internal</c>, not private: the document-identity resolver (spaarkeai-word-add-in-r1 task 012)

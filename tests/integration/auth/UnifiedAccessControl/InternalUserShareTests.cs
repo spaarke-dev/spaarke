@@ -963,6 +963,21 @@ public class InternalUserShareTests
     }
 
     /// <summary>
+    /// Task 150, round 17 item 3: a row whose <c>sprk_issecure</c> came back EMPTY (the column is field-secured; empty
+    /// means the app identity's Read was lost) is mapped by the ONE flag reader
+    /// (<see cref="ExternalParticipationService.FlagsFrom"/>) — and must reach this rule as secure, never "not secure".
+    /// </summary>
+    [Fact]
+    public async Task Unshare_WhenTheSecureFlagReadsEmpty_AppliesTheLastPersonRule()
+    {
+        _flags.Flags[MatterId] = ExternalParticipationService.FlagsFrom(isSecure: null, accessPermission: null, stateCode: 0);
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// The twin of the case above for a flag read that THROWS (not one that answers Unreadable): the catch around the
     /// read must also treat the record as secure. Without this, a regression of that catch to "not secure" would let
     /// the last person go from a secure record whenever the flag read faults (S5 / ADR-003).
