@@ -517,6 +517,40 @@ describe('sprk_todo_regarding_presave v1.4.0 — submit mode for locked controls
     }
   });
 
+  test('a lookup staged with an id that cleans to empty gets setSubmitMode("always") after its null setValue', () => {
+    // setLookupIfPresent's empty-id branch ("{}" strips to "") stages a NULL, exactly as a clear does. A
+    // disabled control must not drop that null from the INSERT either (task 168 r1, verifier item 3).
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = {
+      ...pendingCommunicationUnderMatter(),
+      clearLookups: [],
+      ancestorStamps: [
+        {
+          entityType: 'sprk_project',
+          entitySet: 'sprk_projects',
+          lookupAttribute: 'sprk_regardingproject',
+          recordId: '{}',
+        },
+      ],
+    };
+
+    presave.onSave(execCtx(formContext));
+
+    const sets = callsFor(calls, 'sprk_regardingproject');
+    const subs = callsFor(submits, 'sprk_regardingproject');
+    expect(sets).toHaveLength(1);
+    expect(sets[0].value).toBeNull();
+    expect(subs).toHaveLength(1);
+    expect(subs[0].value).toBe('always');
+    expect(subs[0].seq).toBe(sets[0].seq + 1);
+
+    // The same branch through the helper directly, and its return value.
+    const { formContext: single, calls: singleCalls, submits: singleSubs } = makeFormContext(['sprk_regardingmatter']);
+    expect(presave._internals.setLookupIfPresent(single, 'sprk_regardingmatter', '{}', '', 'sprk_matter')).toBe(true);
+    expect(singleCalls).toEqual([{ seq: 0, field: 'sprk_regardingmatter', value: null }]);
+    expect(singleSubs).toEqual([{ seq: 1, field: 'sprk_regardingmatter', value: 'always' }]);
+  });
+
   test('NEGATIVE: no setSubmitMode for an attribute that is not on the form', () => {
     const onForm = FULL_FORM.filter(f => f !== 'sprk_regardingmatter' && f !== 'sprk_regardingproject');
     const { formContext, submits } = makeFormContext(onForm);

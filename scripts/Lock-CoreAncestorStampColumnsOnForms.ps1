@@ -37,7 +37,7 @@
       NO_FILING_PICKER        (task 168 escalation trigger 1) a VISIBLE, EDITABLE locked-column control on a
                               form that hosts neither the RegardingResolver nor CommunicationConnections:
                               locking it would remove the only form input that files the record under a root.
-                              The owner chooses: add the picker to that form, or lock it anyway;
+                              Owner round 19 item 1: Add-RegardingFilingPickerToForms.ps1 adds the picker first;
       PICKER_WITHOUT_PRESAVE  (trigger 3) a form that hosts the RegardingResolver AND a locked-column control
                               but does not register Spaarke.SmartTodo.RegardingPreSave.onLoad;
       WORKFLOW_REFERENCE      a business rule (workflow category 2) or business process flow (category 4)
@@ -304,14 +304,14 @@ function Get-FormRefusals([string]$FormXml, [string[]]$Columns, [int]$FormType =
         $resolvers = @($pickers | Where-Object { $_.GetAttribute('name') -match $RegardingResolverPattern })
         $openVisible = @($controls | Where-Object { -not $_.Hidden -and -not $_.Disabled })
         if ($openVisible.Count -gt 0 -and $pickers.Count -eq 0) {
-            $refusals += @{ Code = 'NO_FILING_PICKER'; Detail = "visible editable control(s) $(($openVisible | ForEach-Object { $_.Id }) -join ', ') and no RegardingResolver or CommunicationConnections on the form (task 168 escalation trigger 1: owner decision)" }
+            $refusals += @{ Code = 'NO_FILING_PICKER'; Detail = "visible editable control(s) $(($openVisible | ForEach-Object { $_.Id }) -join ', ') and no RegardingResolver or CommunicationConnections on the form (task 168 trigger 1; owner round 19 item 1: run Add-RegardingFilingPickerToForms.ps1 first)" }
         }
         if ($resolvers.Count -gt 0 -and $controls.Count -gt 0) {
             $presave = @($doc.SelectNodes('//events/event') | Where-Object { $_.GetAttribute('name') -ieq 'onload' } |
                 ForEach-Object { $_.SelectNodes('.//Handler') } |
                 Where-Object { $_.GetAttribute('functionName') -ceq $PresaveOnLoad -and $_.GetAttribute('enabled') -ine 'false' })
             if ($presave.Count -eq 0) {
-                $refusals += @{ Code = 'PICKER_WITHOUT_PRESAVE'; Detail = "the form hosts the RegardingResolver and locked-column control(s) but does not register $PresaveOnLoad (task 168 escalation trigger 3: owner decision)" }
+                $refusals += @{ Code = 'PICKER_WITHOUT_PRESAVE'; Detail = "the form hosts the RegardingResolver and locked-column control(s) but does not register $PresaveOnLoad (task 168 trigger 3; owner round 19 item 2: run Add-RegardingFilingPickerToForms.ps1 first)" }
             }
         }
     }
@@ -364,6 +364,20 @@ function Test-LockTransform([string]$Before, [string]$After, [string[]]$Columns)
     return @($problems)
 }
 
+<#
+    The parse check as refusals: each problem from Test-LockTransform becomes TRANSFORM_INCOMPLETE (a targeted
+    control left enabled) or TRANSFORM_PARSE (anything else). Pure; the live scan and -SelfTest both use it, so the
+    code mapping a live run refuses on is the one -SelfTest proves.
+#>
+function Get-TransformRefusals([string]$Before, [string]$After, [string[]]$Columns) {
+    $out = @()
+    foreach ($p in (Test-LockTransform $Before $After $Columns)) {
+        $code = if ($p -like 'TRANSFORM_INCOMPLETE*') { 'TRANSFORM_INCOMPLETE' } else { 'TRANSFORM_PARSE' }
+        $out += @{ Code = $code; Detail = $p }
+    }
+    return $out
+}
+
 function Test-WorkflowReferencesLocked([string]$Xaml, [string]$ClientData, [string[]]$Columns) {
     $text = "$Xaml`n$ClientData"
     foreach ($c in $Columns) {
@@ -401,8 +415,11 @@ if ($SelfTest) {
         $refusalPath = Join-Path $case.FullName 'expected-refusal.txt'
         $metaPath = Join-Path $case.FullName 'form-type.txt'
         $formType = if (Test-Path -LiteralPath $metaPath) { [int](Get-Content -LiteralPath $metaPath -Raw).Trim() } else { 2 }
+        # managed.txt ("true"/"false") stands in for systemform.ismanaged, so MANAGED_FORM is proven offline too.
+        $managedPath = Join-Path $case.FullName 'managed.txt'
+        $isManaged = (Test-Path -LiteralPath $managedPath) -and ((Get-Content -LiteralPath $managedPath -Raw).Trim() -ieq 'true')
         $in = [System.IO.File]::ReadAllText($inputPath)
-        $refusals = @(Get-FormRefusals $in $LockedColumns $formType $false)
+        $refusals = @(Get-FormRefusals $in $LockedColumns $formType $isManaged)
         $result = Lock-FormXml $in $LockedColumns
         $problems = @(Test-LockTransform $in $result.Xml $LockedColumns)
         $ok = $true; $why = ''
@@ -437,6 +454,34 @@ if ($SelfTest) {
         if ($t.Got -eq $t.Want) { Write-Host ("  PASS  {0,-44} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
         else { $failures++; Write-Host ("  FAIL  {0,-44} {1} (got {2})" -f 'inline', $t.Name, $t.Got) -ForegroundColor Red }
     }
+    # The parse check on its own (task 168 r1, verifier item 2). Every non-refusal fixture is ALSO compared
+    # byte-for-byte with expected.xml, so the fixtures alone never prove that the parse check bites. In a live run
+    # there is no expected.xml and the parse check is the only guard against a transform bug, so each refusal is
+    # pinned here on a crafted before/after pair, through the same Get-TransformRefusals a live run uses.
+    $pb = '<form><tabs><tab name="t"><labels><label description="General" /></labels><note>abc</note>' +
+          '<control id="sprk_regardingmatter" datafieldname="sprk_regardingmatter" />' +
+          '<control id="other" datafieldname="sprk_name" visible="true" /></tab></tabs></form>'
+    $pLocked = $pb.Replace('datafieldname="sprk_regardingmatter" />', 'datafieldname="sprk_regardingmatter" disabled="true" />')
+    $pairs = @(
+        @{ Name = 'parse: a correct lock passes (positive control)'; After = $pLocked; Want = '' },
+        @{ Name = 'parse: targeted control left enabled'; After = $pb; Want = 'TRANSFORM_INCOMPLETE' },
+        @{ Name = 'parse: a non-target attribute changed'; After = $pLocked.Replace('visible="true"', 'visible="false"'); Want = 'TRANSFORM_PARSE' },
+        @{ Name = 'parse: an attribute added to a non-target'; After = $pLocked.Replace('id="other"', 'id="other" disabled="true"'); Want = 'TRANSFORM_PARSE' },
+        @{ Name = 'parse: text changed'; After = $pLocked.Replace('<note>abc</note>', '<note>abd</note>'); Want = 'TRANSFORM_PARSE' },
+        @{ Name = 'parse: an element added'; After = $pLocked.Replace('</tab>', '<control id="extra" /></tab>'); Want = 'TRANSFORM_PARSE' },
+        # A form that already carries a stray Disabled= (another attribute to XML): adding disabled="true" leaves
+        # every other attribute unchanged, so only the duplicate check sees the second spelling.
+        @{ Name = 'parse: duplicate disabled (disabled + Disabled)'; Before = $pb.Replace('datafieldname="sprk_regardingmatter" />', 'datafieldname="sprk_regardingmatter" Disabled="false" />'); After = $pb.Replace('datafieldname="sprk_regardingmatter" />', 'datafieldname="sprk_regardingmatter" Disabled="false" disabled="true" />'); Want = 'TRANSFORM_PARSE' },
+        @{ Name = 'parse: result not well-formed'; After = $pLocked.Replace('</form>', ''); Want = 'TRANSFORM_PARSE' }
+    )
+    foreach ($t in $pairs) {
+        $before = if ($t.ContainsKey('Before')) { $t.Before } else { $pb }
+        $codes = @(Get-TransformRefusals $before $t.After $LockedColumns | ForEach-Object { $_.Code } | Sort-Object -Unique)
+        $got = $codes -join ','
+        if ($got -ceq $t.Want) { Write-Host ("  PASS  {0,-44} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-44} {1} (want [{2}], got [{3}])" -f 'inline', $t.Name, $t.Want, $got) -ForegroundColor Red }
+    }
+    $inline += $pairs
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
     Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($inline.Count) inline check(s)." -ForegroundColor Green
     exit 0
@@ -653,9 +698,8 @@ try {
                 Write-Info "form '$($f.name)' ($($f.formid)) type $($f.type) active=$($f.formactivationstate): $state"
                 continue
             }
-            foreach ($p in (Test-LockTransform $xml $result.Xml $present)) {
-                $code = if ($p -like 'TRANSFORM_INCOMPLETE*') { 'TRANSFORM_INCOMPLETE' } else { 'TRANSFORM_PARSE' }
-                $refusals.Add(@{ Code = $code; Where = $where; Detail = $p })
+            foreach ($r in (Get-TransformRefusals $xml $result.Xml $present)) {
+                $refusals.Add(@{ Code = $r.Code; Where = $where; Detail = $r.Detail })
             }
             Write-Plan "form '$($f.name)' ($($f.formid)) type $($f.type) active=$($f.formactivationstate): lock $($result.Locked -join ', ')"
             $edits.Add([pscustomobject]@{ FormId = $f.formid; Table = $table; Name = $f.name; Type = $f.type; Before = $xml; After = $result.Xml })
@@ -676,7 +720,7 @@ try {
         $grid = Invoke-Dv -Endpoint "customcontroldefaultconfigs?`$select=controldescriptionxml&`$filter=primaryentitytypecode eq '$table'"
         foreach ($g in $grid.value) {
             if ("$($g.controldescriptionxml)" -match '<EnableEditing[^>]*>\s*yes\s*</EnableEditing>') {
-                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5, owner decision; not changed by this script"
+                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 19 item 3 is escalated (the grid has no OnRowLoad event; task 168 note section 5.3); not changed by this script"
             }
         }
     }

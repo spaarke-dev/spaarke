@@ -3,7 +3,8 @@
 > **Task**: 168 (#1107) · owner round 8 item 3 · amendments: owner rounds 9-10 (round 10 item 2 = add the picker to the analysis form, then lock)
 > **Branch**: `task/uac-r2-168`, from `task/uac-r2-156-c1-r2` with `work/unified-access-control-r2` merged in (clean merge, no conflicts). Base `144b36b51`.
 > **Rigor**: FULL (security edge, live form definitions, TEST-MODIFYING). Model tier sonnet @ high (run on Opus).
-> **Status**: **completed-with-escalation.** The code, fixtures, presave, tests and docs are done and green. Three escalation triggers fired on live dev and one blocker was found in the analysis amendment (below). The live `-Apply` is the main session's manual gate. As the script stands it REFUSES the full four-table apply until the owner decides on trigger 1.
+> **Status (r1, 2026-10-04)**: **completed-with-escalation.** The verifier's findings are closed in code, and owner round 19 items 1, 2 and 4 are delivered as two new operator scripts. Two first-class stops are reported: **trigger 9** (built on 156's unmerged branch; merge 156 first) and **round 19 item 3** (the grid has no OnRowLoad event). Live runs are the main session's gate, §10.4. See **§10**.
+> **Status (2026-10-03, superseded)**: **completed-with-escalation.** The code, fixtures, presave, tests and docs are done and green. Three escalation triggers fired on live dev and one blocker was found in the analysis amendment (below). The live `-Apply` is the main session's manual gate. As the script stands it REFUSES the full four-table apply until the owner decides on trigger 1.
 
 ---
 
@@ -16,11 +17,12 @@
 | Presave v1.4.0: `setSubmitMode("always")` after every staged or cleared lookup, guarded | ✅ 21/21 presave tests; full RegardingResolver suite 114/114; PCF `build:prod` OK |
 | Seeds S1-S11, each red then restored byte-identical | ✅ §6 |
 | I-1 row + 156 note "Resolved" line | ✅ |
-| **Trigger 1 FIRED**: three forms show the roots as visible, editable controls and host no filing picker | 🔔 owner decision. The script refuses them (`NO_FILING_PICKER`). |
-| **Trigger 3 FIRED (literally)**: the Event main form hosts the RegardingResolver without the presave | 🔔 reported. Moot for the lock, because that form has no root control. It points to a defect that predates this task. |
-| **Trigger 5 FIRED**: the `sprk_event` and `sprk_analysis` home grids are EDITABLE Power Apps grids | 🔔 owner decision. Reported by the script; not changed. |
-| **Round 10 item 2 (add the RegardingResolver to the analysis form) BLOCKED**: `sprk_analysis` has no `sprk_regardingrecordurl`, and the picker writes it unconditionally | 🔔 needs a decision: a schema add or a shared-code change |
-| Live `-Apply` | ⏳ manual gate (§8). Only `-Tables sprk_todo` applies cleanly today. |
+| **Trigger 1 FIRED**: three forms show the roots as visible, editable controls and host no filing picker | ✅ decided (round 19 item 1); `Add-RegardingFilingPickerToForms.ps1` adds the picker first (§10). Live gate pending. |
+| **Trigger 3 FIRED (literally)**: the Event main form hosts the RegardingResolver without the presave | ✅ decided (round 19 item 2); the same picker script adds the presave and hidden cells (§10). Live gate pending. |
+| **Trigger 5 FIRED**: the `sprk_event` and `sprk_analysis` home grids are EDITABLE Power Apps grids | 🔔 round 19 item 3 chose an OnRowLoad handler, but the grid has no OnRowLoad event, and such a handler would breach ADR-006. Stopped with an ADR-conflict report (§10.5); the script still reports the grids. |
+| **Round 10 item 2 (add the RegardingResolver to the analysis form) BLOCKED**: `sprk_analysis` has no `sprk_regardingrecordurl`, and the picker writes it unconditionally | ✅ decided (round 19 item 4): `Add-AnalysisRegardingRecordUrlColumn.ps1`, then the picker script, then the lock (§10). Live gate pending. |
+| **Trigger 9** (r1): built on task 156's unmerged branch | 🔔 reported (§10.5): merge 156 first, then 168. |
+| Live `-Apply` | ⏳ manual gate (**§10.4**, which supersedes §8): presave → schema script → picker script → lock → checks. |
 
 ---
 
@@ -249,6 +251,8 @@ Script sha256 before and after every seed, final bytes: `65a30c56466992b6e982031
 
 ## 8. Manual live gate (main session, step 7, in this order)
 
+> **Superseded by §10.4 (r1, 2026-10-04)**, which adds the schema and picker scripts before the lock and the new checks (k) and (l). Kept as the 2026-10-03 record.
+
 1. **(a)** Confirm that no other formxml writer is running against dev: task 138's `Retire-CommunicationAccessPermission.ps1 -Apply` and `Deploy-TodoSubgridsToElevenParentForms.ps1`.
 2. **(b)** Deploy the presave v1.4.0 to the EXISTING web resource **`sprk_todo_regarding_presave`** (id `2ae21d81`; live is v1.2.0) and publish, using the dataverse-deploy skill. Then open a to-do CREATE form and confirm the console line `[SmartTodo.RegardingPreSave v1.4.0] OnSave handler registered`.
 3. **(c)** `pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1`, the dry run. It exits 2 on the three trigger-1 forms until the owner decides §5.1.
@@ -268,3 +272,202 @@ Live gate results: _pending (main session)_.
 - The I-1 row edit touched only the "root typed directly onto a filed row" clause. The 156 note gained one "Resolved" line.
 - `/conflict-check`: no file of this task is on the hot-path watchlist (BFF, SpaarkeAi, ci-workflows, skill directives, root CLAUDE.md), so it was not invoked. The known overlaps are named in the POML's parallel-reason: the I-1 row, also edited by 156, 158 and the round-8 follow-ups; the presave area, also touched by task 147; and live formxml writers.
 - `.claude/**`: no edit needed.
+
+## 10. Round r1 (2026-10-04): the verifier's findings and owner round 19
+
+Branch `task/uac-r2-168-r1`, from `task/uac-r2-168` (`01c591391`). Binding inputs: the verifier's 16 findings, and **owner round 19** (2026-10-04, `notes/session27-owner-decisions-and-research.md` on `work/unified-access-control-r2`), which answers this task's §5 escalations:
+1. trigger 1: the three forms get the picker, hidden cells and presave, THEN the lock;
+2. trigger 3: the Event main form gets the presave and hidden cells;
+3. trigger 5: an OnRowLoad handler on the editable `sprk_event` / `sprk_analysis` home grids disables the root columns;
+4. the amendment blocker: add `sprk_regardingrecordurl` to `sprk_analysis` (schema script with the rootcomponentbehavior-0 check), then the picker, then the lock;
+5. every live step is a main-session gate, run dry → apply → verify.
+
+The main session's note for this round also named rounds 15 and 16. Both were read: they decide tasks 162-167 and contain no item for task 168.
+
+### 10.1 What changed, per finding
+
+| # | Finding | Closure |
+|---|---|---|
+| 1, 11 | Seed S5 as specified did not go red: fixture 05 uses the canonical `disabled="true"`, so rewriting it is byte-identical | **Fixed.** New fixture **13-noncanonical-disabled-true-idempotent**: `disabled="True"`, `disabled='true'`, `disabled = "TRUE"`; `expected.xml` = `input.xml`. Seed **S5r** (the verifier's exact mutation: delete `if ($value.Trim() -ieq 'true') { return $Tag }`) now fails fixture 13 ("output differs from expected.xml"). §6's S5 (`if ($false)`, always ADD) remains a separate, valid seed. |
+| 2, 12 | The parse check (TRANSFORM_PARSE / TRANSFORM_INCOMPLETE) and MANAGED_FORM were not proven offline | **Fixed.** (a) The live mapping of parse problems to refusal codes moved into a pure `Get-TransformRefusals`, used by the live scan AND by `-SelfTest`. (b) Eight inline before/after cases call it: a correct lock (positive control, no refusal), a targeted control left enabled (TRANSFORM_INCOMPLETE), a non-target attribute changed, an attribute added to a non-target, text changed, an element added, a stray `Disabled=` plus `disabled="true"` (the duplicate check alone), a result that is not well-formed (each TRANSFORM_PARSE). (c) `-SelfTest` reads an optional `managed.txt`; new fixture **14-refuse-managed-form** expects MANAGED_FORM. Seeds S12a-S12i below each go red. |
+| 3 | Removing `forceSubmit` from `setLookupIfPresent`'s empty-id branch left jest green | **Fixed.** New jest test "a lookup staged with an id that cleans to empty gets setSubmitMode("always") after its null setValue" (through `onSave` with a stamp whose id is `{}`, and through `_internals.setLookupIfPresent`). Seed S3p: removing that one call fails exactly this test (1 failed, 21 passed); restored byte-identical (`6d34b82b…`, unchanged — the presave source did not change in r1). |
+| 4, 15 | Trigger 9 fired and was not reported as a trigger | **Reported as a first-class stop (§10.5).** It cannot be fixed from this branch: 156 is still `[open]` and not in `work/unified-access-control-r2` (`git merge-base --is-ancestor task/uac-r2-156-c1-r2 work/unified-access-control-r2` → false on 2026-10-04). Integration order: **156 first, then 168**. |
+| 5, 13 | Round 10 item 2 (picker on the analysis form) not executed; blocked by the missing `sprk_regardingrecordurl` | **Delivered as code, per round 19 item 4.** New `scripts/Add-AnalysisRegardingRecordUrlColumn.ps1` adds the column (the `sprk_todo` definition: String / Url / 500, audited) after checking that `sprk_analysis` ships in SpaarkeMaster with rootcomponentbehavior 0. New `scripts/Add-RegardingFilingPickerToForms.ps1` then puts the picker, hidden cells and presave on the Analysis main form `d408a721` (it REFUSES that form with PAIR_INCOMPLETE until the column exists). Then the lock script locks it. **No PCF or shared-library source changed** (ADR-006 scope kept). Live runs are gates (§10.4). |
+| 6, 14 | Goal (1) unmet for event `90d2eff7`, `835b8ee8` and communication `b58ec3d8` (NO_FILING_PICKER) | **Delivered as code, per round 19 item 1.** The picker script adds the RegardingResolver (entity = the table), hidden cells and the presave to the three forms; the lock script's NO_FILING_PICKER then clears. Proven offline on the live form XML (read-only snapshot, 2026-10-04): picker transform → lock transform on all five target forms gives no refusal and no parse problem, and each form ends complete (§10.3). The event Quick Create `642e1a65` gets live-gate check **(k)**. |
+| 7 | Verified as claimed | No change. |
+| 8 | Live presave is v1.2.0; deploying v1.4.0 brings v1.3.0's FR-26 staging live | **Recorded as a behaviour change** in gate step (b) (§10.4). |
+| 9, 10 | Test runs / docs verified | No change. |
+| 16 | Pending live gate | Still pending (main session). Its order now includes the schema and picker scripts (§10.4); (i) and (j) are no longer waiting on decisions. |
+
+Owner round 19 item 2 (Event main form `eaf22dcb`) rides the same picker script: it already hosts the RegardingResolver, so the script adds only the presave registration and the hidden pair, root and intermediate lookup cells.
+
+### 10.2 The two new scripts
+
+**`scripts/Add-RegardingFilingPickerToForms.ps1`** (target forms: the five named by round 19; `-Forms` overrides). Additive only, as string insertions (never a re-serialization):
+- a visible section `sprk_filing_picker` (first section of the first visible tab) with one control bound to `sprk_regardingrecordtype`, hosting `sprk_Spaarke.Controls.RegardingResolver` with `entity` = the table. The control description is the one on the live To Do and Event main forms. It is added only when the form hosts no RegardingResolver;
+- a hidden section `sprk_filing_hidden` with a cell for every pair text column and every `sprk_regarding*` lookup of the table that has no control on the form;
+- the form library `sprk_todo_regarding_presave` and the OnLoad handler `Spaarke.SmartTodo.RegardingPreSave.onLoad` (pass execution context), added to the FORM-LEVEL `<events>` / `<formLibraries>`.
+- **Found during the r1 run:** the live Analysis main form has NO form-level `<events>`, but a web-resource cell carries its own nested `<events><event name="onload" … /></events>`. A text search for `</events>` or `<event name="onload"` finds that nested one. The parse check caught it on the offline end-state run ("no … handler after the transform"). Container and onload positions now come from an XmlReader (depth-1 elements only, `Get-TopLevelElementSpan`), and fixture 13 pins it.
+- New ids are a stable hash of (form id, purpose), so a re-run writes identical bytes and a complete form is left byte-identical.
+- Refusals (exit 2): FORM_NOT_FOUND, MANAGED_FORM, PAIR_INCOMPLETE, PICKER_MISCONFIGURED, PRESAVE_DISABLED, NO_VISIBLE_TAB, PREREQ_MISSING (live: web resource or customcontrol absent), TRANSFORM_PARSE, FORM_CHANGED.
+- Modes are copied from the lock script: dry run, `-Apply` (snapshot written and read back first; re-read before each PATCH; read-back after), `-Verify`, a guarded `-RestoreFrom` and `-SelfTest`. Writes: `PATCH systemforms` and `POST PublishXml`, only in the `-RestoreFrom` branch or after the `if (-not $Apply)` exit.
+- `-SelfTest`: 13 fixtures under `tests/fixtures/form-filing-picker/`, plus 9 inline parse-check cases.
+
+**`scripts/Add-AnalysisRegardingRecordUrlColumn.ps1`**: dry run, `-Apply`, `-Verify`, `-SelfTest` (10 inline checks).
+- It refuses (exit 2) SOLUTION_MEMBERSHIP (sprk_analysis is not a SpaarkeMaster entity component with rootcomponentbehavior 0) and COLUMN_MISMATCH (a column of that name exists with another type, format or length; it is never altered).
+- `-Verify` exits 0 only when the column matches and the solution check passes. A read fault exits 1.
+
+**Lock script changes in r1:**
+- `Get-TransformRefusals`, the `managed.txt` read, fixtures 13 and 14 and eight inline checks;
+- the NO_FILING_PICKER / PICKER_WITHOUT_PRESAVE texts and the grid REPORT now point to round 19.
+
+The transform and the refusal logic are unchanged.
+
+### 10.3 Live runs (spaarkedev1, read-only, 2026-10-04)
+
+- Schema script dry run: "Column state: absent; Solution check: sprk_analysis ships in SpaarkeMaster with all subcomponents … would create" → **exit 0**.
+- Schema script `-Verify`: "VERIFY FAIL: column absent" → **exit 1** (expected before the apply).
+- Positive control: `-Verify -Table sprk_todo` → VERIFY PASS, **exit 0**.
+- Picker dry run:
+  - prerequisites present;
+  - PLAN for `eaf22dcb` (16 hidden cells + presave), `90d2eff7` and `835b8ee8` (picker `sprk_regardingrecordtype1` + 5 cells + presave), `b58ec3d8` (picker + 6 cells + presave);
+  - REFUSAL PAIR_INCOMPLETE for `d408a721` → **exit 2** (expected until the schema apply).
+- Picker `-Verify`: 43 gaps + 1 refusal → **exit 1**.
+- Lock dry run / `-Verify`: unchanged from §3.1/§3.2 (exit 2 / exit 1). The three NO_FILING_PICKER refusals now name the picker script.
+- **Offline end-state proof on the live form XML.** The forms were read read-only into the scratchpad. The analysis specs had `sprk_regardingrecordurl` added, as after the schema apply. The run was picker transform → lock refusals → lock transform → parse checks:
+
+| Form | Picker added | Picker parse | Lock refusals | Locked | Lock parse | Complete after lock |
+|---|---|---|---|---|---|---|
+| event main `eaf22dcb` | 18 | ok | none | matter, project, servicerequest, workassignment | ok | yes |
+| event modal `90d2eff7` | 8 | ok | none | servicerequest, matter, project, workassignment | ok | yes |
+| Assign Work `835b8ee8` | 8 | ok | none | servicerequest, matter, project, workassignment | ok | yes |
+| Message `b58ec3d8` | 9 | ok | none | matter, project, servicerequest, workassignment | ok | yes |
+| Analysis main `d408a721` | 15 | ok (after the top-level fix) | none | matter, project, servicerequest, workassignment | ok | yes |
+
+### 10.4 Manual live gate (main session, dev, in this order; supersedes §8)
+
+1. **(a)** Confirm that no other formxml writer is running: task 138's retirement script and `Deploy-TodoSubgridsToElevenParentForms.ps1`.
+2. **(b)** Deploy presave v1.4.0 to the EXISTING web resource `sprk_todo_regarding_presave` (`2ae21d81`) and publish. Confirm `[SmartTodo.RegardingPreSave v1.4.0] OnSave handler registered` in a to-do CREATE form's console.
+   - **Behaviour change (verifier item 8):** the live copy is v1.2.0. This deploy also brings v1.3.0 live: FR-26 core-ancestor stamp staging and reparent clears, on the To Do main form. Checks (c), (d) and (f) exercise it.
+3. **(c)** `pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1`, then `-Apply`, then `-Verify` (must exit 0).
+4. **(d)** `pwsh scripts/Add-RegardingFilingPickerToForms.ps1`, then `-Apply -SnapshotPath <picker-snapshot>`, then `-Verify` (must exit 0).
+5. **(e)** `pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1` (the dry run must exit 0, with no refusal), then `-Apply -SnapshotPath <lock-snapshot>`, then `-Verify` with the default four tables (must exit 0).
+6. **(f)** Run the live checks with `uac.child.user@demo.spaarke.com`:
+   - (b)-(h) of the acceptance criterion;
+   - (i) on the Event main, modal and Assign Work forms and on the Message form;
+   - (j) "+ New" analysis from a Matter's Analyses tab, plus a re-file and a clear through the picker on the Analysis main form (the picker writes `sprk_regardingrecordurl`);
+   - **(k), new (verifier item 6):** a "+ New" event from a parent record's Events subgrid that opens the Event quick create form `642e1a65`. That form has hidden roots, now disabled, and no presave; the parent lookup comes from the platform's relationship pre-fill. On read-back, the row must carry the parent's root lookup (for example `sprk_regardingmatter` from a Matter);
+   - **(l), new (round 19 item 2):** an event CREATED on the Event main form `eaf22dcb` with a matter picked in the RegardingResolver. On read-back it carries `sprk_regardingmatter` and the pair.
+7. **(g)** On any failure:
+   - restore in REVERSE order: `Lock-CoreAncestorStampColumnsOnForms.ps1 -RestoreFrom <lock-snapshot>`, then `Add-RegardingFilingPickerToForms.ps1 -RestoreFrom <picker-snapshot>`. Each refuses if a later change touched its forms, which is why the order matters;
+   - the analysis column is additive and stays. Deleting a column is destructive and needs its own decision;
+   - then STOP (trigger 7).
+
+Exact commands (dev):
+```
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1 -Apply
+pwsh scripts/Add-AnalysisRegardingRecordUrlColumn.ps1 -Verify
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1 -Apply -SnapshotPath .\filing-picker-snapshot-dev.json
+pwsh scripts/Add-RegardingFilingPickerToForms.ps1 -Verify
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 -Apply -SnapshotPath .\form-lock-snapshot-dev.json
+pwsh scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 -Verify
+```
+
+Live gate results: _pending (main session)_.
+
+### 10.5 Escalations (🔔 first-class stops, recorded and reported)
+
+**Trigger 9 (POML gate): this work is built on task 156's unmerged branch.**
+- `task/uac-r2-168` was branched from `task/uac-r2-156-c1-r2`. Task 156 is `[open]` in `work/unified-access-control-r2`'s TASK-INDEX, and its commits reach only `integ/uac-r2-batch4`.
+- `git diff work/unified-access-control-r2...task/uac-r2-168-r1` therefore carries about 8,800 lines of 156's unaccepted `src/server/**` and `tests/**` changes. Merging 168 now would bring 156 in with it.
+- The trigger's instruction is STOP and report. This round changed no 156 file.
+- **Integration must merge 156 first, then 168 (whose own diff is then only the 168 files), or rebase 168 onto `work` after 156 lands.**
+- 168 cannot be rebased off 156 today, because it edits the I-1 row and the 156 note in the form 156 left them.
+
+🔔 **ADR Conflict — Resolution Required (owner round 19 item 3, the editable home grids)**
+
+- **ADR in question**: ADR-006 (UI surface architecture).
+- **Specific rule**: "No new legacy JavaScript web resources. This means no jQuery, no framework-free JS with business logic, no ad hoc scripts." A PCF is the surface for UI embedded in a Dataverse host.
+- **Conflict**: round 19 item 3 decided "an **OnRowLoad handler** that disables the root columns in the grid". Two facts, found in this round, make that mechanism unbuildable as written:
+  1. **The event does not exist.** The Power Apps grid (`Microsoft.PowerApps.PowerAppsOneGrid`, `EnableEditing=yes` on the `sprk_event` and `sprk_analysis` home grids, live 2026-10-04) exposes three client events to a table's grid: **OnRecordSelect, OnChange and OnSave**. Sources: Microsoft Learn, "Grids and subgrids in model-driven apps" (Events table) and "Grid OnSave event". The nearest documented event, OnRecordSelect + `GridCell.setDisabled`, does not hold:
+     - a practitioner write-up (Diana Birkelbach, "Power Apps Grid API: disabling", 2025-01) reports that the Power Apps grid lets a user move between cells by keyboard and edit them without OnRecordSelect firing;
+     - grid OnSave cancellation is not documented.
+  2. **A handler of that kind is a new framework-free JS web resource**, which ADR-006 forbids.
+- **Proposed path: C (pivot to comply), with a new component.** The ADR-006-compliant and documented mechanism is a **Power Apps grid customizer control**: a PCF named in the grid's "Customizer control" property (Microsoft Learn, "Customize the editable grid control").
+  - Its `cellEditorOverrides` cancel editing for the four root columns, the documented `stopEditing(true)` pattern. That pattern is per cell, so it also covers keyboard navigation.
+  - Its `cellRendererOverrides` mark those cells read-only.
+  - Every other column keeps inline editing, which is round 19's intent.
+  - It is set on the `sprk_event` and `sprk_analysis` grid control configuration (`customcontroldefaultconfig`, property `GridCustomizerControlFullName`) by a dry run / `-Apply` / `-Verify` script.
+- **Rationale**: it is the only documented grid hook that acts on the editor itself. The same practitioner thread reports one residual for the `stopEditing` pattern: the Delete key clearing a cell. It must be checked on dev, with a renderer-side guard if it reproduces. The server's reconciliation job still repairs any root changed outside the forms, as the owner accepted in round 8 item 3.
+- **Impact if accepted**: one new PCF under `src/client/pcf/` (React 16 platform library, build:prod, jest), one grid-configuration script, and a deploy gate. No BFF change.
+- **Alternatives considered and rejected**:
+  - an OnRecordSelect web resource: keyboard bypass, and it breaks ADR-006 (path A would document a known-bypassable lock);
+  - turning off grid editing: round 19 rejected it.
+- **Why this part is STOPPED, not built**: the decided mechanism cannot exist, and the replacement is a new component that changes the decision's substance (a PCF in place of a handler). CLAUDE.md §6.5 and the round-12 rule make that a first-class stop for the decision-maker. Item 3 is also not among this round's 16 verifier findings. The lock script keeps REPORTING the two grids until it is built.
+
+**Not a trigger, recorded:** §5.5 (the To Do main form has no `sprk_regardingservicerequest` cell) is still open, because round 19 does not name the to-do form. The picker script already closes it if pointed at that form. `Add-RegardingFilingPickerToForms.ps1 -Forms eca59df4-1364-f111-ab0c-7ced8ddc4cc6` would add only the missing hidden cell(s). It is not in the default target list; that is the main session's call.
+
+### 10.6 Seeds (r1): each red, then restored byte-identical (SHA-256 compared, file touched)
+
+| Seed | Mutation | Red |
+|---|---|---|
+| S5r | drop `if ($value.Trim() -ieq 'true') { return $Tag }` (the verifier's mutation) | 13-noncanonical-disabled-true-idempotent "output differs" |
+| S12a | `Test-LockTransform` returns `@()` | all 7 negative inline parse cases |
+| S12b | TRANSFORM_INCOMPLETE check removed | inline "targeted control left enabled" |
+| S12c | `-SelfTest` passes IsManaged=`$false` (the verifier's observation) | 14-refuse-managed-form |
+| S12d | MANAGED_FORM check removed | 14-refuse-managed-form |
+| S12e | duplicate-disabled check removed | inline "duplicate disabled (disabled + Disabled)" |
+| S12f | attribute comparison removed | inline "non-target attribute changed", "attribute added to a non-target" |
+| S12g | text comparison removed | inline "text changed" |
+| S12h | child-count check removed | inline "an element added" |
+| S12i | code mapping collapsed to TRANSFORM_PARSE | inline "targeted control left enabled" (got TRANSFORM_PARSE) |
+| S3p | `forceSubmit` removed from the empty-id branch | jest: the new empty-id test (1 failed, 21 passed) |
+| P1 | presave handler always re-added | 01, 02, 04 "not idempotent", 03 "output differs" |
+| P2 | PAIR_INCOMPLETE removed | 06 |
+| P3 | picker entity check removed | 07 |
+| P4 | MANAGED_FORM removed | 08 |
+| P5 | PRESAVE_DISABLED removed | 09 |
+| P6 | NO_VISIBLE_TAB refusal removed | 10 |
+| P7 | `Test-PickerTransform` returns `@()` | the 8 negative inline parse cases |
+| P8 | control-id collisions ignored | 01, 04, 05 (and 11) output differs |
+| P9 | pair text columns get no cells | 01, 02, 04, 05 output differs |
+| P10 | `-Verify` read fault exits 0 | `-Verify -EnvironmentUrl https://uac168-nonexistent-org.crm.dynamics.com`: guarded exit 1, seeded exit 0 |
+| P11 | shallow match ignores attributes | inline positive control (a real transform reported as broken) |
+| P12 | post-condition (form complete) removed | inline "picker names another entity", "hidden cell dropped", "presave handler dropped" |
+| P13 | containers found by text search, not top-level | 13-nested-cell-events-untouched |
+| C1 | column format not compared | inline "column as plain text" |
+| C2 | rootcomponentbehavior not checked | inline "entity with rcb 1" |
+| C3 | `-Verify` read fault exits 0 | unreachable URL: guarded exit 1, seeded exit 0 |
+| C4 | column length not compared | inline "column too short" |
+
+Final hashes (after all seeds): see §10.7.
+
+### 10.7 Tests (r1)
+
+| Suite | Result |
+|---|---|
+| `Lock-CoreAncestorStampColumnsOnForms.ps1 -SelfTest` | exit 0: **14 fixtures + 13 inline** (5 library/workflow + 8 parse-check) |
+| `Add-RegardingFilingPickerToForms.ps1 -SelfTest` | exit 0: **13 fixtures + 9 inline** |
+| `Add-AnalysisRegardingRecordUrlColumn.ps1 -SelfTest` | exit 0: **10 inline** |
+| The same two fixture sets converted to CRLF (what a Windows checkout produces) | both exit 0 |
+| Mode exclusivity | `-Apply -Verify` (schema script) and `-Apply -SelfTest` (picker script) each throw before any read: exit 1 |
+| RegardingResolver jest, full (`npx jest`) | **115 passed, 3 suites** (114 + the new empty-id test), run twice green. A third run, made while `npm run build:prod` and the .NET suites were running, reported one suite that failed to load (48 tests ran, 0 failed). Re-run alone, all three suites passed. This is contention, not a failure. |
+| RegardingResolver `npm run build:prod` | succeeded |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **346 / 346 passed** |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
+| `tests/integration/Spe.Integration.Tests` | **403 passed, 25 skipped** (428), 0 failed |
+| BFF unit (`tests/unit/Sprk.Bff.Api.Tests`), full run | **14,399 passed, 0 failed, 54 skipped** (14,453), 17 m 48 s |
+
+Working-tree SHA-256 (CRLF) after the last seed; every seed restored to these bytes:
+- `Lock-CoreAncestorStampColumnsOnForms.ps1` `d64b4db3…`;
+- `Add-RegardingFilingPickerToForms.ps1` `b4707a97…`;
+- `Add-AnalysisRegardingRecordUrlColumn.ps1` `8fc0f591…`;
+- `sprk_todo_regarding_presave.js` `6d34b82b…` (unchanged in r1).
+
+Scope against `01c591391` (r0):
+- no change under `src/server/**`, `tests/Spaarke.ArchTests/**`, the RegardingResolver or CommunicationConnections PCF source, `src/client/webresources/**` or `src/client/shared/**`;
+- no new web resource and no waiver;
+- `.claude/**` needed no edit.

@@ -1,0 +1,42 @@
+{
+  "table": "sprk_analysis",
+  "formId": "a0000006-0000-0000-0000-000000000006",
+  "managed": false,
+  "columns": [
+    {
+      "name": "sprk_regardingrecordtype",
+      "kind": "Lookup",
+      "label": "Regarding Record Type"
+    },
+    {
+      "name": "sprk_regardingrecordid",
+      "kind": "Text",
+      "label": "Regarding Record Id"
+    },
+    {
+      "name": "sprk_regardingrecordname",
+      "kind": "Text",
+      "label": "Regarding Record Name"
+    },
+    {
+      "name": "sprk_regardingrecordnumber",
+      "kind": "Text",
+      "label": "Regarding Record Number"
+    },
+    {
+      "name": "sprk_regardingmatter",
+      "kind": "Lookup",
+      "label": "Regarding Matter"
+    },
+    {
+      "name": "sprk_regardingproject",
+      "kind": "Lookup",
+      "label": "Regarding Project"
+    },
+    {
+      "name": "sprk_regardingcommunication",
+      "kind": "Lookup",
+      "label": "Regarding Communication"
+    }
+  ]
+}
