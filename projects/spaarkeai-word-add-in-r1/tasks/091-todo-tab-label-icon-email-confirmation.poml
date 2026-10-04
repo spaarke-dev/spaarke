@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT-2/4: the "To Do" tab — label, the blue Microsoft To Do check icon, tab spacing, Assigned To shows email, a clear confirmation and an Open-in-Spaarke link after creating</title>
     <phase>6 UAT round 3 (2026-10-03)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx` in the task pane and BFF `.cs` (`OfficeSearchService` contact projection + its response DTO), with tests on both sides.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -135,4 +135,26 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-10-04. Full detail: projects/spaarkeai-word-add-in-r1/notes/091-todo-tab.md.
+    Server: OfficeSearchService.cs's EntitySearchMeta gained an optional EmailField (Contact only,
+    "emailaddress1"); selected in the SAME impersonated query, never added to the $filter predicate;
+    EntitySearchResponse.cs gained an additive, nullable Email field. Client: tab label "Create To Do" ->
+    "To Do" with a new local MicrosoftToDoIcon.tsx (copied from Spaarke.UI.Components per the add-in's
+    ADR-012 exception); TabList gap for visible tab spacing; Assigned-To rows/chip show email + a quieter
+    job-title line (never the server's literal "contact" fallback); handleCreateTodo now returns todoId
+    and uses describeFetchFailure for honest error text; CreateTodoView shows a success MessageBar
+    ("To Do created: {name}") with an "Open in Spaarke" link gated on canOpenRecord + ORG_URL (NFR-10).
+    Gates: 70/70 gated jest suites green (969 tests, incl. new CreateTodoView.test.tsx, 7 tests); lint 0;
+    typecheck 68 total / 0 production (pre-existing baseline, none in task files); dotnet build 0 errors;
+    Office search unit+contract tests 6+11 passed; ArchTests 349/349; CVE clean (no package changes). A
+    full ~12,400-test BFF suite run was attempted beyond the POML's own required gate and stopped after
+    25+ min with no output signal (not required by acceptance criterion 7 — see notes file §5); not an
+    independent full-suite confirmation, flagged as open for the main session.
+    Publish size: owed to the main session per CLAUDE.md §10 hazard three (this worktree built repeatedly).
+    Live UAT (criterion 8): open — no deployed host in this session.
+    code-review: PASS, 0 critical (a few non-blocking observations, see notes file).
+    adr-check: 0 violations across ADR-021, ADR-008, ADR-012, ADR-038, ADR-019.
+  </notes>
 </task>

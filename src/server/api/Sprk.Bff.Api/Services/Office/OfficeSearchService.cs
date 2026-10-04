@@ -284,7 +284,13 @@ public class OfficeSearchService
     }
 
     /// <summary>Per-entity-type Dataverse Web API search metadata (mirrors RecordSyncJob's catalogue).</summary>
-    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField);
+    /// <param name="EmailField">
+    /// Task 091 (UAT-2): an additive, DISPLAY-only column — selected in the same impersonated query as every
+    /// other field above, never added to the <c>contains(...)</c> search predicate. <c>null</c> for every
+    /// entity type except Contact (<c>emailaddress1</c>), where it lets the Assigned-To picker tell apart
+    /// two contacts that share a display name.
+    /// </param>
+    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField, string? EmailField = null);
 
     private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
         new Dictionary<AssociationEntityType, EntitySearchMeta>
@@ -293,7 +299,7 @@ public class OfficeSearchService
             [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
             [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_description"),
             [AssociationEntityType.Account] = new("accounts", "accountid", "name", "accountnumber", "description"),
-            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle"),
+            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle", "emailaddress1"),
         };
 
     /// <summary>
@@ -355,6 +361,9 @@ public class OfficeSearchService
         var selectFields = new List<string> { meta.IdField, meta.NameField, "modifiedon" };
         if (meta.RefField is not null) selectFields.Add(meta.RefField);
         if (meta.DescField is not null) selectFields.Add(meta.DescField);
+        // Task 091: selected (never searched — the contains() predicate above is built from NameField/RefField
+        // only) so the Assigned-To picker can tell apart two contacts sharing a display name.
+        if (meta.EmailField is not null) selectFields.Add(meta.EmailField);
 
         var odataQuery =
             $"$filter={filter}&$select={string.Join(",", selectFields)}&$top={top}";
@@ -392,6 +401,7 @@ public class OfficeSearchService
         var id = Guid.TryParse(GetJsonString(row, meta.IdField), out var g) ? g : Guid.Empty;
         var refVal = meta.RefField is not null ? GetJsonString(row, meta.RefField) : null;
         var desc = meta.DescField is not null ? GetJsonString(row, meta.DescField) : null;
+        var email = meta.EmailField is not null ? GetJsonString(row, meta.EmailField) : null;
         var modified = DateTimeOffset.TryParse(GetJsonString(row, "modifiedon"), out var mo)
             ? mo
             : DateTimeOffset.UtcNow;
@@ -404,6 +414,9 @@ public class OfficeSearchService
             Name = name!,
             DisplayInfo = !string.IsNullOrWhiteSpace(refVal) ? refVal! : (desc ?? GetLogicalName(type)),
             PrimaryField = !string.IsNullOrWhiteSpace(refVal) ? refVal! : name!,
+            // Task 091: additive display-only field; null for every type without an EmailField (i.e. all but
+            // Contact) and null for a Contact with no email on file. Never a fallback onto PrimaryField/Name.
+            Email = !string.IsNullOrWhiteSpace(email) ? email! : null,
             IconUrl = $"/icons/{type.ToString().ToLowerInvariant()}.svg",
             ModifiedOn = modified
         };

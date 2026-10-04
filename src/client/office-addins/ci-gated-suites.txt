@@ -287,3 +287,12 @@ shared/taskpane/services/__tests__/documentIdentityService.stampWrite.test.ts
 shared/taskpane/components/views/__tests__/SaveView.identityStamp.test.tsx
 shared/taskpane/utils/__tests__/documentFileName.test.ts
 word/commands/__tests__/notify.test.ts
+# --- To Do tab label/icon/spacing, contact email, create confirmation (task 091, UAT round 3: UAT-2/4) ---
+# Pins: the Assigned-To picker shows a contact's email (additive) alongside name, with job title as a
+# quieter third line and never the server's literal "contact" fallback; the selected chip shows name +
+# email; a successful create shows a success MessageBar naming the To Do with an "Open in Spaarke" link
+# gated on canOpenRecord + ORG_URL (NFR-10, never rendered dead); a failed create shows the server's own
+# reason, never a generic message, and no success confirmation. Tab label/icon changes ("To Do" + the
+# Microsoft To Do blue check) are pinned by the two suites already listed above:
+# TaskPaneNavigation.test.tsx and TaskPaneShell.test.tsx (both updated by this task).
+shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
