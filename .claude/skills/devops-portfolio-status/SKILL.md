@@ -44,7 +44,8 @@ query {
             nodes {
               # Extract: Type, Project Type, Status, Parent issue, Task Count, Tasks Completed,
               # AI Spend (est.) (added 2026-10-04, reuse-governance finding — estimated local-transcript
-              # cost, see devops-project-sync Step 1 and scripts/ai-cost/get-project-cost.py)
+              # cost; refreshed on-demand by /project-spend-update, not by this skill. May be stale -
+              # check "AI Spend As Of" per project before reporting totals as current.)
             }
           }
         }

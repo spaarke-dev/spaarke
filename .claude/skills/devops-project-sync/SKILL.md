@@ -41,7 +41,8 @@ This is the workhorse — most automation hooks call this skill at end-of-host-s
 - `current-task.md` "Task" field → for in-progress detection
 - Worktree existence + last commit date → Status heuristic
 - Open PR for branch → also influences Status
-- `python scripts/ai-cost/get-project-cost.py {name}` (added 2026-10-04, reuse-governance finding) → `AI Spend (est.)`, `AI Calls`, `AI Spend As Of` = today's date. Estimated from local Claude Code transcripts at list API pricing — **not** a reconciled invoice figure (no attempt to distinguish metered-API usage from subscription/Max-plan usage per owner direction 2026-10-04: keep this cheap and automatic, reconcile against the actual bill manually at the portfolio level, not per project). If the script reports `found: false` (no local transcript folder matches — e.g. the project was never worked via this machine's Claude Code, or was renamed), leave the three AI-cost fields untouched rather than writing zero.
+
+**Not in scope**: `AI Spend (est.)` / `AI Calls` / `AI Spend As Of` are updated by the separate `/project-spend-update` skill, triggered manually — not tied to task completion. See `.claude/skills/project-spend-update/SKILL.md` (added 2026-10-04, reuse-governance finding, revised same day to decouple from this skill per owner direction — a task-execute-tied refresh under-covers Workflow-tool-driven sessions that don't route through Step 9.6).
 
 ### Step 2: Query current Issue field values
 
@@ -51,7 +52,7 @@ query {
     ... on ProjectV2Item {
       fieldValues(first: 30) {
         nodes {
-          # extract all 9 portfolio fields' current values (incl. AI Spend (est.), AI Calls, AI Spend As Of)
+          # extract all 6 portfolio fields' current values
         }
       }
     }
@@ -61,7 +62,7 @@ query {
 
 ### Step 3: Compute diff
 
-For each of the 9 portfolio fields:
+For each of the 6 portfolio fields:
 - If computed value == current value → NO-OP for this field (idempotency contract)
 - If computed value != current value → ADD to mutation list
 
@@ -97,7 +98,7 @@ For audit trail. Not required by spec but helps debugging.
 
 ## Outputs
 
-- Up to 9 GitHub Project field mutations (or zero if no-op)
+- Up to 6 GitHub Project field mutations (or zero if no-op)
 - Single confirmation line (per NFR-03 when called by hook; verbose by default when user-invoked)
 
 ## Behavior contracts (binding)
