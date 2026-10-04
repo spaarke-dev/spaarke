@@ -78,6 +78,14 @@ public interface IDataverseRecordShareService
         CancellationToken ct = default)
         => Task.FromException<AccessRights>(new NotSupportedException(
             $"{GetType().Name} does not read a principal's effective rights."));
+
+    /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessForRecordsOrThrowAsync"/>
+    /// <remarks>unified-access-control-r2 task 149: the strict read for many records of one table, for the secure-child
+    /// share synchronizer. Every record asked about is in the answer, or the call throws.</remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -141,4 +149,10 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default)
         => _dataverse.RetrievePrincipalRightsAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default)
+        => _dataverse.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
 }

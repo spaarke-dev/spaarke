@@ -431,11 +431,11 @@ public class NoAccessShareEnforcerTests
         NoAccessEnforcementReport? secondReport = null;
         var interleaved = new InterleavingShares(_h.Shares);
         var other = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, _h.Shares, _h.Cache.Mock.Object,
-            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
         interleaved.BeforeFirstRevoke = async () =>
             secondReport = await other.EnforceEntryAsync(second, new[] { Tenant }, CancellationToken.None);
         var enforcer = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, interleaved, _h.Cache.Mock.Object,
-            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(interleaved), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var firstReport = await enforcer.EnforceEntryAsync(first, new[] { Tenant }, CancellationToken.None);
 
@@ -471,7 +471,7 @@ public class NoAccessShareEnforcerTests
             AfterFirstRead = async () => reportA = await _h.Enforcer.EnforceEntryAsync(entryA, new[] { Tenant }, CancellationToken.None),
         };
         var enforcerB = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, staleFirstRead, _h.Cache.Mock.Object,
-            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(staleFirstRead), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var reportB = await enforcerB.EnforceEntryAsync(entryB, new[] { Tenant }, CancellationToken.None);
 
@@ -515,6 +515,70 @@ public class NoAccessShareEnforcerTests
 
         report.Failures.Should().ContainSingle(f => f.Kind == "record-lock-unavailable");
         _h.Shares.Writes.Should().BeEmpty();
+    }
+
+    // ── Task 149 merged after this task (AC6): the secure record's children follow a removal at once ──────────────
+
+    private const int CollaborateOnChild = 23; // Collaborate without Share — task 149's child mirror
+    private static readonly Guid ChildDocument = Guid.Parse("14314314-3143-1431-4314-3143143143e1");
+    private static readonly Guid ChildEvent = Guid.Parse("14314314-3143-1431-4314-3143143143e2");
+
+    /// <summary>The secure project as task 149's synchronizer reads it: owned by the Secure team, with two children.</summary>
+    private void SecureProjectWithChildren()
+    {
+        _h.ChildWorld = SecureChildShareWorld.Standard()
+            .SecureRoot(Project, SecureProject)
+            .SecureChild("sprk_document", ChildDocument, ("sprk_project", Project, SecureProject))
+            .SecureChild("sprk_event", ChildEvent, ("sprk_regardingproject", Project, SecureProject));
+        foreach (var (table, id) in new[] { ("sprk_document", ChildDocument), ("sprk_event", ChildEvent) })
+        {
+            _h.Shares.Seed(table, id, User(Walled), CollaborateOnChild);
+            _h.Shares.Seed(table, id, User(Colleague), CollaborateOnChild);
+        }
+    }
+
+    [Fact]
+    public async Task Enforce_ARemovedRootShare_RemovesTheWalledUserFromEveryChildAtOnce_NotAtTheNextTick()
+    {
+        SecureProjectWithChildren();
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue();
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled && r.RecordId == SecureProject);
+        _h.Shares.MaskOf("sprk_document", ChildDocument, User(Walled)).Should().BeNull("the children follow the root in the same call");
+        _h.Shares.MaskOf("sprk_event", ChildEvent, User(Walled)).Should().BeNull();
+        _h.Shares.MaskOf("sprk_document", ChildDocument, User(Colleague)).Should().Be(CollaborateOnChild, "the colleague keeps R");
+        _h.Shares.MaskOf("sprk_event", ChildEvent, User(Colleague)).Should().Be(CollaborateOnChild);
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheChildrenCannotBeUpdated_IsAFailureNamingTheRecord_AndTheRootRemovalStands()
+    {
+        SecureProjectWithChildren();
+        _h.ChildWorld.FailingQueriesOf("sprk_event");
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse("a fan-out that could not finish is never \"complete\"");
+        report.Failures.Should().ContainSingle(f => f.Kind == "children-incomplete" && f.RecordId == SecureProject);
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled, "the root removal stands");
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Enforce_WhenNothingWasRemovedOnTheRecord_DoesNotReadItsChildren()
+    {
+        SecureProjectWithChildren(); // the walled user holds child shares but no ROOT share: nothing to remove at the root
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        await Enforce(entry);
+
+        _h.ChildWorld.QueriedTables.Should().BeEmpty("the fan-out runs only after a removal; the reconcile owns the rest");
     }
 
     /// <summary>A lease that is granted, then found expired (or unreachable) when renewed.</summary>
@@ -596,5 +660,10 @@ public class NoAccessShareEnforcerTests
 
             return shares;
         }
+
+        // Task 149: the batched strict read the secure-child synchronizer uses (merged with task 143).
+        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+            string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => inner.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
     }
 }

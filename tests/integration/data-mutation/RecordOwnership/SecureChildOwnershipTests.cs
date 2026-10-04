@@ -687,6 +687,11 @@ public class SecureChildOwnershipTests
 
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default) =>
             throw new NotSupportedException();
+
+        // Batch 4 integration (task 149): the batched share read joins the seam; never reached by these tests.
+        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+            string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private static (TaskActionCore Core, List<Entity> Created) TaskCore(IRecordOwnershipResolver ownership)

@@ -536,6 +536,26 @@ public static class ExternalAccessModule
         // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
         services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
+        // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
+        // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
+        // the reconcile job below, and by NoAccessShareEnforcer after it removes a root share (task 143 merge, r3). Concrete
+        // class (ADR-010: no second implementation, no interface). SCOPED since r3: it consults task 143's scoped
+        // SecureShareNoAccessGuard before every child grant or widening; every consumer resolves it from a request or job
+        // scope (the endpoints' handler parameters, the reconcile job's per-run scope, the scoped enforcer). Every
+        // dependency — IGenericEntityService, the one POA seam IDataverseRecordShareService, the guard — is registered
+        // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6 and §13.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+
+        // Task 149 — the scheduled safety net and the mechanism for every writer that does not pass through the share
+        // endpoints: children created or re-filed under a secure record, and model-driven-app Share/Unshare of a secure root
+        // (no relationship cascades either, live metadata 2026-10-02). Every two minutes. ENABLED WITH WRITES: it IS the
+        // mechanism (report-only would leave new children invisible to the root's sharees), and every write is bounded by
+        // the root's own shares. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6).
+        // UNCONDITIONAL registration (ADR-032): IServiceScopeFactory, TimeProvider and the synchronizer are unconditional.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob>(
+            Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob.DefaultCronSchedule);
+
         // unified-access-control-r2 task 143 (owner Q4; round 3 R3/R4) — the No Access safety net: every 5 minutes,
         // every active entry is enforced through NoAccessShareEnforcer (out-of-band MDA shares after an entry, records
         // that became secure, links that appeared). ENABLED with writes ON, per the owner's R4 answer — it only ever

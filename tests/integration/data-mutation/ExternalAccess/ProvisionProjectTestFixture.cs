@@ -258,6 +258,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public LogCapture Logs { get; } = new();
 
     /// <summary>
+    /// Task 149: the Dataverse the secure-child share synchronizer reads (its POA writes go to the recording share
+    /// service, so they land in <see cref="Grants"/>). Default: an environment with no Secure Record BU, where the
+    /// fan-out after provisioning reads nothing and writes nothing.
+    /// </summary>
+    internal SecureChildShareWorld ChildWorld { get; set; } = SecureChildShareWorld.WithoutSecureBusinessUnit();
+
+    /// <summary>
     /// One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke. <c>Sequence</c> shares
     /// <see cref="RecordedUpdate"/>'s counter, so a test can order a share against an owner PATCH (task 133).
     /// </summary>
@@ -463,6 +470,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
         UnreadableLinkUsers.Clear();
         Logs.Clear();
+        ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -492,7 +500,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
             // Task 061 — the POA share plane. Recorded rather than mocked.
             services.RemoveAll<IDataverseRecordShareService>();
-            services.AddSingleton<IDataverseRecordShareService>(new RecordingRecordShareService(this));
+            var recordShare = new RecordingRecordShareService(this);
+            services.AddSingleton<IDataverseRecordShareService>(recordShare);
+
+            // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares.
+            services.RemoveAll<SecureChildShareSynchronizer>();
+            services.AddSingleton(SecureChildShareWorld.SynchronizerOver(() => ChildWorld, recordShare));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -1191,6 +1204,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             }
 
             return GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        }
+
+        // Task 149: the batched strict read the secure-child synchronizer uses. Provisioning's own steps never call it.
+        public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+            string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            var answer = new Dictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>();
+            foreach (var id in recordIds.Distinct())
+                answer[id] = await GetPrincipalAccessOrThrowAsync(entityLogicalName, id, ct);
+            return answer;
         }
 
         /// <summary>The write refusals Grant and Modify share (a creator share is written by either).</summary>

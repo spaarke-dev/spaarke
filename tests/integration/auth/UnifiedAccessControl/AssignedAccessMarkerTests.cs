@@ -61,14 +61,19 @@ public class AssignedAccessMarkerTests
     private Task<IResult> ShareUser(Guid user) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", _matter, user, ExternalAccessLevel.Collaborate),
-            _h.Shares, _h.Grants, _h.Cache.Mock.Object, new WriteProbe(), _h.Guard,
+            _h.Shares, _h.Grants, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
             _h.Materializer, Context(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Batch 4 integration (task 149): the share routes fan out to a secure root's children — the REAL
+    /// synchronizer over a world with no secure record, so it answers "not applicable" for this ordinary matter.</summary>
+    private Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Children() =>
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(), _h.Shares);
 
     private Task<IResult> UnshareUser(Guid user) =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("matter", _matter, user),
             _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object,
-            _h.Materializer, Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            _h.Materializer, Children(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 9 — removal through Manage Access sticks; a manual grant afterwards still succeeds

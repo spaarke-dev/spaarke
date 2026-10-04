@@ -86,7 +86,9 @@ public sealed record SystemUserNoAccessSubjects(NoAccessSubjects Subjects, strin
 /// reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
 /// contact C represent") over the same two links. On a non-secure record the veto checks only the derived contact and its
 /// organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
-/// normalizer could not derive contributed no grant to remove.</para>
+/// normalizer could not derive contributed no grant to remove. Task 149's <c>SecureChildShareSynchronizer</c> asks
+/// <see cref="CheckAsync"/> about each of a child's secure ROOTS before any child grant or widening, and drops a user it
+/// refuses (walled or unverifiable).</para>
 /// </remarks>
 public sealed class SecureShareNoAccessGuard
 {
@@ -125,8 +127,9 @@ public sealed class SecureShareNoAccessGuard
 
         if (!ExternalParticipationService.IsFlagBearingRootType(entityLogicalName))
         {
-            // Not a secure ROOT type: no direct POA share on it is a secure-record share today. A child record
-            // becomes securable with C10 part 2 (tasks 146/149), whose share fan-out must ask about its ROOT.
+            // Not a secure ROOT type: no direct POA share on it is a secure-record share. A child of a secure record
+            // (C10 part 2, tasks 146/149) is asked about through its ROOT: SecureChildShareSynchronizer calls this check
+            // for each of the child's secure roots before any child grant or widening.
             return SecureShareWallDecision.NotSecure;
         }
 

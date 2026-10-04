@@ -507,6 +507,54 @@ configuration is shaped correctly.
 | 9 | **NFR-05 assertion** — `SecureBuRoleDepthAssertionTests` live test with `SPAARKE_NFR05_DATAVERSE_URL` set (and `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when only `az login` is available) | **passes**: no non-administrator human reaches the BU by depth on project/matter/work assignment, the BU holds no users, the named team resolves with no members, it alone holds the role, and the role holds Read at User depth on every table in `config/secure-record-owner-role.json` (clause 5, task 145 — a gap names the table and means that table's secure rows cannot be owned by the team) |
 | 10 | **Cutover complete**: `scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Verify` | **exit 0** — every secure row owned by the named team, none by the default team and none outside the BU |
 | 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each exposure is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; a clause-5 coverage gap is an ERROR line naming the table (fail-closed, not an exposure); it writes nothing |
+| 12 | The BFF's `secure-child-share-reconciliation` job (`/api/admin/jobs/secure-child-share-reconciliation/status`, task 149) | **enabled**, last run `Success = true`, heartbeat `[SECURE-CHILD-SHARES] heartbeat status=Completed`. `held > 0` names a child whose secure roots cannot be determined (see §7a); `notUpdated > 0` is retried every two minutes |
+| 13 | **🔴 Sharees see the children, nobody else does** (task 149) — with existing non-admin test users: share a secure project with user A, create a child under it, wait one reconcile tick (≤ 2 min) | A reads the child in MDA; a user NOT shared on the project is DENIED it; unsharing A (Manage Access, or the MDA Share dialog + one tick) removes A from the child. Delete the probes |
+
+### 7a. The children of a secure record — who can see them (task 149)
+
+A secure record's children (documents, events, to-dos, communications, memos, analyses and the rest of the codified
+set in `config/secure-record-owner-role.json`) are owned by the memberless `Secure Record Owners` team (task 146), so
+**the only way to reach one is a share on the child row itself**. Dataverse does not provide that share: every
+root→child relationship has Share, Unshare, Reparent and Assign set to **NoCascade** (read 2026-10-02). The BFF does:
+
+- **The rule.** Every child carries exactly its secure root's internal sharees — users and teams — at the root's rights
+  restricted to Read, Write, Append, AppendTo and Delete. **Never Share** (share the ROOT; the children follow) and
+  never Assign — owner decision, round 11 item 4. A child filed under two secure records gets only the people shared on
+  BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
+  child is removed.
+- **The No Access list wins** (task 143). A user on the No Access list of ANY secure record a child is filed under is
+  never given anything new on that child — no new share, no wider one — even when the child's other secure record does
+  not wall them, and even while their share on the record itself is still there (the No Access enforcement has not run
+  yet, or kept them as the record's last reader); a share they already hold can only narrow. When the enforcement
+  removes their share on the record, its children follow in the same call. If the list cannot be checked for someone,
+  they are given nothing and the child is retried. The list applies where the record's **Secure flag**
+  (`sprk_issecure`) is set: a record owned by `Secure Record Owners` whose flag reads No or empty — possible only part
+  way through an unsecure (see the ship gate below) or after a hand edit before task 150 locks the flag — is not
+  checked for its children either. Its own share path (Manage Access and the No Access enforcement) skips it the same
+  way, so a child is never wider than its record.
+- **When.** Immediately when a share is added, changed or removed through Manage Access (the response says how many
+  related records could not be updated yet, if any); immediately after secure provisioning; immediately after the No
+  Access enforcement removes a share on the record; and every two minutes for everything else — a new or re-filed
+  child, a client-side create, and a Share/Unshare made in the model-driven app's own dialog on a secure record.
+- **The two-minute window is accepted** (owner decision, round 11 item 2, 2026-10-03). For a model-driven-app
+  Share/Unshare and for a NEW or RE-FILED child, the children catch up within at most two minutes: an unshared user can
+  keep a child for that long, and a sharee may wait that long to open a child just created. The reconcile job is the
+  mechanism, ships with **writes on**, and Dataverse's table-wide Share/Unshare/Reparent cascade is **not** enabled.
+- **Held children.** A child whose secure roots cannot be determined from the data (a missing parent, a root marked
+  secure whose provisioning did not complete, a filing chain deeper than six levels) is only ever narrowed — nobody is
+  added to it — and is reported as `held` until the data is fixed. When none of its secure records can be found at all,
+  every share on it is removed, so a stale share (a former sharee's) never survives on such a child.
+- **Messages on a secure record.** A conversation message filed under a secure record is a child like any other: its
+  readers are the record's sharees. Thread participants who are not shared on the record are NOT granted it (the
+  messaging grant skips Secure-team-owned messages); share the record to give someone its conversation.
+- **Not this mechanism.** Contacts (SPA/Teams) reach children through the external data plane's root scoping, not POA
+  shares.
+- **🔴 SHIP GATE — no record is unsecured in a shared environment until task 148 is deployed** (owner decision, round
+  11 item 3, 2026-10-03). Tasks 146 and 149 may deploy. A record that has been made ordinary again keeps its children
+  owned by `Secure Record Owners` and shared with its FORMER sharees, untouched, until task 148 moves the children into
+  the record's business unit and then calls the synchronizer; there is no other repair. Removing those shares first
+  would leave the children readable by nobody. So until 148 is deployed, **do not unsecure** a record in any
+  environment other people use (`notes/task-149-secure-child-sharee-access.md` §12 decision 4, §13).
 
 ### ⚠️ Privilege caching will lie to you
 
@@ -636,6 +684,10 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Create one BU per project | Retired mechanism. No `SP-*` BUs should exist |
 | Set `sprk_containerid` on the secure BU | That is the *shared* cascade container. A secure project uses its own |
 | Use `pac` without checking the active profile | `pac auth list` may be pointed at production. Mint a token against an explicit URL instead |
+| Share an individual CHILD of a secure record (a document, a to-do) with someone | The reconcile removes any child share its root does not carry, within two minutes. Share the secure record itself; its children follow (§7a) |
+| Turn on Share / Unshare / Reparent cascade on a project, matter or work-assignment relationship | The setting is TABLE-WIDE: every ordinary record's children would be shared too, a product-wide behaviour change. The owner decided against it (round 11 item 2): the two-minute reconcile is the mechanism (§7a) |
+| Unsecure a record in a shared environment before task 148 is deployed | Its children keep their former sharees and nobody in its business unit can read them (§7a ship gate, owner round 11 item 3) |
+| Disable the `secure-child-share-reconciliation` job in a shared environment | It is the only mechanism for new children and for model-driven-app Share/Unshare of a secure record; disabled, a removed user keeps every child (§7a) |
 
 ---
 
@@ -652,3 +704,4 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Provisioning code | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` (projects, matters, work assignments; `recordType` + `recordId`) |
 | Named owner team + the two invariants | `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`; census job `Services/ExternalAccess/SecureRecordIsolationCensusJob.cs`; evaluator `Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs` |
 | One-time migration off the default team | [`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1`](../../scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1); record `projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md` |
+| Sharees of a secure record see its children (§7a) | `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs` (+ `SecureChildLineage.cs`, `SecureChildShareReconciliationJob.cs`); record `projects/unified-access-control-r2/notes/task-149-secure-child-sharee-access.md` |

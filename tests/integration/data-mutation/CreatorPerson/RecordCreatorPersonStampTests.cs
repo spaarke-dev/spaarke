@@ -25,7 +25,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CreatorPerson;
 /// <para><b>The failure mode.</b> Secure provisioning's resume shares a stranded secure record to the person who created
 /// it. For an app-created row there was nobody to share to (createdonbehalfby is empty, live 2026-10-01), so the resume
 /// could only refuse. A writer that forgot the stamp would pass every create test and silently bring that back.</para>
-/// <para>The user-OBO chat create (<c>dataverse.create_record</c>) is pinned in <c>DataverseCreateRecordHandlerTests</c>;
+/// <para>The chat create (<c>dataverse.create_record</c>, created by the app since task 146; its stamp rides that create
+/// per owner round 10) is pinned in <c>SecureChildOwnershipAiToolTests</c>, and its refusal of an item naming the column
+/// in <c>DataverseCreateRecordHandlerTests</c>;
 /// the column's schema (name, target, tables, field security) against these constants in
 /// <see cref="RecordCreatorPersonSchemaAgreementTests"/>.</para>
 /// </remarks>

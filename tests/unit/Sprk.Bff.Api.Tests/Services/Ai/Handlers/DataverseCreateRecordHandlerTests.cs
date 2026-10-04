@@ -568,7 +568,9 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
-    // unified-access-control-r2 task 133 b2 — the creator stamp (owner round 7 item 2)
+    // unified-access-control-r2 task 133 b2 — the creator stamp (owner round 7 item 2). Since owner round 10 the stamp
+    // rides the APPLICATION's create payload on the owned path (SecureChildOwnershipAiToolTests); this class keeps the
+    // refusal of an item that names the column.
     // ═════════════════════════════════════════════════════════════════════════════
 
     private void SetupCreate(string entitySetName, string primaryIdAttribute, Guid createdId, Guid? createdBy)

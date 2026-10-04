@@ -300,6 +300,66 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         _user.Posts.Should().BeEmpty();
     }
 
+    // ── Task 133 creator stamp, integrated with G5 (owner round 10: "superseded at integration by task 146's
+    //    create-as-the-app, which writes the stamp in the create payload"). Batch 4 integration: the ONE stamp is task 146
+    //    c1-r1's (RecordOwnerResolution.StampCreatorOn in OwnedChildWrite.CreateAsync, a sprk_CreatedByPerson bind after
+    //    the caller's checks); task 149 r3's own WithCreatorPersonAsync re-map was dropped so the column is written once.
+
+    [Theory]
+    [InlineData("sprk_matter", "sprk_mattername")]
+    [InlineData("sprk_project", "sprk_projectname")]
+    [InlineData("sprk_workassignment", "sprk_name")]
+    public async Task CreateRecord_ASecureRootTable_CarriesTheCallerAsItsCreatorPerson_InTheAppsOwnCreate(
+        string table, string nameColumn)
+    {
+        // Live, the column is field-secured so that ONLY the BFF writes it (Set-RecordCreatorPersonSchema.ps1): the
+        // server-set stamp is not the caller's column-security question.
+        _user.SecuredColumns.Add(RecordCreatorPerson.Column);
+
+        var result = await CreateRecord(table, (nameColumn, JsonSerializer.SerializeToElement("New")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().BeEmpty("created by the application, never as the user then patched");
+        _user.Patches.Should().BeEmpty("there is no follow-up write: the stamp rides the create");
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == table).Subject.Fields;
+        fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind")
+            .WhoseValue.Should().Be($"/systemusers({Caller:D})",
+                "createdby is the application, so the person who asked is recorded — the caller by WhoAmI, never the item");
+        fields.Keys.Count(k => k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase)
+                               || k.StartsWith("sprk_createdbyperson", StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1, "exactly one creator stamp");
+        Owner(fields).Should().Be(Directory.ChildTeam);
+    }
+
+    [Fact]
+    public async Task CreateRecord_AChildTable_IsStampedWithItsCreatorPerson_Too()
+    {
+        // Batch 4 integration: task 149 r3 pinned "a child is never stamped" (task 133's three roots only). Task 146 c1-r1
+        // (owner round 13 item 9, later than round 10) stamps the CHILD tables the application creates as well, so F3's
+        // creator branch can admit the person who asked — this case now pins that, once.
+        var result = await CreateRecord("sprk_todo", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind")
+            .WhoseValue.Should().Be($"/systemusers({Caller:D})");
+    }
+
+    [Fact]
+    public async Task CreateRecord_ARequestNamingAFieldSecuredColumnOnARoot_IsStillRefused_TheExemptionIsTheCreatorColumnOnly()
+    {
+        _user.SecuredColumns.Add(RecordCreatorPerson.Column);
+        _user.SecuredColumns.Add("sprk_matterdescription");
+
+        var result = await CreateRecord("sprk_matter",
+            ("sprk_mattername", JsonSerializer.SerializeToElement("New")),
+            ("sprk_matterdescription", JsonSerializer.SerializeToElement("privileged")));
+
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        result.ErrorMessage.Should().Contain("sprk_matterdescription");
+        _appCreates.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("sprk_workspacelayout")]   // per-user by design
     [InlineData("sprk_mattertype_ref")]    // organization-owned: no owner to decide
@@ -610,12 +670,22 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
             },
-            ["sprk_matter"] = new[] { ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal") },
+            ["sprk_matter"] = new[]
+            {
+                ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
+                ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+            },
+            ["sprk_project"] = new[]
+            {
+                ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
+                ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+            },
             ["sprk_workassignment"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
+                ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
             },
             ["sprk_communication"] = new[]
             {
@@ -635,6 +705,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_todo", "prvAppendsprk_todo", "prvCreatesprk_communication", "prvAppendsprk_communication",
             "prvCreateActivity", "prvAppendActivity", "prvCreatesprk_matter", "prvAppendsprk_matter",
             "prvCreatesprk_workassignment", "prvAppendsprk_workassignment",
+            "prvCreatesprk_project", "prvAppendsprk_project",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
@@ -642,6 +713,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Records the caller holds Full Access on (Delete as well) — F3's question (task 146 c1).</summary>
         public HashSet<Guid> FullAccessOn { get; } = new();
         public HashSet<string> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public HashSet<Guid> InvisibleRows { get; } = new();
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
@@ -652,6 +724,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         [GeneratedRegex(@"@odata\.id"":""(?<set>\w+)\((?<id>[0-9a-fA-F-]{36})\)")]
         private static partial Regex Target();
+
+        [GeneratedRegex(@"LogicalName eq '(?<c>[a-z0-9_]+)'")]
+        private static partial Regex AttributeNamed();
 
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
             Task.FromResult(Get(Uri.UnescapeDataString(relativePath)));
@@ -679,7 +754,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 var table = definition.Groups["t"].Value;
                 var rest = definition.Groups["rest"].Value;
                 if (rest.StartsWith("/Attributes", StringComparison.Ordinal))
-                    return Ok(new { value = SecuredColumns.Select(c => new { LogicalName = c, IsSecured = true }) });
+                {
+                    // Only the columns the question names — as Dataverse answers the $filter.
+                    var asked = AttributeNamed().Matches(rest).Select(m => m.Groups["c"].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    return Ok(new { value = SecuredColumns.Where(asked.Contains).Select(c => new { LogicalName = c, IsSecured = true }) });
+                }
                 if (rest.Contains("Privileges", StringComparison.Ordinal))
                 {
                     var schema = table is "task" ? "Activity" : table;

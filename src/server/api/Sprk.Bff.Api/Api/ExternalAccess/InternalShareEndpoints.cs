@@ -67,6 +67,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <c>/unshare-user</c> refuses to remove the last enabled user whose share can read a secure record (409
 /// <c>last_reader_on_secure_record</c>).</para>
 ///
+/// <para><b>The children of a SECURE record follow its shares</b> (task 149, C10 part 2). Once the root's share is written
+/// and confirmed — or found already right, or found already absent — <see cref="SecureChildShareSynchronizer.SyncRootAsync"/>
+/// brings every child the Secure Record Owners team owns into line with the root's shares: never wider, never Share or
+/// Assign. It runs only AFTER the root write succeeded (a refused or unconfirmed root write fans out nothing) and it is a
+/// no-op for a record that is not secure. When some children could not be updated the answer is 500
+/// <c>children_incomplete</c> with the counts — never a silent 200 — and the root write STANDS (an unshare is never rolled
+/// back to restore access); the scheduled reconcile completes it, and repeating the request is safe.</para>
+///
 /// <para>ADR-001 Minimal API · ADR-008 authorization by the group's endpoint filter · ADR-019 every refusal is
 /// ProblemDetails with a stable reason code and the trace id · ADR-009 the affected user's impersonated root-set cache
 /// is cleared after every write attempt.</para>
@@ -113,6 +121,13 @@ public static class InternalShareEndpoints
     /// amendment R3), so nothing was removed. 409.
     /// </summary>
     internal const string LastReaderOnSecureRecordReasonCode = "sdap.access.user_share.last_reader_on_secure_record";
+
+    /// <summary>
+    /// The share on the record WAS written (or removed), but not every child of the secure record could be brought into
+    /// line with it yet (task 149). 500 with the counts; the scheduled reconcile completes it, and repeating the request is
+    /// safe. An unshare is never rolled back to restore access.
+    /// </summary>
+    internal const string ChildrenIncompleteReasonCode = "sdap.access.user_share.children_incomplete";
 
     /// <summary>
     /// The user is on the record's No Access list (task 143, owner Q4: the list applies to internal users on secure
@@ -246,6 +261,7 @@ public static class InternalShareEndpoints
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
         CallerRecordAccessProbe callerAccessProbe,
+        SecureChildShareSynchronizer secureChildShares,
         SecureShareNoAccessGuard noAccessGuard,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
@@ -424,8 +440,12 @@ public static class InternalShareEndpoints
 
             // Task 142: a deliberate share onto a user the Assigned-To rule shared to (or suggested) is now the operator's.
             await assignedAccess.MarkShareAdoptedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
-            return TypedResults.Ok(new ShareRecordWithUserResponse(
-                systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
+
+            // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
+            return await ChildrenIncompleteAfterShareAsync(
+                       secureChildShares, root, systemUserId, OutcomeUnchanged, current, httpContext, logger, callerOid, ct)
+                   ?? TypedResults.Ok(new ShareRecordWithUserResponse(
+                       systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
         }
 
         // ── Write, then confirm what Dataverse stored ─────────────────────────
@@ -476,9 +496,12 @@ public static class InternalShareEndpoints
             "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
             callerOid, root.Type, root.Id, systemUserId, level, granted.AccessRightsMask, outcome, current, narrowed);
 
-        return TypedResults.Ok(new ShareRecordWithUserResponse(
-            systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
-            outcome, narrowed));
+        // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
+        return await ChildrenIncompleteAfterShareAsync(
+                   secureChildShares, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger, callerOid, ct)
+               ?? TypedResults.Ok(new ShareRecordWithUserResponse(
+                   systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
+                   outcome, narrowed));
     }
 
     // =========================================================================
@@ -499,6 +522,7 @@ public static class InternalShareEndpoints
         ExternalParticipationService participations,
         ITenantCache cache,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        SecureChildShareSynchronizer secureChildShares,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -555,7 +579,12 @@ public static class InternalShareEndpoints
             logger.LogInformation(
                 "[USER-SHARE] {SystemUserId} holds no share on {RootType} {RootId}; nothing to remove (caller {CallerOid}).",
                 systemUserId, root.Type, root.Id, callerOid);
-            return TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
+
+            // Still fanned out: the user may still hold a share on a child (an incomplete earlier unshare, or one made in
+            // the model-driven app), and repeating the unshare is how a caller removes it.
+            return await ChildrenIncompleteAfterUnshareAsync(
+                       secureChildShares, root, systemUserId, removed: false, httpContext, logger, callerOid, ct)
+                   ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
         }
 
         // ── S5 (owner round 3, task 139 amendment R3): a secure record always keeps someone who can see it ──
@@ -605,7 +634,137 @@ public static class InternalShareEndpoints
         // and never thrown: the removal above stands.
         await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
 
-        return TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: true));
+        // ── Task 149: the root share is confirmed gone; now remove the user from its secure children ──
+        return await ChildrenIncompleteAfterUnshareAsync(
+                   secureChildShares, root, systemUserId, removed: true, httpContext, logger, callerOid, ct)
+               ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: true));
+    }
+
+    // =========================================================================
+    // Task 149 — the secure children follow the root
+    // =========================================================================
+
+    /// <summary>
+    /// After a confirmed share on the root: brings the root's secure children into line, and answers the 500
+    /// <see cref="ChildrenIncompleteReasonCode"/> refusal when some could not be — or <c>null</c> when every child is in line
+    /// (or the record is not secure).
+    /// </summary>
+    private static async Task<IResult?> ChildrenIncompleteAfterShareAsync(
+        SecureChildShareSynchronizer secureChildShares,
+        GrantExternalAccessEndpoint.GrantRootResolution root,
+        Guid systemUserId,
+        string rootOutcome,
+        int rootMask,
+        HttpContext httpContext,
+        ILogger logger,
+        string? callerOid,
+        CancellationToken ct)
+    {
+        var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
+        if (children.IsComplete)
+            return null;
+
+        logger.LogWarning(
+            "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is in place ({Outcome}), but its secure children are " +
+            "not all in line: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held} (caller {CallerOid}). " +
+            "The scheduled reconcile completes it.",
+            systemUserId, root.Type, root.Id, rootOutcome, children.Status, children.ChildrenInScope,
+            children.ChildrenNotUpdated, children.ChildrenHeld, callerOid);
+
+        var detail = children.Status == SecureChildShareSyncStatus.Failed
+            ? "The record was shared, but its related records (documents, events, to-dos and communications) could not be " +
+              "read, so they do not show it yet. They are updated automatically within a few minutes, or you can try again."
+            : $"The record was shared, but {children.ChildrenLeftOutOfLine} of its {children.ChildrenInScope} related records " +
+              "(documents, events, to-dos and communications) could not be updated yet. They are updated automatically " +
+              "within a few minutes, or you can try again." + HeldSentence(children);
+
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
+            ("outcome", rootOutcome), ("accessRightsMask", rootMask));
+    }
+
+    /// <summary>
+    /// After a confirmed unshare on the root (or none to remove): removes the user from the root's secure children. The
+    /// root's unshare STANDS whatever happens here — access is never restored to undo a partial removal.
+    /// </summary>
+    private static async Task<IResult?> ChildrenIncompleteAfterUnshareAsync(
+        SecureChildShareSynchronizer secureChildShares,
+        GrantExternalAccessEndpoint.GrantRootResolution root,
+        Guid systemUserId,
+        bool removed,
+        HttpContext httpContext,
+        ILogger logger,
+        string? callerOid,
+        CancellationToken ct)
+    {
+        var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
+
+        // A HELD child does not keep the removed user: held children are only narrowed, and a principal its known roots do
+        // not share is revoked from it. So for an unshare only children that could not be updated at all are incomplete.
+        if (children.IsComplete
+            || (children.Status != SecureChildShareSyncStatus.Failed && children.ChildrenNotUpdated == 0))
+            return null;
+
+        logger.LogWarning(
+            "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but its secure children " +
+            "are not all in line: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held} (caller {CallerOid}). " +
+            "The scheduled reconcile completes it.",
+            systemUserId, root.Type, root.Id, removed, children.Status, children.ChildrenInScope,
+            children.ChildrenNotUpdated, children.ChildrenHeld, callerOid);
+
+        var detail = children.Status == SecureChildShareSyncStatus.Failed
+            ? "This user's access to the record was removed, but its related records (documents, events, to-dos and " +
+              "communications) could not be read, so they may still open them. They are removed automatically within a few " +
+              "minutes, or you can try again."
+            : $"This user's access to the record was removed, but {children.ChildrenNotUpdated} of its " +
+              $"{children.ChildrenInScope} related records (documents, events, to-dos and communications) could not be " +
+              "updated yet, so they may still open those. They are removed automatically within a few minutes, or you can " +
+              "try again.";
+
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
+            ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated));
+    }
+
+    private const string ChildrenIncompleteTitle = "Related records not all updated";
+
+    /// <summary>
+    /// The extra sentence when some children are HELD: their secure records cannot be determined from the data, so the
+    /// schedule will not add anyone to them until an administrator repairs how they are filed — "a few minutes" would
+    /// not be true for those.
+    /// </summary>
+    private static string HeldSentence(SecureChildShareSyncResult children) =>
+        children.ChildrenHeld == 0
+            ? string.Empty
+            : $" {children.ChildrenHeld} of them cannot be matched to their secure record until an administrator repairs " +
+              "how they are filed; nobody is added to those meanwhile.";
+
+    /// <summary>The 500 for a root write that stands while some of its secure children are not yet in line.</summary>
+    private static IResult ChildrenIncomplete(
+        HttpContext httpContext,
+        string title,
+        string detail,
+        Guid systemUserId,
+        SecureChildShareSyncResult children,
+        params (string Key, object? Value)[] rootFacts)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["traceId"] = httpContext.TraceIdentifier,
+            ["reasonCode"] = ChildrenIncompleteReasonCode,
+            ["systemUserId"] = systemUserId,
+            ["childrenStatus"] = children.Status.ToString(),
+            ["childrenInScope"] = children.ChildrenInScope,
+            ["childrenUpdated"] = children.ChildrenUpdated + children.ChildrenUnchanged,
+            ["childrenNotUpdated"] = children.ChildrenLeftOutOfLine,
+            ["childrenHeld"] = children.ChildrenHeld,
+        };
+        foreach (var (key, value) in rootFacts)
+            extensions[key] = value;
+
+        return Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: title,
+            detail: detail,
+            extensions: extensions);
     }
 
     // =========================================================================

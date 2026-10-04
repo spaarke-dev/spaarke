@@ -67,6 +67,14 @@ public class InternalUserShareTests
     private readonly FakeRecordShareTable _shares = new();
     private readonly FakeSystemUsers _users = new();
 
+    /// <summary>
+    /// Task 149: the secure-child synchronizer the share routes now fan out through, over a world with the Secure Record BU
+    /// and team but NO secure roots — the matter here is ordinary, so the fan-out reads its root, finds it ordinary and
+    /// writes nothing. The secure fan-out itself is pinned in SecureChildShareMirrorTests.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld _children =
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+
     /// <summary>The record's flags, read by /unshare-user's S5 rule (task 139). Unseeded: Standard, not secure.</summary>
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _flags = new(defaultFlags: RootRecordFlags.None);
     private readonly Mock<ITenantCache> _cache = new();
@@ -498,7 +506,7 @@ public class InternalUserShareTests
     {
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
-            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _guard,
+            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
             AssignedAccessTestDoubles.InertMaterializer(),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
@@ -1153,15 +1161,16 @@ public class InternalUserShareTests
         Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter", AccessRights? callerRights = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
-            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights), _guard,
-            AssignedAccess, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
+            _children.Synchronizer(_shares), _guard, AssignedAccess, AuthenticatedContext(), NullLogger<Program>.Instance,
+            CancellationToken.None);
 
     /// <summary>
     /// Reports fixed rights for the caller, which is what the intersection rule reads. A probe that answered
     /// <see cref="AccessRights.None"/> would make every share refuse, so the default has to be a caller who can
     /// actually grant — and a test that wants the narrowing path states the narrower rights explicitly.
     /// </summary>
-    private sealed class StubCallerRightsProbe : CallerRecordAccessProbe
+    internal sealed class StubCallerRightsProbe : CallerRecordAccessProbe
     {
         private readonly AccessRights _rights;
 
@@ -1190,7 +1199,8 @@ public class InternalUserShareTests
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
-            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, AuthenticatedContext(),
+            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
+            AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>
@@ -1240,7 +1250,7 @@ public class InternalUserShareTests
     /// is: it understands only <c>systemuserid eq {id}</c> clauses joined by <c>or</c>, rejects a <c>$select</c> naming a
     /// column the table does not have, and returns ONLY the selected columns.
     /// </summary>
-    private sealed class FakeSystemUsers
+    internal sealed class FakeSystemUsers
     {
         private static readonly HashSet<string> Columns = new(StringComparer.Ordinal)
         {

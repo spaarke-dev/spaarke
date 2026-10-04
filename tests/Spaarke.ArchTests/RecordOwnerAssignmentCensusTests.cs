@@ -417,8 +417,8 @@ public class RecordOwnerAssignmentCensusTests
             "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
 
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
-            "Secure provisioning assigns the ROOT to the named Secure team (task 144), and moves it back to its pre-provisioning "
-            + "owner when a later step is refused (task 143's undo; the member was AssignOwnerToSecureTeamAsync before 143)."),
+            "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
+            "back to the owner read before the call (task 133 renamed AssignOwnerToSecureTeamAsync to serve both)."),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,

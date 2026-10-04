@@ -997,6 +997,15 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>();
             services.AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(RecordShares);
 
+            // Task 149: the share routes fan out to a secure record's children through the secure-child synchronizer.
+            // The contract here is the routes' wire shape, so it runs over an environment with no Secure Record BU (no
+            // record is secure): the fan-out reads nothing more and writes nothing. The fan-out itself is pinned in
+            // SecureChildShareMirrorTests.
+            var noSecureRecords = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.WithoutSecureBusinessUnit();
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                () => noSecureRecords, RecordShares));
+
             // Fixed clock for grant-expiry decisions (task 097).
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);

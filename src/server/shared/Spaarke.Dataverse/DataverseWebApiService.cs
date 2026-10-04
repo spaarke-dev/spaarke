@@ -1410,6 +1410,70 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return DataverseAccessRightsMapper.FromAccessRightsString(rights);
     }
 
+    /// <summary>How many records one batched share read names — keeps the OData filter far below the URL limit.</summary>
+    public const int PrincipalAccessBatchSize = 25;
+
+    /// <summary>
+    /// The strict share read (<see cref="GetPrincipalAccessOrThrowAsync"/>) for MANY records of one table: every record
+    /// asked about is in the answer (an empty list when it has no share), or the call throws.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a batched read</b> (unified-access-control-r2 task 149). The secure-child share synchronizer compares
+    /// every child of a secure record with its root's shares; one GET per child would spend the application user's
+    /// Dataverse request budget on a schedule. The records are read <see cref="PrincipalAccessBatchSize"/> at a time,
+    /// with the same query shape the single read uses (logical-name <c>objecttypecode</c>, <c>changedon</c>; see
+    /// <see cref="PrincipalAccessQuery"/>) plus <c>objectid</c>, verified live on spaarkedev1 on 2026-10-02.</para>
+    /// <para><b>Same strictness, per batch.</b> A refused read, a missing <c>value</c>, a second page, a row with no
+    /// readable record, principal, mask or <c>changedon</c>, or a row for a record that was not asked about: the whole
+    /// call throws, so a caller deciding writes from it never mistakes "could not read" for "no share".</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The shares could not be read completely.</exception>
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(recordIds);
+
+        var answer = new Dictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>();
+        foreach (var batch in recordIds.Where(id => id != Guid.Empty).Distinct().Chunk(PrincipalAccessBatchSize))
+        {
+            var asked = batch.ToHashSet();
+            using var response = await SendGetAsync(PrincipalAccessBatchQuery(batch, entityLogicalName), ct);
+            if (!response.IsSuccessStatusCode)
+                throw ShareReadFailed(entityLogicalName, batch[0],
+                    $"Dataverse answered {(int)response.StatusCode} {response.StatusCode} for a batch of {batch.Length}");
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data?.Value is null)
+                throw ShareReadFailed(entityLogicalName, batch[0], "the batched response carried no rows");
+
+            if (data.NextLink is not null)
+                throw ShareReadFailed(entityLogicalName, batch[0], "the batched shares continue on another page");
+
+            var byRecord = asked.ToDictionary(id => id, _ => new List<Dictionary<string, JsonElement>>());
+            foreach (var row in data.Value)
+            {
+                if (!TryReadGuid(row, "objectid", out var objectId) || !byRecord.TryGetValue(objectId, out var rows))
+                    throw ShareReadFailed(entityLogicalName, batch[0], "a share row names no record that was asked about");
+
+                rows.Add(row);
+            }
+
+            foreach (var (id, rows) in byRecord)
+                answer[id] = ReadPrincipalAccessRows(rows, entityLogicalName, id, strict: true);
+        }
+
+        return answer;
+    }
+
+    /// <summary>The batched read's query: every POA row of the named records of one table.</summary>
+    private static string PrincipalAccessBatchQuery(IReadOnlyCollection<Guid> recordIds, string entityLogicalName)
+        => $"principalobjectaccessset?$filter=objecttypecode eq '{entityLogicalName}' and ("
+            + string.Join(" or ", recordIds.Select(id => $"objectid eq {id}"))
+            + ")&$select=objectid,principalid,principaltypecode,accessrightsmask,changedon";
+
     /// <summary>The query both share reads issue: every POA row of one record.</summary>
     /// <remarks>
     /// 🔴 <b>Three faults were fixed here on 2026-09-22, each masking the next</b> — found because

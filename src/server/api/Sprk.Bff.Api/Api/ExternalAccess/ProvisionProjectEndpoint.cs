@@ -397,6 +397,7 @@ public static class ProvisionProjectEndpoint
         SpeFileStore speFileStore,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
+        SecureChildShareSynchronizer secureChildShares,
         IConfiguration configuration,
         SecureShareNoAccessGuard noAccessGuard,
         HttpContext httpContext,
@@ -777,6 +778,24 @@ public static class ProvisionProjectEndpoint
             "[PROVISION] Provisioning complete for {RecordType} {RecordId}: BU={BuId} ({BuName}), " +
             "OwnerTeam={TeamId}, Container={ContainerId}, Resumed={Resumed}",
             root.WireToken, recordId, secureBuId, secureBuName, ownerTeamId, speContainerId, resume);
+
+        // ── Step 8 (task 149): the record's secure children follow the shares Step 5.5 wrote ──
+        //
+        // Step 5.5 is a root-share writer like /share-user, so it fans out the same way. Today a freshly provisioned
+        // record has no Secure-team-owned children (task 148 re-owns existing ones, then runs this same synchronizer), so
+        // this is normally a no-op; it is here so the rule "every BFF root-share write fans out" has no exception. It
+        // never fails the provisioning: the record IS provisioned and shared, and the scheduled reconcile
+        // (SecureChildShareReconciliationJob) completes any child left out of line.
+        var children = await secureChildShares.SyncRootAsync(root.LogicalName, recordId, ct);
+        if (!children.IsComplete)
+        {
+            logger.LogWarning(
+                "[PROVISION] {RecordType} {RecordId} is provisioned, but its secure children are not all in line with its " +
+                "shares yet: status={Status} inScope={InScope} notUpdated={NotUpdated} held={Held}. The scheduled " +
+                "reconcile completes it. TraceId={TraceId}",
+                root.WireToken, recordId, children.Status, children.ChildrenInScope, children.ChildrenNotUpdated,
+                children.ChildrenHeld, traceId);
+        }
 
         return TypedResults.Ok(new ProvisionProjectResponse(
             BusinessUnitId: secureBuId,

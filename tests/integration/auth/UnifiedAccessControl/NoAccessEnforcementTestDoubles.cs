@@ -197,7 +197,20 @@ internal static class NoAccessEnforcementTestDoubles
         /// scheduler's singleton lease store is shared by every enforcement in a process.</summary>
         public IScheduledJobLease Lease { get; set; } = new ProcessLocalScheduledJobLease();
 
+        /// <summary>
+        /// Task 149 (merged after 143): the Dataverse the secure-child synchronizer reads after a removal. Default: an
+        /// environment with no Secure Record BU, where that fan-out reads the root, finds nothing secure and writes nothing.
+        /// </summary>
+        public DataMutation.ExternalAccess.SecureChildShareWorld ChildWorld { get; set; } =
+            DataMutation.ExternalAccess.SecureChildShareWorld.WithoutSecureBusinessUnit();
+
+        /// <summary>The REAL synchronizer over <see cref="ChildWorld"/> and the given share seam (default: <see cref="Shares"/>).</summary>
+        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer ChildShares(
+            Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
+            => DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, shares ?? Shares);
+
         public NoAccessShareEnforcer Enforcer => new(
-            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, NullLogger<NoAccessShareEnforcer>.Instance);
+            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(),
+            NullLogger<NoAccessShareEnforcer>.Instance);
     }
 }

@@ -131,7 +131,14 @@ public sealed record NoAccessEnforcementReport(
 /// <c>Skipped(no-access)</c> (142 not landed: its ledger must treat a share this enforcer removed that way).</para>
 ///
 /// <para><b>Fails closed</b> (ADR-003). Every read that fails is a <see cref="NoAccessEnforcementFailure"/>, and a report
-/// with any failure or truncation is not <see cref="NoAccessEnforcementReport.Complete"/>. Nothing here ever GRANTS.</para>
+/// with any failure or truncation is not <see cref="NoAccessEnforcementReport.Complete"/>. Nothing here ever grants on a
+/// root.</para>
+///
+/// <para><b>The record's children follow</b> (task 149, merged after this task — AC6). After a removal on a secure record,
+/// <see cref="SecureChildShareSynchronizer.SyncRootAsync"/> brings its children into line with the root's REMAINING share
+/// set at once, so the walled user leaves every child in the same call rather than at the next reconcile tick. That fan-out
+/// never exceeds the root's shares and never gives a walled user anything (it asks the same guard before any grant); a fan-out
+/// that could not finish is reported as a failure (<c>children-incomplete</c>), and the 2-minute reconcile completes it.</para>
 /// </remarks>
 public sealed class NoAccessShareEnforcer
 {
@@ -152,6 +159,7 @@ public sealed class NoAccessShareEnforcer
     private readonly IDataverseRecordShareService _recordShare;
     private readonly ITenantCache _cache;
     private readonly IScheduledJobLease _recordLock;
+    private readonly SecureChildShareSynchronizer _secureChildShares;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
 
     /// <param name="store">The enforcer's Dataverse reads.</param>
@@ -164,6 +172,8 @@ public sealed class NoAccessShareEnforcer
     /// (<c>no-access-enforce:{table}:{id}</c>) — never a job's dispatch key. Reusing it from a service that a scheduled
     /// job resolves is the ADR-036 A1-7 / ADR-052 §5 tension recorded as a project-scoped §6.5 path-A exception in
     /// <c>projects/unified-access-control-r2/design.md</c> §9 (task 143 r2).</param>
+    /// <param name="secureChildShares">Task 149's synchronizer (merged after this task): after a root share is removed,
+    /// the record's children follow at once.</param>
     /// <param name="logger">Logger.</param>
     public NoAccessShareEnforcer(
         NoAccessEnforcementStore store,
@@ -172,6 +182,7 @@ public sealed class NoAccessShareEnforcer
         IDataverseRecordShareService recordShare,
         ITenantCache cache,
         IScheduledJobLease recordLock,
+        SecureChildShareSynchronizer secureChildShares,
         ILogger<NoAccessShareEnforcer> logger)
     {
         _store = store;
@@ -180,6 +191,7 @@ public sealed class NoAccessShareEnforcer
         _recordShare = recordShare;
         _cache = cache;
         _recordLock = recordLock;
+        _secureChildShares = secureChildShares;
         _logger = logger;
     }
 
@@ -581,11 +593,53 @@ public sealed class NoAccessShareEnforcer
             _logger.LogWarning(ex, "[NO-ACCESS-ENFORCE] Owner of {Type} {RecordId} unreadable.", logicalName, recordId);
         }
 
+        var removedBefore = run.Removed.Count;
         foreach (var userId in users)
         {
             await EnforceForUserAsync(logicalName, binding.EntitySet, recordId, userId, owningTeam, owningTeamRead,
                 cacheTenants, run, ct).ConfigureAwait(false);
         }
+
+        if (run.Removed.Count > removedBefore)
+        {
+            await SyncChildrenAsync(logicalName, recordId, run, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Task 149 (merged after this task, AC6): a root share this run removed leaves the secure record's CHILDREN at once —
+    /// <see cref="SecureChildShareSynchronizer.SyncRootAsync"/> mirrors the root's remaining share set onto them — rather
+    /// than at the next reconcile tick. The root removal stands whatever this answers; a fan-out that could not finish is a
+    /// failure naming the record (the 2-minute reconcile completes it), never "complete".
+    /// </summary>
+    private async Task SyncChildrenAsync(string logicalName, Guid recordId, Run run, CancellationToken ct)
+    {
+        SecureChildShareSyncResult children;
+        try
+        {
+            children = await _secureChildShares.SyncRootAsync(logicalName, recordId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[NO-ACCESS-ENFORCE] Entry {EntryId}: the children of {Type} {RecordId} could not be updated.",
+                run.EntryId, logicalName, recordId);
+            children = SecureChildShareSyncResult.Failed("the children could not be updated");
+        }
+
+        if (children.IsComplete)
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            "[NO-ACCESS-ENFORCE] Entry {EntryId}: removed on {Type} {RecordId}, but its children are {Status} " +
+            "({NotUpdated} not updated, {Held} held of {InScope}; {Detail}).",
+            run.EntryId, logicalName, recordId, children.Status, children.ChildrenNotUpdated, children.ChildrenHeld,
+            children.ChildrenInScope, children.Detail);
+        run.Fail(logicalName, recordId, null, "children-incomplete",
+            $"Access to {logicalName} {recordId} was removed, but not every related record (documents, events, to-dos, " +
+            "communications) could be updated yet. The scheduled safety net finishes it within a few minutes; open the " +
+            "record's Manage Access to check.");
     }
 
     private async Task EnforceForUserAsync(

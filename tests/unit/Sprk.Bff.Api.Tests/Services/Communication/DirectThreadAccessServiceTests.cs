@@ -52,10 +52,27 @@ public class DirectThreadAccessServiceTests
             .Select(id => new DataversePrincipalAccess(User(id), 1, DateTimeOffset.UtcNow))
             .ToList();
 
+    /// <summary>
+    /// Task 149 r1: the message-access grant first reads the message's owner (a Secure-team-owned message is never
+    /// granted to participants). Every message here is USER-owned unless a test says otherwise — the shape these
+    /// tests were written for. The secure cases are pinned against an evaluating Dataverse in SecureChildShareMirrorTests.
+    /// </summary>
+    public DirectThreadAccessServiceTests()
+    {
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owninguser"] = new EntityReference("systemuser", Caller) },
+            }));
+    }
+
     private DirectThreadAccessService BuildSut() => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         Mock.Of<ILogger<DirectThreadAccessService>>());
 
     // ── FindOrCreateDirectThreadAsync: create + no regarding anchor ────────────────────────────
