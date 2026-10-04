@@ -710,7 +710,7 @@ public sealed class DocumentContextService
             // App-only fallback (background processing scenarios). The row's pointer is verified first (task 166 r1):
             // a pointer into a container this document may not use refuses — never downloads.
             if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
-                    document.Id, document.GraphDriveId, cancellationToken))
+                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
             {
                 _logger.LogWarning(
                     "App-only download of document {DocumentId} refused: its storage pointer could not be verified",

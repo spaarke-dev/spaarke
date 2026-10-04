@@ -230,7 +230,7 @@ public static class DocumentsBulkEndpoints
 
                 // uac-r2 task 166 r1 (owner round 21 item 1b): the bytes are read AS THE APPLICATION from the row's
                 // pointer, so the pointer must name a container this document may use. Refused per document.
-                if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(rawId, driveId, ct))
+                if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(rawId, driveId, itemId, ct))
                 {
                     failedItems.Add(new FailedItem(rawId, fileName, DocumentStorageUnverifiedReason));
                     continue;

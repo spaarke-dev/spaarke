@@ -519,13 +519,18 @@ public static class FieldMappingEndpoints
                 });
             }
 
-            // Step 2: Get source record field values
+            // Step 2: Get source record field values — AS THE CALLER (task 166 r2). The row-level Read gate above
+            // does not cover field-level security: an app-only read would return a secured source column the caller
+            // cannot read and copy it into children they CAN read. Impersonated, Dataverse returns such a column as
+            // null (the rule is then skipped), and a source the caller cannot read at all returns no row (404).
             var sourceFields = profile.Rules.Select(r => r.SourceField).Distinct().ToArray();
-            var sourceValues = await RetrieveSourceRecordValuesAsync(
-                dataverseService,
+            var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
+                impersonatedQuery,
+                entityService,
                 request.SourceEntity,
                 request.SourceRecordId,
                 sourceFields,
+                callerSystemUserId.Value,
                 ct);
 
             if (sourceValues is null)
@@ -671,25 +676,70 @@ public static class FieldMappingEndpoints
     }
 
     /// <summary>
-    /// Retrieves field values from the source record.
+    /// The source-row query issued AS THE CALLER (task 166 r2): the mapped fields of exactly the authorized source row.
     /// </summary>
-    private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsync(
-        IFieldMappingDataverseService dataverseService,
-        string entityLogicalName,
-        Guid recordId,
+    /// <remarks>
+    /// <c>internal</c> so a test can pin the exact string. A rule field that is not a logical name is never interpolated
+    /// into the query (it reads as null, so its rule is skipped); the row's own id column is always selected, so the
+    /// <c>$select</c> is never empty.
+    /// </remarks>
+    internal static string BuildSourceRecordQuery(string sourceEntity, Guid sourceRecordId, IEnumerable<string> fields)
+    {
+        var select = fields.Where(IsLogicalName).Append($"{sourceEntity}id").Distinct(StringComparer.OrdinalIgnoreCase);
+        return $"$select={string.Join(",", select)}&$filter={sourceEntity}id eq {sourceRecordId:D}&$top=1";
+    }
+
+    /// <summary>
+    /// Retrieves the source record's mapped field values AS THE CALLER (task 166 r2) through the same impersonated seam
+    /// the child query uses — so field-level security applies: a secured column the caller cannot read comes back
+    /// null and its rule is skipped, instead of being copied into children the caller can read. No row (the caller
+    /// cannot read the source, or it does not exist) → <see langword="null"/> (the route's 404). No app-only fallback:
+    /// a fault propagates to the route's 500.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the app-only <c>IFieldMappingDataverseService.RetrieveRecordFieldsAsync</c> call. Values are converted
+    /// exactly as that method converts them (string, Int64 or double, bool, null, else raw JSON text), so the rule
+    /// engine sees the same shapes.
+    /// </remarks>
+    private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsCallerAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
+        string sourceEntity,
+        Guid sourceRecordId,
         string[] fields,
+        Guid callerSystemUserId,
         CancellationToken ct)
     {
-        try
+        var entitySet = await entityService.GetEntitySetNameAsync(sourceEntity, ct);
+        var rows = await impersonatedQuery.QueryAsync(
+            entitySet, BuildSourceRecordQuery(sourceEntity, sourceRecordId, fields), callerSystemUserId, ct);
+
+        if (rows.Count == 0)
         {
-            return await dataverseService.RetrieveRecordFieldsAsync(entityLogicalName, recordId, fields, ct);
-        }
-        catch (Exception ex) when (ex.Message.Contains("404") || ex.Message.Contains("not found"))
-        {
-            // Record not found
             return null;
         }
+
+        var row = rows[0];
+        var result = new Dictionary<string, object?>();
+        foreach (var field in fields)
+        {
+            result[field] = row.TryGetValue(field, out var value) ? ToClrValue(value) : null;
+        }
+
+        return result;
     }
+
+    /// <summary>The JSON → CLR conversion the app-only field read applied (kept identical for the rule engine).</summary>
+    private static object? ToClrValue(System.Text.Json.JsonElement element) => element.ValueKind switch
+    {
+        System.Text.Json.JsonValueKind.String => element.GetString(),
+        System.Text.Json.JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+        System.Text.Json.JsonValueKind.True => true,
+        System.Text.Json.JsonValueKind.False => false,
+        System.Text.Json.JsonValueKind.Null => null,
+        System.Text.Json.JsonValueKind.Undefined => null,
+        _ => element.GetRawText(),
+    };
 
     /// <summary>
     /// The ONE "source not found" answer (task 166): an unknown source id, a source the caller cannot read, an

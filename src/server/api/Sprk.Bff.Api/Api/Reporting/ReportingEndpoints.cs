@@ -1,6 +1,10 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.Reporting;
 
@@ -20,15 +24,19 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// principal could reach — while the shipped client sent the catalog row id and no workspace, so every call was a
 /// 400.</para>
 ///
-/// <para><b>Row-level security identity.</b> The embed token's <c>EffectiveIdentity</c> is the caller's BUSINESS UNIT,
-/// computed server-side from the caller's own Dataverse <c>systemuser</c> (WhoAmI as the caller), with the dataset role
-/// <see cref="RlsRoleName"/> — the identity the report models' DAX (<c>USERNAME()</c> = business unit id) filters on.
-/// It used to come from a <c>businessunit</c>/<c>bu</c> token claim that nothing produces, so no token carried an RLS
-/// identity at all. No identity, no token: a caller whose business unit cannot be read is refused.</para>
+/// <para><b>Row-level security identity.</b> The embed token's <c>EffectiveIdentity</c> — and, since task 166 r2, the
+/// export job's — is the caller's BUSINESS UNIT, computed server-side from the caller's own Dataverse <c>systemuser</c>
+/// (WhoAmI as the caller), with the dataset role <see cref="RlsRoleName"/> — the identity the report models' DAX
+/// (<c>USERNAME()</c> = business unit id) filters on. It used to come from a <c>businessunit</c>/<c>bu</c> token claim
+/// that nothing produces, so no token carried an RLS identity at all. No identity, no token and no export: a caller
+/// whose business unit cannot be read is refused.</para>
 ///
 /// <para><b>Catalog writes run as the caller.</b> Create, update and delete of <c>sprk_report</c> rows go through the
 /// same OBO client, so Dataverse enforces the caller's own Create / Write / Delete; the Author / Admin module roles
-/// remain an additional gate. The update verb is PATCH — the verb the client sends.</para>
+/// remain an additional gate. The update verb is PATCH — the verb the client sends. Create checks the caller's own
+/// Create privilege BEFORE the app-only Power BI clone (owner round 9 write pattern), and only ever clones the SOURCE
+/// row's report — no client-named Power BI report is registered. Delete removes the Power BI report only for a custom
+/// row no other catalog row references (owner round 23 item 2).</para>
 ///
 /// Error responses follow ADR-019: RFC 7807 ProblemDetails with <c>errorCode</c> extension.
 /// </summary>
@@ -154,16 +162,17 @@ public static class ReportingEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
-        // POST /api/reporting/export — server-side export to PDF or PPTX
+        // POST /api/reporting/export — server-side export to PDF or PPTX (business-unit RLS identity, task 166 r2)
         group.MapPost("/export", ExportReport)
             .WithName("ExportReportingReport")
-            .WithSummary("Exports a catalog report the caller can read to PDF or PPTX via Power BI server-side export")
+            .WithSummary("Exports a catalog report the caller can read to PDF or PPTX (business-unit RLS) via Power BI server-side export")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status504GatewayTimeout);
 
         return app;
@@ -219,15 +228,8 @@ public static class ReportingEndpoints
         if (businessUnitId is null)
         {
             // No identity, no token: a token without the business-unit RLS identity would show the whole dataset.
-            return Results.Problem(
-                title: "Report Identity Unavailable",
-                detail: "Your business unit could not be determined, so no report session could be issued. Try again.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = ErrorCodeRlsIdentityUnavailable,
-                    ["correlationId"] = traceId
-                });
+            return RlsIdentityUnavailable(
+                "Your business unit could not be determined, so no report session could be issued. Try again.", traceId);
         }
 
         logger.LogInformation(
@@ -315,12 +317,16 @@ public static class ReportingEndpoints
 
     /// <summary>
     /// POST /api/reporting/reports — a new catalog entry derived from a source entry the caller can read
-    /// (Author/Admin). The workspace and dataset come from the SOURCE row; the client names neither.
+    /// (Author/Admin). The workspace and dataset come from the SOURCE row; the client names neither. The new Power BI
+    /// report is always a server-side CLONE of the source row's report: a client-named Power BI report id ("Save As"
+    /// registration) is no longer accepted (task 166 r2, owner round 23 item 2 — view-only embed tokens cannot create a
+    /// report, so that path could only alias an existing report into a catalog row the caller owned).
     /// </summary>
     private static async Task<IResult> CreateReport(
         CreateReportRequest request,
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] CallerRecordAccessProbe accessProbe,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -347,44 +353,34 @@ public static class ReportingEndpoints
 
         var traceId = context.TraceIdentifier;
 
+        // Owner round 9 write pattern (task 166 r2): the caller's OWN right to create the catalog row is checked AS THE
+        // CALLER before the app-only Power BI clone — a caller who may not create the row never causes a clone. The row
+        // create below still runs as the caller (Dataverse decides again); the compensating delete stays for a create
+        // that fails for any other reason.
+        if (!await CallerMayCreateCatalogRowAsync(accessProbe, context, logger, ct))
+        {
+            return InsufficientPrivilege("You do not have permission to create report catalog entries.");
+        }
+
         var source = await ReadCatalogRowAsync(dataverseUser, request.SourceReportId, logger, ct);
-        if (source is null)
+        if (source is null || source.DatasetId is not { } datasetId)
         {
             return ReportNotInCatalog(traceId);
         }
 
-        // Resolve the Power BI report the new catalog row will point at — in the SOURCE's workspace, always.
+        // Clone the SOURCE row's Power BI report into the SOURCE's workspace, always.
         PowerBiReport created;
-        var cloned = false;
         try
         {
-            if (request.PbiReportId is { } savedAsId && savedAsId != Guid.Empty)
-            {
-                // Save As (in-editor): the SDK already created the report in the workspace the embed token named.
-                // Verify it IS a report in the source row's workspace before registering it — the client cannot point
-                // a catalog row at anything else.
-                created = await embedService.GetReportAsync(source.WorkspaceId, savedAsId, profileId: null, ct: ct);
-            }
-            else
-            {
-                if (source.DatasetId is not { } datasetId)
-                {
-                    return ReportNotInCatalog(traceId);
-                }
-
-                created = await embedService.CreateReportAsync(
-                    source.WorkspaceId, request.Name.Trim(), datasetId, source.PbiReportId, profileId: null, ct: ct);
-                cloned = true;
-            }
+            created = await embedService.CreateReportAsync(
+                source.WorkspaceId, request.Name.Trim(), datasetId, source.PbiReportId, profileId: null, ct: ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
                 "Create report failed in Power BI. SourceRow={SourceRowId}, CorrelationId={CorrelationId}",
                 source.RowId, traceId);
-            return request.PbiReportId is not null
-                ? ReportNotInCatalog(traceId) // the named report is not in the source's workspace (or not visible)
-                : PowerBiFailed("Failed to create the report in Power BI.", traceId);
+            return PowerBiFailed("Failed to create the report in Power BI.", traceId);
         }
 
         // Register it AS THE CALLER — Dataverse enforces their Create on sprk_report.
@@ -426,18 +422,15 @@ public static class ReportingEndpoints
                 "Catalog row create failed ({Status} {ErrorCode}). CorrelationId={CorrelationId}",
                 write.StatusCode, write.ErrorCode, traceId);
 
-            if (cloned)
+            // The clone was OURS — do not leave an uncatalogued report behind.
+            try
             {
-                // The clone was OURS — do not leave an uncatalogued report behind.
-                try
-                {
-                    await embedService.DeleteReportAsync(source.WorkspaceId, created.Id, profileId: null, ct: ct);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Compensating delete of cloned report {ReportId} failed. CorrelationId={CorrelationId}",
-                        created.Id, traceId);
-                }
+                await embedService.DeleteReportAsync(source.WorkspaceId, created.Id, profileId: null, ct: ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Compensating delete of cloned report {ReportId} failed. CorrelationId={CorrelationId}",
+                    created.Id, traceId);
             }
 
             return CatalogWriteFailed(write, "The report could not be registered in the catalog.", traceId);
@@ -501,13 +494,23 @@ public static class ReportingEndpoints
 
     /// <summary>
     /// DELETE /api/reporting/reports/{reportId} — Admin only. The catalog row is deleted AS THE CALLER first (Dataverse
-    /// enforces their Delete); only then is the derived Power BI report deleted, so a caller who may not delete the row
-    /// can never cause the report itself to be deleted.
+    /// enforces their Delete); only then may the derived Power BI report be deleted, so a caller who may not delete the
+    /// row can never cause the report itself to be deleted.
     /// </summary>
+    /// <remarks>
+    /// <b>Which Power BI reports this route may delete</b> (task 166 r2, owner round 23 item 2): ONLY the report of a
+    /// CUSTOM row (<c>sprk_iscustom</c> — one this module cloned) that NO other catalog row references. A standard
+    /// (non-custom) report is shared and managed outside this route, and a report another row still points at is that
+    /// row's too; in both cases the catalog row is deleted and the Power BI report is kept. "Does another row reference
+    /// it?" is a server invariant, so it is read APP-ONLY (<see cref="IGenericEntityService"/>): a caller-scoped read
+    /// would miss rows the caller cannot see and delete a report they still depend on. It returns nothing to the caller;
+    /// an unreadable answer keeps the report (fail closed toward not destroying shared content).
+    /// </remarks>
     private static async Task<IResult> DeleteReport(
         Guid reportId,
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IGenericEntityService entityService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -544,6 +547,22 @@ public static class ReportingEndpoints
         if (!deleted.IsSuccess)
         {
             return CatalogWriteFailed(deleted, "The catalog entry could not be deleted.", traceId);
+        }
+
+        if (!row.IsCustom)
+        {
+            logger.LogInformation(
+                "Catalog row {CatalogRowId} deleted; its Power BI report {ReportId} is a standard (non-custom) report and is kept. "
+                + "CorrelationId={CorrelationId}", row.RowId, row.PbiReportId, traceId);
+            return TypedResults.NoContent();
+        }
+
+        if (await IsReferencedByAnotherCatalogRowAsync(entityService, row, logger, ct) is not false)
+        {
+            logger.LogInformation(
+                "Catalog row {CatalogRowId} deleted; its Power BI report {ReportId} is kept (another catalog row references it, "
+                + "or that could not be determined). CorrelationId={CorrelationId}", row.RowId, row.PbiReportId, traceId);
+            return TypedResults.NoContent();
         }
 
         try
@@ -597,6 +616,16 @@ public static class ReportingEndpoints
             return ReportNotInCatalog(traceId);
         }
 
+        // Task 166 r2: an export is the same data path as an embed, so it carries the same server-computed RLS
+        // identity (the caller's business unit). No identity, no export — an export without it would return every
+        // business unit's rows.
+        var businessUnitId = await ReadCallerBusinessUnitAsync(dataverseUser, logger, ct);
+        if (businessUnitId is null)
+        {
+            return RlsIdentityUnavailable(
+                "Your business unit could not be determined, so the report could not be exported. Try again.", traceId);
+        }
+
         logger.LogInformation(
             "Export requested. CatalogRow={CatalogRowId}, Format={Format}, CorrelationId={CorrelationId}",
             row.RowId, request.Format, traceId);
@@ -607,6 +636,8 @@ public static class ReportingEndpoints
                 row.WorkspaceId,
                 row.PbiReportId,
                 request.Format,
+                RlsUsername(businessUnitId.Value),
+                [RlsRoleName],
                 profileId: null,
                 ct: ct);
 
@@ -795,6 +826,76 @@ public static class ReportingEndpoints
     /// <summary>The RLS username: the business unit id the report models' DAX looks up (lowercase "D").</summary>
     internal static string RlsUsername(Guid businessUnitId) => businessUnitId.ToString("D"); // "D" is lowercase hex
 
+    /// <summary>
+    /// The live Create privilege on <c>sprk_report</c> (read-only check on spaarkedev1, 2026-10-04:
+    /// <c>privileges?$filter=name eq 'prvCreatesprk_Report'</c> → id <c>4ea28bbd…</c>, accessright 32 = Create).
+    /// </summary>
+    internal const string CreateReportPrivilege = "prvCreatesprk_Report";
+
+    /// <summary>
+    /// Does the caller hold <see cref="CreateReportPrivilege"/>, asked AS THE CALLER (OBO WhoAmI +
+    /// RetrieveUserSetOfPrivilegesByNames — the task-130 G5 precedent)? No token, OBO failure, any fault → false.
+    /// </summary>
+    internal static async Task<bool> CallerMayCreateCatalogRowAsync(
+        CallerRecordAccessProbe accessProbe, HttpContext context, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            return await accessProbe.CallerHoldsPrivilegeAsync(
+                TokenHelper.ExtractBearerTokenOrNull(context), CreateReportPrivilege, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "The {Privilege} check faulted; refusing the create (fail closed).", CreateReportPrivilege);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Does a catalog row OTHER than <paramref name="row"/> reference <paramref name="row"/>'s Power BI report? Read
+    /// APP-ONLY (a server invariant: the caller may not see every row that depends on the report), active and inactive
+    /// rows alike. <see langword="true"/> = referenced, <see langword="false"/> = no other row, <see langword="null"/> =
+    /// could not be determined (the caller keeps the report).
+    /// </summary>
+    internal static async Task<bool?> IsReferencedByAnotherCatalogRowAsync(
+        IGenericEntityService entityService, CatalogRow row, ILogger logger, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_report")
+        {
+            ColumnSet = new ColumnSet("sprk_reportid"),
+            TopCount = 1,
+            Criteria = new FilterExpression(LogicalOperator.And)
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_pbi_reportid", ConditionOperator.Equal, row.PbiReportId.ToString("D")),
+                    new ConditionExpression("sprk_reportid", ConditionOperator.NotEqual, row.RowId),
+                },
+            },
+        };
+
+        try
+        {
+            var others = await entityService.RetrieveMultipleAsync(query, ct);
+            return others?.Entities is { } entities ? entities.Count > 0 : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Whether another catalog row references Power BI report {ReportId} could not be read; keeping the report.",
+                row.PbiReportId);
+            return null;
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Responses
     // -----------------------------------------------------------------------------------------
@@ -810,6 +911,18 @@ public static class ReportingEndpoints
             {
                 ["errorCode"] = ReportNotInCatalogReasonCode,
                 ["reasonCode"] = ReportNotInCatalogReasonCode,
+                ["correlationId"] = traceId
+            });
+
+    /// <summary>No business-unit RLS identity could be computed: no token is issued and no export runs.</summary>
+    private static IResult RlsIdentityUnavailable(string detail, string traceId) =>
+        Results.Problem(
+            title: "Report Identity Unavailable",
+            detail: detail,
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = ErrorCodeRlsIdentityUnavailable,
                 ["correlationId"] = traceId
             });
 

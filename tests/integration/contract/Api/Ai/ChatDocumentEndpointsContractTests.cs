@@ -459,6 +459,43 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "an unverified pointer must never be followed app-only");
     }
 
+    [Fact]
+    public async Task IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_Returns409AndNeverDownloads()
+    {
+        // unified-access-control-r2 task 166 r2 (owner round 23 item 1): the r1 check looked at the DRIVE only, so a
+        // Write holder could re-point sprk_graphitemid at any item in an accepted container. The item the route is
+        // about to download must be one the row's creator uploaded — asked about the exact (drive, item) it follows.
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(ArchiveDocumentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = ArchiveDocumentId,
+                Name = "Re Acme",
+                GraphDriveId = ChatDocumentEndpointsTestFixture.ArchiveBusinessUnitContainer,
+                GraphItemId = "item-someone-elses",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.PointerWorld.Items[(ChatDocumentEndpointsTestFixture.ArchiveBusinessUnitContainer, "item-someone-elses")] =
+            new Sprk.Bff.Api.Models.SpeItemCreator("payroll.xlsx", Guid.NewGuid().ToString("D"), null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = ArchiveDocumentId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("code").GetString().Should().Be("document_storage_unverified");
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an item the row's creator did not upload must never be followed app-only");
+    }
+
     /// <summary>A real sprk_document id: the ingest verifies the pointer of the row it names (task 166 r1).</summary>
     private static readonly string ArchiveDocumentId = "0e0e0e0e-0000-4000-8000-000000000166";
 
@@ -641,6 +678,14 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     /// <summary>The business-unit container the ingest tests' archive pointers name (task 166 r1 pointer check).</summary>
     public const string ArchiveBusinessUnitContainer = "drive-1";
 
+    /// <summary>
+    /// The document-pointer world behind the REAL resolver (task 166 r2): "drive-1" is the root business unit's
+    /// container, and every item was uploaded by the document's creator unless a test records otherwise in
+    /// <see cref="TestRecordContainerResolver.DocumentPointerWorld.Items"/> (read live, so a per-test entry applies).
+    /// </summary>
+    internal TestRecordContainerResolver.DocumentPointerWorld PointerWorld { get; } =
+        new() { RootClaims = c => c == ArchiveBusinessUnitContainer };
+
     public Mock<IDocumentDataverseService> DataverseMock { get; } = new();
     public Mock<SpeFileStore> SpeMock { get; } = BuildSpeMock();
     // task 064 (E1c): the from-document ingest endpoint applies per-document authorization
@@ -782,8 +827,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the ingest follows the archive row's pointer
         // as the application, so it verifies the pointer's container first. "drive-1" is a business-unit container of
         // this test environment; any other container is not.
-        builder.Services.AddSingleton(
-            TestRecordContainerResolver.ForBusinessUnitContainers(ArchiveBusinessUnitContainer));
+        builder.Services.AddSingleton(PointerWorld.Build());
 
         // task 064 (E1c): the from-document ingest endpoint resolves the sprk_document via
         // IDocumentDataverseService — register the mock so the ingest contract tests drive it.
@@ -854,6 +898,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         AuthzMock.Reset();
         CacheCalls.Clear();
         DurableBlobs.Clear();
+        PointerWorld.Items.Clear();
         Auth.IncludeTid = true;
         Auth.TenantId = UploadFakeAuthOptions.DefaultTenantId;
         ConfigureDefaults();

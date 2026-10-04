@@ -47,8 +47,8 @@ export interface ReportEmbedConfig {
   /** Optional view mode override */
   viewMode?: models.ViewMode;
   /**
-   * Power BI workspace (group) ID — returned by the BFF alongside the embed token.
-   * Required for Save As operations (targetWorkspaceId).
+   * Power BI workspace (group) ID — returned by the BFF alongside the embed token. Informational only: Save As is a
+   * server-side clone of the catalog row (unified-access-control-r2 task 166 r2) and sends no workspace.
    */
   workspaceId?: string;
 }

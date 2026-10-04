@@ -181,7 +181,7 @@ function fileNameFrom(response: Response, fallback: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Report management — create, update, save-as
+// Report management — create (also used by Save As: a server-side clone, task 166 r2), update
 // ---------------------------------------------------------------------------
 
 /**
@@ -281,54 +281,6 @@ export async function updateReport(
     return { ok: true, data: undefined };
   } catch (err) {
     console.error("[reportingApi] updateReport failed", err);
-    return { ok: false, error: String(err) };
-  }
-}
-
-/**
- * Request body for POST /api/reporting/reports (save-as registration).
- *
- * unified-access-control-r2 task 166 r1: the Power BI SDK's report.saveAs() already created the copy (with the
- * user's unsaved edits) in the workspace the embed token named; this registers it. The BFF verifies the new report
- * IS in the SOURCE catalog row's workspace before it writes the catalog row — the client cannot point a row elsewhere.
- */
-export interface SaveAsReportRequest {
-  /** New display name for the copied report. */
-  name: string;
-  /** The sprk_report catalog row the copy was made from. */
-  sourceReportId: string;
-  /** The new Power BI report id (from the SDK's "saved" event). */
-  pbiReportId: string;
-}
-
-/**
- * Create a copy of an existing report (Save As).
- *
- * Calls POST /api/reporting/reports with the new Power BI report id. The BFF verifies it belongs to the source
- * report's workspace and creates a new custom sprk_report catalog row as the user.
- *
- * @param request  SaveAs parameters including new name and source report info
- */
-export async function saveAsReport(
-  request: SaveAsReportRequest
-): Promise<ApiResult<CreateReportResponse>> {
-  try {
-    const url = `${getBffBaseUrl()}${REPORTING_CATALOG_PATH}`;
-    const response = await authenticatedFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      return { ok: false, error: body || response.statusText, status: response.status };
-    }
-
-    const data = (await response.json()) as CreateReportResponse;
-    return { ok: true, data };
-  } catch (err) {
-    console.error("[reportingApi] saveAsReport failed", err);
     return { ok: false, error: String(err) };
   }
 }

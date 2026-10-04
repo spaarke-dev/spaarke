@@ -481,12 +481,21 @@ public class ReportingEmbedService
     /// <param name="workspaceId">Power BI workspace GUID.</param>
     /// <param name="reportId">Report GUID to export.</param>
     /// <param name="format">Output format: <see cref="ExportFormat.PDF"/> or <see cref="ExportFormat.PPTX"/>.</param>
+    /// <param name="username">
+    ///   The row-level-security username (the caller's business unit id). Required: an export is the same data path
+    ///   as an embed, so it carries the same effective identity (unified-access-control-r2 task 166 r2).
+    /// </param>
+    /// <param name="roles">The dataset RLS role(s) <paramref name="username"/> is evaluated under. Required.</param>
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
     ///   A <see cref="Stream"/> containing the exported file bytes. The caller must dispose it.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when the Power BI export job fails.</exception>
+    /// <exception cref="ArgumentException">Thrown when no RLS identity is supplied — an export is never unfiltered.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///   Thrown when the Power BI export job fails, or when the report's dataset (which the identity must name) cannot
+    ///   be determined.
+    /// </exception>
     /// <exception cref="TimeoutException">
     ///   Thrown when the export job does not complete within the polling timeout
     ///   (<see cref="ExportMaxPolls"/> × <see cref="ExportPollInterval"/>).
@@ -495,18 +504,38 @@ public class ReportingEmbedService
         Guid workspaceId,
         Guid reportId,
         ExportFormat format,
+        string username,
+        IList<string> roles,
         Guid? profileId = null,
         CancellationToken ct = default)
     {
+        // An export runs as the service principal, so without an effective identity Power BI would return every
+        // business unit's rows (or fail on an RLS dataset). Refuse rather than export unfiltered (task 166 r2).
+        if (string.IsNullOrWhiteSpace(username) || roles is not { Count: > 0 })
+        {
+            throw new ArgumentException("An export requires the caller's row-level-security identity.", nameof(username));
+        }
+
         _logger.LogInformation(
-            "Exporting report {ReportId} from workspace {WorkspaceId} as {Format}",
-            reportId, workspaceId, format);
+            "Exporting report {ReportId} from workspace {WorkspaceId} as {Format} (RLS user: {Username})",
+            reportId, workspaceId, format, username);
 
         var client = await GetPowerBIClientAsync(profileId, ct);
-        var pbiFormat = MapExportFormat(format);
 
-        // Step 1: Trigger the async export job.
-        var exportRequest = new ExportReportRequest { Format = pbiFormat };
+        // The identity must name the report's dataset — read it from Power BI, as the embed path does.
+        Report report;
+        try
+        {
+            report = await client.Reports.GetReportInGroupAsync(workspaceId, reportId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch report {ReportId} for export", reportId);
+            throw;
+        }
+
+        // Step 1: Trigger the async export job — WITH the caller's effective identity.
+        var exportRequest = BuildExportRequest(format, report.DatasetId, username, roles);
         Export exportJob;
         try
         {
@@ -674,6 +703,45 @@ public class ReportingEmbedService
             Name: report.Name ?? string.Empty,
             EmbedUrl: report.EmbedUrl ?? string.Empty,
             DatasetId: Guid.TryParse(report.DatasetId, out var dsId) ? dsId : Guid.Empty);
+
+    /// <summary>
+    /// The Power BI export request for <paramref name="format"/>, carrying the row-level-security
+    /// <see cref="EffectiveIdentity"/> (<paramref name="username"/> under <paramref name="roles"/> on
+    /// <paramref name="datasetId"/>) — the same identity <see cref="BuildGenerateTokenRequest"/> puts in an embed token
+    /// (unified-access-control-r2 task 166 r2). No identity, no request: a blank username, no roles or no dataset throw,
+    /// so an export can never run unfiltered as the service principal.
+    /// </summary>
+    internal static ExportReportRequest BuildExportRequest(
+        ExportFormat format, string? datasetId, string username, IList<string> roles)
+    {
+        if (string.IsNullOrWhiteSpace(username) || roles is not { Count: > 0 })
+        {
+            throw new ArgumentException("An export requires a row-level-security identity.", nameof(username));
+        }
+
+        if (string.IsNullOrWhiteSpace(datasetId))
+        {
+            throw new InvalidOperationException(
+                "The report's dataset could not be determined, so the export's row-level-security identity cannot be applied.");
+        }
+
+        return new ExportReportRequest
+        {
+            Format = MapExportFormat(format),
+            PowerBIReportConfiguration = new PowerBIReportExportConfiguration
+            {
+                Identities =
+                [
+                    new EffectiveIdentity
+                    {
+                        Username = username,
+                        Datasets = [datasetId],
+                        Roles = roles,
+                    },
+                ],
+            },
+        };
+    }
 
     /// <summary>Maps the public <see cref="ExportFormat"/> enum to the Power BI API <see cref="FileFormat"/>.</summary>
     private static FileFormat MapExportFormat(ExportFormat format) => format switch

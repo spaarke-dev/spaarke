@@ -10,9 +10,10 @@
 //     unreadable are one 404; the RLS identity is the caller's business unit read server-side. Only the REAL route
 //     group (with its real ReportingAuthorizationFilter) proves which id each handler consumes.
 //
-// Doubles are module boundaries only (ADR-038 §4): IDataverseUserClient (the caller's OBO Dataverse client) and
-// ReportingEmbedService at its permitted virtual seam (ADR-010 — unsealed for this). No Mock<HttpMessageHandler>, no
-// DI-registration assertion, no constructor null-check.
+// Doubles are module boundaries only (ADR-038 §4): IDataverseUserClient (the caller's OBO Dataverse client),
+// ReportingEmbedService at its permitted virtual seam (ADR-010 — unsealed for this), CallerRecordAccessProbe at its
+// virtual privilege question, and IGenericEntityService (the app-only "does another catalog row reference this
+// report?" read, task 166 r2). No Mock<HttpMessageHandler>, no DI-registration assertion, no constructor null-check.
 
 using System.Net;
 using System.Net.Http.Headers;
@@ -32,10 +33,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Reporting;
@@ -57,9 +62,11 @@ public sealed class ReportingCatalogBindingContractTests
     // Absent and unreadable are ONE answer, and Power BI is never asked (F14 / F15 / F16).
     // =============================================================================================
 
+    // "row-of-another-id" (task 166 r2): the read answers 200 with a row whose sprk_reportid is NOT the id asked for —
+    // the binding never adopts a row other than the one the request named.
     public static TheoryData<string> UnboundRowShapes => new()
     {
-        "not-found", "access-denied", "obo-failed", "read-throws", "row-without-power-bi-ids",
+        "not-found", "access-denied", "obo-failed", "read-throws", "row-without-power-bi-ids", "row-of-another-id",
     };
 
     [Theory]
@@ -174,12 +181,14 @@ public sealed class ReportingCatalogBindingContractTests
     }
 
     [Fact]
-    public async Task Export_ForAReadableRow_ExportsTheDerivedReport()
+    public async Task Export_ForAReadableRow_ExportsTheDerivedReport_UnderTheCallersBusinessUnitRlsIdentity()
     {
         await using var host = await Host.StartAsync();
         host.ArrangeCatalogRow("readable");
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
         host.Embed
-            .Setup(e => e.ExportReportAsync(WorkspaceId, PbiReportId, ExportFormat.PDF, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.ExportReportAsync(WorkspaceId, PbiReportId, ExportFormat.PDF, It.IsAny<string>(),
+                It.IsAny<IList<string>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream("%PDF-1.7"u8.ToArray()));
 
         var response = await host.Send(HttpMethod.Post, "/api/reporting/export", Viewer,
@@ -187,8 +196,57 @@ public sealed class ReportingCatalogBindingContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
-        host.Embed.Verify(e => e.ExportReportAsync(WorkspaceId, PbiReportId, ExportFormat.PDF, null, It.IsAny<CancellationToken>()),
-            Times.Once, "the report and workspace come from the catalog row, never from the request");
+        host.Embed.Verify(e => e.ExportReportAsync(
+                WorkspaceId, PbiReportId, ExportFormat.PDF,
+                CallerBusinessUnit.ToString("D"),
+                It.Is<IList<string>>(roles => roles != null && roles.SequenceEqual(new[] { "BusinessUnitFilter" })),
+                null, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the report and workspace come from the catalog row, and the export runs under the SAME server-computed "
+            + "business-unit RLS identity as an embed token (task 166 r2) — never unfiltered");
+    }
+
+    [Fact]
+    public async Task Export_WhenTheCallersBusinessUnitCannotBeRead_ExportsNothing()
+    {
+        await using var host = await Host.StartAsync();
+        host.ArrangeCatalogRow("readable");
+        host.ArrangeBusinessUnit(null);
+
+        var response = await host.Send(HttpMethod.Post, "/api/reporting/export", Viewer,
+            new { reportId = CatalogRowId, format = "PDF" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "an export without the business-unit RLS identity would contain every business unit's rows");
+        host.VerifyPowerBiNeverAsked();
+    }
+
+    // The export request Power BI receives carries the identity (task 166 r2): the service cannot be asked to export
+    // without one, and the request it builds names the username, the role and the report's dataset.
+    [Fact]
+    public void ExportRequest_CarriesTheEffectiveIdentity_OnTheReportsDataset()
+    {
+        var request = ReportingEmbedService.BuildExportRequest(
+            ExportFormat.PPTX, DatasetId.ToString(), CallerBusinessUnit.ToString("D"), ["BusinessUnitFilter"]);
+
+        request.Format.Should().Be(Microsoft.PowerBI.Api.Models.FileFormat.PPTX);
+        var identity = request.PowerBIReportConfiguration.Identities.Should().ContainSingle().Subject;
+        identity.Username.Should().Be(CallerBusinessUnit.ToString("D"));
+        identity.Roles.Should().Equal("BusinessUnitFilter");
+        identity.Datasets.Should().Equal(DatasetId.ToString());
+    }
+
+    [Theory]
+    [InlineData("", "BusinessUnitFilter", "dataset")]
+    [InlineData("bu", null, "dataset")]
+    [InlineData("bu", "BusinessUnitFilter", null)]
+    public void ExportRequest_WithoutACompleteIdentity_IsNeverBuilt(string username, string? role, string? datasetId)
+    {
+        var roles = role is null ? new List<string>() : new List<string> { role };
+
+        var build = () => ReportingEmbedService.BuildExportRequest(ExportFormat.PDF, datasetId, username, roles);
+
+        build.Should().Throw<Exception>("an export without a complete RLS identity would run unfiltered");
     }
 
     [Fact]
@@ -274,22 +332,70 @@ public sealed class ReportingCatalogBindingContractTests
         host.CreatedRowPayloads.Should().BeEmpty();
     }
 
+    // Owner round 23 item 2 (task 166 r2): the client-named "Save As" registration path is gone. A body that still
+    // names a Power BI report gets a CLONE of the source row's report; the named report is never looked up, never
+    // registered, so a caller cannot alias an existing (uncatalogued or unreadable) report into a row they own.
     [Fact]
-    public async Task Create_SaveAsRegistration_OfAReportNotInTheSourcesWorkspace_IsRefused_AndRegistersNothing()
+    public async Task Create_WithAClientNamedPowerBiReport_ClonesTheSource_AndNeverRegistersTheNamedReport()
     {
         await using var host = await Host.StartAsync();
         host.ArrangeCatalogRow("readable");
-        var stranger = Guid.NewGuid();
+        var named = Guid.NewGuid();
+        var cloneId = Guid.NewGuid();
         host.Embed
-            .Setup(e => e.GetReportAsync(WorkspaceId, stranger, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("PowerBINotFoundException"));
+            .Setup(e => e.CreateReportAsync(WorkspaceId, "Saved as", DatasetId, PbiReportId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PowerBiReport(cloneId, "Saved as", "https://app.powerbi.com/clone", DatasetId));
+        host.ArrangeCatalogCreate(Guid.NewGuid());
 
         var response = await host.Send(HttpMethod.Post, "/api/reporting/reports", Author,
-            new { name = "Saved as", sourceReportId = CatalogRowId, pbiReportId = stranger });
+            new { name = "Saved as", sourceReportId = CatalogRowId, pbiReportId = named });
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "a Save As may register only a report in the source row's own workspace");
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Embed.Verify(e => e.GetReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a client-named Power BI report is never looked up");
+        var created = JsonNode.Parse(host.CreatedRowPayloads.Should().ContainSingle().Subject)!;
+        created["sprk_pbi_reportid"]!.GetValue<string>().Should().Be(cloneId.ToString("D"),
+            "the new row points at the server's clone, never at the report the client named");
+        created.ToJsonString().Should().NotContain(named.ToString("D"));
+    }
+
+    // Owner round 9 write pattern (task 166 r2): the caller's own Create on sprk_report is asked AS THE CALLER before
+    // the app-only Power BI clone — a caller who may not create the row causes no clone at all.
+    [Theory]
+    [InlineData("denied")]
+    [InlineData("throws")]
+    public async Task Create_WithoutTheCallersCreatePrivilege_IsRefused_BeforeAnyReadOrClone(string answer)
+    {
+        await using var host = await Host.StartAsync();
+        host.ArrangeCatalogRow("readable");
+        var privilege = host.AccessProbe.Setup(p => p.CallerHoldsPrivilegeAsync(
+            It.IsAny<string?>(), ReportingEndpoints.CreateReportPrivilege, It.IsAny<CancellationToken>()));
+        if (answer == "denied")
+        {
+            privilege.ReturnsAsync(false);
+        }
+        else
+        {
+            privilege.ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+        }
+
+        var response = await host.Send(HttpMethod.Post, "/api/reporting/reports", Author,
+            new { name = "Copy", sourceReportId = CatalogRowId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.AccessProbe.Verify(p => p.CallerHoldsPrivilegeAsync(
+            "caller-token", ReportingEndpoints.CreateReportPrivilege, It.IsAny<CancellationToken>()), Times.Once,
+            "the question is asked with the CALLER's own token");
+        host.CatalogPathsRead.Should().BeEmpty();
         host.CreatedRowPayloads.Should().BeEmpty();
+        host.VerifyPowerBiNeverAsked();
+    }
+
+    [Fact]
+    public void CreateReportPrivilege_IsTheLiveVerifiedName()
+    {
+        // Read-only on spaarkedev1, 2026-10-04: privilegeid 4ea28bbd…, name prvCreatesprk_Report, accessright 32 (Create).
+        ReportingEndpoints.CreateReportPrivilege.Should().Be("prvCreatesprk_Report");
     }
 
     [Fact]
@@ -356,10 +462,11 @@ public sealed class ReportingCatalogBindingContractTests
     }
 
     [Fact]
-    public async Task Delete_DeletesTheRowAsTheCallerFirst_ThenTheDerivedReport()
+    public async Task Delete_OfACustomRowNoOtherRowReferences_DeletesTheRowAsTheCallerFirst_ThenTheDerivedReport()
     {
         await using var host = await Host.StartAsync();
-        host.ArrangeCatalogRow("readable");
+        host.ArrangeCatalogRow("readable-custom");
+        host.ArrangeOtherReferences(0);
         var order = new List<string>();
         host.DataverseUser
             .Setup(d => d.DeleteAsync($"sprk_reports({CatalogRowId:D})", It.IsAny<CancellationToken>()))
@@ -374,6 +481,48 @@ public sealed class ReportingCatalogBindingContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         order.Should().Equal("row", "report");
+        var query = host.ReferenceQueries.Should().ContainSingle(
+            "whether another row references the report is read APP-ONLY — a caller-scoped read would miss rows the caller cannot see").Subject;
+        query.EntityName.Should().Be("sprk_report");
+        query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_pbi_reportid"
+            && c.Operator == ConditionOperator.Equal && (string)c.Values[0] == PbiReportId.ToString("D"));
+        query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_reportid"
+            && c.Operator == ConditionOperator.NotEqual && (Guid)c.Values[0] == CatalogRowId);
+    }
+
+    // Owner round 23 item 2 (task 166 r2): DELETE removes the Power BI report ONLY for a custom row no other catalog row
+    // references. A standard report, a report another row (even one the caller cannot see) still points at, and an
+    // unanswerable reference question all KEEP the report; the caller's catalog row is still deleted.
+    [Theory]
+    [InlineData("standard-row")]
+    [InlineData("referenced-by-another-row")]
+    [InlineData("reference-check-throws")]
+    public async Task Delete_KeepsThePowerBiReport_UnlessItIsACustomRowsUnreferencedReport(string shape)
+    {
+        await using var host = await Host.StartAsync();
+        host.ArrangeCatalogRow(shape == "standard-row" ? "readable" : "readable-custom");
+        switch (shape)
+        {
+            case "referenced-by-another-row":
+                host.ArrangeOtherReferences(1);
+                break;
+            case "reference-check-throws":
+                host.EntityService
+                    .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+                break;
+        }
+
+        host.DataverseUser
+            .Setup(d => d.DeleteAsync($"sprk_reports({CatalogRowId:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(204, null));
+
+        var response = await host.Send(HttpMethod.Delete, $"/api/reporting/reports/{CatalogRowId}", Admin);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, "the caller's catalog row was deleted");
+        host.DataverseUser.Verify(d => d.DeleteAsync($"sprk_reports({CatalogRowId:D})", It.IsAny<CancellationToken>()), Times.Once);
+        host.Embed.Verify(e => e.DeleteReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a shared or still-referenced Power BI report is never destroyed by deleting one catalog row");
     }
 
     [Fact]
@@ -424,7 +573,7 @@ public sealed class ReportingCatalogBindingContractTests
         return node.ToJsonString();
     }
 
-    private static JsonElement RowJson(Guid rowId, bool withPowerBiIds = true)
+    private static JsonElement RowJson(Guid rowId, bool withPowerBiIds = true, bool isCustom = false)
     {
         var row = new Dictionary<string, object?>
         {
@@ -435,7 +584,7 @@ public sealed class ReportingCatalogBindingContractTests
             ["sprk_datasetid"] = DatasetId.ToString("D"),
             ["sprk_embedurl"] = "https://app.powerbi.com/reportEmbed",
             ["sprk_category"] = 100000000,
-            ["sprk_iscustom"] = false,
+            ["sprk_iscustom"] = isCustom,
         };
         return JsonSerializer.SerializeToElement(row);
     }
@@ -450,8 +599,25 @@ public sealed class ReportingCatalogBindingContractTests
         public List<string> CatalogPathsRead { get; } = new();
         public List<string> CreatedRowPayloads { get; } = new();
 
+        /// <summary>The caller's privilege question (task 166 r2). Defaults to "holds prvCreatesprk_Report".</summary>
+        public Mock<CallerRecordAccessProbe> AccessProbe { get; } = new(
+            MockBehavior.Loose,
+            new HttpClient(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<CallerRecordAccessProbe>.Instance,
+            null!);
+
+        /// <summary>The app-only reference read DELETE makes (task 166 r2). Defaults to "no other row".</summary>
+        public Mock<IGenericEntityService> EntityService { get; } = new(MockBehavior.Loose);
+        public List<QueryExpression> ReferenceQueries { get; } = new();
+
         private Host()
         {
+            AccessProbe
+                .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), ReportingEndpoints.CreateReportPrivilege, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            ArrangeOtherReferences(0);
+
             Embed = new Mock<ReportingEmbedService>(
                 MockBehavior.Loose,
                 Options.Create(new PowerBiOptions
@@ -481,6 +647,13 @@ public sealed class ReportingCatalogBindingContractTests
             {
                 case "readable":
                     record.ReturnsAsync(DataverseUserResponse.Ok(200, RowJson(CatalogRowId)));
+                    break;
+                case "readable-custom":
+                    record.ReturnsAsync(DataverseUserResponse.Ok(200, RowJson(CatalogRowId, isCustom: true)));
+                    break;
+                case "row-of-another-id":
+                    // A well-formed row with usable Power BI ids — but not the row the request named.
+                    record.ReturnsAsync(DataverseUserResponse.Ok(200, RowJson(Guid.NewGuid())));
                     break;
                 case "not-found":
                     record.ReturnsAsync(DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "not found"));
@@ -516,6 +689,22 @@ public sealed class ReportingCatalogBindingContractTests
                     ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { UserId = Guid.NewGuid(), BusinessUnitId = bu }))
                     : DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.OboExchangeFailed, "obo"));
 
+        /// <summary>The app-only reference read returns <paramref name="others"/> OTHER catalog rows.</summary>
+        public void ArrangeOtherReferences(int others)
+            => EntityService
+                .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Callback((QueryExpression q, CancellationToken _) => ReferenceQueries.Add(q))
+                .ReturnsAsync(() =>
+                {
+                    var rows = new EntityCollection();
+                    for (var i = 0; i < others; i++)
+                    {
+                        rows.Entities.Add(new Entity("sprk_report", Guid.NewGuid()));
+                    }
+
+                    return rows;
+                });
+
         public void ArrangeCatalogCreate(Guid newRowId)
             => DataverseUser
                 .Setup(d => d.PostAsync(ReportingEndpoints.CatalogCollectionApiPath, It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
@@ -525,7 +714,7 @@ public sealed class ReportingCatalogBindingContractTests
         public void VerifyPowerBiNeverAsked()
         {
             Embed.Verify(e => e.GetEmbedConfigAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IList<string>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Embed.Verify(e => e.ExportReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ExportFormat>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Embed.Verify(e => e.ExportReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ExportFormat>(), It.IsAny<string>(), It.IsAny<IList<string>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.GetReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.CreateReportAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.DeleteReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -559,6 +748,8 @@ public sealed class ReportingCatalogBindingContractTests
             builder.Services.AddAuthorization();
             builder.Services.AddSingleton(DataverseUser.Object);
             builder.Services.AddSingleton(Embed.Object);
+            builder.Services.AddSingleton(AccessProbe.Object);
+            builder.Services.AddSingleton(EntityService.Object);
             builder.WebHost.UseTestServer();
 
             _app = builder.Build();

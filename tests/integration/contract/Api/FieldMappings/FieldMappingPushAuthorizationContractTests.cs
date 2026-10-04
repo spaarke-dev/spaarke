@@ -163,6 +163,78 @@ public class FieldMappingPushAuthorizationContractTests
     }
 
     // =========================================================================================
+    // Task 166 r2: the SOURCE's mapped fields are read AS THE CALLER (field-level security applies)
+    // =========================================================================================
+
+    [Fact]
+    public void BuildSourceRecordQuery_SelectsTheMappedFieldsOfExactlyTheAuthorizedRow()
+    {
+        var query = FieldMappingEndpoints.BuildSourceRecordQuery(
+            "sprk_matter", MatterId, ["sprk_clientreference", "bad field')", "sprk_name"]);
+
+        query.Should().Be(
+            $"$select=sprk_clientreference,sprk_name,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+            "a rule field that is not a logical name is never interpolated into the caller's query");
+    }
+
+    [Fact]
+    public async Task Push_ReadsTheSourceFieldsAsTheCaller_NeverAppOnly()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.SourceReads.Should().Equal(new[]
+        {
+            ("sprk_matters", (string?)$"$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+             CallerSystemUserId),
+        }, "the source row is read through the impersonated seam, as the caller");
+        host.FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no app-only source read remains on this route");
+    }
+
+    // A column under field-level security that the caller cannot read comes back NULL from an impersonated read. The
+    // push must not copy it into children the caller CAN read (the app-only read used to return its real value).
+    [Fact]
+    public async Task Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_IsNeverCopiedIntoAChild()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(sourceValue: null);
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never, "a value the caller cannot read is never written anywhere");
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        json["skippedCount"]!.GetValue<int>().Should().Be(2);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("REF-166");
+    }
+
+    [Fact]
+    public async Task Push_WhenTheCallersSourceReadReturnsNoRow_IsTheUniform404_AndNoChildIsReadOrWritten()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(sourceRowVisible: false);
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        Normalize(await response.Content.ReadAsStringAsync()).Should().Be(Normalize(await UnknownSourceBodyAsync()));
+        host.ChildQueries.Should().BeEmpty();
+        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    // =========================================================================================
     // Task 166 r1 (owner round 21 item 3): the parent lookup comes from RELATIONSHIP METADATA
     // =========================================================================================
 
@@ -301,6 +373,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         public List<(string EntitySet, string? Query, Guid Caller)> ChildQueries { get; } = new();
 
+        /// <summary>Every SOURCE-row read (task 166 r2), with the caller it impersonated.</summary>
+        public List<(string EntitySet, string? Query, Guid Caller)> SourceReads { get; } = new();
+
         /// <summary>Every relationship-metadata read (task 166 r1), with the caller it impersonated.</summary>
         public List<(string Path, string? Query, Guid Caller)> MetadataQueries { get; } = new();
 
@@ -327,7 +402,9 @@ public class FieldMappingPushAuthorizationContractTests
             Guid[]? visibleChildren = null,
             string targetEntity = "sprk_event",
             string targetSet = "sprk_events",
-            string[]? lookupsToSource = null)
+            string[]? lookupsToSource = null,
+            string? sourceValue = "REF-166",
+            bool sourceRowVisible = true)
         {
             FieldMappings
                 .Setup(f => f.GetFieldMappingProfileWithRulesAsync("sprk_matter", targetEntity, true, It.IsAny<CancellationToken>()))
@@ -347,16 +424,32 @@ public class FieldMappingPushAuthorizationContractTests
                         },
                     ],
                 });
-            FieldMappings
-                .Setup(f => f.RetrieveRecordFieldsAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" });
-
             Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
+            Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+
+            // The SOURCE row, as the caller reads it (task 166 r2): a field-secured column the caller cannot read comes
+            // back null; a source the caller cannot read comes back as no row.
+            Impersonated
+                .Setup(q => q.QueryAsync("sprk_matters", It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string set, string? query, Guid caller, CancellationToken _) =>
+                {
+                    SourceReads.Add((set, query, caller));
+                    return sourceRowVisible
+                        ? new List<Dictionary<string, JsonElement>>
+                        {
+                            new()
+                            {
+                                ["sprk_matterid"] = JsonSerializer.SerializeToElement(MatterId.ToString()),
+                                ["sprk_clientreference"] = JsonSerializer.SerializeToElement(sourceValue),
+                            },
+                        }
+                        : new List<Dictionary<string, JsonElement>>();
+                });
 
             var children = visibleChildren ?? new[] { ChildA, ChildB };
             Impersonated
                 .Setup(q => q.QueryAsync(
-                    It.Is<string>(set => !set.StartsWith("EntityDefinitions", StringComparison.Ordinal)),
+                    It.Is<string>(set => !set.StartsWith("EntityDefinitions", StringComparison.Ordinal) && set != "sprk_matters"),
                     It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string set, string? query, Guid caller, CancellationToken _) =>
                 {
@@ -397,6 +490,7 @@ public class FieldMappingPushAuthorizationContractTests
             FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
             ChildQueries.Should().BeEmpty("no child query — as the caller or app-only — before the source is authorized");
+            SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
         }
 
         private async Task InitializeAsync()

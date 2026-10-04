@@ -1015,7 +1015,8 @@ public static class ChatDocumentEndpoints
 
         // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): the download below follows the row's pointer AS THE
         //     APPLICATION, so the pointer must name a container this document may use — refused before any read.
-        if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(document.Id, document.GraphDriveId, ct))
+        if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(
+                document.Id, document.GraphDriveId, document.GraphItemId, ct))
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,

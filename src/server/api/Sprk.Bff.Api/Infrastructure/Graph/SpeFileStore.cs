@@ -134,6 +134,10 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsUserAsync(ctx, driveId, itemId, ct);
 
+    /// <inheritdoc />
+    public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+        => _driveItemOps.GetItemCreatorAsync(driveId, itemId, ct);
+
     public Task<Stream?> DownloadFileAsUserAsync(
         HttpContext ctx,
         string driveId,

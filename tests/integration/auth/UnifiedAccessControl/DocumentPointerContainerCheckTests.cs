@@ -1,133 +1,251 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Models;
 using Xunit;
+using World = TestRecordContainerResolver.DocumentPointerWorld;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
-/// unified-access-control-r2 task 166 r1 — owner round 21 item 1 part (b): the server-side check that runs before
-/// EVERY app-only download that follows a <c>sprk_document</c> row's <c>sprk_graphdriveid</c>.
+/// unified-access-control-r2 task 166 — the server-side check that runs before EVERY app-only read that follows a
+/// <c>sprk_document</c> row's <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c> (owner round 21 item 1 part b), as
+/// made the INTERIM check by owner round 23 item 1 (r2).
 /// </summary>
 /// <remarks>
-/// <para><b>Why.</b> The BFF reads a document's bytes as the managed identity, from whatever drive the row names. Any
-/// Write holder can re-point a row until the pointer columns are field-secured, and rows forged before that lock stay
+/// <para><b>Why.</b> The BFF reads a document's bytes as the managed identity, from whatever drive and item the row names.
+/// Any Write holder can re-point a row until the pointer columns are field-secured, and rows forged before that lock stay
 /// forged — so the pointer is verified at the moment it is followed.</para>
-/// <para><b>The rule under test</b> (legacy-compatible, decided by the main session 2026-10-04): a pointer into a
-/// SECURE record's own container is honoured only for a document that hangs off that record (directly, or as a child
-/// of a document that does); any other pointer must name one of this environment's shared containers (a business
-/// unit's, or the configured archive); anything undecidable refuses.</para>
-/// <para>Seam: the REAL <see cref="RecordContainerResolver"/> over a substituted registry and entity service
-/// (<see cref="TestRecordContainerResolver.ForDocumentPointerWorld"/>). No <c>Mock&lt;HttpMessageHandler&gt;</c>.</para>
+/// <para><b>The rule under test</b> (round 23): (1) the ITEM — Graph's <c>createdBy</c> is the row's creator
+/// (<c>createdby</c> when a person, else <c>sprk_createdbyperson</c>), or the BFF identity for an item the BFF uploaded
+/// for a row the BFF created; (2) the CONTAINER — a secure record's own container only for that record's documents, the
+/// archive only on the archive path (the row's communication's own item), otherwise a business-unit container in the
+/// DOCUMENT OWNER's customer subtree. Anything undecidable refuses. The r1 rule checked neither the item nor the
+/// customer, which the r1 verifier showed lets a Write holder read any item of any business unit — under Model 1,
+/// another customer's.</para>
+/// <para>Seam: the REAL <see cref="RecordContainerResolver"/> over a substituted registry, entity service and SPE item
+/// reader (<see cref="TestRecordContainerResolver.DocumentPointerWorld"/>). No <c>Mock&lt;HttpMessageHandler&gt;</c>.</para>
 /// </remarks>
 public class DocumentPointerContainerCheckTests
 {
-    private const string BusinessUnitContainer = "b!bu-container";
+    private const string Item = "01ITEMCREATEDBYTHEDOCUMENTCREATOR";
     private const string ArchiveContainer = "b!archive-container";
     private const string SecureMatterContainer = "b!secure-matter-container";
-    private const string ForeignContainer = "b!another-customers-container";
+    private const string ForeignContainer = "b!a-container-no-unit-stamps";
+
+    // Model 1 (owner round 20): two customers as top-level business units of one environment.
+    private const string CustomerAContainer = "b!customer-a-container";
+    private const string CustomerA1Container = "b!customer-a-child-container";
+    private const string CustomerBContainer = "b!customer-b-container";
+    private static readonly Guid Root = TestRecordContainerResolver.PointerWorldRootBusinessUnit;
+    private static readonly Guid CustomerA = Guid.Parse("a0000000-0000-4000-8000-000000000166");
+    private static readonly Guid CustomerA1 = Guid.Parse("a1000000-0000-4000-8000-000000000166");
+    private static readonly Guid CustomerB = Guid.Parse("b0000000-0000-4000-8000-0000000001b6");
 
     private static readonly Guid SecureMatterId = Guid.Parse("1a000000-0000-4000-8000-000000000166");
     private static readonly Guid OtherMatterId = Guid.Parse("1b000000-0000-4000-8000-000000000166");
-    private static readonly Guid BusinessUnitId = Guid.Parse("1c000000-0000-4000-8000-000000000166");
     private static readonly Guid DocumentId = Guid.Parse("1d000000-0000-4000-8000-000000000166");
     private static readonly Guid ChildDocumentId = Guid.Parse("1e000000-0000-4000-8000-000000000166");
+    private static readonly Guid CommunicationId = Guid.Parse("1f000000-0000-4000-8000-000000000166");
+    private static readonly Guid OtherPerson = Guid.Parse("2a000000-0000-4000-8000-000000000166");
+    private static readonly Guid OtherPersonObjectId = Guid.Parse("2b000000-0000-4000-8000-000000000166");
+    private static readonly Guid AnotherApplication = Guid.Parse("2c000000-0000-4000-8000-000000000166");
+    private static readonly Guid AnotherApplicationUser = Guid.Parse("2d000000-0000-4000-8000-000000000166");
 
-    private static RecordContainerResolver World(
-        Dictionary<(string, Guid), Entity>? rows = null, Exception? queryFault = null)
+    private static readonly string CreatorObjectId = TestRecordContainerResolver.PointerWorldCreatorObjectId.ToString("D");
+    private static readonly string BffApplicationId = TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D");
+
+    /// <summary>Root → customer A (→ A1) and customer B, each stamping its own container; one secure matter.</summary>
+    private static World Environment(
+        Exception? queryFault = null, Exception? itemFault = null, bool createdByPersonColumnMissing = false, bool noItemReader = false)
     {
-        var allRows = new Dictionary<(string, Guid), Entity>(rows ?? new Dictionary<(string, Guid), Entity>())
+        var world = new World
         {
-            [("sprk_matter", SecureMatterId)] = new Entity("sprk_matter", SecureMatterId)
-            {
-                ["sprk_issecure"] = true,
-                ["sprk_containerid"] = SecureMatterContainer,
-                ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
-            },
-            [("sprk_matter", OtherMatterId)] = new Entity("sprk_matter", OtherMatterId)
-            {
-                ["sprk_issecure"] = false,
-                ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
-            },
-            [("businessunit", BusinessUnitId)] = new Entity("businessunit", BusinessUnitId)
-            {
-                ["sprk_containerid"] = BusinessUnitContainer,
-            },
+            ArchiveContainerId = ArchiveContainer,
+            RetrieveMultipleFault = queryFault,
+            ItemReadFault = itemFault,
+            CreatedByPersonColumnMissing = createdByPersonColumnMissing,
+            NoItemReader = noItemReader,
         };
-
-        return TestRecordContainerResolver.ForDocumentPointerWorld(
-            isBusinessUnitContainer: c => c == BusinessUnitContainer,
-            secureClaims: new Dictionary<string, (string Entity, Guid Id)>(StringComparer.Ordinal)
-            {
-                [SecureMatterContainer] = ("sprk_matter", SecureMatterId),
-            },
-            rows: allRows,
-            archiveContainerId: ArchiveContainer,
-            retrieveMultipleFault: queryFault);
-    }
-
-    private static Entity Document(Guid id, string? linkColumn = null, Guid? linkedId = null, Guid? parent = null)
-    {
-        var row = new Entity("sprk_document", id);
-        if (linkColumn is not null)
+        world.BusinessUnits[CustomerA] = (Root, CustomerAContainer);
+        world.BusinessUnits[CustomerA1] = (CustomerA, CustomerA1Container);
+        world.BusinessUnits[CustomerB] = (Root, CustomerBContainer);
+        world.SecureClaims[SecureMatterContainer] = ("sprk_matter", SecureMatterId);
+        world.Rows[("sprk_matter", SecureMatterId)] = new Entity("sprk_matter", SecureMatterId)
         {
-            row[linkColumn] = new EntityReference("sprk_matter", linkedId!.Value);
-        }
-        if (parent is { } parentId)
+            ["sprk_issecure"] = true,
+            ["sprk_containerid"] = SecureMatterContainer,
+            ["owningbusinessunit"] = new EntityReference("businessunit", CustomerA),
+        };
+        world.Rows[("sprk_matter", OtherMatterId)] = new Entity("sprk_matter", OtherMatterId)
         {
-            row["sprk_parentdocument"] = new EntityReference("sprk_document", parentId);
-        }
-
-        return row;
+            ["sprk_issecure"] = false,
+            ["owningbusinessunit"] = new EntityReference("businessunit", CustomerA),
+        };
+        world.Rows[("systemuser", OtherPerson)] = new Entity("systemuser", OtherPerson)
+        {
+            ["azureactivedirectoryobjectid"] = OtherPersonObjectId,
+        };
+        world.Rows[("systemuser", AnotherApplicationUser)] = new Entity("systemuser", AnotherApplicationUser)
+        {
+            ["applicationid"] = AnotherApplication,
+        };
+        return world;
     }
 
-    // ── Shared environment containers ───────────────────────────────────────────────────────────────
+    /// <summary>A document owned in <paramref name="owner"/> (default customer A), created by the world's person.</summary>
+    private static Entity Doc(Guid id, Guid? owner = null, Guid? createdBy = null) =>
+        World.Document(id, createdBy, owner ?? CustomerA);
+
+    private static Task<bool> Check(World world, string drive, string? item = Item, Guid? documentId = null) =>
+        world.Build().IsDocumentPointerContainerAllowedAsync(documentId ?? DocumentId, drive, item);
+
+    // ── The CONTAINER: business units, by the document owner's customer subtree (Model 1) ──────────────
 
     [Fact]
-    public async Task PointerIntoABusinessUnitContainer_IsAllowed()
+    public async Task PointerIntoTheOwnersOwnBusinessUnitContainer_IsAllowed()
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(DocumentId, BusinessUnitContainer);
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
 
-        allowed.Should().BeTrue("447 of 530 live documents sit in their UPLOADER's business-unit container (pre-task-076)");
+        (await Check(world, CustomerAContainer)).Should().BeTrue();
     }
 
     [Fact]
-    public async Task PointerIntoTheConfiguredArchiveContainer_IsAllowed()
+    public async Task PointerIntoAnotherBusinessUnitOfTheSameCustomer_IsAllowed()
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(DocumentId, ArchiveContainer);
+        // A document owned in the customer's child unit may sit in the customer's container, and vice versa.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA1);
+        world.Rows[("sprk_document", ChildDocumentId)] = Doc(ChildDocumentId, owner: CustomerA);
 
-        allowed.Should().BeTrue();
+        (await Check(world, CustomerAContainer)).Should().BeTrue();
+        (await Check(world, CustomerA1Container, documentId: ChildDocumentId)).Should().BeTrue();
     }
 
     [Fact]
-    public async Task PointerIntoAContainerThisEnvironmentDoesNotOwn_IsRefused()
+    public async Task PointerIntoAnotherCustomersBusinessUnitContainer_IsRefused()
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(DocumentId, ForeignContainer);
+        // The r1 verifier's case (item 7): a Write holder on a customer-A document re-points it at customer B's
+        // container. r1 accepted ANY business unit's container; round 23 confines it to the owner's customer subtree.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA1);
 
-        allowed.Should().BeFalse("a forged pointer must not reach a container no business unit, archive or secure record here owns");
+        (await Check(world, CustomerBContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ARootOwnedDocument_MayUseAnyBusinessUnitContainer_TheOperatorLevel()
+    {
+        // Root-BU ownership is the operator level (dev artifact, owner #1081); its subtree is the environment's.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: Root);
+
+        (await Check(world, CustomerBContainer)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PointerIntoAContainerNoBusinessUnitStamps_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: Root);
+
+        (await Check(world, ForeignContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ADocumentWhoseOwningBusinessUnitIsNotInTheHierarchy_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: Guid.NewGuid());
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
     }
 
     [Fact]
     public async Task Ensure_OnARefusedPointer_Throws409DocumentStorageUnverified()
     {
-        var act = () => World().EnsureDocumentPointerContainerAsync(DocumentId, ForeignContainer);
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+
+        var act = () => world.Build().EnsureDocumentPointerContainerAsync(DocumentId, CustomerBContainer, Item);
 
         var thrown = await act.Should().ThrowAsync<SdapProblemException>();
         thrown.Which.StatusCode.Should().Be(409);
         thrown.Which.Code.Should().Be(RecordContainerResolver.DocumentStorageUnverifiedCode);
     }
 
-    // ── A secure record's own container ─────────────────────────────────────────────────────────────
+    // ── The CONTAINER: the archive, only on the archive path ──────────────────────────────────────────
+
+    private static World ArchiveWorld(Guid? linkedCommunication, string itemName)
+    {
+        var world = Environment();
+        var row = Doc(DocumentId, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        if (linkedCommunication is { } c)
+        {
+            row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", c);
+        }
+
+        world.Rows[("sprk_document", DocumentId)] = row;
+        world.Items[(ArchiveContainer, Item)] = new SpeItemCreator(itemName, null, BffApplicationId);
+        return world;
+    }
+
+    [Fact]
+    public async Task PointerIntoTheArchive_ForTheArchivesOwnRecordOfThatCommunicationsItem_IsAllowed()
+    {
+        var world = ArchiveWorld(CommunicationId, $"{CommunicationId:N}_Re- Q4 numbers.eml");
+
+        (await Check(world, ArchiveContainer)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PointerIntoTheArchive_FromARowNotLinkedToACommunication_IsRefused()
+    {
+        var world = ArchiveWorld(null, $"{CommunicationId:N}_Re- Q4 numbers.eml");
+
+        (await Check(world, ArchiveContainer)).Should().BeFalse("the archive container is not an ordinary document container");
+    }
+
+    [Fact]
+    public async Task PointerIntoTheArchive_AtAnotherCommunicationsItem_IsRefused()
+    {
+        // The row is linked to communication C, but the item was archived for communication D — another customer's mail,
+        // possibly: the archive container is shared by the whole environment.
+        var world = ArchiveWorld(CommunicationId, $"{Guid.NewGuid():N}_someone else's mail.eml");
+
+        (await Check(world, ArchiveContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WhenTheArchiveIsAlsoABusinessUnitsContainer_EitherRuleAdmits_AndNeitherWidens()
+    {
+        // Live dev (2026-10-04): Communication:ArchiveContainerId IS the "Spaarke Demo" unit's container. An ordinary
+        // document of that customer is admitted by the subtree rule; another customer's is not, archive or no archive.
+        var world = new World { ArchiveContainerId = CustomerBContainer };
+        world.BusinessUnits[CustomerA] = (Root, CustomerAContainer);
+        world.BusinessUnits[CustomerB] = (Root, CustomerBContainer);
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerB);
+        world.Rows[("sprk_document", ChildDocumentId)] = Doc(ChildDocumentId, owner: CustomerA);
+
+        (await Check(world, CustomerBContainer)).Should().BeTrue("customer B's own document in customer B's container");
+        (await Check(world, CustomerBContainer, documentId: ChildDocumentId)).Should().BeFalse(
+            "a customer-A document that is not the archive's own record gains nothing from the container also being the archive");
+    }
+
+    // ── The CONTAINER: a secure record's own container ────────────────────────────────────────────────
 
     [Fact]
     public async Task PointerIntoASecureMattersContainer_ForADocumentOfThatMatter_IsAllowed()
     {
-        var resolver = World(new() { [("sprk_document", DocumentId)] = Document(DocumentId, "sprk_matter", SecureMatterId) });
+        var world = Environment();
+        var row = Doc(DocumentId);
+        row["sprk_matter"] = new EntityReference("sprk_matter", SecureMatterId);
+        world.Rows[("sprk_document", DocumentId)] = row;
 
-        var allowed = await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, SecureMatterContainer);
-
-        allowed.Should().BeTrue();
+        (await Check(world, SecureMatterContainer)).Should().BeTrue();
     }
 
     [Fact]
@@ -135,35 +253,156 @@ public class DocumentPointerContainerCheckTests
     {
         // The F0 attack: re-point a document the attacker may write (filed under a matter they can see) at the secure
         // matter's container, then download it through the BFF.
-        var resolver = World(new() { [("sprk_document", DocumentId)] = Document(DocumentId, "sprk_matter", OtherMatterId) });
+        var world = Environment();
+        var row = Doc(DocumentId);
+        row["sprk_matter"] = new EntityReference("sprk_matter", OtherMatterId);
+        world.Rows[("sprk_document", DocumentId)] = row;
 
-        var allowed = await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, SecureMatterContainer);
-
-        allowed.Should().BeFalse();
+        (await Check(world, SecureMatterContainer)).Should().BeFalse();
     }
 
     [Fact]
     public async Task PointerIntoASecureMattersContainer_ForAnAttachmentOfADocumentOfThatMatter_IsAllowed()
     {
-        var resolver = World(new()
-        {
-            [("sprk_document", DocumentId)] = Document(DocumentId, "sprk_matter", SecureMatterId),
-            [("sprk_document", ChildDocumentId)] = Document(ChildDocumentId, parent: DocumentId),
-        });
+        var world = Environment();
+        var parent = Doc(DocumentId);
+        parent["sprk_matter"] = new EntityReference("sprk_matter", SecureMatterId);
+        var child = Doc(ChildDocumentId);
+        child["sprk_parentdocument"] = new EntityReference("sprk_document", DocumentId);
+        world.Rows[("sprk_document", DocumentId)] = parent;
+        world.Rows[("sprk_document", ChildDocumentId)] = child;
 
-        var allowed = await resolver.IsDocumentPointerContainerAllowedAsync(ChildDocumentId, SecureMatterContainer);
-
-        allowed.Should().BeTrue("an email attachment's file lives where its email's does");
+        (await Check(world, SecureMatterContainer, documentId: ChildDocumentId)).Should().BeTrue(
+            "an email attachment's file lives where its email's does");
     }
 
     [Fact]
     public async Task PointerIntoASecureMattersContainer_ForADocumentWithNoLink_IsRefused()
     {
-        var resolver = World(new() { [("sprk_document", DocumentId)] = Document(DocumentId) });
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId);
 
-        var allowed = await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, SecureMatterContainer);
+        (await Check(world, SecureMatterContainer)).Should().BeFalse();
+    }
 
-        allowed.Should().BeFalse();
+    // ── The ITEM: created by the row's creator (owner round 23 item 1) ───────────────────────────────
+
+    [Fact]
+    public async Task AnItemUploadedByAnotherPerson_IsRefused_EvenInTheOwnersOwnContainer()
+    {
+        // The r1 verifier's case (item 7): r1 never looked at sprk_graphitemid, so a Write holder could re-point a row at
+        // ANY item in an accepted container. The item must be the row creator's own upload.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("payroll.xlsx", OtherPersonObjectId.ToString("D"), BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AnItemThatIsNotInTheNamedDrive_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+        world.Items[(CustomerAContainer, Item)] = null;
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WhenTheItemCannotBeRead_TheCheckRefuses()
+    {
+        var world = Environment(itemFault: new HttpRequestException("Graph unavailable"));
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WithNoItemReader_TheCheckRefuses()
+    {
+        var world = Environment(noItemReader: true);
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse("an item that cannot be verified is never followed");
+    }
+
+    [Fact]
+    public async Task APersonsRow_WhoseItemTheBffUploadedAppOnly_IsRefused()
+    {
+        // Round 23: the BFF identity is accepted only for rows the BFF created.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", null, BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ABffRow_WhoseItemTheBffUploadedAppOnly_IsAllowed()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", null, BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ABffRow_WhoseItemAnotherApplicationUploaded_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", null, AnotherApplication.ToString("D"));
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ARowAnotherApplicationCreated_IsRefused_EvenForThatApplicationsOwnUpload()
+    {
+        // "The BFF identity for BFF-created rows" — not any application's.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA, createdBy: AnotherApplicationUser);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", null, AnotherApplication.ToString("D"));
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ABffRow_WhoseItemItsRecordedPersonUploaded_IsAllowed()
+    {
+        // createdby is the BFF, so the row's creator is sprk_createdbyperson (tasks 133 / 146).
+        var world = Environment();
+        var row = Doc(DocumentId, owner: CustomerA, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        row[RecordContainerResolver.CreatedByPersonColumn] = new EntityReference("systemuser", OtherPerson);
+        world.Rows[("sprk_document", DocumentId)] = row;
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", OtherPersonObjectId.ToString("D"), BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ABffRow_WithNoRecordedPerson_WhoseItemAPersonUploaded_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", CreatorObjectId, BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse("whose upload it should be cannot be verified");
+    }
+
+    [Fact]
+    public async Task WhereTheCreatedByPersonColumnDoesNotExist_ABffRowsPersonIsUnverifiable_ButAPersonsRowStillVerifies()
+    {
+        // Owner round 17: a missing creator column is unverifiable. It must refuse only the answer that needs it.
+        var world = Environment(createdByPersonColumnMissing: true);
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA, createdBy: TestRecordContainerResolver.PointerWorldBffUser);
+        world.Rows[("sprk_document", ChildDocumentId)] = Doc(ChildDocumentId, owner: CustomerA);
+        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", CreatorObjectId, BffApplicationId);
+
+        (await Check(world, CustomerAContainer)).Should().BeFalse();
+        (await Check(world, CustomerAContainer, documentId: ChildDocumentId)).Should().BeTrue();
     }
 
     // ── Undecidable → refuse ────────────────────────────────────────────────────────────────────────
@@ -171,20 +410,22 @@ public class DocumentPointerContainerCheckTests
     [Fact]
     public async Task WhenTheContainerQueriesFault_TheCheckRefuses()
     {
-        var resolver = World(queryFault: new TimeoutException("Dataverse unavailable"));
+        var world = Environment(queryFault: new TimeoutException("Dataverse unavailable"));
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
 
-        var allowed = await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, BusinessUnitContainer);
-
-        allowed.Should().BeFalse("a pointer that cannot be verified is not followed (fail closed)");
+        (await Check(world, CustomerAContainer)).Should().BeFalse("a pointer that cannot be verified is not followed (fail closed)");
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task ABlankPointer_IsRefused(string? drive)
+    [InlineData(null, Item)]
+    [InlineData("", Item)]
+    [InlineData("   ", Item)]
+    [InlineData(CustomerAContainer, null)]
+    [InlineData(CustomerAContainer, "")]
+    [InlineData(CustomerAContainer, "  ")]
+    public async Task ABlankPointer_IsRefused(string? drive, string? item)
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(DocumentId, drive);
+        var allowed = await Environment().Build().IsDocumentPointerContainerAllowedAsync(DocumentId, drive, item);
 
         allowed.Should().BeFalse();
     }
@@ -192,7 +433,7 @@ public class DocumentPointerContainerCheckTests
     [Fact]
     public async Task AnEmptyDocumentId_IsRefused()
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(Guid.Empty, BusinessUnitContainer);
+        var allowed = await Environment().Build().IsDocumentPointerContainerAllowedAsync(Guid.Empty, CustomerAContainer, Item);
 
         allowed.Should().BeFalse();
     }
@@ -202,7 +443,7 @@ public class DocumentPointerContainerCheckTests
     [InlineData("not-a-document-id")]
     public async Task ATextDocumentIdThatIsNotAGuid_IsRefused(string? documentId)
     {
-        var allowed = await World().IsDocumentPointerContainerAllowedAsync(documentId, BusinessUnitContainer);
+        var allowed = await Environment().Build().IsDocumentPointerContainerAllowedAsync(documentId, CustomerAContainer, Item);
 
         allowed.Should().BeFalse("an id that names no sprk_document row has no pointer that can be verified");
     }
@@ -210,9 +451,48 @@ public class DocumentPointerContainerCheckTests
     [Fact]
     public async Task ATextDocumentIdThatIsAGuid_IsCheckedLikeTheGuidOverload()
     {
-        var resolver = World();
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
+        var resolver = world.Build();
 
-        (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId.ToString("D"), BusinessUnitContainer)).Should().BeTrue();
-        (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId.ToString("D"), ForeignContainer)).Should().BeFalse();
+        (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId.ToString("D"), CustomerAContainer, Item)).Should().BeTrue();
+        (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId.ToString("D"), CustomerBContainer, Item)).Should().BeFalse();
+    }
+
+    // ── The two pure pieces ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void CustomerSubtree_IsTheOwnersTopLevelUnitAndEverythingBeneathIt()
+    {
+        var hierarchy = new Dictionary<Guid, Guid?>
+        {
+            [Root] = null, [CustomerA] = Root, [CustomerA1] = CustomerA, [CustomerB] = Root,
+        };
+
+        RecordContainerResolver.CustomerSubtree(CustomerA1, hierarchy).Should().BeEquivalentTo(new[] { CustomerA, CustomerA1 });
+        RecordContainerResolver.CustomerSubtree(CustomerA, hierarchy).Should().BeEquivalentTo(new[] { CustomerA, CustomerA1 });
+        RecordContainerResolver.CustomerSubtree(CustomerB, hierarchy).Should().BeEquivalentTo(new[] { CustomerB });
+        RecordContainerResolver.CustomerSubtree(Root, hierarchy).Should().BeEquivalentTo(new[] { Root, CustomerA, CustomerA1, CustomerB });
+        RecordContainerResolver.CustomerSubtree(Guid.NewGuid(), hierarchy).Should().BeNull("an unknown unit has no subtree");
+
+        var cycle = new Dictionary<Guid, Guid?> { [CustomerA] = CustomerA1, [CustomerA1] = CustomerA };
+        RecordContainerResolver.CustomerSubtree(CustomerA, cycle).Should().BeNull("a cyclic hierarchy is unverifiable");
+    }
+
+    [Fact]
+    public void TheBffIdentity_IsEveryApplicationIdTheBffAuthenticatesAs()
+    {
+        var api = Guid.NewGuid();
+        var managedIdentity = Guid.NewGuid();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["API_APP_ID"] = api.ToString(),
+            ["AzureAd:ClientId"] = api.ToString(),
+            ["Graph:ManagedIdentity:ClientId"] = managedIdentity.ToString(),
+            ["Dataverse:ClientId"] = "#{not-a-guid}#",
+        }).Build();
+
+        RecordContainerResolver.BffApplicationIdsFrom(configuration).Should().BeEquivalentTo(new[] { api, managedIdentity });
+        RecordContainerResolver.BffApplicationIdsFrom(null).Should().BeEmpty();
     }
 }

@@ -80,11 +80,6 @@ export interface ReportingToolbarProps {
   reportRef: React.RefObject<Report | null>;
   /** True while the embed token is loading (or auto-refreshing). */
   tokenLoading: boolean;
-  /**
-   * Power BI workspace ID — required for Save As (targetWorkspaceId).
-   * Comes from the embed token response; null until a report is loaded.
-   */
-  workspaceId: string | null;
   /** Called when the user selects a different report. */
   onReportSelect: (report: ReportCatalogItem) => void;
   /** Called when the user changes the report mode. */
@@ -126,7 +121,6 @@ export const ReportingToolbar: React.FC<ReportingToolbarProps> = ({
   reports,
   reportRef,
   tokenLoading,
-  workspaceId,
   onReportSelect,
   onModeChange,
   onRefresh,
@@ -208,7 +202,6 @@ export const ReportingToolbar: React.FC<ReportingToolbarProps> = ({
               <SaveControls
                 report={reportRef.current}
                 selectedReport={selectedReport}
-                workspaceId={workspaceId}
                 disabled={isDisabled}
                 onSaveAsComplete={onSaveAsComplete}
               />

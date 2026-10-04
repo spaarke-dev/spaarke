@@ -17,8 +17,8 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// </param>
 /// <param name="WorkspaceId">
 ///   The Power BI workspace the report lives in — derived server-side from the <c>sprk_report</c> catalog row
-///   (unified-access-control-r2 task 166 r1). The client needs it as the target of an in-editor Save As; it never
-///   sends it back as an authority (a Save As is registered by its SOURCE catalog row).
+///   (unified-access-control-r2 task 166 r1). Informational: the client never sends it back (task 166 r2 removed the
+///   in-editor Save As registration it was once returned for; a copy is a server-side clone of a catalog row).
 /// </param>
 public record EmbedConfig(
     string Token,
@@ -70,17 +70,18 @@ public enum ExportFormat
 /// </summary>
 /// <param name="Name">Display name for the new report.</param>
 /// <param name="SourceReportId">
-///   The <c>sprk_report</c> row the new report is based on. Its workspace and dataset are inherited.
+///   The <c>sprk_report</c> row the new report is based on. Its workspace and dataset are inherited, and the server
+///   CLONES its Power BI report.
 /// </param>
-/// <param name="PbiReportId">
-///   Optional. The Power BI report an in-editor <b>Save As</b> already created (the Power BI SDK's <c>saved</c> event
-///   reports its id). When present the server REGISTERS it — after verifying, as the service principal, that it is a
-///   report in the SOURCE row's workspace. When absent the server CLONES the source report (New Report).
-/// </param>
+/// <remarks>
+/// Task 166 r2 (owner round 23 item 2): the optional <c>PbiReportId</c> ("Save As" registration of a report the client
+/// named) is REMOVED. Embed tokens are view-only, so the SDK's saveAs could never create a report; the property could
+/// only point a new catalog row at an existing Power BI report (an alias). A client that still sends it is ignored
+/// (System.Text.Json skips unknown members) and gets a clone.
+/// </remarks>
 public record CreateReportRequest(
     string Name,
-    Guid SourceReportId,
-    Guid? PbiReportId = null);
+    Guid SourceReportId);
 
 /// <summary>Response for <c>POST /api/reporting/reports</c>: the new catalog row.</summary>
 /// <param name="ReportId">The new <c>sprk_report</c> row id.</param>

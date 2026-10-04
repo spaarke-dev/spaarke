@@ -147,7 +147,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
 
             // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the download below follows the row's
             // pointer as the application, so the pointer's container is verified first (fail closed, permanent).
-            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, ct))
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct))
             {
                 _telemetry.RecordExtractionFailure(extractionStopwatch, documentIdStr, RecordContainerResolver.DocumentStorageUnverifiedCode);
                 await UpdateInvoiceExtractionStatusAsync(invoiceId, ExtractionStatusFailed, ct);

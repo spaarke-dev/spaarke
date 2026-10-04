@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 
 /// <summary>
 /// The REAL <see cref="RecordContainerResolver"/> over a Dataverse world of exactly one root record — for tests of
@@ -125,90 +128,215 @@ internal static class TestRecordContainerResolver
             NullLogger<RecordContainerResolver>.Instance);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // The document-pointer world (task 166 r1; owner round 23 item 1 in r2): business units with their containers and
+    // parents, secure records claiming their own containers, the document rows and their creators, the drive items
+    // and THEIR creators, the configured archive container and the BFF identity.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The root business unit of every pointer world (parent null).</summary>
+    public static readonly Guid PointerWorldRootBusinessUnit = Guid.Parse("b0b0b0b0-0000-4000-8000-000000000166");
+
+    /// <summary>The PERSON (a human systemuser) who created the default document and uploaded its item.</summary>
+    public static readonly Guid PointerWorldCreator = Guid.Parse("c0c0c0c0-0000-4000-8000-000000000166");
+
+    /// <summary><see cref="PointerWorldCreator"/>'s Entra object id — what Graph reports as <c>createdBy.user.id</c>.</summary>
+    public static readonly Guid PointerWorldCreatorObjectId = Guid.Parse("c1c1c1c1-0000-4000-8000-000000000166");
+
+    /// <summary>The BFF's Entra application id ("the BFF identity", configured as <c>API_APP_ID</c>).</summary>
+    public static readonly Guid PointerWorldBffApplicationId = Guid.Parse("bff00000-0000-4000-8000-000000000166");
+
+    /// <summary>The BFF's Dataverse application user (its <c>applicationid</c> is <see cref="PointerWorldBffApplicationId"/>).</summary>
+    public static readonly Guid PointerWorldBffUser = Guid.Parse("bff11111-0000-4000-8000-000000000166");
+
     /// <summary>
-    /// An environment in which NO secure record claims any container and the business units stamp exactly the containers
-    /// <paramref name="isBusinessUnitContainer"/> accepts. The document-pointer check (task 166 r1, owner round 21 item 1b)
-    /// therefore honours a pointer into one of them and refuses any other — for tests of app-only download paths whose
+    /// An environment in which NO secure record claims any container and the ROOT business unit stamps exactly the
+    /// containers <paramref name="isBusinessUnitContainer"/> accepts; every document is created and owned in that root
+    /// by <see cref="PointerWorldCreator"/>, who also uploaded every item. The document-pointer check therefore honours
+    /// a pointer into one of those containers and refuses any other — for tests of app-only download paths whose
     /// subject is something else, which must still run behind the real check.
     /// </summary>
     public static RecordContainerResolver ForBusinessUnitContainers(Func<string, bool> isBusinessUnitContainer)
-        => ForDocumentPointerWorld(
-            isBusinessUnitContainer,
-            secureClaims: new Dictionary<string, (string Entity, Guid Id)>(StringComparer.Ordinal),
-            rows: new Dictionary<(string, Guid), Entity>(),
-            archiveContainerId: null,
-            retrieveMultipleFault: null);
+        => new DocumentPointerWorld
+        {
+            RootClaims = isBusinessUnitContainer,
+        }.Build();
 
     /// <summary><see cref="ForBusinessUnitContainers(Func{string, bool})"/> for a fixed set of containers.</summary>
     public static RecordContainerResolver ForBusinessUnitContainers(params string[] containers)
         => ForBusinessUnitContainers(c => Array.IndexOf(containers, c) >= 0);
 
     /// <summary>
-    /// The full document-pointer world (task 166 r1): business-unit containers, SECURE records claiming their own
-    /// containers (<paramref name="secureClaims"/>: container → record), the rows the check reads (documents and the
-    /// records they link), the configured archive container, and an optional fault every query throws.
+    /// The full document-pointer world (task 166 r1 / r2). Defaults: one root business unit claiming nothing; any
+    /// document not in <see cref="Rows"/> is <see cref="Document"/> (created by <see cref="PointerWorldCreator"/>, owned
+    /// by the root); any item not in <see cref="Items"/> was uploaded by <see cref="PointerWorldCreator"/>.
     /// </summary>
-    public static RecordContainerResolver ForDocumentPointerWorld(
-        Func<string, bool> isBusinessUnitContainer,
-        IReadOnlyDictionary<string, (string Entity, Guid Id)> secureClaims,
-        IReadOnlyDictionary<(string, Guid), Entity> rows,
-        string? archiveContainerId,
-        Exception? retrieveMultipleFault)
+    public sealed class DocumentPointerWorld
     {
-        var registry = new Mock<ISecurableEntityRegistry>();
-        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SecurableRoots);
-        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(name, SecurableRoots, DocumentWorldEntities));
+        /// <summary>Business units: id → (parent, stamped container). The root is present by default.</summary>
+        public Dictionary<Guid, (Guid? Parent, string? Container)> BusinessUnits { get; } = new()
+        {
+            [PointerWorldRootBusinessUnit] = (null, null),
+        };
 
-        var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
-        entityService.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) =>
-                rows.TryGetValue((entity, id), out var row)
-                    ? row
-                    : throw new InvalidOperationException($"Unmodelled row {entity}({id})."));
-        entityService.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+        /// <summary>Extra containers the ROOT business unit claims (the predicate form of <see cref="BusinessUnits"/>).</summary>
+        public Func<string, bool>? RootClaims { get; init; }
+
+        /// <summary>SECURE records claiming their own containers: container → record.</summary>
+        public Dictionary<string, (string Entity, Guid Id)> SecureClaims { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Dataverse rows the check reads (documents, the records they link, systemusers).</summary>
+        public Dictionary<(string, Guid), Entity> Rows { get; } = new();
+
+        /// <summary>Drive items and who created them: (drive, item) → creator (null = not in that drive).</summary>
+        public Dictionary<(string Drive, string Item), SpeItemCreator?> Items { get; } = new();
+
+        /// <summary>The configured <c>Communication:ArchiveContainerId</c>.</summary>
+        public string? ArchiveContainerId { get; init; }
+
+        /// <summary>A fault every RetrieveMultiple throws (the container / hierarchy queries).</summary>
+        public Exception? RetrieveMultipleFault { get; init; }
+
+        /// <summary>The environment does not have the <c>sprk_createdbyperson</c> column on documents (owner round 17).</summary>
+        public bool CreatedByPersonColumnMissing { get; init; }
+
+        /// <summary>The Graph creator read throws (Graph unavailable).</summary>
+        public Exception? ItemReadFault { get; init; }
+
+        /// <summary>The resolver is built with NO SharePoint Embedded item reader (a host that registers none).</summary>
+        public bool NoItemReader { get; init; }
+
+        /// <summary>A document row created by <paramref name="createdBy"/> and owned in <paramref name="owningBusinessUnit"/>.</summary>
+        public static Entity Document(Guid id, Guid? createdBy = null, Guid? owningBusinessUnit = null)
+            => new("sprk_document", id)
             {
-                if (retrieveMultipleFault is not null)
-                {
-                    throw retrieveMultipleFault;
-                }
+                ["createdby"] = new EntityReference("systemuser", createdBy ?? PointerWorldCreator),
+                ["owningbusinessunit"] = new EntityReference("businessunit", owningBusinessUnit ?? PointerWorldRootBusinessUnit),
+            };
 
-                var collection = new EntityCollection();
-                var container = ContainerSearchedFor(query);
-                if (container is null)
-                {
-                    return collection;
-                }
+        public RecordContainerResolver Build()
+        {
+            var registry = new Mock<ISecurableEntityRegistry>();
+            registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(SecurableRoots);
+            registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(name, SecurableRoots, DocumentWorldEntities));
 
-                if (query.EntityName == "businessunit")
+            var people = new Dictionary<(string, Guid), Entity>
+            {
+                [("systemuser", PointerWorldCreator)] = new Entity("systemuser", PointerWorldCreator)
                 {
-                    if (isBusinessUnitContainer(container))
+                    ["azureactivedirectoryobjectid"] = PointerWorldCreatorObjectId,
+                },
+                [("systemuser", PointerWorldBffUser)] = new Entity("systemuser", PointerWorldBffUser)
+                {
+                    ["applicationid"] = PointerWorldBffApplicationId,
+                },
+            };
+
+            var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            entityService.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) =>
+                {
+                    if (entity == "sprk_document" && CreatedByPersonColumnMissing && columns.Contains("sprk_createdbyperson"))
                     {
-                        collection.Entities.Add(new Entity("businessunit", Guid.NewGuid()) { ["sprk_containerid"] = container });
+                        throw new InvalidOperationException(
+                            "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_createdbyperson'.");
+                    }
+
+                    if (Rows.TryGetValue((entity, id), out var row) || people.TryGetValue((entity, id), out row))
+                    {
+                        return row;
+                    }
+
+                    return entity == "sprk_document"
+                        ? Document(id)
+                        : throw new InvalidOperationException($"Unmodelled row {entity}({id}).");
+                });
+            entityService.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+                {
+                    if (RetrieveMultipleFault is not null)
+                    {
+                        throw RetrieveMultipleFault;
+                    }
+
+                    var collection = new EntityCollection();
+                    var container = ContainerSearchedFor(query);
+
+                    if (query.EntityName == "businessunit")
+                    {
+                        if (container is null)
+                        {
+                            // The hierarchy read: every unit with its parent.
+                            foreach (var (unitId, (parent, _)) in BusinessUnits)
+                            {
+                                var unit = new Entity("businessunit", unitId);
+                                if (parent is { } p)
+                                {
+                                    unit["parentbusinessunitid"] = new EntityReference("businessunit", p);
+                                }
+
+                                collection.Entities.Add(unit);
+                            }
+
+                            return collection;
+                        }
+
+                        foreach (var (unitId, (_, stamped)) in BusinessUnits)
+                        {
+                            var claims = string.Equals(stamped, container, StringComparison.Ordinal)
+                                         || (unitId == PointerWorldRootBusinessUnit && RootClaims?.Invoke(container) == true);
+                            if (claims)
+                            {
+                                collection.Entities.Add(new Entity("businessunit", unitId) { ["sprk_containerid"] = container });
+                            }
+                        }
+
+                        return collection;
+                    }
+
+                    if (container is null)
+                    {
+                        return collection;
+                    }
+
+                    // Pass 1 (secure claimants) carries `sprk_issecure == true`; pass 2 (co-mingling) does not — and this
+                    // world has no non-secure claimant of a secure container.
+                    var asksForSecure = query.Criteria.Conditions.Any(c =>
+                        c.AttributeName == "sprk_issecure" && c.Operator == ConditionOperator.Equal);
+                    if (asksForSecure && SecureClaims.TryGetValue(container, out var owner) && owner.Entity == query.EntityName)
+                    {
+                        collection.Entities.Add(new Entity(owner.Entity, owner.Id) { ["sprk_containerid"] = container });
                     }
 
                     return collection;
-                }
+                });
 
-                // Pass 1 (secure claimants) carries `sprk_issecure == true`; pass 2 (co-mingling) does not — and this
-                // world has no non-secure claimant of a secure container.
-                var asksForSecure = query.Criteria.Conditions.Any(c =>
-                    c.AttributeName == "sprk_issecure" && c.Operator == ConditionOperator.Equal);
-                if (asksForSecure && secureClaims.TryGetValue(container, out var owner) && owner.Entity == query.EntityName)
+            var speFiles = new Mock<ISpeFileOperations>(MockBehavior.Loose);
+            speFiles.Setup(f => f.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string drive, string item, CancellationToken _) =>
                 {
-                    collection.Entities.Add(new Entity(owner.Entity, owner.Id) { ["sprk_containerid"] = container });
-                }
+                    if (ItemReadFault is not null)
+                    {
+                        throw ItemReadFault;
+                    }
 
-                return collection;
-            });
+                    return Items.TryGetValue((drive, item), out var creator)
+                        ? creator
+                        : new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"));
+                });
 
-        var options = Microsoft.Extensions.Options.Options.Create(
-            new Sprk.Bff.Api.Configuration.CommunicationOptions { ArchiveContainerId = archiveContainerId });
+            var options = Microsoft.Extensions.Options.Options.Create(
+                new Sprk.Bff.Api.Configuration.CommunicationOptions { ArchiveContainerId = ArchiveContainerId });
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["API_APP_ID"] = PointerWorldBffApplicationId.ToString("D") })
+                .Build();
 
-        return new RecordContainerResolver(
-            registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance, options);
+            return new RecordContainerResolver(
+                registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance, options,
+                NoItemReader ? null : speFiles.Object, configuration);
+        }
     }
 
     private static readonly IReadOnlySet<string> DocumentWorldEntities =

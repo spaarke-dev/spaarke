@@ -320,6 +320,37 @@ public class DriveItemOperations
         }
     }
 
+    /// <summary>
+    /// Who CREATED a drive item (app-only Graph read of <c>id,name,createdBy</c>) — the evidence the document-pointer
+    /// check verifies before the BFF follows a <c>sprk_document</c> row's pointer as the application
+    /// (unified-access-control-r2 task 166 r2, owner round 23 item 1). Returns <see langword="null"/> when the item is
+    /// not in that drive (Graph 404). Deliberately NOT cached: it sits on an authorization path, so a stale or poisoned
+    /// cache entry would be a security defect rather than a slow page; every other fault throws (the caller refuses).
+    /// </summary>
+    public async Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+    {
+        try
+        {
+            var item = await _factory.ForApp().Drives[driveId].Items[itemId]
+                .GetAsync(req => req.QueryParameters.Select = new[] { "id", "name", "createdBy" }, cancellationToken: ct);
+
+            if (item is null)
+            {
+                return null;
+            }
+
+            return new SpeItemCreator(
+                item.Name,
+                item.CreatedBy?.User?.Id,
+                item.CreatedBy?.Application?.Id);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Item {ItemId} not found in drive {DriveId} (creator read)", itemId, driveId);
+            return null;
+        }
+    }
+
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)
     // =============================================================================

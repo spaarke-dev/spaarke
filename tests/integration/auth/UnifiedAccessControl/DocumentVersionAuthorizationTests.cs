@@ -387,6 +387,7 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
 
         public Task<FileHandleDto?> GetFileMetadataAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> GetFileMetadataAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
+        public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<SpeItemCreator?>>();
         public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         // Deliberately UNMODELLED, not recorded. These are the INTERNAL OBO version routes; the
         // app-only overload exists only for the external-access surface (unified-access-control-r2).

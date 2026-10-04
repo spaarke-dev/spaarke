@@ -1,8 +1,14 @@
 # Task 166: Memory, Compose and remaining-surface route authorization
 
 > **Task**: `tasks/166-memory-compose-and-remaining-route-authorization.poml` (GitHub #1105)
-> **Branch**: `task/uac-r2-166` from `work/unified-access-control-r2` @ `e6dd48b43`; **r1**: `task/uac-r2-166-r1` (§18)
+> **Branch**: `task/uac-r2-166` from `work/unified-access-control-r2` @ `e6dd48b43`; **r1**: `task/uac-r2-166-r1` (§18);
+> **r2**: `task/uac-r2-166-r2` (§19)
 > **Rigor**: FULL (bff-api, auth, security; TEST-MODIFYING override applies)
+> **Outcome (r2, 2026-10-04)**: the 20-item verification of `582a4b42a` is closed and owner round 23 is implemented
+> (§19): the interim document-pointer check verifies the ITEM and the owner's customer subtree; reporting export carries
+> the RLS identity; the Save-As registration path is removed and DELETE is guarded; Create checks the caller's privilege
+> before the clone; the field-mapping source is read as the caller. Status `completed-with-escalation`: round 21 item 1
+> (i)–(iii) remain OWED by task 166 for the follow-up round round 23 names (§19.10).
 > **Outcome (r1, 2026-10-04)**: COMPLETED. Owner round 21 decided the three escalations of §8 and r1 implements
 > them (§18); r1 also closes the 25-item verification of `18a6aebdf` (§18.2). Not closed: publish size (harness skip,
 > §18.10). Round 21 item 1 steps (i)–(iii) are owed by task 166 and run by the main session (§18.3).
@@ -357,6 +363,11 @@ Full runs (once, at the end, on the final code): see §16.
 
 ## 18.3 Round 21 item 1 (b): the document-pointer check, and what task 166 still owes
 
+> **SUPERSEDED in r2 (§19.3)** by owner round 23 item 1: the check now also verifies the ITEM (Graph `createdBy`
+> against the row's creator) and confines business-unit containers to the document owner's customer subtree; the
+> archive is accepted only on the archive path. The site table below still lists every call site (each now passes the
+> item id too). The rule text and "0 refused" figures below are r1's.
+
 **The rule** (`RecordContainerResolver.IsDocumentPointerContainerAllowedAsync(documentId, pointerDriveId)`; the
 `string` overload refuses an id that is not a GUID; `EnsureDocumentPointerContainerAsync` throws
 `SdapProblemException` 409 `document_storage_unverified`):
@@ -608,3 +619,254 @@ waivers owned by 166**, the `PUT` key becoming the `PATCH` key. `RouteAuthorizat
     then the same with `-Verify` (exit 0).
 
 No `.claude` edit is needed for this round (§12's edit stands).
+
+# r2 (2026-10-04): verifier findings on `582a4b42a` closed, owner round 23 implemented
+
+> **Branch**: `task/uac-r2-166-r2` from `task/uac-r2-166-r1` @ `582a4b42a`
+> **Inputs**: the 20-item adversarial verification of `582a4b42a`; **owner round 23** (work branch `bfafcc04e`,
+> BINDING — the main session's decisions on r1's two open questions, under the round-15 standing directive; also
+> delivered as an uncommitted `NOTE-FROM-MAIN.md`, deleted before commit); rounds 1–12 and 21 as before.
+> **Outcome**: every finding is closed in code and tests, or proven and recorded (§19.2), EXCEPT the round 21 item 1
+> steps (i)–(iii), which round 23 assigns to the follow-up round (§19.10). Publish size: the verifier's own measurement
+> is recorded (§19.9); this run was told to skip it.
+
+## 19.1 Round 23 as applied
+
+| Round 23 item | Decision (binding) | Implemented here |
+|---|---|---|
+| 1 — interim document-pointer check | Verify the ITEM (driveItem `createdBy` = the row's creator — `createdby` when human, else `sprk_createdbyperson` — or the BFF identity for BFF-created rows) AND accept only containers in the document owner's business unit or its customer's subtree (archive only on the archive path); unverifiable fails closed; residual exposure stated | §19.3 |
+| 2 — reporting Save-As | Remove the `pbiReportId` registration path (view-only tokens cannot create a report; it only aliased); keep the server-side clone; DELETE removes the Power BI report only for an `iscustom` row no other catalog row references | §19.4 |
+
+## 19.2 The 20 findings — what changed per item
+
+| # | Finding | Closure |
+|---|---|---|
+| 1 | Positive: independent runs match | No change. This round's runs: §19.9. (The lone `PlaybookByNameDeprecationTests` failure the verifier saw is in a file this task does not touch; see §19.9 for this round's integration runs.) |
+| 2 (a) / 19 | `ContainerDocumentAuthorizationFilter` calling `next()` for a missing query `containerId` turned nothing red (the handler answers the same 400) | NEW `AccessControl.ContainerDocumentListAuthorizationTests.QuerySource_AMissingContainerId_IsTheFiltersOwn400_AndNeverReachesTheHandler(null / "" / "   ")` drives the REAL filter with a recording `next` and recording Dataverse doubles: the answer is the filter's own 400 with the exact detail, the handler is never reached, no resolver / Dataverse / access-data call. The route-level test cannot see the difference by design (identical 400), so the filter contract is pinned at the filter. Seed S8 (`return await next(context)`) → 3 red. |
+| 2 (b) | Removing `ReadCatalogRowAsync`'s `RowId == requested id` check turned nothing red | NEW shape `row-of-another-id` in `ReportingCatalogBindingContractTests.UnboundRowShapes` (a well-formed row with usable Power BI ids but another `sprk_reportid`): embed-token, export and GET each answer the uniform 404 and Power BI is never asked. Seed S7 → 3 red. |
+| 3 / 20 | Publish size not measured by the task | Recorded from the verifier's independent measurement (§19.9): `e6dd48b43` 45.657 MB vs `582a4b42a` 45.675 MB = **+0.018 MB**, Compress-Archive Optimal, PDBs included, 212 / 212 files, short-path fresh worktrees, zips in the scratchpad (CLAUDE.md §10 hazard four reproduced). This run's own measurement was skipped on the harness instruction; r2 adds no package and no DI registration. |
+| 4 / 15 | HIGH: `POST /api/reporting/export` ran `ExportToFileInGroupAsync` with no effective identity | `ExportReport` now reads the caller's business unit AS THE CALLER (WhoAmI, the embed path's `ReadCallerBusinessUnitAsync`) and refuses with the embed path's 503 `sdap.reporting.rls.identity_unavailable` when it cannot (the route now `.ProducesProblem(503)`); `ReportingEmbedService.ExportReportAsync(…, string username, IList<string> roles, …)` requires the identity (throws without it), reads the report's dataset from Power BI (as the embed path does) and builds the request through `BuildExportRequest`, which puts `PowerBIReportConfiguration.Identities = [EffectiveIdentity{Username = business unit, Roles = [BusinessUnitFilter], Datasets = [dataset]}]` in the request and refuses a blank username, no roles or no dataset. Tests: `Export_ForAReadableRow_ExportsTheDerivedReport_UnderTheCallersBusinessUnitRlsIdentity`, `Export_WhenTheCallersBusinessUnitCannotBeRead_ExportsNothing`, `ExportRequest_CarriesTheEffectiveIdentity_OnTheReportsDataset`, `ExportRequest_WithoutACompleteIdentity_IsNeverBuilt` (3 cases). Seeds S1 / S1b red. |
+| 5 / 16 | MEDIUM: Save-As registration aliased any report in the source's workspace; DELETE then destroyed it app-only | Round 23 item 2: `CreateReportRequest.PbiReportId` is DELETED (a client that still sends it is ignored by System.Text.Json and gets a clone); `CreateReport` ALWAYS clones the SOURCE row's report; `GetReportAsync` is no longer called by any route. `DeleteReport` deletes the catalog row as the caller first (unchanged), then deletes the Power BI report ONLY when the row is `sprk_iscustom` AND no other catalog row (active or inactive) references its `sprk_pbi_reportid` — an APP-ONLY existence read (`IsReferencedByAnotherCatalogRowAsync`, a server invariant: a caller-scoped read would miss rows the caller cannot see); a standard report, a still-referenced report, or an unanswerable reference question KEEPS the report (204, logged). Client: `SaveControls` Save As now calls `createReport({name, sourceReportId})` (a server clone); `saveAsReport` / `SaveAsReportRequest` are deleted from `reportingApi.ts`; the unused `workspaceId` prop is removed from `SaveControls` / `ReportingToolbar` / `App`. Tests: `Create_WithAClientNamedPowerBiReport_ClonesTheSource_AndNeverRegistersTheNamedReport`, `Delete_OfACustomRowNoOtherRowReferences_DeletesTheRowAsTheCallerFirst_ThenTheDerivedReport` (also pins the app-only query's two conditions), `Delete_KeepsThePowerBiReport_UnlessItIsACustomRowsUnreferencedReport(standard-row / referenced-by-another-row / reference-check-throws)`, `ReportingEndpointsTests.CreateReportRequest_HasExpectedProperties` (`PbiReportId` absent). Seeds S2, S4, S5, S6 red. |
+| 6 | LOW-MEDIUM: Create cloned app-only before knowing the caller may create the row | Round 9 write pattern: `CreateReport` asks `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync(caller token, "prvCreatesprk_Report")` AS THE CALLER after the input 400s and BEFORE the source read and the clone; false / throw / no token → 403 (`sdap.reporting.deny.insufficient_privilege`), nothing read, nothing cloned. The constant is the live-verified name (§19.6) and is pinned by `CreateReportPrivilege_IsTheLiveVerifiedName`. The compensating delete stays for a row create that fails for another reason (it now always runs, since every create is a clone). Test: `Create_WithoutTheCallersCreatePrivilege_IsRefused_BeforeAnyReadOrClone(denied / throws)` (asserts the caller's own token is forwarded). Seed S3 red. |
+| 7 / 17 | HIGH: the pointer check verified the drive only and accepted any business-unit or the archive container; the deviation rested on an unrecorded answer | Round 23 item 1 implemented (§19.3), and the decision IS now recorded (round 23, `bfafcc04e`). The check verifies the ITEM (Graph `createdBy`) against the row's creator and confines business-unit containers to the document OWNER's customer subtree (Model 1: another customer's container is refused); the archive is accepted only on the archive path. The misleading r1 comment is replaced. Every call site now passes the item id it is about to read. 33 test methods (39 cases) in `DocumentPointerContainerCheckTests` (rewritten) + a route-level item test. Seeds S10–S15 red. |
+| 8 / 18 | FLS on the pointer columns not applied; prerequisites (i) pointer-attach endpoint, (ii) legacy migration not built; POML said `completed` | NOT built in this round, BY BINDING DECISION: round 23 makes the item-verifying check the interim rule "until round 21 item 1's BFF pointer-attach path, legacy migration of the 447 dev files, FLS apply and strict derived-container check land in the follow-up round". The record is corrected: the POML status is now `completed-with-escalation` (the project's existing value for "code done, an owner-decided item still open"), and §19.10 lists (i)–(iii) as owed by task 166. |
+| 9, 10, 11 | Positive: deletions, forbidden-change criteria, covered deviations verified | No change. r2 again leaves `src/server/shared/Spaarke.Dataverse/**`, `EntityAccessFilter`, `SemanticSearchAuthorizationFilter` and `OperationAccessPolicy` untouched (diff). |
+| 12 | LOW: `scripts/Seed-TypedHandlers.ps1:220` still names the deleted `GET /api/workspace/state` | Comment corrected: the kept read path is the `SprkChatAgentFactory` workspace-state prompt block; the route was deleted by task 166 (round 10 item 1). |
+| 13 | LOW: the push read the source's mapped fields app-only after a row-level Read check (FLS bypass) | The source's mapped fields are now read AS THE CALLER through the route's existing impersonated seam (`IImpersonatedCommunicationQuery.QueryAsync(entity set, "$select={fields},{source}id&$filter={source}id eq {id}&$top=1", caller)`), converted exactly as the app-only read converted them. A field-secured column the caller cannot read comes back null, so its rule is skipped and nothing is copied; no row → the uniform 404. A rule field that is not a logical name is never interpolated. `IFieldMappingDataverseService.RetrieveRecordFieldsAsync` is no longer called by the handler; `DataverseWebApiService.cs` / `IFieldMappingDataverseService.cs` are unchanged. Tests: `BuildSourceRecordQuery_SelectsTheMappedFieldsOfExactlyTheAuthorizedRow`, `Push_ReadsTheSourceFieldsAsTheCaller_NeverAppOnly`, `Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_IsNeverCopiedIntoAChild`, `Push_WhenTheCallersSourceReadReturnsNoRow_IsTheUniform404_AndNoChildIsReadOrWritten`. Seed S9 red. |
+| 14 | Integration note (OfficeQuickCreateContractTests textual merge; 167 not landed) | No change; r2 does not touch that file. /conflict-check re-run (§19.9). |
+
+## 19.3 Round 23 item 1: the interim document-pointer check
+
+`RecordContainerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId)` (+ the `string` id
+overload and `EnsureDocumentPointerContainerAsync(…, itemId)`, 409 `document_storage_unverified`), now in
+`Infrastructure/Dataverse/RecordContainerResolver.DocumentPointer.cs` — the SAME sealed type split into a `partial`
+file by reason-to-change (CLAUDE.md §11.5); no new type, no registration change. Both halves must hold; anything
+undecidable refuses:
+
+1. **The CONTAINER.**
+   - (a) a SECURE record's own container: only for a document hanging off that record (unchanged from r1);
+   - (b) the communication archive (`Communication:ArchiveContainerId`): only on the ARCHIVE PATH — the row carries
+     `sprk_relatedcommunication` = C (`CrossPathLink.LinkedCommunicationAttribute`, stamped by every archive writer)
+     AND the item's name is `{C:N}_…` (every archive upload — `CommunicationService`, `IncomingCommunicationProcessor`,
+     `MessageAttachmentMaterializer` — is named so): the item is the archive's record of THAT communication;
+   - (c) otherwise a business unit's container, and only one stamped by a unit in the DOCUMENT OWNER's customer
+     subtree: walk the owner's `owningbusinessunit` up to the unit directly under the root (the customer), then that
+     unit and every descendant (`SpeAdminTenantScope.CollectSelfAndDescendants`, reused). A root-owned row's subtree
+     is the whole environment (the operator level — the `SpeAdminTenantScope` precedent; root ownership is the dev
+     artifact of owner #1081). Unknown unit, broken chain, cycle, a hierarchy larger than one read → refuse.
+   - Because the archive can ALSO be a business unit's container (on dev it IS "Spaarke Demo"'s, §19.6), (b) and (c)
+     are alternatives: either may admit a pointer, neither widens the other.
+2. **The ITEM.** `ISpeFileOperations.GetItemCreatorAsync(drive, item)` — an app-only, UNCACHED Graph read of
+   `id,name,createdBy` (null when the item is not in that drive) — then:
+   - the row's creator is `createdby` when that systemuser has no `applicationid` (a person), else the person in
+     `sprk_createdbyperson` (read in its OWN query; a missing column, as on dev today, makes only this answer
+     unverifiable — owner round 17);
+   - an item uploaded BY A PERSON (`createdBy.user.id`) must be that person (compared by Entra object id against
+     `azureactivedirectoryobjectid`);
+   - an item uploaded APP-ONLY (no user id) is accepted only for a row the BFF itself created (its `applicationid` is
+     the BFF identity) and only when `createdBy.application.id` is the BFF identity;
+   - "the BFF identity" = every Entra application id the BFF authenticates as: `AzureAd:ClientId`, `API_APP_ID`,
+     `Graph:ManagedIdentity:ClientId`, `ManagedIdentity:ClientId`, `Dataverse:ClientId` (existing settings; no new
+     option). On dev these are `1e40baad…` (SDAP-BFF-SPE-API) and `5967251e…` (mi-bff-api-dev) — exactly the two
+     Dataverse application users that created 412 of the 530 pointered documents.
+
+**Residual exposure until the strict check (stated by round 23):** a pointer to ANOTHER legitimately uploaded item of
+the same creator inside the owner's own customer subtree; for a BFF-created row "the same creator" is the BFF identity.
+
+**Call sites** (§18.3 table, unchanged list): each now passes exactly the item it reads — `DataverseDocumentsEndpoints`
+download, `FileAccessEndpoints` download + eml-render, `DocumentsBulkEndpoints`, `ChatDocumentEndpoints` from-document,
+`DocumentStorageResolver`, `DocumentCheckoutService` edit + preview URL, `CommunicationService` send attachments + .eml
+embed (the attachment row's own item, verified against its document), `AppOnlyAnalysisService` (×2),
+`DocumentContextService`, `FileIndexingService`, `InvoiceExtractionJobHandler`, `AttachmentClassificationJobHandler`.
+
+**Expected effect on today's dev data** (read-only, §19.6; the item half needs a Graph census, so it is a live gate):
+the container half refuses the **21** Business-Unit-1-owned documents in "Spaarke Demo"'s container that are not
+communication-linked (another top-level unit's container), plus any of the further **10** communication-linked ones
+whose item is not named for its communication; the 494 root-owned and 5 BU-1-in-own-container documents pass it. The
+item half additionally refuses any document whose item was uploaded by someone other than its creator — notably BFF-created
+rows whose item a PERSON uploaded (OBO), while `sprk_createdbyperson` is absent on `sprk_document` (task 146's child
+schema is not yet applied on dev). These refusals are the decided behaviour until the owed migration (§19.10).
+
+Tests: `AccessControl.DocumentPointerContainerCheckTests` (rewritten, 33 methods / 39 cases: container — own unit,
+same customer, another customer refused, root-owned, foreign, unknown unit, Ensure 409, archive path / unlinked /
+another communication's item, archive-that-is-also-a-unit, the four secure-container cases; item — another person's
+upload, not in the drive, Graph fault, no reader, person-row + BFF upload refused, BFF row + BFF upload, BFF row +
+another application, another application's row, BFF row + recorded person, BFF row + no person, missing column;
+undecidable — query fault, blank drive / item (6), empty / non-GUID / GUID-text ids; pure — `CustomerSubtree`,
+`BffApplicationIdsFrom`), and the route-level
+`Api.Ai.ChatDocumentEndpointsContractTests.IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_Returns409AndNeverDownloads`
+(the item asked about is the exact one downloaded). The shared `TestRecordContainerResolver` world now models business
+units with parents, document creators, item creators and the BFF identity; its `ForBusinessUnitContainers` default
+(root-owned documents, created and uploaded by one person) keeps every consumer test's subject unchanged.
+
+## 19.4 Reporting (round 23 item 2 + findings 4, 5, 6)
+
+| Route | r2 change |
+|---|---|
+| `POST /api/reporting/export` | the server-computed business-unit RLS identity is in the export request (§19.2 item 4); 503 without it |
+| `POST /api/reporting/reports` | caller's `prvCreatesprk_Report` asked AS THE CALLER before any read or clone; always a server-side clone of the source row; no client-named Power BI report |
+| `DELETE /api/reporting/reports/{reportId:guid}` | row deleted as the caller first (unchanged); Power BI report deleted only for a custom row no other row references (app-only existence read); otherwise kept |
+| `GET /embed-token`, `GET /reports/{id}`, export | the catalog read now has a pinned "row of another id" refusal |
+
+Client (`src/solutions/Reporting`): `SaveControls.tsx` (Save As = server clone via `createReport`; the SDK `saveAs`
+and the "saved"-event id capture are gone), `reportingApi.ts` (`saveAsReport` / `SaveAsReportRequest` deleted),
+`ReportingToolbar.tsx` / `App.tsx` (`workspaceId` prop removed), `ReportViewer.tsx` (doc comment). Build: §19.9.
+
+## 19.5 Field-mapping push (finding 13)
+
+See §19.2 item 13. The impersonated read is the route's existing mechanism (round 9: "reads — the caller's own rights
+decide"); Dataverse applies row AND field security to it.
+
+## 19.6 Live read-only facts (2026-10-04; Dataverse MCP SQL and `az webapp config appsettings list`; no write)
+
+| Fact | Value |
+|---|---|
+| `privilege` `prvCreatesprk_Report` | id `4ea28bbd…`, accessright 32 (Create) — the constant |
+| Business units | root `Spaarke` (`06fbf21c…`, container `b!vzGD…`); children `Spaarke Business Unit 1` (`cb15f587…`, `b!vzGD…` — the same container as the root), `Spaarke Demo` (`9271b764…`, `b!yLRd…`), `Secure Record`, `Spaarke Dev 1`, `Spaarke Test 1` (no container) |
+| dev BFF settings (ids only) | `API_APP_ID` = `AzureAd__ClientId` = `Dataverse__ClientId` = `1e40baad…`; `Graph__ManagedIdentity__ClientId` = `ManagedIdentity__ClientId` = `5967251e…`; `Communication__ArchiveContainerId` = `b!yLRd…` (= Spaarke Demo's unit container) |
+| Pointered active documents by owner unit × drive × creator | root: `b!vzGD…` 44 person + 34 BFF; `b!yLRd…` 74 person + 342 BFF. BU 1: `b!vzGD…` 5 BFF; `b!yLRd…` 31 BFF (10 of them communication-linked). Total 530 (118 person-created, 412 BFF-created) |
+| `sprk_document.sprk_createdbyperson` | does not exist on dev (the read fails: "entity doesn't contain attribute") — task 146's child schema not yet applied |
+
+## 19.7 Placement (CLAUDE.md §10) and component justification (§11) — this round
+
+Placement: **in BFF, existing routes only.** No new endpoint, service, DI registration, package, option, job or column.
+`RecordContainerResolver` gains two OPTIONAL constructor dependencies that are already registered unconditionally
+(`ISpeFileOperations` → `SpeFileStore`, Scoped like the resolver; `IConfiguration`); no cycle (Graph types do not depend
+on the resolver). Reporting handlers gain `[FromServices] CallerRecordAccessProbe` (registered unconditionally,
+`ExternalAccessModule`) and `IGenericEntityService` (registered). Publish size: §19.9.
+
+New members, three questions each:
+- **`ISpeFileOperations.GetItemCreatorAsync`** (+ `SpeFileStore` delegate, `DriveItemOperations` implementation) and the
+  **`SpeItemCreator`** record — Existing: `GetFileMetadataAsync` (app-only metadata, `FileHandleDto`, Redis-cached) has no
+  creator, and `SpeAdminGraphService` exposes only a display name. Extension: adding creator fields to the cached
+  `FileHandleDto` would put an authorization input behind a 5-minute cache and break old cache entries; the facade
+  (ADR-007) gains one uncached method instead, returning a DTO, not an SDK type. Cost of nothing: round 23's ITEM
+  verification is impossible — a re-pointed `sprk_graphitemid` cannot be told from the real one.
+- **`RecordContainerResolver.DocumentPointer.cs` (partial)**, `CreatedByPersonColumn`, `BffApplicationIdKeys` /
+  `BffApplicationIdsFrom`, `CustomerSubtree` and private helpers — Existing: the r1 check in the same type; the
+  hierarchy math reuses `SpeAdminTenantScope.CollectSelfAndDescendants`; the archive link name reuses
+  `CrossPathLink.LinkedCommunicationAttribute`. Extension: they extend the one owner of container decisions; the split
+  file keeps the 2,200-line resolver from growing by another cohesive-but-distinct concern. Cost of nothing: verifier
+  items 7 / 17 (cross-customer and any-item reads).
+- **Reporting `CreateReportPrivilege`, `CallerMayCreateCatalogRowAsync`, `IsReferencedByAnotherCatalogRowAsync`,
+  `RlsIdentityUnavailable`; `ReportingEmbedService.BuildExportRequest`; `ExportReportAsync`'s two required
+  parameters** — Existing: the embed path's identity read and `BuildGenerateTokenRequest` (the export builder is its
+  twin); the probe's G5 privilege question. Cost of nothing: items 4, 5, 6.
+- **Field-mapping `BuildSourceRecordQuery`, `RetrieveSourceRecordValuesAsCallerAsync`, `ToClrValue`** — Existing: the
+  app-only `RetrieveRecordFieldsAsync` (shared lib, not editable here) and the route's impersonated seam (reused). Cost
+  of nothing: item 13.
+- Removed surface: `CreateReportRequest.PbiReportId`, the Save-As branch, the client's `saveAsReport`.
+- Test-only: `TestRecordContainerResolver.DocumentPointerWorld` (replaces r1's `ForDocumentPointerWorld`; the real
+  resolver over its seams, ADR-010), `ChatDocumentEndpointsTestFixture.PointerWorld`.
+
+ADR-002: no plugin. ADR-003: every new check fails closed (an unreadable item, creator, person column, hierarchy or
+reference answer refuses — or, for DELETE, keeps the shared report). ADR-007: the new Graph read returns a DTO. ADR-038:
+no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests.
+
+## 19.8 Seeding (two seeded builds, 2026-10-04; restored from byte copies, files touched)
+
+16 seeds (`scratchpad/seed166r2.py`); build A: 13 seeds in disjoint code; build B: 3 seeds whose code overlaps build A's
+(the item check as a whole vs its branches; the two DELETE guards). **43 of 247** targeted tests went red, each naming
+its guard (A: 34 of 144; B: 9 of 103):
+
+| Seed | Red tests (examples) |
+|---|---|
+| S1 export identity without the business unit | `ExportRequest_CarriesTheEffectiveIdentity_OnTheReportsDataset` |
+| S1b export proceeds without a business unit | `Export_WhenTheCallersBusinessUnitCannotBeRead_ExportsNothing` |
+| S2 Save-As registration restored (DTO + branch) | `Create_WithAClientNamedPowerBiReport_ClonesTheSource_AndNeverRegistersTheNamedReport`, `CreateReportRequest_HasExpectedProperties` |
+| S3 Create privilege pre-check skipped | `Create_WithoutTheCallersCreatePrivilege_IsRefused_BeforeAnyReadOrClone(denied / throws)` |
+| S4 standard reports deleted too (B) | `Delete_KeepsThePowerBiReport_…(standard-row)` |
+| S5 unknown reference answer = unreferenced (B) | `Delete_KeepsThePowerBiReport_…(reference-check-throws)` |
+| S6 reference check removed | `Delete_KeepsThePowerBiReport_…(referenced-by-another-row / reference-check-throws)`, `Delete_OfACustomRowNoOtherRowReferences_…` |
+| S7 catalog row id not compared | `EmbedToken_/Export_/GetReport_ForARowTheCallerCannotBindTo_…(row-of-another-id)` |
+| S8 missing query id calls `next()` | `QuerySource_AMissingContainerId_IsTheFiltersOwn400_AndNeverReachesTheHandler` (3) |
+| S9 source fields read app-only | `Push_ReadsTheSourceFieldsAsTheCaller_NeverAppOnly`, `Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_…` (+ the push tests whose source the app-only double does not model) |
+| S10 item check removed (B) | `AnItemUploadedByAnotherPerson_IsRefused_…`, `APersonsRow_WhoseItemTheBffUploadedAppOnly_IsRefused`, `ABffRow_WhoseItemAnotherApplicationUploaded_IsRefused`, `ARowAnotherApplicationCreated_…`, `ABffRow_WithNoRecordedPerson_…`, the missing-column case, `IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_…` |
+| S11 any business unit's container | `PointerIntoAnotherCustomersBusinessUnitContainer_IsRefused`, `ADocumentWhoseOwningBusinessUnitIsNotInTheHierarchy_IsRefused`, `Ensure_OnARefusedPointer_…`, `WhenTheArchiveIsAlsoABusinessUnitsContainer_…` |
+| S12 archive accepted unconditionally | `PointerIntoTheArchive_FromARowNotLinkedToACommunication_IsRefused`, `…_AtAnotherCommunicationsItem_IsRefused` |
+| S13 BFF identity accepted for a person's row | `APersonsRow_WhoseItemTheBffUploadedAppOnly_IsRefused` |
+| S14 unknown person accepts any uploader | `ABffRow_WithNoRecordedPerson_WhoseItemAPersonUploaded_IsRefused`, `WhereTheCreatedByPersonColumnDoesNotExist_…` |
+| S15 a call site verifies another item | `IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_Returns409AndNeverDownloads` |
+
+Restored: no `SEED-166R2` marker remains in `src/` or `tests/` (Grep).
+
+## 19.9 Gates (this round, final code)
+
+| Gate | Result |
+|---|---|
+| Affected tests (before the final runs) | Reporting 108 passed; FieldMapping 114 passed / 1 skipped; pointer-check consumers (download / AI / communication / checkout / jobs / version / destroy / container list) 1,429 passed / 13 skipped; pointer + chat-document 56 passed; all 0 failed |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **14,509 total: 14,455 passed, 54 skipped, 0 failed** (12 m 43 s; +45 cases vs r1's 14,464) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **346 passed, 0 failed** |
+| Sprk.Bff.Api.IntegrationTests (full) | **104 passed, 0 failed** (run alone — the verifier's `PlaybookByNameDeprecationTests` contention flake did not recur) |
+| Spe.Integration.Tests (full) | **405 total: 380 passed, 25 skipped (environment-gated `SkippableFact`s), 0 failed** |
+| BFF build | succeeded (warnings as errors) |
+| `dotnet list package --vulnerable --include-transitive` | `Sprk.Bff.Api` has no vulnerable packages |
+| Reporting client | `npm run build` (vite) **green** after `npm install --legacy-peer-deps --no-audit --no-fund` here and in `Spaarke.UI.Components`, and `npm run build` of `Spaarke.SdapClient` / `Spaarke.Auth` (the worktree had no node_modules / dist). `tsc --noEmit`: 0 errors in the files this round changed (12 pre-existing in `ReportDropdown`, `ReportViewer` — untouched code —, `ThemeProvider`, `globalStyles`). `prettier --list-different` flags the five changed files AND their HEAD versions (pre-existing drift from the root config); not reformatted, to keep the diff to the change. The package has no test runner. |
+| /conflict-check (2026-10-04, r2 files) | 27 open PRs × the 37 files this round changes: **no overlap**. Master since the merge base (`b8026dfa8`, master @ `62277d50a`): **no overlap** with this round's files (r1's `OfficeQuickCreateContractTests.cs` textual merge stands). BFF hot path shared with other active worktrees: soft warn, no hard conflict. |
+| Publish size | Not measured by this run (harness: skip). The verifier's independent measurement of r1: **45.657 MB** (`e6dd48b43`) vs **45.675 MB** (`582a4b42a`) = **+0.018 MB**, Compress-Archive Optimal, PDBs included, 212 / 212 files, fresh short-path worktrees. r2 adds no package and no DI registration; the main session re-measures at integration. Ceiling 60 MB. |
+
+## 19.10 Not closed
+
+- **Round 21 item 1 (i)–(iii) — OWED BY TASK 166, assigned by round 23 to the follow-up round:** (i) the BFF
+  pointer-attach endpoint with every client pointer writer moved to it; (ii) the legacy migration script (dry run /
+  `-Apply` / `-Verify`) for the dev files not in their derived container; (iii) then
+  `scripts/Set-DocumentPointerFieldSecurity.ps1 -ClientNoLongerWritesPointers -Apply` / `-Verify` and the switch of
+  this check to the strict derived-container comparison. Until then the F0 write door is narrowed by §19.3, not closed;
+  the POML status says so (`completed-with-escalation`).
+- **Publish size** — the verifier's figure is recorded; this run did not re-measure (harness instruction).
+
+## 19.11 Route authorization ledger input — r2 rows (route key as the guard spells it)
+
+| Route key | Mechanism that now decides | Deny test (FQN) |
+|---|---|---|
+| `POST /api/reporting/export` | handler: row read as the caller + server-computed BU RLS identity in the export (503 without it) | `Sprk.Bff.Api.Tests.Api.Reporting.ReportingCatalogBindingContractTests.Export_WhenTheCallersBusinessUnitCannotBeRead_ExportsNothing` |
+| `POST /api/reporting/reports` | handler: `prvCreatesprk_Report` AS THE CALLER before any read or clone; source row read as the caller; clone only | `…ReportingCatalogBindingContractTests.Create_WithoutTheCallersCreatePrivilege_IsRefused_BeforeAnyReadOrClone` |
+| `DELETE /api/reporting/reports/{reportId:guid}` | handler: row deleted as the caller first; Power BI report only for an unreferenced custom row | `…ReportingCatalogBindingContractTests.Delete_KeepsThePowerBiReport_UnlessItIsACustomRowsUnreferencedReport` |
+| download routes of §18.3 | existing authorization + the round-23 pointer check (item + customer subtree) | `Sprk.Bff.Api.Tests.Api.Ai.ChatDocumentEndpointsContractTests.IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_Returns409AndNeverDownloads`; `Sprk.Bff.Api.Tests.AccessControl.DocumentPointerContainerCheckTests` |
+| `GET /api/v1/documents` (query `containerId`) | `ContainerDocumentAuthorizationFilter(queryParameter: "containerId")` — unchanged; the missing-id 400 is now pinned at the filter | `Sprk.Bff.Api.Tests.AccessControl.ContainerDocumentListAuthorizationTests.QuerySource_AMissingContainerId_IsTheFiltersOwn400_AndNeverReachesTheHandler` |
+
+## 19.12 Manual live gates — r2 (main session, dev; non-admin test users; ids redacted to 8 chars)
+
+17. **Before or right after the deploy — pointer-check census.** The item half needs Graph `createdBy`, which this run
+    cannot read. After deploying to dev, download one document of each class and read the BFF log for
+    `[DOCUMENT-POINTER] REFUSED`: a person-uploaded document (`createdby` a person), an Office-saved document (BFF row,
+    BFF upload), an archived email `.eml` and one of its attachments (archive path), a Compose / chat-saved document
+    (BFF row, OBO upload — EXPECTED refused until task 146's child schema and stamp populate `sprk_createdbyperson`),
+    and one of the 21 BU-1-owned documents in "Spaarke Demo"'s container (EXPECTED refused, §19.3). Record the counts;
+    any refusal outside the expected classes is a defect to report, not to widen.
+18. **Reporting** (with gate 11's seeded `sprk_report` row): export as a user of business unit X → the PDF contains only
+    X's rows; a user whose business unit cannot be read → 503, no file. An Author without `prvCreatesprk_Report` → 403
+    and no new report in the workspace. Deleting a STANDARD row (or one another row references) as an Admin → the row
+    is gone and the Power BI report still exists.
+19. Field-mapping push from a matter whose mapped source column is field-secured from the test user → the children are
+    unchanged for that column (if no profile maps an FLS column, record "no FLS-mapped profile; proven by tests").
+
+## 19.13 Integration notes
+
+- `RecordContainerResolver.CreatedByPersonColumn` spells `sprk_createdbyperson`; switch it to task 146's
+  `Spaarke.Dataverse.RecordCreatorPersonColumn.LogicalName` when 146 is merged (the integration checklist's
+  "creator column constant" item covers the same switch for 146's helper).
+- Task 146's child-table `sprk_createdbyperson` schema (a deploy prerequisite already) is also what lets BFF-created
+  rows with person-uploaded items pass this check; until it is applied and stamped, those rows are refused (decided).
+- `NOTE-FROM-MAIN.md` (round 23) was deleted, not committed.
+- No `.claude` edit is needed for this round (§12's edit stands).

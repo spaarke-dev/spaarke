@@ -2243,7 +2243,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 var containerResolver = speScope.ServiceProvider.GetRequiredService<RecordContainerResolver>();
                 var linkedDocument = att.GetAttributeValue<EntityReference>("sprk_document");
                 if (linkedDocument is null
-                    || !await containerResolver.IsDocumentPointerContainerAllowedAsync(linkedDocument.Id, driveId, ct))
+                    || !await containerResolver.IsDocumentPointerContainerAllowedAsync(linkedDocument.Id, driveId, itemId, ct))
                 {
                     _logger.LogWarning(
                         "Attachment '{FileName}' skipped for .eml embedding: its storage pointer could not be verified | CommunicationId: {CommunicationId}",
@@ -2543,7 +2543,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Downloading attachment {Index}/{Total} | SprkDocId: {SprkDocumentId}, DriveId: {DriveId}, ItemId: {ItemId}, CorrelationId: {CorrelationId}",
                 i + 1, attachmentDocumentIds.Length, sprkDocumentId, driveId, itemId, correlationId);
 
-            if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(sprkDocumentId, driveId, ct))
+            if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(sprkDocumentId, driveId, itemId, ct))
             {
                 throw new SdapProblemException(
                     code: RecordContainerResolver.DocumentStorageUnverifiedCode,

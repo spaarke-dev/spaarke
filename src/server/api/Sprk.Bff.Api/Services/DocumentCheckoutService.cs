@@ -1141,7 +1141,7 @@ public class DocumentCheckoutService
         }
 
         // task 166 r1: the URL is minted AS THE APPLICATION from the row's pointer — verified first (fail closed).
-        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, ct);
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, itemId, ct);
 
         _logger.LogDebug("Getting edit URL for DriveId='{DriveId}', ItemId='{ItemId}'", driveId, itemId);
 
@@ -1167,7 +1167,7 @@ public class DocumentCheckoutService
     private async Task<string> GetPreviewUrlAsync(Guid documentId, string driveId, string itemId, CancellationToken ct)
     {
         // task 166 r1: the URL is minted AS THE APPLICATION from the row's pointer — verified first (fail closed).
-        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, ct);
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, itemId, ct);
 
         var preview = await _speFileStore.GetPreviewUrlAsync(driveId, itemId, null, ct);
         return preview.PreviewUrl ?? "";

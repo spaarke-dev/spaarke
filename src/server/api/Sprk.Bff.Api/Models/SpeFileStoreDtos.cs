@@ -85,6 +85,22 @@ public record SpeDriveItemSummary(
     DateTimeOffset? CreatedDateTime);
 
 /// <summary>
+/// Who created a SharePoint Embedded drive item — Graph's <c>createdBy</c> identity set, without SDK types (ADR-007).
+/// The document-pointer check (unified-access-control-r2 task 166 r2, owner round 23 item 1) compares it with the
+/// <c>sprk_document</c> row's creator before the BFF follows the row's pointer as the application.
+/// </summary>
+/// <param name="Name">The item's name (an archive-path item is named <c>{communicationId:N}_…</c>).</param>
+/// <param name="UserObjectId">
+///   <c>createdBy.user.id</c>: the Entra object id of the person who uploaded it (delegated / OBO uploads). Null for an
+///   app-only upload (SharePoint reports "SharePoint App" with no id).
+/// </param>
+/// <param name="ApplicationId"><c>createdBy.application.id</c>: the Entra app (client) id the upload ran under.</param>
+public record SpeItemCreator(
+    string? Name,
+    string? UserObjectId,
+    string? ApplicationId);
+
+/// <summary>
 /// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).
 /// </summary>
 public enum SpeSharedItemOutcome

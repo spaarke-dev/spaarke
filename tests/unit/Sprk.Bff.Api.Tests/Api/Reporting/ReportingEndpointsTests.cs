@@ -129,7 +129,8 @@ public class ReportingEndpointsTests
         var type = typeof(CreateReportRequest);
         type.GetProperty("Name").Should().NotBeNull();
         type.GetProperty("SourceReportId").Should().NotBeNull();
-        type.GetProperty("PbiReportId").Should().NotBeNull();
+        type.GetProperty("PbiReportId").Should().BeNull(
+            "uac-r2 task 166 r2 (owner round 23 item 2): a client-named Power BI report is never registered — a new report is always a server-side clone");
         type.GetProperty("WorkspaceId").Should().BeNull();
         type.GetProperty("DatasetId").Should().BeNull();
     }

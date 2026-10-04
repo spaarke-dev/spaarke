@@ -152,7 +152,7 @@ public sealed class FileIndexingService : IFileIndexingService
             // orphan file the BFF just uploaded, or the API-key service route — and follows no row.
             if (!string.IsNullOrWhiteSpace(request.DocumentId)
                 && !await _containerResolver.IsDocumentPointerContainerAllowedAsync(
-                    request.DocumentId, request.DriveId, cancellationToken))
+                    request.DocumentId, request.DriveId, request.ItemId, cancellationToken))
             {
                 return FileIndexingResult.Failed("Document storage could not be verified");
             }

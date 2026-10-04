@@ -104,7 +104,7 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
         // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): every caller of this resolver downloads AS THE
         // APPLICATION, so the pointer must name a container this document may use before it is handed out. Throws the
         // 409 document_storage_unverified SdapProblemException otherwise (see RecordContainerResolver).
-        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, cancellationToken);
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, itemId, cancellationToken);
 
         _logger.LogInformation(
             "Resolved document {DocumentId} to storage pointers (DriveId length: {DriveIdLength}, ItemId length: {ItemIdLength})",

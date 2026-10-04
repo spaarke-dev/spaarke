@@ -1052,7 +1052,7 @@ public static class FileAccessEndpoints
 
             // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): followed AS THE APPLICATION, so the pointer must name a
             //     container this document may use (409 document_storage_unverified otherwise, before any read).
-            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, ct);
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
 
             // 4. Download file stream from SPE using app-only auth
             var fileStream = await speFileStore.DownloadFileAsync(
@@ -1137,7 +1137,8 @@ public static class FileAccessEndpoints
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
             // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): the pointer must name a container this document may use.
-            await containerResolver.EnsureDocumentPointerContainerAsync(Guid.Parse(documentId), document.GraphDriveId, ct);
+            await containerResolver.EnsureDocumentPointerContainerAsync(
+                Guid.Parse(documentId), document.GraphDriveId, document.GraphItemId, ct);
 
             // 4. Download the .eml stream from SPE via the EXISTING facade (app-only, per ADR-007) — no new
             //    download method, no GraphServiceClient injection.

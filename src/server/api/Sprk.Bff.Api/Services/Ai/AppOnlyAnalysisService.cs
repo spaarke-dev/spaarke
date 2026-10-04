@@ -246,7 +246,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
             // 4. Verify the row's pointer names a container this document may use (task 166 r1, fail closed),
             //    then download file from SPE using app-only auth
-            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, document.GraphDriveId, cancellationToken))
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    documentId, document.GraphDriveId, document.GraphItemId, cancellationToken))
             {
                 await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
                 return AppOnlyDocumentAnalysisResult.Failed(documentId, "Document storage could not be verified");
@@ -1483,7 +1484,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         try
         {
             // task 166 r1 (owner round 21 item 1b): verify the row's pointer before following it app-only.
-            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(document.Id, document.GraphDriveId, cancellationToken))
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
             {
                 return string.Empty;
             }

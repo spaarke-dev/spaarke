@@ -53,7 +53,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// back to the shared container — so there is no ADR-032 Null-Object question to answer here, because there
 /// is no acceptable null object.</para>
 /// </summary>
-public sealed class RecordContainerResolver
+public sealed partial class RecordContainerResolver
 {
     /// <summary>The stamped container column, on both the securable records and the business unit.</summary>
     private const string ContainerColumn = "sprk_containerid";
@@ -99,20 +99,37 @@ public sealed class RecordContainerResolver
 
     /// <summary>
     /// <c>Communication:ArchiveContainerId</c> — the one shared container that is not a business unit's; the
-    /// document-pointer check (task 166 r1) accepts it as an environment container.
+    /// document-pointer check (task 166 r1 / r2) accepts it only on the communication-archive path.
     /// </summary>
     private readonly string? _archiveContainerId;
+
+    /// <summary>
+    /// The app-only Graph read of an item's creator — the document-pointer check's ITEM evidence (task 166 r2, owner
+    /// round 23 item 1). Null outside a host that registers SharePoint Embedded access: the check then refuses (an
+    /// item that cannot be verified is never followed).
+    /// </summary>
+    private readonly Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations? _speFiles;
+
+    /// <summary>
+    /// Every Entra application (client) id the BFF authenticates as — "the BFF identity" of owner round 23 item 1
+    /// (task 166 r2). See <see cref="BffApplicationIdsFrom"/>.
+    /// </summary>
+    private readonly IReadOnlySet<Guid> _bffApplicationIds;
 
     public RecordContainerResolver(
         ISecurableEntityRegistry securableEntities,
         IGenericEntityService entityService,
         ILogger<RecordContainerResolver> logger,
-        Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Configuration.CommunicationOptions>? communicationOptions = null)
+        Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Configuration.CommunicationOptions>? communicationOptions = null,
+        Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations? speFiles = null,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     {
         _securableEntities = securableEntities ?? throw new ArgumentNullException(nameof(securableEntities));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _archiveContainerId = communicationOptions?.Value?.ArchiveContainerId;
+        _speFiles = speFiles;
+        _bffApplicationIds = BffApplicationIdsFrom(configuration);
     }
 
     /// <summary>
@@ -505,202 +522,9 @@ public sealed class RecordContainerResolver
             fallbackContainerId: null);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-    // The document-pointer check — unified-access-control-r2 task 166 r1 (owner round 21 item 1, part b)
-    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>The code every app-only download refusal of an unverifiable document pointer carries.</summary>
-    public const string DocumentStorageUnverifiedCode = "document_storage_unverified";
-
-    /// <summary>An email attachment is a child document of the email document; its file lives where the email's does.</summary>
-    private const string ParentDocumentColumn = "sprk_parentdocument";
-
-    /// <summary>
-    /// Throws <see cref="SdapProblemException"/> (<see cref="DocumentStorageUnverifiedCode"/>, 409) unless
-    /// <see cref="IsDocumentPointerContainerAllowedAsync"/> accepts the pointer. Call it BEFORE every app-only download
-    /// that follows a <c>sprk_document</c> row's <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>.
-    /// </summary>
-    public async Task EnsureDocumentPointerContainerAsync(Guid documentId, string? pointerDriveId, CancellationToken ct = default)
-    {
-        if (await IsDocumentPointerContainerAllowedAsync(documentId, pointerDriveId, ct).ConfigureAwait(false))
-        {
-            return;
-        }
-
-        throw new SdapProblemException(
-            code: DocumentStorageUnverifiedCode,
-            title: "Document storage could not be verified",
-            detail: "This document's file is not in a storage container its record may use, so it is not served. "
-                    + "An administrator must repair the document's storage location.",
-            statusCode: 409);
-    }
-
-    /// <summary>
-    /// May the BFF follow this document row's SharePoint Embedded pointer AS THE APPLICATION? (task 166 r1)
-    /// </summary>
-    /// <remarks>
-    /// <para><b>The threat.</b> The BFF downloads a document's bytes as the managed identity from the drive the row's
-    /// <c>sprk_graphdriveid</c> names. Until the pointer columns are field-secured (scripts/Set-DocumentPointerFieldSecurity.ps1)
-    /// any Write holder can re-point a row — and rows forged before that lock stay forged. This check runs before the
-    /// download and refuses a pointer into a container the document has no business in.</para>
-    /// <para><b>The rule.</b> (1) A pointer into a SECURE record's own container is honoured only for a document that
-    /// hangs off that very record — named directly by one of its root lookups, or through a related record that this
-    /// resolver resolves to that container, or through its parent document (one level). (2) Any other pointer must name
-    /// one of THIS environment's shared containers: a business unit's <c>sprk_containerid</c>, or the configured
-    /// communication archive container. A container this environment does not own (another customer's) is refused.
-    /// (3) Anything that cannot be decided — an indeterminate owner, a read fault — refuses.</para>
-    /// <para><b>Why not "must equal the container derived for the row" for every document.</b> Live dev data
-    /// (2026-10-04): 447 of 530 active documents were uploaded before task 076 into the UPLOADER's business-unit
-    /// container, not their record's. A strict derived-container comparison would refuse ~85% of legitimate downloads;
-    /// that remaining tightening needs those files moved first (task note §8). What a forged pointer can reach is
-    /// already narrowed to the environment's own non-secure containers, and the field-security lock stops new
-    /// forgeries.</para>
-    /// </remarks>
-    public async Task<bool> IsDocumentPointerContainerAllowedAsync(
-        Guid documentId, string? pointerDriveId, CancellationToken ct = default)
-    {
-        if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(pointerDriveId))
-        {
-            return false;
-        }
-
-        var drive = pointerDriveId.Trim();
-        try
-        {
-            var secureOwner = await ResolveOwningRecordAsync(drive, ct).ConfigureAwait(false);
-            if (secureOwner is not null)
-            {
-                var belongs = await DocumentHangsOffAsync(documentId, secureOwner, drive, depth: 0, ct).ConfigureAwait(false);
-                if (!belongs)
-                {
-                    _logger.LogWarning(
-                        "[DOCUMENT-POINTER] REFUSED: document {DocumentId} points into the OWN container of secure {Entity} "
-                        + "{RecordId}, but the document does not belong to that record. Not served app-only.",
-                        documentId, secureOwner.EntityLogicalName, secureOwner.RecordId);
-                }
-
-                return belongs;
-            }
-
-            if (!string.IsNullOrWhiteSpace(_archiveContainerId) && IsSameContainer(_archiveContainerId, drive))
-            {
-                return true;
-            }
-
-            if (await IsBusinessUnitContainerAsync(drive, ct).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            _logger.LogWarning(
-                "[DOCUMENT-POINTER] REFUSED: document {DocumentId} points into a container that is neither a secure "
-                + "record's own nor one of this environment's business-unit / archive containers. Not served app-only.",
-                documentId);
-            return false;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[DOCUMENT-POINTER] REFUSED: the container of document {DocumentId}'s pointer could not be verified "
-                + "(fail closed).", documentId);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// <see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, CancellationToken)"/> for callers holding the
-    /// document id as text (<see cref="DocumentEntity.Id"/>, job payloads). An id that is not a GUID names no
-    /// <c>sprk_document</c> row, so its pointer cannot be verified — refused.
-    /// </summary>
-    public Task<bool> IsDocumentPointerContainerAllowedAsync(
-        string? documentId, string? pointerDriveId, CancellationToken ct = default)
-    {
-        if (!Guid.TryParse(documentId, out var id))
-        {
-            _logger.LogWarning(
-                "[DOCUMENT-POINTER] REFUSED: '{DocumentId}' is not a document id, so the pointer it carries cannot be "
-                + "verified (fail closed).", documentId);
-            return Task.FromResult(false);
-        }
-
-        return IsDocumentPointerContainerAllowedAsync(id, pointerDriveId, ct);
-    }
-
-    private async Task<bool> DocumentHangsOffAsync(
-        Guid documentId, OwningSecureRecord owner, string drive, int depth, CancellationToken ct)
-    {
-        // The document's record links are the ONE canonical vocabulary (DocumentLinkFields — every sprk_document
-        // record-link lookup, verified against live metadata). A link whose target this resolver cannot resolve to a
-        // secure container simply does not match; it never widens what is honoured.
-        var columns = DocumentLinkFields.LogicalNames.Append(ParentDocumentColumn).ToArray();
-        var row = await _entityService.RetrieveAsync("sprk_document", documentId, columns, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return false;
-        }
-
-        foreach (var (column, target) in DocumentLinkFields.All.Select(f => (f.LogicalName, f.TargetEntityLogicalName)))
-        {
-            if (row.GetAttributeValue<EntityReference>(column) is not { Id: var linkedId } || linkedId == Guid.Empty)
-            {
-                continue;
-            }
-
-            if (string.Equals(target, owner.EntityLogicalName, StringComparison.Ordinal) && linkedId == owner.RecordId)
-            {
-                return true;
-            }
-
-            try
-            {
-                var decision = await ResolveForRecordAsync(target, linkedId, ct).ConfigureAwait(false);
-                if (decision.Outcome == ContainerDecisionOutcome.ResolvedSecure && IsSameContainer(decision.ContainerId, drive))
-                {
-                    return true;
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // One unresolvable link is not a match; the others may still be.
-                _logger.LogInformation(ex,
-                    "[DOCUMENT-POINTER] Link {Column} -> {Target} {LinkedId} of document {DocumentId} could not be resolved.",
-                    column, target, linkedId, documentId);
-            }
-        }
-
-        if (depth == 0 && row.GetAttributeValue<EntityReference>(ParentDocumentColumn) is { Id: var parentId }
-            && parentId != Guid.Empty && parentId != documentId)
-        {
-            return await DocumentHangsOffAsync(parentId, owner, drive, depth: 1, ct).ConfigureAwait(false);
-        }
-
-        return false;
-    }
-
-    /// <summary>Does a business unit of THIS environment stamp <paramref name="drive"/> as its container?</summary>
-    private async Task<bool> IsBusinessUnitContainerAsync(string drive, CancellationToken ct)
-    {
-        var query = new QueryExpression(BusinessUnitEntity)
-        {
-            ColumnSet = new ColumnSet(ContainerColumn),
-            TopCount = ClaimantProbeLimit,
-            Criteria = new FilterExpression(LogicalOperator.And)
-            {
-                Conditions = { new ConditionExpression(ContainerColumn, ConditionOperator.Like, $"%{EscapeForLike(drive)}%") }
-            }
-        };
-
-        var results = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return results?.Entities?.Any(e => IsSameContainer(e.GetAttributeValue<string>(ContainerColumn), drive)) == true;
-    }
+    // The document-pointer check (task 166 r1 / r2) lives in RecordContainerResolver.DocumentPointer.cs — the same type,
+    // split by reason-to-change (CLAUDE.md §11.5): it answers an identity-and-tenancy question about a row's pointer,
+    // not a record's container placement.
 
     /// <summary>
     /// Read the record being resolved, normalizing "does not exist" to the documented 404.

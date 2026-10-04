@@ -264,7 +264,8 @@ public static class DataverseDocumentsEndpoints
                 // Step 3b (uac-r2 task 166 r1, owner round 21 item 1b): the row's pointer is followed AS THE APPLICATION,
                 // so it must point into a container this document may use — refused (409) otherwise, before any read.
                 await containerResolver.EnsureDocumentPointerContainerAsync(
-                    Guid.TryParse(id, out var pointerDocumentId) ? pointerDocumentId : Guid.Empty, document.GraphDriveId, ct);
+                    Guid.TryParse(id, out var pointerDocumentId) ? pointerDocumentId : Guid.Empty, document.GraphDriveId,
+                    document.GraphItemId, ct);
 
                 // Step 4: Download file stream from SPE using app-only auth
                 var fileStream = await GraphCallScope.Run(

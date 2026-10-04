@@ -103,7 +103,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
 
             // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the reads below follow the document's
             // pointer as the application, so its container is verified first (fail closed, permanent).
-            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, ct))
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct))
             {
                 _telemetry.RecordClassificationFailure(stopwatch, documentId, RecordContainerResolver.DocumentStorageUnverifiedCode);
                 return JobOutcome.Poisoned(job.JobId, JobType, "Document storage could not be verified", job.Attempt, stopwatch.Elapsed);
