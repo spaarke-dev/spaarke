@@ -342,6 +342,40 @@ public class NoAccessListReaderTests
             "the first chunk was evaluated before the second faulted");
     }
 
+
+    /// <summary>
+    /// Task 142 verifier, criterion 19 (batch 4 integration): the ETHICAL-WALL loop (Loop A — the referenced-organization
+    /// object chunks) fails the WHOLE answer closed when one of its chunks answers no rows (<c>null</c>, a non-success
+    /// status), exactly as the record loop does — even when the record loop answers cleanly and an EARLIER organization
+    /// chunk already found a real entry. The record-object queries here succeed, so the only thing that can fail the answer
+    /// is the faulted organization chunk: if that chunk were skipped (<c>continue</c>) instead of failing closed, the
+    /// answer would read as complete and a wall on an organization in the unread chunk would never bind.
+    /// </summary>
+    [Fact]
+    public async Task GetDeniedRecordsAsync_AnEthicalWallOrganizationChunkThatAnswersNothing_FailsTheWholeAnswerClosed()
+    {
+        // Two organization-object chunks: the first carries DeniedOrg (a real entry), the second faults.
+        var referenced = new[] { DeniedOrg }.Concat(Ids(NoAccessListReader.ObjectIdChunkSize)).ToArray();
+        var faultingOrg = referenced[NoAccessListReader.ObjectIdChunkSize]; // the first id of the SECOND chunk
+        var sut = new TableNoAccessListReader { NullWhenObjectOrganizationNamed = faultingOrg };
+        sut.Add(OrganizationObjectRow(EntryId, subjectContact: Contact, objectOrg: DeniedOrg));   // found by chunk 1
+        sut.Add(OrganizationObjectRow(EntryId2, subjectContact: Contact, objectOrg: faultingOrg)); // in the unread chunk
+
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, referenced.Skip(1).ToArray()),
+        };
+
+        var result = await sut.GetDeniedRecordsAsync(Contact, Array.Empty<Guid>(), candidates, CancellationToken.None);
+
+        result.FailedClosed.Should().BeTrue(
+            "an unread ethical-wall chunk means the answer cannot prove 'not denied' (NFR-01)");
+        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA, RecordB },
+            "every queried candidate is denied — RecordB's wall sits in the chunk that was never read");
+        result.DenyingEntryIds[RecordA].Should().BeEmpty("a fail-closed answer carries no provenance, even for a real match");
+    }
+
     /// <summary>
     /// The bound itself: every query embeds at most <see cref="NoAccessListReader.MaxSubjectContactIds"/> contacts and
     /// <see cref="NoAccessListReader.MaxSubjectOrganizationIds"/> organizations, and across the queries every subject is
@@ -626,6 +660,13 @@ public class NoAccessListReaderTests
         /// <summary>The fault shape: <c>true</c> throws, <c>false</c> answers the seam's fail-closed <c>null</c>.</summary>
         public bool FaultThrows { get; init; }
 
+        /// <summary>
+        /// When set, the ethical-wall (Loop A) query whose OBJECT fragment names this referenced organization answers the
+        /// seam's fail-closed <c>null</c> — a non-success status on one organization-object chunk. Every other query
+        /// (other organization chunks, every record-object chunk) answers from the table.
+        /// </summary>
+        public Guid? NullWhenObjectOrganizationNamed { get; init; }
+
         public void Add(NoAccessEntryRow row) => _rows.Add(row);
 
         /// <summary>Every id the fragment names in a <c>{column} eq {id}</c> (or <c>eq '{id}'</c>) clause.</summary>
@@ -643,6 +684,12 @@ public class NoAccessListReaderTests
                 return FaultThrows
                     ? throw new HttpRequestException("simulated HTTP 503 on one subject chunk")
                     : Task.FromResult<List<NoAccessEntryRow>?>(null);
+            }
+
+            if (NullWhenObjectOrganizationNamed is { } nullOrg
+                && IdsNamed(objectFilter, "sprk_objectorganization").Contains(nullOrg))
+            {
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
             }
 
             var contacts = IdsNamed(subjectFilter, "sprk_subjectcontact");
