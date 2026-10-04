@@ -239,6 +239,34 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     }
 
     /// <summary>
+    /// Owner round 31 item 2, the compensation's own failure: the creator could not be shared AND the row could not be
+    /// deleted again — the tool says exactly that (never "shared to you"), the row stays secure and team-owned (never a
+    /// business-unit-visible row), and the job's re-entry shares it to its creator and completes it.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheCreatorCannotBeSharedNorTheRowRemoved_SaysSo_AndTheJobSharesItToTheCreator()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+        World.DeletesFail = true;
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be shared to you and could not be removed").And.NotContain("as a secure record shared to you");
+        var created = _writes.Should().ContainSingle().Subject.Id;
+        World.Has("sprk_workassignment", created).Should().BeTrue();
+        _fixture.IsSecureOf(created).Should().BeTrue("still secure — never a business-unit-visible row");
+        _fixture.OwningTeamOf(created).Should().Be(SecureTeam);
+        _fixture.ShareMaskOf(created, Creator).Should().Be(0);
+
+        _fixture.FailShareForPrincipal = null;
+        World.DeletesFail = false;
+        (await new SecureRootInheritanceJobRunner(_fixture).RunAsync()).Success.Should().BeTrue();
+        ShouldBeSecure(created, "the job's re-entry shares it to the person who created it");
+    }
+
+    /// <summary>
     /// Owner round 31 item 2: a creator share that WAS made, with a later step that did not complete (here the container),
     /// leaves a PROVISIONED-but-incomplete record — secure, shared to its creator, never removed — which the existing
     /// re-entry branch (the job) completes.
@@ -371,6 +399,72 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat create: filed under a SECURE matter (typed) AND, by the pair, under a matter whose flag
+    /// reads EMPTY — secure-if-any makes the record secure, but the caller cannot be checked against the unreadable matter's
+    /// No Access list, so the create is refused (<c>creator_no_access_unverifiable</c>) with nothing written.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_UnderASecureMatterAndOneWhoseFlagCannotBeRead_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, other) = Matters();
+        FlagUnreadable(other);
+
+        var result = await ChatCreate(AppCreatesIntoTheWorld().Object).ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                tablename = "sprk_workassignment",
+                item = new Dictionary<string, object>
+                {
+                    ["sprk_name"] = "Review the lease",
+                    ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = secure },
+                    ["sprk_regardingrecordid"] = other.ToString("D"),
+                    ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+                },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 2, the two decisions disagreeing: the ownership resolver names the Secure Record team for a work
+    /// assignment the plan found filed under NO secure record (what it names changed between the two reads) — nothing is
+    /// created (fail closed): never an ordinary row re-owned to the caller's unit, never a team-owned row nobody provisions.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheResolverNamesTheSecureTeamButThePlanFoundNoSecureParent_NothingIsCreated()
+    {
+        var (_, ordinary) = Matters();
+        var resolver = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
+        resolver.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true });
+        var handler = new DataverseCreateRecordHandler(
+            new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator), CreateLogger<DataverseCreateRecordHandler>(),
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object,
+            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+
+        var result = await handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                tablename = "sprk_workassignment",
+                item = new Dictionary<string, object>
+                {
+                    ["sprk_name"] = "Review the lease",
+                    ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = ordinary },
+                },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("NOT created");
         _writes.Should().BeEmpty();
     }
 

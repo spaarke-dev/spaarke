@@ -244,6 +244,12 @@ internal static class OwnedChildWrite
         /// <summary>Task 158 r1: the row was created INTO isolation by this plan — the writer completes it.</summary>
         public SecureRootCreatePlan? Isolated { get; init; }
 
+        /// <summary>
+        /// Task 158 r1: the person an isolated create was made for (the caller, by the WhoAmI this create made — its
+        /// <c>sprk_createdbyperson</c>), whom completing it shares the row to; never asked a second time.
+        /// </summary>
+        public Guid? IsolatedFor { get; init; }
+
         public bool Succeeded =>
             CreatedId is not null
             || (Denied is null && OwnerRefusal is null && ClientFailure is null && SecureFilingRefused is null && PlanRefusal is null);
@@ -312,7 +318,7 @@ internal static class OwnedChildWrite
             if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
             {
                 var created = await CreateIntoIsolationAsync(appOnly, table, item, secureTeam, ct).ConfigureAwait(false);
-                return created with { Isolated = plan };
+                return created with { Isolated = plan, IsolatedFor = me.SystemUserId };
             }
         }
 

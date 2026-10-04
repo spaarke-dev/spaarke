@@ -615,6 +615,27 @@ public static class UnsecureProjectEndpoint
             return ChildrenIncomplete(childPass, root, recordId, flagStillSet: true, logger, traceId,
                 ("newOwnerSystemUserId", newOwnerId));
 
+        // ── Step 3.6 (task 158 r1, owner round 30): what its secure parents passed on ends with its shares ──
+        //
+        // A work assignment or project filed under a secure record carries shares that record passed on, each with a
+        // provenance row on task 142's ledger. Step 4 revokes every share; the rows end first, so a later re-secure never
+        // reads a revoked inherited share as an operator's removal (Declined) and withholds the parents' sharees for good.
+        // Not done → stop here, as an incomplete child pass does: the flag and the shares stay, the same call completes it.
+        if (await relatedRoots.EndProvenanceForUnsecureAsync(root.LogicalName, recordId, ct) is { } provenanceNotEnded)
+        {
+            logger.LogError(
+                "[UNSECURE] {RecordType} {RecordId}: {Why}; its shares were NOT revoked and it still reads as secure. " +
+                "TraceId={TraceId}", root.WireToken, recordId, provenanceNotEnded, traceId);
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()}'s related records were not all updated: {provenanceNotEnded}. Its " +
+                "ownership was reassigned, but its shares were NOT revoked and it still reads as secure. Calling again " +
+                "completes it.",
+                traceId,
+                (ReasonKey, ReasonChildrenIncomplete),
+                ("inheritedSharesNotEnded", true),
+                ("newOwnerSystemUserId", newOwnerId));
+        }
+
         // ── Step 4: Revoke the explicit shares ───────────────────────────────
         //
         // After Step 3.5 every related record is out of isolation and carries none of the record's sharees, so revoking

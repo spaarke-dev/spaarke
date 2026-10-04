@@ -95,6 +95,13 @@ public sealed record SecureRootInheritResult(
     /// </summary>
     public bool RowRemoved { get; init; }
 
+    /// <summary>
+    /// Task 158 r1: a record CREATED into isolation whose creator could not be shared AND which could not be deleted again:
+    /// it exists, secure, and nobody but an administrator can open it until the job shares it to its creator (≤ 5 minutes).
+    /// The writer says exactly that — never "shared to you".
+    /// </summary>
+    public bool RowStranded { get; init; }
+
     /// <summary>The outcome as the response names it.</summary>
     public string WireOutcome => !SharesComplete && IsSecure
         ? "failed"
@@ -795,7 +802,7 @@ public sealed class SecureRootInheritance
                 "deletes it.", logical, recordId, provisioned.ReasonCode);
         }
 
-        return provisioned with { RowRemoved = removed };
+        return provisioned with { RowRemoved = removed, RowStranded = !removed };
     }
 
     /// <summary>Whether <paramref name="systemUserId"/> holds the creator's share on the record (strict read; a fault is "no").</summary>
@@ -993,7 +1000,10 @@ public sealed class SecureRootInheritance
         }
 
         var notDone = new List<string>();
-        var declined = new HashSet<DataversePrincipalRef>();
+
+        // The rows that are declined (an operator's removal on THIS record), by id — apart from the row objects, whose
+        // in-memory state a failed ledger write would leave stale.
+        var declinedRows = new HashSet<Guid>();
 
         // (a) Declined — by /unshare-user on this record (task 142's marker), or found removed / narrowed outside the BFF.
         foreach (var row in ledger.Where(r => r.State != AssignedAccessState.Revoked))
@@ -1003,19 +1013,22 @@ public sealed class SecureRootInheritance
 
             if (row.State == AssignedAccessState.Declined)
             {
-                declined.Add(principal);
+                declinedRows.Add(row.Id);
                 continue;
             }
 
             if (row.State == AssignedAccessState.Shared && row.GrantedLevel is { } written && written != 0
                 && ((current.TryGetValue(principal, out var held) ? held : 0) & written) != written)
             {
-                declined.Add(principal);
+                // Declined whether or not the ledger write lands: never re-added by this pass (fail closed).
+                declinedRows.Add(row.Id);
                 try
                 {
                     await _ledger.UpdateLedgerAsync(row.Id,
                         new AssignedAccessLedgerWrite(AssignedAccessState.Declined, AssignedAccessReason.RemovedOutOfBand), ct)
                         .ConfigureAwait(false);
+                    row.StateValue = (int)AssignedAccessState.Declined;
+                    row.Reason = AssignedAccessReason.RemovedOutOfBand;
                     _logger.LogInformation(
                         "[SECURE-INHERIT] {Principal}'s inherited share on {Table} {RecordId} was removed or narrowed outside the " +
                         "BFF: recorded Declined — it is not given again while the parent share persists.", principal, logical, recordId);
@@ -1030,13 +1043,15 @@ public sealed class SecureRootInheritance
 
         // (b) Sources that ended: an isolated parent that no longer shares the principal (owner round 30: "on the parent's
         // unshare, remove only the inherited share that is still UNMODIFIED"), reached here when the unshare was made
-        // outside the BFF. A parent that is not isolated (unsecured, mid-provisioning) or cannot be read ends nothing.
-        var mirrors = new Dictionary<(string, Guid), IReadOnlyDictionary<DataversePrincipalRef, int>?>();
-        foreach (var row in ledger.Where(r => r.State != AssignedAccessState.Revoked && r.State != AssignedAccessState.Declined).ToList())
+        // outside the BFF. A Declined row ends too — the operator's removal stands only "while the parent share persists",
+        // so once it does not, a later share on the parent is passed on again. A parent that is not isolated (unsecured,
+        // mid-provisioning) ends nothing (its filed records stay as they are — owner round 6 item 4); one whose state cannot
+        // be read is reported, never read as "not isolated".
+        var mirrors = new Dictionary<(string, Guid), ParentMirrorAnswer>();
+        foreach (var row in ledger.Where(r => r.State != AssignedAccessState.Revoked).ToList())
         {
             if (AssignedAccessStore.InheritedPrincipalOf(row) is not { } principal
-                || AssignedAccessStore.InheritedSourceOf(row.SourceField) is not { } parent
-                || declined.Contains(principal))
+                || AssignedAccessStore.InheritedSourceOf(row.SourceField) is not { } parent)
                 continue;
 
             if (!mirrors.TryGetValue(parent, out var mirror))
@@ -1045,13 +1060,33 @@ public sealed class SecureRootInheritance
                 mirrors[parent] = mirror;
             }
 
-            if (mirror is null || mirror.ContainsKey(principal))
+            if (mirror.Unreadable)
+            {
+                notDone.Add($"whether {parent.Table} {parent.Id:D} still shares {principal} could not be read");
+                continue;
+            }
+
+            if (mirror.Mirror is null || mirror.Mirror.ContainsKey(principal))
                 continue;
 
             var ended = await EndInheritedSourceAsync(logical, recordId, row, ct).ConfigureAwait(false);
             if (!ended.Done)
+            {
                 notDone.Add($"{principal}'s share from {parent.Table} {parent.Id:D}: {ended.Detail}");
+                continue;
+            }
+
+            // Ended (every "done" outcome of the reverse rule ends the row): a decline from this parent no longer holds.
+            row.StateValue = (int)AssignedAccessState.Revoked;
+            declinedRows.Remove(row.Id);
         }
+
+        // The principals still declined: a Declined row whose parent's share persists.
+        var declined = ledger
+            .Where(r => declinedRows.Contains(r.Id))
+            .Select(AssignedAccessStore.InheritedPrincipalOf)
+            .OfType<DataversePrincipalRef>()
+            .ToHashSet();
 
         // (c) The add-only mirror — never re-adding a declined principal.
         var parents = answer.SecureParents.Select(p => (p.Table, p.Id)).ToArray();
@@ -1330,6 +1365,31 @@ public sealed class SecureRootInheritance
         }
 
         var mine = rows.Where(r => r.State != AssignedAccessState.Revoked && AssignedAccessStore.InheritedPrincipalOf(r) == principal).ToList();
+        if (mine.Count > 0)
+        {
+            // Only a SECURE (isolated) parent's unshare ends what it passed on (owner round 30) — the job's rule too. A parent
+            // that is not isolated any more (unsecured: owner round 6 item 4, its filed records stay as they are) ends
+            // nothing; one that still shares the principal (a second share) has nothing to end; one whose state cannot be read
+            // is reported (children_incomplete), never read as "not secure".
+            var parentMirror = await _synchronizer.IsolatedParentMirrorAsync(parent, parentId, ct).ConfigureAwait(false);
+            if (parentMirror.Unreadable)
+            {
+                _logger.LogError(
+                    "[SECURE-INHERIT] Whether {Parent} {ParentId} is still secure could not be read; what it passed on to " +
+                    "{Principal} is ended by the secure-root inheritance job.", parent, parentId, principal);
+                return new InheritedUnsharePass(SecureFiledRootsStatus.Failed, mine.Count, 0, 0, mine.Count,
+                    "whether the record is still secure could not be read, so what it passed on was not ended");
+            }
+
+            if (parentMirror.Mirror is null || parentMirror.Mirror.ContainsKey(principal))
+            {
+                _logger.LogInformation(
+                    "[SECURE-INHERIT] {Parent} {ParentId} is {State}: the {Count} inherited share(s) it passed on to {Principal} " +
+                    "stay.", parent, parentId, parentMirror.Mirror is null ? "not secure" : "still sharing them", mine.Count, principal);
+                return InheritedUnsharePass.NotApplicable;
+            }
+        }
+
         var (removed, kept, notDone) = (0, 0, 0);
         var details = new List<string>();
         foreach (var row in mine)
@@ -1365,6 +1425,139 @@ public sealed class SecureRootInheritance
         return new InheritedUnsharePass(
             complete ? SecureFiledRootsStatus.Completed : SecureFiledRootsStatus.Incomplete,
             mine.Count, removed, kept, notDone + (truncated ? 1 : 0), details.Count == 0 ? null : string.Join("; ", details));
+    }
+
+    /// <summary>
+    /// A work assignment or project is being UNSECURED (task 158 r1, owner round 30): the unsecure endpoint revokes every
+    /// share on it, so every share its secure parents passed on ends with it — each live inherited-share row on it is ended
+    /// (<see cref="AssignedAccessReason.RecordUnsecured"/>) BEFORE the shares are revoked. A row left <c>Shared</c> would
+    /// otherwise read, once the record is secured again, as an operator's removal (Declined), and its parents' sharees would
+    /// never be passed on again. <c>null</c>: done (or nothing to end); otherwise why not — the unsecure stops before
+    /// revoking anything and the same call completes it.
+    /// </summary>
+    public async Task<string?> EndProvenanceForUnsecureAsync(string table, Guid recordId, CancellationToken ct)
+    {
+        if (!Inherits(table))
+            return null;
+
+        var logical = table.Trim().ToLowerInvariant();
+        try
+        {
+            var rows = await _ledger.ReadInheritedLedgerAsync(RootTypeOf(logical), recordId, ct).ConfigureAwait(false);
+            var live = rows.Where(r => r.State != AssignedAccessState.Revoked).ToList();
+            foreach (var row in live)
+                await EndRowAsync(row, AssignedAccessReason.RecordUnsecured, ct).ConfigureAwait(false);
+
+            if (live.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[SECURE-INHERIT] {Table} {RecordId} is being unsecured: {Count} inherited share record(s) ended.",
+                    logical, recordId, live.Count);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-INHERIT] Where the shares on {Table} {RecordId} came from could not be updated before its unsecure.",
+                logical, recordId);
+            return "the record of where its shares came from (shares passed on from the secure records it is filed under) " +
+                   "could not be updated";
+        }
+    }
+
+    /// <summary>
+    /// The job's provenance reconcile for records it did NOT visit this run (task 158 r1, owner round 30: "the L4 job also
+    /// reconciles provenance"): a record re-filed AWAY from a secure parent keeps what that parent passed on (re-filing is
+    /// not an unshare), so a later unshare of the parent made OUTSIDE the BFF (the model-driven app's Share dialog) is
+    /// reached only through the parent's own ledger rows. For each secure parent, its live inherited rows on records not in
+    /// <paramref name="visited"/> whose principal the parent no longer shares are ended by the reverse rule
+    /// (<see cref="EndInheritedSourceAsync"/>). A parent that is not isolated ends nothing; one that cannot be read, a read
+    /// that cannot complete, or a row that is not ended is reported (the run is not a success). Never throws.
+    /// </summary>
+    public async Task<InheritedUnsharePass> ReconcileUnvisitedProvenanceAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> secureParents, IReadOnlySet<(string Table, Guid Id)> visited,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(secureParents);
+        ArgumentNullException.ThrowIfNull(visited);
+        var (rowsSeen, removed, kept, notDone) = (0, 0, 0, 0);
+        var details = new List<string>();
+
+        foreach (var (table, id) in secureParents.Where(p => IsParent(p.Table)).Distinct())
+        {
+            var parent = table.Trim().ToLowerInvariant();
+            List<AssignedAccessLedgerRow> unvisited;
+            try
+            {
+                var (rows, truncated) = await _ledger.ReadInheritedLedgerByParentAsync(parent, id, ct).ConfigureAwait(false);
+                if (truncated)
+                {
+                    notDone++;
+                    details.Add($"{parent} {id:D}: more inherited shares than one pass reads");
+                }
+
+                unvisited = rows.Where(r => r.State != AssignedAccessState.Revoked
+                                            && AssignedAccessStore.InheritedPrincipalOf(r) is not null
+                                            && AssignedAccessStore.RootOf(r) is { } root
+                                            && !visited.Contains((ExternalGrantRoot.LogicalNameFor(root.RootType), root.RootId)))
+                    .ToList();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-INHERIT] What {Parent} {ParentId} passed on could not be read.", parent, id);
+                notDone++;
+                details.Add($"{parent} {id:D}: what it passed on could not be read");
+                continue;
+            }
+
+            if (unvisited.Count == 0)
+                continue;
+
+            var mirror = await _synchronizer.IsolatedParentMirrorAsync(parent, id, ct).ConfigureAwait(false);
+            if (mirror.Unreadable)
+            {
+                notDone += unvisited.Count;
+                details.Add($"{parent} {id:D}: whether it still shares what it passed on could not be read");
+                continue;
+            }
+
+            if (mirror.Mirror is null)
+                continue;
+
+            foreach (var row in unvisited)
+            {
+                var principal = AssignedAccessStore.InheritedPrincipalOf(row)!.Value;
+                if (mirror.Mirror.ContainsKey(principal))
+                    continue;
+
+                rowsSeen++;
+                var root = AssignedAccessStore.RootOf(row)!.Value;
+                var logical = ExternalGrantRoot.LogicalNameFor(root.RootType);
+                var ended = await EndInheritedSourceAsync(logical, root.RootId, row, ct).ConfigureAwait(false);
+                if (!ended.Done)
+                {
+                    notDone++;
+                    details.Add($"{logical} {root.RootId:D}: {principal}'s share from {parent} {id:D}: {ended.Detail}");
+                }
+                else if (ended.Removed)
+                {
+                    removed++;
+                }
+                else
+                {
+                    kept++;
+                }
+            }
+        }
+
+        _logger.LogInformation(
+            "[SECURE-INHERIT] Provenance of records not filed under their source any more: ended={Rows} removed={Removed} " +
+            "kept={Kept} notDone={NotDone}.", rowsSeen, removed, kept, notDone);
+        return new InheritedUnsharePass(
+            notDone == 0 ? SecureFiledRootsStatus.Completed : SecureFiledRootsStatus.Incomplete,
+            rowsSeen, removed, kept, notDone, details.Count == 0 ? null : string.Join("; ", details.Take(20)));
     }
 
     /// <summary>

@@ -152,6 +152,12 @@ public static class AssignedAccessReason
     public const string KeptLastReader = "kept-last-reader";
 
     /// <summary>
+    /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
+    /// had passed on ends with it (a row left Shared would later read as an operator's removal when it is secured again).
+    /// </summary>
+    public const string RecordUnsecured = "record-unsecured";
+
+    /// <summary>
     /// Prefix of a reason recording what a raised grant had before: its level AND the date the subject's access ran until
     /// (<c>raised-from:100000000@2026-10-13</c>, written by <see cref="RaisedFromLevel"/>). Both are put back when the
     /// assignment ends — the rule renews a raised grant like its own while the assignment lasts (owner A5), so restoring
@@ -727,17 +733,25 @@ public class AssignedAccessStore
     /// Roots that hold a live ledger row (any state but Revoked) — so an assignment cleared OUTSIDE the product (grid
     /// edit, import, flow) is still revisited. Exceptions propagate.
     /// </summary>
+    /// <remarks>
+    /// Task 158 r1: the inherited-share provenance rows (<see cref="InheritedSourcePrefix"/>) share this table but are not
+    /// Assigned-To rows — the materializer ignores them (no contact / organization subject), and they are left out of this
+    /// scan so they never count toward its <see cref="MaxScanRows"/> bound (an environment with many inherited shares would
+    /// otherwise truncate — and fail — the Assigned-To job's run). <see cref="IsAssignedToScanRow"/> is the same predicate.
+    /// </remarks>
     internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
     {
         var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
             EntitySet,
-            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked}",
-            select: "sprk_assignedaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
+            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
+                    $"not startswith(sprk_sourcefield,'{InheritedSourcePrefix}')",
+            select: "sprk_assignedaccessid,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
             top: MaxScanRows + 1,
             cancellationToken: ct).ConfigureAwait(false);
 
         var truncated = rows.Count > MaxScanRows;
         var roots = rows.Take(MaxScanRows)
+            .Where(IsAssignedToScanRow)
             .Select(RootOf)
             .Where(r => r is not null)
             .Select(r => r!.Value)
@@ -745,6 +759,13 @@ public class AssignedAccessStore
             .ToList();
         return (roots, truncated);
     }
+
+    /// <summary>
+    /// Task 158 r1: a live ledger row the Assigned-To job revisits — any row but an inherited-share provenance row (the
+    /// predicate <see cref="ScanLedgerRootsAsync"/>'s filter states in OData).
+    /// </summary>
+    internal static bool IsAssignedToScanRow(AssignedAccessLedgerRow row)
+        => row.State != AssignedAccessState.Revoked && InheritedSourceOf(row.SourceField) is null;
 
     /// <summary>The root a ledger row is held at, or <c>null</c> for a row with none.</summary>
     internal static AssignedRootRef? RootOf(AssignedAccessLedgerRow row)

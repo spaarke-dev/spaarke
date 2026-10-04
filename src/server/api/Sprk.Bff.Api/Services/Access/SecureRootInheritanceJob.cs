@@ -32,6 +32,11 @@ namespace Sprk.Bff.Api.Services.Access;
 /// starves the ones behind it. Any deferral makes the run <c>Success = false</c> (with <c>deferred</c> and
 /// <c>resumeAfter</c> in its ResultJson); the next run continues from the cursor. Isolated records only have their sharees
 /// (and the provenance of those, owner round 30) checked, which every run does for all of them.</para>
+/// <para><b>Provenance of records no longer filed under their source</b> (task 158 r1, owner round 30). A record re-filed
+/// AWAY from a secure parent keeps what that parent passed on, and is no longer listed under it; so after the per-record
+/// pass, each secure parent's own inherited-share rows on records this run did not visit are checked
+/// (<see cref="SecureRootInheritance.ReconcileUnvisitedProvenanceAsync"/>): one the parent no longer shares (an unshare
+/// made outside the BFF) is ended by the reverse rule. Anything not done fails the run.</para>
 /// <para><b>An EMPTY parent flag is reported, never skipped</b> (owner round 17 item 3). The scan lists the matters and
 /// projects flagged secure AND those whose flag is empty; a record filed only under an empty-flagged parent is
 /// unverifiable (nothing is written to it) and fails the run, naming it — so a parent the repair script has not reached is
@@ -125,6 +130,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
             .Concat(filed.Where(r => r.FlaggedSecure).OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
             .ToList();
         (string Table, Guid Id)? lastProvisioned = null;
+        var visited = new HashSet<(string Table, Guid Id)>();
 
         foreach (var record in ordered)
         {
@@ -134,6 +140,7 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 continue;
             }
 
+            visited.Add((record.Table, record.Id));
             var result = await inheritance.SecureIfFiledUnderSecureAsync(record.Table, record.Id, traceId, cancellationToken)
                 .ConfigureAwait(false);
             if (!record.FlaggedSecure)
@@ -164,6 +171,14 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 });
             }
         }
+
+        // Owner round 30 ("the L4 job also reconciles provenance"): what each secure parent passed on to records NOT visited
+        // above — re-filed away from it, still secure — is ended when the parent no longer shares the principal (an unshare
+        // made outside the BFF). Never throws; anything not done fails the run, naming it.
+        var unvisited = await inheritance.ReconcileUnvisitedProvenanceAsync(parents, visited, cancellationToken)
+            .ConfigureAwait(false);
+        if (!unvisited.IsComplete)
+            incomplete.Add($"inherited shares of records no longer filed under their source: {unvisited.NotDone} not ended ({unvisited.Detail})");
 
         // The cursor: past the bound, the next run continues after the last record this one provisioned; a run that reached
         // every record starts the next from the beginning.
@@ -217,6 +232,8 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 // The progress cursor: the next run continues after this record. Null when this run reached every record.
                 resumeAfter = deferred > 0 && lastProvisioned is { } resume ? $"{resume.Table}:{resume.Id:D}" : null,
                 sharesWritten,
+                // Task 158 r1: inherited shares on records no longer filed under the parent that passed them on.
+                unfiledProvenance = new { ended = unvisited.Rows, removed = unvisited.Removed, kept = unvisited.Kept, notDone = unvisited.NotDone },
                 incomplete = incomplete.Take(50).ToArray(),
                 records = sampled,
                 attempt = context.Attempt,

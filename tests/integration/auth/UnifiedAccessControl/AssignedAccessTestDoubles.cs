@@ -248,7 +248,8 @@ internal static class AssignedAccessTestDoubles
                 throw new HttpRequestException("Simulated scan failure.");
             lock (_gate)
             {
-                var roots = Ledger.Where(r => r.State != AssignedAccessState.Revoked)
+                // The production predicate (task 158 r1): live rows, inherited-share provenance rows left out.
+                var roots = Ledger.Where(IsAssignedToScanRow)
                     .Select(RootOf).Where(r => r is not null).Select(r => r!.Value).Distinct().ToList();
                 return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
             }

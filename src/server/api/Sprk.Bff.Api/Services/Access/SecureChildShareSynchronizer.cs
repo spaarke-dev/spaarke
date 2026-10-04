@@ -134,6 +134,20 @@ public sealed record InheritedShareOutcome(
     DataversePrincipalRef Principal, int MirrorMask, int MaskBefore, int MaskAfter, InheritedShareAction Action);
 
 /// <summary>
+/// One secure parent's mirror as the reverse rule reads it (task 158 r1, owner round 30): <see cref="Mirror"/> when the
+/// parent is isolated; <c>null</c> when it is not (it ends nothing it passed on); <see cref="Unreadable"/> when it could not
+/// be decided — reported by the caller, never read as "not isolated".
+/// </summary>
+public sealed record ParentMirrorAnswer(IReadOnlyDictionary<DataversePrincipalRef, int>? Mirror, bool Unreadable)
+{
+    /// <summary>The parent is not isolated (or does not exist): it ends nothing it passed on.</summary>
+    public static ParentMirrorAnswer NotIsolated { get; } = new(null, false);
+
+    /// <summary>Whether the parent is isolated, or whom it shares, could not be read.</summary>
+    public static ParentMirrorAnswer CouldNotRead { get; } = new(null, true);
+}
+
+/// <summary>
 /// What taking the mirrored shares off one child did (task 148, <see cref="SecureChildShareSynchronizer.RemoveMirrorAsync"/>):
 /// <see cref="SecureChildShareSyncStatus.Completed"/> (none left), <see cref="SecureChildShareSyncStatus.NotApplicable"/>
 /// (the child no longer exists), <see cref="SecureChildShareSyncStatus.Incomplete"/> (a share is left, or the child is still
@@ -255,37 +269,41 @@ public sealed class SecureChildShareSynchronizer
 
     /// <summary>
     /// Task 158 r1 (owner round 30): ONE parent's mirror — its direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>
-    /// — when it is ISOLATED (owned by the named Secure Record owner team). <c>null</c> when it is not isolated (unsecured,
-    /// mid-provisioning), does not exist, or cannot be read: such a parent ends nothing it passed on (the reverse rule
-    /// fires only on a secure parent's unshare).
+    /// — when it is ISOLATED (owned by the named Secure Record owner team). <see cref="ParentMirrorAnswer.Mirror"/> is
+    /// <c>null</c> when the parent is not isolated (unsecured, mid-provisioning) or does not exist: such a parent ends
+    /// nothing it passed on (the reverse rule fires only on a secure parent's unshare; an unsecured parent's filed records
+    /// stay as they are — owner round 6 item 4). <see cref="ParentMirrorAnswer.Unreadable"/> when it could not be decided
+    /// (the parent, its shares or the named team could not be read) — never read as "not isolated": the caller reports it.
     /// </summary>
-    public async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> IsolatedParentMirrorAsync(
+    public async Task<ParentMirrorAnswer> IsolatedParentMirrorAsync(
         string parentTable, Guid parentId, CancellationToken ct)
     {
         if (!SecureChildLineage.IsRoot(parentTable))
-            return null;
+            return ParentMirrorAnswer.NotIsolated;
 
         try
         {
             var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
             if (team.TeamId is not { } secureTeamId)
-                return null;
+                return ParentMirrorAnswer.CouldNotRead;
 
             var parent = new RowRef(parentTable.ToLowerInvariant(), parentId);
             var facts = await ReadRootFactsAsync(_dataverse, parent, ct).ConfigureAwait(false);
             if (facts is null || facts.OwningTeam != secureTeamId)
-                return null;
+                return ParentMirrorAnswer.NotIsolated;
 
-            return Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
-                .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
-                .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
-                .Where(p => RecordShareLevels.CanRead(p.Mask))
-                .ToDictionary(p => p.Key, p => p.Mask);
+            return new ParentMirrorAnswer(
+                Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
+                    .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
+                    .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                    .Where(p => RecordShareLevels.CanRead(p.Mask))
+                    .ToDictionary(p => p.Key, p => p.Mask),
+                Unreadable: false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}'s shares could not be read.", parentTable, parentId);
-            return null;
+            return ParentMirrorAnswer.CouldNotRead;
         }
     }
 

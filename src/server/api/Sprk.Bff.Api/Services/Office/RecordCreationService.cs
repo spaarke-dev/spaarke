@@ -597,7 +597,15 @@ public sealed class RecordCreationService
                     "not be made, so the new project was removed again. Nothing was created. Try again in a few minutes."));
             }
 
-            if (!secured.IsComplete)
+            if (secured.RowStranded)
+            {
+                // Not shared to the maker and not removable: it exists, and only an administrator can open it until the job
+                // shares it to the maker (task 158 r1) — never reported as "shared to you".
+                warnings.Add(
+                    "The project was created as a secure record, but it could not be shared to you and could not be removed " +
+                    $"again ({secured.ReasonCode}); it is shared to you automatically within a few minutes.");
+            }
+            else if (!secured.IsComplete)
             {
                 warnings.Add(
                     "The project was created as a secure record shared to you, but securing it could not be finished yet " +

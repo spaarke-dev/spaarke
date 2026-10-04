@@ -534,6 +534,164 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         run.ErrorMessage.Should().Contain(workAssignment.ToString("D"));
     }
 
+    // ══ Round 30 — the provenance's lifecycle beyond one share (task 158 r1 completion) ════════════════════════════════
+
+    private const string UnsecureRoute = "/api/v1/external-access/unsecure-project";
+
+    private Task<HttpResponseMessage> UnsecureRouteAsync(string recordType, Guid recordId) =>
+        _fixture.CreateAuthenticatedClient().PostAsJsonAsync(UnsecureRoute, new { recordType, recordId });
+
+    /// <summary>
+    /// Unsecuring a filed record revokes every share on it, so what its parent passed on ENDS with it
+    /// (<see cref="AssignedAccessReason.RecordUnsecured"/>) — and when it is secured again under its secure parent, the
+    /// parent's sharee is passed on again. A row left Shared would read, after the revoke, as an operator's removal
+    /// (Declined) and withhold the sharee for good.
+    /// </summary>
+    [Fact]
+    public async Task UnsecuringAFiledRecord_EndsWhatItsParentPassedOn_SoSecuringItAgainPassesTheShareeOnAgain()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+
+        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var unsecured = await UnsecureRouteAsync("workassignment", workAssignment);
+
+        unsecured.StatusCode.Should().Be(HttpStatusCode.OK, await unsecured.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "an unsecure revokes every share");
+        var ended = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        ended.State.Should().Be(AssignedAccessState.Revoked);
+        ended.Reason.Should().Be(AssignedAccessReason.RecordUnsecured);
+
+        SecureMatter(_fixture, matter, null, Colleague); // the matter is secured again and shares the same person
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("filed under a secure matter again");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "never mistaken for an operator's removal");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague && r.State != AssignedAccessState.Revoked)
+            .State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    /// <summary>Fault: the provenance cannot be ended — the unsecure stops before revoking anything (children_incomplete).</summary>
+    [Fact]
+    public async Task UnsecuringAFiledRecord_WhenItsProvenanceCannotBeEnded_StopsBeforeRevokingItsShares()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.InheritedLedger.FailLedgerWrites = true;
+
+        var response = await UnsecureRouteAsync("workassignment", workAssignment);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete);
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("the flag stays until the same call completes it");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "its shares were not revoked");
+    }
+
+    /// <summary>
+    /// Owner round 30, "never re-added WHILE the parent share persists": an operator removed the inherited share on the filed
+    /// record (Declined); the matter's share then ended OUTSIDE the BFF — the job ends the decline with it — and a later
+    /// share on the matter is passed on again.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_EndsADeclineWhenTheParentsShareEndsOutsideTheBff_SoALaterShareIsPassedOnAgain()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        (await UnshareAsync("workassignment", workAssignment, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Declined);
+
+        _fixture.RemoveShare(matter, DataversePrincipalRef.User(Colleague));
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Revoked,
+            "the decline held only while the matter's share persisted");
+
+        _fixture.SeedShare(matter, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "a new share on the matter is passed on again");
+    }
+
+    /// <summary>
+    /// ADR-003 in the provenance reconcile: whether a parent that passed a share on still shares the person cannot be read —
+    /// the record's pass is incomplete and the run is not a success (never read as "not secure, ends nothing").
+    /// </summary>
+    [Fact]
+    public async Task TheJob_WhenAParentThatPassedAShareOnCannotBeRead_FailsTheRun_NamingTheRecord()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecureProject(_fixture, project, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.RightsCsvForMask(Mirror));
+        await _fixture.InheritedLedger.CreateInheritedLedgerAsync(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType.WorkAssignment,
+            workAssignment, "sprk_project", project, DataversePrincipalRef.User(Colleague),
+            new AssignedAccessLedgerWrite(AssignedAccessState.Shared, null, GrantedLevel: Mirror), CancellationToken.None);
+        World.FailingRowReadsOf("sprk_project", project);
+
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Contain(workAssignment.ToString("D"));
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "nothing is ended on an unread answer");
+    }
+
+    /// <summary>
+    /// Owner round 6 item 4 + round 30: a parent that is no longer secure ends nothing it passed on — its filed records stay
+    /// as they are. An unshare of the person on the (now ordinary) matter leaves the secure work assignment's inherited
+    /// share in place, as the job does.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromAMatterThatIsNoLongerSecure_EndsNothingItPassedOn()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await UnshareAsync("matter", matter, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "an ordinary record's unshare is not a secure parent's");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    /// <summary>
+    /// The L4 job also reconciles the provenance of a record re-filed AWAY from its secure parent (re-filing is not an
+    /// unshare, so it keeps what the parent passed on): when the parent's share ends outside the BFF, the next run ends the
+    /// unmodified inherited share — though the record is no longer listed under that parent.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_EndsAnInheritedShareOnARecordReFiledAwayFromTheParent_WhenTheParentUnsharesOutsideTheBff()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null); // re-filed under nothing
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "re-filing is not an unshare");
+
+        _fixture.RemoveShare(matter, DataversePrincipalRef.User(Colleague));
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "its access there came from the matter");
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
     // ══ The job — resumable, and blind to nothing ══════════════════════════════════════════════════════════════════════
 
     /// <summary>
