@@ -418,6 +418,41 @@ public class AssignedAccessMaterializerTests
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Task 142 round 18 (R-14): a contact with more organizations than ONE deny-list query holds (here 30 active
+    /// memberships; the bound is 25) is CHECKED. Before round 18 the reader refused the set deterministically, so every
+    /// pass reported deny-list-unreadable — the sync answered 500 and the job stayed red for as long as the contact stayed
+    /// assigned. Now: no entry → granted, the run complete; an entry on the 30th organization → Skipped(no-access), the
+    /// record's policy, the run still complete.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AContactWithMoreOrganizationsThanOneQueryHolds_IsChecked_AndTheRunCompletes(bool lastOrganizationWalled)
+    {
+        var contact = _h.Contact();
+        var memberships = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToArray();
+        _h.Participations.ContactOrganizations[contact] = memberships;
+        if (lastOrganizationWalled)
+            _h.DenyList.DenyOrganizationOnRecord(memberships[^1], _matter);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeTrue("a large subject set is not a fault (round 18)");
+        outcome.Failures.Should().BeEmpty();
+        if (lastOrganizationWalled)
+        {
+            _h.Grants.Rows.Should().BeEmpty();
+            LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.NoAccess);
+        }
+        else
+        {
+            _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+            LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        }
+    }
+
     [Fact]
     public async Task AnUnreadableDenyList_IsASkip_NeverAGrant()
     {

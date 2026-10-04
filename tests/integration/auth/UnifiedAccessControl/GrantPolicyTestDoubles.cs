@@ -214,6 +214,12 @@ internal static class GrantPolicyTestDoubles
         /// </summary>
         public Exception? Throws { get; set; }
 
+        /// <summary>
+        /// Task 142 round 18: when set, only the query whose SUBJECT fragment names this id faults (<c>null</c>) — one
+        /// faulted subject chunk among several, the others answering.
+        /// </summary>
+        public Guid? FaultsWhenSubjectNames { get; set; }
+
         /// <summary>How many chunk queries ran — proves the shared reader was consulted.</summary>
         public int Queries { get; private set; }
 
@@ -271,6 +277,8 @@ internal static class GrantPolicyTestDoubles
             if (Throws is { } ex)
                 return Task.FromException<List<NoAccessEntryRow>?>(ex);
             if (Faults)
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
+            if (FaultsWhenSubjectNames is { } faulting && subjectFilter.Contains(faulting.ToString(), StringComparison.Ordinal))
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
 
             var recordLoop = objectFilter.Contains("sprk_objectrecordid", StringComparison.Ordinal);

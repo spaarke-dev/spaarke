@@ -1660,6 +1660,47 @@ public class AccessibleRecordSetServiceTests
             "the twin — resolvable, named by no entry — keeps exactly its Full Access grant");
     }
 
+    /// <summary>
+    /// Task 142 round 18 (R-14): a contact with more active organization memberships than ONE deny-list query holds (30;
+    /// the bound is 25) is evaluated on the READ path too. Before round 18 the reader refused that set and failed closed,
+    /// so EVERY candidate was removed — the contact saw nothing at all. Now only the record an entry walls off (via one of
+    /// the 30 organizations) is removed; its sibling keeps its grant.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_AContactWithMoreOrganizationsThanOneQueryHolds_LosesOnlyTheWalledRecord()
+    {
+        var walledOrganization = Guid.Parse("a4000000-0000-0000-0000-000000000142");
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess },
+            new ExternalParticipation { ProjectId = MemberRecordA, AccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        for (var i = 0; i < 29; i++)
+        {
+            participations.ActiveOrgIds.Add(Guid.NewGuid());
+        }
+
+        participations.ActiveOrgIds.Add(walledOrganization);
+
+        var reader = new SubjectRowReader();
+        reader.Add(new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = Guid.NewGuid(),
+            _sprk_subjectorganization_value = walledOrganization,
+            _sprk_objectrecordtype_value = Guid.NewGuid(),
+            sprk_objectrecordid = GrantedProject.ToString(),
+        });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse("an entry names one of the contact's 30 organizations on this record");
+        set.RightsFor(MemberRecordA).Should().Be(
+            ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.FullAccess),
+            "the sibling is evaluated and kept — no longer removed because the subject set was 'too large'");
+        reader.SubjectFilters.Distinct().Should().HaveCountGreaterThan(1, "the 30 organizations were split across queries");
+    }
+
     [Fact]
     public async Task ComposeAsync_SystemUserWithNoResolvableContact_NeverQueriesDenyList()
     {

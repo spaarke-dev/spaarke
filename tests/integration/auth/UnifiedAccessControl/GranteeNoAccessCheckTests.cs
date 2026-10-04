@@ -139,6 +139,43 @@ public class GranteeNoAccessCheckTests
             "a check that could not be completed is a fault (owner round 13 item 4) — fail closed, never an entry");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round 18 (task 142 R-14): a grantee with more organizations than ONE query holds is CHECKED, not Unverifiable
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Before round 18 a contact whose wall set (every active membership, plus the firm the request names) exceeded 25
+    /// organizations was answered Unverifiable on every call — the grant routes' 503 "try again" that never succeeds, the
+    /// Assigned-To job red for as long as the contact stayed assigned. Now the reader evaluates the whole set in chunks:
+    /// an entry on the LAST organization is Denied, and no entry is Allowed.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AGranteeWithMoreOrganizationsThanOneQueryHolds_IsChecked_NeverUnverifiable(bool lastOrganizationWalled)
+    {
+        var memberships = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToArray();
+        _participations.ContactOrganizations[ContactId] = memberships;
+        if (lastOrganizationWalled)
+            _reader.DenyOrganizationOnRecord(memberships[^1], RecordId);
+
+        (await CheckAsync()).Should().Be(lastOrganizationWalled ? NoAccessCheckAnswer.Denied : NoAccessCheckAnswer.Allowed,
+            "a large subject set is evaluated (round 18) — never the deterministic Unverifiable it used to be");
+        _reader.Queries.Should().BeGreaterThan(1, "the set was split across subject chunks");
+    }
+
+    /// <summary>The fail-closed twin: a genuine read fault in ONE of the chunks is still Unverifiable for the whole check.</summary>
+    [Fact]
+    public async Task AGranteeWithMoreOrganizationsThanOneQueryHolds_AFaultInOneChunk_IsUnverifiable()
+    {
+        var memberships = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToArray();
+        _participations.ContactOrganizations[ContactId] = memberships;
+        _reader.FaultsWhenSubjectNames = memberships[^1]; // one subject chunk carries it; the other answers
+
+        (await CheckAsync()).Should().Be(NoAccessCheckAnswer.Unverifiable,
+            "the answers of the readable chunks are not all the denials — fail closed, reported as a fault");
+    }
+
     /// <summary>A reader that returns no answer at all — previously a NullReferenceException in the veto's catch-all.</summary>
     [Fact]
     public async Task ADenyListReaderThatReturnsNoAnswer_IsUnverifiable()

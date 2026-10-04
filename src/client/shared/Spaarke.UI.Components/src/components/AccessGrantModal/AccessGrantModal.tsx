@@ -429,9 +429,14 @@ function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenti
  * `.would_lower_existing` (409 — the grant was capped at your level and the
  * person already holds more; also returned by `/share-user`) and
  * `.grantee_denied` (422 — the grantee is on the record's No Access list), plus
- * `/share-user`'s own `sdap.access.user_share.caller_cannot_grant`. Their
- * ProblemDetails `detail` is written for the person, so the modal shows it
- * verbatim instead of a generic "try again" — retrying would fail the same way. */
+ * `/share-user`'s own `sdap.access.user_share.caller_cannot_grant`. Task 142
+ * (owner round 13 item 4; round 18): `.no_access_unverifiable` (503 — whether
+ * the grantee is on the No Access list could not be checked, a read fault;
+ * nothing was granted). Their ProblemDetails `detail` is written for the
+ * person, so the modal shows it verbatim instead of a generic "try again": a
+ * policy refusal says why retrying would fail the same way, and the two 503s
+ * (`.policy_unreadable`, `.no_access_unverifiable`) say themselves that a retry
+ * may succeed. */
 const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.record_restricted',
   'sdap.access.grant.org_grant_direct_only_record',
@@ -439,6 +444,7 @@ const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.caller_cannot_grant',
   'sdap.access.grant.would_lower_existing',
   'sdap.access.grant.grantee_denied',
+  'sdap.access.grant.no_access_unverifiable',
   'sdap.access.user_share.caller_cannot_grant',
 ]);
 
@@ -585,8 +591,10 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   }
   if (policyRefusals.length > 0) {
     // Task 138: the record's access policy refused at least one grant. The
-    // server's sentence says why and what to do; retrying would fail the same
-    // way, so it is not phrased as a retryable failure.
+    // server's sentence says why and what to do (for a policy refusal,
+    // retrying would fail the same way; for the two 503 read faults the
+    // sentence itself says to try again), so the modal adds no retry advice
+    // of its own.
     const reasons = Array.from(new Set(policyRefusals)).join(' ');
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
     return {
