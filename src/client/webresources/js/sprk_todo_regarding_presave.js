@@ -116,6 +116,11 @@
  *
  * # Version
  *
+ * v1.4.0 — every lookup this script stages or clears gets setSubmitMode("always"),
+ *          because the four sprk_regarding{core} controls are now read-only on the
+ *          to-do / event / communication / analysis forms and a disabled control
+ *          must not drop a staged value from the INSERT (2026-10-03,
+ *          unified-access-control-r2 task 168, owner round 8 item 3)
  * v1.3.0 — FR-26: core-ancestor stamp + reparent-clear staging (2026-09-04,
  *          unified-access-control-r2 task 051)
  * v1.2.0 — SRFR-040: sprk_regardingrecordnumber support (2026-07-02)
@@ -138,7 +143,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.3.0";
+    ns.VERSION = "1.4.0";
 
     /**
      * Resolver text/url fields written verbatim from the pending payload.
@@ -432,6 +437,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
             var cleanId = String(recordId || "").replace(/[{}]/g, "");
             if (!cleanId) {
                 attr.setValue(null);
+                forceSubmit(attr, fieldName);
                 return true;
             }
             attr.setValue([
@@ -441,6 +447,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                     entityType: entityType
                 }
             ]);
+            forceSubmit(attr, fieldName);
             return true;
         } catch (err) {
             console.warn(
@@ -474,6 +481,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                 return false;
             }
             attr.setValue(null);
+            forceSubmit(attr, fieldName);
             return true;
         } catch (err) {
             console.warn(
@@ -481,6 +489,27 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
                 err
             );
             return false;
+        }
+    }
+
+    /**
+     * v1.4.0 (task 168) — make a staged lookup ride the INSERT even when its
+     * control is disabled. Called only AFTER a successful setValue. A throw here
+     * is logged and swallowed: the value is already staged, so the caller's
+     * return value must not change (otherwise a staged stamp would be reported
+     * as "not an attribute on this form", which is false).
+     */
+    function forceSubmit(attr, fieldName) {
+        if (typeof attr.setSubmitMode !== "function") {
+            return;
+        }
+        try {
+            attr.setSubmitMode("always");
+        } catch (err) {
+            console.warn(
+                "[SmartTodo.RegardingPreSave v" + ns.VERSION + "] setSubmitMode(\"always\") failed for " + fieldName + ":",
+                err
+            );
         }
     }
 

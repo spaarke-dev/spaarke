@@ -387,6 +387,7 @@ way `CoreAncestorResolverTests.Taxonomy_MatchesTheTypeScriptSide` parses the tax
 
 ### 🔔 Owner decision — a root set directly on a row filed under another record (verifier round 2 item 9)
 
+- **Resolved by owner round 8 item 3 (option 1 + 3) and task 168:** the rule stays as shipped, and `scripts/Lock-CoreAncestorStampColumnsOnForms.ps1` makes the four root columns read-only on the child forms (checked by `-Verify`; live apply and the open form decisions are in `notes/task-168-lock-root-columns-on-forms.md`).
 - **Situation.** When a row's pair names an intermediate (rule 3), or it has no pair and exactly one intermediate (rule 5),
   EVERY root column the source can carry is treated as a copy. The cascade and the job set it to the source's root, or
   clear it when the source names no root of that type. A root a person sets DIRECTLY on such a row is therefore reverted
