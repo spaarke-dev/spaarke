@@ -7,6 +7,7 @@ using Moq;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Xunit;
 using AuthorizationResult = Sprk.Bff.Api.Services.Ai.AuthorizationResult;
 
@@ -298,8 +299,178 @@ public class AnalysisAuthorizationFilterTests
 
     #endregion
 
-    #region Constructor Tests
+    #region Fail-closed mode switch (task 162)
 
+    [Fact(DisplayName = "162: an AuthorizationMode with no case DENIES with 403 system_failure and never calls next")]
+    public async Task UnhandledMode_Denies403_AndNeverCallsNext()
+    {
+        var filter = CreateFilter((AuthorizationMode)99);
+        var context = CreateContext(CreateUser());
+        var nextCalled = false;
+
+        var result = await filter.InvokeAsync(context.Object, _ =>
+        {
+            nextCalled = true;
+            return ValueTask.FromResult<object?>(Results.Ok());
+        });
+
+        nextCalled.Should().BeFalse();
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(403);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be("sdap.access.error.system_failure");
+    }
+
+    #endregion
+
+    #region AnalysisAccess anchor rule (task 162)
+
+    /// <summary>
+    /// EVERY Lookup attribute the live metadata sweep returned for sprk_analysis (spaarkedev1,
+    /// EntityDefinitions(LogicalName='sprk_analysis')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata,
+    /// 2026-10-03), with its targets. Recorded in notes/task-162-ai-analysis-route-authorization.md section 1.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> LiveLookupSnapshot = new Dictionary<string, string>
+    {
+        ["createdby"] = "systemuser",
+        ["createdonbehalfby"] = "systemuser",
+        ["modifiedby"] = "systemuser",
+        ["modifiedonbehalfby"] = "systemuser",
+        ["ownerid"] = "systemuser,team",
+        ["owningbusinessunit"] = "businessunit",
+        ["owningteam"] = "team",
+        ["owninguser"] = "systemuser",
+        ["sprk_actionid"] = "sprk_analysisaction",
+        ["sprk_agreementtype"] = "sprk_agreementtype",
+        ["sprk_assignedattorney1"] = "contact",
+        ["sprk_assignedattorney2"] = "contact",
+        ["sprk_assignedparalegal1"] = "contact",
+        ["sprk_assignedparalegal2"] = "contact",
+        ["sprk_documentid"] = "sprk_document",
+        ["sprk_outputfileid"] = "sprk_document",
+        ["sprk_playbook"] = "sprk_analysisplaybook",
+        ["sprk_regardingbudget"] = "sprk_budget",
+        ["sprk_regardingcommunication"] = "sprk_communication",
+        ["sprk_regardingdocument"] = "sprk_document",
+        ["sprk_regardinginvoice"] = "sprk_invoice",
+        ["sprk_regardingmatter"] = "sprk_matter",
+        ["sprk_regardingproject"] = "sprk_project",
+        ["sprk_regardingrecordtype"] = "sprk_recordtype_ref",
+        ["sprk_regardingservicerequest"] = "sprk_servicerequest",
+        ["sprk_regardingworkassignment"] = "sprk_workassignment",
+        ["sprk_reviewerby"] = "systemuser",
+    };
+
+    [Fact(DisplayName = "162: every live sprk_analysis Lookup is classified exactly once, with its live target; none is unclassified")]
+    public void EveryLiveAnalysisLookup_IsClassifiedExactlyOnce()
+    {
+        var table = AnalysisAuthorizationFilter.LookupColumns;
+
+        table.Select(c => c.Column).Should().OnlyHaveUniqueItems();
+        table.Select(c => c.Column).Should().BeEquivalentTo(LiveLookupSnapshot.Keys,
+            "a Lookup added to sprk_analysis must be classified as anchor or non-anchor before it can be trusted");
+        foreach (var column in table)
+        {
+            column.TargetLogicalName.Should().Be(LiveLookupSnapshot[column.Column], column.Column);
+            column.Reason.Should().NotBeNullOrWhiteSpace(column.Column);
+        }
+    }
+
+    [Fact(DisplayName = "162: the anchor retrieve selects only anchor columns that exist live; every lookup to a sprk_document is a document anchor")]
+    public void AnchorRetrieve_SelectsOnlyLiveAnchorColumns()
+    {
+        var anchors = AnalysisAuthorizationFilter.LookupColumns
+            .Where(c => c.Role != AnalysisLookupRole.NotAnchor)
+            .Select(c => c.Column);
+
+        AnalysisAuthorizationFilter.AnchorColumns.Should().BeEquivalentTo(anchors);
+        AnalysisAuthorizationFilter.AnchorColumns.Should().OnlyContain(c => LiveLookupSnapshot.ContainsKey(c));
+        AnalysisAuthorizationFilter.AnchorColumns.Should().Contain(new[]
+        {
+            "sprk_documentid", "sprk_outputfileid", "sprk_regardingdocument", "sprk_regardingmatter",
+            "sprk_regardingproject", "sprk_regardingworkassignment", "sprk_regardinginvoice",
+        });
+        AnalysisAuthorizationFilter.LookupColumns
+            .Where(c => c.TargetLogicalName == "sprk_document")
+            .Should().OnlyContain(c => c.Role == AnalysisLookupRole.DocumentAnchor);
+    }
+
+    [Fact(DisplayName = "162: the Create privilege on sprk_analysis is pinned to the name live privileges returned")]
+    public void CreateAnalysisPrivilege_IsTheLiveName()
+    {
+        // spaarkedev1 privileges?$filter=startswith(name,'prvCreatesprk_analysis'), 2026-10-03.
+        AnalysisAuthorizationFilter.CreateAnalysisPrivilege.Should().Be("prvCreatesprk_analysis");
+        AnalysisAuthorizationFilter.AnalysisEntitySetLabel.Should().Be("sprk_analysises");
+    }
+
+    #endregion
+
+    #region Playbook-use decision (task 162; shared with task 164)
+
+    [Fact(DisplayName = "162: a PUBLIC playbook needs no check")]
+    public async Task PlaybookUse_Public_NeedsNoCheck()
+    {
+        var id = Guid.NewGuid();
+        var playbooks = new Mock<IPlaybookService>();
+        playbooks.Setup(p => p.GetPlaybookAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = id, IsPublic = true });
+
+        var check = await PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync(playbooks.Object, id, "body.playbookId", CancellationToken.None);
+
+        check.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "162: a non-public or unknown playbook gets a Record-path Read check on its own row; Dataverse decides and the owner id is never consulted")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PlaybookUse_NonPublicOrUnknown_IsARecordReadCheck(bool exists)
+    {
+        var id = Guid.NewGuid();
+        var playbooks = new Mock<IPlaybookService>();
+        playbooks.Setup(p => p.GetPlaybookAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(exists ? new PlaybookResponse { Id = id, IsPublic = false, OwnerId = Guid.NewGuid() } : null);
+
+        var check = await PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync(playbooks.Object, id, "body.playbookId", CancellationToken.None);
+
+        check.Should().BeEquivalentTo(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = "sprk_analysisplaybooks",
+            RecordId = id,
+            Operation = "read",
+            Source = "body.playbookId",
+        });
+    }
+
+    [Fact(DisplayName = "162: a playbook lookup fault propagates (every caller denies on it)")]
+    public async Task PlaybookUse_LookupFault_Propagates()
+    {
+        var playbooks = new Mock<IPlaybookService>();
+        playbooks.Setup(p => p.GetPlaybookAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse"));
+
+        var act = () => PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync(playbooks.Object, Guid.NewGuid(), "s", CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+    }
+
+    #endregion
+
+    #region Run write rule (task 162)
+
+    public static TheoryData<string, PlaybookNodeDto[], bool> RunShapes => new()
+    {
+        { "zero nodes (Legacy mode writes the profile)", Array.Empty<PlaybookNodeDto>(), true },
+        { "a node with no executor type", new[] { new PlaybookNodeDto { SprkExecutortype = null } }, true },
+        { "an inactive side-effecting node", new[] { new PlaybookNodeDto { SprkExecutortype = ExecutorType.AiAnalysis }, new PlaybookNodeDto { SprkExecutortype = ExecutorType.DeliverToIndex, IsActive = false } }, true },
+        { "only read-only nodes", new[] { new PlaybookNodeDto { SprkExecutortype = ExecutorType.Start }, new PlaybookNodeDto { SprkExecutortype = ExecutorType.AiAnalysis } }, false },
+    };
+
+    [Theory(DisplayName = "162: a run can write the documents when it has no nodes, an unclassifiable node, or any side-effecting node")]
+    [MemberData(nameof(RunShapes))]
+    public void RunCanWriteDocuments_FollowsTheNodeList(string shape, PlaybookNodeDto[] nodes, bool expected)
+    {
+        AnalysisAuthorizationFilter.RunCanWriteDocuments(nodes).Should().Be(expected, shape);
+    }
 
     #endregion
 }
@@ -315,5 +486,7 @@ public class AuthorizationModeTests
         // Assert
         ((int)AuthorizationMode.DocumentAccess).Should().Be(0);
         ((int)AuthorizationMode.AnalysisAccess).Should().Be(1);
+        ((int)AuthorizationMode.AnalysisPromote).Should().Be(2);
+        ((int)AuthorizationMode.AnalysisRun).Should().Be(3);
     }
 }

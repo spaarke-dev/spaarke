@@ -91,7 +91,6 @@ k6 run k6-ai-load-test.js
 |----------|--------|---------|
 | `/api/ai/rag/search` | POST | RAG hybrid search |
 | `/api/ai/analysis/execute` | POST | Analysis execution |
-| `/api/ai/analysis/{id}/export` | POST | Export operations |
 
 ## Results
 

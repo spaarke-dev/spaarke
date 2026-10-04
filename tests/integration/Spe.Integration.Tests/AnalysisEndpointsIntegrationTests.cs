@@ -280,53 +280,33 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
             "requests without authentication should return 401");
     }
 
+    /// <summary>
+    /// INVERTED by unified-access-control-r2 task 162 (the one existing expectation the task changes, on purpose).
+    /// Until task 162 an unknown PlaybookId reached the engine and came back as a 200 SSE "error" chunk. The run
+    /// filter now asks the playbook-use decision BEFORE the stream: a playbook GetPlaybookAsync does not find gets
+    /// the same Record-path check as a non-public one, Dataverse answers None for it, and the request is a 403
+    /// with no stream at all — identical to a playbook the caller may not use, so the route is not an existence
+    /// oracle for playbook ids.
+    /// </summary>
     [Fact]
-    public async Task ExecuteAnalysis_WithPlaybookNotFound_ReturnsErrorChunk()
+    public async Task ExecuteAnalysis_WithPlaybookNotFound_Returns403BeforeTheStream()
     {
         // Arrange
         var client = _fixture.CreateAuthorizedClientWithPlaybookNotFound();
-        var documentId = Guid.NewGuid();
-        var playbookId = Guid.NewGuid(); // Non-existent playbook
-        var actionId = Guid.NewGuid();
-
         var request = new AnalysisExecuteRequest
         {
-            DocumentIds = [documentId],
-            PlaybookId = playbookId,
-            ActionId = actionId
+            DocumentIds = [Guid.NewGuid()],
+            PlaybookId = Guid.NewGuid(), // Non-existent playbook
+            ActionId = Guid.NewGuid()
         };
 
         // Act
         var response = await client.PostAsJsonAsync("/api/ai/analysis/execute", request);
-        var stream = await response.Content.ReadAsStreamAsync();
-        var reader = new StreamReader(stream);
-
-        AnalysisStreamChunk? errorChunk = null;
-        while (!reader.EndOfStream)
-        {
-            var line = await reader.ReadLineAsync();
-            if (line?.StartsWith("data: ") == true)
-            {
-                var json = line["data: ".Length..];
-                var chunk = JsonSerializer.Deserialize<AnalysisStreamChunk>(json, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
-
-                if (chunk?.Type == "error")
-                {
-                    errorChunk = chunk;
-                    break;
-                }
-            }
-        }
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "SSE always returns 200, errors sent as events");
-        errorChunk.Should().NotBeNull();
-        errorChunk!.Type.Should().Be("error");
-        errorChunk.Done.Should().BeTrue();
-        errorChunk.Error.Should().ContainEquivalentOf("playbook");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.Content.Headers.ContentType?.MediaType.Should().NotBe("text/event-stream");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.deny.insufficient_rights");
     }
 
     [Fact]
@@ -691,8 +671,64 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
+            // unified-access-control-r2 task 162: /execute chains a run filter that asks, AS THE CALLER, the
+            // playbook-use decision, the playbook's node list, and Read/Write on the documents (FinanceAuthorizationFilter
+            // over AuthorizationService -> IAccessDataSource). A loose mock answers null for both lookups, which the
+            // filter DENIES, so the fixture gives explicit decisions per scenario: every playbook is public except in
+            // PlaybookNotFound (null, so the run is refused BEFORE the stream); every playbook has one read-only AI node;
+            // and the access data source mirrors MockAiAuthorizationService's scenario (Unauthorized -> None,
+            // PartialAuthorization -> only the authorized documents, otherwise full rights).
+            services.AddScoped<IPlaybookService>(_ =>
+            {
+                var playbooks = new Mock<IPlaybookService>();
+                playbooks
+                    .Setup(p => p.GetPlaybookAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((Guid id, CancellationToken _) => _scenario == TestScenario.PlaybookNotFound
+                        ? null
+                        : new PlaybookResponse { Id = id, IsPublic = true });
+                return playbooks.Object;
+            });
+            services.AddScoped<INodeService>(_ =>
+            {
+                var nodes = new Mock<INodeService>();
+                nodes
+                    .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[]
+                    {
+                        new PlaybookNodeDto { Id = Guid.NewGuid(), SprkExecutortype = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AiAnalysis },
+                    });
+                return nodes.Object;
+            });
+            services.RemoveAll<IAccessDataSource>();
+            services.AddScoped<IAccessDataSource>(_ =>
+            {
+                AccessRights RightsFor(string id) => _scenario switch
+                {
+                    TestScenario.Unauthorized => AccessRights.None,
+                    TestScenario.PartialAuthorization => Guid.TryParse(id, out var g) && _authorizedDocumentIds.Contains(g)
+                        ? AccessRights.Read | AccessRights.Write
+                        : AccessRights.None,
+                    _ => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo,
+                };
+                var access = new Mock<IAccessDataSource>();
+                access
+                    .Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((string userId, string resourceId, string? _, CancellationToken _) =>
+                        new AccessSnapshot { UserId = userId, ResourceId = resourceId, AccessRights = RightsFor(resourceId) });
+                access
+                    .Setup(a => a.GetRecordAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((string userId, string entitySet, Guid recordId, string? _, CancellationToken _) =>
+                        new AccessSnapshot
+                        {
+                            UserId = userId,
+                            ResourceId = recordId.ToString(),
+                            // Dataverse answers None for a row that does not exist: in PlaybookNotFound the playbook row is missing.
+                            AccessRights = _scenario == TestScenario.PlaybookNotFound && entitySet == "sprk_analysisplaybooks"
+                                ? AccessRights.None
+                                : RightsFor(recordId.ToString()),
+                        });
+                return access.Object;
+            });
             // R7 task 041 (FR-11) — scenario-aware mock for /api/ai/analysis/execute migration.
             // Replaces the previous loose mock that produced empty SSE streams. Drives the
             // same TestScenario enum the legacy MockAnalysisOrchestrationService used, so test
@@ -830,12 +866,6 @@ internal class MockAnalysisOrchestrationService : IAnalysisOrchestrationService
 
     // Other interface methods not used in these tests
     public Task<AnalysisDetailResult> GetAnalysisAsync(Guid analysisId, CancellationToken cancellationToken) =>
-        throw new NotImplementedException();
-
-    public Task<SavedDocumentResult> SaveWorkingDocumentAsync(Guid analysisId, AnalysisSaveRequest request, CancellationToken cancellationToken) =>
-        throw new NotImplementedException();
-
-    public Task<ExportResult> ExportAnalysisAsync(Guid analysisId, AnalysisExportRequest request, CancellationToken cancellationToken) =>
         throw new NotImplementedException();
 
     public IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(PlaybookExecuteRequest request, HttpContext httpContext, CancellationToken cancellationToken) =>

@@ -817,10 +817,10 @@ public static class AnalysisServicesModule
         // cluster residual — 2026-06-01). Phase 1c re-triage surfaced ChatWordExportEndpoints.ExportToWordAsync
         // injects the concrete DocxExportService unconditionally → metadata-gen abort when Analysis:Enabled=false.
         // See AddUnconditionalChatAndNotificationServices below.
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.ExportServiceRegistry>();
+        // unified-access-control-r2 task 162 (owner round 10 item 1): the IExportService registrations (Docx, Pdf,
+        // Email) and ExportServiceRegistry were DELETED with their only consumer, POST /api/ai/analysis/{id}/export.
+        // DocxExportService stays registered as its concrete type (AddUnconditionalChatAndNotificationServices) for
+        // ChatWordExportEndpoints.
         // Extracted focused services from AnalysisOrchestrationService (ADR-010: constructor ≤10 params)
         services.AddScoped<AnalysisDocumentLoader>();
         services.AddScoped<AnalysisRagProcessor>();

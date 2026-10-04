@@ -192,6 +192,14 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
+        // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
+        // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
+        // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /
+        // 9: check as the user, then the app writes). AppendTo for the "finance.attach_invoice" reasoning (the
+        // new row's lookup attaches it to the parent); Read because the analysis then surfaces the parent's
+        // metadata to its creator. A separate key so deny logs name the operation.
+        ["analysis.attach"] = AccessRights.Read | AccessRights.AppendTo,
+
         // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
         // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
         // The live schema has NO sprk_invoice → sprk_document lookup; the link is sprk_document.sprk_invoice,
