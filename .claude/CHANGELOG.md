@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (C-19)
+
+`.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
+service. This PR deletes it (zero consumers, along with `EntityConfigurationService`, `CustomCommandFactory` and
+`Toolbar/CommandToolbar`: dead infrastructure from a deleted PCF that carried a loop-over-selection
+`deleteRecord`), so the example is removed. The full ADR's mention is left alone: it is past tense, and accurate
+as history. Found by the `spaarke-ontology-platform-r1` reuse audit (cleanup item C-19). The ADR-012 UI Components table also drops its `CommandToolbar` row (15 groups, was 16), and the `PageChrome` row now reads `ViewToolbar`, because `PageChrome/CommandBar` is deleted in the same PR.
+
 ###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
 
 Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and

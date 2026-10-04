@@ -873,7 +873,7 @@ export interface WorkspacePaneEvent {
    * assistant + context pane.
    *
    * @see FR-38 — additive `workspace.*` reverse-flow event types
-   * @see Pillar 9 — `SerializedDocumentViewerState.selectionText` (same
+   * @see Pillar 9 — server-derived DocumentViewer `selectionText` (same
    *      privacy model: double-gated by parent tab visibility; ~200 char
    *      cap; user-visible-by-design)
    * @see ADR-015 Amendment 2026-05-17 — Tier 3 work-history allowed content
