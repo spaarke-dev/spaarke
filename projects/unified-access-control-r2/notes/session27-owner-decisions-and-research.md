@@ -262,6 +262,16 @@ Also from task 156's verifier, filed as work rather than decisions (the owner's 
 2. **167, routes with neither RequireAuthorization nor AllowAnonymous:** set an authorization **FallbackPolicy requiring an authenticated user** (fail closed at runtime) **and** a guard rule that fails the build on any route lacking `RequireAuthorization*` or `AllowAnonymous` on its route or group chain, with negative and positive controls. Every intentionally anonymous endpoint carries an explicit `AllowAnonymous`.
 3. **133:** `container_ownership_unreadable` and `resume_creator_unavailable` (creatorState unreadable) classify **401/403 as Refused** (an administrator must act), as the cascade reads already do; 503/429 stay retryable.
 
+## Owner directive, round 15 (2026-10-03). BINDING. Task 162's anchorless analyses.
+
+Owner: *"we need this to be properly fixed so that we do not have the issue — it cannot defer or just sideline the issue/solution — fix it in the correct way."* "Accept the 404", "row-Read fallback" and "backfill only" are each REJECTED as partial. The complete fix, owned by task 162:
+
+1. **Classify** every anchorless active `sprk_analysis` row (221 of 994 on dev, 2026-10-03) by WHY it has no anchor: (i) created in a record's context by a writer that failed to record the anchor; (ii) genuinely standalone (created with no record in context). Record the counts per writer and per class in the note.
+2. **Fix every writer at the source** (ADR-002 WP-1: one server-side invariant owner): an analysis created in a record's context ALWAYS records its anchor. Find the writers (start with the 65 rows created by the BFF application identity; latest 2026-10-02) and fix each, with a test that fails if the anchor is dropped.
+3. **Backfill** class (i) rows whose anchor is derivable from existing data (linked document / output / session / regarding pair), with a script in the repo's schema/data-script pattern: dry run → `-Apply` → `-Verify`. Do NOT run `-Apply` yourself; the main session runs it on dev.
+4. **Standalone analyses (class ii) are PERSONAL:** readable only by the person who created them — matched by Dataverse systemuserid (never the Entra oid; never a business-unit-depth row Read, which could expose one user's analysis to colleagues). Anything that cannot be verified fails closed with the uniform 404.
+5. Tests and seeds for each part; the published Copilot `getAnalysis` keeps working for anchored and for the creator's own standalone analyses.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
