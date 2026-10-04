@@ -15,9 +15,19 @@ import { derivePrimaryReview, ASSOCIATION_STATUS_RESOLVED_VALUE } from '../prove
 
 const GUID = '11111111-1111-1111-1111-111111111111';
 
-function ctx(updateRecord: jest.Mock) {
-  return { webApi: { updateRecord }, hostEntity: 'sprk_communication', hostRecordId: GUID };
+// UAC-r2 task 147 r1: a regarding write (clearing the primary moves the communication out of a record) is a re-file
+// through the BFF; `webApi.updateRecord` must never carry it. `refile` stands in for the BFF route.
+const webApiUpdate = jest.fn();
+function ctx(refile: jest.Mock) {
+  return {
+    webApi: { updateRecord: webApiUpdate },
+    hostEntity: 'sprk_communication',
+    hostRecordId: GUID,
+    refileThroughBff: refile,
+  };
 }
+
+beforeEach(() => webApiUpdate.mockReset());
 
 describe('clearPrimaryRegarding (item 2 — delete a confirmed denorm-only primary)', () => {
   it('clears the denorm fields + status for a denorm-only primary (entity "") with no typed-lookup fetch', async () => {
@@ -28,6 +38,7 @@ describe('clearPrimaryRegarding (item 2 — delete a confirmed denorm-only prima
     expect(res.success).toBe(true);
     // Denorm-only primary → no typed lookup to null → no metadata fetch.
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(webApiUpdate).not.toHaveBeenCalled();
 
     const [entity, id, payload] = updateRecord.mock.calls[0];
     expect(entity).toBe('sprk_communication');
@@ -40,6 +51,15 @@ describe('clearPrimaryRegarding (item 2 — delete a confirmed denorm-only prima
       'sprk_RegardingRecordType@odata.bind': null,
       sprk_associationstatus: null,
     });
+  });
+
+  it('REFUSES when the BFF re-file is not wired - nothing goes through webApi (fail closed)', async () => {
+    const res = await clearPrimaryRegarding(
+      { webApi: { updateRecord: webApiUpdate }, hostEntity: 'sprk_communication', hostRecordId: GUID },
+      ''
+    );
+    expect(res.success).toBe(false);
+    expect(webApiUpdate).not.toHaveBeenCalled();
   });
 
   it('is a no-op success in CREATE mode (no host guid) and never writes', async () => {

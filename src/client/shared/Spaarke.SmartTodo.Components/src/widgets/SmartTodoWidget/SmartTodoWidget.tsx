@@ -23,7 +23,7 @@
  *     style does NOT apply text-transform, so they render verbatim.
  *   - INLINE QUICK-ADD (UAT 7): The toolbar's left slot now contains
  *     `[+ wizard] [QuickAdd Input] [Add btn]`. Typing a title + clicking Add
- *     (or pressing Enter) calls `webApi.createRecord('sprk_todo', { sprk_name })`
+ *     (or pressing Enter) creates the to-do through the BFF (`POST /api/v1/child-records/sprk_todo`, UAC-r2 task 147 r1)
  *     directly — no wizard, no modal, no roundtrip to a separate Code Page.
  *     On success: clear input + refetch. On error: surface a MessageBar with
  *     a "Open full wizard" link that delegates to the existing `onAddTodo`
@@ -87,6 +87,7 @@
  *     — canonical Pattern D worked example (R3 task 115 / R4 task 033b).
  */
 
+import { createChildRecordViaBff } from '@spaarke/ui-components';
 import * as React from 'react';
 import {
   Body1,
@@ -334,6 +335,15 @@ export interface SmartTodoWidgetProps {
    * embedded mounts.
    */
   quickAddPlaceholder?: string;
+  /**
+   * UAC-r2 task 147 r1 (owner round 28 item 1): QuickAdd creates the to-do through the BFF (G5) — the server decides its
+   * owner, so it is never created owned by the user. The host's BFF-authenticated fetch and base URL (`''` for a fetch
+   * that resolves relative `/api` paths). Without them QuickAdd refuses with a message (fail closed), never falling
+   * back to `webApi.createRecord`.
+   */
+  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  /** BFF base URL — see {@link SmartTodoWidgetProps.authenticatedFetch}. */
+  bffBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +352,8 @@ export interface SmartTodoWidgetProps {
 
 export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   webApi,
+  authenticatedFetch,
+  bffBaseUrl,
   userId,
   regardingContext,
   scope,
@@ -418,7 +430,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
 
   // UAT 2026-06-19 — three-field inline quick-add: Title + Due Date + Assigned To + Add.
   // Replaces the prior single-field title-only quick-add. Each field is
-  // independently controlled; submission sends all three to webApi.createRecord.
+  // independently controlled; submission sends all three to the BFF child-record create (task 147 r1).
   // Defaults: due date = today (end-of-day local), assigned to = widget's userId prop.
   const todayISODate = React.useMemo(() => {
     const d = new Date();
@@ -768,11 +780,6 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   const submitQuickAdd = React.useCallback(async () => {
     const title = quickAddTitle.trim();
     if (!title) return;
-    if (!webApi.createRecord) {
-      // eslint-disable-next-line no-console
-      console.warn('[SmartTodoWidget] quickAdd invoked without webApi.createRecord — input ignored.');
-      return;
-    }
     setIsQuickAdding(true);
     setQuickAddError(null);
 
@@ -803,7 +810,14 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     }
 
     try {
-      await webApi.createRecord('sprk_todo', payload);
+      // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5); a refusal is shown as the QuickAdd error.
+      if (!authenticatedFetch || typeof bffBaseUrl !== 'string') {
+        // Fail closed: never create the to-do as the user (it would be owned by them, in their business unit).
+        throw new Error(
+          'The to-do was not saved: this view is not connected to the Spaarke service, which must save it.'
+        );
+      }
+      await createChildRecordViaBff(authenticatedFetch, bffBaseUrl, 'sprk_todo', payload);
       setQuickAddTitle('');
       // Keep due date + assigned-to defaults for the next entry (faster repeat).
       refetch();
@@ -815,7 +829,17 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
     } finally {
       setIsQuickAdding(false);
     }
-  }, [quickAddTitle, quickAddDueDate, quickAddAssignedTo, quickAddAssignedToContactId, webApi, contactId, refetch]);
+  }, [
+    quickAddTitle,
+    quickAddDueDate,
+    quickAddAssignedTo,
+    quickAddAssignedToContactId,
+    webApi,
+    authenticatedFetch,
+    bffBaseUrl,
+    contactId,
+    refetch,
+  ]);
 
   const handleQuickAddClick = React.useCallback(() => {
     void submitQuickAdd();
@@ -910,11 +934,10 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         ? 'Open selected to-do'
         : `Open first selected to-do (${selectedIds.size} selected)`;
 
-  // QuickAdd is only available when the host's webApi exposes createRecord.
-  // When absent (legacy hosts, read-only mounts), the QuickAdd Input + Add
-  // button are suppressed; the `+` wizard button remains as the only create
-  // affordance.
-  const quickAddAvailable = typeof webApi.createRecord === 'function';
+  // QuickAdd is only available when the host wired the BFF (UAC-r2 task 147 r1: the to-do is created through it, never
+  // as the user). When absent (legacy hosts, read-only mounts), the QuickAdd Input + Add button are suppressed; the `+`
+  // wizard button remains as the only create affordance.
+  const quickAddAvailable = !!authenticatedFetch && typeof bffBaseUrl === 'string';
   const quickAddDisabled = quickAddTitle.trim().length === 0 || isQuickAdding;
 
   // -------------------------------------------------------------------------

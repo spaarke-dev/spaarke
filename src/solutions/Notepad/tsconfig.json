@@ -25,7 +25,8 @@
       "@spaarke/ui-components/hooks": ["../../client/shared/Spaarke.UI.Components/src/hooks/index.ts"],
       "@spaarke/ui-components/hooks/*": ["../../client/shared/Spaarke.UI.Components/src/hooks/*"],
       "@spaarke/ui-components/utils": ["../../client/shared/Spaarke.UI.Components/src/utils/index.ts"],
-      "@spaarke/ui-components/utils/*": ["../../client/shared/Spaarke.UI.Components/src/utils/*"]
+      "@spaarke/ui-components/utils/*": ["../../client/shared/Spaarke.UI.Components/src/utils/*"],
+      "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"]
     }
   },
   "include": ["src"],

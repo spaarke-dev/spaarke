@@ -147,6 +147,26 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
+    public async Task ChildCreate_ABudgetUnderASecureMatter_FromTheRibbonsNewBudget_IsOwnedByTheNamedTeam()
+    {
+        // Owner round 28 item 2 (E2): the native subgrid "+ New" under a secure matter is replaced by a command that creates
+        // the budget through this route and then opens it.
+        var result = await CreateChild("sprk_budget", new()
+        {
+            ["sprk_name"] = "New budget",
+            ["sprk_Matter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created);
+        _user.Posts.Should().BeEmpty();
+        var (table, budgetId, fields) = _appCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_budget");
+        Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        _shareTable.MaskOf("sprk_budget", budgetId, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+        fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind", "task 147 r1 added sprk_budget to the stamped child tables");
+    }
+
+    [Fact]
     public async Task ChildCreate_UnderAFlaggedButNotIsolatedProject_IsRefused409_WithTheStableCode_AndCreatesNothing()
     {
         var result = await CreateChild("sprk_todo", new()
@@ -214,6 +234,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         Status(result).Should().Be(StatusCodes.Status403Forbidden, "the client never sets the owner or the creator person");
         _appCreates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("ownerid@odata.bind", "/systemusers(a2460000-0000-4000-8000-0000000000aa)")]
+    [InlineData("sprk_CreatedByPerson@odata.bind", "/systemusers(a2460000-0000-4000-8000-0000000000ee)")]
+    public async Task ChildRefile_NamingAServerOwnedColumn_IsRefused403_AndNothingIsWritten(string key, string value)
+    {
+        var result = await RefileChild("sprk_todo", Todo, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+            [key] = value,
+        });
+
+        Status(result).Should().Be(StatusCodes.Status403Forbidden, "a re-file never sets the owner or the creator person");
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.DeniedCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
     }
 
     [Fact]

@@ -85,6 +85,9 @@ public static class RecordCreatorPerson
         // record the person who asked. Added to scripts/Set-ChildRecordCreatorPersonSchema.ps1 in the same change; the
         // column lands in dev through that script's dry run / -Apply / -Verify (manual gate G147-5).
         "sprk_memo", "sprk_reportcard",
+        // Task 147 r1 (owner round 28 item 2, E2): the secure-record ribbon's "New Budget" creates a budget app-only
+        // through POST /api/v1/child-records/sprk_budget, so it records the person who asked too (same script, gate G147-5).
+        "sprk_budget",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

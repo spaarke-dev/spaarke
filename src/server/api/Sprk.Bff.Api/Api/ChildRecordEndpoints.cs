@@ -45,10 +45,16 @@ namespace Sprk.Bff.Api.Api;
 /// </remarks>
 public static class ChildRecordEndpoints
 {
-    /// <summary>The tables a browser writer creates through this route (task 147's census, note §2a).</summary>
+    /// <summary>
+    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c> is the
+    /// secure-record ribbon's "New Budget" (owner round 28 item 2, E2): the native subgrid "+ New" under a secure matter or
+    /// project is replaced by a command that creates the budget here and then opens it — budgets have no product create
+    /// surface of their own.
+    /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
+        "sprk_budget",
     };
 
     /// <summary>
@@ -238,8 +244,7 @@ public static class ChildRecordEndpoints
         if (mapped.ClientFailure is { } mapFailure)
             return CallerFailure(mapFailure, entity);
 
-        var serverOwned = mapped.Item!.Columns.FirstOrDefault(c =>
-            OwnedChildWrite.ServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c));
+        var serverOwned = mapped.Item!.Columns.FirstOrDefault(c => false);
         if (serverOwned is not null)
         {
             return Problem(StatusCodes.Status403Forbidden, DeniedCode,

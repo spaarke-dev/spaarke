@@ -52,6 +52,8 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         ["sprk_memos"] = "sprk_memo",
         ["sprk_analysises"] = "sprk_analysis",
         ["sprk_fileversions"] = "sprk_fileversion",
+        // Task 147 r1 E2: the ribbon's "New Budget" creates a budget through the child-record route, which mirrors inline.
+        ["sprk_budgets"] = "sprk_budget",
     };
 
     /// <summary>Makes the batched strict read throw for this table only (task 149: one table's read failing).</summary>

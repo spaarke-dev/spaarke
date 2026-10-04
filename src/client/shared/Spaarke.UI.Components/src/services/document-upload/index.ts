@@ -57,4 +57,7 @@ export type { DocumentRecordServiceOptions, EntityConfigResolver } from './Docum
 // IDataverseClient implementations
 export { PcfDataverseClient } from './PcfDataverseClient';
 export { ODataDataverseClient } from './ODataDataverseClient';
+
+// UAC-r2 task 147 r1 (owner round 28 item 1): the upload pipeline's document creates go through the BFF (G5).
+export { withBffChildCreates } from './BffChildRecordDataverseClient';
 export type { ODataDataverseClientOptions } from './ODataDataverseClient';

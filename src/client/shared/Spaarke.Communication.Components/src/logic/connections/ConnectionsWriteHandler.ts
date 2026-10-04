@@ -25,6 +25,7 @@
 
 import {
   applyResolverFields,
+  updateChildRecordViaBff,
   TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
@@ -67,6 +68,42 @@ export interface IResolverWriteContext {
    * not recorded (unchanged behavior).
    */
   recordAffinity?: (targetEntityType: string, targetRecordId: string) => void;
+  /**
+   * UAC-r2 task 147 r1 (owner round 28 item 1): a communication's REGARDING writes (set, unlink, clear-primary) are a
+   * re-file — they move the communication into or out of a record, so its owner follows (the Secure Record Owners team
+   * under a secure record; F3 on a move out of one). They go to the communications family's
+   * `PATCH /api/communications/{id}/filing` through this function — the caller's own update, the owner re-derived and
+   * assigned. Without it a regarding write is REFUSED (never sent through `webApi.updateRecord`, which would leave the
+   * owner wrong). Build it with {@link bffRefile}. The plain column writes (association status, override reason) stay
+   * on `webApi.updateRecord`.
+   */
+  refileThroughBff?: (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void>;
+}
+
+/**
+ * Task 147 r1: the {@link IResolverWriteContext.refileThroughBff} for a host holding a BFF-authenticated fetch (`bffBaseUrl`
+ * may be `''` for a fetch that resolves relative `/api` paths).
+ */
+export function bffRefile(
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  bffBaseUrl: string
+): (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void> {
+  return (hostEntity, hostRecordId, payload) =>
+    updateChildRecordViaBff(authenticatedFetch, bffBaseUrl, hostEntity, hostRecordId, payload);
+}
+
+/** Task 147 r1: a regarding write of the host — through the BFF re-file (fail closed when it is not wired). */
+async function writeRegarding(
+  ctx: IResolverWriteContext,
+  hostId: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  if (!ctx.refileThroughBff) {
+    throw new Error(
+      'The association was not saved: this view is not connected to the Spaarke service, which must save it.'
+    );
+  }
+  await ctx.refileThroughBff(ctx.hostEntity, hostId, payload);
 }
 
 export interface IResolverWriteResult {
@@ -241,7 +278,7 @@ export async function applyRegardingSelection(
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await writeRegarding(ctx, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
     } catch (err) {
       return {
         success: false,
@@ -298,7 +335,8 @@ export async function unlinkRegarding(
   }
 
   try {
-    await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, {
+    // UAC-r2 task 147 r1: an unlink is a re-file OUT of that record — through the BFF (F3 on a move out of a secure one).
+    await writeRegarding(ctx, cleanId, {
       [`${navProp.navPropName}@odata.bind`]: null,
     });
     return { success: true };
@@ -354,7 +392,8 @@ export async function clearPrimaryRegarding(
   }
 
   try {
-    await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, payload);
+    // UAC-r2 task 147 r1: clearing the primary is a re-file OUT of it — through the BFF.
+    await writeRegarding(ctx, cleanId, payload);
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'clear primary failed' };

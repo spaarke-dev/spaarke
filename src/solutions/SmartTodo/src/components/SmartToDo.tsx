@@ -34,6 +34,7 @@
  *   - No 6-layer navigation detection / side pane cleanup
  */
 
+import { createTodoThroughBff } from '../services/childRecordWrites';
 import * as React from "react";
 import {
   makeStyles,
@@ -757,7 +758,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       }
       void (async () => {
         try {
-          await webApi.createRecord('sprk_todo', payload);
+          // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5) — the server decides the owner.
+          await createTodoThroughBff(payload);
           refetch();
         } catch (err) {
           // eslint-disable-next-line no-console

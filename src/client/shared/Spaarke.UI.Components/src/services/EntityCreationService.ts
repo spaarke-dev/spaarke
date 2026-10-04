@@ -32,6 +32,7 @@
  * ```
  */
 
+import { createChildRecordViaBff, isBffChildCreateTable } from '../utils/adapters/bffChildWriteAdapter';
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
@@ -616,6 +617,11 @@ export class EntityCreationService {
    * @returns The GUID of the created record
    */
   async createEntityRecord(entityName: string, entityData: Record<string, unknown>): Promise<string> {
+    // UAC-r2 task 147 r1 (owner round 28 item 1): a CHILD record is created through the BFF (G5) — the server decides its
+    // owner. Roots (matter, project, work assignment) are unchanged here.
+    if (isBffChildCreateTable(entityName)) {
+      return createChildRecordViaBff(this._authenticatedFetch, this._bffBaseUrl, entityName, entityData);
+    }
     const result = await this._webApi.createRecord(entityName, entityData);
     return result.id;
   }
@@ -749,8 +755,15 @@ export class EntityCreationService {
         }
 
         console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
-        const result = await this._webApi.createRecord('sprk_document', documentEntity);
-        createdDocumentIds.push(result.id);
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the document row is created through the BFF (G5) — the server
+        // decides its owner (the Secure Record Owners team when its parent is secure); a refusal is this file's warning.
+        const documentId = await createChildRecordViaBff(
+          this._authenticatedFetch,
+          this._bffBaseUrl,
+          'sprk_document',
+          documentEntity
+        );
+        createdDocumentIds.push(documentId);
         linkedCount++;
       } catch (err) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

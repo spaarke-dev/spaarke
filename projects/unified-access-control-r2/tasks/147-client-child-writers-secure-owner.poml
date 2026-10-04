@@ -4,7 +4,7 @@
     <title>C10 part 2 (client) — children created or re-parented in the browser through Xrm.WebApi (wizards, Notepad memos, To Do widgets, document upload, regarding resolvers) end up secure when their parent is: inventory every client writer, decide per writer (route through the BFF per WP-3, or create-then-server-fix-up per WP-5), and turn on the scheduled reconciliation as the safety net for every write outside the product</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "client-created children")</phase>
     <gate>after 144, 145, 146, 148 and 149 are merged. Coordinate with field-mapping-server-write-path-r1 (W3/W4/W5) before building any BFF create endpoint.</gate>
-    <status>escalated</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-boundary change spanning client (.ts/.tsx) and BFF (.cs) write paths; tags bff-api, auth, security, frontend; enables a scheduled job that writes ownership.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -267,6 +267,83 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
         passed + 25 skipped, 0 failed). CVE scan finds none; dotnet format whitespace is clean.</tests>
       <live>READ-ONLY only (GETs): sprk_memo metadata, role privileges per business unit, the stamp backfill dry run.
         Pending manual gates G147-1 to G147-4 are in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1" base="1a39f7bdd" outcome="completed">
+      <summary>Owner round 28 implemented in full (E1 = A1, E2 = BFF-backed commands under a secure parent + the L4 recent pass
+        every 2 minutes with writes on); verifier items 1-23 closed or recorded as manual live gates. Rebased onto the batch-4
+        integration base (merges 70db1efb1 and e96112845). Full record: notes/task-147-client-child-writers.md (r1).</summary>
+      <done>
+        <item>Items 1-2: sprk_memo is an intermediate (IntermediateRootColumns), a stamp source with parties, and known to
+          RecordContainerResolver (KindByEntity, ByEntity links, sprk_timekeeper party) on the integration base.</item>
+        <item>E1 = A1: POST /api/v1/child-records/{table} (G5: as-caller Create + AppendTo + no server-owned or FLS column;
+          app-only create owned by the resolver's team; sprk_createdbyperson = caller; sharees mirrored inline) and the ONE
+          re-file core OwnedChildWrite.RefileAsync behind PATCH /api/v1/child-records/{table}/{id},
+          PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing; Compose re-files through
+          PUT /api/v1/documents/{id}. Uniform 404; ProblemDetails reason codes.</item>
+        <item>Every census client writer switched (wizards via withBffChildWrites, Daily Briefing, Smart To Do widget,
+          SmartTodo page, LegalWorkspace, Notepad, event side pane, document upload, EntityCreationService, Compose, Create
+          Matter invoice re-file, RegardingResolver PCF 1.6.0, CommunicationConnections PCF 1.7.0 and the communication
+          surfaces); unwired hosts refused (fail closed); refusals show the server message; client ownerid binds removed.</item>
+        <item>Task 152 + reminder: "Created By" readers use sprk_createdbyperson, else createdby (people-targeting, grant
+          expiry reminder, Notepad, document tabs).</item>
+        <item>E2: platform subgrid "+ New" under a secure root replaced by BFF-backed "New &lt;thing&gt;" commands
+          (sprk_secure_child_ribbon.js, SecureChildRibbons template + merge script, Deploy-SecureChildNewCommands.ps1 dry run /
+          -Apply / -Verify; read-only live inventory and RetrieveEntityRibbon drift check run against dev); sprk_budget added
+          to the create route and the stamped child tables; MDA Create privilege kept.</item>
+        <item>L4: SecureChildReconciliationJob every 2 minutes, enabled; recent pass writes unless
+          RecentChangesWritesEnabled=false; unfinished records and unplaced rows carried and retried every run; a
+          non-Completed synchronizer answer fails the run (items 4-5).</item>
+        <item>Docs (item 6): DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3, I-2 and I-6; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c. Note corrections (items 7-8), backfill owner (item 9), 169 hand-off (item 10).</item>
+      </done>
+      <justification-new-surface>
+        <item name="POST/PATCH /api/v1/child-records/{table} (ChildRecordEndpoints)">
+          <existing>OwnedChildWrite (chat tools), PUT /api/v1/documents/{id}; /api/dataverse is read-only; no browser create
+            route existed.</existing>
+          <extension>A thin HTTP face over the existing core; event and communication re-files were added to their own
+            families instead of here.</extension>
+          <cost-of-doing-nothing>every browser child under a secure record stays user-owned, readable by the creator's
+            business unit, until a reconcile run.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing">
+          <existing>the families' typed update routes (no lookup payload).</existing>
+          <extension>Added to the families per round 28; both call the shared ChildRecordEndpoints.UpdateAsync.</extension>
+          <cost-of-doing-nothing>a re-filed event or communication keeps its previous owner.</cost-of-doing-nothing>
+        </item>
+        <item name="OwnedChildWrite.RefileAsync, SecureChildShareSynchronizer.SyncChildAsync and IsSecureOwnerTeamAsync, DataverseWriteItemMapper.MapWebApiPayloadAsync">
+          <existing>the AI update handler's inline re-file; SyncRootAsync; the AI item mapper.</existing>
+          <extension>Extracted or extended; the handler calls the shared core.</extension>
+          <cost-of-doing-nothing>two copies of the re-file rule and no inline mirror for one child.</cost-of-doing-nothing>
+        </item>
+        <item name="config SecureChild:Reconciliation:RecentChangesWritesEnabled">
+          <existing>SecureChild:Reconciliation:WritesEnabled (the sweep).</existing>
+          <extension>A separate switch: round 28 turns the recent pass on while the backfill sweep stays report-only.</extension>
+          <cost-of-doing-nothing>either the sweep writes unreviewed or the net stays off.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_budget in CreateTables, StampedChildTables and the schema script">
+          <existing>the codified role set already holds sprk_budget (G146-1).</existing>
+          <extension>One table added to existing lists.</extension>
+          <cost-of-doing-nothing>the ribbon's New Budget would have no BFF create.</cost-of-doing-nothing>
+        </item>
+        <item name="client bffChildWriteAdapter.ts, BffChildRecordDataverseClient.ts and per-host auth bootstrap files">
+          <existing>bffDataServiceAdapter.ts, with no child create route behind it.</existing>
+          <extension>One seam of decorators over IDataService / IDataverseClient; host files only bootstrap auth.</extension>
+          <cost-of-doing-nothing>each writer hand-rolls fetch and error parsing.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_secure_child_ribbon.js, SecureChildRibbons, Deploy-SecureChildNewCommands.ps1, SecureChildNewCommandAgreementTests">
+          <existing>AccessRibbons (tasks 142/150) pattern; no guard spans ribbon script, template and scripts.</existing>
+          <extension>Same pattern (one template, one merge script, one deploy script); placed on CHILD subgrids, not in the
+            root forms' Access flyout.</extension>
+          <cost-of-doing-nothing>the platform "+ New" under a secure record creates user-owned children.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF for the routes (app-identity Dataverse write after an as-caller check; low volume; no package, no
+          background work, no AI capability). No new DI registration or interface (static endpoint class over existing
+          services). Publish size: skipped per the brief.</placement>
+      </justification-new-surface>
+      <tests>TESTS_PLACEHOLDER</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, quick-create flags, RetrieveEntityRibbon, the deploy script's dry
+        run. Pending manual gates G147-2 to G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-1 withdrawn.</live>
       <claude-edits>none</claude-edits>
     </run>
   </execution>

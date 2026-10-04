@@ -36,8 +36,10 @@
  *  10. Empty memos — 'No memo' title, editor disabled (edge case)
  *
  * Constraints:
- *   • Zero `@spaarke/auth` imports (NFR-05).
- *   • Zero BFF calls (NFR-07); all Dataverse I/O through the Xrm.WebApi stub.
+ *   • Zero `@spaarke/auth` imports (NFR-05) — EXCEPT the memo create, which goes through the BFF since UAC-r2 task
+ *     147 r1 (owner round 28 item 1, a §6.5 path-B amendment of NFR-05/NFR-07 for that one write). Its single module
+ *     (`services/memoWrites`) is mocked at the boundary.
+ *   • Zero other BFF calls (NFR-07); every other Dataverse I/O through the Xrm.WebApi stub.
  *   • ADR-038: this IS the integration test for the Notepad user flow (KEEP).
  *
  * Harness technique:
@@ -93,6 +95,13 @@ jest.mock(
   }),
   { virtual: true }
 );
+
+// UAC-r2 task 147 r1 (owner round 28 item 1): the memo CREATE goes through the BFF (G5) — the one function that posts
+// it is the boundary here; Xrm.WebApi.createRecord must never be called.
+const mockCreateMemoThroughBff = jest.fn(async (_payload: Record<string, unknown>) => "memo-new");
+jest.mock("../services/memoWrites", () => ({
+  createMemoThroughBff: (...args: any[]) => (mockCreateMemoThroughBff as any)(...args),
+}));
 
 // SUPPORTED_MEMO_PARENTS — direct module (deep path). Values match the schema
 // map in `useSprkMemoRepository.test.ts`.
@@ -444,10 +453,10 @@ describe("Notepad — full round-trip integration (FR-14/15/16/17/18)", () => {
 
     await click(newBtn!);
 
-    // createRecord was called on sprk_memo with sprk_name="Untitled".
-    expect(stub.createRecord).toHaveBeenCalledTimes(1);
-    const [entityLogicalName, payload] = stub.createRecord.mock.calls[0];
-    expect(entityLogicalName).toBe("sprk_memo");
+    // The memo was created through the BFF (task 147 r1) with sprk_name="Untitled" — never Xrm.WebApi.createRecord.
+    expect(stub.createRecord).not.toHaveBeenCalled();
+    expect(mockCreateMemoThroughBff).toHaveBeenCalledTimes(1);
+    const [payload] = mockCreateMemoThroughBff.mock.calls[0] as [Record<string, any>];
     expect(payload.sprk_name).toBe("Untitled");
     expect(payload.sprk_memobody).toBe("");
     // Resolver fields populated by mocked applyResolverFields:

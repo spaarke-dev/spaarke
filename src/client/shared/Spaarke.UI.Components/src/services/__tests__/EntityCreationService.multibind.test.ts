@@ -20,6 +20,8 @@
  *   - additionalBinds is applied identically across multiple uploaded files.
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch } from '../../__mocks__/bffChildWriteFake';
 import { EntityCreationService, type ISpeFileMetadata, type AuthenticatedFetchFn } from '../EntityCreationService';
 import type { IWebApiWithCreate } from '../../types/WebApiLike';
 
@@ -60,7 +62,11 @@ const file2: ISpeFileMetadata = { id: 'item-2', name: 'file2.pdf', size: 200, we
 describe('EntityCreationService.createDocumentRecords — additionalBinds', () => {
   it('omitting additionalBinds preserves the single-bind payload shape (no regression)', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     const result = await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1], {
       containerId: 'container-1',
@@ -78,7 +84,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('emits both @odata.bind entries on one create call when additionalBinds is provided', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
       containerId: 'container-1',
@@ -96,7 +106,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('supports more than one additional bind on the same document', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
       additionalBinds: [
@@ -113,7 +127,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('normalizes brace-wrapped + mixed-case GUIDs on both the primary bind and additionalBinds', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     await service.createDocumentRecords('sprk_events', '{EVENT-GUID-1}', 'sprk_Event', [file1], {
       additionalBinds: [{ entitySet: 'sprk_matters', id: '{Matter-Guid-1}', navProp: 'sprk_Matter' }],
@@ -126,7 +144,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('skips a duplicate additionalBinds nav-prop and warns instead of overwriting the primary bind', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
       // Deliberately collides with the primary bind's nav-prop.
@@ -146,7 +168,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('skips a duplicate nav-prop across two additionalBinds entries (second is dropped)', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
       additionalBinds: [
@@ -163,7 +189,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('applies additionalBinds identically across multiple uploaded files', async () => {
     const webApi = makeWebApi(['doc-guid-1', 'doc-guid-2']);
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1, file2], {
       additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' }],
@@ -181,7 +211,11 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
 
   it('an empty additionalBinds array behaves identically to omitting the option', async () => {
     const webApi = makeWebApi();
-    const service = new EntityCreationService(webApi, makeAuthFetch(), 'https://bff.example');
+    const service = new EntityCreationService(
+      webApi,
+      bffChildWriteFetch(webApi, makeAuthFetch()),
+      'https://bff.example'
+    );
 
     await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1], {
       additionalBinds: [],

@@ -659,7 +659,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
             ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
             // Task 147 r1: the browser child-record routes' tables.
-            ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events",
+            ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -715,6 +715,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
             },
+            // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
+            ["sprk_budget"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
         };
 
         public HashSet<string> Held { get; } = new(StringComparer.OrdinalIgnoreCase)
@@ -724,6 +730,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_workassignment", "prvAppendsprk_workassignment",
             "prvCreatesprk_project", "prvAppendsprk_project",
             "prvCreatesprk_memo", "prvAppendsprk_memo", "prvCreatesprk_event", "prvAppendsprk_event",
+            "prvCreatesprk_budget", "prvAppendsprk_budget",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();

@@ -11,6 +11,7 @@
  * @see ../CreateMatterWizard.tsx (associateToRecord — exported for testing)
  */
 import { associateToRecord } from '../CreateMatterWizard';
+import { withBffChildWrites } from '../../../utils/adapters/bffChildWriteAdapter';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
 
@@ -77,6 +78,45 @@ describe('associateToRecord — sprk_invoice (task 014 / FR-A5)', () => {
     const result = await associateToRecord(dataService, MATTER_ID, association);
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe('associateToRecord — the invoice re-file goes through the BFF (UAC-r2 task 147 r1)', () => {
+  it('sends the invoice re-file to PATCH /api/v1/child-records/sprk_invoice/{id}, not to Xrm.WebApi', async () => {
+    const updateRecord = jest.fn().mockResolvedValue(undefined);
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 204, json: async () => ({}) } as Response);
+
+    const result = await associateToRecord(
+      withBffChildWrites(makeDataService({ updateRecord }), fetchMock, 'https://bff.example'),
+      MATTER_ID,
+      { entityType: 'sprk_invoice', recordId: INVOICE_ID_RAW, recordName: 'INV-2026-0007' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(updateRecord).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`https://bff.example/api/v1/child-records/sprk_invoice/${INVOICE_ID_CLEAN}`);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).toEqual({ 'sprk_Matter@odata.bind': `/sprk_matters(${MATTER_ID})` });
+  });
+
+  it('a refused re-file is a warning (success: false), never a client-side fallback write', async () => {
+    const updateRecord = jest.fn().mockResolvedValue(undefined);
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: 'The record was not found, or you do not have access to it.' }),
+    } as Response);
+
+    const result = await associateToRecord(
+      withBffChildWrites(makeDataService({ updateRecord }), fetchMock, 'https://bff.example'),
+      MATTER_ID,
+      { entityType: 'sprk_invoice', recordId: INVOICE_ID_RAW, recordName: 'INV-2026-0007' }
+    );
+
+    expect(result.success).toBe(false);
+    expect(updateRecord).not.toHaveBeenCalled();
   });
 });
 

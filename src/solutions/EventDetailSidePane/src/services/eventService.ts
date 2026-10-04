@@ -7,6 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
+import { refileEventThroughBff } from "./childRecordWrites";
 import {
   IEventRecord,
   EVENT_HEADER_SELECT_FIELDS,
@@ -380,11 +381,13 @@ export async function saveEvent(
       console.log("[EventService] Scalar fields saved");
     }
 
-    // Save lookup bindings separately
+    // Save lookup bindings separately — through the BFF (UAC-r2 task 147 r1, owner round 28 item 1): a change to what
+    // the event is filed under is a re-file, so its owner is re-derived (the Secure Record Owners team under a secure
+    // record) and F3 applies to a move out of one. The scalar fields above stay the caller's own Xrm.WebApi update.
     if (Object.keys(lookupPayload).length > 0) {
       console.log("[EventService] Lookup payload:", JSON.stringify(lookupPayload, null, 2));
       try {
-        await webApi.updateRecord(EVENT_ENTITY, normalizedId, lookupPayload);
+        await refileEventThroughBff(normalizedId, lookupPayload);
         console.log("[EventService] Lookup fields saved");
       } catch (lookupError) {
         const lookupMsg = lookupError instanceof Error

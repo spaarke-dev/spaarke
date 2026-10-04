@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -47,6 +48,27 @@ public class ClientChildFixUpTests
     /// record under <c>recentChanges</c> and lists the change with the row's previous owner. An ordinary record's
     /// user-owned to-do and an unfiled user-owned document, both changed in the same window, are never written.
     /// </summary>
+    /// <summary>
+    /// The SHIPPING STATE (owner round 28 item 2: "the L4 recent-changes pass runs with writes ON every 2 minutes") - not an
+    /// ADR-038 B3 wiring test: perturb the cron or the enabled flag and it reddens (the NoAccessShareReconciliation
+    /// precedent).
+    /// </summary>
+    [Fact]
+    public void TheJobShipsEnabled_EveryTwoMinutes()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddExternalAccess();
+
+        using var provider = services.BuildServiceProvider();
+        var registration = provider.GetServices<ScheduledJobRegistration>()
+            .Single(r => r.Job.JobId == SecureChildReconciliationJob.JobIdConstant);
+
+        registration.CronSchedule.Should().Be("*/2 * * * *");
+        registration.Enabled.Should().BeTrue();
+    }
+
     [Fact]
     public async Task ANonProductChildOfASecureRecord_IsReownedAndMirrored_InTheNextRun_EvenOutsideTheSweepWindow()
     {

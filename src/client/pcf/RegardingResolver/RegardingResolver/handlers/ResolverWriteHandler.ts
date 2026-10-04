@@ -72,6 +72,7 @@ import {
   TODO_REGARDING_CATALOG,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
+import { isBffChildRefileTable } from '@spaarke/ui-components/dist/utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,6 +96,65 @@ export interface IResolverWriteContext {
   hostEntity: string;
   /** Host record GUID. Empty / undefined when the form is creating a new record. */
   hostRecordId?: string;
+  /**
+   * v1.6.0 (UAC-r2 task 147 r1, owner round 28 item 1): re-files a SAVED child host through the BFF — the caller's own
+   * update, with the owner re-derived (the Secure Record Owners team under a secure record) and F3 on a move out of one.
+   * Used for every host table the BFF re-files (`isBffChildRefileTable`); without it such a host's write is REFUSED
+   * (never sent through `webApi.updateRecord`, which would leave the owner wrong). Other hosts keep `webApi.updateRecord`.
+   */
+  refileThroughBff?: (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void>;
+  /**
+   * v1.6.0 (task 147 r1, owner round 28 item 2): whether a project / matter / work assignment is SECURE — `true`, `false`,
+   * or `null` when it cannot be read. On a NEW (unsaved) host the selection rides the form's own save, which runs as the
+   * user, so a parent that is (or might be) secure is refused there: such a record is created from the secure record's
+   * New command, or saved first and then filed (a re-file through the BFF).
+   */
+  isSecureRoot?: (rootEntity: string, rootId: string) => Promise<boolean | null>;
+}
+
+/** The secure-flagged root tables (they carry `sprk_issecure`). */
+const SECURE_ROOT_TABLES = new Set(['sprk_project', 'sprk_matter', 'sprk_workassignment']);
+
+/**
+ * v1.6.0 (task 147 r1): the write of a SAVED host — through the BFF for every child table it re-files, else
+ * `webApi.updateRecord`. A BFF re-file table with no `refileThroughBff` is refused (fail closed).
+ */
+async function writeSavedHost(ctx: IResolverWriteContext, payload: Record<string, unknown>): Promise<void> {
+  const hostId = (ctx.hostRecordId as string).replace(/[{}]/g, '');
+  if (isBffChildRefileTable(ctx.hostEntity)) {
+    if (!ctx.refileThroughBff) {
+      throw new Error(
+        `The ${ctx.hostEntity} was not re-filed: this control is not connected to the Spaarke service, which must save it.`
+      );
+    }
+    await ctx.refileThroughBff(ctx.hostEntity, hostId, payload);
+    return;
+  }
+  await ctx.webApi.updateRecord(ctx.hostEntity, hostId, payload);
+}
+
+/**
+ * v1.6.0 (task 147 r1): on a NEW host, the reason the selection must not ride the form's own (as-the-user) save — a root
+ * among the derived stamps that is secure, or whose flag cannot be read — or `null` when it may.
+ */
+async function refusalForNewHost(
+  ctx: IResolverWriteContext,
+  stamps: ReadonlyArray<{ entityType: string; recordId: string }>
+): Promise<string | null> {
+  const roots = stamps.filter(s => SECURE_ROOT_TABLES.has(s.entityType));
+  if (roots.length === 0) return null;
+  if (!ctx.isSecureRoot) {
+    return 'This record cannot be filed here before it is saved: whether its parent is secure cannot be checked. Save it first, then file it.';
+  }
+  for (const root of roots) {
+    const secure = await ctx.isSecureRoot(root.entityType, root.recordId);
+    if (secure !== false) {
+      return secure === true
+        ? 'This record would be filed under a secure record. Create it from that record (its New command), or save it first and then file it here.'
+        : "Whether this record's parent is secure could not be checked, so it is not filed before it is saved. Save it first, then file it.";
+    }
+  }
+  return null;
 }
 
 export interface IResolverWriteResult {
@@ -407,9 +467,16 @@ export async function applyRegardingSelection(
 
   // Persist immediately if we have a host record; otherwise return for pre-save staging.
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  if (!hasHostGuid) {
+    // v1.6.0 (task 147 r1): a NEW host's selection rides the form's own save, as the user. Never under a secure record.
+    const refusal = await refusalForNewHost(ctx, ancestorStamps);
+    if (refusal) {
+      return { success: false, catalogEntry, ancestorStatus: built.ancestor.status, error: refusal };
+    }
+  }
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await writeSavedHost(ctx, payload);
     } catch (err) {
       return {
         success: false,
@@ -529,7 +596,9 @@ export async function clearRegarding(
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      // v1.6.0 (task 147 r1): a clear is a re-file OUT of the parent — through the BFF (F3 on a move out of a secure
+      // record, the owner re-derived).
+      await writeSavedHost(ctx, payload);
     } catch (err) {
       return {
         success: false,
