@@ -384,6 +384,19 @@ The owner, verbatim: "Accept your recommended wording so that the task does not 
    - The model-driven Create privilege on child tables is NOT removed globally: it would break ordinary records, and the native-command replacement closes the in-product path without it.
 3. **Merge order:** task 169 rebases onto 147, which adds `sprk_memo` to the CHILD taxonomy under owner round 2 item 6. 169's "byte-for-byte unchanged" criterion then holds against that base.
 
+## Round 29 (2026-10-04). BINDING. Main-session decision under round 15, applying owner round 27's stance ("accept the recommended wording … adjust in UAT"). Client copy for task 143's five provisioning codes.
+
+These codes are emitted by `ProvisionProjectEndpoint` but have no client entry, so users saw a generic error (found by the 150 merge). They are added to `provisioningService.ts` and to its emitted-codes list (32 → 37), each pinned verbatim. The style is resume-neutral ("could not be finished"), as in rounds 10 and 17.
+
+| Code | Status | Retry | Copy |
+|---|---|---|---|
+| `sdap.provision.creator_no_access` | 403 | No | You are on this project's No Access list, so you cannot secure it. Nothing about the project changed. |
+| `sdap.provision.creator_no_access_unverifiable` | 500 | Yes | Whether you may access this project could not be checked, so securing it could not be finished. Nothing about the project changed. |
+| `sdap.provision.resume_creator_no_access` | 409 | No | Securing the project could not be finished, because the person who created it is on its No Access list. Nothing about the project changed. An administrator needs to review the project's access. |
+| `sdap.provision.resume_creator_no_access` | 500 | Yes | Securing the project could not be finished, because the access of the person who created it could not be checked. Nothing about the project changed. |
+| `sdap.provision.principal_no_access` | per-person warning | — | {name} is on this project's No Access list, so the project was not shared with them. |
+| `sdap.provision.principal_no_access_unverifiable` | per-person warning | — | Whether {name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access. |
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
