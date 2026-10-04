@@ -357,6 +357,18 @@ On UNSECURE, a root sharee's share is removed from a child ONLY if that child wa
    - **Ownership:** 166 builds the service if its follow-up reaches it first; otherwise the 150 integration lane builds it and 166's script calls it. Never two mechanisms.
 4. **Make Secure confirmation copy** is owner-authored (150 escalation trigger 5). It is asked in the next owner question round with a recommended draft. Until then the command is built and tested with the recommended draft as ONE constant, and it ships only with the owner's answer.
 
+## Owner round 27 (2026-10-04). BINDING. The Make Secure confirmation copy (answers round 26 item 4)
+
+The owner, verbatim: "Accept your recommended wording so that the task does not get delayed (we can adjust in UAT if necessary)". The copy below is ACCEPTED. It ships as ONE constant, pinned verbatim by the UI test.
+
+**`{record}`** is `project`, `matter` or `work assignment`, from the form's table.
+
+- **Title:** Make this {record} secure?
+- **Body, paragraph 1:** Only the person who created this {record} and the people it is shared with will keep access. Everyone else in your organization loses access, and external contacts keep only access granted to them directly.
+- **Body, paragraph 2:** Its existing documents, events, to-dos and other related records become secure too, for the same people, and its files move to the {record}'s own secure storage. This can take a few minutes.
+- **Body, paragraph 3:** To remove the secure designation later, ask someone with Full Access to the {record}, or the person who created it.
+- **Buttons:** **Make Secure** (primary) · **Cancel**
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
