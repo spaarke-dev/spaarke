@@ -39,7 +39,7 @@
 |---|---|---|---|---|---|---|
 | ✅ 020 | [`Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
 | ✅ 021 | [**The predicate compiler**](021-predicate-compiler-exists-notexists.poml) | FULL | **opus/xhigh** | 020, 005 | — | 🔴 **THE RISK ITEM.** Serial. `notExists` has no in-repo template |
-| ✅ 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | `PolicyVersionValidator` seam for task 031; owner: **validate at evaluation**, fail closed (app authoring stays) |
+| 🔄 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | `PolicyVersionValidator` seam for task 031; owner: **validate at evaluation**, fail closed (app authoring stays) |
 | ✅ 023 | [Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
 
 ### Phase 3 — The evaluator and Signal lifecycle

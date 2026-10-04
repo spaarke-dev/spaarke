@@ -39,6 +39,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="project">OWNER-DERIVED GATE (2026-10-04, task 022 review F6): obtain every compiled predicate ONLY through PolicyVersionValidator.TryPrepareForEvaluation(snapshot, subjectId, out compiled). Never call PredicateCompiler.Compile directly and never skip the gate: it is what logs EventId 50301 + meters an invalid policy and continues with the others (owner rule: validate at evaluation, fail closed, no silent failure). Build FactValues for the sentence ONLY from values read for the firing subject from POSITIVE fields (the subject's when filter and exists clauses), never from notExists clause fields (task 022 F5, section 0.3).</constraint>
   </constraints>
 
   <knowledge>
