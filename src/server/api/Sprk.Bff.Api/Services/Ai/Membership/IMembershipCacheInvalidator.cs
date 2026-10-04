@@ -157,7 +157,11 @@ public interface IMembershipCacheInvalidator
     /// <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and error paths
     /// included), <c>UnsecureProjectEndpoint</c>'s revocations, <c>SecureChildShareSynchronizer</c>'s child fan-out,
     /// the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing.
-    /// <c>PoaShareClientSingletonGuardTests</c> fails the build on a POA write that does not go through the seam.</para>
+    /// <c>PoaShareClientSingletonGuardTests</c> fails the build on a compiled reference to the concrete client's POA writes
+    /// from any type but the seam (an IL scan of every project that can name the client, whatever the receiver expression),
+    /// on a text-level POA write call whose receiver is not declared only as the seam's interface, on the SDK's POA
+    /// messages, on a second POA payload and on a POA write named as a string — the routes are listed on
+    /// <c>DataverseRecordShareService</c>.</para>
     /// <para>Membership resolution is NOT evicted: it is computed from lookup columns and ownership only — a share is
     /// not a membership term.</para>
     /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>

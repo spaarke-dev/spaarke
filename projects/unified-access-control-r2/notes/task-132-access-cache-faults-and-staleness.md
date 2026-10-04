@@ -525,8 +525,12 @@ Direct-thread and playbook sharing).
 may have committed), with `CancellationToken.None`, never throwing (the hook does not throw; a defect that made it
 throw is caught and logged; the write's own return or exception is what the caller sees). Wiring each of 23 sites
 would leave the next writer to remember; the seam makes it impossible to forget, and
-`PoaShareClientSingletonGuardTests` now fails the build on a POA write that bypasses the seam (the concrete client or
-the SDK messages). `InternalShareEndpoints`' existing per-user `ImpersonatedRootSetSource.InvalidateAsync` is kept: it
+`PoaShareClientSingletonGuardTests` fails the build on the routes around the seam listed in §16.6 (a compiled reference
+to the concrete client's POA writes from any type but the seam, whatever the receiver; a text-level call whose receiver
+is not declared only as the seam; the SDK messages; a second payload; a write named as a string). *Corrected in f1-v1:
+as first committed in f1 this sentence read "fails the build on a POA write that bypasses the seam", which the verifier
+disproved — the f1 detector only saw a bare-identifier receiver (seeds S5 / S6 stayed green). §16.6.*
+`InternalShareEndpoints`' existing per-user `ImpersonatedRootSetSource.InvalidateAsync` is kept: it
 is what works where the invalidator is the Null peer (in-memory cache, Development/Testing).
 
 | Named path | Write sites → seam | Evicted after the write |
@@ -581,7 +585,9 @@ longer leave a stale entry anywhere.
   500) — the PRODUCTION seam over the PRODUCTION `DataverseWebApiService` against an in-memory Web API server (ADR-038
   §7's named replacement for B1); a refused write still throws, after the eviction.
 - `PoaSeam_WhenTheCallerCancels_TheEvictionStillRuns_AndTheCancellationPropagates`.
-- `PoaSeam_WhenEvictionFails_TheShareWriteSucceeds_AndTheFailureIsLogged`.
+- `PoaSeam_WhenEvictionFails_TheShareWriteSucceeds_AndTheFailureIsLogged` (f1; it exercised the invalidator's own
+  catch, not the seam's — replaced in f1-v1 by `PoaSeam_WhenEvictionThrows_…` ×6 and renamed
+  `PoaSeam_WhenRedisFails_TheInvalidatorLogsAndReturns_…`, §16.6).
 - `CascadeChildOwnerChange_BuildsNoPattern_AndScansNothing_WhileARootStillScans` ×2.
 - `CascadeChildTables_AreNeverCached_SoNeitherTheCascadeNorItsRestoreCanLeaveOneStale` (both membership planes + the
   record snapshot; a root snapshot still cached as the control).
@@ -653,3 +659,65 @@ existing + 11 new; the wider affected set incl. `ProvisionAssignCascadeChildOwne
 **15,430 passed / 0 failed / 54 skipped (15,484; 20 m 52 s)**; NetArchTest **606 / 0 / 0**;
 `Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**.
 No contention failure this run. No package change (no publish-size or CVE delta).
+
+### 16.6 Verifier round f1-v1 (2026-10-04, `task/uac-r2-132-f1-v1` from `task/uac-r2-132-f1` @ `835b57472`)
+
+**Verifier findings acted on.** Items 1, 2 and 5 were met (the eviction itself, the cascade-child gate, the behaviour
+seeds); item 3 (blocking) and item 4 (minor) were not. Items 6-8 and 10-11 are observations / gates (below).
+
+**Item 3 — the build guard had a false negative, and five places claimed it had none: CLOSED.** The f1 text detector
+matched only `identifier.XAccessAsync(` and checked the identifier's declaration file-wide. Verifier seed **S5**
+(`sp.GetRequiredService<DataverseWebApiService>().RevokeAccessAsync(…)` in `NoAccessShareEnforcer.cs`) and **S6** (a
+`DataverseWebApiService _recordShare` parameter in a file that also declares `IDataverseRecordShareService _recordShare`)
+both left all 14 guard tests green. Fix, in `tests/Spaarke.ArchTests/PoaShareClientSingletonGuardTests.cs` plus one new
+test helper `tests/Spaarke.ArchTests/IlCallScan.cs`:
+
+| Route around the seam | Rule now | Precision |
+|---|---|---|
+| A compiled call to `DataverseWebApiService.Grant/Modify/RevokeAccessAsync` — any receiver expression, inside a lambda / local function / async state machine, or a method group (`ldftn`) | `EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams` — reads the IL method tokens (`call`/`callvirt`/`newobj`/`ldftn`/`ldvirtftn`/`jmp`) of every type in every assembly that can name the client; closures attributed to their outermost type; only `DataverseRecordShareService` and the client itself may reference them. A target counts if declared on the client, a subclass, or a base type / interface the client implements (so widening one of the client's interfaces is still caught). Fails loud on an undecodable stream or unresolvable token. Vacuity check: it must see the seam's own three calls | exact (types resolved by the compiler) |
+| Which assemblies "can name the client" | `EveryProjectThatCanSeeTheClientIsScanned` — derived from the csproj graph (every `src/**` project whose ProjectReference closure reaches `Spaarke.Dataverse`: today Spaarke.Dataverse, Spaarke.Core, Spaarke.Scheduling, Sprk.Bff.Api); a project the ArchTests cannot load fails the build | exact over `src/**` |
+| The same call in a `src/server` file outside that closure | `EveryPoaShareWriteGoesThroughTheEvictingSeam` — every `.XAccessAsync(` is an offender unless its receiver is an identifier (`x.`, `a.b.x.`, `x?.`, `x!.`) declared in that file, and declared ONLY, as `IDataverseRecordShareService`; an expression receiver (`…)`, `…>`, `…]`), a `var`, an undeclared name and a name also declared as another type are offenders | conservative (may false-red; the compiled rule is the precise one) |
+| Reflection by method name | `NoServerFileNamesTheClientsPoaWritesAsAString` — a `"…AccessAsync"` literal or a `nameof(…AccessAsync)` outside the client and the seam | text |
+| SDK messages; a second payload | unchanged (`NoServerFileSendsSdkPoaMessages`; task 060's payload rule) | text |
+
+Out of reach of any guard, and now SAID so in the comments rather than claimed: a method name assembled from fragments
+to defeat a scan (review's to catch). Controls: `CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam` (three
+never-executed bypass shapes — the S5 inline-resolved receiver, an async lambda, a method group — each flagged, and the
+seam's three writes not flagged, with the scan seen to read them); `Detector_…` gains the S5 shape, `(dv).`,
+`GetClient().`, `shares[0].`, S6, a `var` local and an undeclared receiver as negatives, and `x?.` as a positive.
+
+Comments corrected (each had claimed the build fails on ANY bypassing write): `IDataverseRecordShareService.cs`
+(interface remarks now point at the class; class remarks list exactly the routes closed and the one not), 
+`IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync` remarks, §16.1 above, the POML f1 outcome (correction
+appended, original wording kept for the record) and the guard file's own section header.
+
+**Item 4 — the seam's own catch was untested: CLOSED.** `PoaSeam_WhenEvictionFails_TheShareWriteSucceeds_AndTheFailureIsLogged`
+asserted the INVALIDATOR's warning (the production invalidator never throws, so the seam's catch never ran). Replaced by
+`PoaSeam_WhenEvictionThrows_TheSeamCatchesAndLogs_AndTheWritesOwnOutcomeStands` ×6 (grant / modify / revoke × Dataverse
+204 / 500): a `ThrowingInvalidator` double (every hook throws) under the production seam over the production client; a
+successful write completes, a refused write surfaces ITS `HttpRequestException` (not the double's exception), the eviction
+was attempted exactly once, and the seam's own `[ACCESS-EVICT] The share-change eviction for … ({write})` warning is logged.
+The old case is kept under its true name, `PoaSeam_WhenRedisFails_TheInvalidatorLogsAndReturns_AndTheShareWriteSucceeds`
+(asserting also that the seam logged nothing — it had nothing to catch).
+
+**Seeds (each seeded in the production file, rebuilt, seen red, restored by `git checkout`, `git diff --quiet` asserted,
+touched).**
+
+| # | Seed | Red |
+|---|---|---|
+| S5 | verifier's `sp.GetRequiredService<Spaarke.Dataverse.DataverseWebApiService>().RevokeAccessAsync(…)` in `NoAccessShareEnforcer.cs` | **3** — compiled rule, text rule, `EachNamedShareWriter…(NoAccessShareEnforcer)` |
+| S6 | verifier's `static Task SeedS6(DataverseWebApiService _recordShare, …) => _recordShare.RevokeAccessAsync(…)` in the same file | **3** — same three |
+| S7 | a method group `=> client.RevokeAccessAsync;` on a `DataverseWebApiService` (no `(` — invisible to any text rule) | **1** — compiled rule only (proves the IL rule is needed, not just stricter) |
+| S8 | `typeof(DataverseWebApiService).GetMethod("RevokeAccessAsync")!.Invoke(client, args)` | **1** — `NoServerFileNamesTheClientsPoaWritesAsAString` |
+| S9 | a new `src/server/shared/SeedProbe/SeedProbe.csproj` referencing only `Spaarke.Core` (transitive reach) | **2** — `EveryProjectThatCanSeeTheClientIsScanned` (FileNotFoundException named) + the compiled rule (cannot load it) |
+| S10 | the seam's catch narrowed to `catch (Exception ex) when (ex is null)` (verifier's item-4 seed) | **6** — every `PoaSeam_WhenEvictionThrows_…` case |
+| S11 | the seam's catch kept but its `LogWarning` removed | **6** — every `PoaSeam_WhenEvictionThrows_…` case (the log assertion bites on its own) |
+
+All restored byte-identical (asserted); the probe directory removed.
+
+**Not code (unchanged):** item 8 — share writes cost 1-2 keyspace SCANs each; task 149's fan-out and the round-28
+2-minute reconcile can issue them in bursts; trigger 8 was evaluated against the dev keyspace (≤ 178 keys) and does not
+fire; watch a large production keyspace after deploy (an observation, not a gate). Items 10-11: G-1 / G-2 (§12) and the
+criterion-17 reviewer approval at PR time (§15.3) are unchanged.
+
+`.claude/**`: no edit needed.

@@ -32,7 +32,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <para><b>Every write evicts the access caches it stales</b> (task 132, batch 4 integration residual): the production
 /// implementation, <see cref="DataverseRecordShareService"/>, calls
 /// <see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/> after
-/// each grant / modify / revoke. A writer therefore needs no eviction of its own — and must not reach POA any other way.</para>
+/// each grant / modify / revoke. A writer therefore needs no eviction of its own — and must not reach POA any other way
+/// (the routes the build guard closes are listed on <see cref="DataverseRecordShareService"/>).</para>
 /// </remarks>
 public interface IDataverseRecordShareService
 {
@@ -105,8 +106,14 @@ public interface IDataverseRecordShareService
 /// whether it returned or threw (a write that reports failure can have committed) — this seam calls
 /// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>: every user's impersonated root set for the
 /// record's root type and every user's access snapshots of the record. The eviction lives HERE, in the one POA client,
-/// rather than at each writer, so no share writer can be born without it (<c>PoaShareClientSingletonGuardTests</c> fails
-/// the build on a POA write that bypasses this seam). It is not bound to the caller's token
+/// rather than at each writer, so no share writer can be born without it. <c>PoaShareClientSingletonGuardTests</c> fails
+/// the build on each route around this seam it can see: a COMPILED reference to <see cref="DataverseWebApiService"/>'s
+/// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync from any type but this one and the client itself (an IL scan
+/// of every project that can name the client, so any receiver expression, lambda, async method or method group); a
+/// <c>.…AccessAsync(</c> call in any <c>src/server</c> file whose receiver is not declared, only, as
+/// <see cref="IDataverseRecordShareService"/>; the SDK's POA messages; a second POA payload; and a POA write method named
+/// as a string (reflection). A name assembled from fragments to defeat a scan is outside what any guard sees; that is
+/// review's to catch. It is not bound to the caller's token
 /// (<see cref="CancellationToken.None"/>) and never fails or changes the write's own outcome: the hook does not throw, and
 /// a defect that made it throw is caught and logged here. Reads evict nothing.</para>
 /// </remarks>
