@@ -20,21 +20,21 @@ This is the running list of obligations the main session takes on while integrat
 
 ## `.claude/` edits (main session only; sub-agents cannot write there)
 
-- [ ] **142:** the concise `.claude/adr/ADR-034-user-record-membership.md` Amendment A4 (ACCEPTED in owner round 11). The exact text is in 142's note.
+- [x] **142:** the concise `.claude/adr/ADR-034-user-record-membership.md` Amendment A4 (ACCEPTED in owner round 11). The exact text is in 142's note.**Done** in `c95716a82`: all five edits from 142 note §13.4, with the spec FR-32 + MUST NOT and design §7 exception text.
 - [ ] **166:** `.claude/skills/bff-deploy/SKILL.md` §9c. Move its smoke check off `GET /healthz/dataverse/doc/{id}`, which was an anonymous document read, onto `/healthz/dataverse`. The exact text is in 166's note. Also update the runbooks it lists (`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`, `051-operator-runbook.md`).
 - [ ] **160 (only if a production caller needs the SDK path):** a one-line ADR-028 A5 note that an SDK CallerId path satisfies A5's "equivalent refusal".
-- [ ] **`.claude/CHANGELOG.md`:** add an entry for each `.claude` edit above.
+- [ ] **`.claude/CHANGELOG.md`:** add an entry for each `.claude` edit above. The A4 entry is added (`c95716a82`); 166 §9c and 160 A5 remain.
 
 ## Live steps on dev (owner round 11: approved; run each as dry run, then apply, then verify, and record it in the task's live-gate note)
 
 **Before deploying the integrated BFF:**
-- [x] **133:** `scripts/Set-RecordCreatorPersonSchema.ps1` APPLIED 2026-10-03 (`92d5f3cc1`). `-Verify` must be re-run to PASS after the schema-script verify fix above.
-- [x] **143 G-1:** APPLIED 2026-10-03 (`92d5f3cc1`). Re-run `-Verify` after the script fix.
+- [x] **133:** `scripts/Set-RecordCreatorPersonSchema.ps1` APPLIED 2026-10-03 (`92d5f3cc1`). `-Verify` **PASS 2026-10-04** (read-only, after `0ff4992ed`).
+- [x] **143 G-1:** APPLIED 2026-10-03 (`92d5f3cc1`). `-Verify` **PASS 2026-10-04** (read-only, after `0ff4992ed`).
 - [ ] **143 O2** (only an access-administrator role reads `sprk_noaccessentry`): WITH the deploy, because it changes current behaviour.
 - [x] **150 G-0:** null repair PASS 2026-10-03 (42 rows). Fix the after-check counting slip at integration.
 - [ ] **150 FLS lock** on `sprk_issecure` (invoice included, round 10 item 11): WITH the 150 client and BFF deploy.
 - [x] **146 G146-1** (9 → 26, the §5.4 strip, negative and positive probes) and **G146-2**: DONE 2026-10-03.
-- [ ] **Copy G146-1's verbatim refusals** from `notes/batch4-live-gates-2026-10-03.md` into the 17 `evidence` fields of `config/secure-record-owner-role.json` on the integration branch, replacing "VERBATIM REFUSAL PENDING".
+- [x] **Copy G146-1's verbatim refusals** from `notes/batch4-live-gates-2026-10-03.md` into the 17 `evidence` fields of `config/secure-record-owner-role.json` on the integration branch, replacing "VERBATIM REFUSAL PENDING". **Done** in `b8a1374c2`: all 17 entries, and the duplicate census entry from the 148 merge is folded into one. ArchTests 600/600.
 - [ ] **142:** the ledger schema (`sprk_assignedaccess`) and the "Update Access" ribbon.
 - [ ] **146 (round 13 item 9) — HARD PREREQUISITE before the BFF deploy:** apply 146's child-table `sprk_createdbyperson` schema script (dry run → `-Apply` → `-Verify`). 146 now stamps every app-created child unconditionally, so a missing column fails the create (gate G146-6).
 
