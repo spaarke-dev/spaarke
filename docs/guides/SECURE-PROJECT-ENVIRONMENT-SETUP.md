@@ -509,6 +509,7 @@ configuration is shaped correctly.
 | 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each exposure is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; a clause-5 coverage gap is an ERROR line naming the table (fail-closed, not an exposure); it writes nothing |
 | 12 | The BFF's `secure-child-share-reconciliation` job (`/api/admin/jobs/secure-child-share-reconciliation/status`, task 149) | **enabled**, last run `Success = true`, heartbeat `[SECURE-CHILD-SHARES] heartbeat status=Completed`. `held > 0` names a child whose secure roots cannot be determined (see §7a); `notUpdated > 0` is retried every two minutes |
 | 13 | **🔴 Sharees see the children, nobody else does** (task 149) — with existing non-admin test users: share a secure project with user A, create a child under it, wait one reconcile tick (≤ 2 min) | A reads the child in MDA; a user NOT shared on the project is DENIED it; unsharing A (Manage Access, or the MDA Share dialog + one tick) removes A from the child. Delete the probes |
+| 14 | The BFF's `secure-child-reconciliation` job (`/api/admin/jobs/secure-child-reconciliation/status`, task 148) | **disabled** unless the owner has scheduled it (task 147); a manual trigger with `SecureChild__Reconciliation__WritesEnabled` unset is REPORT-ONLY — heartbeat `[SECURE-CHILD-RECONCILE] heartbeat mode=ReportOnly`, and `wouldChange` is the backfill still owed (0 once §7c.1 has run) |
 
 ### 7a. The children of a secure record — who can see them (task 149)
 
@@ -550,11 +551,12 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
 - **Not this mechanism.** Contacts (SPA/Teams) reach children through the external data plane's root scoping, not POA
   shares.
 - **🔴 SHIP GATE — no record is unsecured in a shared environment until task 148 is deployed** (owner decision, round
-  11 item 3, 2026-10-03). Tasks 146 and 149 may deploy. A record that has been made ordinary again keeps its children
-  owned by `Secure Record Owners` and shared with its FORMER sharees, untouched, until task 148 moves the children into
-  the record's business unit and then calls the synchronizer; there is no other repair. Removing those shares first
-  would leave the children readable by nobody. So until 148 is deployed, **do not unsecure** a record in any
-  environment other people use (`notes/task-149-secure-child-sharee-access.md` §12 decision 4, §13).
+  11 item 3, 2026-10-03). Tasks 146 and 149 may deploy. Before task 148, a record made ordinary again kept its children
+  owned by `Secure Record Owners` and shared with its FORMER sharees. **Task 148 meets the gate in code**: unsecure now
+  re-owns every child into the record's business unit and removes its mirrored shares BEFORE the record's own shares go
+  (§7c). The gate lifts in an environment when the BFF carrying task 148 is deployed THERE; until then, **do not
+  unsecure** a record in any environment other people use (`notes/task-149-secure-child-sharee-access.md` §12 decision 4,
+  §13; `notes/task-148-secure-child-backfill.md`).
 
 ### ⚠️ Privilege caching will lie to you
 
@@ -584,7 +586,8 @@ the creator's share is issued BEFORE the owner move, proven after it, and if it 
 it shares to the person who created the record — its `createdby` user when that is a usable person, otherwise the
 person the BFF recorded in `sprk_createdbyperson` (§7b; an Office quick-created record's `createdby` is the BFF app user)
 — never to the caller instead, then creates and records the container. A record owned by the team **with** a container
-recorded is provisioned: 409, nothing written.
+recorded is provisioned: 409, nothing written — unless its existing related records still need securing, which the call
+then completes (200 `childrenOnly`, task 148 §7c).
 
 **A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
 `65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
@@ -632,7 +635,7 @@ are refused until it has its own container (fail closed).
 |---|---|---|
 | `secure_bu_not_found`, `secure_bu_ambiguous`, `secure_owner_team_not_found`, `secure_owner_team_ambiguous`, `secure_owner_team_has_members`, `secure_owner_team_membership_unreadable`, `secure_bu_has_users`, `secure_bu_users_unreadable`, `container_type_not_configured` | Unchanged — refused before any write | Administrator fixes the environment (§3–§5, `SharePointEmbedded:ContainerTypeId`), then provisioning is called again |
 | `legacy_per_project_bu` | Unchanged | Administrator migrates the record off its per-project BU (manual) |
-| `already_provisioned` | Provisioned: owned by the team, container recorded. Nothing written | Nothing to provision. Who can open it is managed through Manage Access: an administrator shares it to anyone who should hold it but cannot open it (this is also the recovery for a record that kept its own container — `containerKept: true` below) |
+| `already_provisioned` | Provisioned: owned by the team, container recorded, every existing related record already secured (task 148: when one is not, the call secures it and answers 200 `childrenOnly: true` instead). Nothing written | Nothing to provision. Who can open it is managed through Manage Access: an administrator shares it to anyone who should hold it but cannot open it (this is also the recovery for a record that kept its own container — `containerKept: true` below) |
 | `owned_by_other_secure_team` | Owned by the retired default team | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) |
 | `creator_unresolved` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
 | `record_owner_unreadable` | Unchanged — refused before any write. The row was read with no owning user or team, which is deterministic for that row | **An administrator** checks the record's owner in Dataverse; calling again before that repeats the refusal (not offered as a retry) |
@@ -648,6 +651,7 @@ are refused until it has its own container (fail closed).
 | `container_creation_failed` | Owned by the team, shared to its creator, no container (a replaced shared container was unlinked before the move, so it is not recorded either) | **The same caller** calls again: it resumes |
 | `container_not_recorded` | Owned by the team, shared to its creator, no container recorded; the error names a container that holds nothing | **The same caller** calls again: it resumes and records a NEW container. Delete the named empty container |
 | `creator_share_failed_resumable` | 🔴 Owned by the memberless team **without a confirmed creator share** — possibly nobody can open it (logged CRITICAL `[PROVISION]`). `ownershipVerified: false` when the move back could not be read back at all (the record may instead be back with its previous owner). The creator no longer passes the Write check. `containerKept: true` — the record keeps its own container; the detail says whether the creator's share was confirmed before the move (it then still stands unless the move itself dropped it) | `containerKept: false`: while the team owns it, **an administrator** (who holds Write through their role) calls provisioning again for the record: it resumes and shares to the person who created it (`createdby`, or `sprk_createdbyperson`). `containerKept: true`: **no resume** — a provisioning call answers `already_provisioned`; if the creator cannot open the record, **an administrator shares it to them through Manage Access** (or Share in the model-driven app). Either way: if the move back did take effect, the record is where it was and its creator calls provisioning again — when `childOwnersAtRisk` is present (the move back could not be verified, and some cascaded rows had owners of their own), an administrator first puts each listed row back with its `nextCall` |
+| `children_incomplete` (HTTP 500; task 148; `childrenReowned`, `childrenRemaining`, `childTables` — per table: examined, already correct, re-owned, refused, failed; `containerKept`) | Provisioned — isolated, shared, its container recorded — but some of its EXISTING related records are not yet re-owned into the team or not yet shared with its sharees (each left as it was — never more exposed than before the call). The pass runs after the container (Step 8), so a related record never blocks the record's storage | **The same caller** calls again: the record is provisioned, so the call completes the related records and answers 200 `childrenOnly: true` (or 409 `already_provisioned` once there is nothing left to do). A child the ownership rule REFUSES (e.g. one also filed under another record flagged secure but not isolated) stays refused until that record is fixed; the `[PROVISION]` and `[SECURE-CHILD-RECONCILE]` log lines name it. A Dataverse refusal of the re-own naming a privilege is an escalation to the codified role set (§5), not something to work around |
 | `resume_creator_unavailable` (`creatorState`: `absent` / `disabled` / `application-user` — HTTP 409; `unreadable` / `refused` / `column-missing` — HTTP 500; `creatorColumn`: `createdby` or `sprk_createdbyperson` — which column the state describes; `createdByState` / `creatorPersonState` for the operator) | Unchanged — refused before any write: owned by the team, no container. Neither `createdby` nor `sprk_createdbyperson` names a usable person, and it is never shared to the caller or anyone else instead — a share another person already holds does not change that | `unreadable` (a read failed — `createdby` or the recorded person, transiently): **the same caller** calls again once the read works (the wizard offers "Try securing again"). `refused` (owner round 14: Dataverse refused a read the decision needs — a 401/403, the BFF's sign-in or its application user's Read privilege on `systemuser` or on the record's table refused; or a 400 to a user read): calling again repeats the refusal (no retry is offered); **an administrator** restores that Read privilege first, then calls again. `column-missing` (Dataverse answered 400 to the query naming `sprk_createdbyperson` — the column is not in this environment, §7b has not run): calling again repeats the refusal (no retry is offered); **an administrator** applies §7b (`Set-RecordCreatorPersonSchema.ps1 -Apply`, then `-Verify`) and calls again. `disabled`: **an administrator** re-enables that user, if they should keep the record, and calls again — the resume shares it to them. Any state: **an administrator** assigns the record (Dataverse Assign) to the person who should hold it — it leaves the owner team and is back in the state of a secure record never provisioned (flagged, no container, uploads refused, readable within that person's business unit as before provisioning) — and **that person** calls provisioning: it runs from the start and shares it to them. Sharing through Manage Access and calling again does NOT complete it (owner decision F8). Rows that land here now: records created by an application BEFORE `sprk_createdbyperson` existed, or outside the BFF, with no person recorded |
 
 **Calling provisioning as an administrator** (the resume path): `POST {bff}/api/v1/external-access/provision-project`
@@ -682,6 +686,69 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 
 ---
 
+## 7c. Existing children follow the record — provisioning, unsecure and the one-time backfill (task 148)
+
+A record's children are created secure by task 146 and shared by task 149. The children it ALREADY HAS when it becomes
+secure — and the children of a record that stops being secure, and of every record that was secure before task 148 — are
+brought into line by ONE engine, `SecureChildReconciler`, called from three places:
+
+| Trigger | When | What happens to the existing children |
+|---|---|---|
+| `/provision-project` | Step 8: after the record is isolated (Step 5), shared (Step 5.5 + colleagues) and has its container (Steps 6/7, or the one it keeps); also on a call for an ALREADY provisioned record, before it answers 409 | Each child is re-owned to `Secure Record Owners` (the ownership rule, task 146), read back; then the record's sharees are mirrored onto it (task 149 — its former Step 8). Incomplete → `children_incomplete` (§7a table); calling again completes it (200 `childrenOnly: true`); nothing left to do → 409 `already_provisioned` as before |
+| `/unsecure-project` | Step 3.5: after the record moved to its new owner (Step 3), BEFORE its own shares are revoked (Step 4) and its flag cleared (Step 5) | Each child the team owns is re-owned to the owner the rule gives a child of an ordinary record (its business unit's team), THEN its mirrored shares are removed. The SharePoint document locations / documents the record's Assign cascaded to the new owner are placed by the same rule (owner round 13 item 1). Incomplete → 500 `sdap.unsecure.children_incomplete`: **the record's shares stay and `sprk_issecure` stays set**, so the people shared on it keep the children that are still isolated; calling again completes it. On a record already not secure, the call completes the children an earlier unsecure left behind. Before the move, the cascade rows are read (`sdap.unsecure.cascade_children_unreadable` refuses before any write, as provisioning does) |
+| `secure-child-reconciliation` job | Disabled by default; a manual trigger, or the schedule task 147 sets | Every record flagged `sprk_issecure = true` (projects, matters, work assignments), in a fixed order, at most `SecureChild:Reconciliation:MaxRootsPerRun` (default 50) per run; each run's `resumeAfter` is where the next continues (the run history is per instance — a restart starts the sweep over, harmlessly). **Report-only** unless `SecureChild__Reconciliation__WritesEnabled=true` |
+
+**Which rows.** A record's descendants through every lookup task 149's lineage map lists — a document's `sprk_project`
+AND `sprk_relatedproject`, the `sprk_regarding{project|matter|workassignment}` links, and further hops (a to-do filed only
+under a document of the record). **Never**: a row filed under nothing; a row of another record only; a per-user Direct or
+master thread; a work assignment or project filed under the record — it is a ROOT of its own (owner round 6; task 158),
+and neither it nor its own children are moved. A row is moved only across the isolation boundary: an ordinary row the
+rule would give another ordinary team is left alone. A row also filed under a SECOND secure record stays isolated
+(secure-if-any).
+
+**Ordering and the invariant.** Into isolation the re-own comes first and the mirror second (task 149 mirrors only
+team-owned rows): for the length of the pass the record's sharees may briefly not see a child they saw through their
+business unit — never the reverse; no principal that could not read a child before gains it. Out of isolation the
+re-own comes first, so a child is never readable by nobody.
+
+### 7c.1 The one-time backfill — runbook
+
+Run on each environment ONCE after the BFF carrying task 148 is deployed and the §5 role set is applied. The script only
+triggers the job and reads its run history; the rule is the BFF's. It needs an Azure CLI login of a user holding the
+BFF's `SystemAdmin` policy (the `/api/admin/jobs` routes), and for `-Apply` rights to change the App Service settings.
+
+```powershell
+# 1. DRY RUN (report-only; the default). Repeats until the pass completes, prints every planned change with the row's
+#    current owner, and saves each run's report to .\secure-child-backfill-<timestamp>\ .
+.\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default
+
+# 2. Review the reports: every planned change is a related record of a secure record moving INTO the Secure team.
+#    A 'refused' row names a parent flagged secure but not isolated (fix that record first). A planned change of a
+#    document whose content sits in a SHARED SPE container is an escalation (task 148 trigger 1) — present it to the owner.
+
+# 3. APPLY (writes): turns SecureChild__Reconciliation__WritesEnabled on (an app-setting change restarts the app), runs the
+#    pass to its end, then turns the setting OFF again.
+.\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default `
+  -Apply -ResourceGroup <rg> -AppName <bff-app-service>
+
+# 4. VERIFY (report-only): exit 0 only when a full pass plans ZERO changes and refuses / fails nothing.
+.\scripts\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Verify
+```
+
+Every re-own is logged before it is written (`[SECURE-CHILD-RECONCILE] reassign: <table> <id> owner <previous> -> team
+<target>`) — the reversal record: assign the row back to `<previous>` to undo it. A run's `ResultJson` samples the first
+200 changes with the same fields.
+
+**Manual live gate (dev, after deploy; owner-approved round 11, run by the main session).** Seed probe children under
+an ordinary project, matter and work assignment owned by an existing non-admin test user — a document via
+`sprk_project`, a document via `sprk_relatedproject` (project), an event, a to-do regarding the document, a
+communication, a memo; provision each secure; record each child's owner read-back, the creator's share on each child,
+and that a non-sharee existing non-admin test user (`uac.child.user@demo.spaarke.com`) is denied; unsecure one of them
+and record the reverse (children on the business unit's team, no child shares, the flag cleared last); run §7c.1 steps
+1-4 over dev's secure records; delete the probes and record the deletion.
+
+---
+
 ## 8. What must NOT be done
 
 | ❌ | Why |
@@ -699,7 +766,9 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Use `pac` without checking the active profile | `pac auth list` may be pointed at production. Mint a token against an explicit URL instead |
 | Share an individual CHILD of a secure record (a document, a to-do) with someone | The reconcile removes any child share its root does not carry, within two minutes. Share the secure record itself; its children follow (§7a) |
 | Turn on Share / Unshare / Reparent cascade on a project, matter or work-assignment relationship | The setting is TABLE-WIDE: every ordinary record's children would be shared too, a product-wide behaviour change. The owner decided against it (round 11 item 2): the two-minute reconcile is the mechanism (§7a) |
-| Unsecure a record in a shared environment before task 148 is deployed | Its children keep their former sharees and nobody in its business unit can read them (§7a ship gate, owner round 11 item 3) |
+| Unsecure a record in a shared environment before task 148 is deployed there | Its children keep their former sharees and nobody in its business unit can read them (§7a ship gate, owner round 11 item 3). With 148 deployed, unsecure moves them first (§7c) |
+| Turn on `SecureChild__Reconciliation__WritesEnabled` without reviewing a report-only run first | The sweep moves the ownership of existing rows in bulk; the report is the evidence (and the reversal record) the owner reviews before any write (§7c.1) |
+| Clear `sprk_issecure` by hand on a record whose unsecure answered `children_incomplete` | The flag is what keeps the record's sharees on its still-isolated children and tells the next call to finish; call unsecure again instead (§7c) |
 | Disable the `secure-child-share-reconciliation` job in a shared environment | It is the only mechanism for new children and for model-driven-app Share/Unshare of a secure record; disabled, a removed user keeps every child (§7a) |
 
 ---

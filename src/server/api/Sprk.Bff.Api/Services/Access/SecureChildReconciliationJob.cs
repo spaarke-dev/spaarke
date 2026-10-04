@@ -21,12 +21,12 @@ namespace Sprk.Bff.Api.Services.Access;
 /// A manual admin trigger of the disabled job reports. In report-only mode every change the run WOULD make is logged per row
 /// with the row's current owner, and summarized in the run's <c>ResultJson</c>.</para>
 /// <para><b>Ordered, capped, resumable.</b> Roots are taken in a fixed order (table, then id), at most
-/// <see cref="MaxRootsPerRunConfigKey"/> per run (default <see cref="DefaultMaxRootsPerRun"/>). Each run's
-/// <c>ResultJson</c> records <c>resumeAfter</c> — the last root it processed — and the next run continues after it, until a
-/// run reaches the end (<c>passComplete: true</c>) and the next starts again from the beginning. Every root is a progress
-/// line in the log before it is processed, so an interrupted run's position is in the log too. Because every step of a pass
-/// is keyed on observed state, re-processing a root is harmless: a restart (the run history is per instance) only starts the
-/// sweep over.</para>
+/// <see cref="MaxRootsPerRunConfigKey"/> per run (default <see cref="DefaultMaxRootsPerRun"/>). The next run continues
+/// after the last root the previous one reached (a cursor in this singleton, per instance — the task 143 job's precedent),
+/// until a run reaches the end (<c>passComplete: true</c>) and the next starts again from the beginning. Each run's
+/// <c>ResultJson</c> records the same position (<c>resumeAfter</c>), and every root is a progress line in the log before it
+/// is processed, so an interrupted run's position is visible. Because every step of a pass is keyed on observed state,
+/// re-processing a root is harmless: a restart only starts the sweep over.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
@@ -105,16 +105,20 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             : DefaultMaxRootsPerRun;
 
         using var scope = _scopeFactory.CreateScope();
-        var resumeAfter = await ReadResumePointAsync(
-            scope.ServiceProvider.GetService<IBackgroundJobStore>(), cancellationToken).ConfigureAwait(false);
         var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
         var reconciler = scope.ServiceProvider.GetRequiredService<SecureChildReconciler>();
 
         // The secure records, in a fixed order. A listing that cannot complete decides nothing: ADR-036 A1 rule 4.
         var roots = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
-        var start = resumeAfter is { } after ? roots.FindIndex(r => r.Key == after) + 1 : 0;
-        if (start >= roots.Count)
-            start = 0; // the previous run finished the pass, or its last root is gone: start over
+
+        // Continue after the last record the previous run reached (by ORDER, not position: records secured or unsecured
+        // in between never make the window skip one). Past the end — the previous run finished the pass — start over.
+        (string Table, Guid Id)? resumeAfter;
+        lock (_cursorGate)
+            resumeAfter = _cursor;
+        var start = resumeAfter is { } after ? roots.FindIndex(r => Compare((r.Table, r.Id), after) > 0) : 0;
+        if (start < 0)
+            start = 0;
         var batch = roots.Skip(start).Take(cap).ToList();
 
         var totals = new int[7];
@@ -166,6 +170,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         var lastKey = batch.Count > 0 ? batch[^1].Key : null;
         var passComplete = start + batch.Count >= roots.Count;
+        lock (_cursorGate)
+            _cursor = passComplete || batch.Count == 0 ? null : (batch[^1].Table, batch[^1].Id);
         var duration = _timeProvider.GetElapsedTime(started);
         var success = incompleteRoots.Count == 0;
 
@@ -251,39 +257,18 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         return roots;
     }
 
-    /// <summary>
-    /// Where the previous run stopped: the newest completed run of this job whose <c>ResultJson</c> carries
-    /// <c>resumeAfter</c>. A fresh start when there is none, when the newest says the pass completed, or when the history
-    /// cannot be read (logged — a re-processed root is harmless).
-    /// </summary>
-    private async Task<string?> ReadResumePointAsync(IBackgroundJobStore? jobStore, CancellationToken ct)
+    /// <summary>The sweep order: table (ordinal), then id — the order <see cref="ListSecureRootsAsync"/> returns.</summary>
+    private static int Compare((string Table, Guid Id) a, (string Table, Guid Id) b)
     {
-        if (jobStore is null)
-        {
-            _logger.LogWarning("[SECURE-CHILD-RECONCILE] No run history is registered; starting the sweep from the beginning.");
-            return null;
-        }
-
-        try
-        {
-            var runs = await jobStore.GetRecentRunsAsync(JobIdConstant, 10, ct).ConfigureAwait(false);
-            foreach (var run in runs)
-            {
-                if (string.IsNullOrWhiteSpace(run.ResultJson))
-                    continue;
-
-                using var doc = JsonDocument.Parse(run.ResultJson);
-                if (!doc.RootElement.TryGetProperty("resumeAfter", out var value))
-                    continue;
-                return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] The previous run's position could not be read; starting the sweep " +
-                "from the beginning.");
-        }
-
-        return null;
+        var byTable = string.CompareOrdinal(a.Table, b.Table);
+        return byTable != 0 ? byTable : a.Id.CompareTo(b.Id);
     }
+
+    // The progress cursor: the last record a run reached while a pass is in progress (null between passes). It lives in this
+    // singleton, per instance — the task 143 NoAccessShareReconciliationJob precedent: the scheduler lease runs one tick at a
+    // time, a job must not depend on the scheduler's store (ADR-052 §5 / ADR-036 A1 rule 7, WorkloadPlacementGuardTests), and
+    // a restart only starts the sweep over, which is harmless because every step of a pass is keyed on observed state. Each
+    // run's ResultJson and its progress log lines carry the same position for an operator.
+    private readonly object _cursorGate = new();
+    private (string Table, Guid Id)? _cursor;
 }

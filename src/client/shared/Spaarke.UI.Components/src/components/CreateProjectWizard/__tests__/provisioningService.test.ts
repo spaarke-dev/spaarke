@@ -100,6 +100,25 @@ describe('provisionSecureProject — request shape (task 061 contract)', () => {
     // not report one would mean the client had stopped mirroring the field that matters most.
     expect(result.data!.sharedToCreatorSystemUserId).toBe(successBody.sharedToCreatorSystemUserId);
   });
+
+  it('accepts a childrenOnly success (task 148) — only the related records of a project secured earlier were completed', async () => {
+    const body = { ...successBody, sharedToCreatorSystemUserId: '', resumed: true, childrenOnly: true };
+    const authFetch = jest.fn().mockResolvedValue(okResponse(body));
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.success).toBe(true);
+    expect(result.data!.childrenOnly).toBe(true);
+  });
+
+  it('still refuses a 2xx with no creator share that is NOT childrenOnly', async () => {
+    const authFetch = jest.fn().mockResolvedValue(okResponse({ ...successBody, sharedToCreatorSystemUserId: '' }));
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.success).toBe(false);
+    expect(result.failureKind).toBe('error');
+  });
 });
 
 describe('provisionSecureProject — failure classification', () => {
@@ -400,6 +419,8 @@ describe('provisionSecureProject — failure classification', () => {
     // Task 133: only an administrator can finish these — the creator may no longer pass the Write gate.
     ['sdap.provision.creator_share_failed_resumable', 'needs-administrator', false],
     ['sdap.provision.resume_creator_unavailable', 'needs-administrator', false],
+    // Task 148: secured and shared, but some existing related records are not secured yet — the next call completes them.
+    ['sdap.provision.children_incomplete', 'interrupted', true],
   ];
 
   it.each(EMITTED)('maps reason code %s to %s (retryable: %s)', (reasonCode, expected, retryable) => {
@@ -432,7 +453,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(28);
+    expect(EMITTED).toHaveLength(29);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

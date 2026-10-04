@@ -102,6 +102,29 @@ export interface IProvisionProjectResponse {
    * server added it.
    */
   resumed?: boolean;
+  /**
+   * Task 148: what the call did to the project's EXISTING related records (documents, events, to-dos, communications,
+   * memos) — re-owned into the secure owner team and shared with the project's sharees. Optional because the server added
+   * it; a successful response always carries a complete pass.
+   */
+  children?: {
+    status: string;
+    reowned: number;
+    remaining: number;
+    tables: Array<{
+      table: string;
+      examined: number;
+      alreadyCorrect: number;
+      reowned: number;
+      refused: number;
+      failed: number;
+    }>;
+  };
+  /**
+   * Task 148: true when the project was ALREADY secured and this call only completed its related records. No share was
+   * written by this call (the earlier call proved the creator's), so `sharedToCreatorSystemUserId` is the empty GUID.
+   */
+  childrenOnly?: boolean;
 }
 
 /**
@@ -156,6 +179,8 @@ export type ProvisioningFailureKind =
    * server's `creatorShareConfirmed` extension is true (task 133 verifier round 2: the copy follows it). The next call
    * resumes or restarts. Retryable; when the share is unconfirmed and the caller can no longer open the record, that
    * call is refused at the Write gate and an administrator finishes, which the unconfirmed copy says.
+   * Also (task 148, `children_incomplete`): secured and shared, but the project's EXISTING related records are not all
+   * secured yet; each is left as it was, never more exposed. The same caller's next call completes them. Retryable.
    */
   | 'interrupted'
   /**
@@ -357,6 +382,14 @@ const REASON_STATES: Readonly<
     failureKind: 'storage-incomplete',
     errorMessage:
       'The project was secured and shared with you, but its document container could not be linked to it, so files cannot be stored on it yet.',
+    retryable: true,
+  },
+  // Task 148: the project is secured and shared, but some of its existing related records are not secured yet (each left
+  // as it was). The server tells the same caller that calling again completes them.
+  'sdap.provision.children_incomplete': {
+    failureKind: 'interrupted',
+    errorMessage:
+      'The project was secured and shared with you, but some of its existing documents, events, to-dos or messages are not secured yet.',
     retryable: true,
   },
   'sdap.provision.creator_share_failed_resumable': {
@@ -676,7 +709,9 @@ export async function provisionSecureProject(
     // it"), so a body missing it means the contract moved underneath us. Without this check a shape
     // change ships as success and the wizard tells the user the project is "shared with you" on no
     // evidence — the record would be unopenable and the UI would say otherwise. Fail closed instead.
-    if (!data?.sharedToCreatorSystemUserId) {
+    // Task 148: a `childrenOnly` response completed the related records of a project secured earlier — its creator share
+    // was proven by that earlier call, so this response carries none.
+    if (!data?.childrenOnly && !data?.sharedToCreatorSystemUserId) {
       console.error('[ProvisioningService] 2xx response did not report the creator share; treating as failure.', {
         received: data,
       });

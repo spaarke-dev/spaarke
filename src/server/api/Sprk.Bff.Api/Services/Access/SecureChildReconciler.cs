@@ -564,9 +564,8 @@ public sealed class SecureChildReconciler
             {
                 Count(table, Changed);
                 _changes.Add(new(table, row.Id, previous, target, SecureChildRowOutcome.Changed, null));
-                // The ownership the next row's decision reads must be the new one.
-                row[OwningTeamColumn] = new EntityReference("team", target);
-                row.Attributes.Remove(OwningUserColumn);
+                // (A deeper row's decision reads this row FRESH through the resolver, so it sees the new owner — which is
+                // why rows are taken shallowest first.)
                 return targetIsSecure ? null : (table, row.Id, wasIsolated);
             }
 

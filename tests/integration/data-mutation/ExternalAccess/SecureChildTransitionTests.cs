@@ -224,7 +224,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
     /// AC 3 + AC 5 (provisioning): a child whose re-own Dataverse refuses makes the pass incomplete — a stable reason code and
     /// re-owned/remaining counts, never a success and never a bare 500. The record stays secured and shared; the refused
     /// child keeps its old owner (under-shared, never readable by a new principal); no principal outside the record's sharees
-    /// is granted anything. A second call completes the pass and only then provisions the container.
+    /// is granted anything. The record keeps its container (the pass runs after it). A second call — the record is now
+    /// provisioned — completes the pass (200 <c>childrenOnly</c>) and creates no second container.
     /// </summary>
     [Fact]
     public async Task Provisioning_WhenAChildCannotBeReowned_IsIncompleteWithCounts_AndASecondCallCompletesIt()
@@ -247,7 +248,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
 
         _fixture.OwningTeamOf(rootId).Should().Be(SecureTeam, "the record's own steps are not undone");
         _fixture.SomeoneCanOpen(rootId).Should().BeTrue();
-        _fixture.ContainerIdOf(rootId).Should().BeNull("the pass stops before the container steps");
+        _fixture.ContainerIdOf(rootId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId,
+            "the pass runs after the container: a related record the rule cannot place never blocks the record's storage");
         _fixture.ChildWorld.OwnerOf("sprk_event", family.Event).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
             "the refused child keeps its old owner — under-shared, never handed to anyone new");
         _fixture.Grants.Select(g => g.Principal).Distinct().Should().OnlyContain(
@@ -259,11 +261,14 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         var second = await client.PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
 
         second.StatusCode.Should().Be(HttpStatusCode.OK, await second.Content.ReadAsStringAsync());
-        (await JsonOf(second)).GetProperty("resumed").GetBoolean().Should().BeTrue();
+        var completed = await JsonOf(second);
+        completed.GetProperty("childrenOnly").GetBoolean().Should().BeTrue(
+            "the record was provisioned by the first call; the second only completes its related records");
+        completed.GetProperty("children").GetProperty("reowned").GetInt32().Should().Be(1);
         _fixture.ChildWorld.OwnerOf("sprk_event", family.Event).Should().Be(DataversePrincipalRef.Team(SecureTeam));
         _fixture.SharesOn(family.Event).Keys.Should().BeEquivalentTo(
             new[] { DataversePrincipalRef.User(Creator), DataversePrincipalRef.User(Colleague) });
-        _fixture.ContainerIdOf(rootId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.CreatedContainerDisplayNames.Should().ContainSingle("no second container is created");
     }
 
     /// <summary>
@@ -669,59 +674,42 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         sweep.LastResult!.Success.Should().BeFalse();
     }
 
-    /// <summary>The sweep job over a world: a real reconciler, a scope factory, an in-memory run history.</summary>
+    /// <summary>
+    /// The sweep job over a world: ONE job instance (it keeps its progress cursor, as the singleton the scheduler holds), a
+    /// real reconciler resolved per run from a scope, and the writes switch and cap read from configuration per run.
+    /// </summary>
     private sealed class SweepHarness
     {
         public SecureChildShareWorld World { get; } = SecureChildShareWorld.Standard();
         public FakeRecordShareTable Shares { get; } = new();
         public JobRunResult? LastResult { get; private set; }
-        private readonly RunHistory _history = new();
+        private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        private readonly ServiceProvider _provider;
+        private readonly SecureChildReconciliationJob _job;
 
-        public async Task<JsonElement> RunAsync(string? writesEnabled, string? maxRootsPerRun = null)
+        public SweepHarness()
         {
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [SecureChildReconciliationJob.WritesEnabledConfigKey] = writesEnabled,
-                [SecureChildReconciliationJob.MaxRootsPerRunConfigKey] = maxRootsPerRun,
-            }).Build();
-
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => World).Object);
             // Work assignments cascade nothing on Assign, so the platform-cascade client is never called here.
             services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => World, Shares, webApi: null!));
-            services.AddSingleton<IBackgroundJobStore>(_history);
-            using var provider = services.BuildServiceProvider();
-
-            var job = new SecureChildReconciliationJob(
-                provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, configuration,
+            _provider = services.BuildServiceProvider();
+            _job = new SecureChildReconciliationJob(
+                _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, _configuration,
                 NullLogger<SecureChildReconciliationJob>.Instance);
-            LastResult = await job.ExecuteAsync(
+        }
+
+        public async Task<JsonElement> RunAsync(string? writesEnabled, string? maxRootsPerRun = null)
+        {
+            _configuration[SecureChildReconciliationJob.WritesEnabledConfigKey] = writesEnabled;
+            _configuration[SecureChildReconciliationJob.MaxRootsPerRunConfigKey] = maxRootsPerRun;
+
+            LastResult = await _job.ExecuteAsync(
                 new JobRunContext(Guid.NewGuid(), "test", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
                 CancellationToken.None);
-            _history.Add(LastResult);
 
             using var doc = JsonDocument.Parse(LastResult.ResultJson!);
             return doc.RootElement.Clone();
         }
-    }
-
-    /// <summary>The run history the job reads its resume point from — newest first, as the store answers.</summary>
-    private sealed class RunHistory : IBackgroundJobStore
-    {
-        private readonly List<BackgroundJobRunRecord> _runs = new();
-
-        public void Add(JobRunResult result) => _runs.Insert(0, new BackgroundJobRunRecord(
-            Guid.NewGuid(), SecureChildReconciliationJob.JobIdConstant, JobRunTrigger.ManualAdmin, "test",
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, result.Success ? "Succeeded" : "Failed", result.ErrorMessage,
-            result.ProcessedItems, result.Duration, result.ResultJson));
-
-        public Task<IReadOnlyList<BackgroundJobRunRecord>> GetRecentRunsAsync(string jobId, int limit, CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<BackgroundJobRunRecord>>(_runs.Take(limit).ToList());
-
-        public Task<IReadOnlyList<BackgroundJobDefinition>> LoadJobsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<Guid> RecordRunStartAsync(string jobId, JobRunTrigger trigger, string correlationId, DateTimeOffset? scheduledFireUtc, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task RecordRunCompleteAsync(Guid runId, JobRunResult result, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<bool> HasRunForScheduledTimeAsync(string jobId, DateTimeOffset scheduledFireUtc, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<bool> SetEnabledAsync(string jobId, bool enabled, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }
