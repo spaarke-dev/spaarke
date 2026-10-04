@@ -289,6 +289,11 @@ Owner: *"we need this to be properly fixed so that we do not have the issue — 
 3. The app-only readers that map an EMPTY `sprk_issecure` to "not secure" (ExternalParticipationService, ExternalDataService, InternalShareEndpoints, ExternalGrantLifecycle, SubjectStandingGrantReader, RecordOwnershipResolver) **fail closed** on an absent flag, exactly as `RecordContainerResolver` does. Owned by task 150; tests + seeds per reader.
 4. Task 150 also closes its two LOW items: the stale "still DRAFT" note sentence, and a committed regression check for `scripts/Repair-SecureFlagNulls.ps1`'s after-count.
 
+## Round 18 (2026-10-03). BINDING. Main-session decision under the owner's standing directive (round 15). Task 142 R-14.
+
+1. `NoAccessListReader.GetDeniedRecordsAsync` must **evaluate any subject set**: chunk organization and contact ids within the safe query bound, one query per chunk, union the results. The deterministic "too large → FailedClosed" state is removed (it made a grant "try again" forever and kept the Assigned-To job red permanently). A genuine read fault in any chunk still fails the whole answer closed (Unverifiable). Tests for 26+ organizations / 6+ contacts and a fault in one chunk; the admin-guide limit sentence updated.
+2. Task 142 also adds the new 503 no-access-unverifiable code to the Manage Access client's `GRANT_POLICY_REASON_CODES`, and corrects the stale grantee_denied quote in `notes/task-139-grant-model.md`.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
