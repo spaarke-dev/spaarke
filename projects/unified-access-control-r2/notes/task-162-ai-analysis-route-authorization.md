@@ -276,6 +276,17 @@ deleted, S6 targets the same check on promote.
 
 Every seed turned at least one named test red; after each, the file was restored byte-identically (asserted by the runner) and the working tree showed no source change. S9 and S11 were re-seeded once: their first spelling (`callerOid is null`) failed to COMPILE under nullable analysis, which proves nothing, so they were re-run with a non-nullable spelling.
 
+**Verifier round 1 (branch `task/uac-r2-162-r1`, 2026-10-03)** — three more seeds, for the three gaps the verifier
+found. Each was applied by the runner to `AnalysisAuthorizationFilter.cs`, the test assembly rebuilt, the task's
+contract + filter tests run, and the file restored byte-identically (SHA-256 asserted) and touched; `git status`
+showed only this round's intended edits afterwards.
+
+| Seed | Change applied | Red | Tests turned red |
+|---|---|---|---|
+| S21 | an anchor whose type has no entity set is SKIPPED (`continue`) instead of rejected (the verifier's seed, which survived before this round) | 6 | `162 GET: a READABLE document anchor beside an anchor whose type has no entity set (budget, communication, service request) is still the uniform 404 — the unmapped anchor is rejected, never skipped` (3 rows)<br>`162: an anchor whose type has no entity set REJECTS the whole analysis even when a readable document anchor sits beside it — it is never skipped` (3 rows) |
+| S19p | the PROMOTE check-declaration catch turned into `next` | 1 | `162 promote: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and writes nothing` |
+| S22 | the evaluator resolved with `GetRequiredService` again (an unresolvable evaluator throws → 500) | 4 | `162: on /execute, an evaluator that cannot be resolved (not registered, or a dependency missing) DENIES 403 system_failure — not a 500, never next` (2 rows)<br>`162: on GET, an evaluator that cannot be resolved answers the uniform 404 — not a 500, never next` (2 rows) |
+
 ---
 
 ## 10. Tests
@@ -293,7 +304,7 @@ All on this branch, 2026-10-03, after the final code (the seeded runs are in §9
 | **Integration** `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | 104/104 pass |
 | **Integration** `tests/integration/Spe.Integration.Tests` (full) | 403 pass, 25 skipped (pre-existing), 0 fail |
 | `dotnet list package --vulnerable --include-transitive` (BFF) | no vulnerable packages (QuestPDF removed; nothing added) |
-| Publish size | skipped per the task brief; expected to SHRINK (QuestPDF + four export files removed) |
+| Publish size (measured by the round-1 VERIFIER, recorded here in round 1; CLAUDE.md §10 procedure) | **Base** `91a1c1c83` (fresh worktree `C:\wvs162m`): **45.66 MB, 212 files**. **Branch** `task/uac-r2-162` (fresh worktree `C:\wvs162p`): **35.11 MB, 190 files**. **Delta −10.55 MB.** Both zipped with PowerShell `Compress-Archive` (Optimal) over the publish folder, **PDBs included**, from short paths. The file counts differ by exactly the 22 QuestPDF files this task deletes with the package (`QuestPDF.dll`, `libQuestPdfSkia.so`, `libqpdf.so` and 19 `LatoFont` files); every other file is on both sides, so the measurement is sound. Well under the 60 MB ceiling. (Round 1 changed one filter method and one comment — no package, file or reference — so the figure stands for `-r1`; not re-measured, per the round-1 brief.) |
 
 Existing-test changes beyond the new tests (each one-line justified):
 - `ExecuteAnalysis_WithPlaybookNotFound_ReturnsErrorChunk` → `…_Returns403BeforeTheStream` — the one expectation the POML inverts on purpose (an unknown playbook is now refused before the stream, identical to a denied one).
@@ -312,7 +323,7 @@ Existing-test changes beyond the new tests (each one-line justified):
 
 **adr-check**: compliant — ADR-001 (Minimal API, no new routes), ADR-002 (no plugins; decisions in the BFF), ADR-003 (fail closed: switch default, every fault, missing registration, null node list), ADR-007 (no Graph types; one SPE write SITE removed), ADR-008 (every check in the route's own filter chain; the session-derived checks in the handler per the #863 precedent, listed in SessionOwnershipGuardTests), ADR-010 (no new interface, service or registration; three registrations removed), ADR-013 (FR-C6 hit once → §6.5 Path C, §4 row 7), ADR-019 (reasonCode on every deny), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; real-host deny tests). No violation.
 
-BFF hygiene (CLAUDE.md §10): **placement** — in the BFF: these are existing BFF routes and filters; no new service, endpoint, registration, option, job, column or package (`.claude/constraints/bff-extensions.md` §A). Package REMOVED: QuestPDF. CVE check clean.
+BFF hygiene (CLAUDE.md §10): **placement** — in the BFF: these are existing BFF routes and filters; no new service, endpoint, registration, option, job, column or package (`.claude/constraints/bff-extensions.md` §A). Package REMOVED: QuestPDF. CVE check clean. Publish size: 45.66 → 35.11 MB (−10.55 MB), see the table above.
 
 ---
 
@@ -342,3 +353,48 @@ Adjusted from the POML for the deleted routes. Ids redacted to 8 characters in t
 
 None. (`.claude/skills/context-handoff/SKILL.md:282-287` mentions `EmailExportService` only as a worked example of a
 checkpoint, not as guidance; leave it.)
+
+---
+
+## 13. Adversarial verifier, round 1 — item by item (branch `task/uac-r2-162-r1` off `task/uac-r2-162`)
+
+The verifier found 14 items. Items 1–5 and 9–12 confirm the code, with no change asked. Items 6/14, 7, 8 and 13 asked
+for changes. All are closed below. Nothing else was changed.
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | Route findings closed; deletions verified (no caller, not published) | Confirmed. No change. |
+| 2 | Both integration suites, ArchTests, task tests green in the verifier's run | Confirmed. Re-run in full this round (§10 / table below). |
+| 3 | 15 unit-suite contention timeouts, all green in isolation | Confirmed as contention. This round's full run is reported below. |
+| 4 | Publish size measured by the verifier: −10.55 MB | **Recorded** in §10 and in the POML `<placement>` (item 13). |
+| 5 | All 17 seeds re-run red by the verifier; 5 extra seeds red | Confirmed. No change. |
+| 6 / 14 | **TEST GAP**: seed S21 (skip an anchor with no entity set instead of rejecting it) SURVIVED, because the only case seeded the budget anchor ALONE | **Fixed.** Added two tests, each with a **readable document anchor beside** an unmapped anchor, covering every unmapped anchor type: budget, communication and service request. (1) Real host: `Get_ReadableDocumentBesideAnAnchorWithoutEntitySet_IsUniform404` (3 rows). The caller gets full rights on the document AND on a guessed entity set for the other anchor, and the orchestrator is set up to answer 200. The test asserts the uniform 404 and that `GetAnalysisAsync` is never called. (2) Unit: `BuildAnchorTargets_UnmappedAnchorBesideADocument_Rejects` (3 rows). It asserts a Rejection and zero checks. **S21 now turns 6 tests red** (§9). Criterion "Anchor rule (c)" is now proven, not vacuous. |
+| 7 | No test proved that a PROMOTE check-building fault denies | **Fixed.** Added `Promote_CheckDeclarationFault_Denies`: `GetPlaybookAsync` throws for the body PlaybookId. The test asserts 403 `sdap.access.error.system_failure` and that nothing is written (no `CreateAnalysisAsync`, no session bind). Seed S19p (only the promote catch turned into `next`) turns it red (§9). |
+| 8 | `EvaluateAsync` called `GetRequiredService<AuthorizationService>()` outside any try. A missing registration gave a 500 instead of the 403 `system_failure` that ADR-003 describes. | **Fixed** in `AnalysisAuthorizationFilter`. Both `EvaluateAsync` and `EvaluateFaultAsync` now resolve the evaluator through `ResolveEvaluatorOrNull`. It uses `GetService` inside a try/catch, so it covers a service that is not registered AND one that is registered but whose dependency is missing (resolution throws). Either way the filter denies through `DenyEvaluatorUnavailable` in the route's own deny shape: the **uniform 404 on GET**, so this path is no oracle either, and **403 `sdap.access.error.system_failure`** on promote and execute. It never calls next. Tests: `Run_EvaluatorUnavailable_Denies403SystemFailure` and `Get_EvaluatorUnavailable_IsTheUniform404`, 2 rows each (not registered / unresolvable). Seed S22 (`GetRequiredService` restored) turns all 4 red (§9). These are behaviour tests of the fail-closed branch, not DI-registration tests (ADR-038): each asserts the HTTP result and that next is never called. `FinanceAuthorizationFilter.cs` is untouched. Its own extension method has the same `GetRequiredService` shape, but it is out of this task's scope and is recorded as an observation for task 170 (the rename/generalization). The pre-existing `AddAnalysisAuthorizationFilter` lambda resolves `IAiAuthorizationService` with `GetRequiredService` the same way. That code is unchanged and outside this finding; it never calls next. |
+| 9 | Ten behaviours checked and found correct | Confirmed. No change. |
+| 10 | `ExecutorSideEffects` classification checked against every registered executor | Confirmed. The residual risk is already recorded in §5. No change. |
+| 11 | No ADR-038 violations; no live writes; no `.claude/**` edits; no client broken | Confirmed. This round adds no `Mock<HttpMessageHandler>`, no DI-registration test and no ctor null-check test. No live calls of any kind. |
+| 12 | Comments accurate. The handler comment on the PlaybookId 400 "slightly overstates" | Comment corrected in `AnalysisEndpoints.ExecuteAnalysis`. The branch is reached "only when the handler runs without that filter (a direct call, or the filter removed from the chain)". No code change. |
+| 13 | **Criterion not met**: publish size not reported; the full unit-suite run was not clean | **Closed.** Publish size recorded (§10, POML `<placement>`): base 45.66 MB / 212 files, branch 35.11 MB / 190 files, −10.55 MB, Compress-Archive Optimal, PDBs included. The file-count difference is exactly the 22 deleted QuestPDF files, so the sides are otherwise equal. This round re-ran the full unit suite. Its result, including any contention timeouts and their isolated re-run, is in the table below. |
+
+**Round-1 conflict check.** No open PR touches `AnalysisAuthorizationFilter.cs`, `AnalysisEndpoints.cs` or the
+contract test (`gh pr list`, file filter). Same-project branches touching these files since `2026-09-25`: only
+`task/uac-r2-146*` (`AnalysisEndpoints.cs` fork/promote/create owner stamping, already recorded in §10 and in the POML
+`<conflict-check>`). This round's only `AnalysisEndpoints.cs` edit is one comment inside `ExecuteAnalysis`, a hunk 146
+does not touch.
+
+**Round-1 placement / justification.** This round adds no service, registration, endpoint, option, job, column or
+package. Two private methods were added to the existing filter (`ResolveEvaluatorOrNull`, `DenyEvaluatorUnavailable`),
+and `EvaluateAsync` changed from static to instance so it can log.
+
+**Round-1 tests** (branch `task/uac-r2-162-r1`, 2026-10-03):
+
+| Run | Result |
+|---|---|
+| `dotnet build tests/unit/Sprk.Bff.Api.Tests -warnaserror` / `dotnet build src/server/api/Sprk.Bff.Api -warnaserror` | Build succeeded, 0 warnings |
+| Task + affected tests (contract, filter unit, mode pin, side-effect, promote / execute-dispatch / review-memo / PromoteDurableFk fixtures, PlaybookAuthorizationFilterTests) | 144/144 pass (11 new cases this round) |
+| Seeds S21 / S19p / S22 | 6 / 1 / 4 red; each restored byte-identically |
+| **Full BFF unit suite** | 14 224 pass, 54 skipped, **10 failed, every one `TaskCanceledException: The operation was canceled`**. These are HTTP test-host timeouts of 3 m 17 s to 3 m 33 s, hit while other agents' `testhost` processes were running. The areas are Compose seams and contracts, the document identity and profile contracts, external-access upload, and MI route retirement; this task touched none of them. **Re-run in isolation, all 10 pass (11 cases, counting a theory row).** This is contention; both results are reported. |
+| **NetArchTest** | 346/346 pass |
+| **Sprk.Bff.Api.IntegrationTests** (full) | 104/104 pass |
+| **Spe.Integration.Tests** (full) | 403 pass, 25 skipped (already skipped before this task), 0 fail |
