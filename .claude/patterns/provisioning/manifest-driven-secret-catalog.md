@@ -27,7 +27,7 @@ Load this pattern when:
 
 | `value_source` | Where the value comes from | Examples |
 |---|---|---|
-| `from-bicep-output` | Written by `customer.bicep`'s `kvSecrets` module from the customer's **own** resources at H2a; H4 checks that it exists | `Redis-ConnectionString`, the service endpoints (`DocumentIntelligence-ApiKey` retired by T243) |
+| `from-bicep-output` | Written by `customer.bicep`'s `kvSecrets` module from the customer's **own** resources at H2a; H4 checks that it exists | the service endpoints (`DocumentIntelligence-ApiKey` retired by T243, `Redis-ConnectionString` by T242 — Redis is Entra-only and its endpoint is the per-env setting `Redis__Endpoint`) |
 | `from-intake-parameter` | An intake value (`IntakeParameterCatalog`) H4 maps in `IntakeValueParameterKeys` | `TenantId`; `Communication-DefaultMailbox` (T245c) |
 | `from-topology-constants` | A Spaarke-tier constant carried as an intake value (from `spaarke-constants.yaml`); same map | `SPE-ContainerTypeId` |
 | `written-by-h3` | H3 writes it to the customer vault itself; H4 (which runs before H3) **skips** the entry | `BFF-API-ClientId`, `BFF-API-Audience` |

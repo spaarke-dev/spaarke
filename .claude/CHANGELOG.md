@@ -7,6 +7,26 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — Redis: Azure Managed Redis, Microsoft Entra only (T242, owner D12/D13); ADR-009 amended
+
+`customer-provisioning-orchestration-r1` T242 (§6.5 Path B — owner decisions D12/D13 amend ADR-009 §2/§3).
+
+- **`.claude/adr/ADR-009-redis-caching.md`** (+ full `docs/adr/ADR-009-caching-redis-first.md`): product = Azure
+  Managed Redis (`Microsoft.Cache/redisEnterprise`); SKU table B0 (dev/demo non-HA, staging + customer stamps HA);
+  authentication = the app's user-assigned managed identity only (access keys disabled, access-policy assignment,
+  `Redis__Endpoint` plain setting, RESP3). Replaces the Basic/Standard/Premium SKU table and the "connection string in
+  Key Vault" MUST; the 2026-09-28 "Standard per customer" wording is marked superseded.
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp Redis — Azure Managed Redis, Microsoft Entra
+  only" (module shape, no key/secret/connection-string setting, BFF + Worker refuse a connection string outside
+  Development/Testing, H1 registers `Microsoft.Cache`).
+- **`.claude/constraints/azure-deployment.md`**: the `ConnectionStrings__Redis` KV-reference row → `Redis__Endpoint`
+  (plain host:10000).
+- **`.claude/patterns/caching/distributed-cache.md` + `INDEX.md`**: `CacheModule` mode selection; keys disabled; the
+  INDEX line that still said `AbortOnConnectFail = false` corrected to `true`.
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `Redis-ConnectionString` no longer an example
+  of a from-bicep-output secret.
+
+---
 ###### 2026-10-04 — provisioning: Exchange sidecar holds no credential; H14a on RBAC for Applications (T251, D24–D26)
 
 `customer-provisioning-orchestration-r1` T251 (gap G30, owner decisions D24, D25, D26).

@@ -355,26 +355,6 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// Redis-ConnectionString — Azure Cache for Redis connection string.
-resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Redis-ConnectionString')) {
-  parent: keyVault
-  name: 'Redis-ConnectionString'
-  properties: {
-    value: secretValues['Redis-ConnectionString']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-bicep-output'
-  }
-  tags: {
-    canonicalName: 'Redis-ConnectionString'
-    category: 'data-services'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // SPE-CommunicationArchiveContainerId — SPE communication-archive container ID (archived email / communication payloads).
 resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-CommunicationArchiveContainerId')) {
   parent: keyVault
@@ -477,7 +457,6 @@ output canonicalSecretNames array = [
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'
-  'Redis-ConnectionString'
   'SPE-CommunicationArchiveContainerId'
   'SPE-ContainerTypeId'
   'SPE-DefaultContainerId'

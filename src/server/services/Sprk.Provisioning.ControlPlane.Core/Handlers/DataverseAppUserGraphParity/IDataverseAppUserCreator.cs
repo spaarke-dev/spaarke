@@ -18,6 +18,22 @@
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 
+/// <summary>
+/// Result of one <see cref="IDataverseAppUserCreator.EnsureAppUserAsync"/>
+/// invocation. Exhaustive: <see cref="Success"/> | <see cref="Failure"/>.
+/// </summary>
+public abstract record DataverseAppUserCreationOutcome
+{
+    private DataverseAppUserCreationOutcome() { }
+
+    /// <summary>App User exists (created or already present) with the requested role associated.</summary>
+    /// <param name="SystemUserId">The Dataverse <c>systemuserid</c> GUID.</param>
+    public sealed record Success(string SystemUserId) : DataverseAppUserCreationOutcome;
+
+    /// <summary>Registration failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
+    public sealed record Failure(string Diagnostic) : DataverseAppUserCreationOutcome;
+}
+
 /// <summary>Request to ensure one Dataverse Application User exists with a given security role.</summary>
 /// <param name="EnvironmentUrl">Target Dataverse environment URL.</param>
 /// <param name="TenantId">Target Entra tenant id (§4D I1 — mandatory, no default).</param>
@@ -66,20 +82,4 @@ public interface IDataverseAppUserCreator
     Task<DataverseAppUserCreationOutcome> EnsureAppUserAsync(
         DataverseAppUserCreationRequest request,
         CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Result of one <see cref="IDataverseAppUserCreator.EnsureAppUserAsync"/>
-/// invocation. Exhaustive: <see cref="Success"/> | <see cref="Failure"/>.
-/// </summary>
-public abstract record DataverseAppUserCreationOutcome
-{
-    private DataverseAppUserCreationOutcome() { }
-
-    /// <summary>App User exists (created or already present) with the requested role associated.</summary>
-    /// <param name="SystemUserId">The Dataverse <c>systemuserid</c> GUID.</param>
-    public sealed record Success(string SystemUserId) : DataverseAppUserCreationOutcome;
-
-    /// <summary>Registration failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
-    public sealed record Failure(string Diagnostic) : DataverseAppUserCreationOutcome;
 }

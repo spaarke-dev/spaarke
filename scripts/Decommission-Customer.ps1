@@ -84,7 +84,7 @@
       Storage account:  sprk{customerId}{env}sa
       Key Vault:        sprk-{customerId}-{env}-kv
       Service Bus:      spaarke-{customerId}-{env}-sb
-      Redis:            spaarke-{customerId}-{env}-cache
+      Redis:            sprk-{customerId}-{env}-redis (Azure Managed Redis, Microsoft.Cache/redisEnterprise)
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -143,7 +143,7 @@ if ($StorageAccountName.Length -gt 24) { $StorageAccountName = $StorageAccountNa
 $KeyVaultName = "sprk-$CustomerId-$Environment-kv"
 if ($KeyVaultName.Length -gt 24) { $KeyVaultName = $KeyVaultName.Substring(0, 24) }
 $ServiceBusName = "spaarke-$CustomerId-$Environment-sbus"
-$RedisName = "spaarke-$CustomerId-$Environment-cache"
+$RedisName = "sprk-$CustomerId-$Environment-redis"   # customer.bicep redisCacheName (Azure Managed Redis)
 
 # Dataverse environment display name pattern
 $DataverseEnvName = "spaarke-$CustomerId"
@@ -551,7 +551,7 @@ elseif ($DryRun) {
     Write-Log "  - Storage Account: $StorageAccountName" -Level DRY-RUN
     Write-Log "  - Key Vault:       $KeyVaultName" -Level DRY-RUN
     Write-Log "  - Service Bus:     $ServiceBusName" -Level DRY-RUN
-    Write-Log "  - Redis Cache:     $RedisName" -Level DRY-RUN
+    Write-Log "  - Managed Redis:   $RedisName" -Level DRY-RUN
 }
 else {
     Write-Log "Deleting resource group: $ResourceGroupName"

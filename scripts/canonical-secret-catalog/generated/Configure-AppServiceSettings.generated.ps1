@@ -63,6 +63,9 @@ param(
     [string]$KvVaultUri,
 
     [Parameter(Mandatory = $true)]
+    [string]$RedisEndpoint,
+
+    [Parameter(Mandatory = $true)]
     [string]$ServiceBusFqns,
 
     [Parameter(Mandatory = $true)]
@@ -106,7 +109,6 @@ $settings = @(
     "Communication__WebhookSigningKey=$(Format-KvRef 'Communication-Webhook-SigningKey')",
     "Compose__Webhook__ClientState=$(Format-KvRef 'Compose-Webhook-ClientState')",
     "Compose__Webhook__SigningKey=$(Format-KvRef 'Compose-Webhook-SigningKey')",
-    "ConnectionStrings__Redis=$(Format-KvRef 'Redis-ConnectionString')",
     "CosmosPersistence__Endpoint=$CosmosEndpoint",
     "Customer__Id=$CustomerId",
     "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
@@ -130,7 +132,7 @@ $settings = @(
     "ManagedIdentity__ClientId=$UamiClientId",
     "Membership__EventPublisher__ServiceBusNamespace=$ServiceBusFqns",
     "Membership__JunctionUpdater__ServiceBusNamespace=$ServiceBusFqns",
-    "Redis__ConnectionString=$(Format-KvRef 'Redis-ConnectionString')",
+    "Redis__Endpoint=$RedisEndpoint",
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",

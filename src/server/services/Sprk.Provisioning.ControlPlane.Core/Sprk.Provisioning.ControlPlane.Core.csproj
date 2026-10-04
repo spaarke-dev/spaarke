@@ -230,12 +230,17 @@
          Reference lives on .Core so both .Api (future in-process integration
          tests) and .Worker (production dispatcher host) can compose against
          IDistributedCache without either project pinning its own version.
-         Cache is per-environment (Deploy-RedisCache.ps1); NEVER
-         per-customer per spec MUST rule (FR-12 rejects per-customer Redis).
+         The Worker's cache is the per-environment Redis (Deploy-RedisCache.ps1), not a
+         customer stamp's (stamps have their own since D-12; the Worker never reads them).
          Pinned to 10.0.9 for parity with Microsoft.Extensions.Logging
          .Abstractions 10.0.9 already floored by Azure.Core 1.60.0 in the
          test-project (prevents NU1605 warnings-as-errors on downgrades). -->
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.9" />
+    <!-- Task 242 (owner D12/D13): DispatchModule connects to an Entra-only Azure Managed Redis with the
+         Worker UAMI when Redis:Endpoint is set. Same versions as the BFF (StackExchange.Redis >= 2.10.1
+         required; latest 2.x pinned). -->
+    <PackageReference Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
 
     <!-- YamlDotNet — task 126 (Wave G-2 Batch G-2C) H4 real-values correctness
          gate. FileKvSecretManifest.cs parses scripts/canonical-secret-catalog/

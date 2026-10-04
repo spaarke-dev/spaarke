@@ -68,6 +68,13 @@ public sealed class BicepDeployOutputs
     /// </summary>
     public required string ServiceBusFullyQualifiedNamespace { get; init; }
 
+    /// <summary>
+    /// Customer Azure Managed Redis endpoint, <c>{host}:10000</c> (ARM output <c>redisEndpoint</c>) — written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.RedisEndpoint"/> and set by H4b as the BFF's
+    /// <c>Redis__Endpoint</c> (task 242). Not a secret: the cache has access keys disabled.
+    /// </summary>
+    public required string RedisEndpoint { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
 }

@@ -241,6 +241,7 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
             }
 
             var uamiVerified = (DataverseAppUserVerificationResult.Verified)uamiResult;
+            // The UAMI application user's systemuser.azureactivedirectoryobjectid.
             var observedObjectId = uamiVerified.AzureActiveDirectoryObjectId;
             var byteEqual = !string.IsNullOrWhiteSpace(observedObjectId)
                 && string.Equals(observedObjectId, request.UamiObjectId, StringComparison.OrdinalIgnoreCase);
@@ -250,7 +251,7 @@ public sealed class DataverseAppUserPairT2Probe : ITrapProbe
                 _logger.LogInformation(
                     "T2 probe PASSED (byte-equality verified): both BFF app-reg + UAMI resolve as Dataverse " +
                     "App Users on env={Env} (tenant={TenantId}, bffAppId={BffAppRegId}, uamiClientId={UamiClientId}) " +
-                    "AND the UAMI row's azureactivedirectoryobjectid byte-equals the expected principalId.",
+                    "AND the UAMI systemuser row's azureactivedirectoryobjectid byte-equals the expected principalId.",
                     request.DataverseUrl, request.TenantId, request.BffAppRegId, request.UamiClientId);
                 return new TrapVerificationOutcome.Passed(Kind);
             }

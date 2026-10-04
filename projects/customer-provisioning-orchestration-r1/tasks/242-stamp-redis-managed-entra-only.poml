@@ -4,7 +4,7 @@
     <title>Per-customer Redis → Azure Managed Redis B0, Entra-only (owner D12) — stamp module, H2a→H4b endpoint setting, no connection-string secret, BFF + Worker connect with their managed identity</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T242 (owner decision D12); code only — the live dev recreation is T242b</phase>
     <gate>startable (T249 ✅ removed the other `redis.bicep` consumer in stacks/; T226 ✅)</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF DI (`CacheModule.cs`, `Sprk.Bff.Api.csproj`), control-plane handlers and models (.cs), Bicep deployed by H2a, the canonical secret catalog and its generated files; auth (managed identity) change.</rigor-reason>
     <model-tier>opus</model-tier>

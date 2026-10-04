@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Cache.NullObjects;
 using Sprk.Bff.Api.Infrastructure.Caching;
@@ -15,9 +16,21 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// + Development (in-memory + Null-Object IConnectionMultiplexer per ADR-032),
 /// Redis-off + AllowInMemoryFallback + NOT Development (throw at startup),
 /// Redis-off + no fallback opt-in (throw at startup).
+/// <para>
+/// Redis-on authentication (task 242, owner D12/D13): with <c>Redis:Endpoint</c> set, the multiplexer authenticates
+/// only with the user-assigned managed identity (Microsoft Entra — Azure Managed Redis has access keys disabled) over
+/// RESP3, so the token refresh can re-authenticate the pub/sub connection (JobStatusService, membership invalidation).
+/// A connection string is used only when no endpoint is set AND the environment is Development or Testing.
+/// </para>
 /// </summary>
 public static class CacheModule
 {
+    /// <summary>The setting deployed environments must carry when Redis is enabled (named in startup errors).</summary>
+    internal const string EndpointSettingName = "Redis__Endpoint";
+
+    /// <summary>The setting that names the user-assigned managed identity (named in startup errors).</summary>
+    internal const string ClientIdSettingName = "ManagedIdentity__ClientId";
+
     /// <summary>
     /// Adds distributed cache (Redis or in-memory) and memory cache services.
     /// Production-like dev semantics: <c>AbortOnConnectFail=true</c> on the Redis-on
@@ -29,8 +42,26 @@ public static class CacheModule
         IConfiguration configuration,
         ILoggingBuilder logging,
         IHostEnvironment environment)
+        => services.AddCacheModule(
+            configuration,
+            logging,
+            environment,
+            (options, clientId) => StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithUserAssignedManagedIdentityAsync(options, clientId),
+            options => StackExchange.Redis.ConnectionMultiplexer.Connect(options));
+
+    /// <summary>
+    /// Test seam: the two network steps of the Redis-on branch — acquiring the Entra token for the managed identity
+    /// and connecting — are passed in, so mode selection is verifiable without Azure or a live Redis.
+    /// </summary>
+    internal static IServiceCollection AddCacheModule(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        ILoggingBuilder logging,
+        IHostEnvironment environment,
+        Func<StackExchange.Redis.ConfigurationOptions, string, Task> configureForManagedIdentity,
+        Func<StackExchange.Redis.ConfigurationOptions, StackExchange.Redis.IConnectionMultiplexer> connect)
     {
-        // Bind RedisOptions (Enabled, ConnectionString, InstanceName, AllowInMemoryFallback)
+        // Bind RedisOptions (Enabled, Endpoint, ConnectionString, InstanceName, AllowInMemoryFallback)
         var redisOptions = new RedisOptions();
         configuration.GetSection(RedisOptions.SectionName).Bind(redisOptions);
 
@@ -56,33 +87,9 @@ public static class CacheModule
             // ────────────────────────────────────────────────────────────────────
             // Branch (a): Redis-on — real connection, fail-fast.
             // ────────────────────────────────────────────────────────────────────
-            var redisConnectionString = configuration.GetConnectionString("Redis")
-                ?? configuration["Redis:ConnectionString"];
-
-            if (string.IsNullOrWhiteSpace(redisConnectionString))
-            {
-                throw new InvalidOperationException(
-                    "Redis is enabled but no connection string was found. " +
-                    "Set 'ConnectionStrings:Redis' or 'Redis:ConnectionString' in configuration. " +
-                    "In Azure App Service, this is typically a Key Vault reference of the form " +
-                    "'@Microsoft.KeyVault(VaultName=<vault>;SecretName=<secret>)'. " +
-                    "Verify the App Setting exists and that the Managed Identity has 'get' permission on the secret.");
-            }
-
-            StackExchange.Redis.ConfigurationOptions configOptions;
-            try
-            {
-                configOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConnectionString);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    "Failed to parse Redis connection string. " +
-                    "Source: 'ConnectionStrings:Redis' or 'Redis:ConnectionString' App Setting " +
-                    "(typically backed by a Key Vault reference). " +
-                    "Verify the secret value resolves to a valid StackExchange.Redis configuration string.",
-                    ex);
-            }
+            var (configOptions, authMode) = string.IsNullOrWhiteSpace(redisOptions.Endpoint)
+                ? BuildConnectionStringOptions(configuration, environment, isLocalLike)
+                : BuildManagedIdentityOptions(redisOptions.Endpoint, configuration, configureForManagedIdentity);
 
             // Production-like dev (FR-01): fail-fast on connect.
             configOptions.AbortOnConnectFail = true;
@@ -94,18 +101,18 @@ public static class CacheModule
             StackExchange.Redis.IConnectionMultiplexer connectionMultiplexer;
             try
             {
-                connectionMultiplexer = StackExchange.Redis.ConnectionMultiplexer.Connect(configOptions);
+                connectionMultiplexer = connect(configOptions);
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    "Failed to connect to Redis at startup (AbortOnConnectFail=true). " +
-                    "Connection-string source: 'ConnectionStrings:Redis' or 'Redis:ConnectionString' App Setting " +
-                    "(typically a Key Vault reference '@Microsoft.KeyVault(VaultName=<vault>;SecretName=<secret>)'). " +
-                    "Check (1) the Redis instance is running and reachable; " +
-                    "(2) the Key Vault secret resolves and contains a valid connection string; " +
-                    "(3) firewall / private-endpoint rules allow the App Service outbound IP; " +
-                    "(4) the configured password / access key matches the Redis instance.",
+                    $"Failed to connect to Redis at startup (AbortOnConnectFail=true, authentication: {authMode}). " +
+                    (authMode == RedisAuthMode.ManagedIdentity
+                        ? $"Check (1) '{EndpointSettingName}' is the cache's host:port (Azure Managed Redis listens on 10000); " +
+                          $"(2) the user-assigned identity named by '{ClientIdSettingName}' holds an access-policy assignment " +
+                          "on the cache's database; (3) the cache allows the App Service's network path."
+                        : "Check (1) the Redis instance is running and reachable; " +
+                          "(2) the connection string ('ConnectionStrings:Redis' or 'Redis:ConnectionString') is valid."),
                     ex);
             }
 
@@ -134,6 +141,9 @@ public static class CacheModule
             logger.LogInformation(
                 "Distributed cache: Redis enabled with instance name '{InstanceName}'",
                 redisOptions.InstanceName);
+
+            // Which authentication path is live (task 242). Names the mode only — never a key or connection string.
+            logger.LogInformation("Distributed cache: Redis authentication is {AuthMode}", authMode);
         }
         else if (redisOptions.AllowInMemoryFallback && isLocalLike)
         {
@@ -195,6 +205,112 @@ public static class CacheModule
         services.AddSingleton<ITenantCache, TenantCache>();
 
         return services;
+    }
+
+    /// <summary>Names of the two Redis authentication paths (logged at startup; never a credential).</summary>
+    internal static class RedisAuthMode
+    {
+        public const string ManagedIdentity = "managed identity (Microsoft Entra)";
+        public const string ConnectionString = "connection string (Development/Testing only)";
+    }
+
+    /// <summary>
+    /// Endpoint path: Microsoft Entra with the user-assigned managed identity, RESP3, TLS, no password.
+    /// </summary>
+    private static (StackExchange.Redis.ConfigurationOptions Options, string AuthMode) BuildManagedIdentityOptions(
+        string endpoint,
+        IConfiguration configuration,
+        Func<StackExchange.Redis.ConfigurationOptions, string, Task> configureForManagedIdentity)
+    {
+        // The same lookup every app-only consumer uses (ADR-028 A4 — one shared credential path).
+        var clientId = ManagedIdentityCredentialFactory.ResolveUamiClientId(configuration);
+        if (clientId is null)
+        {
+            throw new InvalidOperationException(
+                $"'{EndpointSettingName}' is set but no managed-identity client id is configured. Set " +
+                $"'{ClientIdSettingName}' to the client id of the user-assigned identity that holds the cache's " +
+                "access policy — Azure Managed Redis here has access keys disabled, so the managed identity is the " +
+                "only way in.");
+        }
+
+        StackExchange.Redis.ConfigurationOptions options;
+        try
+        {
+            options = StackExchange.Redis.ConfigurationOptions.Parse(endpoint);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"'{EndpointSettingName}' could not be parsed. It must be host:port of the Azure Managed Redis " +
+                "(e.g. name.region.redis.azure.net:10000).", ex);
+        }
+
+        if (!string.IsNullOrEmpty(options.Password) || !string.IsNullOrEmpty(options.User))
+        {
+            // Value deliberately not echoed: it carries a credential.
+            throw new InvalidOperationException(
+                $"'{EndpointSettingName}' contains a credential. It must be host:port only — the BFF authenticates " +
+                "with its managed identity; Redis keys and connection strings are not used outside Development/Testing.");
+        }
+
+        options.Ssl = true;
+        // RESP3: the token refresh re-authenticates every connection, including the pub/sub one (RESP2 cannot).
+        options.Protocol = StackExchange.Redis.RedisProtocol.Resp3;
+
+        try
+        {
+            configureForManagedIdentity(options, clientId).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not obtain a Microsoft Entra token for Redis with the managed identity named by " +
+                $"'{ClientIdSettingName}'. Check the identity is attached to this App Service and the value is its " +
+                "client id (not its object id).", ex);
+        }
+
+        return (options, RedisAuthMode.ManagedIdentity);
+    }
+
+    /// <summary>
+    /// Connection-string path: Development and Testing only, and only without an endpoint.
+    /// </summary>
+    private static (StackExchange.Redis.ConfigurationOptions Options, string AuthMode) BuildConnectionStringOptions(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        bool isLocalLike)
+    {
+        if (!isLocalLike)
+        {
+            throw new InvalidOperationException(
+                $"Redis is enabled but '{EndpointSettingName}' is not set (ASPNETCORE_ENVIRONMENT=" +
+                $"{environment.EnvironmentName}). Set '{EndpointSettingName}' to the Azure Managed Redis host:port " +
+                $"(the BFF connects with its managed identity, '{ClientIdSettingName}'). A Redis connection string " +
+                "('ConnectionStrings:Redis' / 'Redis:ConnectionString') is accepted only in Development and Testing.");
+        }
+
+        var redisConnectionString = configuration.GetConnectionString("Redis")
+            ?? configuration["Redis:ConnectionString"];
+
+        if (string.IsNullOrWhiteSpace(redisConnectionString))
+        {
+            throw new InvalidOperationException(
+                $"Redis is enabled but neither '{EndpointSettingName}' nor a connection string is set. " +
+                $"Set '{EndpointSettingName}' (managed identity) or, in Development/Testing only, " +
+                "'ConnectionStrings:Redis' / 'Redis:ConnectionString' (e.g. localhost:6379).");
+        }
+
+        try
+        {
+            return (StackExchange.Redis.ConfigurationOptions.Parse(redisConnectionString), RedisAuthMode.ConnectionString);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "Failed to parse the Redis connection string ('ConnectionStrings:Redis' or 'Redis:ConnectionString'). " +
+                "Verify it is a valid StackExchange.Redis configuration string.",
+                ex);
+        }
     }
 
     private static void DecorateDistributedCacheWithMetrics(IServiceCollection services)

@@ -261,15 +261,6 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: Email-WebhookSigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- Redis-ConnectionString (data-services) ----
-# Purpose: Azure Cache for Redis connection string.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Redis-ConnectionString' -Value 'placeholder-from-bicep-output' -Description 'Azure Cache for Redis connection string.' -Category 'data-services'
-} else {
-    Write-Host '  SKIP: Redis-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- SPE-CommunicationArchiveContainerId (spe) ----
 # Purpose: SPE communication-archive container ID (archived email / communication payloads).
 # Value source: from-bicep-output

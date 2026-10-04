@@ -86,8 +86,11 @@ public sealed class FileKvSecretManifestTests
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         success.Entries.Should().NotBeEmpty();
-        success.Entries.Count.Should().BeGreaterThanOrEqualTo(20,
-            "manifest.yaml (task 084) declared 26 entries as of 2026-08-19 — a drastically smaller count would indicate a parse regression");
+        // The catalog shrinks on purpose as keys are removed (owner D13): 21 entries on 2026-10-04 after task 242
+        // removed Redis-ConnectionString, of which the default secret-free reader serves 19. The floor guards
+        // against a parse regression (a handful of rows), not against deliberate removals.
+        success.Entries.Count.Should().BeGreaterThanOrEqualTo(15,
+            "the default reader served 19 entries on 2026-10-04 — a drastically smaller count would indicate a parse regression");
     }
 
     [Fact]
@@ -122,8 +125,7 @@ public sealed class FileKvSecretManifestTests
     [InlineData("TenantId", KvSecretValueSource.FromIntakeParameter)]
     [InlineData("BFF-API-ClientId", KvSecretValueSource.WrittenByEntraAppReg)]
     [InlineData("BFF-API-Audience", KvSecretValueSource.WrittenByEntraAppReg)]
-    // T226: Redis is written by customer.bicep from the customer's own cache.
-    [InlineData("Redis-ConnectionString", KvSecretValueSource.FromBicepOutput)]
+    // (Redis-ConnectionString removed by task 242: stamp Redis is Entra-only, no secret.)
     // T226: task 214's from-topology-constants — the reader rejected it before T226.
     [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromTopologyConstants)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]

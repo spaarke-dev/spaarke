@@ -79,12 +79,112 @@ public class CacheModuleTests
     // registration, so the branch needs a live Redis — passing `abortConnect=false` in the test's
     // connection string does nothing, because the production code overwrites it.
     //
-    // KNOWN GAP, stated honestly: its skip reason claimed coverage by
-    // `tests/manual/RedisValidationTests.ps1`. That claim was FALSE — the harness greps config and
-    // source text and never resolves a multiplexer. So nothing automated now asserts
-    // "Redis on => real multiplexer, not the null object". The Redis-OFF branches (b/c/d) and the
-    // ADR-032 `NullConnectionMultiplexer` semantics remain covered by the running tests below.
-    // Closing the gap needs a Redis container in the test lane, not a resurrected skip.
+    // Task 242 closed most of that gap: the network steps (Entra token for the managed identity, and the
+    // connect) are injected through the internal AddCacheModule overload, so the tests below assert the
+    // Redis-on mode selection and the options handed to the connect — including that the multiplexer the
+    // connect returns is the one DI serves. What stays untested here is a real handshake against Azure
+    // Managed Redis (task 242b verifies that live on dev).
+
+    private const string Endpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000";
+    private const string ClientId = "00000000-1111-2222-3333-555555555555";
+
+    private sealed class NetworkFakes
+    {
+        public string? ClientIdUsed { get; private set; }
+        public ConfigurationOptions? ConnectedWith { get; private set; }
+        public IConnectionMultiplexer Multiplexer { get; } =
+            new NullConnectionMultiplexer(NullLogger<NullConnectionMultiplexer>.Instance);
+
+        public Task Configure(ConfigurationOptions options, string clientId)
+        {
+            ClientIdUsed = clientId;
+            return Task.CompletedTask;
+        }
+
+        public IConnectionMultiplexer Connect(ConfigurationOptions options)
+        {
+            ConnectedWith = options;
+            return Multiplexer;
+        }
+    }
+
+    private static void AddWithFakes(
+        IServiceCollection services, Dictionary<string, string?> config, string environmentName, NetworkFakes fakes) =>
+        services.AddCacheModule(
+            BuildConfiguration(config),
+            GetLoggingBuilder(services),
+            new FakeHostEnvironment { EnvironmentName = environmentName },
+            fakes.Configure,
+            fakes.Connect);
+
+    [Fact]
+    public void Redis_On_Endpoint_AuthenticatesWithTheManagedIdentityOverResp3_AndServesThatMultiplexer()
+    {
+        var services = new ServiceCollection();
+        var fakes = new NetworkFakes();
+
+        AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["Redis:Endpoint"] = Endpoint,
+            ["ManagedIdentity:ClientId"] = ClientId,
+        }, Environments.Production, fakes);
+
+        fakes.ClientIdUsed.Should().Be(ClientId, "the token is requested for the configured user-assigned identity");
+        fakes.ConnectedWith!.Protocol.Should().Be(RedisProtocol.Resp3,
+            "RESP3 lets the token refresh re-authenticate the pub/sub connection");
+        fakes.ConnectedWith.Ssl.Should().BeTrue();
+        fakes.ConnectedWith.Password.Should().BeNullOrEmpty("the cache has access keys disabled");
+        fakes.ConnectedWith.AbortOnConnectFail.Should().BeTrue("FR-01 fail-fast is unchanged");
+        services.BuildServiceProvider().GetRequiredService<IConnectionMultiplexer>()
+            .Should().BeSameAs(fakes.Multiplexer);
+    }
+
+    [Fact]
+    public void Redis_On_Endpoint_WithoutManagedIdentityClientId_ThrowsNamingTheSetting()
+    {
+        var services = new ServiceCollection();
+
+        Action act = () => AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["Redis:Endpoint"] = Endpoint,
+        }, Environments.Production, new NetworkFakes());
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ManagedIdentity__ClientId*");
+    }
+
+    [Fact]
+    public void Redis_On_ConnectionStringOnly_Production_ThrowsNamingRedisEndpoint()
+    {
+        var services = new ServiceCollection();
+        var fakes = new NetworkFakes();
+
+        Action act = () => AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["ConnectionStrings:Redis"] = "localhost:6379",
+        }, Environments.Production, fakes);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Redis__Endpoint*");
+        fakes.ConnectedWith.Should().BeNull("nothing connects with a connection string outside Development/Testing");
+    }
+
+    [Fact]
+    public void Redis_On_ConnectionString_Development_ConnectsWithIt_WithoutManagedIdentity()
+    {
+        var services = new ServiceCollection();
+        var fakes = new NetworkFakes();
+
+        AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["ConnectionStrings:Redis"] = "localhost:6379",
+        }, Environments.Development, fakes);
+
+        fakes.ClientIdUsed.Should().BeNull();
+        fakes.ConnectedWith!.EndPoints.Should().ContainSingle().Which.ToString().Should().Contain("6379");
+    }
 
     [Fact]
     public void Redis_On_NoConnectionString_Throws()
@@ -107,7 +207,7 @@ public class CacheModuleTests
         // Assert
         act.Should()
             .Throw<InvalidOperationException>()
-            .WithMessage("*Redis is enabled but no connection string was found*");
+            .WithMessage("*Redis is enabled but neither 'Redis__Endpoint' nor a connection string is set*");
     }
 
     // ===================================================================

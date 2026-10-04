@@ -113,6 +113,8 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.KeyVaultName.Should().Be("sprk-acme-prod-kv");
         success.Outputs.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
         success.Outputs.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
+        // Task 242 — the Managed Redis endpoint, verbatim (host:10000).
+        success.Outputs.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
         // Honest-empty per the file-header "BLOCKING DISCOVERY" note — customer.bicep
         // does not currently produce these; the runner must NOT fabricate values.
         success.Outputs.UserAssignedIdentityObjectId.Should().BeEmpty();
@@ -389,6 +391,7 @@ public sealed class ArmDeploymentRunnerTests
                   "keyVaultName": { "type": "String", "value": "sprk-acme-prod-kv" },
                   "keyVaultUri": { "type": "String", "value": "https://sprk-acme-prod-kv.vault.azure.net/" },
                   "serviceBusEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-sbus.servicebus.windows.net:443/" },
+                  "redisEndpoint": { "type": "String", "value": "sprk-acme-prod-redis.westus2.redis.azure.net:10000" },
                   "signalrEnabled": { "type": "Bool", "value": false }
                 }
                 """));

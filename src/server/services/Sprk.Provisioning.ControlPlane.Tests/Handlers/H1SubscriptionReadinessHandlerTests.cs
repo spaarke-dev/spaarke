@@ -50,6 +50,14 @@ public sealed class H1SubscriptionReadinessHandlerTests
     // ---------- AC-1 SpaarkeOwned happy path ----------
 
     [Fact]
+    public void DefaultRequiredResourceProviders_IncludeMicrosoftCache()
+    {
+        // Task 242: every stamp deploys Azure Managed Redis (Microsoft.Cache/redisEnterprise). Without the
+        // registration H2a's deployment fails MissingSubscriptionRegistration on a fresh subscription.
+        new SubscriptionReadinessOptions().RequiredResourceProviders.Should().Contain("Microsoft.Cache");
+    }
+
+    [Fact]
     public async Task AC1_SpaarkeOwnedHappyPath_ReturnsSuccessAndEnqueuesH2a()
     {
         var run = BuildRun(tenancy: "SpaarkeOwned");

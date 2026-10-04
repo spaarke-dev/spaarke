@@ -199,7 +199,7 @@ prereqs:
     scope: once_per_subscription
     frequency: once per sub (fresh subs)
     owner: Spaarke platform admin
-    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success.
+    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success. Microsoft.Cache is for Azure Managed Redis (Microsoft.Cache/redisEnterprise), which every customer stamp deploys (task 242); L2 handler H1 registers it by default.
     check_recipe:
       cli: |
         for ns in Microsoft.Web Microsoft.Storage Microsoft.KeyVault Microsoft.CognitiveServices Microsoft.Search \

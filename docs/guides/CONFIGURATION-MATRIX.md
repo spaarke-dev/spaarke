@@ -130,8 +130,9 @@ Options class: `RedisOptions` (`Configuration/RedisOptions.cs`)
 | Setting | Default | Location | Description |
 |---------|---------|----------|-------------|
 | `Redis:Enabled` | `false` | Env Var / appsettings | Enable Redis (false = in-memory fallback) |
-| `Redis:ConnectionString` | -- | Key Vault | Redis connection string |
-| `Redis:InstanceName` | `sdap:` | appsettings | Cache key prefix |
+| `Redis:Endpoint` | -- | App Setting (plain) | Azure Managed Redis `host:10000`. When set, the BFF authenticates with its managed identity (`ManagedIdentity:ClientId`) over RESP3; required with `Redis:Enabled=true` outside Development/Testing (task 242) |
+| `Redis:ConnectionString` | -- | user-secrets / local config | Development/Testing only, and only without `Redis:Endpoint` (e.g. `localhost:6379`); refused elsewhere |
+| `Redis:InstanceName` | `spaarke:` | appsettings | Cache key prefix |
 | `Redis:DefaultExpirationMinutes` | `60` | appsettings | Sliding expiration |
 | `Redis:AbsoluteExpirationMinutes` | `1440` | appsettings | Absolute expiration (24h) |
 
@@ -341,7 +342,7 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 | Secret Name | Used By | Description |
 |-------------|---------|-------------|
 | `ServiceBus-ConnectionString` | `ConnectionStrings:ServiceBus`, `ServiceBus:ConnectionString` | Azure Service Bus |
-| `Redis-ConnectionString` | `ConnectionStrings:Redis` | Redis cache |
+| ~~`Redis-ConnectionString`~~ | ~~`ConnectionStrings:Redis`~~ | Retired by task 242 — Redis is Entra-only; use the plain `Redis:Endpoint` setting |
 | ~~`BFF-API-ClientSecret`~~ | ~~`Dataverse:ClientSecret`, `AgentToken:ClientSecret`~~ | 🔴 **All DELETED 2026-08-24** (task 033). BFF identity is secret-free; use `Graph:Credentials:Order=[ManagedIdentityFederated]` |
 | `Dataverse-ServiceUrl` | `Dataverse:ServiceUrl` | Dataverse environment URL |
 | `ai-openai-endpoint` | `DocumentIntelligence:OpenAiEndpoint` | Azure OpenAI endpoint |
@@ -382,7 +383,7 @@ After changing configuration:
 | CORS errors in browser console | Missing allowed origin | Add origin to `Cors:AllowedOrigins:N` App Setting |
 | Key Vault reference shows literal `@Microsoft.KeyVault(...)` | App Service Key Vault integration not configured | Enable managed identity and Key Vault reference resolution on the App Service |
 | Graph calls fail with 401 | `Graph:ClientSecret` expired or `ManagedIdentity:Enabled` mismatch | Rotate secret in Key Vault or verify MI config |
-| Redis timeout errors | `Redis:ConnectionString` invalid or Redis unreachable | Verify connection string; set `Redis:Enabled=false` to fall back to in-memory |
+| Redis startup or timeout errors | `Redis:Endpoint` wrong, the managed identity lacks the cache's access policy, or Redis unreachable | Check `Redis:Endpoint` is host:10000 and `ManagedIdentity:ClientId` names the identity with the access-policy assignment; in Development only, `Redis:Enabled=false` + `AllowInMemoryFallback=true` falls back to in-memory |
 
 ---
 

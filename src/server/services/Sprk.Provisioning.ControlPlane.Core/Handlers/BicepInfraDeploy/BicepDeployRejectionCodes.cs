@@ -15,8 +15,8 @@
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (upgrade
 //     mode): defaults to REJECT + escalate on drift with report at
 //     runNotes/drift-{customerId}-{timestamp}.md.
-//   - projects/customer-provisioning-orchestration-r1/spec.md § MUST rules:
-//     Redis MUST NOT be provisioned per-customer (Q-E FR-12).
+//   - (Retired: the Q-E FR-12 "no per-customer Redis" rule — D-12 made Redis
+//     per-customer; see ArmTemplateInspector's RETIRED RULE note.)
 //   - projects/customer-provisioning-orchestration-r1/design.md §4B T1 —
 //     ARM-verify keyVaultReferenceIdentity on both prod + staging slots.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback

@@ -149,6 +149,13 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - A `sitecontainers` environment variable's `value` is the **name of a Worker app setting**, never a literal (Microsoft's contract — a literal arrives empty; G30). The sidecar binds its port even when a setting is missing, so it can never hold the Worker at 503.
 - One-time per tenant: deployment guide §4.2.1 / prerequisite `PRQ-E-15`.
 
+## Stamp Redis — Azure Managed Redis, Microsoft Entra only (BINDING, task 242 / owner D12–D13)
+
+- **MUST** deploy every stamp's Redis from `modules/redis.bicep`: `Microsoft.Cache/redisEnterprise@2025-07-01`, `Balanced_B0`, high availability on (D12), database `default` with `accessKeysAuthentication: Disabled`, OSSCluster, AllKeysLRU, port 10000, and a `databases/accessPolicyAssignments` entry for the **stamp UAMI only**.
+- **MUST NOT** add `listKeys()`, a Redis key/connection-string output, a `Redis-ConnectionString` catalog secret, or a `Redis__ConnectionString` / `ConnectionStrings__Redis` setting for a stamp. The endpoint is the plain setting `Redis__Endpoint` (`host:10000`) — set by `customer.bicep` and by H4b (`from-h2a-output:redis_endpoint`).
+- The BFF (`CacheModule`) and the L2 Worker (`DispatchModule`) authenticate with their user-assigned identity (`ManagedIdentity__ClientId`) over RESP3 whenever `Redis__Endpoint` is set, and **refuse to start** on a connection string without it outside Development/Testing — so a deployed BFF/Worker MUST carry `Redis__Endpoint` before it runs a T242+ build (per-env cut-over: task 242b, endpoint added first, connection string removed only after master carries T242).
+- H1 registers `Microsoft.Cache` by default. Managed Redis has no scale-down and HA is fixed at create — size up only on a measured memory metric.
+
 ## Handler idempotency + drift-detection
 
 - Every handler MUST be idempotent. Second run of the same handler against the same customer resources produces the same end state (assuming no external drift).

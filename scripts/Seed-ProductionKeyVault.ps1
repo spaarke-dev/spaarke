@@ -120,12 +120,11 @@ Set-VaultSecret -Name "BFF-API-Audience" `
 
 # === Data Services ===
 Write-Host ""
-Write-Host "[3/7] Data Services (Redis, Service Bus, Dataverse)" -ForegroundColor Yellow
+Write-Host "[3/7] Data Services (Service Bus, Dataverse)" -ForegroundColor Yellow
 
-Set-VaultSecret -Name "Redis-ConnectionString" `
-    -Value "placeholder-redis-not-yet-provisioned" `
-    -Description "Azure Cache for Redis connection string (update after Redis provisioning)" `
-    -IsPlaceholder $true
+# Redis-ConnectionString — NOT seeded (task 242, owner D12/D13): Spaarke Redis is Azure Managed Redis with
+# access keys disabled; the BFF connects with its managed identity using the plain Redis__Endpoint app
+# setting (Configure-ProductionAppSettings.ps1 -RedisEndpoint). There is no Redis secret to seed.
 
 # ── A38c secret-free marker gate ────────────────────────────────────────────────────────────
 # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed 2026-08-24).
@@ -260,7 +259,7 @@ Write-Host "  Real secrets: $($totalCount - $placeholderCount)" -ForegroundColor
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Gray
 Write-Host "    1. Run Register-EntraAppRegistrations.ps1 to populate Entra ID secrets"
-Write-Host "    2. Provision Redis, Service Bus, and update connection strings"
+Write-Host "    2. Provision Azure Managed Redis (redis-prod.bicepparam) and Service Bus; pass the Redis endpoint to Configure-ProductionAppSettings.ps1 -RedisEndpoint"
 Write-Host "    3. Get AI service keys and update ai-* secrets"
 Write-Host "    4. Re-deploy BFF API (staging slot health check should now pass)"
 Write-Host ""

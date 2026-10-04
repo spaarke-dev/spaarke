@@ -508,6 +508,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ServiceBusFullyQualifiedNamespace = hasRoot
                 ? ServiceBusFullyQualifiedNamespaceFromEndpoint(ReadString(root, "serviceBusEndpoint"))
                 : string.Empty,
+            RedisEndpoint = hasRoot ? ReadString(root, "redisEndpoint") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
     }

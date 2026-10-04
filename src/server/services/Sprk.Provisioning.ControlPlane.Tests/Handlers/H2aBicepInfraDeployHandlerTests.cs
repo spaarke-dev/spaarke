@@ -106,6 +106,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
         repo.LastWrittenRun.InterStepState.MiResourceId.Should().Be(ExpectedUamiRid);
         repo.LastWrittenRun.InterStepState.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
+        // Task 242 — the Managed Redis endpoint H4b sets as Redis__Endpoint.
+        repo.LastWrittenRun.InterStepState.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -702,6 +704,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             KeyVaultName = "kv",
             KeyVaultUri = "https://kv.vault.azure.net/",
             ServiceBusFullyQualifiedNamespace = "ns.servicebus.windows.net",
+            RedisEndpoint = "r.westus2.redis.azure.net:10000",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -720,6 +723,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.KeyVaultName))]
     [InlineData(nameof(BicepDeployOutputs.KeyVaultUri))]
     [InlineData(nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace))]
+    [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -742,6 +746,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             KeyVaultUri = blankField == nameof(BicepDeployOutputs.KeyVaultUri) ? "" : complete.KeyVaultUri,
             ServiceBusFullyQualifiedNamespace = blankField == nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace)
                 ? "" : complete.ServiceBusFullyQualifiedNamespace,
+            RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -1027,6 +1032,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         KeyVaultName = "sprk-acme-prod-kv",
         KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/",
         ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net",
+        RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
         SignalRDeployed = signalRDeployed,
     };
 

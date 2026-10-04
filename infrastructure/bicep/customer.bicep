@@ -8,19 +8,12 @@
 //   - Storage Account (temp files, document processing)
 //   - Key Vault (customer-specific secrets)
 //   - Service Bus namespace (job queues)
+//   - Azure Managed Redis (per-customer cache, Microsoft Entra only — see REDIS CACHE below)
 //
-// Note (UPDATED 2026-08-19, task 128b -- E2 reconciliation): per-customer Redis
-// WAS deprecated per Q-E Architecture 1 / FR-12 (spaarke-redis-cache-remediation-r1
-// + r2, which removed this template's Redis module call in r2 task 020). Owner
-// reconciliation (2026-08-19): this template is confirmed (task 129 background) to
-// be the SOLE template deployed for the Model2Dedicated branch, where env=customer
-// 1:1 -- so "per-environment" and "per-customer" are the same unit for THIS
-// template. modules/redis.bicep is wired unconditionally below (see REDIS CACHE
-// section) as the per-environment Redis for that customer's dedicated environment.
-// Model 1 (shared/trial) Redis is UNAFFECTED -- it remains per-env-shared via
-// scripts/Deploy-RedisCache.ps1 and has no code path through this file. See
-// spec.md v3.6 FR-04 / § MUST Rules and design.md v3.6 §7.2 for the Model 1 vs
-// Model 2 distinction this reconciliation introduced.
+// Note (Redis): every customer stamp has its own Redis (D-12, 2026-09-28: Redis access control is per
+// instance, so a shared cache cannot separate customers). Since task 242 (owner D12/D13, 2026-09-30) it is
+// Azure Managed Redis Balanced_B0 with high availability, access keys disabled, reached by the stamp UAMI
+// through an access-policy assignment. No Redis key, connection string or Key Vault secret exists for a stamp.
 
 targetScope = 'subscription'
 
@@ -122,15 +115,15 @@ param acsWebhookEndpointUrl string = ''
 @allowed(['B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
 param appServiceSku string = 'S1'
 
-// --- Redis Cache options (Phase C — customer-provisioning-orchestration-r1, task 128b;
-// E2 reconciliation — per-customer Redis for Model2Dedicated, see header note) ---
+// --- Azure Managed Redis options (task 242, owner D12) ---
 
-@description('SKU for the per-customer Redis Cache. Default Basic (dev-cost-optimized, ~$15/mo) per redis-dev.bicepparam precedent — single overridable default, not environment-conditional Bicep logic; override via CLI --parameters for staging/prod, matching appServiceSku default S1 being overridden the same way.')
-@allowed(['Basic', 'Standard', 'Premium'])
-param redisSku string = 'Basic'
+@description('Azure Managed Redis SKU for the per-customer cache. Owner D12: Balanced_B0. Size up only on a measured memory metric — Managed Redis has no scale-down.')
+@allowed(['Balanced_B0', 'Balanced_B1', 'Balanced_B3', 'Balanced_B5', 'Balanced_B10'])
+param redisSkuName string = 'Balanced_B0'
 
-@description('SKU capacity (family size) for the per-customer Redis Cache. Default 0 (Basic C0, cheapest tier) per redis-dev.bicepparam precedent.')
-param redisCapacity int = 0
+@description('High availability for the per-customer cache. Owner D12: Enabled. Fixed at create time — changing it on an existing stamp is rejected by Azure.')
+@allowed(['Enabled', 'Disabled'])
+param redisHighAvailability string = 'Enabled'
 
 // --- Tags ---
 
@@ -203,9 +196,7 @@ var logAnalyticsName = 'sprk-${customerId}-${environmentName}-logs'
 // Document Intelligence: sprk-{customer}-{env}-docintel (per design.md §7.1 naming convention).
 var docIntelligenceName = 'sprk-${customerId}-${environmentName}-docintel'
 
-// Redis Cache: sprk-{customer}-{env}-redis (task 128b / E2 reconciliation -- not yet a
-// canonical design.md §7.1 row; matches the existing SignalR/OpenAI/AI Search naming
-// shape used elsewhere in this file. See design.md v3.6 §7.1 amendment.)
+// Azure Managed Redis: sprk-{customer}-{env}-redis (task 128b naming; Managed Redis since task 242).
 var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
@@ -342,10 +333,8 @@ module serviceBus 'modules/service-bus.bicep' = {
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
 // (Wave C2's multi-stack plan is moot: this is the template H2a deploys — Model 2 today, Model 1
 // with tasks 225b + 228 (D-12); task 225a retired stacks/model1-shared.bicep.)
-// Redis IS now provisioned per-customer (task 128b, E2 reconciliation) -- see the
-// REDIS CACHE section below + the updated header note. Redis is not co-located
-// with Cosmos DB in this file; it is grouped with the other supporting-infra
-// resources (Document Intelligence + Monitoring) after AI Search per §7.6.
+// Redis is per-customer too (see the REDIS CACHE section below + the header note). It is
+// grouped with the other supporting-infra resources after AI Search per §7.6.
 // Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.
 // ============================================================================
 
@@ -447,26 +436,13 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
-// REDIS CACHE (Phase C — customer-provisioning-orchestration-r1, task 128b;
-// module authored by spaarke-redis-cache-remediation-r1 task 020, FR-09
-// hardened). Per the owner's E2 reconciliation (2026-08-19; see the updated
-// header note above): this template is confirmed to be the SOLE template
-// deployed for the Model2Dedicated branch, where "per-environment" and
-// "per-customer" are the same unit -- so modules/redis.bicep is wired
-// UNCONDITIONALLY (no feature-gate param), matching Cosmos DB's unconditional-
-// invocation precedent in this file. Model 1 (shared/trial) is NOT affected --
-// it has no code path through this file and continues to use the per-env-
-// shared Redis via scripts/Deploy-RedisCache.ps1. `redisSku`/`redisCapacity`
-// default to 'Basic'/0 (dev-appropriate cost posture per redis-dev.bicepparam
-// precedent, same pattern as `appServiceSku`'s single overridable default --
-// staging/prod override at deploy time via CLI `--parameters`, not env-
-// conditional Bicep logic). No UAMI RBAC param -- Redis auth is access-key
-// based, not MI-based. No `subnetId`/`staticIP` override -- this file has no
-// VNet module; public network access matches Cosmos DB / OpenAI / AI Search's
-// own public-endpoint posture here. Raw `redisPrimaryKey`/`redisConnectionString`
-// are intentionally NOT echoed as top-level outputs (secret-output-hygiene
-// precedent from task 128) -- future task-129-style kv-secrets wiring can
-// reference `redis.outputs.*` symbolically in-file.
+// REDIS CACHE — Azure Managed Redis, Microsoft Entra only (task 242, owner D12/D13)
+// Balanced_B0 with high availability by default; one database ('default', port 10000,
+// OSSCluster, AllKeysLRU) with access keys DISABLED. The stamp UAMI is the only identity
+// with a data-access policy: the BFF runs as the UAMI (ADR-028) and connects with
+// Microsoft.Azure.StackExchangeRedis over RESP3 using `Redis__Endpoint` (host:10000, a
+// plain app setting — not a secret). Public endpoint, matching Cosmos DB / OpenAI /
+// AI Search in this file (no VNet module here).
 // ============================================================================
 
 module redisCache 'modules/redis.bicep' = {
@@ -475,8 +451,11 @@ module redisCache 'modules/redis.bicep' = {
   params: {
     redisName: redisCacheName
     location: location
-    sku: redisSku
-    capacity: redisCapacity
+    skuName: redisSkuName
+    highAvailability: redisHighAvailability
+    accessPolicyPrincipalIds: [
+      uami.outputs.principalId
+    ]
     tags: tags
   }
 }
@@ -635,9 +614,11 @@ module bffApi 'modules/app-service.bicep' = {
       AZURE_CLIENT_ID: uami.outputs.clientId
       ManagedIdentity__ClientId: uami.outputs.clientId
 
-      // Redis (per-customer, task 128b)
+      // Redis (per-customer Azure Managed Redis, Entra only — task 242). The BFF authenticates
+      // with the UAMI (ManagedIdentity__ClientId above); there is no Redis key or connection
+      // string. H4b writes the same Redis__Endpoint value (per_env_settings, from H2a's output).
       Redis__Enabled: 'true'
-      Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Redis-ConnectionString)'
+      Redis__Endpoint: redisCache.outputs.redisEndpoint
       Redis__InstanceName: 'spaarke:' // Prefix for key isolation
 
       // AI Services — endpoints direct from sibling-module outputs; auth is the stamp
@@ -739,17 +720,16 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 // therefore the actual value-writer H4 depends on to no-op/succeed on these
 // entries instead of failing QuarantineRequired on a fresh customer.
 //
-// Resolvable (6) -- direct sibling-module output references:
+// Resolvable (5) -- direct sibling-module output references:
 //   AiSearch-Endpoint, AppInsights-ConnectionString, AzureOpenAI-Endpoint,
-//   Communication-WebhookUrl, DocumentIntelligence-Endpoint, Redis-ConnectionString
+//   Communication-WebhookUrl, DocumentIntelligence-Endpoint
 //
 // REMOVED FROM THE PROCESS (T226, owner 2026-09-30) -- the BFF reaches these services
 // with the stamp UAMI, so no key is written to the vault for them:
 //   AiSearch--AdminKey, ServiceBus-ConnectionString, AzureOpenAI-ApiKey;
-//   Storage-ConnectionString (no BFF reader at all); DocumentIntelligence-ApiKey (T243).
-// Keys that stay for now (owner D13 keyless stamps, implemented incrementally):
-//   Redis-ConnectionString -- the BFF has no Entra path for Redis today; the Azure
-//     Managed Redis + Entra-only move is plan task T242.
+//   Storage-ConnectionString (no BFF reader at all); DocumentIntelligence-ApiKey (T243);
+//   Redis-ConnectionString (T242: Azure Managed Redis with access keys disabled — the BFF
+//     connects with the UAMI using the plain Redis__Endpoint app setting).
 //
 // Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
@@ -778,7 +758,6 @@ var kvSecretValues = {
   'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
   'Communication-WebhookUrl': '${bffApi.outputs.appServiceUrl}/api/communications/incoming-webhook'
   'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
-  'Redis-ConnectionString': redisCache.outputs.redisConnectionString
 }
 
 module kvSecrets '../../scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep' = {
@@ -853,12 +832,13 @@ output appInsightsId string = monitoring.outputs.appInsightsId
 output logAnalyticsName string = monitoring.outputs.logAnalyticsName
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
 
-// --- Redis Cache (task 128b / Phase C — E2 reconciliation). Raw
-// `redisPrimaryKey`/`redisConnectionString` are intentionally NOT echoed here —
-// flows through a future kv-secrets wiring task instead (task 129 territory). ---
+// --- Azure Managed Redis (task 242). Output name `redisEndpoint` is LOAD-BEARING:
+// ArmDeploymentRunner.MapOutputs reads it into BicepDeployOutputs.RedisEndpoint → InterStepState →
+// H4b's Redis__Endpoint. Not a secret (host:port); the cache has no keys. ---
 output redisName string = redisCache.outputs.redisName
 output redisHostName string = redisCache.outputs.redisHostName
 output redisPort int = redisCache.outputs.redisPort
+output redisEndpoint string = redisCache.outputs.redisEndpoint
 
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName

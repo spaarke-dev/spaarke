@@ -66,8 +66,9 @@
 //   Level 1 (Service Bus MessageId dedup): the H0 chain / future reconciler
 //           computes deterministic MessageId per (HandlerId, RunId, CustomerId,
 //           paramHash); SB duplicate-detection collapses re-enqueues.
-//   Level 2 (Redis IdempotencyService): NOT YET IMPLEMENTED in L2 (design.md
-//           §4.1 preamble; parity with H0 / H0.5).
+//   Level 2 (Redis dispatch idempotency): applied by the dispatcher before the
+//           handler runs (DispatchModule / DispatchIdempotencyService, task 105),
+//           not inside this handler.
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H2a",
 //           IdempotencyKey==infra-{customerId}-{bicepVer}). Match ⇒ Success
@@ -702,6 +703,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.KeyVaultName, nameof(BicepDeployOutputs.KeyVaultName));
         Check(outputs.KeyVaultUri, nameof(BicepDeployOutputs.KeyVaultUri));
         Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
+        Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
         return missing;
     }
 
@@ -811,6 +813,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.KeyVaultUri = outputs.KeyVaultUri;
         run.InterStepState.MiResourceId = outputs.UserAssignedIdentityResourceId;
         run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
+        run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

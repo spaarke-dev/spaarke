@@ -240,27 +240,13 @@ secrets:
   # ==========================================================================
   # Data services (Redis)
   # ==========================================================================
-
-  - canonical_name: 'Redis-ConnectionString'
-    category: 'data-services'
-    purpose: 'Azure Cache for Redis connection string.'
-    consumers:
-      - 'BFF: ConnectionStrings:Redis / Redis:ConnectionString'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: 'Grandfathered PascalCase per §7.9 R2.'
-    aliases:
-      # Lowercase-hyphenated form used in infrastructure/bicep/stacks/*.bicep.
-      # Alias-collapse target — Bicep should emit the canonical form.
-      - 'redis-connection-string'
-    # T226 (2026-09-30): written by customer.bicep's kvSecrets module from the
-    # customer's OWN Redis (access key; the BFF has no Entra path for Redis today).
-    # Long-term Redis product/auth decision tracked separately (plan §7 T242).
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'ConnectionStrings__Redis'
-      - 'Redis__ConnectionString'
-    tags: ['data-services', 'connection-string']
+  # Redis-ConnectionString — REMOVED by task 242 (owner D12/D13, 2026-10-04). A customer
+  # stamp's Redis is Azure Managed Redis with access keys DISABLED: there is no key, no
+  # connection string and no secret. The BFF connects with the stamp UAMI using the plain
+  # app setting Redis__Endpoint (per_env_settings below, from H2a's `redisEndpoint` output).
+  # Do NOT re-add a Redis secret here. (The per-environment platform vault entry the L2
+  # Worker reads is seeded by scripts/provisioning/Seed-PlatformKeyVault.ps1, not by this
+  # catalog; task 242b retires it.)
 
   # ==========================================================================
   # SharePoint Embedded (SPE)
@@ -865,6 +851,19 @@ per_env_settings:
     notes: >-
       Auth-v4 §10.2 entry 6. Shares the service_bus_fqns source with entries
       4 and 5.
+
+  - key: 'Redis__Endpoint'
+    per_env_source: 'from-h2a-output:redis_endpoint'
+    iOptionsModule: 'RedisOptions'
+    required: true
+    notes: >-
+      Task 242 (owner D12/D13). host:10000 of the stamp's Azure Managed Redis
+      (customer.bicep output `redisEndpoint`). Not a secret: the cache has
+      access keys disabled and the BFF authenticates with its UAMI
+      (ManagedIdentity__ClientId) over RESP3. NEVER a connection string, NEVER
+      a Key Vault reference. With Redis enabled outside Development/Testing the
+      BFF refuses to start without it. customer.bicep sets the same value on
+      deploy; H4b keeps it on upgrades.
 
   - key: 'DocumentIntelligence__Enabled'
     per_env_source: 'literal'

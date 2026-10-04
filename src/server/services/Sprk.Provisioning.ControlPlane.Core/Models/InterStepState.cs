@@ -153,6 +153,16 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H2a)]
     public string? ServiceBusFullyQualifiedNamespace { get; set; }
 
+    /// <summary>
+    /// The customer Azure Managed Redis endpoint, <c>{host}:10000</c> (H2a output — ARM output <c>redisEndpoint</c>).
+    /// H4b sets it as the BFF's <c>Redis__Endpoint</c>; the BFF connects with the stamp UAMI (no key exists).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 242, owner D12/D13).</remarks>
+    [JsonPropertyName("redisEndpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? RedisEndpoint { get; set; }
+
     /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

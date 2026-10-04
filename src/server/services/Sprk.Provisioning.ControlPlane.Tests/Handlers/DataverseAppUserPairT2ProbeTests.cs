@@ -324,12 +324,12 @@ public sealed class DataverseAppUserPairT2ProbeTests
     [Fact]
     public async Task ProbeAsync_ByteEqualityObservedNull_ReturnsFailed()
     {
-        // Verifier returned no azureactivedirectoryobjectid at all (e.g. a
+        // Verifier returned no systemuser.azureactivedirectoryobjectid at all (e.g. a
         // pre-A41 row that was never explicitly set) — also a mismatch, not a
         // pass, because the app-only call would still 401 for the same reason.
         var verifier = new FakeVerifier(
             bff: new DataverseAppUserVerificationResult.Verified("sys-bff-1"),
-            uami: new DataverseAppUserVerificationResult.Verified("sys-uami-1", AzureActiveDirectoryObjectId: null));
+            uami: new DataverseAppUserVerificationResult.Verified("systemuser-uami-1", AzureActiveDirectoryObjectId: null));
         var probe = BuildProbe(verifier);
 
         var outcome = await probe.ProbeAsync(BuildRequestWithUamiObjectId(UamiObjectId), CancellationToken.None);

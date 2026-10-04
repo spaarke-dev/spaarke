@@ -109,7 +109,7 @@ The Model 1 / Model 2 columns are gone deliberately: **the disposition is the sa
 | **App Service Plan** | Compute for BFF API | **Dedicated per customer** | A plan cannot span subscriptions — forced by the per-customer subscription. Largest single per-customer fixed cost |
 | **App Service** | Sprk.Bff.Api hosting | **One BFF app per customer** | Each BFF is bound to one Dataverse environment through per-deployment config (`AzureAd:TenantId`, Dataverse URL) |
 | **Key Vault** | Secrets, certificates | **Dedicated per customer** | Holds secrets; vault-scoped RBAC; ~free to dedicate |
-| **Redis Cache** | Token caching, sessions | **Dedicated per customer, at Standard tier** | Auth is **per-instance, not per-keyspace** — a connection string reaches the whole keyspace. Standard gives SLA + replication; Premium's exclusives (VNet injection — unused and Microsoft-deprecated, RDB persistence, geo-replication, clustering) are not required, since a Redis loss costs a cold start, not data |
+| **Redis Cache** | Token caching, sessions | **Dedicated per customer — Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12, task 242) | Auth is **per-instance, not per-keyspace** — any identity with access reaches the whole keyspace, so each customer gets its own cache. Access keys are disabled; the stamp UAMI holds the only access-policy assignment. Azure Cache for Redis (Basic/Standard/Premium) retires 2028-09-30 and blocks new-customer creation since 2026-04-01. A Redis loss costs a cold start, not data |
 | **Service Bus** | Job queue | **Dedicated namespace per customer** | Already per-customer; ~free |
 | **Storage** | Document/temp bytes | **Dedicated per customer** | Holds data at rest |
 | **Cosmos DB** | Audit, sessions, memory | **Dedicated account per customer** | Holds data at rest. Serverless ⇒ no fixed floor. ⚠️ A `/tenantId` partition does **not** separate Model 1 customers |
@@ -186,7 +186,7 @@ single full-stack deployment into that customer's own subscription and resource 
 2. **Model 2 only** — obtain H0.5 admin consent and establish Azure Lighthouse delegation. *Model 1 requires
    neither: Spaarke already owns the tenant.*
 3. **Deploy the full per-customer Azure stack via Bicep** (`customer.bicep`, deployed by L2 handler H2a) —
-   App Service Plan + BFF App Service, Key Vault, Redis (Standard), Service Bus, Storage, Cosmos,
+   App Service Plan + BFF App Service, Key Vault, Redis (Azure Managed Redis B0, Entra only), Service Bus, Storage, Cosmos,
    App Insights / Log Analytics, Azure OpenAI, AI Search, Document Intelligence.
 4. **Create App Registrations** and the per-customer BFF identity (applies to **both** models).
 5. **Create the SPE Container**, import the Power Platform managed solutions, create the Application User,

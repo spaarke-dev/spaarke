@@ -30,9 +30,10 @@
 //   - Microsoft.ManagedServices (Lighthouse — used by existing
 //                                CheckLighthouseDelegationAsync for Model 2)
 //   - Microsoft.Insights       (App Insights baseline)
-//   Redis (Microsoft.Cache) is NOT included — per Q-E FR-12 Redis is
-//   per-environment, not per-customer; H2a's template inspector explicitly
-//   rejects a per-customer Redis. SignalR (Microsoft.SignalRService) is
+//   - Microsoft.Cache          (Azure Managed Redis — every stamp has its own
+//                                cache since D-12; Microsoft.Cache/redisEnterprise
+//                                since task 242)
+//   SignalR (Microsoft.SignalRService) is
 //   conditional (ADR-032 feature flag) and NOT part of the always-required
 //   list — its Bicep module will register on-demand if a customer's
 //   signalrEnabled flag flips true.
@@ -61,6 +62,7 @@ public sealed class SubscriptionReadinessOptions
         "Microsoft.ManagedIdentity",
         "Microsoft.ManagedServices",
         "Microsoft.Insights",
+        "Microsoft.Cache",
     };
 
     /// <summary>

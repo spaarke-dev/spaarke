@@ -149,6 +149,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.CosmosEndpoint)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.ServiceBusFullyQualifiedNamespace)),
+                RunInput.Output(nameof(InterStepState.RedisEndpoint)),     // T242: Redis__Endpoint
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run

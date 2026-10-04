@@ -38,7 +38,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `Redis-ConnectionString` | data-services | 90-days | - | from-bicep-output |
 | `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
 | `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
 | `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
@@ -297,23 +296,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **App-setting keys**:
   - `Email__WebhookSigningKey`
 
-### `Redis-ConnectionString`
-
-- **Category**: data-services
-- **Purpose**: Azure Cache for Redis connection string.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: connection-string, data-services
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: ConnectionStrings:Redis / Redis:ConnectionString
-- **App-setting keys**:
-  - `ConnectionStrings__Redis`
-  - `Redis__ConnectionString`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `redis-connection-string`
-
 ### `SPE-CommunicationArchiveContainerId`
 
 - **Category**: spe
@@ -386,4 +368,3 @@ The following drift spellings are documented as aliases on canonical entries. Ta
 | `communication-webhook-secret` | `Communication-WebhookClientState` | communication |
 | `compose-webhook-clientstate` | `Compose-Webhook-ClientState` | compose |
 | `compose-webhook-signingkey` | `Compose-Webhook-SigningKey` | compose |
-| `redis-connection-string` | `Redis-ConnectionString` | data-services |
