@@ -1,5 +1,20 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-04 (checkpoint #11, after the restart). Supersedes #10 for "what is running".
+>
+> ## ⚡ CHECKPOINT #11: relaunched after the restart
+> - **Round 35** decided and pushed (`b69a8a20e`): task 165's five verifier questions, and 147 Q2.
+> - **Continuation workflow `wf_43b9b777-2ea`** (script `scratchpad/uac-restart.js`, generator `scratchpad/gen_restart.py`):
+>   - Fix lanes, each continuing from its #10 resume branch: 147 → `task/uac-r2-147-r1c`, 158 → `-158-r1c`, 150-integ → `-150-integ-c`, 132 → `-132-f1-v1c`, 140 → `-140-x1-v1c`, 165 → `-165-f2`, 167 → `-167-f2`.
+>   - Re-verify only: 166 (`task/uac-r2-166-f1`) and 168 (`task/uac-r2-168-f1`).
+>   - Each lane gets up to 2 further fix rounds (`-v1`, `-v2`).
+>   - Opus; at most 4 agents at once.
+> - **Agent `sweepmerge`** (Agent tool, so it may be resumed with SendMessage) is merging into `C:\wt4i`, in order: 159, 160, 161-r1, 162-f1, 164-r1, 163-f1. It also does round 34 items 1 and 2.
+> - **Watcher:** `scratchpad/journal_watch.py` (RUNS = the new run).
+> - **Next:**
+>   - Merge each lane as it comes back `ready-to-merge`, in this order: 150-integ, 132-f1 (then the 148×132 evictions), 140, 147, then 169 rebased onto 147, 158, 165–168, then the 167 ledger.
+>   - Then the integration checklist and task 170.
+
 > **Last Updated**: 2026-10-04 ~14:45 EDT (context-handoff, **checkpoint #10, before a MACHINE RESTART**). This block SUPERSEDES #9/#8/#7 for "what is running" (nothing is). Read it first.
 >
 > ## ⚡ CHECKPOINT #10 — everything was STOPPED cleanly for a restart
