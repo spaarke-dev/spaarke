@@ -32,6 +32,12 @@ namespace Spaarke.ArchTests;
 ///   (<see cref="Waivers"/>).</item>
 /// </list>
 ///
+/// <para><b>Sign-in is declared, never implied</b> (task 167 r2). Credit says which record a caller may act on; it
+/// presumes a signed-in caller. So every live route also carries <c>.RequireAuthorization(...)</c> on its route or
+/// group chain, or a declared <c>.AllowAnonymous()</c> that Rule A then sends to an AnonymousByDesign or Pending
+/// waiver. The BFF sets no FallbackPolicy, so a route with neither is public, and no waiver excuses that
+/// (<see cref="NoRouteIsAnonymousByOmission"/>).</para>
+///
 /// <para><b>The attachment-form census.</b> Every authorization-shaped call on any route chain — any
 /// <c>.Add*Filter</c>, <c>.AddEndpointFilter</c>, <c>.Require*</c>, <c>.WithMetadata</c> — must sit in exactly
 /// one list: credited, admin, <see cref="NonDecidingAttachments"/> (pass-throughs, each pinned to its source
@@ -1589,19 +1595,27 @@ public partial class RouteAuthorizationGuardTests
     }
 
     // =============================================================================================
-    // THE TWO SHAPES THE SCANNER CANNOT READ — refused outright (task 167 r1, findings 3 and 4)
+    // THE THREE SHAPES THAT WOULD FAIL OPEN — refused outright (task 167 r1 findings 3 and 4; r2 finding 2)
     // ---------------------------------------------------------------------------------------------
-    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapGroup. Two things could
-    // put a route surface beside it without it noticing, and both fail OPEN, so both are refused rather than
-    // stated as residuals:
+    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapGroup. Three things could
+    // put an anonymous or unread route surface beside it without it noticing, and all three fail OPEN, so all
+    // three are refused rather than stated as residuals:
     //   - Anonymity carried by an ATTRIBUTE ([AllowAnonymous] on a lambda or a handler method,
     //     WithMetadata(new AllowAnonymousAttribute()), an IAllowAnonymous implementation) or by an .AllowAnonymous()
     //     call hidden in a wrapper extension. Such a route would scan as signed-in and could carry any Permanent
-    //     basis, escaping the AnonymousByDesign rule. Today every anonymity in the BFF is an .AllowAnonymous() call
-    //     on a chain the scanner reads.
+    //     basis, escaping the AnonymousByDesign rule. (AnonymityIsDeclaredOnlyOnAScannedChain)
+    //   - Anonymity by OMISSION (r2): a route with neither .RequireAuthorization(...) nor .AllowAnonymous() on its
+    //     route or group chain. The BFF sets no FallbackPolicy or DefaultPolicy (AuthorizationModule.cs registers
+    //     neither; Api/Office/CommunicationsEndpoints.cs:55 and Api/SpeAdmin/ContainerItemEndpoints.cs:37-38 say
+    //     so), so such a route is callable WITHOUT SIGNING IN — yet it carries no
+    //     AllowAnonymous, so it scanned as signed-in and passed under a ReferenceData waiver with no mandatory
+    //     control (the r2 verifier seeded exactly that, GET /api/zzref, and the guard stayed green).
+    //     (NoRouteIsAnonymousByOmission — no waiver exempts it)
     //   - A registration API outside the vocabulary: .Map(...) (all verbs), MapFallback*, MapHub<T>,
     //     MapControllers and the like, or any Map* call that is not a method declared under src/server/**.
-    //     None exists today.
+    //     (NoRouteIsRegisteredInAFormTheScannerCannotRead)
+    // Today every anonymity in the BFF is an .AllowAnonymous() call on a chain the scanner reads, every other live
+    // route carries .RequireAuthorization(...) on its route or group chain, and no unread registration form exists.
     // MAINTENANCE: if one of these is genuinely needed, teach the scanner the shape (and its census) first, with a
     // control — do not add an exemption list.
     // =============================================================================================
@@ -1732,6 +1746,46 @@ public partial class RouteAuthorizationGuardTests
             + string.Join("\n  ", violations));
     }
 
+    /// <summary>
+    /// True when the route's EFFECTIVE chain — its own fluent calls plus every enclosing group's, aggregator groups
+    /// and group-continuation statements included — carries <c>.RequireAuthorization(...)</c> in any form. Every
+    /// policy that form can name requires a signed-in caller today: the bare call uses the framework default
+    /// (an authenticated user — the BFF overrides no DefaultPolicy), the named policies call RequireAuthenticatedUser
+    /// (AuthorizationModule.cs:331, :342, :358, :364) or fail without a user id (ResourceAccessHandler.cs:39), and a
+    /// NEW policy name is an unclassified attachment form until a reviewer classifies it.
+    /// </summary>
+    private static bool RequiresSignIn(RouteRegistration route) => route.Chain.Any(c => c.Name == "RequireAuthorization");
+
+    /// <summary>Live routes that are anonymous by OMISSION: neither .RequireAuthorization(...) nor .AllowAnonymous()
+    /// anywhere on the effective chain (task 167 r2, verifier finding 2).</summary>
+    private static List<string> AnonymousByOmissionViolations(IEnumerable<RouteRegistration> routes)
+        => routes
+            .Where(r => !r.Anonymous && !RequiresSignIn(r))
+            .Select(r => $"{r.Key}\n      at {r.File}:{r.Line} — neither .RequireAuthorization(...) nor .AllowAnonymous() on its "
+                         + $"route or group chain [{string.Join(", ", r.Forms)}]: it is callable WITHOUT SIGNING IN")
+            .OrderBy(v => v, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 167 r2: no route is anonymous by omission — each carries .RequireAuthorization(...) or a declared .AllowAnonymous()")]
+    public void NoRouteIsAnonymousByOmission()
+    {
+        var violations = AnonymousByOmissionViolations(Real.Live);
+        Assert.True(
+            violations.Count == 0,
+            "The BFF sets no FallbackPolicy or DefaultPolicy, so a route with neither .RequireAuthorization(...) nor "
+            + ".AllowAnonymous() on its route or group chain can be called WITHOUT SIGNING IN. It does not scan as "
+            + "anonymous, so it could pass under any Permanent basis with no AnonymousByDesign waiver and no mandatory "
+            + "control. No waiver exempts this rule. Add .RequireAuthorization() to the route or its MapGroup (an "
+            + "[Authorize] attribute is not read — declare it on the chain); if the route is public BY DESIGN, write "
+            + ".AllowAnonymous() on the chain and give it an AnonymousByDesign waiver naming its MANDATORY control.\n\n  "
+            + string.Join("\n  ", violations));
+
+        // Non-vacuous: the real code has routes the predicate WOULD catch were their anonymity not declared — the
+        // explicitly anonymous probes carry no RequireAuthorization — and they are exempt only because they say so.
+        Assert.Contains(Real.Live, r => r.Anonymous && !RequiresSignIn(r));
+        Assert.Contains(Real.Live, r => !r.Anonymous && RequiresSignIn(r));
+    }
+
     [Fact(DisplayName = "Task 167 r1 controls: attribute anonymity, wrapper anonymity and unread registration forms each fail")]
     public void UnreadableShapes_NegativeControl_AttributeAnonymityAndUnreadFormsFail()
     {
@@ -1783,6 +1837,62 @@ public partial class RouteAuthorizationGuardTests
             "        var g = app.MapGroup(\"/api/f\");\n        g.MapGet(\"/a\", H);\n        g.MapMethods(\"/b\", [\"PATCH\"], H);\n"
             + "        app.MapHealthChecks(\"/h\");\n        app.MapX();\n        // app.MapFallback(H);"));
         Assert.Empty(UnreadRegistrationViolations(new[] { fine }, declared));
+    }
+
+    [Fact(DisplayName = "Task 167 r2 controls: a route anonymous by omission fails even under a waiver; declared sign-in or anonymity passes")]
+    public void AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver()
+    {
+        // NEGATIVE — the r2 verifier's seed, as a fixture: a bare registration, plus a Permanent ReferenceData waiver.
+        var bare = ScanText("Api/UserEndpoints.cs", new[] { "        app.MapGet(\"/api/zzref\", () => Results.Ok());" });
+        var route = Assert.Single(bare);
+        Assert.Equal("GET /api/zzref", route.Key);
+        Assert.False(route.Anonymous);   // it does not SCAN as anonymous — that is the hole
+        var assessed = Assess(route, Array.Empty<HandlerDecision>());
+        var waiver = Permanent("GET /api/zzref", PermanentBasis.ReferenceData, "167",
+            "Seeded by AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver to prove the rule bites; UserEndpoints.cs:1.");
+
+        // Before r2 this was the whole verdict: the waiver satisfied Rule A and broke no waiver rule, so the guard was
+        // green for a route anyone can call without signing in.
+        Assert.Empty(RuleAViolations(new[] { assessed }, new[] { waiver }));
+        Assert.Empty(WaiverViolations(new[] { assessed }, new[] { waiver }));
+
+        // r2: the omission rule names the route, and it consults no waiver.
+        Assert.Contains(AnonymousByOmissionViolations(bare), v => v.StartsWith("GET /api/zzref\n      at Api/UserEndpoints.cs:1 ", StringComparison.Ordinal));
+
+        // NEGATIVE: a credited per-resource filter is not sign-in (filters run after authorization); an [Authorize]
+        // attribute and WithMetadata(new AuthorizeAttribute()) are not read (fail closed — declare it on the chain);
+        // a rate limit is not sign-in.
+        foreach (var lines in new[]
+                 {
+                     new[] { "        var g = app.MapGroup(\"/api/zz\");", "        g.MapGet(\"/{id}\", Get).AddEntityAccessFilter();" },
+                     new[] { "        app.MapGet(\"/api/zz/{id}\", [Authorize] (Guid id) => Results.Ok());" },
+                     new[] { "        app.MapGet(\"/api/zz/{id}\", Get).WithMetadata(new AuthorizeAttribute());" },
+                     new[] { "        app.MapGet(\"/api/zz/{id}\", Get).RequireRateLimiting(\"anonymous\");" },
+                 })
+        {
+            var routes = ScanText("Api/Fake/Omit.cs", lines);
+            Assert.Single(routes);
+            Assert.False(routes[0].Unparseable, routes[0].Problem);   // a real, resolved route — not a parse failure
+            Assert.Single(AnonymousByOmissionViolations(routes));
+        }
+
+        // POSITIVE: sign-in declared on the route, on the group, through a nested group, by a statement continuing the
+        // group, or by a named policy; and an explicit .AllowAnonymous() (which Rule A then sends to AnonymousByDesign).
+        foreach (var lines in new[]
+                 {
+                     new[] { "        app.MapGet(\"/api/zz/{id}\", Get).RequireAuthorization();" },
+                     new[] { "        var g = app.MapGroup(\"/api/zz\").RequireAuthorization();", "        g.MapGet(\"/{id}\", Get);" },
+                     new[] { "        var g = app.MapGroup(\"/api/zz\").RequireAuthorization();", "        var h = g.MapGroup(\"/inner\");", "        h.MapGet(\"/{id}\", Get);" },
+                     new[] { "        var g = app.MapGroup(\"/api/zz\");", "        g.RequireAuthorization();", "        g.MapGet(\"/{id}\", Get);" },
+                     new[] { "        app.MapPost(\"/api/zz/admin\", Post).RequireAuthorization(\"SystemAdmin\");" },
+                     new[] { "        app.MapGet(\"/ping\", () => Results.Text(\"pong\")).AllowAnonymous().RequireRateLimiting(\"anonymous\");" },
+                 })
+        {
+            var routes = ScanText("Api/Fake/Declared.cs", lines);
+            Assert.Single(routes);
+            Assert.False(routes[0].Unparseable, routes[0].Problem);
+            Assert.Empty(AnonymousByOmissionViolations(routes));
+        }
     }
 
     // =============================================================================================
@@ -2678,6 +2788,9 @@ public partial class RouteAuthorizationGuardTests
         var healthDoc = WaiverOf("GET /healthz/dataverse/doc/{id}")!;
         Assert.Equal(WaiverKind.Pending, healthDoc.Kind);
         Assert.Equal(Gap.NoDecision, healthDoc.Gap);
+        // Owned by 166, not UNOWNED-NEW: task 166 amendment (a) names this route, and owner round 12 item 8 keeps such
+        // findings with 161/166 (it supersedes the AC text "Pending UNOWNED-NEW"; recorded in task 167 round r2).
+        Assert.Equal("166", healthDoc.OwningTask);
         Assert.Contains("bff-deploy", healthDoc.Reason);
         Assert.Equal(Credit.Anonymous, byKey["GET /healthz/dataverse/doc/{id}"].Credit);
 

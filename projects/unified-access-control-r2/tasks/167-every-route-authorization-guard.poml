@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. It changes no file under src/, so it touches none of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs); it only reads them.</parallel-reason>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration.</parallel-reason>
     <deps>none</deps>
     <tags>testing, security, auth, archtest, bff-api</tags>
     <estimated-effort>2-3 days</estimated-effort>
@@ -796,11 +796,11 @@ Negative: removing any one fails Rule A naming it. POST /api/ai/rag/send-to-inde
   - POST /api/office/quickcreate/{entityType} (S-69)
 - Negative: removing a NoDecision waiver fails Rule A naming the route. The old Permanent GET /api/v1/documents waiver, if restored, fails the sweep-ledger rule.</criterion>
     <criterion testable="true">Refuted routes:
-- POST /api/finance/matters/{matterId}/recalculate, POST /api/finance/projects/{projectId}/recalculate and POST /api/v1/external-access/revoke pass by per-resource credit, with no waiver.
+- POST /api/finance/matters/{matterId}/recalculate, POST /api/finance/projects/{projectId}/recalculate and POST /api/v1/external-access/revoke pass by per-resource credit, with no waiver. [SUPERSEDED for revoke by owner round 12 item 9 (binding), recorded in round r2: revoke is still credited per resource (AddDelegationRuleFilter) but carries a Pending InsufficientDecision waiver owned by 166 (the client-supplied ContainerId, 166 amendment (b)); NamedRoutes_CarryTheirRecordedClassification asserts that state. The two finance routes are unchanged: credited, no waiver.]
 - GET /api/ai/chat/context-mappings/analysis/{analysisId} carries a Pending UNOWNED-NEW waiver.
 - GET /api/reporting/reports and the four /api/ai/playbooks/runs/{runId:guid} routes are classified per the background, with the evidence cited in the waiver reason.</criterion>
     <criterion testable="true">New findings:
-- GET /healthz/dataverse/doc/{id} carries a Pending UNOWNED-NEW waiver (Gap NoDecision; anonymous). Its reason names the bff-deploy SKILL.md §9c consumer. It was reported when confirmed.
+- GET /healthz/dataverse/doc/{id} carries a Pending UNOWNED-NEW waiver (Gap NoDecision; anonymous). Its reason names the bff-deploy SKILL.md §9c consumer. It was reported when confirmed. [SUPERSEDED for the owner by owner round 12 item 8 (binding), recorded in round r2: the waiver is Pending NoDecision owned by 166, because task 166 amendment (a) names this route; everything else in this line holds (anonymous, the §9c consumer named, reported on confirmation). NamedRoutes_CarryTheirRecordedClassification asserts that state.]
 - Every other flagged route outside the sweep ledger carries one of: a Permanent waiver with a basis whose reason cites the handler file:line that proves it; a verified HandlerDecision; or a Pending UNOWNED-NEW waiver.
 - Each NEW candidate listed in the background is resolved in one of those ways, with the reason recorded.
 - The task note lists every UNOWNED-NEW route with file:line, impact, proposed severity, evidence and any named consumer. The count in the note equals the number of UNOWNED-NEW waivers in the code.</criterion>
@@ -813,7 +813,7 @@ Negative: removing any one fails Rule A naming it. POST /api/ai/rag/send-to-inde
 - GET /api/office/search/matter-types keeps Permanent ReferenceData.
 - The three /api/office/communications routes and GET /api/office/search/entities are either converted to verified HandlerDecision declarations (with their Permanent waivers deleted), or keep Permanent with a basis. The choice and the reason are recorded in the note.
 - No Pending waiver is converted to Permanent.</criterion>
-    <criterion testable="true">Scope: git diff shows changes only under tests/Spaarke.ArchTests/, in projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md, in this task's TASK-INDEX.md status cell, in this POML's status, and in projects/unified-access-control-r2/current-task.md. No file under src/ changed.</criterion>
+    <criterion testable="true">Scope: git diff shows changes only under tests/Spaarke.ArchTests/, in projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md, in this task's TASK-INDEX.md status cell, in this POML's status, and in projects/unified-access-control-r2/current-task.md. No file under src/ changed. [SUPERSEDED in part by owner round 12 item 1 (binding, 2026-10-03), recorded in round r2: exactly one src/ file changes - three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs on /healthz, /healthz/catalog and /ping. See parallel-reason and execution/justification-of-src-change.]</criterion>
     <criterion testable="true">Seeding proofs: for every new rule, the task note records what was seeded and the failure text observed. The rules are: the census set, the scanner forms, duplicate keys, aggregator binding, Rule E's exception, every-route Rule A, the attachment-form census, the non-credited forms, the pass-through pins, whole-identifier tokens, the admin pin, HandlerDecision, each stale rule, and the sweep ledger.</criterion>
     <criterion testable="true">Suites: these are run in full before the PR, with counts recorded in the note:
 - tests/Spaarke.ArchTests (green);
@@ -914,6 +914,45 @@ The route counts in the background come from a Python approximation of the scann
       client timeouts under machine contention; those 10 re-run in isolation: 15/15 theory cases passed).
       /conflict-check: no open PR or master change on the four files; task 166 amendment (a) will edit
       EndpointMappingExtensions.cs next to these lines (soft warn).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-167-r2" base="449d3e8dd" result="completed; one owner question open (item 5)" round="verifier r2">
+      Full record: notes/task-167-every-route-authorization-guard.md section 16. Test code, this POML and the note only;
+      no src/ file changed in r2; no waiver changed (214 = 125 Pending + 89 Permanent; UNOWNED-NEW stays 21).
+      ITEM 2 / 9 (FAIL-OPEN, closed): new rule NoRouteIsAnonymousByOmission - every live route's effective chain
+      (own calls + every group's, aggregator groups and continuation statements included) carries
+      .RequireAuthorization(...) or a declared .AllowAnonymous(); NO waiver is consulted, so a route callable without
+      signing in (the BFF sets no FallbackPolicy / DefaultPolicy) can no longer pass under any basis. An [Authorize]
+      attribute or WithMetadata(new AuthorizeAttribute()) is not read and fails (fail closed). Real code: 0 violations.
+      Control AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver: the verifier's GET /api/zzref + ReferenceData
+      waiver passes Rule A and every waiver rule (the pre-r2 hole) and fails the new rule; four undeclared shapes fail;
+      six declared shapes pass. Chosen over reclassifying implicit anonymity as Credit.Anonymous, which would have let
+      an AnonymousByDesign or Pending waiver cover an UNDECLARED public route.
+      ITEM 6 / 10 / 11 (closed for traceability): parallel-reason amended; the scope, refuted-routes and new-findings
+      criteria carry SUPERSEDED annotations naming owner round 12 items 1, 9 and 8; the named-routes test now also pins
+      the /healthz/dataverse/doc/{id} owner "166". The r1 comment block is rewritten as "the three shapes that would
+      fail open".
+      ITEMS 1, 3, 4, 7, 8: verified, not open; no change.
+      ITEM 5 (NOT closed - owner question): read-only evidence disproves the "client IP not forwarded" branch (the
+      limiter's own rejection log on spaarke-bff-dev, Linux, recorded public IP 47.198.16.39 on 2026-10-02) and shows
+      legitimate probe load of at most 3/min on /healthz over 30 days, all callers combined. The one real edge: pollers
+      at a 5 s cadence (deploy-bff-api.yml 12 x 5 s; Deploy-BffApi.ps1 and control-plane H9 24 x 5 s) lose their last
+      two polls of the FINAL fixed window when the app answered Unhealthy to the ten before; a production verify can
+      then roll back a good deploy. r1's "Deploy-BffApi.ps1 is unaffected" was wrong and is corrected. Options for the
+      owner: A keep "anonymous" + pollers at 6 s; B (recommended) a dedicated per-IP "health-probe" policy (30/min) for
+      /healthz, /healthz/catalog, /ping - one new registration, section 11 answers prepared in note section 16.3;
+      C accept the edge.
+      SEEDING (real src, each restored and touched): r2-1 the verifier's zzref route + ReferenceData waiver (1 failed,
+      the new rule only); r2-2 RequireAuthorization removed from the /api/compose aggregator group and from GET /api/me
+      (the rule names 18 routes: 17 Compose + /api/me; the root-mapped webhook correctly not); r2-3 the doc route's
+      owner flipped to UNOWNED-NEW (named-routes test: expected "166").
+      TESTS: Guard 53/53; ArchTests 384/384; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed; BFF unit suite 14198 passed / 14 failed / 54 skipped (all 14 TaskCanceledException client
+      timeouts under machine contention; those 14 re-run in isolation: 21/21 theory cases passed).
+      /conflict-check: no open PR (23) or master change on the guard files; local siblings 160, 161-r1, 162, 163 edit the
+      guard (163 also EndpointMappingExtensions.cs at ~:325, not this task's lines) - soft warn, reconciled at
+      integration by owner round 9 item 2.
+      PLACEMENT (CLAUDE.md section 10/11): no new BFF service, registration, endpoint, option, job, column, package or
+      file in r2. No Dataverse plugin (ADR-002). The new rule fails closed (ADR-003).
     </outcome>
     <justification-of-src-change round="r1">
       Owner round 12 item 1 (binding) overrides this POML's "change NO file under src/" for one purpose: rate-limit

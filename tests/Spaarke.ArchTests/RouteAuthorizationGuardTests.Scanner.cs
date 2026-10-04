@@ -30,7 +30,10 @@ namespace Spaarke.ArchTests;
 /// gate earns no credit, so the route is flagged). (2) An ANONYMITY the chain does not show — an
 /// <c>[AllowAnonymous]</c> attribute on a lambda or a handler method, <c>WithMetadata(new
 /// AllowAnonymousAttribute())</c>, or an <c>.AllowAnonymous()</c> hidden in a wrapper — would fail OPEN, so
-/// <c>AnonymityIsDeclaredOnlyOnAScannedChain</c> refuses every one (task 167 r1). (3) A registration API outside
+/// <c>AnonymityIsDeclaredOnlyOnAScannedChain</c> refuses every one (task 167 r1). So would an anonymity by
+/// OMISSION — no <c>.RequireAuthorization(...)</c> and no <c>.AllowAnonymous()</c> on the effective chain, which with
+/// no FallbackPolicy is a public route that scans as signed-in — so <c>NoRouteIsAnonymousByOmission</c> refuses it,
+/// whatever its waiver (task 167 r2). (3) A registration API outside
 /// the vocabulary — <c>.Map(...)</c>, <c>MapFallback*</c>, <c>MapHub&lt;T&gt;</c>, <c>MapControllers</c>, or any
 /// undeclared <c>Map*</c> call — would put routes beside the census, so
 /// <c>NoRouteIsRegisteredInAFormTheScannerCannotRead</c> refuses it (task 167 r1). What remains unseen is request

@@ -5,7 +5,8 @@
 > with only a sign-in check fails the build."
 > **Evidence**: `notes/route-authorization-sweep-2026-10-02.md` (82 findings, 90 route keys).
 > **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`; verifier round r1 on
-> `task/uac-r2-167-r1` (§15). **One `src/` file changed, by owner decision**: owner round 12 item 1 rate-limits
+> `task/uac-r2-167-r1` (§15); verifier round r2 on `task/uac-r2-167-r2` (§16 — test code, the POML and this note
+> only; **one item left for the owner**, §16.3). **One `src/` file changed, by owner decision**: owner round 12 item 1 rate-limits
 > `GET /healthz`, `GET /healthz/catalog` and `GET /ping` (`Infrastructure/DI/EndpointMappingExtensions.cs`, three
 > `.RequireRateLimiting("anonymous")` lines). Nothing else under `src/` changed.
 
@@ -468,9 +469,11 @@ No Dataverse plugin (ADR-002). Tests: the guard pins the control on the chain; `
 window of 10 requests/min per client IP with no queue. The App Service health check (1/min/instance) and swap warm-up
 are well under it, but `deploy-bff-api.yml`'s staging and production `/healthz` loops poll 12 times at 5 s: if the app
 answers Unhealthy for the first ten polls of a window and Healthy only on poll 11-12, those two get 429 and the step
-fails where it previously passed. `Deploy-BffApi.ps1` (24 x 5 s) treats a 429 as a retry and spans two windows, so it
-is unaffected. If that edge matters, the remedy is a looser dedicated probe policy — a new registration needing its own
-§11 justification, so it is not added here.
+fails where it previously passed. ~~`Deploy-BffApi.ps1` (24 x 5 s) treats a 429 as a retry and spans two windows, so it
+is unaffected.~~ **Corrected in r2 (§16.3):** `Deploy-BffApi.ps1` and the control plane's H9 probe (both 24 x 5 s)
+treat a 429 as a retry, but their FINAL window has the same edge (polls 23-24). If that edge matters, the remedy is a
+looser dedicated probe policy — a new registration needing its own §11 justification, so it is not added here; r2
+puts the choice to the owner (§16.3).
 
 **`.claude/` edit for the main session (main-session-only path), exact text** — append a row to the troubleshooting
 table in `.claude/skills/bff-deploy/SKILL.md` (the table that holds the "Health check fails at 60s" row):
@@ -518,3 +521,129 @@ intended files changed.
 Test scope beyond the listed behaviours: none. ADR-038 bans: no `Mock<HttpMessageHandler>`, no DI-registration test, no
 constructor null-check test in anything added. No test calls Dataverse or Azure (the census control writes and deletes
 a temporary directory only).
+
+## 16. Verifier round r2 (2026-10-03) — branch `task/uac-r2-167-r2`
+
+Base `449d3e8dd` (`task/uac-r2-167-r1`). The r2 verifier's 11 items, each closed, verified-as-not-open, or (item 5)
+narrowed with live evidence and put to the owner. **No `src/` file changes in r2**; no waiver changes (214 = 125
+Pending + 89 Permanent, unchanged; `ExpectedUnownedNewCount` stays 21).
+
+### 16.1 Per verifier item
+
+| # | Item | Disposition | Where |
+|---|---|---|---|
+| 1 | Verification run (ArchTests 382/382, both integration suites, 47/47 affected unit tests) | **Verified, not open.** Informational. | — |
+| 2 | **FAIL-OPEN**: a route with neither `.RequireAuthorization(...)` nor `.AllowAnonymous()` on its route or group chain is callable WITHOUT SIGNING IN (the BFF sets no FallbackPolicy / DefaultPolicy), yet scanned as non-anonymous and passed under a Permanent ReferenceData waiver | **Closed.** New rule `NoRouteIsAnonymousByOmission`: every LIVE route's effective chain (own calls + every group's, aggregator groups and group-continuation statements included) carries `.RequireAuthorization(...)` in some form, or a declared `.AllowAnonymous()` (which Rule A already sends to AnonymousByDesign / Pending). **No waiver is consulted** — the rule is not satisfiable by a waiver, so the seeded shape cannot pass under any basis. An `[Authorize]` attribute or `WithMetadata(new AuthorizeAttribute())` is not read and fails (fail closed; declare it on the chain). Every policy `RequireAuthorization` names today requires a signed-in caller (bare = framework default authenticated user; `AuthorizationModule.cs:331/:342/:358/:364` call `RequireAuthenticatedUser`; `ResourceAccessHandler.cs:39` fails without a user id), and a NEW policy name is an unclassified attachment form until reviewed. The real code: **zero** violations (matches the verifier's probe). Controls: `AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver` — the verifier's exact seed (`GET /api/zzref` + a ReferenceData waiver) shown to pass Rule A and every waiver rule (the pre-r2 hole) and then to fail the new rule; a credited filter with no sign-in, an `[Authorize]` lambda, `WithMetadata(new AuthorizeAttribute())` and a rate-limit-only route each fail; six declared shapes pass (route-level, group-level, nested group, a `g.RequireAuthorization();` continuation statement, a named policy, an explicit `.AllowAnonymous()`). Design choice: a separate rule rather than reclassifying implicit anonymity as `Credit.Anonymous` — reclassification would have let an AnonymousByDesign or Pending waiver cover an UNDECLARED public route, contradicting AnonymousByDesign's definition ("`.AllowAnonymous()` declared"), and would have changed six historical fixtures' expected credit. | `RouteAuthorizationGuardTests.cs` (rule, Fact, control; class summary; the "three shapes that would fail open" block); Scanner summary; Ledger AnonymousByDesign definition + admin-mechanism comment + state line |
+| 3 | The verifier's ten seeds, all detected and restored | **Verified, not open.** No change. | — |
+| 4 | Ledger independently checked (90 sweep entries = POML ledger; 125 Pending / 89 Permanent; per-owner counts) | **Verified, not open.** No change. | — |
+| 5 | `src/` change and deploy risk of the shared `"anonymous"` policy on `/healthz`, `/healthz/catalog`, `/ping` | **Narrowed with live read-only evidence; the policy choice is the OWNER's — not closed here** (§16.3). The verifier's conditional "if App Service does not forward the client IP" is **disproved** for the deployed Linux app; the one remaining edge (5-second pollers losing their last two polls of a window) is quantified, a wrong r1 claim is corrected (§15.3), and three options are put to the owner with a recommendation. | §16.3 |
+| 6 | POML `<parallel-reason>` still said "changes no file under src/"; r1 comment "every anonymity is an `.AllowAnonymous()` call" omitted the no-RequireAuthorization shape | **Closed.** `<parallel-reason>` amended (one `src/` file, by owner round 12 item 1; not a parallel-unsafe zone; 163 and 166(a) edit other regions of it). The comment block is rewritten as "the THREE shapes that would fail open" and now states the omission shape and its rule. | POML; `RouteAuthorizationGuardTests.cs` |
+| 7 | ADR-038 bans, no live calls, POML well-formed, consumers unbroken | **Verified, not open.** The r2 additions are inline-fixture source analysis only (no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor null-check, no file or network I/O). | — |
+| 8 | Heartbeat OwnerComparison basis | **Verified, not open.** No change. | — |
+| 9 | Criterion "Anonymous routes (intent)" + ADR-003 fail-closed on the guard's own decisions | **Closed** by item 2: an effectively-anonymous route can no longer exist in a green build, so every anonymous route is a DECLARED `.AllowAnonymous()` that the scanner classifies `Anonymous` and Rule A sends to AnonymousByDesign / Pending. | as item 2 |
+| 10 | Criterion "Scope: no file under src/ changed" vs. the three rate-limit lines | **Closed for traceability.** The criterion carries a `[SUPERSEDED in part by owner round 12 item 1 ...]` annotation; `<parallel-reason>` amended (item 6). | POML |
+| 11 | Criteria "revoke: no waiver" and "/healthz/dataverse/doc/{id} Pending UNOWNED-NEW" vs. the code | **Closed for traceability.** Both criteria carry `[SUPERSEDED by owner round 12 item 9 / item 8 ...]` annotations. `NamedRoutes_CarryTheirRecordedClassification` already asserted revoke's Pending InsufficientDecision 166; r2 adds `Assert.Equal("166", healthDoc.OwningTask)` so the doc route's superseded OWNER is pinned too (it asserted Pending/NoDecision/anonymous, not the owner). | POML; `RouteAuthorizationGuardTests.cs` named-routes test |
+
+### 16.2 Seeding proofs (r2) — each seeded on REAL source, run, failure captured, restored and touched
+
+| # | Rule | Seeded | Result |
+|---|---|---|---|
+| r2-1 | `NoRouteIsAnonymousByOmission` (item 2) — the verifier's own seed | `app.MapGet("/api/zzref", () => Results.Ok());` in `Api/UserEndpoints.cs` `MapUserEndpoints` + `Permanent("GET /api/zzref", PermanentBasis.ReferenceData, ...)` in `.Ledger.cs` | **1 failed / 52 passed**: only the new rule — "GET /api/zzref / at Api/UserEndpoints.cs:17 — neither .RequireAuthorization(...) nor .AllowAnonymous() on its route or group chain []: it is callable WITHOUT SIGNING IN". Every other rule stayed green on this seed, which is the hole the verifier described. |
+| r2-2 | Same rule, GROUP inheritance through an aggregator + a route-level removal | `.RequireAuthorization()` removed from the `/api/compose` group in `Api/ComposeEndpoints.cs` (the aggregator) AND from `GET /api/me` in `Api/UserEndpoints.cs` | **1 failed / 52 passed**: the rule names 18 routes — all 17 Compose routes bound to the group, plus `GET /api/me`; the Compose webhook (declared `.AllowAnonymous()` on the ROOT builder) is correctly not named. |
+| r2-3 | Named-routes owner pin (item 11) | `GET /healthz/dataverse/doc/{id}` waiver owner `"166"` → `"UNOWNED-NEW"` | **1 failed**: `NamedRoutes_CarryTheirRecordedClassification` — `Expected: "166"`, `Actual: "UNOWNED-NEW"`. |
+
+After the last restore, `git status` shows only the intended files changed (the three guard files, the POML, this
+note). One restore needed care: the r2-1 ledger seed was written with LF endings; the file was restored to its CRLF
+endings byte-for-byte (2,612 CRLF lines, `zzref` absent) before the next run.
+
+### 16.3 Item 5 — the rate-limit policy on the liveness probes: evidence, and the owner question
+
+**Evidence gathered (all read-only).**
+
+1. **The partition key IS the real client IP on the deployed app.** The rate limiter's own rejection log
+   (`RateLimitingModule.cs:272-277` logs `Connection.RemoteIpAddress`) on `spaarke-bff-dev` (Linux App Service, the
+   stack `infrastructure/bicep/modules/app-service.bicep:104` and `deployment-slot.bicep:112` deploy everywhere)
+   recorded `IP: 47.198.16.39` — a public ISP address — on 2026-10-02T19:57:54Z (App Insights
+   `spe-insights-dev-67e2xz`, the only rejection in 30 days). So external callers do NOT share a few front-end IPs and
+   the per-IP budget is not "close to global". (The BFF has no ForwardedHeaders code; whatever delivers the client
+   address, the observed value is the client's. Microsoft documents no automatic forwarded-headers wiring for Linux —
+   [proxy-load-balancer](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer?view=aspnetcore-10.0) —
+   which is why this was measured rather than assumed.)
+2. **Legitimate probe volume is far below the budget, even summed over ALL callers.** App Insights `requests` on
+   `spaarke-bff-dev`, 30 days (`client_IP` is masked to 0.0.0.0, so these are GLOBAL per-minute counts — an upper
+   bound for any one IP): `/healthz` 42,984 requests, **max 3 in any minute, 0 minutes over 5**, codes {200, 503};
+   `/ping` 9 (max 1/min); `/api/config` 65 (max 2/min); `/api/office/health` 4; `/status` 1. No anonymous probe ever
+   approached 10 in a minute.
+3. **Every caller, against a fixed window of 10 per minute per IP:**
+   - App Service health check (`healthCheckPath=/healthz`): 1/min/instance — safe (item 2's data).
+   - Slot-swap warm-up (`WEBSITE_SWAP_WARMUP_PING_PATH=/healthz`, `_STATUSES=200`): one internal request per
+     instance, retried only on timeout ([deploy-staging-slots](https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots)).
+     A 429 there WOULD stop the swap ("If the returned status code isn't in the list, the warm-up and swap operations
+     are stopped"), but it needs ten requests from the internal warm-up address inside one minute, which this cadence
+     never produces — safe.
+   - `deploy-promote.yml`: `/ping` every 15 s (≤ 5/min), then one `/healthz` and one `OPTIONS /ping` — safe.
+   - Control plane H4b (`HttpHealthzProbe`: 30/60/90/120/180 s backoff) and H13 (`E2EValidationRunner`: one `/healthz`
+     + one `/ping`) — safe.
+   - **5-second pollers — the one real edge:** `deploy-bff-api.yml` (staging, production and rollback-verify loops,
+     12 × 5 s, then one `/ping`), `scripts/Deploy-BffApi.ps1` (24 × 5 s, `Test-Health` loop :180-196) and the control
+     plane's H9 `HttpHealthProbe` (`BffDeployOptions.HealthProbeInterval` 5 s × `HealthProbeMaxRetries` 24). Such a
+     poller makes up to 12 requests in one fixed window; when the BFF ITSELF answered non-200 (Unhealthy 503) to the ten
+     before, polls 11-12 get 429. In a non-final window that only delays detection; in the FINAL window it removes the
+     last ~10 s of the poller's budget (deploy-bff-api.yml ~50 s instead of ~60 s; Deploy-BffApi.ps1 and H9 ~110 s
+     instead of ~120 s). Requests the platform front end answers while the app is not listening (502/503) never reach
+     the limiter. The outcome flips only when the app answers Unhealthy for ~45-50 s and turns Healthy inside that
+     final ~10 s. Consequence: a staging verify fails safe ("production is UNCHANGED", re-run); a **production verify
+     triggers the automatic rollback swap of a deploy that would have passed**. (r1's "Deploy-BffApi.ps1 is unaffected"
+     was wrong — corrected in §15.3.)
+4. Side observation (pre-existing, not task 167's): `Deploy-BffApi.ps1`'s `Test-Health` loop neither counts nor
+   sleeps when `/healthz` answers 200 with body `Degraded` (it only counts in `catch`), so before r1 it could spin
+   without bound on a Degraded app; the rate limit now turns the 11th call into a counted 429. Worth a script fix by
+   whoever owns it.
+
+**🔔 Owner question (verifier r2 item 5 — not decided here; owner round 12 item 1 chose "a rate limit", not which one).**
+
+| Option | What | New surface | Fixes the 5-s edge | Cost |
+|---|---|---|---|---|
+| **A** | Keep the shared `"anonymous"` policy (r1 state) and make the three 5-s pollers poll at ≥ 6 s: `deploy-bff-api.yml` `INTERVAL=6` (three loops), `Deploy-BffApi.ps1` `-HealthCheckIntervalSeconds` default 6, `BffDeployOptions.HealthProbeInterval` 6 s | none in the BFF | yes (≤ 10 polls per 60 s) | three consumer edits outside task 167: the ci-workflows hot path, a script, the provisioning control plane; every future poller must remember the 6 s rule |
+| **B (recommended)** | A dedicated probe policy for `/healthz`, `/healthz/catalog` and `/ping` only — e.g. `"health-probe"`: per-IP sliding window, 30/min, no queue | one named rate-limit policy in `RateLimitingModule.cs` | yes, for every current and future poller up to 30/min | one BFF registration (§11 below); `/healthz/dataverse*`, `demo-request`, `consent-callback` and the config routes keep the strict 10/min |
+| C | Accept the edge as recorded (r1 state) | none | no | a production verify can roll back a good deploy when the app turns healthy in the poller's last ~10 s |
+
+§11 three-question template for option B (prepared, NOT applied): **Existing** — the `"anonymous"` policy
+(`RateLimitingModule.cs:95-104`, fixed window 10/min/IP, shared by 12 anonymous routes). **Extension** — no: raising
+`"anonymous"` to cover 12-poll loops triples the budget of the routes that create rows (`demo-request`), process an
+HMAC'd onboarding callback, or hit Dataverse anonymously (`/healthz/dataverse`, `/healthz/dataverse/crud`). **Cost of
+doing nothing** — the final-window edge above: `deploy-bff-api.yml`'s production verify rolls back a good deploy when
+the app turns healthy in the last ~10 s of its budget. A `.claude/skills/bff-deploy/SKILL.md` troubleshooting row for
+429s during manual polling is already recorded in §15.3 for the main session (main-session-only path).
+
+### 16.4 /conflict-check (round r2)
+
+Files this round edits: `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`, `.Ledger.cs`, `.Scanner.cs`, this
+note and the POML (no `src/`). Checked 2026-10-03: **no open PR** (23 checked) touches any guard file or
+`EndpointMappingExtensions.cs`; `origin/master` (`62277d50a`) has not changed them since the merge base `b8026dfa8`.
+Local sibling branches: `task/uac-r2-160` (+13/-1), `task/uac-r2-161-r1` (+7/-4), `task/uac-r2-162` (+20) and
+`task/uac-r2-163` (+9/-1) edit the task-074 `RouteAuthorizationGuardTests.cs`; `task/uac-r2-163` also edits
+`EndpointMappingExtensions.cs` at ~:325 (the removed `MapAdminKnowledgeEndpoints` block — not this task's lines 68/76/124).
+**Soft warn**, unchanged from r1: the main session reconciles the guard at integration (owner round 9 item 2).
+
+### 16.5 Placement and justification (CLAUDE.md §10/§11)
+
+r2 adds no BFF service, registration, endpoint, option, job, column or package — test code (one rule, one control, one
+assertion), comment text, the POML and this note. No new file. §10 not triggered (no publish-size or CVE impact; not
+measured per the harness rule). No Dataverse plugin (ADR-002). ADR-003: the new rule fails CLOSED (an attribute-only or
+unread authorization is a violation, never a pass).
+
+### 16.6 Test runs (round r2, final state; run sequentially, 2026-10-03 20:25-21:05)
+
+| Suite | Result |
+|---|---|
+| Affected: `RouteAuthorizationGuardTests` | **53 / 53 passed** (51 + 2 new: `NoRouteIsAnonymousByOmission`, `AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver`) |
+| `tests/Spaarke.ArchTests` (NetArchTest, full) | **384 / 384 passed**, 0 skipped (2 m 38 s) |
+| `Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
+| `Spe.Integration.Tests` | **403 passed, 25 skipped, 0 failed** (7 m 37 s) |
+| `Sprk.Bff.Api.Tests` (BFF unit, full, TRX) | **14,198 passed, 14 failed, 54 skipped** of 14,266 (28 m 12 s). All 14 are `TaskCanceledException: The operation was canceled` — the client-timeout contention signature of §12/§15.6 under the same multi-agent load; none is an assertion. The 14: `DelegationRuleCharacterizationTests.CanManageAccess_ForACallerHoldingExactlyTheNewCollaborateRights_Is200`, `DocumentProfileContractTests.GetDocument_WithNonCompletedStatus_Returns200WithStatusCodeAndNoProfileText(100000003)`, `RelatedRecordCardContractTests.ResolveIdentity_ForADocumentFiledToAMatter_ReturnsTypeDisplayNameAndNumber`, `InsightEndpointsContractTests.PostAsk_CanonicalNameWithBindingRow_LookupIsCaseInsensitive`, `InsightsAssistantEndpointContractTests.Post_RagDisabled_WithForceModeRag_Returns503WithErrorCode`, `InsightsSearchEndpointContractTests.PostSearch_FacadeThrows_Returns500ProblemDetails`, `PinnedMemoryEndpointsContractTests.UpdatePin_NotFound_Returns404`, `CommunicationsEndpointsContractTests.GetLinkedTodos_WithAuthAndThreeMatches_Returns200WithTodos`, `OfficeEntitySearchAuthorizationContractTests.SearchEntities_ForAnAuthorizedUser_StillReturnsTheRowsThePickerNeeds`, `OfficeQuickCreateContractTests.Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndNoNumber`, `OfficeSaveNoTargetContainerContractTests.PostOfficeSave_WithNoTargetEntity_AndAnUnresolvableCaller_StillLandsInTheConfiguredDefaultContainer`, `OfficeTodoSourceAuthorizationContractTests.Post_Todo_WhenEverySourceIsReadable_StillCreatesTheTodo_WithResolverFieldsStamped`, `OfficeVersionSaveContractTests.Post_OfficeSave_VersionSave_WhenTheDocumentHasNoSpePointers_Returns409Office017_AndNeverFallsBackToANewItem`, `Issue1084_OfficeJobRecordDurabilityTests.SaveOfLargeContent_GetsADurableJobRow_WhosePayloadCarriesNoContent(Document)`. **Isolated re-run of those 14 (21 cases with the theories' parameters): 21 / 21 passed** (35 s). The unit assembly compiles nothing r2 changes (r2 touches only `tests/Spaarke.ArchTests`). |
+
+Test scope beyond the listed behaviours: none (the one added assertion pins a criterion's superseded state, item 11).
+ADR-038 bans hold in everything added: inline-fixture source analysis only — no `Mock<HttpMessageHandler>`, no
+DI-registration test, no constructor null-check test, no Dataverse/Azure call. The live evidence in §16.3 came from
+read-only `az monitor app-insights query` calls made by hand, not from any test.

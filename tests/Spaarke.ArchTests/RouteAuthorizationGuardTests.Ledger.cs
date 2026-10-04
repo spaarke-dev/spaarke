@@ -566,7 +566,8 @@ public partial class RouteAuthorizationGuardTests
     // MAINTENANCE: a route credited ONLY by one of these must be in AdminOnlyRoutes. Not admin, deliberately:
     // AddReportingAuthorizationFilter (a module role, not an operator gate) and
     // RequireAuthorization(AuthPolicies.ExternalCollaboration) (authentication-scheme selection). There is no
-    // DefaultPolicy or FallbackPolicy in the BFF, so a bare RequireAuthorization() only means "signed in".
+    // DefaultPolicy or FallbackPolicy in the BFF, so a bare RequireAuthorization() only means "signed in" — and a
+    // route with NO RequireAuthorization is public, which NoRouteIsAnonymousByOmission refuses (task 167 r2).
     //
     // ⚠️ The SystemAdmin assertion ALSO passes a token whose scope claim merely CONTAINS "admin"
     // (Infrastructure/DI/AuthorizationModule.cs:371-373). Task 165 fixes that policy (its amendment); this guard
@@ -1246,12 +1247,15 @@ public partial class RouteAuthorizationGuardTests
     //                                             fingerprint; a change to that fingerprint makes it stale.
     //        Permanent — the route is genuinely safe without a per-resource decision. It names a PermanentBasis from
     //                    the CLOSED set, and its reason cites the handler file:line that proves the basis:
-    //                      AnonymousByDesign         — AllowAnonymous, with a MANDATORY compensating control named at
-    //                                                  file:line (a rate limit, an HMAC, OAuth state, an
-    //                                                  IsDevelopment-only mapping). An optional control does not count,
-    //                                                  and neither does a harmless response on its own (owner round 12
-    //                                                  item 1 kept this strict rule and rate-limited /healthz,
-    //                                                  /healthz/catalog and /ping instead).
+    //                      AnonymousByDesign         — .AllowAnonymous() DECLARED on the route or group chain, with a
+    //                                                  MANDATORY compensating control named at file:line (a rate
+    //                                                  limit, an HMAC, OAuth state, an IsDevelopment-only mapping). An
+    //                                                  optional control does not count, and neither does a harmless
+    //                                                  response on its own (owner round 12 item 1 kept this strict rule
+    //                                                  and rate-limited /healthz, /healthz/catalog and /ping instead).
+    //                                                  A route anonymous by OMISSION (no RequireAuthorization, no
+    //                                                  AllowAnonymous) cannot be waived at all: NoRouteIsAnonymousByOmission
+    //                                                  fails it whatever its waiver says (task 167 r2).
     //                      CallerScopedOnly          — reads/writes only rows keyed by a server-derived caller identity
     //                                                  (oid, systemuserid, contact id), no caller-chosen id of another
     //                                                  principal's record.
@@ -1294,7 +1298,8 @@ public partial class RouteAuthorizationGuardTests
     // findings for the main session to assign (listed in notes/task-167-every-route-authorization-guard.md), 14
     // Pending routes owned by a fix task's amendment or by owner round 12 (161: 4, 166: 10), and 89 Permanent
     // waivers each with a verified basis. The suite is green BECAUSE of the Pending entries — that is the honest
-    // state, not a passing grade.
+    // state, not a passing grade. Task 167 r2 changed no waiver: it added NoRouteIsAnonymousByOmission, which no
+    // waiver can satisfy.
     // =============================================================================================
 
     private enum WaiverKind
