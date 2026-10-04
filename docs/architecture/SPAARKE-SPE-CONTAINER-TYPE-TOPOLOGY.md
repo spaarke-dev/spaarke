@@ -105,7 +105,10 @@ choice means creating a replacement, and (R3) the mistake stays on the books for
 | Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` | **new** | `standard` | Spaarke | 1 container per customer |
 | Model 2 (customer's Azure subscription inside the **customer's own** tenant) | `Spaarke Model 2` | **new** | `directToCustomer` | **Customer tenants** | **ALL** Model 2 customers |
 
-Four of twenty-five. **Model 2 scales to unlimited customers** through registration (R4).
+**Budget**: the four types in the inventory above already existed; `Spaarke Model 1` was created
+2026-10-03 (**5 of 25**); adding `Spaarke Trial 1` and `Spaarke Model 2` brings it to **7 of 25**.
+**Model 2 scales to unlimited customers** through registration (R4), so customer growth does not move
+this number.
 
 > 🟡 **Deployment-model note (2026-09-28, owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))**
 > — Model 1 is **not** a shared tier. Every customer gets a **dedicated Dataverse environment and a
