@@ -1,9 +1,12 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Locks sprk_issecure on sprk_project, sprk_matter and sprk_workassignment with field-level security, so ONLY the
-    BFF (through the secure/unsecure endpoints) can set or clear it, while EVERY user still reads its true value
-    (unified-access-control-r2 task 150; owner round 2 item 2). Dry run by default; -Apply writes; -Verify checks.
+    Locks sprk_issecure on sprk_project, sprk_matter, sprk_workassignment and sprk_invoice with field-level security, so
+    ONLY the BFF (through the secure/unsecure endpoints) can set or clear it on the three roots, while EVERY user still
+    reads its true value (unified-access-control-r2 task 150; owner round 2 item 2). sprk_invoice is locked the same way
+    (owner round 10 item 11): an invoice follows its matter, so its flag is no longer a security input anywhere in the BFF
+    (SecurableEntityRegistry.FlagIsNotASecurityInput) and NOTHING writes it; the lock keeps users from setting a value
+    that looks meaningful. Dry run by default; -Apply writes; -Verify checks.
 
 .DESCRIPTION
     It REUSES task 133's two profiles — it never creates or edits their membership:
@@ -40,7 +43,7 @@
       (c) report any OTHER profile that can create or update the column (FAIL). The platform's own System
           Administrator profile gets full access automatically and cannot be narrowed — owner decision F4 accepts it;
           every holder of the System Administrator role is LISTED (informational).
-      (d) publish the three tables.
+      (d) publish the four tables.
     sprk_accesspermission is NOT touched (owner-accepted: it stays editable by Write-holders).
 
     LIVE ORDER (task 150 step 6): Repair-SecureFlagNulls.ps1 -Apply → deploy the BFF → deploy the client (confirm no
@@ -111,7 +114,7 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants (pinned by SecureFlagFieldSecurityScriptAgreementTests) ───────────────────────────────────────
 $Column = 'sprk_issecure'
-$Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment')
+$Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 $Secured = $true

@@ -35,7 +35,7 @@
     Write mode. Without it the script never writes (except the report file).
 
 .PARAMETER Verify
-    Read-only check with a pass/fail exit code: 0 NULL rows and DefaultValue false on all three tables.
+    Read-only check with a pass/fail exit code: 0 NULL rows and DefaultValue false on every table.
 
 .EXAMPLE
     .\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
@@ -66,9 +66,10 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
 $Api = "$EnvironmentUrl/api/data/v9.2"
 
-# ── Constants (the BFF reads these: SecurableEntityRegistry.SecureFlagAttribute; the three secure roots) ─────────
+# ── Constants (SecurableEntityRegistry.SecureFlagAttribute; the three secure roots and the invoice, all four locked by ──
+# scripts/Set-SecureFlagFieldSecurity.ps1, whose (p4) refuses -Apply while any of them holds a NULL) ───────────────────
 $Column = 'sprk_issecure'
-$Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment')
+$Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice')
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -92,8 +93,9 @@ function Get-DvAll([string]$Path) {
 }
 
 # Every OTHER entity carrying the column is covered too (found by the task 150 review, live 2026-10-02: sprk_invoice
-# carries sprk_issecure — 4 of 10 rows NULL). The BFF's SecurableEntityRegistry is metadata-driven, so it treats every
-# carrier as securable, and an ABSENT flag on ANY of them now refuses uploads — not only on the three secure roots.
+# carries sprk_issecure — 4 of 10 rows NULL; it is now in $Tables). The BFF's SecurableEntityRegistry is metadata-driven,
+# so it treats every carrier as securable — except sprk_invoice, whose flag the owner ruled is not a security input
+# (round 10 item 11: an invoice follows its matter) — and an ABSENT flag on any securable carrier refuses uploads.
 $carriers = @((Invoke-DvGet "EntityDefinitions?`$select=LogicalName&`$filter=IsCustomEntity eq true&`$expand=Attributes(`$select=LogicalName;`$filter=LogicalName eq '$Column')").value |
     Where-Object { @($_.Attributes).Count -gt 0 } | ForEach-Object LogicalName)
 $extra = @($carriers | Where-Object { $_ -notin $Tables } | Sort-Object)
@@ -110,7 +112,7 @@ function Report([string]$State, [string]$What) {
 $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
 Write-Host "Environment : $EnvironmentUrl (org '$org')"
 Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }))
-Write-Host ("Tables      : {0}{1}" -f ($Tables -join ', '), $(if ($extra.Count) { "  (discovered beyond the three roots: $($extra -join ', '))" } else { '' }))
+Write-Host ("Tables      : {0}{1}" -f ($Tables -join ', '), $(if ($extra.Count) { "  (discovered beyond the four tables: $($extra -join ', '))" } else { '' }))
 
 $report = [ordered]@{
     environment = $EnvironmentUrl
@@ -178,7 +180,7 @@ $report | ConvertTo-Json -Depth 6 | Set-Content -Path $ReportPath -Encoding utf8
 Write-Host "`nReport: $ReportPath"
 
 if ($Verify -or $Apply) {
-    if ($gaps.Count -eq 0) { Write-Host "`nPASS: no NULL sprk_issecure, and the default is No on all three tables." -ForegroundColor Green; exit 0 }
+    if ($gaps.Count -eq 0) { Write-Host "`nPASS: no NULL sprk_issecure, and the default is No on every table." -ForegroundColor Green; exit 0 }
     Write-Host "`nFAIL ($($gaps.Count)):" -ForegroundColor Red
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1

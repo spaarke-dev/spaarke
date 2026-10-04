@@ -311,6 +311,10 @@ describe('provisionSecureProject — failure classification', () => {
     // Task 150: marking the project secure is the server's FIRST write; it failed, nothing else changed, the same caller
     // may call again.
     ['sdap.provision.secure_flag_not_set', 'not-started', true],
+    // Task 150 (owner round 10 item 10): an UNFLAGGED record is secured only for its creator. Refused before any change —
+    // deterministic for a caller who did not create it; a failed read of the creator, the same caller may call again.
+    ['sdap.provision.not_record_creator', 'not-started', false],
+    ['sdap.provision.record_creator_unverifiable', 'not-started', true],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -349,12 +353,21 @@ describe('provisionSecureProject — failure classification', () => {
     }
   });
 
-  it('says an environment refusal left the project NOT secured — it comes before the server marks it secure (task 150)', () => {
-    // Before task 150 the CLIENT wrote sprk_issecure at create time, so this copy said "created and marked secure".
-    // The server now marks it as its first write, after every environment check — so the project is not marked.
+  // Task 150, owner round 10 item 9 (F6): the copy the owner picked, verbatim. Row 2 is the resume-neutral option D: an
+  // environment refusal comes before the flag write on a FIRST call, but on a RESUME (or for a row an older client
+  // flagged) the project is already flagged, and the response does not say which — so the copy claims neither.
+  it('says an environment refusal could not finish securing the project — claiming neither "not secured" nor "nothing changed" (F6 row 2, option D)', () => {
     const { errorMessage } = classifyProvisioningFailure('sdap.provision.secure_bu_not_found');
-    expect(errorMessage).toMatch(/created but not secured/i);
-    expect(errorMessage).not.toMatch(/marked secure/i);
+    expect(errorMessage).toBe(
+      'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could not be finished; an administrator can finish securing it once the setup is fixed.'
+    );
+    expect(errorMessage).not.toMatch(/not secured|nothing about it changed|marked secure/i);
+  });
+
+  it('says the flag could not be set, and that nothing else changed (F6 row 3, option A)', () => {
+    expect(classifyProvisioningFailure('sdap.provision.secure_flag_not_set').errorMessage).toBe(
+      'The project could not be marked secure, so securing it stopped before anything else changed: its ownership, sharing and document storage are as they were.'
+    );
   });
 
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {
@@ -365,7 +378,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(27);
+    expect(EMITTED).toHaveLength(29);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

@@ -1327,7 +1327,9 @@ public sealed class RecordContainerResolver
                 ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks, parties: EventPartyRegarding),
                 // Typed sprk_project / sprk_matter are its OWN root links; sprk_regardingagreement is an intermediate
                 // (f3: the f2 table gave the invoice no intermediates at all, so an invoice regarding an agreement of a
-                // SECURE matter resolved a shared container).
+                // SECURE matter resolved a shared container). Task 150 (owner round 10 item 11): these links are the
+                // ONLY thing that decides an invoice — its own sprk_issecure is not a security input
+                // (SecurableEntityRegistry.FlagIsNotASecurityInput), so it is never read for a flag or a container.
                 ["sprk_invoice"] = new(polymorphic: true,
                 [
                     ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),

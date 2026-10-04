@@ -46,8 +46,13 @@ public static class SecureFlagFieldSecurityAssertion
     /// <summary>The field-secured column.</summary>
     public const string Column = "sprk_issecure";
 
-    /// <summary>The tables that carry it — the three secure roots.</summary>
-    public static readonly IReadOnlyList<string> Tables = new[] { "sprk_project", "sprk_matter", "sprk_workassignment" };
+    /// <summary>
+    /// The tables whose copy of the column is locked — the three secure roots, and <c>sprk_invoice</c> (owner round 10
+    /// item 11: an invoice follows its matter, so its flag is not a security input and nothing writes it; it is locked
+    /// like the roots so no user sets a value that looks meaningful).
+    /// </summary>
+    public static readonly IReadOnlyList<string> Tables =
+        new[] { "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice" };
 
     /// <summary>The reader profile (task 133's name, shared by every BFF-managed column).</summary>
     public const string ReaderProfileName = "Spaarke BFF-Managed Field Readers";

@@ -207,11 +207,12 @@ public class ChildRecordContainerResolutionTests
         world.Reads("sprk_matter").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice (securable, own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
+    [Fact(DisplayName = "Task 155: an invoice (own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
     public async Task SecurableChild_NotItselfSecure_UnderASecureMatter_ResolvesTheMattersContainer()
     {
         // Live dev: sprk_invoice carries sprk_issecure, and links to its root through typed sprk_matter /
-        // sprk_project lookups, not sprk_regarding{core}.
+        // sprk_project lookups, not sprk_regarding{core}. This world declares the column on the invoice as live does;
+        // since task 150 the registry (and TestEntityCatalog) does not treat it as securable, and the links decide.
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
@@ -223,17 +224,28 @@ public class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice that is ITSELF secure keeps its own container and never consults its root")]
-    public async Task SecurableChild_ItselfSecure_KeepsItsOwnContainer()
+    /// <summary>
+    /// Task 150 (owner round 10 item 11: "invoices follow their matter"). Until task 150 an invoice flagged secure was a
+    /// secure record in its own right — it kept a container of its own and never consulted its root, and with no
+    /// container it refused every upload even under an ordinary matter. Its flag is no longer a security input: the
+    /// matter decides, both ways. (The real registry's half — the invoice classified NotSecurable although its table
+    /// carries the column — is pinned in <c>SecurableEntityRegistryTests</c>.)
+    /// </summary>
+    [Theory(DisplayName = "Task 150: an invoice FLAGGED secure follows its matter — secure under a secure matter, ordinary under an ordinary one")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnInvoiceFlaggedSecure_FollowsItsMatter(bool matterIsSecure)
     {
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: true, ownContainer: OtherRootContainer)
-            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+            .WithRoot("sprk_matter", MatterId, isSecure: matterIsSecure, matterIsSecure ? RootContainer : null)
+            .WithBusinessUnit(BusinessUnitContainer);
 
         var decision = await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
 
-        decision.ContainerId.Should().Be(OtherRootContainer);
-        world.RootReads().Should().Be(0);
+        decision.ContainerId.Should().Be(matterIsSecure ? RootContainer : BusinessUnitContainer,
+            "the invoice's own flag and container decide nothing; its matter does");
+        world.Reads("sprk_matter").Should().Be(1, "the invoice's root is always consulted now");
     }
 
     [Fact(DisplayName = "Task 155: a contact (no ancestor concept) resolves its own business-unit container by the two-argument overload")]
@@ -722,7 +734,10 @@ public class ChildRecordContainerResolutionTests
                             RecordContainerResolver.ChildAncestorLinks.RecordKind.Party))
             .Select(c => c.Column);
 
-        var securable = SecurableWithInvoice.Contains(entity);
+        // Task 150 (owner round 10 item 11): the invoice's table carries sprk_issecure (this world declares it, as live
+        // metadata does), but its flag is not a security input — so its row is read for its links only, never for a flag
+        // or a container of its own.
+        var securable = SecurableWithInvoice.Contains(entity) && entity != "sprk_invoice";
         var expected = ownershipColumns
             .Concat(hasPolymorphicPair ? ["sprk_regardingrecordid", "sprk_regardingrecordtype"] : Array.Empty<string>())
             .Concat(hasPolymorphicPair ? partyRegardingColumns : Array.Empty<string>())
@@ -802,8 +817,9 @@ public class ChildRecordContainerResolutionTests
     [Fact(DisplayName = "Task 155: an email regarding an invoice under a SECURE matter routes to the MATTER's own container, not the archive")]
     public async Task Communication_RegardingAnInvoiceUnderASecureMatter_RoutesToTheMattersContainer()
     {
-        // The deliberate behaviour change: CommunicationContainerResolver asks about securable regardings only, and
-        // sprk_invoice is securable live — so the invoice, now a CHILD, resolves through its secure root.
+        // The deliberate behaviour change: the invoice, a CHILD, resolves through its secure root. (This world declares
+        // sprk_issecure on the invoice as live metadata does; since task 150 the invoice's own flag is not a security
+        // input, so its matter alone decides.)
         var world = new World(securable: SecurableWithInvoice)
             .WithCommunicationRegardingInvoice()
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)

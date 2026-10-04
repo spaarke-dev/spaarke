@@ -331,11 +331,176 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Unsecure — owner round 3b F3: Full Access holders and the creator only
+    // Provision — owner round 10 item 10: an UNFLAGGED record is secured only for its creator
     // ═════════════════════════════════════════════════════════════════════════
 
     private static readonly Guid Colleague = Guid.Parse("c0000000-0000-0000-0000-0000000c0111");
     private static readonly Guid BffApplicationUser = Guid.Parse("a0000000-0000-0000-0000-0000000000b1");
+
+    /// <summary>Nothing at all was written: no flag, no owner move, no share, no container.</summary>
+    private void AssertNothingWritten(Guid recordId)
+    {
+        _fixture.Updates.Should().BeEmpty("the refusal comes before any write — the flag included");
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.IsSecureOf(recordId).Should().BeFalse();
+        _fixture.OwningUserOf(recordId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId, "never moved");
+    }
+
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_AnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_IsRefusedBeforeAnyWrite(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);   // a person created it
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the caller passed the Write gate but is not the creator");
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertNothingWritten(recordId);
+    }
+
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_AnUnflaggedRecord_ByItsCreator_IsProvisioned(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false, createdBy: ProvisionProjectTestFixture.CallerSystemUserId);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+    }
+
+    /// <summary>An app-only create (Office quick-create): createdby is the BFF, the person is <c>sprk_createdbyperson</c>.</summary>
+    [Fact]
+    public async Task Provision_AnUnflaggedAppCreatedRecord_ByThePersonRecordedAsItsCreator_IsProvisioned()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, createdBy: BffApplicationUser,
+            createdByPerson: ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(recordId).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Provision_AnUnflaggedAppCreatedRecord_RecordedForSomeoneElse_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: BffApplicationUser, createdByPerson: Colleague);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>
+    /// "createdby when human": a PERSON in createdby is the creator even when disabled — a <c>sprk_createdbyperson</c> naming
+    /// the caller does not override it (only an app-only create defers to that column).
+    /// </summary>
+    [Fact]
+    public async Task Provision_AnUnflaggedRecord_CreatedByADisabledPerson_IsNotSecuredForTheRecordedPerson()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("workassignment", recordId, isSecure: false, createdBy: Colleague,
+            createdByPerson: ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SystemUsers[Colleague] = (true, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "workassignment", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertNothingWritten(recordId);
+    }
+
+    [Fact]
+    public async Task Provision_AnUnflaggedRecord_WhoseCreatorCannotBeRead_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.SystemUserReadFailsFor = Colleague;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable,
+            "an unreadable creator is never read as 'the caller created it'");
+        AssertNothingWritten(recordId);
+    }
+
+    [Fact]
+    public async Task Provision_AnUnflaggedAppCreatedRecord_WhoseRecordedPersonCannotBeRead_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, createdBy: BffApplicationUser,
+            createdByPerson: ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+        _fixture.CreatorPersonReadFailsWith = HttpStatusCode.ServiceUnavailable;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable);
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>Before the creator-person schema runs, the column records nobody: no one is admitted by it.</summary>
+    [Fact]
+    public async Task Provision_AnUnflaggedAppCreatedRecord_WhenTheCreatorPersonColumnIsMissing_AdmitsNobodyThroughIt()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: BffApplicationUser);
+        _fixture.SystemUsers[BffApplicationUser] = (false, true);
+        _fixture.CreatorPersonColumnExists = false;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonNotRecordCreator);
+        AssertNothingWritten(recordId);
+    }
+
+    /// <summary>
+    /// A record ALREADY flagged (an older client flagged it at create; a row from before task 150) stays on the route's
+    /// Write gate: a Write holder who did not create it still provisions it (owner round 10 item 10).
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_AnAlreadyFlaggedRecord_ByAWriteHolderWhoDidNotCreateIt_StaysOnTheWriteGate(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: true, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.DelegationProbes.Should().NotBeEmpty("the route's Write gate is still what admits the caller");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Unsecure — owner round 3b F3: Full Access holders and the creator only
+    // ═════════════════════════════════════════════════════════════════════════
 
     private void AssertStillSecure(Guid recordId)
     {
@@ -361,9 +526,12 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonNotPermitted);
         using (var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
         {
-            problem.RootElement.GetProperty("detail").GetString().Should()
-                .Contain("Full Access").And.Contain("the person who created it",
-                    "the ribbon shows this message as is, so it must name who CAN remove the designation");
+            // Owner round 10 item 9 (F6 row 6): option A, verbatim. The ribbon shows this message as is, so it names who
+            // CAN remove the designation.
+            var label = recordType == "workassignment" ? "work assignment" : recordType;
+            problem.RootElement.GetProperty("detail").GetString().Should().Be(
+                $"Only someone with Full Access to this {label}, or the person who created it, can remove its secure " +
+                "designation. It is still secure, and nothing was changed.");
         }
 
         AssertStillSecure(recordId);

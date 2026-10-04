@@ -152,6 +152,7 @@ public class SecureFlagFieldSecurityAssertionTests
     [InlineData("sprk_project")]
     [InlineData("sprk_matter")]
     [InlineData("sprk_workassignment")]
+    [InlineData("sprk_invoice")]   // owner round 10 item 11: the invoice's copy is locked like the roots'
     public void Evaluate_WhenOneTableIsNotSecured_Fails(string table)
     {
         var secured = SecureFlagFieldSecurityAssertion.Tables.Where(t => t != table).ToHashSet();
@@ -432,7 +433,23 @@ public class SecureFlagFieldSecurityScriptAgreementTests
         lockScript.Column.Should().Be(SecurableEntityRegistry.SecureFlagAttribute, "the column the BFF reads and refuses on");
         lockScript.Reader.Should().Be(profileScript.Reader, "task 150 REUSES task 133's reader profile — never a second one");
         lockScript.Writer.Should().Be(profileScript.Writer, "task 150 REUSES task 133's writer profile — never a second one");
-        profileScript.Tables.Should().BeEquivalentTo(lockScript.Tables, "both lock the same three roots");
+        lockScript.Tables.Should().BeEquivalentTo(profileScript.Tables.Append("sprk_invoice"),
+            "both lock the three roots; the invoice carries only sprk_issecure, locked too (owner round 10 item 11)");
+    }
+
+    /// <summary>
+    /// Owner round 10 item 11: the invoice's flag is locked BECAUSE it is no longer a security input — the BFF's registry
+    /// leaves it out of the securable set. The two halves move together: a lock without the exclusion would leave an
+    /// invoice flagged true refusing every upload with nobody able to clear it; the exclusion without the lock would leave
+    /// a user-settable flag that looks meaningful.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceIsLocked_ExactlyBecauseItsFlagIsNotASecurityInput()
+    {
+        SecureFlagFieldSecurityAssertion.Tables.Should().Contain("sprk_invoice");
+        SecurableEntityRegistry.FlagIsNotASecurityInput.Should().BeEquivalentTo(
+            SecureFlagFieldSecurityAssertion.Tables.Except(new[] { "sprk_project", "sprk_matter", "sprk_workassignment" }),
+            "every locked table that is not a secure root is one whose flag the registry ignores, and vice versa");
     }
 
     [Fact]
@@ -446,7 +463,7 @@ public class SecureFlagFieldSecurityScriptAgreementTests
 
     private const string Seed = """
         $Column = 'sprk_issecure'
-        $Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment')
+        $Tables = @('sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice')
         $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
         $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
         $Secured = $true
@@ -455,6 +472,7 @@ public class SecureFlagFieldSecurityScriptAgreementTests
     [Theory]
     [InlineData("$Secured = $true", "$Secured = $false")]
     [InlineData("'sprk_matter', ", "")]
+    [InlineData(", 'sprk_invoice'", "")]
     [InlineData("$Column = 'sprk_issecure'", "$Column = 'sprk_accesspermission'")]
     [InlineData("Field Readers'", "Field Readers 2'")]
     [InlineData("Field Writers'", "Flag Writers'")]
