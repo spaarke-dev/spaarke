@@ -260,8 +260,9 @@ public static class AnalysisEndpoints
         // R7 Wave 4 (FR-11): PlaybookId is REQUIRED for the canonical orchestrator path.
         // The legacy raw-OpenAI/ActionId-only path was deleted by task 042 (no transition shim
         // per spec Q6). All Analysis Code Page flows always supply a PlaybookId per the contract.
-        // Task 162: AnalysisAuthorizationFilter's run mode returns this same 400 before any lookup, so this
-        // branch is reached only if that filter is removed from the chain. One constant for both.
+        // Task 162: on the mapped route, AnalysisAuthorizationFilter's run mode returns this same 400 before any
+        // lookup, so a request reaches this branch only when the handler runs without that filter (a direct call,
+        // or the filter removed from the chain). One constant for both.
         if (!request.PlaybookId.HasValue)
         {
             response.StatusCode = StatusCodes.Status400BadRequest;

@@ -2,12 +2,14 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 using AuthorizationResult = Sprk.Bff.Api.Services.Ai.AuthorizationResult;
 
@@ -320,9 +322,98 @@ public class AnalysisAuthorizationFilterTests
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be("sdap.access.error.system_failure");
     }
 
+    /// <summary>
+    /// The request services for the evaluator-unavailable cases: the evaluator's <c>AuthorizationService</c> either
+    /// absent, or registered with its <c>IAccessDataSource</c> dependency missing (so resolving it throws).
+    /// </summary>
+    private static IServiceProvider ServicesWithoutAnEvaluator(bool registeredButUnresolvable, Guid? profilePlaybookId = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        if (registeredButUnresolvable)
+        {
+            services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
+        }
+        if (profilePlaybookId is { } playbookId)
+        {
+            var routing = new Mock<IConsumerRoutingService>();
+            routing
+                .Setup(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(playbookId);
+            services.AddSingleton(routing.Object);
+        }
+        return services.BuildServiceProvider().CreateScope().ServiceProvider;
+    }
+
+    [Theory(DisplayName = "162: on /execute, an evaluator that cannot be resolved (not registered, or a dependency missing) DENIES 403 system_failure — not a 500, never next")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Run_EvaluatorUnavailable_Denies403SystemFailure(bool registeredButUnresolvable)
+    {
+        var playbookId = Guid.NewGuid();
+        var filter = CreateFilter(AuthorizationMode.AnalysisRun);
+        var request = new AnalysisExecuteRequest { DocumentIds = [Guid.NewGuid()], PlaybookId = playbookId };
+        var context = CreateContext(CreateUser(), arguments: request);
+        context.Object.HttpContext.RequestServices = ServicesWithoutAnEvaluator(registeredButUnresolvable, profilePlaybookId: playbookId);
+        var nextCalled = false;
+
+        var result = await filter.InvokeAsync(context.Object, _ =>
+        {
+            nextCalled = true;
+            return ValueTask.FromResult<object?>(Results.Ok());
+        });
+
+        nextCalled.Should().BeFalse();
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(403);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be("sdap.access.error.system_failure");
+    }
+
+    [Theory(DisplayName = "162: on GET, an evaluator that cannot be resolved answers the uniform 404 — not a 500, never next")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Get_EvaluatorUnavailable_IsTheUniform404(bool registeredButUnresolvable)
+    {
+        var analysisId = Guid.NewGuid();
+        var filter = CreateFilter(AuthorizationMode.AnalysisAccess);
+        var context = CreateContext(CreateUser(), new Dictionary<string, object?> { ["analysisId"] = analysisId.ToString() });
+        context.Object.HttpContext.RequestServices = ServicesWithoutAnEvaluator(registeredButUnresolvable);
+        var nextCalled = false;
+
+        var result = await filter.InvokeAsync(context.Object, _ =>
+        {
+            nextCalled = true;
+            return ValueTask.FromResult<object?>(Results.Ok());
+        });
+
+        nextCalled.Should().BeFalse();
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(404);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be("sdap.access.deny.record_unavailable");
+        problem.ProblemDetails.Detail.Should().NotContain(analysisId.ToString());
+    }
+
     #endregion
 
     #region AnalysisAccess anchor rule (task 162)
+
+    [Theory(DisplayName = "162: an anchor whose type has no entity set REJECTS the whole analysis even when a readable document anchor sits beside it — it is never skipped")]
+    [InlineData("sprk_regardingbudget", "sprk_budget")]
+    [InlineData("sprk_regardingcommunication", "sprk_communication")]
+    [InlineData("sprk_regardingservicerequest", "sprk_servicerequest")]
+    public void BuildAnchorTargets_UnmappedAnchorBesideADocument_Rejects(string column, string target)
+    {
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_analysis", Guid.NewGuid())
+        {
+            ["sprk_documentid"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", Guid.NewGuid()),
+            [column] = new Microsoft.Xrm.Sdk.EntityReference(target, Guid.NewGuid()),
+        };
+
+        var targets = AnalysisAuthorizationFilter.BuildAnchorTargets(row, new DefaultHttpContext(), logger: null);
+
+        targets.Rejection.Should().NotBeNull("a skipped unmapped anchor would leave only the document check, which a document reader passes");
+        targets.Checks.Should().BeEmpty();
+    }
 
     /// <summary>
     /// EVERY Lookup attribute the live metadata sweep returned for sprk_analysis (spaarkedev1,

@@ -198,6 +198,35 @@ public class AnalysisEndpointsAuthorizationContractTests
         host.Orchestration.VerifyNoOtherCalls();
     }
 
+    [Theory(DisplayName = "162 GET: a READABLE document anchor beside an anchor whose type has no entity set (budget, communication, service request) is still the uniform 404 — the unmapped anchor is rejected, never skipped")]
+    [InlineData("sprk_regardingbudget", "sprk_budget", "sprk_budgets")]
+    [InlineData("sprk_regardingcommunication", "sprk_communication", "sprk_communications")]
+    [InlineData("sprk_regardingservicerequest", "sprk_servicerequest", "sprk_servicerequests")]
+    public async Task Get_ReadableDocumentBesideAnAnchorWithoutEntitySet_IsUniform404(string column, string target, string guessedSet)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var analysisId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var unmappedId = Guid.NewGuid();
+        host.SeedAnalysis(analysisId, new()
+        {
+            ["sprk_documentid"] = ("sprk_document", documentId),
+            [column] = (target, unmappedId),
+        });
+        // The caller can read the document, and would pass even a guessed entity set for the other anchor: only the
+        // reject-not-skip rule stands between this caller and the analysis.
+        host.Access.Grant(Documents, documentId, FullRights);
+        host.Access.Grant(guessedSet, unmappedId, FullRights);
+        host.Orchestration
+            .Setup(o => o.GetAnalysisAsync(analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisDetailResult { Id = analysisId, Status = "Completed", WorkingDocument = "# draft" });
+
+        var response = await host.SendAsync(Get(analysisId));
+
+        await AssertUniform404Async(response, analysisId);
+        host.Orchestration.Verify(o => o.GetAnalysisAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact(DisplayName = "162 GET: an analysis deleted between the check and the read answers the SAME uniform 404 (handler KeyNotFoundException)")]
     public async Task Get_HandlerKeyNotFoundAfterTheCheck_IsTheSameUniform404()
     {
@@ -423,6 +452,27 @@ public class AnalysisEndpointsAuthorizationContractTests
             host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Playbooks, playbookId, true));
             host.VerifyPromoteWroteNothing();
         }
+    }
+
+    [Fact(DisplayName = "162 promote: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and writes nothing")]
+    public async Task Promote_CheckDeclarationFault_Denies()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var session = await host.SeedOwnSessionAsync(null);
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, ReadAppendTo);
+        var playbookId = Guid.NewGuid();
+        host.PlaybookService
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("playbooks unavailable"));
+
+        var response = await host.SendAsync(Promote(new
+        {
+            sessionId = session.SessionId, name = "A", regardingEntityType = "sprk_matter", regardingEntityId = matterId, playbookId,
+        }));
+
+        await AssertForbiddenAsync(response, "sdap.access.error.system_failure");
+        host.VerifyPromoteWroteNothing();
     }
 
     // =============================================================================================

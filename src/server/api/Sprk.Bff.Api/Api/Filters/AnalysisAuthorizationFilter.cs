@@ -574,16 +574,26 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
         nodes.Count == 0
         || nodes.Any(n => n.SprkExecutortype is not { } executorType || ExecutorSideEffects.IsSideEffecting(executorType));
 
-    /// <summary>Hands the declared checks to the ONE per-route evaluator (task 130).</summary>
-    private static ValueTask<object?> EvaluateAsync(
+    /// <summary>
+    /// Hands the declared checks to the ONE per-route evaluator (task 130). An evaluator that cannot be resolved (a
+    /// missing or broken registration) is a configuration fault and DENIES with this route's deny shape — never a
+    /// 500 from an unhandled exception, never a pass-through (ADR-003).
+    /// </summary>
+    private ValueTask<object?> EvaluateAsync(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next,
         FinanceAuthorizationTargets targets,
         FinanceDenial denial)
     {
         var services = context.HttpContext.RequestServices;
+        var authorizationService = ResolveEvaluatorOrNull(services);
+        if (authorizationService is null)
+        {
+            return ValueTask.FromResult<object?>(DenyEvaluatorUnavailable(context.HttpContext, denial));
+        }
+
         return new FinanceAuthorizationFilter(
-            services.GetRequiredService<Spaarke.Core.Auth.AuthorizationService>(),
+            authorizationService,
             _ => targets,
             denial,
             services.GetService<CallerRecordAccessProbe>()).InvokeAsync(context, next);
@@ -602,11 +612,10 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     {
         _logger?.LogWarning(fault, "[ANALYSIS-AUTH] {Mode}: declaring the checks faulted; denying (fail closed)", _mode);
         var services = context.HttpContext.RequestServices;
-        var authorizationService = services.GetService<Spaarke.Core.Auth.AuthorizationService>();
+        var authorizationService = ResolveEvaluatorOrNull(services);
         if (authorizationService is null)
         {
-            return ValueTask.FromResult<object?>(ProblemDetailsHelper.Forbidden(
-                FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: context.HttpContext.TraceIdentifier));
+            return ValueTask.FromResult<object?>(DenyEvaluatorUnavailable(context.HttpContext, denial));
         }
 
         return new FinanceAuthorizationFilter(
@@ -615,6 +624,38 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             denial,
             services.GetService<CallerRecordAccessProbe>()).InvokeAsync(context, next);
     }
+
+    /// <summary>
+    /// The evaluator's <see cref="Spaarke.Core.Auth.AuthorizationService"/>, or <c>null</c> when it is not registered or
+    /// its construction throws (a dependency missing). Both are configuration faults the caller denies on.
+    /// </summary>
+    private Spaarke.Core.Auth.AuthorizationService? ResolveEvaluatorOrNull(IServiceProvider services)
+    {
+        try
+        {
+            var authorizationService = services.GetService<Spaarke.Core.Auth.AuthorizationService>();
+            if (authorizationService is null)
+            {
+                _logger?.LogError("[ANALYSIS-AUTH] {Mode}: AuthorizationService is not registered; denying (fail closed)", _mode);
+            }
+
+            return authorizationService;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[ANALYSIS-AUTH] {Mode}: AuthorizationService could not be resolved; denying (fail closed)", _mode);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The deny for an unresolvable evaluator, in the route's own deny shape: the uniform 404 on GET (so it is not an
+    /// oracle either), otherwise 403 <c>sdap.access.error.system_failure</c> — the same bodies the evaluator renders.
+    /// </summary>
+    private static IResult DenyEvaluatorUnavailable(HttpContext httpContext, FinanceDenial denial) =>
+        denial == FinanceDenial.UniformNotFound
+            ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
+            : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: httpContext.TraceIdentifier);
 
     /// <summary>
     /// Extract document IDs from request arguments.
