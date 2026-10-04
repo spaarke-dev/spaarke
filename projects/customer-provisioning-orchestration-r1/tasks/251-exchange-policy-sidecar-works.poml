@@ -4,7 +4,7 @@
     <title>Make the Exchange-policy sidecar work on the L2 Worker (G30) — correct its settings wiring, give it a real Exchange identity (preferably managed identity), deploy the Worker + sidecar together healthy</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T251 (gap G30, found during T248's dev deploy 2026-10-03)</phase>
     <gate>startable now; the Exchange identity choice is an owner decision (escalation 1)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-sensitive (Exchange Online app-only identity for H14a), Bicep for a live App Service, sidecar code, and a dev deployment.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -107,6 +107,37 @@
   <notes>
     Filed 2026-10-03 during T248 (owner direction: fix the sidecar properly rather than remove it). Hard prerequisite of
     T186 (first live customer run): H14a cannot set the Exchange ApplicationAccessPolicy without it.
+
+    COMPLETED 2026-10-04. Design + spike log: notes/t251-exchange-sidecar-design.md (owner D24-D26).
+    - Identity: the sidecar holds no credential; the Worker signs in as 'Spaarke Exchange Admin' via its UAMI's
+      federated credential and sends the token per request (D24). Narrowed Exchange role + delegating x4 (D25).
+    - H14a moved from ApplicationAccessPolicy to RBAC for Applications, stamp UAMI only, group-scoped (D26); H10 no
+      longer grants the four mailbox roles in Entra; T3/T4 follow.
+    - Root cause of the spike blocker: -Organization <tenant GUID> lets Exchange connect and read but fails every
+      write ("write permission to target DC"). The Worker now resolves the initial domain from Graph GET
+      /organization and the sidecar requires it. No support case (owner).
+    - Live read-back shape: RecipientWriteScope = Group + CustomResourceScope = group Name (no RecipientGroupScope
+      property); Get-Group lacks ExternalDirectoryObjectId (Get-Recipient has it). Code matches this.
+    Acceptance:
+    - /healthz 200 with the sidecar running: deployed 2026-10-04 (image provisioning-sidecar:633eb5ff3 / latest);
+      sidecar log "Sidecar listening, degraded:false" at 20:19:36Z. platform-controlplane deploy: Worker module
+      Succeeded; Api module failed only on the known pending swap (owner item).
+    - Sidecar environmentVariables name app settings; JSON = fresh compile (verified after prettier).
+    - Owner-approved identity, no secret: in-tenant run of Verify-Sidecar-Live.ps1 -InTenant (the deployed image,
+      the Worker UAMI, the dev tenant): read HTTP 200 Success; wrong secret 401; tenant id as organization 400.
+      Report notes/sidecar-live-verification-2026-10-04.json. The literal in-Worker call runs first in T186 —
+      no endpoint makes the Worker call the sidecar outside a provisioning run.
+    - ControlPlane 2100 / 6 T221 baseline / 1 skip; ArchTests 346/346; Pester 16/16.
+    Tests beyond the stated scope (one line each):
+    - Pester Invoke-MailboxAccessApply cases (code review W5): Drift must create nothing and success needs read-back.
+    - Pester organization checks + the management-scope Drift case: guard the two failure modes found live.
+    - Contract tests for the initial-domain lookup (failure, per-tenant cache, parser): a GUID fallback would
+      silently break every write.
+    Open, recorded for T186: CustomResourceScope was confirmed to carry the group's name on a group whose Name =
+    DisplayName; if Exchange reports DisplayName instead, a group with different values fails closed (read-back
+    Failure), never open (code review W1).
+    Also fixed at discovery: Verify-Sidecar-Live.ps1 could never reach the sidecar on Linux (Kudu runs in its own
+    container) — reworked; Deploy-ControlPlane.ps1 checked the Worker for the pre-rename Cosmos__Endpoint key.
   </notes>
 
   <execution>

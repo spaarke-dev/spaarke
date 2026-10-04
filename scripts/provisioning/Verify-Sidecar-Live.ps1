@@ -106,8 +106,12 @@ param(
     [string]$SidecarName = 'exchange-policy-sidecar',
     [int]$SidecarPort = 8091,
     [switch]$InTenant,
+    # GUIDs only: these values are written into the generated in-container script.
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
     [string]$PolicyScopeGroupId = '00000000-0000-0000-0000-000000000000',
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
     [string]$AppId = '',
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
     [string]$ServicePrincipalObjectId = '',
     [string]$SkipChecks = '',
     [string]$ReportPath = ''

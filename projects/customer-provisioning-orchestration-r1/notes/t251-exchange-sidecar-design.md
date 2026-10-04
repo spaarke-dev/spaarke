@@ -1,6 +1,6 @@
 # T251 — Exchange sidecar: identity + RBAC for Applications design
 
-> **Status**: DRAFT — owner decisions D24–D26 recorded 2026-10-04; four live spikes (§5) must pass before code is locked.
+> **Status**: IMPLEMENTED 2026-10-04 (T251 complete). Spikes S0–S3 passed live (§7); S4, the Graph *effect* of a grant (30 min–2 h), is not checked by T4 and was not run. Deployed and verified in-tenant (`sidecar-live-verification-2026-10-04.json`).
 > **Task**: `tasks/251-exchange-policy-sidecar-works.poml` (gap G30). Research: researcher memory
 > `exo-sidecar-identity-2026-10-03.md`, `exo-rbac-for-apps-design-2026-10-04.md`.
 
