@@ -109,6 +109,8 @@
 | ✅ 091 | [Unaudited sweeps, own PR (C-18)](091-unaudited-sweeps-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1122](https://github.com/spaarke-dev/spaarke/pull/1122) **merged** `48d4fad04`. 4 colour violations fixed; 3 cards documented as different; SECTION_REGISTRY kept with consumer cited |
 | ✅ 092 | [Master build + test failures, own PR](092-master-build-and-test-failures-own-pr.poml) | FULL | sonnet/xhigh | — | I2 | [PR #1123](https://github.com/spaarke-dev/spaarke/pull/1123). 6 PCF builds fixed (broken since the 2026-08-14 CVE bump); 17 failing suites fixed or evidenced; **one user-visible fix** (FR-02 section height) |
 | 🔄 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1282](https://github.com/spaarke-dev/spaarke/pull/1282) merged, but **reopened**: pcf-scripts exits 0 on webpack failure, so the table reported false passes (real: 9 build failures). Follow-up fix in progress |
+| 🔲 094 | [PCF deploy procedures verify the real build result, own PR](094-pcf-deploy-build-verification-own-pr.poml) | FULL | **opus**/high | — | I2 | Main session (.claude skills). From 093b: pcf-scripts exits 0 on failure |
+| 🔲 095 | [Flaky email-attachment regex timeout, own PR](095-flaky-email-attachment-regex-timeout-own-pr.poml) | FULL | sonnet/high | — | I2 | Owner approved 2026-10-04 |
 
 ### Phase 9 — Wrap-up
 
