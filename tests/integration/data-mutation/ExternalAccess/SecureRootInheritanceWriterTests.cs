@@ -403,6 +403,23 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     }
 
     /// <summary>
+    /// Owner round 31 item 1, chat create: whether the caller is on the secure matter's No Access list cannot be checked (the
+    /// list cannot be read) — refused (<c>creator_no_access_unverifiable</c>), nothing created (ADR-003).
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheNoAccessListCannotBeRead_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _fixture.NoAccessList.Faults = true;
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Owner round 31 item 1, chat create: filed under a SECURE matter (typed) AND, by the pair, under a matter whose flag
     /// reads EMPTY — secure-if-any makes the record secure, but the caller cannot be checked against the unreadable matter's
     /// No Access list, so the create is refused (<c>creator_no_access_unverifiable</c>) with nothing written.
@@ -608,6 +625,27 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         _fixture.IsSecureOf(World.Deletes.Single().Id).Should().BeNull("read back gone");
     }
 
+    /// <summary>
+    /// Owner round 31 item 2, Office: the maker could not be shared AND the project could not be removed again — the warning
+    /// says exactly that (never "shared to you"); the project stays secure and team-owned, and the job shares it later.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheMakerCannotBeSharedNorTheProjectRemoved_WarnsSo()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+        World.DeletesFail = true;
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed"));
+        result.Warnings.Should().NotContain(w => w.Contains("as a secure record shared to you"));
+        _fixture.IsSecureOf(result.RecordId).Should().BeTrue();
+        _fixture.OwningTeamOf(result.RecordId).Should().Be(SecureTeam);
+        _fixture.ShareMaskOf(result.RecordId, Creator).Should().Be(0);
+    }
+
     /// <summary>G5, Office: the caller lacks AppendTo on the secure matter — refused (403 kind), nothing created.</summary>
     [Fact]
     public async Task OfficeCreate_WhenTheCallerCannotFileUnderTheSecureMatter_IsRefused_AndNothingIsCreated()
@@ -797,6 +835,51 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
         _writes.Should().BeEmpty("the caller's PATCH is never sent");
         _fixture.SharesOn(workAssignment).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat update: the record's creator is on the WORK ASSIGNMENT's own No Access list — it reads
+    /// unflagged, but it is asked about as the secure record it would become — refused before the PATCH, nothing written.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_WhenTheCreatorIsOnTheRecordsOwnNoAccessList_IsRefusedBeforeThePatch()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.NoAccessReads.Flags[workAssignment] = new Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags(IsSecure: false, IsRestricted: false);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, workAssignment);
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat update: the re-file files the record under a SECURE matter while its pair names a matter
+    /// whose flag reads EMPTY — it would be secured (secure-if-any), but its creator cannot be checked against the unreadable
+    /// matter's No Access list: refused before the PATCH (<c>creator_no_access_unverifiable</c>).
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_UnderASecureMatterWhileItsPairNamesAMatterWhoseFlagCannotBeRead_IsRefusedBeforeThePatch()
+    {
+        var (secure, ordinary) = Matters();
+        var unreadable = Guid.NewGuid();
+        _fixture.SeedMatter(unreadable, isSecure: false);
+        FlagUnreadable(unreadable);
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        FilePair(_fixture, "sprk_workassignment", workAssignment, unreadable, RecordTypeRef(_fixture, "sprk_matter"));
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
     }
 
     /// <summary>AC negative, chat update: the matter's flag cannot be read — refused, the caller's PATCH never sent.</summary>

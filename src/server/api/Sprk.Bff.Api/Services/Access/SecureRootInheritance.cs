@@ -1236,13 +1236,20 @@ public sealed class SecureRootInheritance
             var rootType = RootTypeOf(logical);
 
             // Still justified by the record's current secure parents (their intersection)?
-            var answer = await FindSecureParentsAsync(logical, recordId, ct).ConfigureAwait(false);
-            var mirror = await _synchronizer.InheritedMirrorAsync(answer.SecureParents.Select(p => (p.Table, p.Id)).ToArray(), ct)
-                .ConfigureAwait(false);
-            if (mirror is null)
-                return new EndOutcome(false, false, "whether another secure record it is filed under still shares it could not be read");
             var written = row.GrantedLevel ?? 0;
-            if (answer.HasSecureParent && mirror.TryGetValue(principal, out var still) && (still & written) == written)
+
+            // What the parent's share ADDED (a raise keeps the level it raised from): another parent justifies the share when
+            // it carries at least that.
+            var added = written & ~PriorMaskOf(row.Reason);
+            var justified = await StillJustifiedByParentsAsync(
+                logical, recordId, principal, added != 0 ? added : written, ct).ConfigureAwait(false);
+            if (justified is null)
+            {
+                return new EndOutcome(false, false,
+                    "every secure record it is filed under that could be read still shares it, but another could not be read");
+            }
+
+            if (justified == true)
             {
                 await EndRowAsync(row, AssignedAccessReason.KeptOtherSource, ct).ConfigureAwait(false);
                 return new EndOutcome(true, false, null);
@@ -1313,6 +1320,37 @@ public sealed class SecureRootInheritance
             _logger.LogError(ex, "[SECURE-INHERIT] Ending {Principal}'s inherited share on {Table} {RecordId} failed.", principal, logical, recordId);
             return new EndOutcome(false, false, "removing it failed");
         }
+    }
+
+    /// <summary>
+    /// Whether the record's CURRENT secure parents still pass <paramref name="principal"/> on at <paramref name="written"/>
+    /// — the intersection rule (owner round 11 item 4) the mirror gave it by, with task 149's rule for parents that cannot
+    /// be trusted ("a principal its known roots do not share is revoked; held children are only narrowed"):
+    /// <c>false</c> when a parent that was read (isolated) does not carry it, or no parent could be read at all — the
+    /// intersection does not carry it, so the share is the ended source's; <c>true</c> when every secure parent was read and
+    /// carries it; <c>null</c> (undecided, reported) when every parent that was read carries it but another could not be
+    /// read or is flagged secure without being isolated.
+    /// </summary>
+    private async Task<bool?> StillJustifiedByParentsAsync(
+        string logical, Guid recordId, DataversePrincipalRef principal, int written, CancellationToken ct)
+    {
+        var answer = await FindSecureParentsAsync(logical, recordId, ct).ConfigureAwait(false);
+        var (known, unknown) = (0, !answer.IsKnown);
+        foreach (var parent in answer.SecureParents)
+        {
+            var mirror = await _synchronizer.IsolatedParentMirrorAsync(parent.Table, parent.Id, ct).ConfigureAwait(false);
+            if (mirror.Unreadable || mirror.Mirror is null)
+            {
+                unknown = true; // unreadable, or flagged secure but not isolated: its mirror cannot be trusted
+                continue;
+            }
+
+            if (!mirror.Mirror.TryGetValue(principal, out var carried) || (carried & written) != written)
+                return false;
+            known++;
+        }
+
+        return known == 0 ? false : unknown ? null : true;
     }
 
     private Task EndRowAsync(AssignedAccessLedgerRow row, string reason, CancellationToken ct) =>

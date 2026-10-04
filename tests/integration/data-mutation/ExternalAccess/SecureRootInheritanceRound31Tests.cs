@@ -692,6 +692,96 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
     }
 
+    /// <summary>
+    /// ADR-003 on the unshare fan-out: whether the matter is still secure cannot be read when its sharee is removed — the
+    /// inherited share stays and the unshare reports it (children_incomplete, <c>filedRecordsNotUpdated</c>), never "done".
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_WhenTheMatterCannotBeReadForTheFanOut_ReportsTheFiledRecordAsNotUpdated()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        World.FailingRowReadsOf("sprk_matter", matter);
+
+        var (status, code, body) = Problem(await UnshareAsync("matter", matter, Colleague));
+
+        status.Should().Be(500);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().Be(1, "the work assignment's inherited share was not ended");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "nothing is ended on an unread answer");
+    }
+
+    /// <summary>
+    /// The intersection rule on the way back (owner round 11 item 4, task 149's "a principal its known roots do not share is
+    /// revoked"): the work assignment is ALSO filed under a project flagged secure but not isolated (its mirror cannot be
+    /// trusted) — the matter, which was read, no longer shares the person, so the intersection does not carry them: the
+    /// inherited share is removed.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_RemovesTheShare_ThoughAnotherParentCannotBeTrusted_BecauseTheMatterNoLongerCarriesIt()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        _fixture.SeedProject(project, isSecure: true); // flagged, owned by a user: not isolated
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
+    /// <summary>
+    /// The intersection rule on the way back, undecided: the work assignment was re-filed under a secure project that DOES
+    /// share the person and under one flagged secure but not isolated — every parent that was read still carries them, one
+    /// cannot be trusted: the share stays and the matter's unshare reports it (children_incomplete), for the job to finish.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_HoldsTheShare_WhenEveryReadParentCarriesItButAnotherCannotBeTrusted()
+    {
+        var (matter, project, untrusted, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecureProject(_fixture, project, Colleague);
+        _fixture.SeedProject(untrusted, isSecure: true); // flagged, owned by a user: not isolated
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+        FilePair(_fixture, "sprk_workassignment", workAssignment, untrusted, RecordTypeRef(_fixture, "sprk_project"));
+
+        var (status, code, body) = Problem(await UnshareAsync("matter", matter, Colleague));
+
+        status.Should().Be(500);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().Be(1);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "held: never removed on an undecided intersection");
+    }
+
+    /// <summary>
+    /// ADR-003 in the job's reconcile of records no longer filed under their source: whether the parent still shares what
+    /// it passed on cannot be read — the run is not a success, naming it, and nothing is ended.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_WhenAParentOfAReFiledRecordCannotBeRead_FailsTheRun_AndEndsNothing()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.FailingRowReadsOf("sprk_matter", matter);
+
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Contain("no longer filed under their source");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+    }
+
     // ══ The job — resumable, and blind to nothing ══════════════════════════════════════════════════════════════════════
 
     /// <summary>

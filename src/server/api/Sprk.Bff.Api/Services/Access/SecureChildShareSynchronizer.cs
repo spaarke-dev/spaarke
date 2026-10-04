@@ -308,65 +308,6 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>
-    /// Task 158 r1 (owner round 30): the mirror <see cref="SyncInheritedRootAsync"/> would give a filed root from
-    /// <paramref name="secureParents"/> — each isolated parent's direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>,
-    /// the INTERSECTION over them — read-only. Asked by the reverse rule ("is this principal's inherited share still
-    /// justified by another parent?"). <c>null</c> when it cannot be decided: a parent or its shares unreadable, or a parent
-    /// flagged secure but not isolated (its mirror is not trusted) — the caller then keeps nothing on its account.
-    /// </summary>
-    public async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> InheritedMirrorAsync(
-        IReadOnlyCollection<(string Table, Guid Id)> secureParents, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(secureParents);
-        try
-        {
-            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
-            if (team.TeamId is not { } secureTeamId)
-                return null;
-
-            Dictionary<DataversePrincipalRef, int>? desired = null;
-            foreach (var (table, parentId) in secureParents.Distinct().OrderBy(p => p.Table, StringComparer.Ordinal).ThenBy(p => p.Id))
-            {
-                if (!SecureChildLineage.IsRoot(table))
-                    continue;
-
-                var parent = new RowRef(table.ToLowerInvariant(), parentId);
-                var facts = await ReadRootFactsAsync(_dataverse, parent, ct).ConfigureAwait(false);
-                if (facts is null)
-                    continue; // gone: it confers nothing
-                if (facts.OwningTeam != secureTeamId)
-                {
-                    if (facts.FlaggedSecure)
-                        return null;
-                    continue;
-                }
-
-                var mirror = Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
-                    .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
-                    .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
-                    .Where(p => RecordShareLevels.CanRead(p.Mask))
-                    .ToDictionary(p => p.Key, p => p.Mask);
-
-                desired = desired is null
-                    ? mirror
-                    : desired
-                        .Where(p => mirror.ContainsKey(p.Key))
-                        .Select(p => (p.Key, Mask: p.Value & mirror[p.Key]))
-                        .Where(p => RecordShareLevels.CanRead(p.Mask))
-                        .ToDictionary(p => p.Key, p => p.Mask);
-            }
-
-            return desired ?? new Dictionary<DataversePrincipalRef, int>();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] The inherited mirror of {Parents} could not be read.",
-                string.Join(", ", secureParents.Select(p => $"{p.Table}:{p.Id:D}")));
-            return null;
-        }
-    }
-
-    /// <summary>
     /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that a pass has just re-owned OUT of the
     /// Secure Record owner team (owner round 11 item 3: "148 re-owns the children, then calls <see cref="SyncRootAsync"/>";
     /// after an unsecure the root's share set is going away, so "in line with the root" means "carrying none of its
