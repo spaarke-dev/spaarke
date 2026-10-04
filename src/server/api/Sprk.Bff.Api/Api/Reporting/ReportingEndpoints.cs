@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -37,6 +38,13 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// Create privilege BEFORE the app-only Power BI clone (owner round 9 write pattern), and only ever clones the SOURCE
 /// row's report — no client-named Power BI report is registered. Delete removes the Power BI report only for a custom
 /// row no other catalog row references (owner round 23 item 2).</para>
+///
+/// <para><b>The catalog's second door is closed too</b> (task 166 f1, owner round 25 item 6). The row is the authority, so
+/// its four Power BI pointer columns (<see cref="CatalogPointerColumns"/>) are field-secured and writable by the BFF
+/// identity only (<c>scripts/Set-ReportCatalogFieldSecurity.ps1</c>): Create registers the row as the caller WITHOUT them
+/// and stamps them app-only. And before ANY action the row's workspace must be one of
+/// <see cref="PowerBiOptions.AllowedWorkspaces"/> (for a customer-bound workspace, the caller's customer's) — a row forged
+/// before the lock, or seeded at an arbitrary workspace, is "not in your catalog" and Power BI is never asked.</para>
 ///
 /// Error responses follow ADR-019: RFC 7807 ProblemDetails with <c>errorCode</c> extension.
 /// </summary>
@@ -207,6 +215,7 @@ public static class ReportingEndpoints
         [FromQuery] Guid? reportId,
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -217,6 +226,10 @@ public static class ReportingEndpoints
         }
 
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
         var row = await ReadCatalogRowAsync(dataverseUser, reportId.Value, logger, ct);
         if (row is null)
@@ -230,6 +243,11 @@ public static class ReportingEndpoints
             // No identity, no token: a token without the business-unit RLS identity would show the whole dataset.
             return RlsIdentityUnavailable(
                 "Your business unit could not be determined, so no report session could be issued. Try again.", traceId);
+        }
+
+        if (!await IsWorkspaceAllowedAsync(powerBiOptions.Value, row, businessUnitId, context, logger, ct))
+        {
+            return ReportNotInCatalog(traceId);
         }
 
         logger.LogInformation(
@@ -261,11 +279,16 @@ public static class ReportingEndpoints
     /// <summary>GET /api/reporting/reports — the active catalog entries the CALLER can read (Dataverse trims the list).</summary>
     private static async Task<IResult> GetReports(
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
         DataverseUserResponse response;
         try
@@ -292,11 +315,23 @@ public static class ReportingEndpoints
             return CatalogUnavailable(traceId);
         }
 
-        var items = rows.EnumerateArray()
+        var parsed = rows.EnumerateArray()
             .Select(ParseCatalogRow)
             .Where(r => r is not null)
-            .Select(r => r!.ToItem())
+            .Select(r => r!)
             .ToList();
+
+        // A row whose workspace this deployment may not act on is not offered (task 166 f1): the server would refuse
+        // every action on it.
+        var businessUnitId = parsed.Count > 0 ? await ReadCallerBusinessUnitAsync(dataverseUser, logger, ct) : null;
+        var items = new List<ReportCatalogItem>(parsed.Count);
+        foreach (var row in parsed)
+        {
+            if (await IsWorkspaceAllowedAsync(powerBiOptions.Value, row, businessUnitId, context, logger, ct))
+            {
+                items.Add(row.ToItem());
+            }
+        }
 
         return TypedResults.Ok<IReadOnlyList<ReportCatalogItem>>(items);
     }
@@ -305,13 +340,20 @@ public static class ReportingEndpoints
     private static async Task<IResult> GetReport(
         Guid reportId,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
-        var row = await ReadCatalogRowAsync(dataverseUser, reportId, logger, ct);
+        var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
+
+        var row = await ReadActionableRowAsync(dataverseUser, powerBiOptions.Value, reportId, context, logger, ct);
         return row is null
-            ? ReportNotInCatalog(context.TraceIdentifier)
+            ? ReportNotInCatalog(traceId)
             : TypedResults.Ok(row.ToItem());
     }
 
@@ -327,6 +369,8 @@ public static class ReportingEndpoints
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
         [FromServices] CallerRecordAccessProbe accessProbe,
+        [FromServices] IGenericEntityService entityService,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -352,6 +396,10 @@ public static class ReportingEndpoints
         }
 
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
         // Owner round 9 write pattern (task 166 r2): the caller's OWN right to create the catalog row is checked AS THE
         // CALLER before the app-only Power BI clone — a caller who may not create the row never causes a clone. The row
@@ -362,7 +410,9 @@ public static class ReportingEndpoints
             return InsufficientPrivilege("You do not have permission to create report catalog entries.");
         }
 
-        var source = await ReadCatalogRowAsync(dataverseUser, request.SourceReportId, logger, ct);
+        // The SOURCE must be a row this deployment may act on (task 166 f1, allowed-workspace check): the clone runs in
+        // the source's workspace as the service principal.
+        var source = await ReadActionableRowAsync(dataverseUser, powerBiOptions.Value, request.SourceReportId, context, logger, ct);
         if (source is null || source.DatasetId is not { } datasetId)
         {
             return ReportNotInCatalog(traceId);
@@ -383,16 +433,15 @@ public static class ReportingEndpoints
             return PowerBiFailed("Failed to create the report in Power BI.", traceId);
         }
 
-        // Register it AS THE CALLER — Dataverse enforces their Create on sprk_report.
+        // Register it AS THE CALLER — Dataverse enforces their Create on sprk_report — WITHOUT the four Power BI pointer
+        // columns: they are field-secured, writable by the BFF identity only (owner round 25 item 6,
+        // scripts/Set-ReportCatalogFieldSecurity.ps1), so the BFF stamps them app-only once the row exists. A row with no
+        // pointer columns is unusable (ReadCatalogRowAsync answers "not in your catalog") until then.
         var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["sprk_name"] = request.Name.Trim(),
-            ["sprk_pbi_reportid"] = created.Id.ToString("D"),
-            ["sprk_workspaceid"] = source.WorkspaceId.ToString("D"),
-            ["sprk_datasetid"] = (created.DatasetId != Guid.Empty ? created.DatasetId : source.DatasetId)?.ToString("D"),
             ["sprk_embedurl"] = created.EmbedUrl,
             ["sprk_category"] = CustomCategoryValue,
-            ["sprk_iscustom"] = true,
         });
 
         DataverseUserResponse write;
@@ -436,6 +485,47 @@ public static class ReportingEndpoints
             return CatalogWriteFailed(write, "The report could not be registered in the catalog.", traceId);
         }
 
+        // Stamp the Power BI pointer columns APP-ONLY (the BFF identity is their only writer under field-level security).
+        // The values are server-derived: the clone the BFF just made, in the SOURCE row's (allowed) workspace.
+        try
+        {
+            await entityService.UpdateAsync("sprk_report", newRowId, CatalogPointerFields(
+                created.Id, source.WorkspaceId, created.DatasetId != Guid.Empty ? created.DatasetId : datasetId, isCustom: true), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Catalog row {CatalogRowId} was created but its Power BI pointer could not be stamped; removing the row and "
+                + "the clone {ReportId}. CorrelationId={CorrelationId}", newRowId, created.Id, traceId);
+
+            // The half-made row is the BFF's own (it never carried a pointer); remove it app-only, then the clone.
+            try
+            {
+                await entityService.DeleteAsync("sprk_report", newRowId, ct);
+            }
+            catch (Exception deleteEx)
+            {
+                logger.LogError(deleteEx, "Compensating delete of catalog row {CatalogRowId} failed. CorrelationId={CorrelationId}",
+                    newRowId, traceId);
+            }
+
+            try
+            {
+                await embedService.DeleteReportAsync(source.WorkspaceId, created.Id, profileId: null, ct: ct);
+            }
+            catch (Exception deleteEx)
+            {
+                logger.LogError(deleteEx, "Compensating delete of cloned report {ReportId} failed. CorrelationId={CorrelationId}",
+                    created.Id, traceId);
+            }
+
+            return PowerBiFailed("The report could not be registered in the catalog.", traceId);
+        }
+
         return TypedResults.Created(
             $"/api/reporting/reports/{newRowId:D}",
             new CreateReportResponse(newRowId, created.EmbedUrl, request.Name.Trim()));
@@ -449,6 +539,7 @@ public static class ReportingEndpoints
         Guid reportId,
         UpdateReportRequest request,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -460,8 +551,12 @@ public static class ReportingEndpoints
         }
 
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
-        var row = await ReadCatalogRowAsync(dataverseUser, reportId, logger, ct);
+        var row = await ReadActionableRowAsync(dataverseUser, powerBiOptions.Value, reportId, context, logger, ct);
         if (row is null)
         {
             return ReportNotInCatalog(traceId);
@@ -511,6 +606,7 @@ public static class ReportingEndpoints
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
         [FromServices] IGenericEntityService entityService,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -522,8 +618,14 @@ public static class ReportingEndpoints
         }
 
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
-        var row = await ReadCatalogRowAsync(dataverseUser, reportId, logger, ct);
+        // Task 166 f1 (owner round 25 item 6): the allowed-workspace check runs before ANY delete — a row naming a
+        // workspace this deployment may not act on deletes nothing, not even itself.
+        var row = await ReadActionableRowAsync(dataverseUser, powerBiOptions.Value, reportId, context, logger, ct);
         if (row is null)
         {
             return ReportNotInCatalog(traceId);
@@ -590,6 +692,7 @@ public static class ReportingEndpoints
         ReportingExportRequest request,
         [FromServices] ReportingEmbedService embedService,
         [FromServices] IDataverseUserClient dataverseUser,
+        [FromServices] IOptions<PowerBiOptions> powerBiOptions,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -609,6 +712,10 @@ public static class ReportingEndpoints
         }
 
         var traceId = context.TraceIdentifier;
+        if (WorkspacesUnconfigured(powerBiOptions.Value, traceId) is { } unconfigured)
+        {
+            return unconfigured;
+        }
 
         var row = await ReadCatalogRowAsync(dataverseUser, request.ReportId, logger, ct);
         if (row is null)
@@ -624,6 +731,11 @@ public static class ReportingEndpoints
         {
             return RlsIdentityUnavailable(
                 "Your business unit could not be determined, so the report could not be exported. Try again.", traceId);
+        }
+
+        if (!await IsWorkspaceAllowedAsync(powerBiOptions.Value, row, businessUnitId, context, logger, ct))
+        {
+            return ReportNotInCatalog(traceId);
         }
 
         logger.LogInformation(
@@ -757,6 +869,109 @@ public static class ReportingEndpoints
             logger.LogWarning(ex, "Catalog row {CatalogRowId} read faulted; answering not-in-catalog (fail closed).", rowId);
             return null;
         }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The allowed-workspace check (task 166 f1; owner round 25 item 6)
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>The configuration error: no workspace is allowed, so no report can be acted on (fail closed).</summary>
+    internal const string WorkspacesUnconfiguredCode = "sdap.reporting.config.workspaces_unconfigured";
+
+    /// <summary>
+    /// The four <c>sprk_report</c> columns that point a catalog row at Power BI — field-secured, writable by the BFF
+    /// identity only (<c>scripts/Set-ReportCatalogFieldSecurity.ps1</c>), so only server code ever chooses them.
+    /// </summary>
+    internal static readonly string[] CatalogPointerColumns =
+        ["sprk_pbi_reportid", "sprk_workspaceid", "sprk_datasetid", "sprk_iscustom"];
+
+    /// <summary>The app-only write of a catalog row's Power BI pointer (see <see cref="CatalogPointerColumns"/>).</summary>
+    internal static Dictionary<string, object> CatalogPointerFields(Guid pbiReportId, Guid workspaceId, Guid datasetId, bool isCustom)
+        => new()
+        {
+            ["sprk_pbi_reportid"] = pbiReportId.ToString("D"),
+            ["sprk_workspaceid"] = workspaceId.ToString("D"),
+            ["sprk_datasetid"] = datasetId.ToString("D"),
+            ["sprk_iscustom"] = isCustom,
+        };
+
+    /// <summary>503 before anything is read when no workspace is configured; null when the check can run.</summary>
+    internal static IResult? WorkspacesUnconfigured(PowerBiOptions options, string traceId) =>
+        options.AllowedWorkspaces is { Count: > 0 }
+            ? null
+            : Results.Problem(
+                title: "Reporting Not Configured",
+                detail: "No Power BI workspace is configured for this deployment, so no report can be opened. An "
+                        + "administrator must set PowerBi:AllowedWorkspaces.",
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = WorkspacesUnconfiguredCode,
+                    ["correlationId"] = traceId
+                });
+
+    /// <summary>
+    /// May this deployment act on <paramref name="row"/>'s Power BI workspace for this caller? The workspace must be one of
+    /// <see cref="PowerBiOptions.AllowedWorkspaces"/>; an entry bound to a customer business unit admits only a caller
+    /// whose business unit is that unit or beneath it (read through the one business-unit hierarchy reader,
+    /// <see cref="RecordContainerResolver.IsBusinessUnitInSubtreeAsync"/>). Anything unknown — no entry, an unreadable
+    /// caller business unit for a bound entry, no resolver, a fault — is NO (the caller answers "not in your catalog").
+    /// </summary>
+    internal static async Task<bool> IsWorkspaceAllowedAsync(
+        PowerBiOptions options, CatalogRow row, Guid? callerBusinessUnit, HttpContext context, ILogger logger, CancellationToken ct)
+    {
+        var entries = options.AllowedWorkspaces.Where(w => w.WorkspaceId == row.WorkspaceId && w.WorkspaceId != Guid.Empty).ToList();
+        if (entries.Count == 0)
+        {
+            logger.LogWarning(
+                "Catalog row {CatalogRowId} names Power BI workspace {WorkspaceId}, which is not an allowed workspace of this "
+                + "deployment (PowerBi:AllowedWorkspaces); answering not-in-catalog.", row.RowId, row.WorkspaceId);
+            return false;
+        }
+
+        if (entries.Any(w => w.CustomerBusinessUnitId is null))
+        {
+            return true;
+        }
+
+        if (callerBusinessUnit is not { } unit
+            || context.RequestServices.GetService<RecordContainerResolver>() is not { } hierarchy)
+        {
+            return false;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (await hierarchy.IsBusinessUnitInSubtreeAsync(unit, entry.CustomerBusinessUnitId!.Value, ct))
+            {
+                return true;
+            }
+        }
+
+        logger.LogWarning(
+            "Catalog row {CatalogRowId}'s workspace {WorkspaceId} belongs to another customer than the caller's business unit "
+            + "{BusinessUnitId}; answering not-in-catalog.", row.RowId, row.WorkspaceId, unit);
+        return false;
+    }
+
+    /// <summary>
+    /// <see cref="ReadCatalogRowAsync"/> plus the allowed-workspace check: the row, or <see langword="null"/> — the uniform
+    /// "not in your catalog" — when it is not readable OR names a workspace this deployment may not act on for the caller.
+    /// </summary>
+    internal static async Task<CatalogRow?> ReadActionableRowAsync(
+        IDataverseUserClient dataverseUser, PowerBiOptions options, Guid rowId, HttpContext context, ILogger logger,
+        CancellationToken ct)
+    {
+        var row = await ReadCatalogRowAsync(dataverseUser, rowId, logger, ct);
+        if (row is null)
+        {
+            return null;
+        }
+
+        // The caller's business unit is needed only for a customer-bound workspace.
+        var bound = options.AllowedWorkspaces.Any(w => w.WorkspaceId == row.WorkspaceId && w.CustomerBusinessUnitId is not null);
+        var businessUnit = bound ? await ReadCallerBusinessUnitAsync(dataverseUser, logger, ct) : null;
+        return await IsWorkspaceAllowedAsync(options, row, businessUnit, context, logger, ct) ? row : null;
     }
 
     private static CatalogRow? ParseCatalogRow(JsonElement row)

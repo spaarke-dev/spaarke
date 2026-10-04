@@ -1174,24 +1174,21 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// ✅ FLIPPED BY TASK 017 (filed by task 016). <c>ListExternalMembersAsync</c> used to catch
-    /// <c>ServiceException</c> AND <c>Exception</c> and return <c>[]</c> in both — so "Graph is
-    /// unreachable" and "this container has no external members" were the same answer.
-    ///
-    /// <para>That is why close-project could report <c>200 OK</c> with
-    /// <c>SpeContainerMembersRemoved: 0</c> while every external user still held file permission: the one
-    /// signal that would have revealed it was being discarded one layer down. An empty list must now mean
-    /// exactly one thing.</para>
+    /// ✅ RE-BASED BY uac-r2 TASK 166 f1 (verifier item 14) — was <c>ListExternalMembersAsync_WhenGraphFails_…</c>, whose
+    /// method had no production caller and was deleted. The task-016/017 rule it pinned ("could not ask" is never "has
+    /// none") is asserted on the live single-grant revoke: a failing Graph is a failed result, never the benign
+    /// <see cref="SpeContainerMembershipService.NoPermissionFoundError"/> absence.
     /// </summary>
     [Fact]
-    public async Task ListExternalMembersAsync_WhenGraphFails_ThrowsRatherThanReturningEmpty()
+    public async Task RevokeMembershipAsync_WhenGraphFails_IsAFailure_NeverTheBenignAbsence()
     {
         var service = ServiceWithFailingGraph(new InvalidOperationException("Graph unreachable"));
 
-        var act = () => service.ListExternalMembersAsync(ContainerId.ToString());
+        var result = await service.RevokeMembershipAsync(ContainerId.ToString(), "counsel@client-firm.com");
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "an empty member list must mean 'the container has none', never 'we could not ask'");
+        result.Success.Should().BeFalse();
+        result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
+            "'we could not ask' must never read as 'the container has none'");
     }
 
     // RemoveAllExternalMembersAsync_WhenTheListingFails_Propagates and the two SpeBulkRemovalResult tests were

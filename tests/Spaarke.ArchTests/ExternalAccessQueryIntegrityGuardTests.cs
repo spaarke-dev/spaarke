@@ -171,16 +171,14 @@ public class ExternalAccessQueryIntegrityGuardTests
     {
         var source = ReadSource(MembershipServiceRelativePath);
 
-        // ⚠️ WIDENED BY TASK 024. This guard used to scan ListExternalMembersAsync alone, which was the
-        // whole listing path at the time. Task 024 split the read into a worker
-        // (ReadExternalMembersAsync) over a paged reader (ReadPermissionsAsync) — so a swallowing catch
-        // could now be added one or two frames DOWN and the original single-method scan would not see
-        // it. Every frame on the listing path is scanned, or the guard silently narrows as the code
-        // moves under it.
+        // ⚠️ WIDENED BY TASK 024, NARROWED BY TASK 166 f1. This guard used to scan ListExternalMembersAsync
+        // alone; task 024 split the read into a worker (ReadExternalMembersAsync) over a paged reader
+        // (ReadPermissionsAsync) and the guard followed every frame. Task 166 f1 DELETED the first two (no
+        // production caller after task 166 removed RemoveAllExternalMembersAsync); the paged reader is now the
+        // ONE frame every member read goes through (RemoveMembershipsAsync, RevokeMembershipAsync), so it is
+        // the frame that must never swallow.
         string[] listingPathSignatures =
         [
-            "public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync",
-            "ReadExternalMembersAsync(string containerId, CancellationToken ct)",
             "private async Task<PermissionReadResult> ReadPermissionsAsync",
         ];
 

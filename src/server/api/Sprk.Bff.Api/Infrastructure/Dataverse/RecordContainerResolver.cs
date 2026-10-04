@@ -130,6 +130,8 @@ public sealed partial class RecordContainerResolver
         _archiveContainerId = communicationOptions?.Value?.ArchiveContainerId;
         _speFiles = speFiles;
         _bffApplicationIds = BffApplicationIdsFrom(configuration);
+        _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
+        _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
     }
 
     /// <summary>

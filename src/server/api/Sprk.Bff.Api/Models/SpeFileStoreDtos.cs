@@ -95,10 +95,16 @@ public record SpeDriveItemSummary(
 ///   app-only upload (SharePoint reports "SharePoint App" with no id).
 /// </param>
 /// <param name="ApplicationId"><c>createdBy.application.id</c>: the Entra app (client) id the upload ran under.</param>
+/// <param name="Size">The item's size in bytes (task 166 f1: the relocation copy is verified against it).</param>
+/// <param name="QuickXorHash">The SPE content identity, when Graph has computed it (task 166 f1: copy verification).</param>
+/// <param name="WebUrl">The item's web URL (task 166 f1: <c>sprk_filepath</c> of a server-attached or relocated file).</param>
 public record SpeItemCreator(
     string? Name,
     string? UserObjectId,
-    string? ApplicationId);
+    string? ApplicationId,
+    long? Size = null,
+    string? QuickXorHash = null,
+    string? WebUrl = null);
 
 /// <summary>
 /// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).

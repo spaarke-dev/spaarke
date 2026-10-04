@@ -237,81 +237,13 @@ public class SpeContainerMembershipService
         }
     }
 
-    /// <summary>
-    /// Lists all external members of an SPE container.
-    /// Returns only external members (those with a user identity in their permission grant).
-    /// </summary>
-    /// <param name="containerId">The SPE container ID (GUID format).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>A read-only list of external container members. Empty means the container genuinely has none.</returns>
-    /// <exception cref="ServiceException">Graph could not be reached or refused the request.</exception>
-    /// <remarks>
-    /// <para><b>Failures propagate (task 017, filed by task 016).</b> This method used to catch both
-    /// <see cref="ServiceException"/> and <see cref="Exception"/> and return <c>[]</c> in each — so an
-    /// unreachable Graph was indistinguishable from an empty container. Its only caller at the time,
-    /// <c>RemoveAllExternalMembersAsync</c> (deleted by task 166), therefore answered "0 removed" either way, and
-    /// close-project reported <c>200 OK</c> while every external user might still hold file permission on
-    /// the container. That is FR-15's own acceptance ("no participant retains access post-closure")
-    /// failing silently on the SPE half.</para>
-    ///
-    /// <para>An empty list now means one thing only: the container has no external members. Callers that
-    /// need to keep going on failure should catch deliberately — and report the failure, not absorb it.</para>
-    /// </remarks>
-    public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync(
-        string containerId,
-        CancellationToken ct = default)
-    {
-        var (members, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
-
-        if (!enumerationComplete)
-        {
-            // This signature can return a list or throw — it has no way to say "here are SOME of them".
-            // Returning the partial list would recreate the very defect task 016 filed, one layer up:
-            // the caller would read a short list as the whole truth. Task 024 / finding M1.
-            throw new InvalidOperationException(
-                $"External members of container '{containerId}' could not be fully enumerated " +
-                $"({members.Count} read before the read gave out). A partial list must not be returned " +
-                $"here: an empty or short list is indistinguishable from the whole set to the caller.");
-        }
-
-        _logger.LogInformation(
-            "Found {Count} external members in container {ContainerId}", members.Count, containerId);
-
-        return members;
-    }
-
-    /// <summary>
-    /// The worker behind <see cref="ListExternalMembersAsync"/>: the external members that were read,
-    /// AND whether the underlying permission collection was enumerated to its end.
-    /// </summary>
-    /// <remarks>
-    /// Separate from the public method so a partial read stays expressible: <see cref="ListExternalMembersAsync"/>
-    /// returns a bare list, so it cannot express partiality and must throw. (Its other caller,
-    /// <c>RemoveAllExternalMembersAsync</c>, was deleted by task 166 — it swept INTERNAL users' permissions too.
-    /// Note "external" here means "has a user identity", which on SPE includes internal users: do not build a
-    /// removal on this list.)
-    /// </remarks>
-    internal async Task<(IReadOnlyList<SpeContainerMember> Members, bool EnumerationComplete)>
-        ReadExternalMembersAsync(string containerId, CancellationToken ct)
-    {
-        _logger.LogInformation("Listing external SPE members: containerId={ContainerId}", containerId);
-
-        var graphClient = _graphClientFactory.ForApp();
-
-        var read = await ReadPermissionsAsync(graphClient, containerId, ct);
-
-        // External members are those with a GrantedToV2.User (individual user grants).
-        // System / app permissions and container-type-level grants do not have a User identity.
-        var externalMembers = read.Permissions
-            .Where(p => p.GrantedToV2?.User != null)
-            .Select(ToContainerMember)
-            .Where(m => m != null)
-            .Cast<SpeContainerMember>()
-            .ToList()
-            .AsReadOnly();
-
-        return (externalMembers, read.EnumerationComplete);
-    }
+    // ListExternalMembersAsync, its worker ReadExternalMembersAsync, ToContainerMember and the SpeContainerMember record
+    // were DELETED 2026-10-04 by unified-access-control-r2 task 166 f1 (verifier item 14): their only caller,
+    // RemoveAllExternalMembersAsync, was deleted by task 166 (below), and no other code listed members. The honesty rules
+    // they carried live on in the one paged reader every remaining path uses (ReadPermissionsAsync — an incomplete read
+    // is never an absence), pinned by SpeContainerPagingTests through RemoveMembershipsAsync and RevokeMembershipAsync.
+    // "External" there meant "has a user identity", which on SPE includes internal users — do not rebuild a removal on
+    // such a list.
 
     // RemoveAllExternalMembersAsync DELETED 2026-10-03 — unified-access-control-r2 task 166 (route-authorization
     // sweep amendment (e)). Its only caller was ProjectClosureEndpoint, and it deleted EVERY container permission
@@ -648,26 +580,6 @@ public class SpeContainerMembershipService
         return null;
     }
 
-    /// <summary>
-    /// Converts a Graph Permission to a SpeContainerMember.
-    /// Uses the user's DisplayName as a fallback identifier when UPN is unavailable.
-    /// Returns null if the permission lacks a valid ID.
-    /// </summary>
-    private static SpeContainerMember? ToContainerMember(Permission permission)
-    {
-        if (string.IsNullOrEmpty(permission.Id)) return null;
-
-        var user = permission.GrantedToV2?.User;
-        if (user == null) return null;
-
-        // Prefer UPN from AdditionalData; fall back to DisplayName as identifier
-        var upn = GetUpnFromPermission(permission);
-        var identifier = upn ?? user.DisplayName ?? user.Id ?? string.Empty;
-
-        var roles = permission.Roles?.ToList() ?? [];
-
-        return new SpeContainerMember(permission.Id, identifier, roles.AsReadOnly());
-    }
 }
 
 /// <summary>
@@ -677,12 +589,3 @@ public sealed record SpeContainerMembershipResult(
     bool Success,
     string? PermissionId,
     string? Error);
-
-/// <summary>
-/// Represents an external member of an SPE container.
-/// Email contains the user's UPN / email when available, or their DisplayName as a fallback.
-/// </summary>
-public sealed record SpeContainerMember(
-    string PermissionId,
-    string Email,
-    IReadOnlyList<string> Roles);

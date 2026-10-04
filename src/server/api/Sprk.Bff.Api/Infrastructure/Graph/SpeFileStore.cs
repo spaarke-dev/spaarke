@@ -135,7 +135,9 @@ public class SpeFileStore : ISpeFileOperations
         => _driveItemOps.GetFileMetadataAsUserAsync(ctx, driveId, itemId, ct);
 
     /// <inheritdoc />
-    public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+    /// <remarks><c>virtual</c> (task 166 f1): the module-boundary test double of <c>DocumentContainerRelocator</c>
+    /// substitutes it, as the upload / download / delete siblings already are.</remarks>
+    public virtual Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
         => _driveItemOps.GetItemCreatorAsync(driveId, itemId, ct);
 
     public Task<Stream?> DownloadFileAsUserAsync(

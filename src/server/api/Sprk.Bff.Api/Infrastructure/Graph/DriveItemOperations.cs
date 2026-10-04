@@ -331,8 +331,12 @@ public class DriveItemOperations
     {
         try
         {
+            // task 166 f1: size, file (hashes) and webUrl ride on the same read — the server-side pointer attach and the
+            // relocation copy verify against them; still one uncached call.
             var item = await _factory.ForApp().Drives[driveId].Items[itemId]
-                .GetAsync(req => req.QueryParameters.Select = new[] { "id", "name", "createdBy" }, cancellationToken: ct);
+                .GetAsync(
+                    req => req.QueryParameters.Select = new[] { "id", "name", "createdBy", "size", "file", "webUrl" },
+                    cancellationToken: ct);
 
             if (item is null)
             {
@@ -342,7 +346,10 @@ public class DriveItemOperations
             return new SpeItemCreator(
                 item.Name,
                 item.CreatedBy?.User?.Id,
-                item.CreatedBy?.Application?.Id);
+                item.CreatedBy?.Application?.Id,
+                item.Size,
+                item.File?.Hashes?.QuickXorHash,
+                item.WebUrl);
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {

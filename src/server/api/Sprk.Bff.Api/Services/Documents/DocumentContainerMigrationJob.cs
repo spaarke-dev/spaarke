@@ -1,0 +1,294 @@
+using System.Text.Json;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
+using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+
+namespace Sprk.Bff.Api.Services.Documents;
+
+/// <summary>
+/// unified-access-control-r2 task 166 f1 (owner round 21 item 1 (ii), round 26 item 3) — the LEGACY MIGRATION of document
+/// files into their derived containers, and the gate the strict document-pointer rule is flipped behind.
+/// </summary>
+/// <remarks>
+/// <para><b>What it does per document</b> (every <c>sprk_document</c> that carries a pointer, in id order):
+/// <see cref="DocumentContainerRelocator.RelocateIfMisplacedAsync"/> with <see cref="RelocationPurpose.LegacyMigration"/>
+/// — report-only unless writes are enabled — and then the two document-pointer rules on the (possibly new) pointer:
+/// the round-23 INTERIM rule that is in force and the STRICT derived-container rule waiting behind
+/// <see cref="RecordContainerResolver.StrictDerivedContainerKey"/>.</para>
+/// <para><b>The flip gate.</b> A document the interim rule SERVES and the strict rule would REFUSE is a document the flip
+/// would newly refuse (<c>wouldNewlyRefuse</c>). A pass with zero of those, zero planned moves and zero failures is the
+/// evidence that the flag may be flipped: <c>scripts/Invoke-DocumentContainerMigration.ps1 -Verify</c> exits 0 only then.
+/// Documents BOTH rules refuse (a file that is not verifiably the row's own, a missing item) are listed for an
+/// administrator; the flip changes nothing for them.</para>
+/// <para><b>The script decides nothing</b> (148's <c>Invoke-SecureChildBackfill.ps1</c> precedent): it triggers this job
+/// through <c>POST /api/admin/jobs/document-container-migration/trigger</c> (SystemAdmin) and reads the run reports. No
+/// Graph or Dataverse logic lives in PowerShell.</para>
+/// <para><b>Writes</b> only when <see cref="WritesEnabledKey"/> is true (an App Service setting the script sets for
+/// <c>-Apply</c> and removes in a <c>finally</c>). Registered DISABLED: it runs only when triggered.</para>
+/// <para><b>Batches.</b> One run examines at most <see cref="MaxDocumentsPerRunKey"/> documents (default
+/// <see cref="DefaultMaxDocumentsPerRun"/>) after a per-instance cursor; a run that reaches the last document reports
+/// <c>passComplete</c> and resets the cursor. Each report says where it started (<c>startAfter</c>, null = the first
+/// document) and ended (<c>endAt</c>), so the script can prove a pass was contiguous.</para>
+/// <para><b>ADR-036 A1.</b> Rule 1: the scheduler's lease — one run at a time. Rule 3: every step is keyed on observed
+/// state (a relocated file is InPlace next time), so a re-run completes and repeats nothing. Rule 4: an enumeration fault
+/// throws (retryable); a per-document fault is recorded as Failed and the run continues. Rule 5: one heartbeat per
+/// attempt. Rule 6: <c>AddScheduledJob</c> in <c>DocumentsModule</c>.</para>
+/// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process scheduler — the work IS the BFF's
+/// container decisions and its app-only SPE and Dataverse identity, low volume (one pass per environment), operator
+/// triggered. No new package, store or host.</para>
+/// </remarks>
+public sealed class DocumentContainerMigrationJob : IScheduledJob
+{
+    /// <summary>Stable job id — the admin trigger and history routes key off it.</summary>
+    public const string JobIdConstant = "document-container-migration";
+
+    /// <summary>Never fires on its own: registered disabled; the schedule is only the scheduler's required shape.</summary>
+    internal const string DefaultCronSchedule = "0 3 * * *";
+
+    /// <summary>The App Service setting that lets a run WRITE (<c>DocumentContainerMigration__WritesEnabled</c>).</summary>
+    public const string WritesEnabledKey = "DocumentContainerMigration:WritesEnabled";
+
+    /// <summary>Per-run batch size (<c>DocumentContainerMigration__MaxDocumentsPerRun</c>).</summary>
+    public const string MaxDocumentsPerRunKey = "DocumentContainerMigration:MaxDocumentsPerRun";
+
+    internal const int DefaultMaxDocumentsPerRun = 100;
+
+    /// <summary>The report lists at most this many rows (the admin history surface stays small); all are counted.</summary>
+    internal const int MaxListedPerRun = 200;
+
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IConfiguration _configuration;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<DocumentContainerMigrationJob> _logger;
+
+    /// <summary>The last document of the previous run of this pass; null = the next run starts the pass.</summary>
+    private Guid? _cursor;
+
+    public DocumentContainerMigrationJob(
+        IServiceScopeFactory scopeFactory,
+        IConfiguration configuration,
+        TimeProvider timeProvider,
+        ILogger<DocumentContainerMigrationJob> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _configuration = configuration;
+        _timeProvider = timeProvider;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public string JobId => JobIdConstant;
+
+    /// <inheritdoc />
+    public string DisplayName => "Document Container Migration";
+
+    /// <inheritdoc />
+    public string Description =>
+        "Moves each document's file into the container derived for its record (copy, verify, re-point, delete source) and "
+        + "reports, per document, whether the strict document-pointer rule would refuse anything the interim rule serves. "
+        + "Report-only unless DocumentContainerMigration:WritesEnabled is true. Triggered by "
+        + "scripts/Invoke-DocumentContainerMigration.ps1 (task 166).";
+
+    /// <inheritdoc />
+    public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var started = _timeProvider.GetTimestamp();
+        var writes = bool.TryParse(_configuration[WritesEnabledKey], out var w) && w;
+        var batch = int.TryParse(_configuration[MaxDocumentsPerRunKey], out var b) && b > 0 ? b : DefaultMaxDocumentsPerRun;
+        var startAfter = _cursor;
+
+        using var scope = _scopeFactory.CreateScope();
+        var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
+        var relocator = scope.ServiceProvider.GetRequiredService<DocumentContainerRelocator>();
+        var resolver = scope.ServiceProvider.GetRequiredService<RecordContainerResolver>();
+
+        IReadOnlyList<Guid> documentIds;
+        try
+        {
+            documentIds = await ReadBatchAsync(dataverse, startAfter, batch, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[DOCUMENT-MIGRATION] heartbeat status=error documents could not be enumerated attempt={Attempt} "
+                + "correlationId={CorrelationId}", context.Attempt, context.CorrelationId);
+            throw new InvalidOperationException("The documents to migrate could not be enumerated.", ex);
+        }
+
+        var report = new MigrationReport(writes ? "write" : "report-only", startAfter);
+        foreach (var documentId in documentIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await ExamineAsync(relocator, resolver, documentId, writes, report, cancellationToken).ConfigureAwait(false);
+        }
+
+        var passComplete = documentIds.Count < batch;
+        _cursor = passComplete ? null : documentIds[^1];
+        report.EndAt = documentIds.Count > 0 ? documentIds[^1] : startAfter;
+        report.PassComplete = passComplete;
+
+        var duration = _timeProvider.GetElapsedTime(started);
+        // "Nothing left to do" for this batch: no planned move, no failure, and no document the flip would newly refuse.
+        var clean = report.WouldNewlyRefuse == 0
+                    && report.Counts.GetValueOrDefault(nameof(RelocationState.Failed)) == 0
+                    && report.Counts.GetValueOrDefault(nameof(RelocationState.WouldRelocate)) == 0;
+
+        // THE HEARTBEAT (ADR-036 A1 rule 5).
+        _logger.Log(
+            clean ? LogLevel.Information : LogLevel.Warning,
+            "[DOCUMENT-MIGRATION] heartbeat mode={Mode} examined={Examined} wouldNewlyRefuse={WouldNewlyRefuse} "
+            + "counts={Counts} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} "
+            + "runId={RunId} correlationId={CorrelationId}",
+            report.Mode, report.Examined, report.WouldNewlyRefuse, JsonSerializer.Serialize(report.Counts), passComplete,
+            context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
+
+        return new JobRunResult(
+            Success: clean,
+            ErrorMessage: clean ? null : $"{report.WouldNewlyRefuse} document(s) the strict rule would newly refuse; "
+                                         + $"{report.Counts.GetValueOrDefault(nameof(RelocationState.WouldRelocate))} planned "
+                                         + $"move(s); {report.Counts.GetValueOrDefault(nameof(RelocationState.Failed))} failed.",
+            ProcessedItems: report.Examined,
+            Duration: duration,
+            ResultJson: JsonSerializer.Serialize(report.ToJson()));
+    }
+
+    /// <summary>One document: relocate (or plan to), then evaluate both rules on the pointer it ends with.</summary>
+    internal static async Task ExamineAsync(
+        DocumentContainerRelocator relocator, RecordContainerResolver resolver, Guid documentId, bool writes,
+        MigrationReport report, CancellationToken ct)
+    {
+        DocumentRelocationOutcome outcome;
+        try
+        {
+            outcome = await relocator.RelocateIfMisplacedAsync(documentId, writes, RelocationPurpose.LegacyMigration, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            outcome = new DocumentRelocationOutcome(
+                documentId, RelocationState.Failed, null, null, null, null, $"relocation faulted ({ex.GetType().Name})");
+        }
+
+        bool? interim = null;
+        bool? strict = null;
+        if (outcome.State is not (RelocationState.NoFile or RelocationState.Failed))
+        {
+            // The pointer the row ends with: the new one after a move, the current one otherwise.
+            var (drive, item) = outcome.State is RelocationState.Relocated or RelocationState.RelocatedSourceKept
+                ? (outcome.TargetDrive, outcome.TargetItem)
+                : (outcome.SourceDrive, outcome.SourceItem);
+            interim = await resolver.IsAllowedUnderInterimRuleAsync(documentId, drive, item, ct).ConfigureAwait(false);
+            // A planned move ends in the derived container by construction, so the strict rule is asked of the pointer
+            // only when nothing is planned.
+            strict = outcome.State == RelocationState.WouldRelocate
+                || await resolver.IsAllowedUnderStrictRuleAsync(documentId, drive, item, ct).ConfigureAwait(false);
+        }
+
+        report.Add(outcome, interim, strict);
+    }
+
+    /// <summary>The next batch of pointered documents after <paramref name="after"/>, in id order.</summary>
+    internal static async Task<IReadOnlyList<Guid>> ReadBatchAsync(
+        IGenericEntityService dataverse, Guid? after, int batch, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet("sprk_documentid"),
+            TopCount = batch,
+            Criteria = new FilterExpression(LogicalOperator.And)
+            {
+                Conditions = { new ConditionExpression("sprk_graphitemid", ConditionOperator.NotNull) },
+            },
+        };
+        if (after is { } cursor)
+        {
+            query.Criteria.Conditions.Add(new ConditionExpression("sprk_documentid", ConditionOperator.GreaterThan, cursor));
+        }
+
+        query.AddOrder("sprk_documentid", OrderType.Ascending);
+
+        var results = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return results?.Entities?.Select(e => e.Id).Where(id => id != Guid.Empty).ToList()
+               ?? throw new InvalidOperationException("The document query returned no result set.");
+    }
+
+    /// <summary>The run report — counted in full, listed up to <see cref="MaxListedPerRun"/>.</summary>
+    internal sealed class MigrationReport
+    {
+        public MigrationReport(string mode, Guid? startAfter)
+        {
+            Mode = mode;
+            StartAfter = startAfter;
+        }
+
+        public string Mode { get; }
+        public Guid? StartAfter { get; }
+        public Guid? EndAt { get; set; }
+        public bool PassComplete { get; set; }
+        public int Examined { get; private set; }
+        public int WouldNewlyRefuse { get; private set; }
+        public int RefusedByBoth { get; private set; }
+        public Dictionary<string, int> Counts { get; } = new(StringComparer.Ordinal);
+        public List<object> Rows { get; } = [];
+        public int RowsTotal { get; private set; }
+
+        public void Add(DocumentRelocationOutcome outcome, bool? interim, bool? strict)
+        {
+            Examined++;
+            var key = outcome.State.ToString();
+            Counts[key] = Counts.GetValueOrDefault(key) + 1;
+
+            var newlyRefused = interim == true && strict == false;
+            if (newlyRefused)
+            {
+                WouldNewlyRefuse++;
+            }
+
+            if (interim == false && strict == false)
+            {
+                RefusedByBoth++;
+            }
+
+            if (outcome.State is RelocationState.InPlace && !newlyRefused && interim == true)
+            {
+                return; // healthy: counted, not listed
+            }
+
+            RowsTotal++;
+            if (Rows.Count < MaxListedPerRun)
+            {
+                Rows.Add(new
+                {
+                    documentId = outcome.DocumentId,
+                    state = key,
+                    interim,
+                    strict,
+                    wouldNewlyRefuse = newlyRefused,
+                    sourceDrive = outcome.SourceDrive,
+                    sourceItem = outcome.SourceItem,
+                    targetDrive = outcome.TargetDrive,
+                    targetItem = outcome.TargetItem,
+                    detail = outcome.Detail,
+                });
+            }
+        }
+
+        public object ToJson() => new
+        {
+            mode = Mode,
+            startAfter = StartAfter,
+            endAt = EndAt,
+            passComplete = PassComplete,
+            examined = Examined,
+            wouldNewlyRefuse = WouldNewlyRefuse,
+            refusedByBoth = RefusedByBoth,
+            counts = Counts,
+            rowsTotal = RowsTotal,
+            rowsListed = Rows.Count,
+            rows = Rows,
+        };
+    }
+}

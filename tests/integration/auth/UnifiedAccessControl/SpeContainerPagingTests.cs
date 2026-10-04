@@ -81,21 +81,25 @@ public class SpeContainerPagingTests
     // Layer 3 (made offline) — the loop actually follows the link.
     // ─────────────────────────────────────────────────────────────────────────────
 
+    // ✅ RE-BASED BY uac-r2 TASK 166 f1 (verifier item 14): the four ListExternalMembers_* tests drove the paged reader
+    // through ListExternalMembersAsync, which had no production caller and was deleted. The SAME reader is now driven
+    // through the two live paths that use it — RemoveMembershipsAsync (close-project, organization revoke) and
+    // RevokeMembershipAsync (single-grant revoke) — so the paging is proven where it matters.
+
     /// <summary>
-    /// The finding in one test: a member on page 2 must be visible. Before task 024 both reads issued a
+    /// The finding in one test: a grantee on page 2 must be visible. Before task 024 both reads issued a
     /// single <c>.GetAsync()</c> and used <c>permissions?.Value</c>, so page 2 did not exist.
     /// </summary>
     [Fact]
-    public async Task ListExternalMembers_SeesMembersOnTheSecondPage()
+    public async Task RemoveMemberships_SeesAGranteeOnTheSecondPage()
     {
         var service = ServiceOver(
             Page(NextLink, UserPermission("perm-1", "first@client-firm.com")),
             Page(null, UserPermission("perm-2", "second@client-firm.com")));
 
-        var members = await service.ListExternalMembersAsync(ContainerId);
+        var results = await service.RemoveMembershipsAsync(ContainerId, ["second@client-firm.com"]);
 
-        members.Select(m => m.Email).Should().BeEquivalentTo(
-            ["first@client-firm.com", "second@client-firm.com"],
+        results["second@client-firm.com"].PermissionId.Should().Be("perm-2",
             "a member past the first page is still a member holding file access; a read that cannot see "
             + "them reports a container clean while they retain it");
     }
@@ -121,16 +125,17 @@ public class SpeContainerPagingTests
     /// Three pages — proves the loop keeps going rather than following exactly one link.
     /// </summary>
     [Fact]
-    public async Task ListExternalMembers_FollowsMoreThanOneLink()
+    public async Task RemoveMemberships_FollowsMoreThanOneLink()
     {
         var service = ServiceOver(
             Page(NextLink, UserPermission("perm-1", "a@client-firm.com")),
             Page(NextLink, UserPermission("perm-2", "b@client-firm.com")),
             Page(null, UserPermission("perm-3", "c@client-firm.com")));
 
-        var members = await service.ListExternalMembersAsync(ContainerId);
+        var results = await service.RemoveMembershipsAsync(ContainerId, ["c@client-firm.com"]);
 
-        members.Should().HaveCount(3, "following one link is not the same as enumerating a collection");
+        results["c@client-firm.com"].PermissionId.Should().Be("perm-3",
+            "following one link is not the same as enumerating a collection");
     }
 
     /// <summary>
@@ -145,9 +150,9 @@ public class SpeContainerPagingTests
         var service = new SpeContainerMembershipService(
             factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
 
-        await service.ListExternalMembersAsync(ContainerId);
+        await service.RemoveMembershipsAsync(ContainerId, ["absent@client-firm.com"]);
 
-        adapter.RequestCount.Should().Be(1,
+        adapter.GetRequestCount.Should().Be(1,
             "a collection with no nextLink is one request; re-reading it would double every cost");
     }
 
@@ -167,9 +172,9 @@ public class SpeContainerPagingTests
         var service = new SpeContainerMembershipService(
             factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
 
-        await service.ListExternalMembersAsync(ContainerId);
+        await service.RemoveMembershipsAsync(ContainerId, ["absent@client-firm.com"]);
 
-        adapter.RequestedUrls.Should().HaveCount(2);
+        adapter.GetRequestCount.Should().Be(2);
         adapter.RequestedUrls[1].Should().Contain("$skiptoken=PAGE2",
             "the second request must be the URL the SERVER handed us — synthesising our own skip token "
             + "is the DriveItemOperations client-pagination shape, which enumerates nothing");
@@ -203,23 +208,10 @@ public class SpeContainerPagingTests
         result.Error.Should().Contain("could not be fully enumerated");
     }
 
-    /// <summary>
-    /// The bound must not be reportable as a complete read — that is the whole reason it exists.
-    /// </summary>
-    [Fact]
-    public async Task ListExternalMembers_WhenThePageBoundIsHit_ThrowsRatherThanReturningAPrefix()
-    {
-        var pages = Enumerable
-            .Range(0, SpeContainerMembershipService.MaxPermissionPages + 2)
-            .Select(i => Page(NextLink, UserPermission($"perm-{i}", $"member{i}@client-firm.com")))
-            .ToArray();
-
-        var act = () => ServiceOver(pages).ListExternalMembersAsync(ContainerId);
-
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "this signature can return a list or throw — it cannot say 'here are SOME of them', and a "
-            + "short list reads to the caller as the whole truth");
-    }
+    // ListExternalMembers_WhenThePageBoundIsHit_ThrowsRatherThanReturningAPrefix DELETED with the method (task 166 f1):
+    // "the bound is never reportable as a complete read" is pinned on the live paths by
+    // RevokeMembership_WhenEnumerationIsIncompleteAndNothingMatched_ReportsFailureNotAbsence (above) and
+    // RemoveMemberships_OnAnIncompleteRead_ReportsUnmatchedMembersAsFailures (below).
 
     /// <summary>
     /// But the removal must still remove everyone it DID see. Aborting leaves strictly MORE access in place — the

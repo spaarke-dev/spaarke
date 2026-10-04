@@ -106,9 +106,30 @@ public static class DataverseDocumentsEndpoints
         // DeadRouteRetirementTests.cs. Do not re-add a body-bound document update without refusing the
         // resource-naming fields and checking AppendTo on any new parent.
         //
-        // ⚠️ The pointer columns remain writable OUTSIDE the BFF (MDA form / Xrm.WebApi) by any Write holder —
-        // no field-level security covers sprk_graphdriveid / sprk_graphitemid (verified read-only 2026-10-03).
-        // That second door is escalated by task 166, not closed by this deletion.
+        // The pointer columns' second door (MDA form / Xrm.WebApi) is closed by owner round 21 item 1: the client no
+        // longer writes them (it calls POST /{id}/file below), field-level security makes them writable by the BFF
+        // identity only (scripts/Set-DocumentPointerFieldSecurity.ps1, a main-session live step), and every app-only
+        // download verifies the pointer (RecordContainerResolver, interim then strict).
+
+        // POST /api/v1/documents/{id}/file — attach the file a client just uploaded to the document it just created
+        // (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i), ADR-002 WP-3). The client creates the row
+        // WITHOUT a pointer; the BFF verifies, then stamps sprk_graphdriveid / sprk_graphitemid as the application —
+        // the only identity the pointer columns' field-level security lets write them. Write on the row is required
+        // as the caller (the route filter); the handler then requires that the row has no file yet (or this same one),
+        // that the caller created it, that the file sits in the container DERIVED for the row, and that the caller
+        // uploaded it (DocumentContainerRelocator.AttachFileAsync).
+        documentsGroup.MapPost("/{id}/file", AttachDocumentFileAsync)
+            .WithName("AttachDocumentFile")
+            .WithDescription("Attaches the file the caller uploaded to the document the caller created; the BFF verifies "
+                + "the file's container and uploader and stamps the document's storage pointer server-side.")
+            .Produces<AttachDocumentFileResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddDocumentAuthorizationFilter("write")
+            .RequireAuthorization();
 
         // DELETE /api/v1/documents/{id} - Delete document
         documentsGroup.MapDelete("/{id}", async (
@@ -622,4 +643,81 @@ public static class DataverseDocumentsEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
+
+    /// <summary>The reason code of every refused file attach (one code; the detail says which check refused).</summary>
+    internal const string AttachRefusedCode = "document_file_attach_refused";
+
+    /// <summary>
+    /// POST /api/v1/documents/{id}/file — see the route's comment. Internal so the test assembly runs the real handler.
+    /// </summary>
+    internal static async Task<IResult> AttachDocumentFileAsync(
+        string id,
+        [FromBody] AttachDocumentFileRequest? request,
+        [FromServices] Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator relocator,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var traceId = context.TraceIdentifier;
+        if (!Guid.TryParse(id, out var documentId) || documentId == Guid.Empty)
+        {
+            return ProblemDetailsHelper.ValidationError("Document ID must be a valid GUID");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.DriveId) || string.IsNullOrWhiteSpace(request.ItemId))
+        {
+            return ProblemDetailsHelper.ValidationError("driveId and itemId (the uploaded file's) are required");
+        }
+
+        try
+        {
+            var result = await relocator.AttachFileAsync(
+                documentId, CallerResolution.ResolveObjectId(context.User), request.DriveId, request.ItemId, ct);
+
+            if (result.Outcome == Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.Attached)
+            {
+                return TypedResults.Ok(new AttachDocumentFileResponse(
+                    documentId, result.DriveId!, result.ItemId!, result.AlreadyAttached));
+            }
+
+            var status = result.Outcome switch
+            {
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.InvalidRequest => StatusCodes.Status400BadRequest,
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheCreator => StatusCodes.Status403Forbidden,
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheUploader => StatusCodes.Status403Forbidden,
+                _ => StatusCodes.Status409Conflict,
+            };
+
+            return TypedResults.Problem(
+                statusCode: status,
+                title: "File Not Attached",
+                detail: result.Detail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = AttachRefusedCode,
+                    ["reasonCode"] = result.Outcome.ToString(),
+                    ["traceId"] = traceId,
+                });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: nothing was attached unless the final write succeeded.
+            logger.LogError(ex, "Attaching a file to document {DocumentId} failed", documentId);
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "The file could not be attached to the document.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
 }
+
+/// <summary>The file a client uploaded (the drive and item ids the upload route returned). Task 166 f1.</summary>
+public sealed record AttachDocumentFileRequest(string? DriveId, string? ItemId);
+
+/// <summary>The attached pointer. <paramref name="AlreadyAttached"/>: this same file was attached before (idempotent).</summary>
+public sealed record AttachDocumentFileResponse(Guid DocumentId, string DriveId, string ItemId, bool AlreadyAttached);

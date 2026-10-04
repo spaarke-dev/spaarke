@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -10,18 +11,34 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // The document-pointer check — unified-access-control-r2 task 166 r1 (owner round 21 item 1, part b), made the
-// INTERIM check of owner round 23 item 1 in task 166 r2.
+// INTERIM check of owner round 23 item 1 in task 166 r2, and given its STRICT successor (the derived-container rule
+// round 21 decided) behind a flag in task 166 f1.
 //
 // Same type as RecordContainerResolver.cs, split into its own file by reason-to-change (CLAUDE.md §11.5): this half
-// answers "may the BFF follow THIS row's pointer as the application?" — an identity question (who created the item,
-// who created the row) plus a tenancy question (is the container in the document owner's customer subtree) — while
-// the main file answers where a record's content is placed. No new type, no new registration: the call sites and the
-// DI registration (Program.cs) are unchanged.
+// answers "may the BFF follow THIS row's pointer as the application?" and "where does THIS document's file belong?"
+// — an identity question (who created the item, who created the row) plus a tenancy / placement question — while the
+// main file answers where a record's content is placed. No new type registration: the call sites and the DI
+// registration (Program.cs) are unchanged.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 public sealed partial class RecordContainerResolver
 {
     /// <summary>The code every app-only download refusal of an unverifiable document pointer carries.</summary>
     public const string DocumentStorageUnverifiedCode = "document_storage_unverified";
+
+    /// <summary>
+    /// The configuration flag that switches the check from the round-23 INTERIM rule to the STRICT derived-container rule
+    /// (owner round 21 item 1 (b); task 166 f1). Default <see langword="false"/> = the interim rule. The main session sets
+    /// it to <c>true</c> (App Service setting <c>DocumentPointer__StrictDerivedContainer</c>) only after the legacy
+    /// migration's <c>-Verify</c> has passed — that gate proves the flip refuses no document the interim rule serves.
+    /// </summary>
+    public const string StrictDerivedContainerKey = "DocumentPointer:StrictDerivedContainer";
+
+    /// <summary>
+    /// <c>EmailProcessing:DefaultContainerId</c> — the Office save path's last-resort container for content with no
+    /// record when the acting user's business unit has none (<c>OfficeService</c>). The derived container of an UNFILED
+    /// document whose owner's business unit stamps no container is this one, exactly as that save chose it.
+    /// </summary>
+    internal const string UnfiledDefaultContainerKey = "EmailProcessing:DefaultContainerId";
 
     /// <summary>An email attachment is a child document of the email document; its file lives where the email's does.</summary>
     private const string ParentDocumentColumn = "sprk_parentdocument";
@@ -45,6 +62,9 @@ public sealed partial class RecordContainerResolver
     /// <summary><c>businessunit.parentbusinessunitid</c> — null on the root business unit only.</summary>
     private const string ParentBusinessUnitColumn = "parentbusinessunitid";
 
+    /// <summary>The communication a document belongs to (the archive path's link; every archive writer stamps it).</summary>
+    private const string CommunicationEntity = "sprk_communication";
+
     /// <summary>
     /// How many business units one hierarchy read returns. Business-unit counts are small (tens); one read is cheaper and
     /// race-free compared with walking parent by parent (the <see cref="SpeAdminTenantScope"/> precedent). A hierarchy
@@ -58,10 +78,29 @@ public sealed partial class RecordContainerResolver
     /// client id. Together they are "the BFF identity" — the <c>createdBy.application.id</c> of an item the BFF uploaded
     /// app-only, and the <c>applicationid</c> of the Dataverse application user that creates rows app-only.
     /// </summary>
+    /// <remarks>
+    /// An environment whose app-only Graph or Dataverse identity is NOT under one of these keys (for example a
+    /// system-assigned managed identity with no client-id setting) cannot recognise the rows and items the BFF made, so
+    /// under the interim rule every BFF-created document is refused (fail closed). The deployment guide names the keys
+    /// (task 166 f1, verifier item 12).
+    /// </remarks>
     internal static readonly string[] BffApplicationIdKeys =
     [
         "AzureAd:ClientId", "API_APP_ID", "Graph:ManagedIdentity:ClientId", "ManagedIdentity:ClientId", "Dataverse:ClientId",
     ];
+
+    /// <summary>The STRICT rule is in force (see <see cref="StrictDerivedContainerKey"/>).</summary>
+    private readonly bool _strictDerivedContainer;
+
+    /// <summary><see cref="UnfiledDefaultContainerKey"/>, when configured.</summary>
+    private readonly string? _unfiledDefaultContainerId;
+
+    // Per-SCOPE memo of the two directory reads every interim check repeats (task 166 f1, verifier item 13): the
+    // resolver is registered Scoped, so this lives for one request (a bulk download of N documents reads the hierarchy
+    // once, not N times) or one job run. Only SUCCESSFUL answers are kept — a faulted read is dropped, so a later call in
+    // the same scope asks again; nothing crosses requests, so a change to the directory is seen by the next request.
+    private readonly ConcurrentDictionary<string, Task<IReadOnlyList<Guid>>> _claimantsMemo = new(StringComparer.Ordinal);
+    private Task<IReadOnlyDictionary<Guid, Guid?>>? _hierarchyMemo;
 
     /// <summary>The distinct, non-empty GUIDs under <see cref="BffApplicationIdKeys"/>. Empty without configuration.</summary>
     internal static IReadOnlySet<Guid> BffApplicationIdsFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
@@ -82,6 +121,17 @@ public sealed partial class RecordContainerResolver
 
         return ids;
     }
+
+    /// <summary><see cref="StrictDerivedContainerKey"/> as a boolean; absent, blank or unparseable = the interim rule.</summary>
+    internal static bool StrictDerivedContainerFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
+        => bool.TryParse(configuration?[StrictDerivedContainerKey], out var strict) && strict;
+
+    /// <summary>Which rule <see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/> applies.</summary>
+    internal bool StrictDerivedContainerMode => _strictDerivedContainer;
+
+    /// <summary>Is <paramref name="drive"/> the same container id as <paramref name="container"/> (trimmed, ordinal)?</summary>
+    internal static bool IsSameContainerId(string? container, string? drive)
+        => !string.IsNullOrWhiteSpace(drive) && IsSameContainer(container, drive.Trim());
 
     /// <summary>
     /// Throws <see cref="SdapProblemException"/> (<see cref="DocumentStorageUnverifiedCode"/>, 409) unless
@@ -111,32 +161,68 @@ public sealed partial class RecordContainerResolver
     /// <remarks>
     /// <para><b>The threat.</b> The BFF downloads a document's bytes as the managed identity from the drive and item the
     /// row's <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c> name. Until the pointer columns are field-secured
-    /// (<c>scripts/Set-DocumentPointerFieldSecurity.ps1</c>, after the owed pointer-attach path and legacy migration) any
-    /// Write holder can re-point a row — and rows forged before that lock stay forged.</para>
-    /// <para><b>The interim rule — owner round 23 item 1 (task 166 r2).</b> Both halves must hold, and anything that
-    /// cannot be decided refuses:</para>
+    /// (<c>scripts/Set-DocumentPointerFieldSecurity.ps1</c>) any Write holder can re-point a row — and rows forged before
+    /// that lock stay forged.</para>
+    /// <para><b>Two rules, one flag</b> (<see cref="StrictDerivedContainerKey"/>):</para>
+    /// <list type="bullet">
+    /// <item><b>STRICT</b> (round 21 item 1 (b), task 166 f1): the pointer's container must be the container DERIVED for
+    /// the document's own record (<see cref="DeriveDocumentContainersAsync"/>) and the item must be in it. In force once
+    /// the client no longer writes pointers (the pointer-attach route), the pointer columns are locked, and the legacy
+    /// migration has moved every misplaced file — the main session flips the flag after the migration's <c>-Verify</c>.
+    /// Its residual: a row forged BEFORE the lock that points at another item of the SAME derived container (round 21:
+    /// "the check does not stop the write"; the lock does).</item>
+    /// <item><b>INTERIM</b> (round 23 item 1, the default): <see cref="IsAllowedUnderInterimRuleAsync"/>.</item>
+    /// </list>
+    /// </remarks>
+    public Task<bool> IsDocumentPointerContainerAllowedAsync(
+        Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
+        => _strictDerivedContainer
+            ? IsAllowedUnderStrictRuleAsync(documentId, pointerDriveId, pointerItemId, ct)
+            : IsAllowedUnderInterimRuleAsync(documentId, pointerDriveId, pointerItemId, ct);
+
+    /// <summary>
+    /// <see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/> for callers
+    /// holding the document id as text (<see cref="DocumentEntity.Id"/>, job payloads). An id that is not a GUID names no
+    /// <c>sprk_document</c> row, so its pointer cannot be verified — refused.
+    /// </summary>
+    public Task<bool> IsDocumentPointerContainerAllowedAsync(
+        string? documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(documentId, out var id))
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-POINTER] REFUSED: '{DocumentId}' is not a document id, so the pointer it carries cannot be "
+                + "verified (fail closed).", documentId);
+            return Task.FromResult(false);
+        }
+
+        return IsDocumentPointerContainerAllowedAsync(id, pointerDriveId, pointerItemId, ct);
+    }
+
+    /// <summary>
+    /// The INTERIM rule — owner round 23 item 1 (task 166 r2), with round 25 item 6's root rule (task 166 f1). Both
+    /// halves must hold, and anything that cannot be decided refuses:
+    /// </summary>
+    /// <remarks>
     /// <list type="number">
     /// <item><b>The ITEM.</b> The drive item's <c>createdBy</c> (read app-only from Graph — the item must exist in THAT
     /// drive) is the row's creator: <c>createdby</c> when that is a person, else <see cref="CreatedByPersonColumn"/>
     /// (compared by Entra object id); or, for a row the BFF itself created, the BFF identity
-    /// (<see cref="BffApplicationIdKeys"/>) for an item it uploaded app-only. Before r2 the item was not checked at all.</item>
+    /// (<see cref="BffApplicationIdKeys"/>) for an item it uploaded app-only.</item>
     /// <item><b>The CONTAINER.</b> (a) A SECURE record's own container is honoured only for a document that hangs off
     /// that very record (one of its <c>DocumentLinkFields</c>, a related record the resolver resolves to that container,
     /// or its parent document, one level). (b) The communication archive container only on the ARCHIVE PATH: the row is
     /// linked to communication <c>C</c> (<c>sprk_relatedcommunication</c>, which every archive writer stamps) and the
     /// item is one the archive wrote for <c>C</c> (every archive upload is named <c>{C:N}_…</c>). (c) Otherwise a
     /// business unit's container, and only one in the DOCUMENT OWNER's customer subtree: the owner's top-level business
-    /// unit (the ancestor directly under the root, or the root itself for a root-owned row) and everything beneath it.
-    /// Under Model 1 — several customers as business units of one environment (owner round 20) — another customer's
-    /// container is therefore refused. Before r2 any business unit's container, or the archive, was accepted.</item>
+    /// unit (the ancestor directly under the root) and everything beneath it — and for a ROOT-owned row, only a
+    /// container the root unit itself stamps (round 25 item 6: no cross-customer re-pointing under Model 1).</item>
     /// </list>
     /// <para><b>Residual exposure until the strict check (recorded by owner round 23):</b> a pointer to ANOTHER
     /// legitimately uploaded item of the same creator, inside the owner's own customer subtree — for a BFF-created row
-    /// "the same creator" is the BFF identity. The strict comparison (the row's pointer must equal the container
-    /// derived for its record) replaces this rule once the pointer-attach path and the legacy migration land (owed;
-    /// task note §19).</para>
+    /// "the same creator" is the BFF identity.</para>
     /// </remarks>
-    public async Task<bool> IsDocumentPointerContainerAllowedAsync(
+    internal async Task<bool> IsAllowedUnderInterimRuleAsync(
         Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
     {
         if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(pointerDriveId) || string.IsNullOrWhiteSpace(pointerItemId))
@@ -190,7 +276,7 @@ public sealed partial class RecordContainerResolver
                 {
                     return Refuse(documentId,
                         "the pointer names neither the archive's own record of this item nor a container in the document "
-                        + "owner's customer subtree (another customer's, or none)");
+                        + "owner's customer subtree (another customer's, a child unit's for a root-owned row, or none)");
                 }
             }
 
@@ -215,22 +301,57 @@ public sealed partial class RecordContainerResolver
     }
 
     /// <summary>
-    /// <see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/> for callers
-    /// holding the document id as text (<see cref="DocumentEntity.Id"/>, job payloads). An id that is not a GUID names no
-    /// <c>sprk_document</c> row, so its pointer cannot be verified — refused.
+    /// The STRICT rule — owner round 21 item 1 (b), task 166 f1: the pointer's drive is a container DERIVED for the
+    /// document (<see cref="DeriveDocumentContainersAsync"/>) and the item exists in that drive. Anything undecidable —
+    /// an underivable container, an unreadable row, no item reader, a Graph fault — refuses.
     /// </summary>
-    public Task<bool> IsDocumentPointerContainerAllowedAsync(
-        string? documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
+    internal async Task<bool> IsAllowedUnderStrictRuleAsync(
+        Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
     {
-        if (!Guid.TryParse(documentId, out var id))
+        if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(pointerDriveId) || string.IsNullOrWhiteSpace(pointerItemId))
         {
-            _logger.LogWarning(
-                "[DOCUMENT-POINTER] REFUSED: '{DocumentId}' is not a document id, so the pointer it carries cannot be "
-                + "verified (fail closed).", documentId);
-            return Task.FromResult(false);
+            return false;
         }
 
-        return IsDocumentPointerContainerAllowedAsync(id, pointerDriveId, pointerItemId, ct);
+        var drive = pointerDriveId.Trim();
+        var item = pointerItemId.Trim();
+        try
+        {
+            if (_speFiles is null)
+            {
+                return Refuse(documentId, "no SharePoint Embedded reader is available to verify the item");
+            }
+
+            var derivation = await DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+            if (!derivation.Decided)
+            {
+                return Refuse(documentId, $"its container cannot be derived ({derivation.Reason})");
+            }
+
+            if (!derivation.Allows(drive))
+            {
+                return Refuse(documentId,
+                    $"the pointer names a container that is not the one derived for the document ({derivation.Reason})");
+            }
+
+            if (await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false) is null)
+            {
+                return Refuse(documentId, "the item is not in the drive the row names");
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[DOCUMENT-POINTER] REFUSED (strict): document {DocumentId}'s pointer could not be verified (fail closed).",
+                documentId);
+            return false;
+        }
     }
 
     private bool Refuse(Guid documentId, string reason)
@@ -239,6 +360,231 @@ public sealed partial class RecordContainerResolver
             "[DOCUMENT-POINTER] REFUSED: document {DocumentId} — {Reason}. Not served app-only.", documentId, reason);
         return false;
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // THE DERIVED CONTAINER (task 166 f1) — where a document's file BELONGS, by the same answers that place content.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The container(s) a document's file BELONGS in, derived server-side from the document's own record links — the
+    /// strict rule's reference, the pointer-attach route's check, and the legacy migration's / Make Secure's target.
+    /// </summary>
+    /// <remarks>
+    /// <para>Derived from the SAME answers that place content (this type's forward resolution), so a file the record-keyed
+    /// upload routes, the Office save, Compose and the communication archive stored is in a container the derivation
+    /// names:</para>
+    /// <list type="number">
+    /// <item>Every record link on the row (<see cref="DocumentLinkFields"/>) whose target can OWN content — a project,
+    /// matter or work assignment, or a record that can hang off one (<c>ChildAncestorLinks</c>: event, invoice, to-do,
+    /// analysis, agreement, budget, report card, service request) — is resolved with <see cref="ResolveForRecordAsync(string, Guid, CancellationToken)"/>;
+    /// <c>sprk_relatedcommunication</c> with the communication pipeline's own answer (the communication's secure root,
+    /// else <c>Communication:ArchiveContainerId</c>). A PARTY link (contact, organization) or the OOB <c>email</c> activity
+    /// owns no content and is not consulted.</item>
+    /// <item>No such link: the PARENT document's derivation (one level — an email attachment lives where its email
+    /// does).</item>
+    /// <item>Still nothing (an unfiled document): the container of the document's OWNING business unit — where the
+    /// record-less upload routes put the bytes — else <see cref="UnfiledDefaultContainerKey"/>.</item>
+    /// </list>
+    /// <para><b>A secure answer dominates.</b> If any link resolves to a SECURE container, that container is the ONLY
+    /// allowed one (two different secure containers are ambiguous and undecidable). Otherwise every non-secure answer is
+    /// allowed (a document filed to two non-secure records may live in either one's container) and the first, in
+    /// <see cref="DocumentLinkFields"/> order, is the primary — the migration's target.</para>
+    /// <para><b>Fail closed.</b> An unreadable row, a link whose resolution throws (an ambiguous or unreadable ancestor,
+    /// a secure record with no container) or no derivable container is NOT decided; the strict rule refuses and the
+    /// migration reports it.</para>
+    /// </remarks>
+    public async Task<DocumentContainerDerivation> DeriveDocumentContainersAsync(Guid documentId, CancellationToken ct = default)
+    {
+        if (documentId == Guid.Empty)
+        {
+            return DocumentContainerDerivation.Undecided("an empty document id names no document");
+        }
+
+        try
+        {
+            return await DeriveCoreAsync(documentId, depth: 0, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "[DOCUMENT-CONTAINER] The container of document {DocumentId} could not be derived.", documentId);
+            return DocumentContainerDerivation.Undecided($"the document or one of its records could not be read ({ex.GetType().Name})");
+        }
+    }
+
+    private async Task<DocumentContainerDerivation> DeriveCoreAsync(Guid documentId, int depth, CancellationToken ct)
+    {
+        var columns = DocumentLinkFields.LogicalNames
+            .Append(ParentDocumentColumn)
+            .Append(OwningBusinessUnitColumn)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var row = await _entityService.RetrieveAsync("sprk_document", documentId, columns, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return DocumentContainerDerivation.Undecided("the document row could not be read");
+        }
+
+        var secure = new List<string>();
+        var plain = new List<string>();
+        var consulted = new List<string>();
+
+        foreach (var link in DocumentLinkFields.All)
+        {
+            if (row.GetAttributeValue<EntityReference>(link.LogicalName) is not { Id: var linkedId } || linkedId == Guid.Empty)
+            {
+                continue;
+            }
+
+            ContainerDecision decision;
+            if (string.Equals(link.TargetEntityLogicalName, CommunicationEntity, StringComparison.Ordinal))
+            {
+                decision = await ResolveForRecordWithFixedFallbackAsync(CommunicationEntity, linkedId, _archiveContainerId, ct)
+                    .ConfigureAwait(false);
+            }
+            else if (ChildAncestorLinks.KindOf(link.TargetEntityLogicalName) is ChildAncestorLinks.RecordKind.Root
+                     or ChildAncestorLinks.RecordKind.Intermediate)
+            {
+                decision = await ResolveForRecordAsync(link.TargetEntityLogicalName, linkedId, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // A party, or the OOB email activity: not an owner of content.
+                continue;
+            }
+
+            consulted.Add(link.LogicalName);
+            switch (decision.Outcome)
+            {
+                case ContainerDecisionOutcome.ResolvedSecure when !string.IsNullOrWhiteSpace(decision.ContainerId):
+                    secure.Add(decision.ContainerId!.Trim());
+                    break;
+                case ContainerDecisionOutcome.ResolvedFallback when !string.IsNullOrWhiteSpace(decision.ContainerId):
+                    plain.Add(decision.ContainerId!.Trim());
+                    break;
+                case ContainerDecisionOutcome.Unresolved:
+                    break;
+                default:
+                    return DocumentContainerDerivation.Undecided(
+                        $"{link.LogicalName} -> {link.TargetEntityLogicalName} resolved to {decision.Outcome}");
+            }
+        }
+
+        if (secure.Count == 0 && plain.Count == 0 && consulted.Count == 0 && depth == 0
+            && row.GetAttributeValue<EntityReference>(ParentDocumentColumn) is { Id: var parentId }
+            && parentId != Guid.Empty && parentId != documentId)
+        {
+            var viaParent = await DeriveCoreAsync(parentId, depth: 1, ct).ConfigureAwait(false);
+            return viaParent.Decided
+                ? viaParent with { Reason = $"the parent document's: {viaParent.Reason}" }
+                : DocumentContainerDerivation.Undecided($"the parent document's container: {viaParent.Reason}");
+        }
+
+        var distinctSecure = secure.Distinct(StringComparer.Ordinal).ToList();
+        if (distinctSecure.Count > 1)
+        {
+            return DocumentContainerDerivation.Undecided("its records resolve to two different secure containers (ambiguous)");
+        }
+
+        if (distinctSecure.Count == 1)
+        {
+            return new DocumentContainerDerivation(
+                true, distinctSecure, distinctSecure[0], IsSecure: true,
+                $"the secure container of its record ({string.Join(", ", consulted)})");
+        }
+
+        var distinctPlain = plain.Distinct(StringComparer.Ordinal).ToList();
+        if (distinctPlain.Count > 0)
+        {
+            return new DocumentContainerDerivation(
+                true, distinctPlain, distinctPlain[0], IsSecure: false,
+                $"the container(s) of its record(s) ({string.Join(", ", consulted)})");
+        }
+
+        if (consulted.Count > 0)
+        {
+            return DocumentContainerDerivation.Undecided(
+                $"its records ({string.Join(", ", consulted)}) resolve to no container (their business units stamp none)");
+        }
+
+        // Unfiled: the owning business unit's container — where the record-less upload routes store the bytes.
+        var ownerContainer = await ResolveOwningBusinessUnitContainerAsync(row, "sprk_document", documentId, ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(ownerContainer))
+        {
+            return new DocumentContainerDerivation(
+                true, [ownerContainer.Trim()], ownerContainer.Trim(), IsSecure: false,
+                "the owning business unit's container (unfiled document)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_unfiledDefaultContainerId))
+        {
+            return new DocumentContainerDerivation(
+                true, [_unfiledDefaultContainerId.Trim()], _unfiledDefaultContainerId.Trim(), IsSecure: false,
+                $"{UnfiledDefaultContainerKey} (unfiled document; its business unit stamps no container)");
+        }
+
+        return DocumentContainerDerivation.Undecided("it is unfiled and its business unit stamps no container");
+    }
+
+    /// <summary>
+    /// The relocation source check of the legacy migration (task 166 f1, owner round 26 item 3): may the BFF move this
+    /// row's file into its derived container? Only a file that is VERIFIABLY the row's own: the item exists, was
+    /// uploaded by the row's creator (the round-23 ITEM half), and sits in a container of this environment — a business
+    /// unit's, the archive, or the own container of a secure record the document hangs off. A forged pointer to another
+    /// person's item is therefore never copied into the document's container (it is reported for an administrator).
+    /// </summary>
+    internal async Task<bool> IsRelocationSourceVerifiedAsync(
+        Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
+    {
+        if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(pointerDriveId) || string.IsNullOrWhiteSpace(pointerItemId)
+            || _speFiles is null)
+        {
+            return false;
+        }
+
+        var drive = pointerDriveId.Trim();
+        try
+        {
+            var row = await _entityService.RetrieveAsync(
+                "sprk_document", documentId, [CreatedByColumn, OwningBusinessUnitColumn], ct).ConfigureAwait(false);
+            var creator = row is null ? null : await _speFiles.GetItemCreatorAsync(drive, pointerItemId.Trim(), ct).ConfigureAwait(false);
+            if (row is null || creator is null
+                || !await ItemWasCreatedByTheRowsCreatorAsync(documentId, row, creator, ct).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_archiveContainerId) && IsSameContainer(_archiveContainerId, drive))
+            {
+                return true;
+            }
+
+            if ((await BusinessUnitsClaimingAsync(drive, ct).ConfigureAwait(false)).Count > 0)
+            {
+                return true;
+            }
+
+            var secureOwner = await ResolveOwningRecordAsync(drive, ct).ConfigureAwait(false);
+            return secureOwner is not null
+                   && await DocumentHangsOffAsync(documentId, secureOwner, drive, depth: 0, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "[DOCUMENT-CONTAINER] The file of document {DocumentId} could not be verified for relocation.", documentId);
+            return false;
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // The ITEM half (round 23)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
     /// The ITEM half of owner round 23 item 1: was the drive item created by the row's creator?
@@ -340,6 +686,10 @@ public sealed partial class RecordContainerResolver
         return creator.Name?.StartsWith($"{communicationId:N}_", StringComparison.OrdinalIgnoreCase) == true;
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // The CONTAINER half of the interim rule: the document owner's customer subtree
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
     /// <summary>
     /// Does a business unit IN THE DOCUMENT OWNER'S CUSTOMER SUBTREE stamp <paramref name="drive"/> as its container?
     /// </summary>
@@ -362,8 +712,23 @@ public sealed partial class RecordContainerResolver
         return subtree is not null && claimants.Any(subtree.Contains);
     }
 
-    /// <summary>The business units whose <c>sprk_containerid</c> is <paramref name="drive"/>.</summary>
+    /// <summary>The business units whose <c>sprk_containerid</c> is <paramref name="drive"/> (memoized per scope).</summary>
     private async Task<IReadOnlyList<Guid>> BusinessUnitsClaimingAsync(string drive, CancellationToken ct)
+    {
+        var read = _claimantsMemo.GetOrAdd(drive, d => QueryBusinessUnitsClaimingAsync(d, ct));
+        try
+        {
+            return await read.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Never remember a failure: the next question in this scope asks Dataverse again.
+            _claimantsMemo.TryRemove(new KeyValuePair<string, Task<IReadOnlyList<Guid>>>(drive, read));
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyList<Guid>> QueryBusinessUnitsClaimingAsync(string drive, CancellationToken ct)
     {
         var query = new QueryExpression(BusinessUnitEntity)
         {
@@ -382,8 +747,23 @@ public sealed partial class RecordContainerResolver
             .ToList() ?? [];
     }
 
-    /// <summary>Every business unit, child → parent (the root's parent is null). One read.</summary>
+    /// <summary>Every business unit, child → parent (the root's parent is null). One read per scope.</summary>
     private async Task<IReadOnlyDictionary<Guid, Guid?>> LoadBusinessUnitHierarchyAsync(CancellationToken ct)
+    {
+        var read = _hierarchyMemo ??= QueryBusinessUnitHierarchyAsync(ct);
+        try
+        {
+            return await read.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Never remember a failure (see BusinessUnitsClaimingAsync).
+            _ = Interlocked.CompareExchange(ref _hierarchyMemo, null, read);
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, Guid?>> QueryBusinessUnitHierarchyAsync(CancellationToken ct)
     {
         var query = new QueryExpression(BusinessUnitEntity)
         {
@@ -410,15 +790,24 @@ public sealed partial class RecordContainerResolver
 
     /// <summary>
     /// The CUSTOMER subtree of <paramref name="ownerBusinessUnit"/>: its top-level business unit — the ancestor directly
-    /// under the root — and every unit beneath it. A root-owned row's subtree is the root's (the operator level, the
-    /// <see cref="SpeAdminTenantScope"/> precedent: an operator above the customer units reaches them). Null — refuse —
-    /// when the unit is unknown, its chain is broken, or the hierarchy has a cycle.
+    /// under the root — and every unit beneath it. For a ROOT-owned row it is the root unit ALONE (owner round 25 item 6,
+    /// task 166 f1): under Model 1 the customers are the units beneath the root, so the root's own documents may use only
+    /// the container the root itself stamps, never a customer's. Null — refuse — when the unit is unknown, its chain is
+    /// broken, or the hierarchy has a cycle.
     /// </summary>
     internal static IReadOnlyCollection<Guid>? CustomerSubtree(Guid ownerBusinessUnit, IReadOnlyDictionary<Guid, Guid?> hierarchy)
     {
-        if (!hierarchy.ContainsKey(ownerBusinessUnit))
+        if (!hierarchy.TryGetValue(ownerBusinessUnit, out var ownerParent))
         {
             return null;
+        }
+
+        if (ownerParent is null)
+        {
+            // The owner IS the root: only the root's own container (round 25 item 6). Before f1 this returned the whole
+            // environment ("the operator level"), which let a Write holder on a root-owned row re-point it at any
+            // customer's container.
+            return [ownerBusinessUnit];
         }
 
         var customer = ownerBusinessUnit;
@@ -439,6 +828,54 @@ public sealed partial class RecordContainerResolver
         }
 
         return SpeAdminTenantScope.CollectSelfAndDescendants(customer, hierarchy);
+    }
+
+    /// <summary>
+    /// Is <paramref name="businessUnit"/> the unit <paramref name="subtreeRoot"/> or beneath it? One hierarchy read per
+    /// scope (shared with the pointer check). Unknown unit, broken chain, cycle or a read fault → <see langword="false"/>
+    /// (fail closed). Used by the reporting module's allowed-workspace check for a workspace bound to one customer
+    /// (task 166 f1, owner round 25 item 6).
+    /// </summary>
+    internal async Task<bool> IsBusinessUnitInSubtreeAsync(Guid businessUnit, Guid subtreeRoot, CancellationToken ct = default)
+    {
+        if (businessUnit == Guid.Empty || subtreeRoot == Guid.Empty)
+        {
+            return false;
+        }
+
+        try
+        {
+            var hierarchy = await LoadBusinessUnitHierarchyAsync(ct).ConfigureAwait(false);
+            var visited = new HashSet<Guid>();
+            Guid? current = businessUnit;
+            while (current is { } unit)
+            {
+                if (unit == subtreeRoot)
+                {
+                    return true;
+                }
+
+                if (!visited.Add(unit) || !hierarchy.TryGetValue(unit, out var parent))
+                {
+                    return false;
+                }
+
+                current = parent;
+            }
+
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[BUSINESS-UNIT] Whether {Unit} is beneath {Root} could not be read; answering no (fail closed).",
+                businessUnit, subtreeRoot);
+            return false;
+        }
     }
 
     private async Task<bool> DocumentHangsOffAsync(
@@ -495,4 +932,27 @@ public sealed partial class RecordContainerResolver
 
         return false;
     }
+}
+
+/// <summary>
+/// Where a document's file BELONGS (<see cref="RecordContainerResolver.DeriveDocumentContainersAsync"/>; task 166 f1).
+/// </summary>
+/// <param name="Decided">A container could be derived. When false the strict rule refuses and the migration reports it.</param>
+/// <param name="AllowedContainers">Every container the file may live in: exactly one when <paramref name="IsSecure"/>.</param>
+/// <param name="PrimaryContainer">The one a misplaced file is moved into.</param>
+/// <param name="IsSecure">The derivation is a secure record's own container.</param>
+/// <param name="Reason">Why — for logs and the migration report.</param>
+public sealed record DocumentContainerDerivation(
+    bool Decided,
+    IReadOnlyList<string> AllowedContainers,
+    string? PrimaryContainer,
+    bool IsSecure,
+    string Reason)
+{
+    /// <summary>Not decided, with the reason.</summary>
+    public static DocumentContainerDerivation Undecided(string reason) => new(false, [], null, false, reason);
+
+    /// <summary>Is <paramref name="drive"/> one of the allowed containers? Never true when not decided.</summary>
+    public bool Allows(string? drive)
+        => Decided && AllowedContainers.Any(c => RecordContainerResolver.IsSameContainerId(c, drive));
 }

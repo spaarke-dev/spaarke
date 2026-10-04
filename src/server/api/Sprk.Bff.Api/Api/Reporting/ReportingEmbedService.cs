@@ -348,39 +348,9 @@ public class ReportingEmbedService
             .ToList();
     }
 
-    /// <summary>
-    /// Returns a single report by ID from the specified Power BI workspace.
-    /// </summary>
-    /// <param name="workspaceId">Power BI workspace (group) GUID.</param>
-    /// <param name="reportId">Report GUID.</param>
-    /// <param name="profileId">Optional service principal profile ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The matching <see cref="PowerBiReport"/> DTO.</returns>
-    public virtual async Task<PowerBiReport> GetReportAsync(
-        Guid workspaceId,
-        Guid reportId,
-        Guid? profileId = null,
-        CancellationToken ct = default)
-    {
-        _logger.LogDebug("Fetching report {ReportId} from workspace {WorkspaceId}",
-            reportId, workspaceId);
-
-        var client = await GetPowerBIClientAsync(profileId, ct);
-
-        Report report;
-        try
-        {
-            report = await client.Reports.GetReportInGroupAsync(workspaceId, reportId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch report {ReportId} from workspace {WorkspaceId}",
-                reportId, workspaceId);
-            throw;
-        }
-
-        return MapToDto(report);
-    }
+    // GetReportAsync DELETED 2026-10-04 by unified-access-control-r2 task 166 f1 (verifier item 14): its only caller was
+    // the Save-As registration branch, removed by owner round 23 item 2. A Power BI report is never looked up by an id a
+    // client names — every report id comes from a catalog row read as the caller.
 
     // -----------------------------------------------------------------------------------------
     // Report create / delete
@@ -625,7 +595,13 @@ public class ReportingEmbedService
     /// added to every outgoing request so the call is scoped to that service principal profile
     /// (task PBI-003 multi-workspace isolation pattern).
     /// </summary>
-    private async Task<PowerBIClient> GetPowerBIClientAsync(
+    /// <remarks>
+    /// <c>protected internal virtual</c> returning the SDK's own <see cref="IPowerBIClient"/> interface (unified-access-control-r2
+    /// task 166 f1, verifier item 7): the ONE seam below which a test substitutes the Power BI service, so the REAL
+    /// <see cref="ExportReportAsync"/> body runs — and a regression that drops the export's row-level-security identity
+    /// fails a test instead of shipping. The SDK type never leaves this class (ADR-007).
+    /// </remarks>
+    protected internal virtual async Task<IPowerBIClient> GetPowerBIClientAsync(
         Guid? profileId,
         CancellationToken ct)
     {

@@ -39,6 +39,7 @@ public class DocumentPointerContainerCheckTests
     private const string CustomerAContainer = "b!customer-a-container";
     private const string CustomerA1Container = "b!customer-a-child-container";
     private const string CustomerBContainer = "b!customer-b-container";
+    private const string RootContainer = "b!root-unit-container";
     private static readonly Guid Root = TestRecordContainerResolver.PointerWorldRootBusinessUnit;
     private static readonly Guid CustomerA = Guid.Parse("a0000000-0000-4000-8000-000000000166");
     private static readonly Guid CustomerA1 = Guid.Parse("a1000000-0000-4000-8000-000000000166");
@@ -137,13 +138,18 @@ public class DocumentPointerContainerCheckTests
     }
 
     [Fact]
-    public async Task ARootOwnedDocument_MayUseAnyBusinessUnitContainer_TheOperatorLevel()
+    public async Task ARootOwnedDocument_MayUseOnlyAContainerTheRootItselfStamps()
     {
-        // Root-BU ownership is the operator level (dev artifact, owner #1081); its subtree is the environment's.
+        // Owner round 25 item 6 (task 166 f1; verifier item 9): before f1 a root-owned row's subtree was the whole
+        // environment ("the operator level"), so under Model 1 a Write holder on a root-owned row the BFF created could
+        // re-point it at any item the BFF uploaded in ANY customer's container. Now only the root's own container.
         var world = Environment();
+        world.BusinessUnits[Root] = (null, RootContainer);
         world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: Root);
 
-        (await Check(world, CustomerBContainer)).Should().BeTrue();
+        (await Check(world, RootContainer)).Should().BeTrue("the root unit's own container");
+        (await Check(world, CustomerBContainer)).Should().BeFalse("a customer's container is not the root's");
+        (await Check(world, CustomerA1Container)).Should().BeFalse("nor is a customer's child unit's");
     }
 
     [Fact]
@@ -472,7 +478,8 @@ public class DocumentPointerContainerCheckTests
         RecordContainerResolver.CustomerSubtree(CustomerA1, hierarchy).Should().BeEquivalentTo(new[] { CustomerA, CustomerA1 });
         RecordContainerResolver.CustomerSubtree(CustomerA, hierarchy).Should().BeEquivalentTo(new[] { CustomerA, CustomerA1 });
         RecordContainerResolver.CustomerSubtree(CustomerB, hierarchy).Should().BeEquivalentTo(new[] { CustomerB });
-        RecordContainerResolver.CustomerSubtree(Root, hierarchy).Should().BeEquivalentTo(new[] { Root, CustomerA, CustomerA1, CustomerB });
+        RecordContainerResolver.CustomerSubtree(Root, hierarchy).Should().BeEquivalentTo(new[] { Root },
+            "a ROOT-owned row may use only the root's own container (owner round 25 item 6) — never a customer's");
         RecordContainerResolver.CustomerSubtree(Guid.NewGuid(), hierarchy).Should().BeNull("an unknown unit has no subtree");
 
         var cycle = new Dictionary<Guid, Guid?> { [CustomerA] = CustomerA1, [CustomerA1] = CustomerA };

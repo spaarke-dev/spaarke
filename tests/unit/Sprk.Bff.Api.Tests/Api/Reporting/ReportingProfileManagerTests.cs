@@ -211,7 +211,7 @@ public class ReportingProfileManagerTests
     /// </summary>
     [Theory]
     [InlineData(nameof(ReportingEmbedService.GetEmbedConfigAsync))]
-    [InlineData(nameof(ReportingEmbedService.GetReportAsync))]
+    // GetReportAsync was deleted by task 166 f1: no route calls it since the Save-As branch was removed (round 23 item 2).
     [InlineData(nameof(ReportingEmbedService.CreateReportAsync))]
     [InlineData(nameof(ReportingEmbedService.DeleteReportAsync))]
     [InlineData(nameof(ReportingEmbedService.ExportReportAsync))]

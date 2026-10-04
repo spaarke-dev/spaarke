@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -206,6 +207,42 @@ internal static class TestRecordContainerResolver
         /// <summary>The resolver is built with NO SharePoint Embedded item reader (a host that registers none).</summary>
         public bool NoItemReader { get; init; }
 
+        /// <summary>The STRICT derived-container rule is in force (<c>DocumentPointer:StrictDerivedContainer</c>, task 166 f1).</summary>
+        public bool Strict { get; init; }
+
+        /// <summary><c>EmailProcessing:DefaultContainerId</c> — an unfiled document's container of last resort (task 166 f1).</summary>
+        public string? UnfiledDefaultContainer { get; init; }
+
+        /// <summary>Every app-only UPDATE the built resolver's entity service received (the relocator's re-point).</summary>
+        public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = new();
+
+        /// <summary>How many OTHER documents the relocator's "does another row point at this file?" read finds.</summary>
+        public int OtherDocumentsReferencingTheFile { get; set; }
+
+        /// <summary>The drive those other documents name (the relocator compares it with the source drive).</summary>
+        public string? ReferencedDrive { get; set; }
+
+        /// <summary>How many business-unit HIERARCHY reads the built resolver made (task 166 f1: one per scope).</summary>
+        public int HierarchyReads { get; private set; }
+
+        /// <summary>How many "which units stamp this container?" reads the built resolver made.</summary>
+        public int ClaimantReads { get; private set; }
+
+        /// <summary>The first N hierarchy reads FAULT (a failed read must not be remembered for the scope).</summary>
+        public int FailFirstHierarchyReads { get; set; }
+
+        /// <summary>Every app-only UPDATE faults (the relocator's re-point fails).</summary>
+        public Exception? UpdateFault { get; set; }
+
+        /// <summary>The entity service the last <see cref="Build"/> created — the relocator shares it (task 166 f1).</summary>
+        public IGenericEntityService? EntityService { get; private set; }
+
+        /// <summary>The SPE item reader the last <see cref="Build"/> created, over <see cref="Items"/>.</summary>
+        public SpeItemCreator? ItemFacts(string drive, string item)
+            => Items.TryGetValue((drive, item), out var creator)
+                ? creator
+                : new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"), Size: 1234, QuickXorHash: "hash-1234");
+
         /// <summary>A document row created by <paramref name="createdBy"/> and owned in <paramref name="owningBusinessUnit"/>.</summary>
         public static Entity Document(Guid id, Guid? createdBy = null, Guid? owningBusinessUnit = null)
             => new("sprk_document", id)
@@ -249,9 +286,40 @@ internal static class TestRecordContainerResolver
                         return row;
                     }
 
+                    if (entity == "businessunit" && BusinessUnits.TryGetValue(id, out var unit))
+                    {
+                        // The forward resolution's non-secure default: a business unit's stamped container (task 166 f1).
+                        var businessUnit = new Entity("businessunit", id);
+                        if (unit.Container is not null)
+                        {
+                            businessUnit["sprk_containerid"] = unit.Container;
+                        }
+
+                        return businessUnit;
+                    }
+
                     return entity == "sprk_document"
                         ? Document(id)
                         : throw new InvalidOperationException($"Unmodelled row {entity}({id}).");
+                });
+            entityService.Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+                {
+                    if (UpdateFault is not null)
+                    {
+                        return Task.FromException(UpdateFault);
+                    }
+
+                    Updates.Add((entity, id, fields));
+                    if (Rows.TryGetValue((entity, id), out var updated))
+                    {
+                        foreach (var (column, value) in fields)
+                        {
+                            updated[column] = value;
+                        }
+                    }
+
+                    return Task.CompletedTask;
                 });
             entityService.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression query, CancellationToken _) =>
@@ -262,12 +330,49 @@ internal static class TestRecordContainerResolver
                     }
 
                     var collection = new EntityCollection();
+                    if (query.EntityName == "sprk_document"
+                        && query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid" && c.Operator == ConditionOperator.NotNull))
+                    {
+                        // The legacy migration's keyset batch (task 166 f1): pointered documents after the cursor, in id order.
+                        var after = query.Criteria.Conditions
+                            .FirstOrDefault(c => c.AttributeName == "sprk_documentid" && c.Operator == ConditionOperator.GreaterThan)?
+                            .Values.FirstOrDefault() as Guid?;
+                        foreach (var document in Rows
+                                     .Where(r => r.Key.Item1 == "sprk_document"
+                                                 && !string.IsNullOrWhiteSpace(r.Value.GetAttributeValue<string>("sprk_graphitemid"))
+                                                 && (after is null || r.Key.Item2.CompareTo(after.Value) > 0))
+                                     .OrderBy(r => r.Key.Item2)
+                                     .Take(query.TopCount ?? int.MaxValue))
+                        {
+                            collection.Entities.Add(new Entity("sprk_document", document.Key.Item2));
+                        }
+
+                        return collection;
+                    }
+
+                    if (query.EntityName == "sprk_document")
+                    {
+                        // The relocator's "does another document point at this file?" read (task 166 f1).
+                        for (var i = 0; i < OtherDocumentsReferencingTheFile; i++)
+                        {
+                            collection.Entities.Add(new Entity("sprk_document", Guid.NewGuid()) { ["sprk_graphdriveid"] = ReferencedDrive });
+                        }
+
+                        return collection;
+                    }
+
                     var container = ContainerSearchedFor(query);
 
                     if (query.EntityName == "businessunit")
                     {
                         if (container is null)
                         {
+                            HierarchyReads++;
+                            if (HierarchyReads <= FailFirstHierarchyReads)
+                            {
+                                throw new TimeoutException("Dataverse unavailable (scripted hierarchy fault)");
+                            }
+
                             // The hierarchy read: every unit with its parent.
                             foreach (var (unitId, (parent, _)) in BusinessUnits)
                             {
@@ -283,6 +388,7 @@ internal static class TestRecordContainerResolver
                             return collection;
                         }
 
+                        ClaimantReads++;
                         foreach (var (unitId, (_, stamped)) in BusinessUnits)
                         {
                             var claims = string.Equals(stamped, container, StringComparison.Ordinal)
@@ -322,17 +428,21 @@ internal static class TestRecordContainerResolver
                         throw ItemReadFault;
                     }
 
-                    return Items.TryGetValue((drive, item), out var creator)
-                        ? creator
-                        : new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"));
+                    return ItemFacts(drive, item);
                 });
 
             var options = Microsoft.Extensions.Options.Options.Create(
                 new Sprk.Bff.Api.Configuration.CommunicationOptions { ArchiveContainerId = ArchiveContainerId });
             var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["API_APP_ID"] = PointerWorldBffApplicationId.ToString("D") })
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["API_APP_ID"] = PointerWorldBffApplicationId.ToString("D"),
+                    [RecordContainerResolver.StrictDerivedContainerKey] = Strict ? "true" : null,
+                    [RecordContainerResolver.UnfiledDefaultContainerKey] = UnfiledDefaultContainer,
+                })
                 .Build();
 
+            EntityService = entityService.Object;
             return new RecordContainerResolver(
                 registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance, options,
                 NoItemReader ? null : speFiles.Object, configuration);

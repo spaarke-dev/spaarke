@@ -313,10 +313,44 @@ public sealed class ReportingCatalogBindingContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reportId"]!.GetValue<Guid>().Should().Be(newRowId);
-        var created = JsonNode.Parse(host.CreatedRowPayloads.Should().ContainSingle().Subject)!;
-        created["sprk_workspaceid"]!.GetValue<string>().Should().Be(WorkspaceId.ToString("D"),
+
+        // Task 166 f1 (owner round 25 item 6): the caller's create carries NONE of the field-secured Power BI pointer
+        // columns; the BFF stamps them APP-ONLY on the new row, with server-derived values.
+        var created = JsonNode.Parse(host.CreatedRowPayloads.Should().ContainSingle().Subject)!.AsObject();
+        created.Select(p => p.Key).Should().NotIntersectWith(ReportingEndpoints.CatalogPointerColumns,
+            "the pointer columns are writable by the BFF identity only — a caller-written create naming them would be refused");
+        var stamp = host.PointerStamps.Should().ContainSingle().Subject;
+        stamp.RowId.Should().Be(newRowId);
+        stamp.Fields["sprk_workspaceid"].Should().Be(WorkspaceId.ToString("D"),
             "the workspace is the SOURCE row's — a client workspace is never written");
-        created["sprk_pbi_reportid"]!.GetValue<string>().Should().Be(cloneId.ToString("D"));
+        stamp.Fields["sprk_pbi_reportid"].Should().Be(cloneId.ToString("D"));
+        stamp.Fields["sprk_datasetid"].Should().Be(DatasetId.ToString("D"));
+        stamp.Fields["sprk_iscustom"].Should().Be(true);
+    }
+
+    [Fact]
+    public async Task Create_WhenThePointerStampFails_TheRowAndTheCloneAreRemoved_AndNothingIsLeftHalfMade()
+    {
+        await using var host = await Host.StartAsync();
+        host.ArrangeCatalogRow("readable");
+        var cloneId = Guid.NewGuid();
+        var newRowId = Guid.NewGuid();
+        host.Embed
+            .Setup(e => e.CreateReportAsync(WorkspaceId, "Copy", DatasetId, PbiReportId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PowerBiReport(cloneId, "Copy", "https://app.powerbi.com/clone", DatasetId));
+        host.ArrangeCatalogCreate(newRowId);
+        host.EntityService
+            .Setup(s => s.UpdateAsync("sprk_report", newRowId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var response = await host.Send(HttpMethod.Post, "/api/reporting/reports", Author,
+            new { name = "Copy", sourceReportId = CatalogRowId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        host.EntityService.Verify(s => s.DeleteAsync("sprk_report", newRowId, It.IsAny<CancellationToken>()), Times.Once,
+            "a row that never got its pointer is the BFF's own half-made row — removed, not left in the catalog");
+        host.Embed.Verify(e => e.DeleteReportAsync(WorkspaceId, cloneId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once,
+            "an uncatalogued clone is not left behind");
     }
 
     [Fact]
@@ -351,12 +385,11 @@ public sealed class ReportingCatalogBindingContractTests
             new { name = "Saved as", sourceReportId = CatalogRowId, pbiReportId = named });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Embed.Verify(e => e.GetReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
-            Times.Never, "a client-named Power BI report is never looked up");
-        var created = JsonNode.Parse(host.CreatedRowPayloads.Should().ContainSingle().Subject)!;
-        created["sprk_pbi_reportid"]!.GetValue<string>().Should().Be(cloneId.ToString("D"),
+        var stamp = host.PointerStamps.Should().ContainSingle().Subject;
+        stamp.Fields["sprk_pbi_reportid"].Should().Be(cloneId.ToString("D"),
             "the new row points at the server's clone, never at the report the client named");
-        created.ToJsonString().Should().NotContain(named.ToString("D"));
+        host.CreatedRowPayloads.Should().ContainSingle().Which.Should().NotContain(named.ToString("D"));
+        stamp.Fields.Values.Should().NotContain(named.ToString("D"));
     }
 
     // Owner round 9 write pattern (task 166 r2): the caller's own Create on sprk_report is asked AS THE CALLER before
@@ -553,6 +586,220 @@ public sealed class ReportingCatalogBindingContractTests
     }
 
     // =============================================================================================
+    // Task 166 f1 (owner round 25 item 6) — the server-side allowed-workspace check. The catalog row is the authority,
+    // so a row pointing at a workspace this deployment may not act on (forged before the pointer columns were locked,
+    // or seeded at an arbitrary workspace) is "not in your catalog" for EVERY action, and Power BI is never asked.
+    // =============================================================================================
+
+    public static TheoryData<string> CatalogRoutes => new()
+    {
+        "embed-token", "export", "get", "update", "delete", "create-from-source",
+    };
+
+    [Theory]
+    [MemberData(nameof(CatalogRoutes))]
+    public async Task AnAction_OnARowWhoseWorkspaceThisDeploymentDoesNotAllow_IsTheUniform404_AndActsOnNothing(string route)
+    {
+        await using var host = await Host.StartAsync(h =>
+            h.PowerBi.AllowedWorkspaces = [new AllowedPowerBiWorkspace { WorkspaceId = ForeignWorkspace }]);
+        host.ArrangeCatalogRow("readable-custom");
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
+
+        var response = await SendRouteAsync(host, route);
+
+        await AssertNotInCatalogAsync(host, response);
+        host.DataverseUser.Verify(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a row naming a disallowed workspace deletes nothing, not even itself");
+        host.DataverseUser.Verify(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.CreatedRowPayloads.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(CatalogRoutes))]
+    public async Task WithNoAllowedWorkspaceConfigured_EveryActionIs503_AndReadsNothing(string route)
+    {
+        await using var host = await Host.StartAsync(h => h.PowerBi.AllowedWorkspaces = []);
+        host.ArrangeCatalogRow("readable-custom");
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
+
+        var response = await SendRouteAsync(host, route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "fail closed: an empty allow-list is never 'any workspace'");
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>()
+            .Should().Be(ReportingEndpoints.WorkspacesUnconfiguredCode);
+        host.CatalogPathsRead.Should().BeEmpty("the configuration answer comes before any catalog read — no oracle");
+        host.VerifyPowerBiNeverAsked();
+    }
+
+    [Fact]
+    public async Task GetReports_WithNoAllowedWorkspaceConfigured_Is503()
+    {
+        await using var host = await Host.StartAsync(h => h.PowerBi.AllowedWorkspaces = []);
+        host.ArrangeCatalogList(RowJson(CatalogRowId));
+
+        var response = await host.Send(HttpMethod.Get, "/api/reporting/reports", Viewer);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        host.CatalogPathsRead.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetReports_OmitsARowWhoseWorkspaceThisDeploymentDoesNotAllow()
+    {
+        await using var host = await Host.StartAsync();
+        var foreignRow = Guid.NewGuid();
+        host.ArrangeCatalogList(RowJson(CatalogRowId), RowJson(foreignRow, workspace: ForeignWorkspace));
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
+
+        var response = await host.Send(HttpMethod.Get, "/api/reporting/reports", Viewer);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var items = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsArray();
+        items.Should().ContainSingle("a row every action would refuse is not offered")
+            .Which!["id"]!.GetValue<Guid>().Should().Be(CatalogRowId);
+    }
+
+    // Model 1 (owner round 20): one environment, several customers as business units. A workspace bound to customer A
+    // admits only A's business units — the business-unit hierarchy is read through the ONE reader
+    // (RecordContainerResolver.IsBusinessUnitInSubtreeAsync), over the REAL resolver.
+    [Theory]
+    [InlineData(true, HttpStatusCode.OK)]
+    [InlineData(false, HttpStatusCode.NotFound)]
+    public async Task EmbedToken_ForACustomerBoundWorkspace_AdmitsOnlyThatCustomersBusinessUnits(
+        bool callerUnderTheCustomer, HttpStatusCode expected)
+    {
+        var customerA = Guid.Parse("a0000000-0000-4000-8000-0000000001a6");
+        var customerB = Guid.Parse("b0000000-0000-4000-8000-0000000001b6");
+        var world = new TestRecordContainerResolver.DocumentPointerWorld();
+        world.BusinessUnits[customerA] = (TestRecordContainerResolver.PointerWorldRootBusinessUnit, null);
+        world.BusinessUnits[customerB] = (TestRecordContainerResolver.PointerWorldRootBusinessUnit, null);
+        world.BusinessUnits[CallerBusinessUnit] = (callerUnderTheCustomer ? customerA : customerB, null);
+
+        await using var host = await Host.StartAsync(h =>
+        {
+            h.PowerBi.AllowedWorkspaces = [new AllowedPowerBiWorkspace { WorkspaceId = WorkspaceId, CustomerBusinessUnitId = customerA }];
+            h.Hierarchy = world.Build();
+        });
+        host.ArrangeCatalogRow("readable");
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
+        host.Embed
+            .Setup(e => e.GetEmbedConfigAsync(WorkspaceId, PbiReportId, It.IsAny<string?>(), It.IsAny<IList<string>?>(),
+                It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EmbedConfig("embed-token", "https://app.powerbi.com/embed", PbiReportId,
+                DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.UtcNow.AddMinutes(48)));
+
+        var response = await host.Send(HttpMethod.Get, $"/api/reporting/embed-token?reportId={CatalogRowId}", Viewer);
+
+        response.StatusCode.Should().Be(expected);
+        if (!callerUnderTheCustomer)
+        {
+            await AssertNotInCatalogAsync(host, response);
+        }
+    }
+
+    [Fact]
+    public async Task ACustomerBoundWorkspace_WithNoHierarchyReader_IsRefused_FailClosed()
+    {
+        await using var host = await Host.StartAsync(h =>
+            h.PowerBi.AllowedWorkspaces = [new AllowedPowerBiWorkspace { WorkspaceId = WorkspaceId, CustomerBusinessUnitId = Guid.NewGuid() }]);
+        host.ArrangeCatalogRow("readable");
+        host.ArrangeBusinessUnit(CallerBusinessUnit);
+
+        var response = await host.Send(HttpMethod.Get, $"/api/reporting/embed-token?reportId={CatalogRowId}", Viewer);
+
+        await AssertNotInCatalogAsync(host, response);
+    }
+
+    private static Task<HttpResponseMessage> SendRouteAsync(Host host, string route) => route switch
+    {
+        "embed-token" => host.Send(HttpMethod.Get, $"/api/reporting/embed-token?reportId={CatalogRowId}", Viewer),
+        "export" => host.Send(HttpMethod.Post, "/api/reporting/export", Viewer, new { reportId = CatalogRowId, format = "PDF" }),
+        "get" => host.Send(HttpMethod.Get, $"/api/reporting/reports/{CatalogRowId}", Viewer),
+        "update" => host.Send(HttpMethod.Patch, $"/api/reporting/reports/{CatalogRowId}", Author, new { name = "x" }),
+        "delete" => host.Send(HttpMethod.Delete, $"/api/reporting/reports/{CatalogRowId}", Admin),
+        "create-from-source" => host.Send(HttpMethod.Post, "/api/reporting/reports", Author,
+            new { name = "Copy", sourceReportId = CatalogRowId }),
+        _ => throw new ArgumentOutOfRangeException(nameof(route), route, null),
+    };
+
+    // =============================================================================================
+    // Task 166 f1 (verifier item 7) — the REAL ExportReportAsync: the request it sends Power BI carries the caller's RLS
+    // identity. The service runs for real; only the SDK client below its one seam (GetPowerBIClientAsync) is a double,
+    // so dropping the identity from the request it builds turns this red.
+    // =============================================================================================
+
+    private sealed class ExportSentinel : Exception;
+
+    private static (Mock<ReportingEmbedService> Service, Mock<Microsoft.PowerBI.Api.IReportsOperations> Reports)
+        RealExportService(Action<Microsoft.PowerBI.Api.Models.ExportReportRequest> onExport)
+    {
+        var reports = new Mock<Microsoft.PowerBI.Api.IReportsOperations>(MockBehavior.Strict);
+        reports
+            .Setup(r => r.GetReportInGroupWithHttpMessagesAsync(WorkspaceId, PbiReportId, It.IsAny<Dictionary<string, List<string>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Rest.HttpOperationResponse<Microsoft.PowerBI.Api.Models.Report>
+            {
+                Body = new Microsoft.PowerBI.Api.Models.Report { Id = PbiReportId, DatasetId = DatasetId.ToString() },
+            });
+        reports
+            .Setup(r => r.ExportToFileInGroupWithHttpMessagesAsync(
+                WorkspaceId, PbiReportId, It.IsAny<Microsoft.PowerBI.Api.Models.ExportReportRequest>(),
+                It.IsAny<Dictionary<string, List<string>>>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid _, Guid _, Microsoft.PowerBI.Api.Models.ExportReportRequest request, Dictionary<string, List<string>> _, CancellationToken _) => onExport(request))
+            .ThrowsAsync(new ExportSentinel()); // stop before the status poll: the request is what is under test
+
+        var client = new Mock<Microsoft.PowerBI.Api.IPowerBIClient>(MockBehavior.Strict);
+        client.SetupGet(c => c.Reports).Returns(reports.Object);
+
+        var service = new Mock<ReportingEmbedService>(
+            MockBehavior.Loose,
+            Options.Create(new PowerBiOptions
+            {
+                TenantId = "00000000-0000-0000-0000-000000000166",
+                ClientId = "00000000-0000-0000-0000-0000000001a6",
+                ClientSecret = "test-secret",
+            }),
+            Mock.Of<ITenantCache>(),
+            new HttpContextAccessor(),
+            NullLogger<ReportingEmbedService>.Instance)
+        { CallBase = true };
+        service.Setup(s => s.GetPowerBIClientAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(client.Object);
+        return (service, reports);
+    }
+
+    [Fact]
+    public async Task ExportReportAsync_TheRealRequestItSends_CarriesTheCallersRlsIdentity_OnTheReportsDataset()
+    {
+        Microsoft.PowerBI.Api.Models.ExportReportRequest? sent = null;
+        var (service, _) = RealExportService(request => sent = request);
+
+        var act = () => service.Object.ExportReportAsync(
+            WorkspaceId, PbiReportId, ExportFormat.PDF, CallerBusinessUnit.ToString("D"), ["BusinessUnitFilter"]);
+
+        await act.Should().ThrowAsync<ExportSentinel>();
+        sent.Should().NotBeNull("the real ExportReportAsync body ran and sent an export request");
+        sent!.Format.Should().Be(Microsoft.PowerBI.Api.Models.FileFormat.PDF);
+        var identity = sent.PowerBIReportConfiguration?.Identities.Should().ContainSingle(
+            "an export runs as the service principal; without the identity Power BI returns every business unit's rows").Subject;
+        identity!.Username.Should().Be(CallerBusinessUnit.ToString("D"));
+        identity.Roles.Should().Equal("BusinessUnitFilter");
+        identity.Datasets.Should().Equal(new[] { DatasetId.ToString() }, "the identity names the report's own dataset, read from Power BI");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ExportReportAsync_WithoutAnRlsUsername_RefusesBeforeAnyPowerBiCall(string username)
+    {
+        var (service, reports) = RealExportService(_ => { });
+
+        var act = () => service.Object.ExportReportAsync(WorkspaceId, PbiReportId, ExportFormat.PDF, username, ["BusinessUnitFilter"]);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        service.Verify(s => s.GetPowerBIClientAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        reports.VerifyNoOtherCalls();
+    }
+
+    // =============================================================================================
     // Harness
     // =============================================================================================
 
@@ -573,14 +820,14 @@ public sealed class ReportingCatalogBindingContractTests
         return node.ToJsonString();
     }
 
-    private static JsonElement RowJson(Guid rowId, bool withPowerBiIds = true, bool isCustom = false)
+    private static JsonElement RowJson(Guid rowId, bool withPowerBiIds = true, bool isCustom = false, Guid? workspace = null)
     {
         var row = new Dictionary<string, object?>
         {
             ["sprk_reportid"] = rowId.ToString("D"),
             ["sprk_name"] = "Q4 Financials",
             ["sprk_pbi_reportid"] = withPowerBiIds ? (rowId == CatalogRowId ? PbiReportId : Guid.NewGuid()).ToString("D") : null,
-            ["sprk_workspaceid"] = WorkspaceId.ToString("D"),
+            ["sprk_workspaceid"] = (workspace ?? WorkspaceId).ToString("D"),
             ["sprk_datasetid"] = DatasetId.ToString("D"),
             ["sprk_embedurl"] = "https://app.powerbi.com/reportEmbed",
             ["sprk_category"] = 100000000,
@@ -598,6 +845,24 @@ public sealed class ReportingCatalogBindingContractTests
         public Mock<ReportingEmbedService> Embed { get; }
         public List<string> CatalogPathsRead { get; } = new();
         public List<string> CreatedRowPayloads { get; } = new();
+
+        /// <summary>
+        /// The deployment's allowed workspaces (task 166 f1). Default: the catalog row's <see cref="WorkspaceId"/>, bound
+        /// to no customer — every other workspace is "not in your catalog".
+        /// </summary>
+        public PowerBiOptions PowerBi { get; } = new()
+        {
+            TenantId = "00000000-0000-0000-0000-000000000166",
+            ClientId = "00000000-0000-0000-0000-0000000001a6",
+            ClientSecret = "test-secret",
+            AllowedWorkspaces = [new AllowedPowerBiWorkspace { WorkspaceId = WorkspaceId }],
+        };
+
+        /// <summary>The business-unit hierarchy reader a customer-bound workspace consults (null = not registered).</summary>
+        public RecordContainerResolver? Hierarchy { get; set; }
+
+        /// <summary>The app-only pointer stamps a create makes (task 166 f1): (row id, fields).</summary>
+        public List<(Guid RowId, Dictionary<string, object> Fields)> PointerStamps { get; } = new();
 
         /// <summary>The caller's privilege question (task 166 r2). Defaults to "holds prvCreatesprk_Report".</summary>
         public Mock<CallerRecordAccessProbe> AccessProbe { get; } = new(
@@ -617,6 +882,10 @@ public sealed class ReportingCatalogBindingContractTests
                 .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), ReportingEndpoints.CreateReportPrivilege, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
             ArrangeOtherReferences(0);
+            EntityService
+                .Setup(s => s.UpdateAsync("sprk_report", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Callback((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) => PointerStamps.Add((id, fields)))
+                .Returns(Task.CompletedTask);
 
             Embed = new Mock<ReportingEmbedService>(
                 MockBehavior.Loose,
@@ -631,9 +900,10 @@ public sealed class ReportingCatalogBindingContractTests
                 NullLogger<ReportingEmbedService>.Instance);
         }
 
-        public static async Task<Host> StartAsync()
+        public static async Task<Host> StartAsync(Action<Host>? arrange = null)
         {
             var host = new Host();
+            arrange?.Invoke(host);
             await host.InitializeAsync();
             return host;
         }
@@ -715,7 +985,6 @@ public sealed class ReportingCatalogBindingContractTests
         {
             Embed.Verify(e => e.GetEmbedConfigAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<IList<string>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.ExportReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ExportFormat>(), It.IsAny<string>(), It.IsAny<IList<string>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Embed.Verify(e => e.GetReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.CreateReportAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Embed.Verify(e => e.DeleteReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -750,6 +1019,12 @@ public sealed class ReportingCatalogBindingContractTests
             builder.Services.AddSingleton(Embed.Object);
             builder.Services.AddSingleton(AccessProbe.Object);
             builder.Services.AddSingleton(EntityService.Object);
+            builder.Services.AddSingleton(Options.Create(PowerBi));
+            if (Hierarchy is not null)
+            {
+                builder.Services.AddSingleton(Hierarchy);
+            }
+
             builder.WebHost.UseTestServer();
 
             _app = builder.Build();
