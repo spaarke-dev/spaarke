@@ -137,6 +137,21 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Task 158 r1 (owner round 30): an inherited row whose principal already held the parent's mirror on the filed record
+    /// when it was passed on — direct access the parent's unshare never removes.
+    /// </summary>
+    public const string CoveredByExistingShare = "covered-by-existing";
+
+    /// <summary>Task 158 r1: the parent's share ended; the principal's access on the filed record was direct, so it is kept.</summary>
+    public const string KeptDirectShare = "kept-direct";
+
+    /// <summary>Task 158 r1: the parent's share ended; another secure parent of the filed record still passes it on, so it is kept.</summary>
+    public const string KeptOtherSource = "kept-other-source";
+
+    /// <summary>Task 158 r1: the parent's share ended; removing it would leave nobody able to open the record (S5), so it is kept.</summary>
+    public const string KeptLastReader = "kept-last-reader";
+
+    /// <summary>
     /// Prefix of a reason recording what a raised grant had before: its level AND the date the subject's access ran until
     /// (<c>raised-from:100000000@2026-10-13</c>, written by <see cref="RaisedFromLevel"/>). Both are put back when the
     /// assignment ends — the rule renews a raised grant like its own while the assignment lasts (owner A5), so restoring
@@ -213,6 +228,14 @@ public sealed class AssignedAccessLedgerRow
 
     [JsonPropertyName("_sprk_subjectsystemuser_value")]
     public Guid? SystemUserId { get; set; }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 30): the TEAM an inherited share was passed on to (a secure parent's team sharee). Read only
+    /// by <see cref="AssignedAccessStore.ReadInheritedLedgerAsync"/> / <see cref="AssignedAccessStore.ReadInheritedLedgerByParentAsync"/>
+    /// — the Assigned-To reads keep their own select, so they never depend on the column.
+    /// </summary>
+    [JsonPropertyName("_sprk_subjectteam_value")]
+    public Guid? SubjectTeamId { get; set; }
 
     [JsonPropertyName("_sprk_externalrecordaccess_value")]
     public Guid? GrantId { get; set; }
@@ -424,6 +447,135 @@ public class AssignedAccessStore
     /// <summary>Updates a ledger row. Exceptions propagate.</summary>
     internal virtual Task UpdateLedgerAsync(Guid rowId, AssignedAccessLedgerWrite write, CancellationToken ct)
         => _dataverse.UpdateAsync(EntitySet, rowId, BuildUpdatePayload(write), ct);
+
+    // ── Inherited shares (task 158 r1, owner round 30 — the provenance of a share passed on to a filed secure root) ─────
+
+    /// <summary>The source-field prefix of an inherited-share row: <c>inherited:{parentTable}:{parentId}</c>.</summary>
+    internal const string InheritedSourcePrefix = "inherited:";
+
+    private const string InheritedLedgerSelect = LedgerSelect + ",_sprk_subjectteam_value";
+
+    /// <summary>The source field naming the secure parent a share was passed on from.</summary>
+    public static string InheritedSourceField(string parentTable, Guid parentId)
+        => string.Create(CultureInfo.InvariantCulture,
+            $"{InheritedSourcePrefix}{parentTable.Trim().ToLowerInvariant()}:{parentId:D}");
+
+    /// <summary>The parent an inherited-share row's source field names, or <c>null</c> for any other row.</summary>
+    public static (string Table, Guid Id)? InheritedSourceOf(string? sourceField)
+    {
+        if (string.IsNullOrWhiteSpace(sourceField)
+            || !sourceField.Trim().StartsWith(InheritedSourcePrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var parts = sourceField.Trim()[InheritedSourcePrefix.Length..].Split(':');
+        return parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && Guid.TryParse(parts[1], out var id) && id != Guid.Empty
+            ? (parts[0].ToLowerInvariant(), id)
+            : null;
+    }
+
+    /// <summary>
+    /// The ledger key of an inherited-share row: <c>{root}:{rootId}:inherited:{parentTable}:{parentId}:{systemuser|team}:{id}</c>
+    /// — the same alternate key, so one row per (filed root, parent, principal).
+    /// </summary>
+    public static string InheritedLedgerKey(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal)
+        => string.Create(CultureInfo.InvariantCulture,
+            $"{ExternalGrantRoot.LogicalNameFor(rootType)}:{rootId:D}:{InheritedSourceField(parentTable, parentId)}:" +
+            $"{(principal.Kind == DataversePrincipalKind.Team ? "team" : "systemuser")}:{principal.Id:D}");
+
+    /// <summary>The principal an inherited-share row is about (a user or a team), or <c>null</c> for any other row.</summary>
+    public static DataversePrincipalRef? InheritedPrincipalOf(AssignedAccessLedgerRow row)
+        => InheritedSourceOf(row.SourceField) is null ? null
+            : row.SystemUserId is { } user && user != Guid.Empty ? DataversePrincipalRef.User(user)
+            : row.SubjectTeamId is { } team && team != Guid.Empty ? DataversePrincipalRef.Team(team)
+            : null;
+
+    /// <summary>The create payload of a new inherited-share row (the principal bound as a user or a team).</summary>
+    internal static Dictionary<string, object?> BuildInheritedCreatePayload(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+        AssignedAccessLedgerWrite write)
+    {
+        var (_, rootNav) = RootLookupFor(rootType);
+        var rootSet = ExternalGrantRoot.BindFor(rootType).EntitySet;
+        var source = InheritedSourceField(parentTable, parentId);
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = Truncate($"{source} → {(principal.Kind == DataversePrincipalKind.Team ? "team" : "systemuser")}:{principal.Id:D}", 200),
+            ["sprk_ledgerkey"] = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal),
+            ["sprk_sourcefield"] = source,
+            [$"{rootNav}@odata.bind"] = $"/{rootSet}({rootId:D})",
+        };
+
+        foreach (var (k, v) in BuildUpdatePayload(write with { SystemUserId = null }))
+            payload[k] = v;
+
+        if (principal.Kind == DataversePrincipalKind.Team)
+            payload["sprk_SubjectTeam@odata.bind"] = $"/teams({principal.Id:D})";
+        else
+            payload["sprk_SubjectSystemUser@odata.bind"] = $"/systemusers({principal.Id:D})";
+
+        return payload;
+    }
+
+    /// <summary>
+    /// Every live inherited-share row held on one filed root (any parent, any state). Exceptions propagate: an unread
+    /// provenance is never "nothing was inherited".
+    /// </summary>
+    internal virtual async Task<IReadOnlyList<AssignedAccessLedgerRow>> ReadInheritedLedgerAsync(
+        ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
+    {
+        var (valueColumn, _) = RootLookupFor(rootType);
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"{valueColumn} eq {rootId:D} and statecode eq 0 and startswith(sprk_sourcefield,'{InheritedSourcePrefix}')",
+            select: InheritedLedgerSelect,
+            cancellationToken: ct).ConfigureAwait(false);
+        return rows.Where(r => r.Id != Guid.Empty && InheritedSourceOf(r.SourceField) is not null).ToList();
+    }
+
+    /// <summary>
+    /// Every live inherited-share row passed on FROM one secure parent, on any filed root — the reverse fan-out of the
+    /// parent's unshare. At most <see cref="MaxScanRows"/>; one more reports <c>Truncated</c> (never a silent prefix).
+    /// Exceptions propagate.
+    /// </summary>
+    internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ReadInheritedLedgerByParentAsync(
+        string parentTable, Guid parentId, CancellationToken ct)
+    {
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"statecode eq 0 and sprk_sourcefield eq '{InheritedSourceField(parentTable, parentId)}'",
+            select: InheritedLedgerSelect,
+            top: MaxScanRows + 1,
+            cancellationToken: ct).ConfigureAwait(false);
+        var live = rows.Where(r => r.Id != Guid.Empty).ToList();
+        return live.Count > MaxScanRows ? (live.Take(MaxScanRows).ToList(), true) : (live, false);
+    }
+
+    /// <summary>Creates an inherited-share row; a duplicate-key loss re-reads it and updates instead.</summary>
+    internal virtual async Task<Guid> CreateInheritedLedgerAsync(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+        AssignedAccessLedgerWrite write, CancellationToken ct)
+    {
+        try
+        {
+            return await _dataverse.CreateAsync(
+                EntitySet, BuildInheritedCreatePayload(rootType, rootId, parentTable, parentId, principal, write), ct)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.PreconditionFailed
+                                                 or System.Net.HttpStatusCode.Conflict)
+        {
+            var key = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal);
+            var existing = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+                EntitySet, filter: $"sprk_ledgerkey eq '{key}'", select: InheritedLedgerSelect, top: 1, cancellationToken: ct)
+                .ConfigureAwait(false);
+            if (existing.FirstOrDefault() is not { } row)
+                throw;
+
+            await UpdateLedgerAsync(row.Id, write with { SystemUserId = null }, ct).ConfigureAwait(false);
+            return row.Id;
+        }
+    }
 
     // ── Reads the materializer needs ───────────────────────────────────────────────────────────────
 

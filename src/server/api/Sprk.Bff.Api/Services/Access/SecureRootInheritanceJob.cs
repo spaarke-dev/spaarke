@@ -21,13 +21,21 @@ namespace Sprk.Bff.Api.Services.Access;
 /// provisioning's own (the record's creator shared first, read back, compensated) or the synchronizer's add-only mirror —
 /// nothing here takes a record out of isolation (round 6 item 4: never auto-unsecure).</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: each record's step is idempotent and read back (an isolated record is only given a
-/// missing sharee), so no claim marker. Rule 4: a run that could not LIST the secure parents or the filed records throws —
-/// a failed scan is a failed run, nothing decided; a run in which some record could not be secured returns
-/// <c>Success = false</c> and the next run revisits it. Rule 5: one heartbeat per attempt. Rule 6: registered through
-/// <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>. Rule 7: no dependency on the scheduler's store.</para>
-/// <para><b>Bounded.</b> At most <see cref="MaxProvisioningsPerRun"/> records are PROVISIONED per run (each creates an SPE
-/// container); the rest stay candidates and are reached by the next run, oldest-listed first. Isolated records only have
-/// their sharees checked, which every run does for all of them.</para>
+/// missing sharee), so no claim marker. Rule 4: a run that could not LIST the parents or the filed records throws — a
+/// failed scan is a failed run, nothing decided; a run in which some record could not be secured, or some record was
+/// deferred past the bound, returns <c>Success = false</c> and the next run continues. Rule 5: one heartbeat per attempt.
+/// Rule 6: registered through <c>AddScheduledJob</c> in <c>ExternalAccessModule</c>. Rule 7: no dependency on the
+/// scheduler's store.</para>
+/// <para><b>Bounded, resumable (task 158 r1).</b> At most <see cref="MaxProvisioningsPerRun"/> records are PROVISIONED per
+/// run (each creates an SPE container), taken in a fixed order (table, then id) starting AFTER the last record the previous
+/// run reached — a cursor in this singleton, per instance (task 148's job precedent) — so a record that keeps failing never
+/// starves the ones behind it. Any deferral makes the run <c>Success = false</c> (with <c>deferred</c> and
+/// <c>resumeAfter</c> in its ResultJson); the next run continues from the cursor. Isolated records only have their sharees
+/// (and the provenance of those, owner round 30) checked, which every run does for all of them.</para>
+/// <para><b>An EMPTY parent flag is reported, never skipped</b> (owner round 17 item 3). The scan lists the matters and
+/// projects flagged secure AND those whose flag is empty; a record filed only under an empty-flagged parent is
+/// unverifiable (nothing is written to it) and fails the run, naming it — so a parent the repair script has not reached is
+/// visible, not silently outside the rule.</para>
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process scheduler — BFF identity, the same
 /// inheritance the endpoints call (L1 and L4 run ONE invariant owner), low volume (the filed records of an environment's
 /// secure records). No package, store, column or interface.</para>
@@ -86,11 +94,15 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
         var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
         var inheritance = scope.ServiceProvider.GetRequiredService<SecureRootInheritance>();
 
-        // A scan that cannot complete decides nothing: ADR-036 A1 rule 4 — it throws, and the run is a failed run.
-        var parents = await ListSecureParentsAsync(dataverse, cancellationToken).ConfigureAwait(false);
-        var filed = parents.Count == 0
+        // A scan that cannot complete decides nothing: ADR-036 A1 rule 4 — it throws, and the run is a failed run. The
+        // parents flagged secure, and those whose flag is EMPTY (owner round 17 item 3: never read as "not secure") — every
+        // record filed under one is decided below, so one filed only under an empty-flagged parent is reported.
+        var parents = await ListParentsAsync(dataverse, ConditionOperator.Equal, cancellationToken).ConfigureAwait(false);
+        var emptyFlagParents = await ListParentsAsync(dataverse, ConditionOperator.Null, cancellationToken).ConfigureAwait(false);
+        var scanned = parents.Concat(emptyFlagParents).Distinct().ToList();
+        var filed = scanned.Count == 0
             ? Array.Empty<FiledRootRef>()
-            : await inheritance.ListFiledRootsAsync(parents, cancellationToken).ConfigureAwait(false);
+            : await inheritance.ListFiledRootsAsync(scanned, cancellationToken).ConfigureAwait(false);
 
         var counts = new Dictionary<SecureRootInheritOutcome, int>();
         var incomplete = new List<string>();
@@ -100,8 +112,21 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
         var sharesWritten = 0;
         var traceId = $"job:{context.RunId}";
 
-        // Not-yet-secure records first (they need provisioning), then the secure ones (their sharees).
-        foreach (var record in filed.OrderBy(r => r.FlaggedSecure).ThenBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
+        // The not-yet-secure records (they need provisioning) in a fixed order, starting after the previous run's cursor;
+        // then the secure ones (their sharees), every run.
+        (string Table, Guid Id)? resumeAfter;
+        lock (_cursorGate)
+            resumeAfter = _cursor;
+        var notYet = filed.Where(r => !r.FlaggedSecure).OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
+        var start = resumeAfter is { } after ? notYet.FindIndex(r => Compare((r.Table, r.Id), after) > 0) : 0;
+        if (start < 0)
+            start = 0;
+        var ordered = notYet.Skip(start).Concat(notYet.Take(start))
+            .Concat(filed.Where(r => r.FlaggedSecure).OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
+            .ToList();
+        (string Table, Guid Id)? lastProvisioned = null;
+
+        foreach (var record in ordered)
         {
             if (!record.FlaggedSecure && provisionings >= MaxProvisioningsPerRun)
             {
@@ -111,6 +136,8 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
 
             var result = await inheritance.SecureIfFiledUnderSecureAsync(record.Table, record.Id, traceId, cancellationToken)
                 .ConfigureAwait(false);
+            if (!record.FlaggedSecure)
+                lastProvisioned = (record.Table, record.Id);
             if (result.Outcome is SecureRootInheritOutcome.Secured or SecureRootInheritOutcome.Refused or SecureRootInheritOutcome.Failed)
                 provisionings++;
 
@@ -138,32 +165,47 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
             }
         }
 
+        // The cursor: past the bound, the next run continues after the last record this one provisioned; a run that reached
+        // every record starts the next from the beginning.
+        lock (_cursorGate)
+            _cursor = deferred > 0 ? lastProvisioned : null;
+
         var duration = _timeProvider.GetElapsedTime(started);
-        var success = incomplete.Count == 0;
+        var success = incomplete.Count == 0 && deferred == 0;
         int Count(SecureRootInheritOutcome outcome) => counts.TryGetValue(outcome, out var n) ? n : 0;
 
         // THE HEARTBEAT (ADR-036 A1 rule 5) — every attempt, including one with nothing to do.
         _logger.Log(
             success ? LogLevel.Information : LogLevel.Warning,
-            "[SECURE-INHERIT] heartbeat secureParents={Parents} filed={Filed} secured={Secured} alreadySecure={Already} " +
-            "unverifiable={Unverifiable} refused={Refused} failed={Failed} deferred={Deferred} sharesWritten={Shares} " +
-            "attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            parents.Count, filed.Count, Count(SecureRootInheritOutcome.Secured), Count(SecureRootInheritOutcome.AlreadySecure),
-            Count(SecureRootInheritOutcome.Unverifiable), Count(SecureRootInheritOutcome.Refused),
-            Count(SecureRootInheritOutcome.Failed), deferred, sharesWritten, context.Attempt, (long)duration.TotalMilliseconds,
-            context.Trigger, context.RunId, context.CorrelationId);
+            "[SECURE-INHERIT] heartbeat secureParents={Parents} emptyFlagParents={EmptyFlag} filed={Filed} secured={Secured} " +
+            "alreadySecure={Already} unverifiable={Unverifiable} refused={Refused} failed={Failed} deferred={Deferred} " +
+            "resumeAfter={ResumeAfter} sharesWritten={Shares} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} " +
+            "runId={RunId} correlationId={CorrelationId}",
+            parents.Count, emptyFlagParents.Count, filed.Count, Count(SecureRootInheritOutcome.Secured),
+            Count(SecureRootInheritOutcome.AlreadySecure), Count(SecureRootInheritOutcome.Unverifiable),
+            Count(SecureRootInheritOutcome.Refused), Count(SecureRootInheritOutcome.Failed), deferred,
+            deferred > 0 && lastProvisioned is { } cursorAt ? $"{cursorAt.Table}:{cursorAt.Id:D}" : null, sharesWritten,
+            context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(
             Success: success,
             ErrorMessage: success
                 ? null
-                : $"{incomplete.Count} filed record(s) not secure yet (or not given their parents' sharees); the next run " +
-                  "revisits them: " + string.Join("; ", incomplete.Take(20)),
+                : string.Join(" ", new[]
+                {
+                    incomplete.Count == 0 ? null
+                        : $"{incomplete.Count} filed record(s) not secure yet (or not given their parents' sharees); the next run " +
+                          "revisits them: " + string.Join("; ", incomplete.Take(20)) + ".",
+                    deferred == 0 ? null
+                        : $"{deferred} filed record(s) were deferred past this run's bound of {MaxProvisioningsPerRun} " +
+                          "provisionings; the next run continues from where this one stopped.",
+                }.Where(m => m is not null)),
             ProcessedItems: filed.Count - deferred,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
             {
                 secureParents = parents.Count,
+                emptyFlagParents = emptyFlagParents.Count,
                 filed = filed.Count,
                 secured = Count(SecureRootInheritOutcome.Secured),
                 alreadySecure = Count(SecureRootInheritOutcome.AlreadySecure),
@@ -172,6 +214,8 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 refused = Count(SecureRootInheritOutcome.Refused),
                 failed = Count(SecureRootInheritOutcome.Failed),
                 deferred,
+                // The progress cursor: the next run continues after this record. Null when this run reached every record.
+                resumeAfter = deferred > 0 && lastProvisioned is { } resume ? $"{resume.Table}:{resume.Id:D}" : null,
                 sharesWritten,
                 incomplete = incomplete.Take(50).ToArray(),
                 records = sampled,
@@ -180,11 +224,12 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
     }
 
     /// <summary>
-    /// Every matter and project flagged <c>sprk_issecure = true</c>, paged; past the page ceiling it throws rather than
-    /// decide on part of them.
+    /// Every matter and project whose <c>sprk_issecure</c> is TRUE (<paramref name="flag"/> =
+    /// <see cref="ConditionOperator.Equal"/>) or EMPTY (<see cref="ConditionOperator.Null"/>), paged; past the page ceiling it
+    /// throws rather than decide on part of them.
     /// </summary>
-    private static async Task<List<(string Table, Guid Id)>> ListSecureParentsAsync(
-        IGenericEntityService dataverse, CancellationToken ct)
+    private static async Task<List<(string Table, Guid Id)>> ListParentsAsync(
+        IGenericEntityService dataverse, ConditionOperator flag, CancellationToken ct)
     {
         var parents = new List<(string, Guid)>();
         foreach (var table in new[] { SecureRootInheritance.Matter, SecureRootInheritance.Project })
@@ -195,13 +240,17 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                 NoLock = true,
                 PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
             };
-            query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Equal, true);
+            if (flag == ConditionOperator.Null)
+                query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Null);
+            else
+                query.Criteria.AddCondition("sprk_issecure", ConditionOperator.Equal, true);
 
             for (var page = 1; ; page++)
             {
                 if (page > MaxPages)
                     throw new InvalidOperationException(
-                        $"{table} still had secure records to list after {MaxPages} pages; nothing is decided on part of them.");
+                        $"{table} still had {(flag == ConditionOperator.Null ? "empty-flagged" : "secure")} records to list after " +
+                        $"{MaxPages} pages; nothing is decided on part of them.");
 
                 var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
                 parents.AddRange(result.Entities.Select(e => (table, e.Id)));
@@ -214,4 +263,18 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
 
         return parents.Distinct().ToList();
     }
+
+    /// <summary>The provisioning order: table (ordinal), then id.</summary>
+    private static int Compare((string Table, Guid Id) a, (string Table, Guid Id) b)
+    {
+        var byTable = string.CompareOrdinal(a.Table, b.Table);
+        return byTable != 0 ? byTable : a.Id.CompareTo(b.Id);
+    }
+
+    // The progress cursor (task 158 r1): the last not-yet-secure record a run provisioned while it deferred others; null
+    // between full passes. In this singleton, per instance — the task 143 / 148 jobs' precedent (ADR-036 A1 rule 7: no
+    // dependency on the scheduler's store). A restart only starts the order over, which is harmless: every step is keyed on
+    // observed state.
+    private readonly object _cursorGate = new();
+    private (string Table, Guid Id)? _cursor;
 }

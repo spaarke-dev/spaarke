@@ -526,6 +526,7 @@ public static class InternalShareEndpoints
         ITenantCache cache,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -586,7 +587,7 @@ public static class InternalShareEndpoints
             // Still fanned out: the user may still hold a share on a child (an incomplete earlier unshare, or one made in
             // the model-driven app), and repeating the unshare is how a caller removes it.
             return await ChildrenIncompleteAfterUnshareAsync(
-                       secureChildShares, root, systemUserId, removed: false, httpContext, logger, callerOid, ct)
+                       secureChildShares, relatedRoots, root, systemUserId, removed: false, httpContext, logger, callerOid, ct)
                    ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
         }
 
@@ -639,7 +640,7 @@ public static class InternalShareEndpoints
 
         // ── Task 149: the root share is confirmed gone; now remove the user from its secure children ──
         return await ChildrenIncompleteAfterUnshareAsync(
-                   secureChildShares, root, systemUserId, removed: true, httpContext, logger, callerOid, ct)
+                   secureChildShares, relatedRoots, root, systemUserId, removed: true, httpContext, logger, callerOid, ct)
                ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: true));
     }
 
@@ -667,13 +668,29 @@ public static class InternalShareEndpoints
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
 
         // Task 158 (owner round 6: "the parent's sharees can see it"): the SECURE work assignments and projects filed under
-        // this matter or project are given the new sharee now (add-only; never thrown — the secure-root inheritance job
-        // completes what this cannot). Not part of this response's contract: the record's own share stands either way.
-        await relatedRoots.PassSharesOnAsync(
+        // this matter or project are given the new sharee now (add-only), each with its provenance recorded (task 158 r1,
+        // owner round 30). A record filed under it that is not secure yet is the job's to secure, not this share's, so it
+        // is not counted; every other record left out is reported through children_incomplete, as 149's children are
+        // (round 30: "failures report through children_incomplete"). The record's own share stands either way.
+        var filed = await relatedRoots.PassSharesOnAsync(
             ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, httpContext.TraceIdentifier, ct);
+        var filedLeft = FiledRecordsLeft(filed);
+
+        if (children.IsComplete && filedLeft == 0)
+            return null;
 
         if (children.IsComplete)
-            return null;
+        {
+            logger.LogWarning(
+                "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is in place ({Outcome}), but {Left} secure record(s) " +
+                "filed under it were not given it yet: {Detail} (caller {CallerOid}). The secure-root inheritance job completes it.",
+                systemUserId, root.Type, root.Id, rootOutcome, filedLeft, filed.Detail, callerOid);
+            return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
+                $"The record was shared, but {filedLeft} of the secure work assignments and projects filed under it could not " +
+                "be given this person yet. They are updated automatically within a few minutes, or you can try again.",
+                systemUserId, children, ("outcome", rootOutcome), ("accessRightsMask", rootMask),
+                ("filedRecordsNotUpdated", filedLeft));
+        }
 
         logger.LogWarning(
             "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is in place ({Outcome}), but its secure children are " +
@@ -690,8 +707,18 @@ public static class InternalShareEndpoints
               "within a few minutes, or you can try again." + HeldSentence(children);
 
         return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("outcome", rootOutcome), ("accessRightsMask", rootMask));
+            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft));
     }
+
+    /// <summary>
+    /// Task 158 r1: the secure filed records a sharee-only pass left out — every incomplete record except one that is not
+    /// secure yet (the job secures it; a share is not that act), or 1 when the pass itself failed.
+    /// </summary>
+    private static int FiledRecordsLeft(SecureFiledRootsPass pass) =>
+        pass.Status == SecureFiledRootsStatus.Failed
+            ? Math.Max(1, pass.Results.Count)
+            : pass.Results.Count(r => !r.IsComplete && r.ReasonCode != SecureRootInheritance.ReasonNotYetSecure)
+              + (pass.Status == SecureFiledRootsStatus.Incomplete && pass.Results.Count == 0 ? 1 : 0);
 
     /// <summary>
     /// After a confirmed unshare on the root (or none to remove): removes the user from the root's secure children. The
@@ -699,6 +726,7 @@ public static class InternalShareEndpoints
     /// </summary>
     private static async Task<IResult?> ChildrenIncompleteAfterUnshareAsync(
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         GrantExternalAccessEndpoint.GrantRootResolution root,
         Guid systemUserId,
         bool removed,
@@ -709,11 +737,33 @@ public static class InternalShareEndpoints
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
 
+        // Task 158 r1 (owner round 30): the reverse fan-out — the secure work assignments and projects this record's sharing
+        // gave the user lose it too, but ONLY where the provenance ledger says it came from here and the share is still the
+        // unmodified one passed on (a direct share, a raised one, or one another parent still justifies is kept).
+        var filed = await relatedRoots.PassUnshareOnAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, DataversePrincipalRef.User(systemUserId),
+            httpContext.TraceIdentifier, ct);
+
         // A HELD child does not keep the removed user: held children are only narrowed, and a principal its known roots do
         // not share is revoked from it. So for an unshare only children that could not be updated at all are incomplete.
-        if (children.IsComplete
-            || (children.Status != SecureChildShareSyncStatus.Failed && children.ChildrenNotUpdated == 0))
+        var childrenDone = children.IsComplete
+                           || (children.Status != SecureChildShareSyncStatus.Failed && children.ChildrenNotUpdated == 0);
+        if (childrenDone && filed.IsComplete)
             return null;
+
+        if (childrenDone)
+        {
+            logger.LogWarning(
+                "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but the inherited shares it " +
+                "had passed on were not all ended: {Detail} (caller {CallerOid}). The secure-root inheritance job completes it.",
+                systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
+            return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
+                "This user's access to the record was removed, but the access this record gave them on " +
+                $"{Math.Max(filed.NotDone, 1)} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
+                "they may still open those. They are removed automatically within a few minutes, or you can try again.",
+                systemUserId, children, ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
+                ("filedRecordsNotUpdated", Math.Max(filed.NotDone, 1)));
+        }
 
         logger.LogWarning(
             "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but its secure children " +
@@ -732,7 +782,8 @@ public static class InternalShareEndpoints
               "try again.";
 
         return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated));
+            ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
+            ("filedRecordsNotUpdated", filed.IsComplete ? 0 : Math.Max(filed.NotDone, 1)));
     }
 
     private const string ChildrenIncompleteTitle = "Related records not all updated";

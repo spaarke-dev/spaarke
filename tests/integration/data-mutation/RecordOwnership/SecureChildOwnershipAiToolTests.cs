@@ -258,20 +258,19 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     }
 
     [Fact]
-    public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsCreatedByTheAppAsAnOrdinaryRowOfTheCallersUnit_Task158()
+    public async Task CreateRecord_AWorkAssignmentTheResolverPutsUnderTheSecureTeam_ButTheSecurePlanDoesNot_IsRefused_Task158r1()
     {
-        // Owner round 6 (task 158): a work assignment under a secure root is itself secure — made so by PROVISIONING, for the
-        // person who asked (creator shared first, then the named team, its own container; SecureRootInheritanceTests). So
-        // it is created exactly as an unfiled one is: owned by the caller's business-unit team, never by the Secure team
-        // (a bare re-own would leave a row nobody can see — S5) and never as the user.
+        // Task 158 r1 (owner round 31 item 2): a work assignment filed under a SECURE record is created INTO isolation, by the
+        // plan SecureRootInheritance makes before the write (SecureRootInheritanceWriterTests drive it). This host's gate
+        // reads a Dataverse with no rows — the plan finds no secure parent — while the ownership resolver's world says the
+        // matter IS secure. The two cannot be reconciled at create time, so nothing is created (fail closed): never the
+        // pre-r1 "ordinary row of the caller's unit", which left a business-unit-visible window.
         var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
-        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("NOT created").And.Contain("could not be decided consistently");
         _user.Posts.Should().BeEmpty("never owned by the individual");
-        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_workassignment").Subject.Fields;
-        Owner(fields).Should().Be(Directory.ChildTeam, "the caller's business-unit team — provisioning moves it");
-        Owner(fields).Should().NotBe(Directory.SecureNamedTeam);
-        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})");
+        _appCreates.Should().BeEmpty("nothing is created when the two owners disagree");
     }
 
     [Fact]
@@ -629,6 +628,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
             ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            // Task 158 r1: the pair's type, and an org-typed lookup (a create's own No Access list).
+            ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -660,6 +661,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
             },
             ["sprk_communication"] = new[]
             {

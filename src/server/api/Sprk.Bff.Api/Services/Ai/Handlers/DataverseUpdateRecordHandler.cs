@@ -47,7 +47,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user").
 /// </para>
 /// <para>
-/// <b>The "User-OBO ONLY" rule is AMENDED for TWO narrow app-only steps — CLAUDE.md §6.5 path B.</b> (1) The re-file's
+/// <b>The "User-OBO ONLY" rule is AMENDED for THREE narrow app-only steps — CLAUDE.md §6.5 path B.</b> (1) The re-file's
 /// owner step above: owner decisions round 13 item 7 (2026-10-03) folded it into path B (it had stood as a §6.5 path A
 /// exception, task 146 note §12c). (2) The core-ancestor re-stamp: owner decisions round 8 item 1 (2026-10-03),
 /// unified-access-control-r2 task 156 — the same reasoning as round 7 item 3, which amended the rule for the two AI CREATE
@@ -62,11 +62,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// stays private to <c>CoreAncestorRestamper</c>. The queued path this tool used before (an enqueue onto
 /// <c>CoreAncestorRestampQueue</c>, run by the background job seconds later) is removed; the queue stays for the storage
 /// resolver's stale refusals. Record: the task 156 note (owner round 8 section) and the task 156 POML execution block.
-/// (3) PROPOSED (unified-access-control-r2 task 158, owner round 6 — the same reasoning as (1) and (2), awaiting the owner's
-/// confirmation as an extension of Amendment A-UAC146): when the caller's own update files a work assignment or project
-/// under a SECURE matter or project, that record is secured in the same call through
-/// <see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/> — provisioning's own app-only steps, for the person who
-/// created the record (never the caller's choice of anyone else); nothing of the caller's own write runs app-only.
+/// (3) ACCEPTED (owner round 32, 2026-10-04 — unified-access-control-r2 task 158, owner rounds 6 and 31; the same reasoning
+/// as (1) and (2), recorded as Amendment A-UAC158, an extension of A-UAC146, in spaarke-ai-architecture-redesign-r1's spec):
+/// when the caller's own update files a work assignment or project under a SECURE matter or project, the record's recorded
+/// creator is first checked against the No Access list of the record and of every secure parent (app-only reads; walled
+/// or unverifiable refuses with nothing written), and after the caller's PATCH that record is secured in the same call
+/// through <see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/> — provisioning's own app-only steps, for the
+/// person who created the record (never the caller's choice of anyone else); nothing of the caller's own write runs
+/// app-only.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,

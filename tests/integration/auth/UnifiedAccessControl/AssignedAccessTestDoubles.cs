@@ -133,6 +133,67 @@ internal static class AssignedAccessTestDoubles
             return Task.CompletedTask;
         }
 
+        // ── Task 158 r1 (owner round 30): the inherited-share provenance rows, in the same in-memory ledger ──────────────
+
+        /// <summary>The inherited-share rows held on one filed root (any state).</summary>
+        public IReadOnlyList<AssignedAccessLedgerRow> InheritedRowsOf(Guid rootId)
+        {
+            lock (_gate)
+                return Ledger.Where(r => RootIdOf(r) == rootId && InheritedSourceOf(r.SourceField) is not null).Select(Clone).ToList();
+        }
+
+        internal override Task<IReadOnlyList<AssignedAccessLedgerRow>> ReadInheritedLedgerAsync(
+            ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
+        {
+            if (FailLedgerRead)
+                throw new HttpRequestException("Simulated ledger read failure.");
+            return Task.FromResult(InheritedRowsOf(rootId));
+        }
+
+        internal override Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ReadInheritedLedgerByParentAsync(
+            string parentTable, Guid parentId, CancellationToken ct)
+        {
+            if (FailLedgerRead)
+                throw new HttpRequestException("Simulated ledger read failure.");
+            var source = InheritedSourceField(parentTable, parentId);
+            lock (_gate)
+            {
+                return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>(
+                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)).Select(Clone).ToList(), false));
+            }
+        }
+
+        internal override Task<Guid> CreateInheritedLedgerAsync(
+            ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+            AssignedAccessLedgerWrite write, CancellationToken ct)
+        {
+            if (FailLedgerWrites)
+                throw new HttpRequestException("Simulated ledger write failure.");
+
+            var key = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal);
+            lock (_gate)
+            {
+                if (Ledger.Any(r => r.LedgerKey == key))
+                    throw new InvalidOperationException($"Duplicate ledger key {key} — the inheritance created a row that exists.");
+
+                var row = new AssignedAccessLedgerRow
+                {
+                    Id = Guid.NewGuid(),
+                    LedgerKey = key,
+                    SourceField = InheritedSourceField(parentTable, parentId),
+                    ProjectId = rootType == ExternalGrantRootType.Project ? rootId : null,
+                    MatterId = rootType == ExternalGrantRootType.Matter ? rootId : null,
+                    WorkAssignmentId = rootType == ExternalGrantRootType.WorkAssignment ? rootId : null,
+                    SystemUserId = principal.Kind == DataversePrincipalKind.SystemUser ? principal.Id : null,
+                    SubjectTeamId = principal.Kind == DataversePrincipalKind.Team ? principal.Id : null,
+                };
+                Apply(row, write with { SystemUserId = null });
+                Ledger.Add(row);
+                Writes.Add(("create", key, write.State));
+                return Task.FromResult(row.Id);
+            }
+        }
+
         internal override Task<AssignedRootSnapshot?> ReadRootAsync(
             ExternalGrantRootType rootType, Guid rootId, IReadOnlyCollection<string> fields, CancellationToken ct)
         {
@@ -504,7 +565,10 @@ internal static class AssignedAccessTestDoubles
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
-        public FakeAssignedAccessStore Store { get; } = new();
+        /// <param name="store">Task 158 r1: a ledger shared with another component under test (the secure-root inheritance).</param>
+        public Harness(FakeAssignedAccessStore? store = null) => Store = store ?? new FakeAssignedAccessStore();
+
+        public FakeAssignedAccessStore Store { get; }
         public GrantTable Grants { get; } = new();
         public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } = new(RootRecordFlags.None);
         /// <summary>The deny list; replace it to model an entry being deactivated (the wall lifted).</summary>

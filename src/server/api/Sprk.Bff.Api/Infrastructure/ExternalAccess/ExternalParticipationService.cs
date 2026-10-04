@@ -1052,6 +1052,16 @@ public class ExternalParticipationService
         };
 
     /// <summary>
+    /// The org-typed lookups of <paramref name="entityType"/> that a No Access entry's organization reaches it through (the
+    /// same registry <see cref="GetReferencedOrganizationIdsAsync"/> reads) — empty for a type that has none. Task 158 r1:
+    /// the No Access list of a secure record that is ABOUT to be created is read from these columns of its create payload.
+    /// </summary>
+    internal static IReadOnlyList<string> OrganizationLookupAttributesOf(string entityType) =>
+        OrganizationLookupAttributes.TryGetValue(entityType ?? string.Empty, out var attributes)
+            ? attributes
+            : Array.Empty<string>();
+
+    /// <summary>
     /// The <c>$select</c> fragment for a batch of org-typed lookups — <c>_{attribute}_value</c> per
     /// column. Extracted as a PURE member (task 007 / A-5 precedent) so the over-match property (every
     /// registered lookup is selected unconditionally — no narrowing to a conferring subset) is directly

@@ -250,6 +250,11 @@ internal static class OwnedChildWrite
     /// </summary>
     /// <param name="serverSetLookupColumns">Lookups the SERVER added to the row (e.g. the email draft's sender) — they
     /// name the caller themselves and cost no AppendTo check.</param>
+    /// <param name="isolatedInto">Task 158 r1 (owner round 31 item 2): a work assignment or project filed under a SECURE
+    /// matter or project, planned by <see cref="SecureRootInheritance.PlanCreateAsync"/> — created INTO isolation: the
+    /// as-caller check also asks AppendTo on every secure parent (the polymorphic pair is text, not a lookup the mapper
+    /// checks), the row is owned by the plan's named Secure Record Owners team and carries <c>sprk_issecure = true</c> in the
+    /// create itself. <c>null</c> for every other create.</param>
     internal static async Task<Outcome> CreateAsync(
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
@@ -258,7 +263,8 @@ internal static class OwnedChildWrite
         DataverseWriteItemMapper.MappedItem item,
         IReadOnlySet<string>? serverSetLookupColumns,
         Guid? callerObjectId,
-        CancellationToken ct)
+        CancellationToken ct,
+        SecureRootCreatePlan? isolatedInto = null)
     {
         var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
@@ -269,23 +275,40 @@ internal static class OwnedChildWrite
         if (!check.Succeeded)
             return check;
 
+        if (isolatedInto is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
+        {
+            // G5 for the secure parents themselves: AppendTo AS THE CALLER on each one the row will be filed under (a parent
+            // named by a typed lookup was checked above; one named by the pair was not).
+            var checkedIds = item.Lookups.Select(l => l.RecordId).ToHashSet();
+            var parentLookups = isolatedInto.SecureParents
+                .Where(p => !checkedIds.Contains(p.Id))
+                .Select(p => new DataverseWriteItemMapper.MappedLookup(
+                    "filed under", p.Table, SecureDesignationRemoval.EntitySetFor(p.Table), p.Id))
+                .ToArray();
+            var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, parentLookups, ct).ConfigureAwait(false);
+            if (!appendTo.Succeeded)
+                return appendTo;
+
+            return await CreateIntoIsolationAsync(appOnly, table, item, secureTeam, ct).ConfigureAwait(false);
+        }
+
         var owner = await ownership.ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(ParentsOf(item), callerObjectId, me.SystemUserId), ct).ConfigureAwait(false);
         if (!owner.IsOwned)
             return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
 
         // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
-        // set, config/secure-record-owner-role.json). A root filed under a secure record is task 158's: a work assignment or
-        // project is CREATED owned by the caller's own business-unit team (the owner it has when filed under nothing) and
-        // then secured through provisioning's own steps — its creator shared first, then the named team — by the handler's
-        // after-create step (SecureRootFilingGate). Any other table would be refused by Dataverse (no Read).
+        // set, config/secure-record-owner-role.json). A work assignment or project filed under a secure record is created
+        // into isolation above (task 158 r1, owner round 31 item 2) — reaching here with a Secure owner means the plan
+        // found no secure parent while the resolver did: the two cannot be reconciled now, so nothing is created (fail
+        // closed). Any other table would be refused by Dataverse (no Read).
         if (owner.IsSecureOwner && SecureRootInheritance.Inherits(table))
         {
-            owner = await ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(Array.Empty<RecordOwnershipParent?>(), callerObjectId, me.SystemUserId), ct)
-                .ConfigureAwait(false);
-            if (!owner.IsOwned)
-                return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
+            return new Outcome
+            {
+                SecureFilingRefused = $"Whether this '{table}' is filed under a secure record could not be decided consistently " +
+                                      "(the records it names changed while it was being created). It was NOT created. Try again.",
+            };
         }
         else if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
         {
@@ -302,6 +325,25 @@ internal static class OwnedChildWrite
 
         var fields = BodyFields(item.JsonBody);
         fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
+
+        var id = Guid.NewGuid();
+        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
+        return new Outcome { CreatedId = id };
+    }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 31 item 2): the app-only create of a work assignment or project — a ROOT — INTO isolation:
+    /// owned by the named Secure Record Owners team provisioning's own topology names (resolved by
+    /// <see cref="SecureRootInheritance.PlanCreateAsync"/>), flagged in the create itself. A root's own ownership is
+    /// provisioning's (task 144), never a child's resolver answer; provisioning's re-entry steps then complete it.
+    /// </summary>
+    private static async Task<Outcome> CreateIntoIsolationAsync(
+        IFieldMappingDataverseService appOnly, string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam,
+        CancellationToken ct)
+    {
+        var fields = BodyFields(item.JsonBody);
+        fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
+        fields["sprk_issecure"] = true;
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);

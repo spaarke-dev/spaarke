@@ -57,6 +57,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.UseChildWorldForRoots();
         _fixture.SystemUsers[Outsider] = (false, false);
         _fixture.SystemUsers[AppUser] = (false, true);
+        _job = new SecureRootInheritanceJobRunner(_fixture);
     }
 
     private SecureChildShareWorld World => _fixture.ChildWorld;
@@ -342,12 +343,14 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
-    /// Secure-if-any: a work assignment under a readably SECURE matter and, by its pair, a project whose flag cannot be
-    /// read IS secured (securing is the closed direction) — but none of its parents' sharees is given (the intersection
-    /// cannot be evaluated against a parent nobody could read), and the result is incomplete so the job retries.
+    /// Owner round 31 item 1 (task 158 r1): a work assignment under a readably SECURE matter and, by its pair, a project whose
+    /// flag cannot be read is NOT secured: the person it would be secured for must not be walled off ANY secure record it is
+    /// filed under, and the unreadable one cannot be checked — so the provisioning refuses before its first write
+    /// (<c>creator_no_access_unverifiable</c>), nothing is written, and the result is incomplete so the job retries (pre-r1
+    /// this record was secured with its sharees held — that no longer holds once the creator's walls are checked first).
     /// </summary>
     [Fact]
-    public async Task ASecureParentBesideAnUnreadableOne_SecuresTheRecord_ButHoldsTheSharees()
+    public async Task ASecureParentBesideAnUnreadableOne_IsNotSecured_BecauseTheCreatorsWallsCannotBeChecked()
     {
         var (matter, unreadable, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter, null, Colleague);
@@ -360,12 +363,10 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         {
             var result = await inheritance.SecureIfFiledUnderSecureAsync("sprk_workassignment", workAssignment, "t158", CancellationToken.None);
 
-            result.Outcome.Should().Be(SecureRootInheritOutcome.Secured);
-            result.IsComplete.Should().BeFalse("its parents' sharees are held");
-            result.ReasonCode.Should().Be(SecureRootInheritance.ReasonParentUnverifiable);
-            ShouldBeSecure(workAssignment, "one readable secure parent is enough");
-            _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0,
-                "never mirrored while a parent it is filed under cannot be read");
+            result.Outcome.Should().Be(SecureRootInheritOutcome.Failed);
+            result.ReasonCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable);
+            result.IsComplete.Should().BeFalse("retried by the job");
+            ShouldBeUntouched(workAssignment, "refused before provisioning's first write");
         }
     }
 
@@ -393,18 +394,18 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
-    /// Add-only on a ROOT: a secure work assignment's own wider share, and a share made on it directly, are never narrowed
-    /// or revoked by the mirror (a root's own shares are its owners' — Manage Access, provisioning); a sharee added to the
-    /// parent LATER reaches it on the next run.
+    /// The mirror onto a ROOT never narrows or revokes a share made on the record itself (a direct View Only share stays), a
+    /// parent's LATER sharee reaches it on the next run — and (owner round 30) an inherited share an operator NARROWED on the
+    /// record outside the BFF is recorded Declined and is never raised again while the parent share persists.
     /// </summary>
     [Fact]
-    public async Task TheMirrorOntoARoot_IsAddOnly_AndAParentsLaterShareeReachesItOnTheNextRun()
+    public async Task TheMirrorOntoARoot_KeepsDirectShares_AddsALaterSharee_AndNeverReRaisesOneAnOperatorNarrowed()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter, null, Colleague);
         FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
         (await RunJobAsync()).Success.Should().BeTrue();
-        // A share made on the record itself that neither contains the mirror nor is contained by it (Read + Delete).
+        // The operator narrows the Colleague's inherited share on the record itself (Read + Delete), outside the BFF.
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), "ReadAccess,DeleteAccess");
         var direct = Guid.NewGuid();
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(direct), RecordShareLevels.ViewOnlyRights);
@@ -415,9 +416,10 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         var run = await RunJobAsync();
 
         run.Success.Should().BeTrue(run.ErrorMessage);
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
-            Mask("ReadAccess,DeleteAccess") | MirrorOf(ProvisionProjectEndpoint.CollaboratorAccessRights),
-            "the mirror is ADDED to the record's own share — its Delete is never taken away");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask("ReadAccess,DeleteAccess"),
+            "the operator's narrowing on the record stands — never raised again while the matter's share persists");
+        _fixture.InheritedLedger.InheritedRowsOf(workAssignment)
+            .Single(r => r.SystemUserId == Colleague).State.Should().Be(Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessState.Declined);
         _fixture.ShareMaskOf(workAssignment, direct).Should().Be(Mask(RecordShareLevels.ViewOnlyRights), "never revoked");
         _fixture.ShareMaskOf(workAssignment, later).Should().Be(MirrorOf(ProvisionProjectEndpoint.CollaboratorAccessRights),
             "the parent's later sharee reaches it within one run");
@@ -632,7 +634,8 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
     /// <summary>
     /// The run's bound: at most <see cref="SecureRootInheritanceJob.MaxProvisioningsPerRun"/> records are PROVISIONED per
-    /// run (each creates a container); the rest are deferred, counted, and secured by the next run.
+    /// run (each creates a container); the rest are deferred, counted — the run is NOT a success (task 158 r1) — and secured
+    /// by the next run, which continues from the cursor.
     /// </summary>
     [Fact]
     public async Task TheJob_ProvisionsAtMostItsBoundPerRun_AndTheNextRunSecuresTheRest()
@@ -645,10 +648,13 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
         var first = await RunJobAsync();
 
+        first.Success.Should().BeFalse("a deferred record is not done: the run is not a success (task 158 r1)");
+        first.ErrorMessage.Should().Contain("deferred");
         using (var doc = JsonDocument.Parse(first.ResultJson!))
         {
             doc.RootElement.GetProperty("secured").GetInt32().Should().Be(SecureRootInheritanceJob.MaxProvisioningsPerRun);
             doc.RootElement.GetProperty("deferred").GetInt32().Should().Be(1);
+            doc.RootElement.GetProperty("resumeAfter").GetString().Should().NotBeNullOrEmpty("the next run continues after it");
         }
 
         filed.Count(id => _fixture.IsSecureOf(id) == true).Should().Be(SecureRootInheritanceJob.MaxProvisioningsPerRun);
@@ -816,21 +822,49 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         return scope.ServiceProvider.GetRequiredService<SecureRootInheritance>();
     }
 
-    /// <summary>
-    /// One run of the REAL job: it lists the secure parents and their filed records through <see cref="World"/> (as the
-    /// job's own <c>IGenericEntityService</c> would) and secures through the host's inheritance (the fixture's provisioning).
-    /// </summary>
-    private async Task<JobRunResult> RunJobAsync()
+    /// <summary>One run of the REAL job — the same job instance across a test, as the scheduler's singleton (its cursor).</summary>
+    private Task<JobRunResult> RunJobAsync() => _job.RunAsync();
+
+    private readonly SecureRootInheritanceJobRunner _job;
+}
+
+/// <summary>
+/// ONE instance of the REAL <see cref="SecureRootInheritanceJob"/> (the scheduler registers it as a singleton, so its progress
+/// cursor survives between runs — task 158 r1): each run lists the parents and their filed records through the fixture's
+/// <see cref="SecureChildShareWorld"/> (as the job's own <c>IGenericEntityService</c> would) and secures through the host's
+/// inheritance (the fixture's provisioning).
+/// </summary>
+internal sealed class SecureRootInheritanceJobRunner
+{
+    private readonly ProvisionProjectTestFixture _fixture;
+    private readonly SecureRootInheritanceJob _job;
+    private readonly ServiceProvider _provider;
+    private IServiceScope? _hostScope;
+
+    public SecureRootInheritanceJobRunner(ProvisionProjectTestFixture fixture)
+    {
+        _fixture = fixture;
+        var services = new ServiceCollection();
+        services.AddSingleton(_ => SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object);
+        services.AddScoped(_ => _hostScope!.ServiceProvider.GetRequiredService<SecureRootInheritance>());
+        _provider = services.BuildServiceProvider();
+        _job = new SecureRootInheritanceJob(
+            _provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, NullLogger<SecureRootInheritanceJob>.Instance);
+    }
+
+    public async Task<JobRunResult> RunAsync()
     {
         using var hostScope = _fixture.Services.CreateScope();
-        var services = new ServiceCollection();
-        services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object);
-        services.AddScoped(_ => hostScope.ServiceProvider.GetRequiredService<SecureRootInheritance>());
-        await using var provider = services.BuildServiceProvider();
-        var job = new SecureRootInheritanceJob(
-            provider.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System, NullLogger<SecureRootInheritanceJob>.Instance);
-        return await job.ExecuteAsync(
-            new JobRunContext(Guid.NewGuid(), "t158", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
-            CancellationToken.None);
+        _hostScope = hostScope;
+        try
+        {
+            return await _job.ExecuteAsync(
+                new JobRunContext(Guid.NewGuid(), "t158", JobRunTrigger.ManualAdmin, new Dictionary<string, object>()),
+                CancellationToken.None);
+        }
+        finally
+        {
+            _hostScope = null;
+        }
     }
 }

@@ -1006,6 +1006,13 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.AddSingleton(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                 () => noSecureRecords, RecordShares));
 
+            // Task 158 r1 (owner round 30): the share routes also fan out to the secure work assignments and projects filed
+            // under the record (both directions), and a fan-out that cannot run is now children_incomplete. The contract
+            // here is the routes' wire shape: the inheritance reads a Dataverse with no rows and an empty provenance ledger,
+            // so nothing is filed under anything. The fan-out itself is pinned in SecureRootInheritanceTests.
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureRootInheritance>();
+            services.AddScoped(_ => Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing());
+
             // Fixed clock for grant-expiry decisions (task 097).
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);

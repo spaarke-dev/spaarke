@@ -1,5 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -28,12 +30,14 @@ using static Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureRootInheritanc
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
 /// <summary>
-/// unified-access-control-r2 task 158 (owner round 6) — (1) CREATE and (2) RE-FILE through every BFF writer of a work
+/// unified-access-control-r2 task 158 (owner rounds 6 and 31) — (1) CREATE and (2) RE-FILE through every BFF writer of a work
 /// assignment or project (the inventory, <c>notes/task-158-secure-inherit-filed-records.md</c> §2): each writer, driven
 /// through its own entry point with its own write seam applying the write to the provisioning fixture's Dataverse, calls
-/// the host's REAL <see cref="SecureRootFilingGate"/> — so a record it files under a secure matter comes out SECURE (flag,
-/// named owner team, own container, creator share, read back), one it files under an ordinary matter is left as it is, and
-/// one whose parent's flag cannot be read is REFUSED with nothing written.
+/// the host's REAL <see cref="SecureRootFilingGate"/> — so a record it CREATES under a secure matter is created INTO
+/// isolation (named team and flag in the create itself — no business-unit-visible window) and comes out SECURE (flag, named
+/// owner team, own container, creator share, read back); one it files under an ordinary matter is left as it is; one whose
+/// parent's flag cannot be read, or whose creator is walled off the record or the secure parent, is REFUSED with nothing
+/// written; and a created row whose creator cannot be shared is removed again.
 /// </summary>
 /// <remarks>
 /// The writers: <c>dataverse.create_record</c> and <c>dataverse.update_record</c> (chat), the playbook output
@@ -167,7 +171,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
             {
                 table.Should().Be("sprk_workassignment");
-                _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"), isSecure: false,
+                _fixture.SeedWorkAssignment(id, owningTeamId: BoundId(fields, "ownerid@odata.bind"),
+                    isSecure: fields.TryGetValue("sprk_issecure", out var flag) && flag is true,
                     createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
                 ApplyFiling(table, id, fields);
             })
@@ -190,38 +195,157 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
 
     /// <summary>
-    /// AC 1, chat create: a work assignment created under a SECURE matter is created by the application as an ordinary row of
-    /// the caller's business unit, then — in the same call — made secure for the person who asked (its
-    /// <c>sprk_createdbyperson</c>; createdby is the application): flag, named team, own container, creator share.
+    /// AC 1 + owner round 31 item 2, chat create: a work assignment created under a SECURE matter is created INTO isolation —
+    /// the application's create itself names the Secure Record Owners team and carries <c>sprk_issecure = true</c>, with the
+    /// caller as <c>sprk_createdbyperson</c> (createdby is the application) — so there is never a business-unit-visible row
+    /// and no owner MOVE afterwards; then it comes out secure: flag, named team, own container, creator share.
     /// </summary>
     [Fact]
-    public async Task ChatCreate_AWorkAssignmentUnderASecureMatter_ComesOutSecure()
+    public async Task ChatCreate_AWorkAssignmentUnderASecureMatter_IsCreatedIntoIsolation_AndComesOutSecure()
     {
         var (secure, _) = Matters();
 
         var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        var created = _writes.Should().ContainSingle().Subject.Id;
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(SecureTeam, "created owned by the named team — never the caller's unit first");
+        fields["sprk_issecure"].Should().Be(true, "flagged in the create itself");
+        BoundId(fields, "sprk_CreatedByPerson@odata.bind").Should().Be(Creator);
+        _fixture.Updates.Should().NotContain(u => u.RecordId == created && u.Payload.ContainsKey("ownerid@odata.bind"),
+            "no owner move: there was never a business-unit-visible window to close");
         ShouldBeSecure(created, "created under a secure matter");
     }
 
     /// <summary>
-    /// ADR-003, chat create: created under a secure matter, but its securing is refused (the person it would be secured for
-    /// is disabled) — never reported as a plain success: the tool answers an error naming the record and the reason.
+    /// Owner round 31 item 2: the creator's share is added and READ BACK before anything else; when it cannot be made the
+    /// just-created row is DELETED (read back gone) and the create is refused — never a row nobody can open, never a
+    /// business-unit-visible one.
     /// </summary>
     [Fact]
-    public async Task ChatCreate_WhenTheNewRecordCannotBeSecured_ReportsItNotSecure()
+    public async Task ChatCreate_WhenTheCreatorCannotBeShared_TheIsolatedRowIsRemoved_AndNothingIsCreated()
     {
         var (secure, _) = Matters();
-        _fixture.SystemUsers[Creator] = (true, false);
+        _fixture.FailShareForPrincipal = Creator;
 
         var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
 
         result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("NOT created").And.Contain("removed again");
         var created = _writes.Should().ContainSingle().Subject.Id;
-        result.ErrorMessage.Should().Contain(created.ToString("D")).And.Contain("could not be made secure yet");
-        _fixture.OwningTeamOf(created).Should().NotBe(SecureTeam, "never moved to the memberless team without a person to see it");
+        World.Has("sprk_workassignment", created).Should().BeFalse("the row was deleted again");
+        _fixture.IsSecureOf(created).Should().BeNull("read back gone");
+        World.Deletes.Should().ContainSingle(d => d.Id == created);
+    }
+
+    /// <summary>
+    /// Owner round 31 item 2: a creator share that WAS made, with a later step that did not complete (here the container),
+    /// leaves a PROVISIONED-but-incomplete record — secure, shared to its creator, never removed — which the existing
+    /// re-entry branch (the job) completes.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheContainerCannotBeCreated_TheRecordStaysSecureForItsCreator_AndTheJobCompletesIt()
+    {
+        var (secure, _) = Matters();
+        _fixture.SpeContainerCreationSucceeds = false;
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse("never reported as a plain success");
+        result.ErrorMessage.Should().Contain("shared to you").And.Contain("completed automatically");
+        var created = _writes.Should().ContainSingle().Subject.Id;
+        _fixture.IsSecureOf(created).Should().BeTrue();
+        _fixture.OwningTeamOf(created).Should().Be(SecureTeam);
+        _fixture.ShareMaskOf(created, Creator).Should().Be(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CreatorAccessRights));
+        World.Deletes.Should().BeEmpty("a record its creator can open is completed, never removed");
+
+        _fixture.SpeContainerCreationSucceeds = true;
+        (await new SecureRootInheritanceJobRunner(_fixture).RunAsync()).Success.Should().BeTrue();
+        ShouldBeSecure(created, "the job completes it through the re-entry branch");
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat create: the caller is on the SECURE MATTER's No Access list — refused before any write
+    /// (<c>sdap.provision.creator_no_access</c>), nothing created.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheCallerIsOnTheSecureMattersNoAccessList_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        result.ErrorMessage.Should().Contain("NOT created");
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat create: the record's OWN No Access list, before it exists — the caller is walled off an
+    /// organization the new work assignment would reference — refused before any write, nothing created.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheCallerIsWalledOffAnOrganizationTheRecordWouldReference_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        var lawFirm = Guid.NewGuid();
+        _fixture.NoAccessList.DenySystemUserOnOrganization(Creator, lawFirm);
+
+        var result = await ChatCreate(AppCreatesIntoTheWorld().Object).ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                tablename = "sprk_workassignment",
+                item = new Dictionary<string, object>
+                {
+                    ["sprk_name"] = "Review the lease",
+                    ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = secure },
+                    ["sprk_assignedlawfirm1"] = new { relatedTable = "sprk_organization", recordId = lawFirm },
+                },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// G5 for a parent named by the POLYMORPHIC PAIR (text — no lookup the mapper checks): the caller's AppendTo on the secure
+    /// matter is asked AS THE CALLER before the isolated create; without it, denied, nothing created.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_UnderASecureMatterByThePair_WithoutAppendToOnTheMatter_IsDenied_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        var user = new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator);
+        user.NoAppendTo.Add(secure);
+        var handler = new DataverseCreateRecordHandler(user, CreateLogger<DataverseCreateRecordHandler>(),
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new RecordOwnershipResolver(
+                SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                NullLogger<RecordOwnershipResolver>.Instance),
+            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+
+        var result = await handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+            {
+                tablename = "sprk_workassignment",
+                item = new Dictionary<string, object>
+                {
+                    ["sprk_name"] = "Review the lease",
+                    ["sprk_regardingrecordid"] = secure.ToString("D"),
+                    ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+                },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        _writes.Should().BeEmpty();
     }
 
     /// <summary>AC 1 control: under an ORDINARY matter the same create stays an ordinary row of the caller's unit.</summary>
@@ -263,7 +387,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             {
                 var id = Guid.NewGuid();
                 _officeCreates.Add(row);
-                _fixture.SeedProject(id, owningTeamId: row.GetAttributeValue<EntityReference>("ownerid").Id, isSecure: false,
+                _fixture.SeedProject(id, owningTeamId: row.GetAttributeValue<EntityReference>("ownerid").Id,
+                    isSecure: row.GetAttributeValue<bool?>("sprk_issecure") == true,
                     createdBy: AppUser, createdByPerson: row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id);
                 ApplyFiling("sprk_project", id, row.Attributes.ToDictionary(a => a.Key, a => (object?)a.Value));
                 return Task.FromResult(id);
@@ -309,7 +434,33 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             .ReturnsAsync(SecureChildShareWorld.GeneralTeam);
         return new RecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(), _gate,
-            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<RecordCreationService>.Instance);
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<RecordCreationService>.Instance,
+            _officeProbe.Object, new HttpContextAccessor { HttpContext = CallerRequest() });
+    }
+
+    /// <summary>
+    /// G5 for the Office create (owner round 31 item 2): the OBO probe's designated virtual seam — the caller's Create on
+    /// <c>sprk_project</c> and their rights on each secure parent. Default: both held.
+    /// </summary>
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe> _officeProbe = OfficeProbe();
+
+    private static Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe> OfficeProbe()
+    {
+        var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
+            MockBehavior.Strict, new HttpClient(), new ConfigurationBuilder().Build(),
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!);
+        probe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        probe.Setup(p => p.GetCallerRightsAsync("caller-token", It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo);
+        return probe;
+    }
+
+    private static HttpContext CallerRequest()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Authorization = "Bearer caller-token";
+        return context;
     }
 
     private Task<RecordCreationResult> OfficeCreateProjectFrom(Guid matter) =>
@@ -323,31 +474,74 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             SourceRecordId = matter,
         });
 
-    /// <summary>AC 1, Office quick-create: a project the mapping files under a SECURE matter comes out secure.</summary>
+    /// <summary>
+    /// AC 1 + owner round 31 item 2, Office quick-create: a project the mapping files under a SECURE matter is created INTO
+    /// isolation (the named team and the flag in the create itself, the maker as <c>sprk_createdbyperson</c>), after the
+    /// caller's own rights were checked (G5), and comes out secure.
+    /// </summary>
     [Fact]
-    public async Task OfficeCreate_AProjectFiledUnderASecureMatter_ComesOutSecure()
+    public async Task OfficeCreate_AProjectFiledUnderASecureMatter_IsCreatedIntoIsolation_AndComesOutSecure()
     {
         var (secure, _) = Matters();
 
         var result = await OfficeCreateProjectFrom(secure);
 
         result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        result.Warnings.Should().NotContain(w => w.Contains("could not be made secure"));
+        result.Warnings.Should().NotContain(w => w.Contains("secur"), "securing completed in the same call");
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureTeam, "never the caller's unit first");
+        row.GetAttributeValue<bool?>("sprk_issecure").Should().BeTrue();
+        _fixture.Updates.Should().NotContain(u => u.RecordId == result.RecordId && u.Payload.ContainsKey("ownerid@odata.bind"));
         ShouldBeSecure(result.RecordId, "filed under a secure matter by the mapping's pair");
+        _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", "sprk_matters", secure, It.IsAny<CancellationToken>()),
+            Times.Once, "AppendTo on the secure matter is asked AS THE CALLER");
     }
 
-    /// <summary>ADR-003, Office quick-create: a project created under a secure matter that cannot be secured is reported.</summary>
+    /// <summary>Owner round 31 item 2, Office: the maker cannot be shared — the project is removed again; nothing created.</summary>
     [Fact]
-    public async Task OfficeCreate_WhenTheNewProjectCannotBeSecured_WarnsThatItIsNotSecureYet()
+    public async Task OfficeCreate_WhenTheMakerCannotBeShared_TheProjectIsRemoved_AndTheCreateRefused()
     {
         var (secure, _) = Matters();
-        _fixture.SystemUsers[Creator] = (true, false);
+        _fixture.FailShareForPrincipal = Creator;
 
         var result = await OfficeCreateProjectFrom(secure);
 
-        result.Succeeded.Should().BeTrue("the project was created");
-        result.Warnings.Should().Contain(w => w.Contains("could not be made secure yet"));
-        _fixture.IsSecureOf(result.RecordId).Should().BeFalse();
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
+        result.Failure.Detail.Should().Contain("removed again");
+        World.Deletes.Should().ContainSingle();
+        _fixture.IsSecureOf(World.Deletes.Single().Id).Should().BeNull("read back gone");
+    }
+
+    /// <summary>G5, Office: the caller lacks AppendTo on the secure matter — refused (403 kind), nothing created.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheCallerCannotFileUnderTheSecureMatter_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _officeProbe.Setup(p => p.GetCallerRightsAsync("caller-token", "sprk_matters", secure, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        result.Failure.Code.Should().Be("caller_cannot_file_under_parent");
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>Owner round 31 item 1, Office: the maker is on the secure matter's No Access list — refused, nothing created.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheMakerIsOnTheSecureMattersNoAccessList_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        result.Failure.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        _officeCreates.Should().BeEmpty();
     }
 
     /// <summary>AC negative, Office quick-create: the matter's flag cannot be read — refused, nothing created.</summary>
@@ -428,9 +622,12 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         ShouldBeSecure(workAssignment, "re-filed under a secure matter");
     }
 
-    /// <summary>ADR-003, chat update: the re-file stands but its securing is refused — reported as an error, not a success.</summary>
+    /// <summary>
+    /// Owner round 31 item 1, chat update: the person the re-filed record would be secured for cannot be named (its creator's
+    /// user is disabled) — refused BEFORE the caller's PATCH, never a re-filed record left unsecured.
+    /// </summary>
     [Fact]
-    public async Task ChatUpdate_WhenTheRefiledRecordCannotBeSecured_ReportsItNotSecure()
+    public async Task ChatUpdate_WhenTheRecordsCreatorCannotBeNamed_IsRefusedBeforeThePatch()
     {
         var (secure, ordinary) = Matters();
         var workAssignment = Guid.NewGuid();
@@ -440,8 +637,29 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         var result = await ChatRefile(workAssignment, secure);
 
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("could not be made secure yet");
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
         _fixture.IsSecureOf(workAssignment).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Owner round 31 item 1, chat update: the record's creator is on the No Access list of the SECURE MATTER it would be
+    /// filed under — refused before the PATCH (<c>creator_no_access</c>), nothing written.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_WhenTheCreatorIsOnTheSecureMattersNoAccessList_IsRefusedBeforeThePatch()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+        _fixture.SharesOn(workAssignment).Should().BeEmpty();
     }
 
     /// <summary>AC negative, chat update: the matter's flag cannot be read — refused, the caller's PATCH never sent.</summary>

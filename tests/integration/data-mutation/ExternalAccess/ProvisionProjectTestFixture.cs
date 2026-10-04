@@ -119,6 +119,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public void SeedShare(Guid recordId, DataversePrincipalRef principal, string accessRightsCsv)
         => _shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
 
+    /// <summary>Task 158 r1: removes a share outside the BFF (a model-driven-app Share dialog, an import).</summary>
+    public void RemoveShare(Guid recordId, DataversePrincipalRef principal) => _shares.TryRemove((recordId, principal), out _);
+
+    /// <summary>Task 158 r1: the mask any principal's share on the record carries now (0 = no share).</summary>
+    public int ShareMaskOf(Guid recordId, DataversePrincipalRef principal)
+        => _shares.TryGetValue((recordId, principal), out var mask) ? mask : 0;
+
     /// <summary>The mask <paramref name="systemUserId"/>'s share on the record carries now (0 = no share).</summary>
     public int ShareMaskOf(Guid recordId, Guid systemUserId)
         => _shares.TryGetValue((recordId, DataversePrincipalRef.User(systemUserId)), out var mask) ? mask : 0;
@@ -201,6 +208,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Task 143: the guard's flag/organization reads. Default: every record secure, no organizations.</summary>
     internal AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService NoAccessReads { get; private set; } =
         new(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
+
+    /// <summary>
+    /// Task 158 r1 (owner round 30): task 142's provenance ledger, in memory — where each share passed on to a filed secure
+    /// root came from. The REAL secure-root inheritance writes and reads it; reset per test.
+    /// </summary>
+    internal AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore InheritedLedger { get; private set; } = new();
 
     /// <summary>Task 143 r1: systemusers whose task-141 link read FAILS (the guard then cannot verify them).</summary>
     internal HashSet<Guid> UnreadableLinkUsers { get; } = new();
@@ -586,6 +599,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         NoAccessReads = new AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
             defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
         UnreadableLinkUsers.Clear();
+        InheritedLedger = new AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore();
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
         _childWorldMirrorsRoots = false;
@@ -644,6 +658,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 sp.GetRequiredService<SecureChildReconciler>(),
                 sp.GetRequiredService<SecureChildShareSynchronizer>(),
                 sp.GetRequiredService<SecureShareNoAccessGuard>(),
+                InheritedLedger,
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<ILogger<SecureRootInheritance>>()));
 
@@ -861,6 +876,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         ChildWorld = SecureChildShareWorld.Standard(SecureBuId, SecureOwnerTeamId)
             .User(CallerSystemUserId, SecureChildShareWorld.GeneralBu);
         ChildWorld.Sequence = NextSequence;
+        // Task 158 r1: a row the isolated-create compensation deletes is gone from this fixture's Dataverse too.
+        ChildWorld.OnDeleted = (_, id) => _records.TryRemove(id, out SeededRecord? _);
         _childWorldMirrorsRoots = true;
         foreach (var record in _records.Values)
             MirrorIntoChildWorld(record);

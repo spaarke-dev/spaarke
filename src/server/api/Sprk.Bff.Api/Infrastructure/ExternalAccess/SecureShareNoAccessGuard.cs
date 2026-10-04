@@ -114,8 +114,54 @@ public sealed class SecureShareNoAccessGuard
     /// </summary>
     /// <param name="entityLogicalName">The record's LOGICAL name (<c>sprk_project</c> / <c>sprk_matter</c> /
     /// <c>sprk_workassignment</c>).</param>
-    public async Task<SecureShareWallDecision> CheckAsync(
+    public Task<SecureShareWallDecision> CheckAsync(
         string entityLogicalName, Guid recordId, Guid systemUserId, CancellationToken ct)
+        => CheckCoreAsync(entityLogicalName, recordId, systemUserId, WallScope.AsFlagged, null, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 r1 (owner round 31 item 1): is <paramref name="systemUserId"/> walled off
+    /// <paramref name="recordId"/> AS A SECURE RECORD — asked by a provisioning that is making the record secure (or by a
+    /// writer filing it under a secure record), BEFORE its first write. The record's own flag is NOT read: on the inherited
+    /// path the record is still unflagged when the creator's share is decided, and a check that answered
+    /// <see cref="SecureShareWallOutcome.NotSecure"/> there would let a walled creator be shared on a record that becomes
+    /// secure a moment later. Everything else — the subjects, the record's referenced organizations, the deny list, every
+    /// fail-closed rule — is <see cref="CheckAsync"/>'s.
+    /// </summary>
+    public Task<SecureShareWallDecision> CheckForSecuringAsync(
+        string entityLogicalName, Guid recordId, Guid systemUserId, CancellationToken ct)
+        => CheckCoreAsync(entityLogicalName, recordId, systemUserId, WallScope.BeingSecured, null, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 r1 (owner round 31 items 1 + 2): is <paramref name="systemUserId"/> walled off a
+    /// secure record that does NOT EXIST YET — a work assignment or project about to be created under a secure parent. Its
+    /// No Access list is every active entry naming one of the organizations the create payload references
+    /// (<paramref name="referencedOrganizationIds"/>, the org-typed lookups <see cref="ExternalParticipationService"/>
+    /// registers for the table); no entry can name a row that has no id yet. Asked before the create, so a walled creator
+    /// is refused with nothing written.
+    /// </summary>
+    /// <param name="prospectiveRecordId">The id the row will be created with (logs and the deny-list candidate).</param>
+    public Task<SecureShareWallDecision> CheckProspectiveAsync(
+        string entityLogicalName, Guid prospectiveRecordId, IReadOnlyCollection<Guid> referencedOrganizationIds,
+        Guid systemUserId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(referencedOrganizationIds);
+        return CheckCoreAsync(entityLogicalName, prospectiveRecordId, systemUserId, WallScope.BeingSecured,
+            referencedOrganizationIds.Where(id => id != Guid.Empty).Distinct().ToArray(), ct);
+    }
+
+    /// <summary>Whether the record's own flag decides the scope (a share) or the record is being secured (task 158 r1).</summary>
+    private enum WallScope
+    {
+        /// <summary><see cref="CheckAsync"/>: the record's flag decides — not secure = nothing applies (Q4).</summary>
+        AsFlagged,
+
+        /// <summary>The record is being made secure: the wall applies whatever the flag reads now.</summary>
+        BeingSecured,
+    }
+
+    private async Task<SecureShareWallDecision> CheckCoreAsync(
+        string entityLogicalName, Guid recordId, Guid systemUserId, WallScope scope,
+        IReadOnlyCollection<Guid>? knownOrganizationIds, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName) || recordId == Guid.Empty || systemUserId == Guid.Empty)
         {
@@ -135,19 +181,22 @@ public sealed class SecureShareNoAccessGuard
 
         try
         {
-            var flags = await _participations
-                .GetRootRecordFlagsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
-
-            // Absent = unreadable at write time (task 138's rule): the read path's "no veto" reading of an absent key
-            // does not hold when the question is whether to WRITE access.
-            if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
+            if (scope == WallScope.AsFlagged)
             {
-                return Refuse("flags", entityLogicalName, recordId, systemUserId);
-            }
+                var flags = await _participations
+                    .GetRootRecordFlagsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
 
-            if (!f.IsSecure)
-            {
-                return SecureShareWallDecision.NotSecure;
+                // Absent = unreadable at write time (task 138's rule): the read path's "no veto" reading of an absent key
+                // does not hold when the question is whether to WRITE access.
+                if (!flags.TryGetValue(recordId, out var f) || f.IsUnreadable)
+                {
+                    return Refuse("flags", entityLogicalName, recordId, systemUserId);
+                }
+
+                if (!f.IsSecure)
+                {
+                    return SecureShareWallDecision.NotSecure;
+                }
             }
 
             var subjects = await ResolveSubjectsAsync(systemUserId, ct).ConfigureAwait(false);
@@ -156,16 +205,24 @@ public sealed class SecureShareNoAccessGuard
                 return Refuse(subjects.Fault!, entityLogicalName, recordId, systemUserId);
             }
 
-            var referenced = await _participations
-                .GetReferencedOrganizationIdsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
-            if (referenced.TryGetValue(recordId, out var refs) && refs.Unreadable)
+            IReadOnlyCollection<Guid> organizations;
+            if (knownOrganizationIds is not null)
             {
-                return Refuse("referenced-organizations", entityLogicalName, recordId, systemUserId);
+                organizations = knownOrganizationIds;
+            }
+            else
+            {
+                var referenced = await _participations
+                    .GetReferencedOrganizationIdsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
+                if (referenced.TryGetValue(recordId, out var refs) && refs.Unreadable)
+                {
+                    return Refuse("referenced-organizations", entityLogicalName, recordId, systemUserId);
+                }
+
+                organizations = referenced.TryGetValue(recordId, out var resolved) ? resolved.OrganizationIds : Array.Empty<Guid>();
             }
 
-            var candidate = new NoAccessCandidateRecord(
-                entityLogicalName, recordId,
-                referenced.TryGetValue(recordId, out var resolved) ? resolved.OrganizationIds : Array.Empty<Guid>());
+            var candidate = new NoAccessCandidateRecord(entityLogicalName, recordId, organizations);
 
             var result = await _noAccessList
                 .GetDeniedRecordsAsync(subjects.Subjects, new[] { candidate }, ct).ConfigureAwait(false);

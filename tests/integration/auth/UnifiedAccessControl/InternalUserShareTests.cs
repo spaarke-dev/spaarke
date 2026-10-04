@@ -1200,7 +1200,8 @@ public class InternalUserShareTests
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
-            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares), AuthenticatedContext(),
+            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>

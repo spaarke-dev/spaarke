@@ -1949,6 +1949,10 @@ public class OfficeService : IOfficeService
     {
         RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
+        // Task 158 r1: a caller walled off (or without the rights to create under) a secure record — 403; a secure create that
+        // could not be checked or completed (and was removed again) — 500.
+        RecordCreationFailureKind.SecureFilingRefused => StatusCodes.Status403Forbidden,
+        RecordCreationFailureKind.SecureFilingFailed => StatusCodes.Status500InternalServerError,
         _ => StatusCodes.Status500InternalServerError
     };
 

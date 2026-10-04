@@ -429,6 +429,12 @@ public class RecordOwnerAssignmentCensusTests
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
+        new OwnerWriteEntry("RecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
+            "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
+            "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
+            "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
+            "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
 
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +

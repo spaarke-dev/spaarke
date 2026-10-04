@@ -48,10 +48,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// resolver's own rules keep it: per-user tables, unfiled communications/threads (E1/E2), and tables with no user/team
 /// ownership (<see cref="OwnedChildWrite.PathFor"/>); such a create filed under a SECURE record is refused. A table
 /// outside the ownership set that would be owned by the Secure team is refused too. A work assignment or project filed
-/// under a secure matter or project (task 158, owner round 6) is created as an ordinary record of the caller's business
-/// unit and then made secure, in the same call, through provisioning's own steps (creator shared first, then the named
-/// team, its own container) — never a bare re-own, and never a row nobody can see (S5). The amendment is recorded in
-/// spaarke-ai-architecture-redesign-r1's spec and the task 146 note §13.
+/// under a secure matter or project (task 158, owner rounds 6 and 31) is created INTO isolation — by the application, owned
+/// by the named Secure Record Owners team, flagged in the create, its <c>sprk_createdbyperson</c> the caller — after the
+/// as-caller pre-check (including AppendTo on each secure parent) and the caller's No Access check against every secure
+/// parent and the record itself; then provisioning's own re-entry steps share it to the caller (read back; a share that
+/// fails deletes the row again), give it its own container and its parents' sharees. No business-unit-visible window,
+/// and never a row nobody can open (S5). The amendment is recorded in spaarke-ai-architecture-redesign-r1's spec (A-UAC146)
+/// and the task 146 note §13; provisioning's app-only follow-on steps for a work assignment or project created under a
+/// secure record are its extension A-UAC158 (§6.5 path B, ACCEPTED by owner round 32, 2026-10-04; task 158 note §14).
 /// </para>
 /// <para>
 /// <b>The creator stamp (unified-access-control-r2 task 133; owner round 7 item 2; integrated per owner round 10).</b> A
@@ -335,37 +339,49 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                     return LogOutcome(context, tablename, MapClientError(tool, forFailure, startedAt), stopwatch);
                 }
 
-                // Task 158 (owner round 6): a work assignment or project filed under a matter or project — whether that
-                // record is secure must be readable, or nothing is created (an unreadable flag is never "not secure").
-                if (await _rootFiling.CheckAsync(tablename, null, OwnedChildWrite.WritesOf(forMapped), cancellationToken)
-                        .ConfigureAwait(false) is { } rootRefusal)
+                // Task 158 r1 (owner round 31): a work assignment or project filed under a SECURE matter or project is
+                // created INTO isolation — owned by the named Secure Record Owners team, flagged in the create, for the
+                // caller (sprk_createdbyperson) — never as an ordinary row of the caller's business unit first. Decided
+                // before any write: an unreadable parent flag, or a caller walled off (or not checkable against) the No
+                // Access list of a secure parent or of the record itself, refuses with nothing created.
+                var plan = Sprk.Bff.Api.Services.Access.SecureRootCreatePlan.Ordinary;
+                var creator = Guid.Empty;
+                if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename))
                 {
-                    return LogOutcome(context, tablename,
-                        Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
-                            rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
-                        stopwatch);
+                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                    if (me.Failure is { } meFailure)
+                        return LogOutcome(context, tablename, MapClientError(tool, meFailure, startedAt), stopwatch);
+                    creator = me.SystemUserId;
+
+                    plan = await _rootFiling.PlanCreateAsync(tablename, OwnedChildWrite.WritesOf(forMapped), creator, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (plan.Refusal is { } rootRefusal)
+                    {
+                        return LogOutcome(context, tablename,
+                            Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
+                                rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                            stopwatch);
+                    }
                 }
 
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken).ConfigureAwait(false);
+                    CallerObjectId(context), cancellationToken, plan.Isolated ? plan : null).ConfigureAwait(false);
 
-                // Task 158: created under a secure matter or project → secured now, for the person who asked (its
-                // sprk_createdbyperson), through provisioning's own steps; then given the parent's sharees.
+                // Created into isolation → completed now: the caller's share (read back; a share that fails deletes the row
+                // again), its own container, its secure parents' sharees.
                 Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null;
-                if (owned.CreatedId is { } createdRoot)
+                if (plan.Isolated && owned.CreatedId is { } createdRoot)
                 {
-                    // The create's own columns: a row created filed under nothing needs no read at all.
-                    secured = await _rootFiling.SecureAfterWriteAsync(
-                            tablename, createdRoot, OwnedChildWrite.WritesOf(forMapped).Select(w => w.Key).ToArray(),
-                            context.DecisionId.ToString("N"))
+                    secured = await _rootFiling.CompleteIsolatedCreateAsync(
+                            tablename, createdRoot, creator, context.DecisionId.ToString("N"))
                         .ConfigureAwait(false);
                 }
 
                 // Task 142 (L1, owner Q5 + R3) on the owned path too (batch 4 integration): a project / matter / work
                 // assignment the application created gets its "Assigned *" contacts' grant or share now. After the create
                 // committed; never throws, never fails this create (a non-root table is a no-op).
-                if (owned.CreatedId is { } ownedId)
+                if (owned.CreatedId is { } ownedId && secured is not { RowRemoved: true })
                 {
                     await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
                         _scopes, tablename, ownedId, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
@@ -622,14 +638,26 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 reason?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
-        // Task 158: created, but not yet secure (its provisioning refused or failed) — never reported as a plain success
-        // (ADR-003). It is filed under a secure record, so the secure-root inheritance job retries it within minutes.
+        // Task 158 r1 (owner round 31 item 2): created into isolation, but it could not be shared to the caller — the row
+        // was deleted again, so the create is refused (never a row nobody can open).
+        if (secured is { RowRemoved: true })
+        {
+            return Error(tool,
+                $"The record was NOT created: a '{tablename}' filed under a secure record is created secure and shared to you, " +
+                $"and that share could not be made ({secured.ReasonCode}: {secured.Detail}), so the new record was removed again. " +
+                "Nothing was created.",
+                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        // Created secure and shared to the caller, but a later step (its own container, its parents' sharees) did not
+        // complete — never reported as a plain success (ADR-003). Nobody outside its sharing sees it meanwhile; the
+        // secure-root inheritance job completes it within minutes.
         if (secured is { IsComplete: false })
         {
             return Error(tool,
-                $"Record {createdId:D} was created in '{tablename}' under a secure record, but it could not be made secure yet " +
-                $"({secured.ReasonCode}: {secured.Detail}). It is retried automatically within a few minutes; until then it is " +
-                "an ordinary record of your business unit, visible to its members.",
+                $"Record {createdId:D} was created in '{tablename}' as a secure record shared to you, but securing it could not " +
+                $"be finished yet ({secured.ReasonCode}: {secured.Detail}). It is completed automatically within a few minutes; " +
+                "until then only you (and the people already given access) can open it.",
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 

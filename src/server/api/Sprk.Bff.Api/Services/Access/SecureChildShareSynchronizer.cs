@@ -84,6 +84,16 @@ public sealed record SecureChildShareSyncResult(
     /// <summary>True when nothing in scope is left out of line.</summary>
     public bool IsComplete => Status is SecureChildShareSyncStatus.Completed or SecureChildShareSyncStatus.NotApplicable;
 
+    /// <summary>
+    /// Task 158 r1 (owner round 30): what <see cref="SecureChildShareSynchronizer.SyncInheritedRootAsync"/> did for each
+    /// principal of its parents' mirror on a ROOT — the input of the inherited-share provenance. <c>null</c> on every other
+    /// pass.
+    /// </summary>
+    public IReadOnlyList<InheritedShareOutcome>? Inherited { get; init; }
+
+    /// <summary>Task 158 r1: the isolated parents the inherited mirror was taken from (every one shares each principal).</summary>
+    public IReadOnlyList<(string Table, Guid Id)>? InheritedFrom { get; init; }
+
     /// <summary>Children in scope that do not yet match: <see cref="ChildrenNotUpdated"/> + <see cref="ChildrenHeld"/>.</summary>
     public int ChildrenLeftOutOfLine => ChildrenNotUpdated + ChildrenHeld;
 
@@ -93,6 +103,35 @@ public sealed record SecureChildShareSyncResult(
     internal static SecureChildShareSyncResult Failed(string detail) =>
         new(SecureChildShareSyncStatus.Failed, 0, 0, 0, 0, 0, 0, 0, 0, 0, detail);
 }
+
+/// <summary>What the inherited mirror did for one principal on a filed secure root (task 158 r1, owner round 30).</summary>
+public enum InheritedShareAction
+{
+    /// <summary>The principal had no share; one was granted (the mirror mask).</summary>
+    Granted,
+
+    /// <summary>The principal's share was raised to <c>before | mirror</c>.</summary>
+    Raised,
+
+    /// <summary>The principal already held at least the mirror: nothing written.</summary>
+    AlreadyCovered,
+
+    /// <summary>An operator removed the inherited share on this record: not re-added while the parent share persists.</summary>
+    Declined,
+
+    /// <summary>On the No Access list of the record or a parent: nothing added.</summary>
+    Walled,
+
+    /// <summary>The No Access list could not be checked: nothing added (held).</summary>
+    Held,
+
+    /// <summary>The write, or its read-back, failed.</summary>
+    Failed,
+}
+
+/// <summary>One principal of a filed secure root's inherited mirror, with the masks before and after (task 158 r1).</summary>
+public sealed record InheritedShareOutcome(
+    DataversePrincipalRef Principal, int MirrorMask, int MaskBefore, int MaskAfter, InheritedShareAction Action);
 
 /// <summary>
 /// What taking the mirrored shares off one child did (task 148, <see cref="SecureChildShareSynchronizer.RemoveMirrorAsync"/>):
@@ -215,6 +254,101 @@ public sealed class SecureChildShareSynchronizer
     public Task<SecureChildShareSyncResult> ReconcileAllAsync(CancellationToken ct) => RunAsync(scope: null, ct);
 
     /// <summary>
+    /// Task 158 r1 (owner round 30): ONE parent's mirror — its direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>
+    /// — when it is ISOLATED (owned by the named Secure Record owner team). <c>null</c> when it is not isolated (unsecured,
+    /// mid-provisioning), does not exist, or cannot be read: such a parent ends nothing it passed on (the reverse rule
+    /// fires only on a secure parent's unshare).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> IsolatedParentMirrorAsync(
+        string parentTable, Guid parentId, CancellationToken ct)
+    {
+        if (!SecureChildLineage.IsRoot(parentTable))
+            return null;
+
+        try
+        {
+            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+            if (team.TeamId is not { } secureTeamId)
+                return null;
+
+            var parent = new RowRef(parentTable.ToLowerInvariant(), parentId);
+            var facts = await ReadRootFactsAsync(_dataverse, parent, ct).ConfigureAwait(false);
+            if (facts is null || facts.OwningTeam != secureTeamId)
+                return null;
+
+            return Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
+                .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
+                .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                .Where(p => RecordShareLevels.CanRead(p.Mask))
+                .ToDictionary(p => p.Key, p => p.Mask);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}'s shares could not be read.", parentTable, parentId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 30): the mirror <see cref="SyncInheritedRootAsync"/> would give a filed root from
+    /// <paramref name="secureParents"/> — each isolated parent's direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>,
+    /// the INTERSECTION over them — read-only. Asked by the reverse rule ("is this principal's inherited share still
+    /// justified by another parent?"). <c>null</c> when it cannot be decided: a parent or its shares unreadable, or a parent
+    /// flagged secure but not isolated (its mirror is not trusted) — the caller then keeps nothing on its account.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<DataversePrincipalRef, int>?> InheritedMirrorAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> secureParents, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(secureParents);
+        try
+        {
+            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+            if (team.TeamId is not { } secureTeamId)
+                return null;
+
+            Dictionary<DataversePrincipalRef, int>? desired = null;
+            foreach (var (table, parentId) in secureParents.Distinct().OrderBy(p => p.Table, StringComparer.Ordinal).ThenBy(p => p.Id))
+            {
+                if (!SecureChildLineage.IsRoot(table))
+                    continue;
+
+                var parent = new RowRef(table.ToLowerInvariant(), parentId);
+                var facts = await ReadRootFactsAsync(_dataverse, parent, ct).ConfigureAwait(false);
+                if (facts is null)
+                    continue; // gone: it confers nothing
+                if (facts.OwningTeam != secureTeamId)
+                {
+                    if (facts.FlaggedSecure)
+                        return null;
+                    continue;
+                }
+
+                var mirror = Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
+                    .Where(p => !(p.Key.Kind == DataversePrincipalKind.Team && p.Key.Id == secureTeamId))
+                    .Select(p => (p.Key, Mask: RecordShareLevels.ChildMirrorMask(p.Value)))
+                    .Where(p => RecordShareLevels.CanRead(p.Mask))
+                    .ToDictionary(p => p.Key, p => p.Mask);
+
+                desired = desired is null
+                    ? mirror
+                    : desired
+                        .Where(p => mirror.ContainsKey(p.Key))
+                        .Select(p => (p.Key, Mask: p.Value & mirror[p.Key]))
+                        .Where(p => RecordShareLevels.CanRead(p.Mask))
+                        .ToDictionary(p => p.Key, p => p.Mask);
+            }
+
+            return desired ?? new Dictionary<DataversePrincipalRef, int>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] The inherited mirror of {Parents} could not be read.",
+                string.Join(", ", secureParents.Select(p => $"{p.Table}:{p.Id:D}")));
+            return null;
+        }
+    }
+
+    /// <summary>
     /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that a pass has just re-owned OUT of the
     /// Secure Record owner team (owner round 11 item 3: "148 re-owns the children, then calls <see cref="SyncRootAsync"/>";
     /// after an unsecure the root's share set is going away, so "in line with the root" means "carrying none of its
@@ -335,19 +469,22 @@ public sealed class SecureChildShareSynchronizer
     /// wall held. Then the record's own children are brought into line with its shares (<see cref="SyncRootAsync"/>).
     /// </summary>
     /// <remarks>
-    /// <para><b>Add-only, because the record is a ROOT of its own.</b> Its share list is also its own: its creator's share
-    /// (provisioning), and whoever its own Manage Access adds. A POA row does not say where it came from, so nothing here can
-    /// tell a share the parent's mirror put there from one the record's own sharing put there. So the mirror is GRANTED or
-    /// WIDENED to the parent's level and never revoked or narrowed — a share already wider (the creator's, with Share) is
-    /// left as it is. Removing a person from the parent does not remove them from the filed record (owner-reversible
-    /// interpretation, notes/task-158-secure-inherit-filed-records.md §6 (iv) and §11 Q1): that is done on the record itself.</para>
+    /// <para><b>Add-only here, because the record is a ROOT of its own.</b> Its share list is also its own: its creator's
+    /// share (provisioning), and whoever its own Manage Access adds. A POA row does not say where it came from, so this pass
+    /// only GRANTS or WIDENS to the parent's level — never revokes or narrows; a share already wider (the creator's, with
+    /// Share) is left as it is. Where a share came from is recorded by the caller (task 158 r1, owner round 30:
+    /// <see cref="SecureRootInheritance"/> writes each outcome in <see cref="SecureChildShareSyncResult.Inherited"/> to task
+    /// 142's <c>sprk_assignedaccess</c> ledger), and the parent's unshare removes only what that provenance says was passed
+    /// on and is still unmodified. <paramref name="declined"/>: principals an operator removed from THIS record, never
+    /// re-added while the parent share persists.</para>
     /// <para><b>Fail closed.</b> The record or a parent that cannot be read, a parent's shares or the record's shares that
     /// cannot be read: <see cref="SecureChildShareSyncStatus.Failed"/>, nothing written. A parent flagged secure but not
     /// isolated (a failed provisioning): held, nothing written (its mirror cannot be trusted; leaving it out would WIDEN the
     /// intersection). A write or read-back that fails: <see cref="SecureChildShareSyncStatus.Incomplete"/>.</para>
     /// </remarks>
     public async Task<SecureChildShareSyncResult> SyncInheritedRootAsync(
-        string rootTable, Guid rootId, IReadOnlyCollection<(string Table, Guid Id)> secureParents, CancellationToken ct)
+        string rootTable, Guid rootId, IReadOnlyCollection<(string Table, Guid Id)> secureParents, CancellationToken ct,
+        IReadOnlySet<DataversePrincipalRef>? declined = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootTable);
         ArgumentNullException.ThrowIfNull(secureParents);
@@ -441,12 +578,24 @@ public sealed class SecureChildShareSynchronizer
         var failed = false;
         var held = false;
         var written = new Dictionary<DataversePrincipalRef, int>();
+        var outcomes = new Dictionary<DataversePrincipalRef, InheritedShareOutcome>();
 
         foreach (var (principal, mask) in desired!.OrderBy(p => p.Key.Id))
         {
             var current = have.TryGetValue(principal, out var c) ? c : 0;
+            if (declined?.Contains(principal) == true)
+            {
+                // Owner round 30: an operator removed it on this record — never re-added while the parent share persists.
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Declined);
+                continue;
+            }
+
             if ((mask & ~current) == 0)
-                continue; // it already carries at least the parent's mirror (the creator's wider share included)
+            {
+                // It already carries at least the parent's mirror (the creator's wider share included).
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.AlreadyCovered);
+                continue;
+            }
 
             if (principal.Kind == DataversePrincipalKind.SystemUser)
             {
@@ -467,6 +616,8 @@ public sealed class SecureChildShareSynchronizer
                 if (wall != SecureShareWallOutcome.NotWalled)
                 {
                     held |= wall == SecureShareWallOutcome.Unverifiable;
+                    outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current,
+                        wall == SecureShareWallOutcome.Walled ? InheritedShareAction.Walled : InheritedShareAction.Held);
                     _logger.LogWarning(
                         "[SECURE-CHILD-SHARES] {Principal} is {Wall} for {Root} or a record it is filed under; nothing is added for " +
                         "them there.", principal,
@@ -493,11 +644,14 @@ public sealed class SecureChildShareSynchronizer
                 }
 
                 written[principal] = target;
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, target,
+                    current == 0 ? InheritedShareAction.Granted : InheritedShareAction.Raised);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] Giving {Principal} its parent's rights on {Root} failed.", principal, root);
                 failed = true;
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Failed);
             }
         }
 
@@ -506,16 +660,21 @@ public sealed class SecureChildShareSynchronizer
             try
             {
                 var after = Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(root.Table, root.Id, ct).ConfigureAwait(false));
-                if (written.Any(w => !after.TryGetValue(w.Key, out var m) || (m & w.Value) != w.Value))
+                foreach (var (principal, target) in written)
                 {
-                    _logger.LogWarning("[SECURE-CHILD-SHARES] {Root} did not read back with its parents' sharees after the writes.", root);
+                    if (after.TryGetValue(principal, out var m) && (m & target) == target)
+                        continue;
+                    _logger.LogWarning("[SECURE-CHILD-SHARES] {Root} did not read back with {Principal}'s parent rights after the write.", root, principal);
                     failed = true;
+                    outcomes[principal] = outcomes[principal] with { Action = InheritedShareAction.Failed };
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Root} could not be read back after the writes.", root);
                 failed = true;
+                foreach (var principal in written.Keys)
+                    outcomes[principal] = outcomes[principal] with { Action = InheritedShareAction.Failed };
             }
         }
 
@@ -549,7 +708,11 @@ public sealed class SecureChildShareSynchronizer
             SharesGranted: granted,
             SharesChanged: changed,
             SharesRevoked: 0,
-            Detail: detail);
+            Detail: detail)
+        {
+            Inherited = outcomes.Values.ToList(),
+            InheritedFrom = isolatedParents.Select(p => (p.Table, p.Id)).ToList(),
+        };
     }
 
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)

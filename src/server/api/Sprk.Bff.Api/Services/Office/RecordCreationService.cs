@@ -73,7 +73,19 @@ public enum RecordCreationFailureKind
 
     /// <summary>No owner could be determined — the caller has no resolvable Dataverse user, or their business unit
     /// has no single default owner team (task 080) — so nothing was created.</summary>
-    OwnerUnresolved
+    OwnerUnresolved,
+
+    /// <summary>
+    /// Task 158 r1 (owner round 31): a record filed under a SECURE record is created secure, and the caller may not create it
+    /// so — on the No Access list of the secure record or the new one, or without the rights to create it there. 403.
+    /// </summary>
+    SecureFilingRefused,
+
+    /// <summary>
+    /// Task 158 r1: whether the caller may create it secure could not be checked, or the secure create could not be
+    /// completed and was removed again. Nothing was created. 500.
+    /// </summary>
+    SecureFilingFailed,
 }
 
 /// <summary>A structured refusal. <see cref="Code"/> is a stable identifier; <see cref="Detail"/> is user-safe text.</summary>
@@ -199,8 +211,17 @@ public sealed class RecordCreationService
     private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            ProjectNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column
+            ProjectNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column,
+            // Task 158 r1: sprk_issecure is the BFF's own (task 150 locks it; owner round 31 item 2 sets it IN the create of a
+            // project filed under a secure record) — never a value a mapping rule copies.
+            SecureFlagAttribute,
         };
+
+    /// <summary>The secure flag (task 150: written only by the BFF).</summary>
+    internal const string SecureFlagAttribute = "sprk_issecure";
+
+    /// <summary>The Create privilege a project create filed under a secure record is checked against AS THE CALLER (G5).</summary>
+    internal const string ProjectCreatePrivilege = "prvCreatesprk_project";
 
     internal const string TeamEntity = "team";
 
@@ -217,7 +238,14 @@ public sealed class RecordCreationService
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer _assignedAccess;
     private readonly ILogger<RecordCreationService> _logger;
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _callerAccess;
+    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor? _http;
 
+    /// <param name="callerAccess">Task 158 r1 (owner round 31 item 2): the OBO probe a project created INTO isolation is
+    /// checked with AS THE CALLER first (G5: Create on the table, AppendTo on every secure parent). Optional so a host
+    /// without the external-access module still composes this service; without it such a create is REFUSED (fail closed),
+    /// never made unchecked.</param>
+    /// <param name="http">The request whose bearer token the probe exchanges (same optionality).</param>
     public RecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
@@ -225,8 +253,12 @@ public sealed class RecordCreationService
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
-        ILogger<RecordCreationService> logger)
+        ILogger<RecordCreationService> logger,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? callerAccess = null,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor? http = null)
     {
+        _callerAccess = callerAccess;
+        _http = http;
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -523,33 +555,58 @@ public sealed class RecordCreationService
         // Task 133 (owner round 7 item 2): the app-only create's person, as for Matter.
         Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
 
-        // Task 158 (owner round 6): a project the field mapping filed under a matter or project (its polymorphic pair) —
-        // whether that record is secure must be readable, or nothing is created (an unreadable flag is never "not secure").
-        if (await _rootFiling.CheckAsync(ProjectEntity, null, entity.Attributes.Select(a => new KeyValuePair<string, object?>(a.Key, a.Value)), ct)
-                .ConfigureAwait(false) is { } rootRefusal)
+        // Task 158 r1 (owner rounds 6 + 31): a project the field mapping filed under a SECURE matter or project (its
+        // polymorphic pair) is created INTO isolation — owned by the named Secure Record Owners team, flagged in the create,
+        // its sprk_createdbyperson the caller — never as an ordinary row of the caller's business unit first. Decided before
+        // any write: an unreadable parent flag, or a caller walled off (or not checkable against) the No Access list of a
+        // secure parent or of the record itself, refuses with nothing created; then the caller's own rights (G5).
+        var plan = await _rootFiling.PlanCreateAsync(
+                ProjectEntity, entity.Attributes.Select(a => new KeyValuePair<string, object?>(a.Key, a.Value)), ownerId, ct)
+            .ConfigureAwait(false);
+        if (plan.Refusal is { } rootRefusal)
         {
             return RecordCreationResult.Failed(new RecordCreationFailure(
-                RecordCreationFailureKind.OwnerUnresolved,
+                KindFor(rootRefusal.RefusalCode),
                 rootRefusal.RefusalCode ?? "record_owner_parent_undetermined",
                 $"The project was not created: {rootRefusal.Reason}."));
+        }
+
+        if (plan.Isolated)
+        {
+            if (await CallerMayCreateIsolatedAsync(plan, ct).ConfigureAwait(false) is { } denied)
+                return RecordCreationResult.Failed(denied);
+
+            IsolateProjectCreate(entity, plan);
         }
 
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
-            createdId, request.CallerUserId, ownerTeamId, warnings.Count);
+            "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner team={OwnerTeamId}, isolated={Isolated}, " +
+            "warnings={WarningCount}",
+            createdId, request.CallerUserId, plan.Isolated ? plan.SecureOwnerTeamId : ownerTeamId, plan.Isolated, warnings.Count);
 
-        // Task 158: filed under a secure record → secured now, for its maker (sprk_createdbyperson), through provisioning's
-        // own steps. A securing that did not complete is reported, not hidden (the job completes it within minutes).
-        // The create's own columns: a project the mapping filed under nothing needs no read at all.
-        if (await _rootFiling.SecureAfterWriteAsync(ProjectEntity, createdId, entity.Attributes.Keys.ToArray(), request.CallerUserId)
-                .ConfigureAwait(false)
-                is { IsComplete: false } secured)
+        if (plan.Isolated)
         {
-            warnings.Add(
-                "The project is filed under a secure record but could not be made secure yet " +
-                $"({secured.ReasonCode}); it is retried automatically within a few minutes.");
+            // Completed now through provisioning's own re-entry steps: the maker's share (read back), its own container, its
+            // parents' sharees. A maker share that fails deletes the project again — nothing is left behind.
+            var secured = await _rootFiling.CompleteIsolatedCreateAsync(ProjectEntity, createdId, ownerId, request.CallerUserId)
+                .ConfigureAwait(false);
+            if (secured.RowRemoved)
+            {
+                return RecordCreationResult.Failed(new RecordCreationFailure(
+                    RecordCreationFailureKind.SecureFilingFailed,
+                    secured.ReasonCode ?? "sdap.inherit.unexpected_result",
+                    "The project is filed under a secure record, so it is created secure and shared to you, and that share could " +
+                    "not be made, so the new project was removed again. Nothing was created. Try again in a few minutes."));
+            }
+
+            if (!secured.IsComplete)
+            {
+                warnings.Add(
+                    "The project was created as a secure record shared to you, but securing it could not be finished yet " +
+                    $"({secured.ReasonCode}); it is completed automatically within a few minutes.");
+            }
         }
 
         await MaterializeAssignedAccessAsync(ProjectEntity, createdId, request.CallerUserId, ct).ConfigureAwait(false);
@@ -562,6 +619,68 @@ public sealed class RecordCreationService
             Warnings = warnings
         };
     }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 31 item 2, G5): AS THE CALLER, before a project is created INTO isolation — Create on
+    /// <c>sprk_project</c> and AppendTo on every secure parent it will be filed under, through the OBO probe on the request's
+    /// own bearer token. The app-only create then grants nothing the caller lacks. Any "could not answer" refuses.
+    /// <c>null</c>: allowed.
+    /// </summary>
+    private async Task<RecordCreationFailure?> CallerMayCreateIsolatedAsync(
+        Sprk.Bff.Api.Services.Access.SecureRootCreatePlan plan, CancellationToken ct)
+    {
+        var token = _http?.HttpContext is { } context
+            ? Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context)
+            : null;
+        if (_callerAccess is null || string.IsNullOrWhiteSpace(token))
+        {
+            _logger.LogError(
+                "[RECORD-CREATE] A project filed under a secure record cannot be checked against the caller's own rights here " +
+                "(probe or token unavailable). Refused (fail closed).");
+            return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingFailed, "caller_rights_unverifiable",
+                "Your permission to create a project under the secure record could not be checked, so it was not created.");
+        }
+
+        if (!await _callerAccess.CallerHoldsPrivilegeAsync(token, ProjectCreatePrivilege, ct).ConfigureAwait(false))
+        {
+            return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingRefused, "caller_cannot_create",
+                "You do not have permission to create projects, so this project was not created.");
+        }
+
+        foreach (var parent in plan.SecureParents)
+        {
+            var rights = await _callerAccess.GetCallerRightsAsync(
+                    token, Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(parent.Table), parent.Id, ct)
+                .ConfigureAwait(false);
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo))
+            {
+                return new RecordCreationFailure(RecordCreationFailureKind.SecureFilingRefused, "caller_cannot_file_under_parent",
+                    "You do not have permission to file a project under the secure record it names, so it was not created.");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 31 item 2): a project — a ROOT — filed under a secure record is created INTO isolation: owned
+    /// by the named Secure Record Owners team provisioning's own topology names (the plan's), flagged in the create itself.
+    /// A root's own ownership is provisioning's (task 144); its re-entry steps complete it after the create.
+    /// </summary>
+    private static void IsolateProjectCreate(Entity entity, Sprk.Bff.Api.Services.Access.SecureRootCreatePlan plan)
+    {
+        entity[OwnerAttribute] = new EntityReference(TeamEntity, plan.SecureOwnerTeamId!.Value);
+        entity[SecureFlagAttribute] = true;
+    }
+
+    /// <summary>The failure kind of a planning refusal: a walled or refused caller is 403, an unverifiable check 500.</summary>
+    private static RecordCreationFailureKind KindFor(string? code) => code switch
+    {
+        Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess => RecordCreationFailureKind.SecureFilingRefused,
+        Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable => RecordCreationFailureKind.SecureFilingFailed,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved => RecordCreationFailureKind.SecureFilingFailed,
+        _ => RecordCreationFailureKind.OwnerUnresolved,
+    };
 
     /// <summary>
     /// The one existence read for a supplied matter type (owner decision 2026-09-11, "do not reject"; project CLAUDE.md
