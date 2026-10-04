@@ -5,7 +5,7 @@
  * verified compatible with React 16/17 (the PCF platform-provided version).
  *
  * PCF controls MUST import from this entry point:
- *   import { FindSimilarDialog } from '@spaarke/ui-components/src/pcf-safe';
+ *   import { RelationshipCountCard } from '@spaarke/ui-components/src/pcf-safe';
  *
  * Code pages should import from the main barrel:
  *   import { SprkChat, WizardShell } from '@spaarke/ui-components';
@@ -53,9 +53,13 @@ export {
   DocumentRecordService,
   MultiFileUploadService,
   NavMapClient,
-  SdapApiClient,
 } from './services/document-upload';
-export type { SdapApiClientOptions, OnUnauthorizedCallback } from './services/document-upload';
+// `SdapApiClient` + `SdapApiClientOptions` + `OnUnauthorizedCallback` were REMOVED from this
+// surface 2026-09-03. They belonged to this package's parallel upload client, which is deleted —
+// `FileUploadService` now takes the one from `@spaarke/sdap-client`, so consumers construct it as:
+//
+//     import { SdapApiClient } from '@spaarke/sdap-client';
+//     new FileUploadService(new SdapApiClient({ baseUrl, authenticatedFetch }), logger);
 
 // ─── Types (no React dependency) ────────────────────────────────────────────
 export type { MiniGraphNode, MiniGraphEdge } from './types/MiniGraphTypes';

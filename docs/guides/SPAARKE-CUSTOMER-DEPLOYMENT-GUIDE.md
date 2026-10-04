@@ -4,7 +4,7 @@
 > **Last Updated**: 2026-08-17
 > **Status**: **Authoritative**. Supersedes the customer-provisioning content in `CUSTOMER-DEPLOYMENT-GUIDE.md`, `CUSTOMER-ONBOARDING-RUNBOOK.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md`, `auth-deployment-setup.md`, `SPAARKE-DEPLOYMENT-GUIDE.md`, and `PRODUCTION-DEPLOYMENT-GUIDE.md`. Those files are retained as one-paragraph stubs pointing here.
 > **Audience**: Platform Operator (primary). Claude Code AI executes automated phases; a human operator holds accountability for gates, secrets, and customer communication.
-> **Applies To**: Every new Spaarke customer environment (Model 2 dedicated stamp; Model 1 shared trial/SMB).
+> **Applies To**: Every new Spaarke customer environment. **Model 1** = dedicated stamp in Spaarke's Azure tenant; **Model 2** = dedicated stamp in the customer's own Azure tenant (D-12, 2026-09-28).
 > **Owner**: Platform Operations. Maintained by `customer-provisioning-orchestration-r1` and its successors.
 
 ---
@@ -86,7 +86,7 @@ Historically Spaarke has three generations of provisioning assets (Gen 1 manual 
 **In-scope for r1** (this guide covers all of these):
 
 - 19 handlers H0–H14, L2 control plane, `/provision-environment` skill (Phase D)
-- Model 1 shared trial/SMB tier + Model 2 dedicated stamp
+- Model 1 (Spaarke-tenant dedicated stamp) + Model 2 (customer-tenant dedicated stamp)
 - Tenant-isolation invariants I1–I5 (ArchTest-enforced)
 - Canonical KV secret catalog + naming compliance (Phase G/H)
 - UAMI migration (Phase C — structural fix for T5 slot-swap trap)
@@ -150,8 +150,8 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
 | Dataverse region | `unitedstates` (default) | Must match Azure region locality |
-| Tenancy model | `Model2Dedicated` (default) or `Model1Shared` | Per §3 selection criteria |
-| Deployment profile | `spaarke-hosted`, `customer-owned`, `demo`, `trial` | Per D15 |
+| Tenancy model | `Model2Dedicated` — ⚠️ currently the **only** valid value, and it covers **both** new models. `Model1Shared` is retired. Migration pending (D-12 §6). | Per §3 selection criteria |
+| Deployment profile | `spaarke-hosted-model2` (= the new **Model 1**), `customer-owned-model2` (= the new **Model 2**), `demo`. ⚠️ `spaarke-hosted-model1-trial` is **retired — never select it**. Names still encode the old vocabulary because the live L2 API validates them; renaming is part of the D-12 §6 enum migration. | Per D15 |
 | Customer admin contact | Name, email, phone | For H0.5 consent flow (Model 2) |
 
 ### 2.4 External lead-time items (surface BEFORE starting pipeline)
@@ -186,55 +186,101 @@ az webapp list --query "[?name=='spaarke-bff-{customerId}-{env}']"
 
 ## 3. Deployment Model Selection
 
-Per D3 (v3), Spaarke supports **two tenancy models**. Same code, different Bicep composition, different post-conditions.
+> 🔴 **REWRITTEN 2026-09-28 — owner decisions D-12 + D-13.** This section previously defined **Model 1 as
+> a shared trial/SMB tier** sharing App Service Plan, Azure OpenAI and AI Search across customers. That tier
+> is **RETIRED**. It was documented, specified, funded and partly built in Bicep, but **never implemented in
+> the engine** — `H5DataverseEnvCreationHandler` creates a Dataverse environment **unconditionally**, keyed
+> `dvenv-{customerId}`. There has never been a code path in which two customers share an environment.
 
-### 3.1 Model 2 — Dedicated Stamp (default)
+Spaarke supports **two deployment models**. They differ on **one axis only: which Azure tenant owns the
+customer's subscription.** Everything else is the same.
 
-**When to choose**: regulated/enterprise customers requiring physical isolation, expected sustained usage, per-customer cost transparency.
+| | Dataverse environment | Azure tenant | Azure subscription + resource group |
+|---|---|---|---|
+| **Model 1** | dedicated, one per customer | **Spaarke's** | dedicated, one per customer |
+| **Model 2** | dedicated, one per customer | **the customer's own** | dedicated, one per customer |
 
-**Composition**:
+**Only two things actually differ**, and both follow from tenant ownership:
 
-- Dedicated per-customer: **Azure OpenAI**, **AI Search**, Document Intelligence, Service Bus, Cosmos DB, Key Vault, App Insights, Storage, App Service Plan, App Service (BFF), UAMI
-- Dedicated: Dataverse env, SPE container-type + root container, Entra app registration (BFF; multitenant per FR-06)
-- **Not per-customer**: Redis (per-environment via `scripts/Deploy-RedisCache.ps1` per Q-E FR-12)
-
-**Cost floor**: ≤ $400/mo Azure per empty environment (per NFR-04); usage-passthrough pricing native via Azure Cost Management + tags.
-
-**Bicep stack**: `infrastructure/bicep/customer.bicep` or `model2-full.bicep`.
-
-### 3.2 Model 1 — Shared Trial/SMB Tier
-
-**When to choose**: trial prospects, SMB customers where the fixed-floor cost of a dedicated stamp is uneconomic, evaluation deployments.
-
-**Composition** (per §3A A1):
-
-- **Shared** across all Model 1 tenants: App Service Plan, Azure OpenAI (metered per D19), Azure AI Search (per-tenant `tenantId` filter on every query)
-- **Dedicated per-customer**: Dataverse env, SPE container-type + root container, Key Vault, Storage, UAMI, Entra app config
-
-**Cost envelope**: ≤ $430/mo marginal per customer (5-10 users, capped tokens); ≤ $400/mo shared platform floor.
-
-**Bicep stack**: `infrastructure/bicep/stacks/model1-shared.bicep`.
-
-**Additional invariants for Model 1** (see §8 for full I1–I5 detail):
-
-- Per-tenant token metering (D19) enforces `tokenBudgetMonthlyUSD` — over-budget attempts return HTTP 429
-- **`tenantId eq` filter mandatory on every AI Search query** (I2 / FR-29) — never a fallback default index scan
-- All Cosmos operations carry `/tenantId` partition-key predicate (I3 / FR-30)
-
-### 3.3 Model 1 vs Model 2 handler-behavior differences
-
-Handlers execute the same code but different inputs and post-conditions per tenancy model. Full table in `design.md` §4.1a; summarized here:
-
-| Handler | Model 2 (dedicated) | Model 1 (shared trial/SMB) |
+| | Model 1 | Model 2 |
 |---|---|---|
-| **H0 preflight** | Full per-customer OpenAI quota + subscription vCPU headroom | Verify per-tenant token budget + shared-platform capacity for +1 tenant |
-| **H2a Bicep** | `customer.bicep` — full dedicated stamp | `model1-shared.bicep` — dedicated KV/Cosmos/Storage/UAMI **only**; shares App Service Plan + AI Search + OpenAI |
-| **H2b AI Search indexes** | 7 indexes on customer's dedicated AI Search | 7 indexes **already exist** on shared platform — H2b verifies + provisions per-tenant `tenantId`-filter query template |
-| **H7 env-var + app-settings** | Points at customer's dedicated OpenAI/AI Search/App Insights | Points at shared platform OpenAI/AI Search; per-tenant metering headers set via D19 layer |
-| **H12c runtime refs** | `sprk_aimodeldeployment` → customer's dedicated OpenAI | `sprk_aimodeldeployment` → shared platform OpenAI with per-tenant attribution |
-| **H13 acceptance** | Full E2E + verify dedicated-resource isolation | Full E2E + verify `tenantId`-filter enforcement + token-metering attribution |
+| **H0.5 admin consent** | not needed (Spaarke's own tenant) | **required** |
+| **H1 Azure Lighthouse delegation** | not needed (Spaarke owns the subscription) | **required** |
 
-Handlers not listed behave identically across tiers.
+⚠️ **The models are now nearly identical infrastructurally.** Resist the pull to justify having two models
+by inventing differences between them — the list above is complete.
+
+### 3.1 Terminology — binding
+
+| Term | Meaning |
+|---|---|
+| **tenant** / `tenantId` | The Entra / Azure / Dataverse **tenant GUID**. Model 1 ⇒ always Spaarke's. Model 2 ⇒ the customer's. |
+| **customer** | The business entity Spaarke sells to. **Many customers share one Azure tenant** under Model 1. |
+
+🔴 **Never write "tenant" when you mean "customer."** Under Model 1 every customer presents the **same**
+`tenantId`, so any control keyed on it — an AI Search `tenantId eq` filter, a Cosmos `/tenantId` partition,
+an SPE container resolver, a `tenant:{tenantId}:…` cache key — **cannot separate customers, and its tests
+pass anyway.**
+
+### 3.2 Composition — identical in both models
+
+**Dedicated per customer**: Dataverse environment · SPE container-type + root container ·
+**Entra app registration (BFF)** · App Service + Plan · Azure OpenAI · AI Search · Cosmos DB ·
+**Redis (Standard tier)** · Storage · Key Vault · Service Bus · Document Intelligence ·
+App Insights + Log Analytics · UAMI · Power BI workspace.
+
+**Shareable — exactly two named exceptions**, each requiring a **`customerId`** discriminator in the BFF
+runtime: **Static Web Apps** (Office add-ins + external SPA) and **Content Safety**. The list is **CLOSED**;
+the admission test is *holds no privileged legal content at rest*. Full criteria:
+`projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md`.
+
+🔴 **The BFF Entra app registration is per customer — D-13, BINDING, do not re-open.** The app registration
+determines the Dataverse **application user**, which is assigned to exactly one **business unit**, and every
+BFF-created record is owned by that application user — so a record can only land in customer X's business
+unit if the BFF authenticated as an app registration dedicated to customer X. Mechanism and rejected
+counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
+
+⚠️ **Why dedication, and not a filter.** Dedicating a resource moves isolation from a query predicate to a
+resource boundary. A predicate must be written correctly in every query, forever, by everyone; a boundary
+cannot be forgotten. For a product holding privileged legal material that difference is the whole argument.
+
+**Azure subscription structure**: one subscription **and** one resource group per customer, so usage is
+segregated and billed per customer natively (ADR-027, amended 2026-09-28). 🔴 This **forces** a dedicated
+App Service Plan — an App Service app cannot use a plan in a different subscription — which is the largest
+single per-customer fixed cost.
+
+**Bicep stack**: `infrastructure/bicep/customer.bicep` / `stacks/model2-full.bicep` — the same per-customer
+stamp for both models. ⚠️ `stacks/model1-shared.bicep`, `stacks/model1-customer.bicep`,
+`modules/model1-shared-l2-rbac.bicep` and `parameters/model1-prod.bicepparam` are **retired artifacts**;
+`model1-shared.bicep` has not compiled since 2026-08-17. Retiring them is a **coordinated multi-surface
+change** (parameter files bound by `using`, an inverted-polarity assertion in `bicep-e2e-dry-run.ps1` that
+passes only while the build fails, and a GitHub workflow whose manifest schema declares `model1-shared` a
+**required** key) — not yet done.
+
+### 3.3 Handler behaviour — what differs
+
+Handlers execute the same code and, as of D-12, almost the same inputs.
+
+| Handler | Model 1 | Model 2 |
+|---|---|---|
+| **H0.5 consent-callback** | **skipped** — Spaarke's own tenant | **required** |
+| **H1 subscription readiness** | SpaarkeOwned ⇒ **no Lighthouse** | CustomerOwned ⇒ **Lighthouse required** |
+
+🔴 **Every other handler behaves identically.** The former per-model table — H0 shared-platform capacity,
+H2a `model1-shared.bicep`, H2b "7 indexes already exist on shared platform", H7/H12c pointing at shared
+platform OpenAI, H13 verifying `tenantId`-filter enforcement — described the retired tier and is deleted.
+
+⚠️ **A known live defect until the enum migration lands** (D-12 §6): `sprk_tenancymodel` value `1`
+(`Model2Dedicated`) covers **both** new models, and `H1SubscriptionReadinessHandler` maps that literal to
+`CustomerOwned` unconditionally — so it currently **demands Lighthouse delegation for subscriptions Spaarke
+already owns**. Expect this when provisioning a new Model 1 customer today.
+
+### 3.4 Invariants — what I1–I5 actually enforce
+
+I2 (AI Search `tenantId` filter), I3 (Cosmos `/tenantId` partition) and I4 (SPE container resolver) remain
+in force and remain ArchTest-enforced, **but they are belt-and-braces, not the customer boundary.** They key
+on `tenantId`, which is identical for every Model 1 customer. The boundary is the dedicated per-customer
+resource in the per-customer subscription. I1 and I5 are unaffected.
 
 ---
 
@@ -315,7 +361,7 @@ Enumerated `gateStates` + `interStepState` shapes per `design.md` §6.2.
 
 - `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_provisionedon`
 - `sprk_currentrunid` (I5 concurrency serialization)
-- `sprk_tenancymodel` (Choice: Model1Shared / Model2Dedicated)
+- `sprk_tenancymodel` (Choice) — 🔴 **MIGRATE, DO NOT RELABEL** (D-12 §6): value `1` (`Model2Dedicated`) holds **both** old-2a and old-2b, which now split across **different** models and need **opposite** Lighthouse answers; value `0` (`Model1Shared`) has **no successor**
 - `sprk_tenantid` (populated from H0.5 or run params)
 - `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` (§14A upgrade compat)
 
@@ -332,18 +378,18 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy: RG, KV, Storage, Service Bus, Cosmos, OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Redis explicitly **NOT** per-customer | — | `infra-{customerId}-{bicepVer}` |
 | **H2b** | AI Search indexes | Provision 7 canonical indexes via `scripts/ai-search/Deploy-AllIndexes.ps1` (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) | — | `aisearch-{customerId}-{indexVer}` |
-| **H3** | Entra app registration | 1 BFF app-reg with ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent) | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ⚠️ **The code does not do this yet**: `H3EntraAppRegHandler` still has a `Model1Shared` branch that creates **zero** app registrations and reuses `SharedBffAppRegistrationId`. Deleting it is open work. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` |
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **8 authoritative solutions** (§11.1a): SpaarkeCore, webresources, then 6 tier-3 parallel | All 8 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
 | **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
-| **H9** | BFF deploy | `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode) | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
+| **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
-| **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at correct OpenAI deployment (Model 2 dedicated; Model 1 shared with attribution) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
+| **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
 | **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 6 T1–T6 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` |
 | **H14** | Post-deploy integrations | (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | `Get-ApplicationAccessPolicy` returns 2 with both principals | `integrations-{customerId}-{integrationVer}` |
 
@@ -424,7 +470,7 @@ Set by H7 per §10.3 of design.md:
 | `sprk_BffApiAppId` | BFF app-reg client ID |
 | `sprk_MsalClientId` | MSAL client ID for browser flows |
 | `sprk_TenantId` | Customer tenant GUID (I1 enforcement — no default) |
-| `sprk_AzureOpenAiEndpoint` | Model 2: dedicated OpenAI; Model 1: shared platform OpenAI |
+| `sprk_AzureOpenAiEndpoint` | The customer's **own dedicated** Azure OpenAI endpoint — both models (D-12 §3). `SharedPlatformOpenAiEndpoint` is a retired artifact |
 | `sprk_ShareLinkBaseUrl` | Customer-facing share link base URL |
 | `sprk_SharePointEmbeddedContainerId` | Populated from H8 output (I4 enforcement) |
 
@@ -438,6 +484,206 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
 - `Graph__ManagedIdentity__ClientId={uami-client-id}`
 - `ManagedIdentity__ClientId={uami-client-id}`
 - `Dataverse:ClientSecret` = KV reference (BFF `/health` fails fast per r3 task 061 `ValidateOnStart` if unresolved — **NFR-05**)
+
+#### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
+
+> Added 2026-09-29 by `unified-access-control-r2` task 123, per decision
+> [D-14](../../projects/unified-access-control-r2/notes/D-14-customer-discriminator.md).
+
+**Every BFF stamp must be able to say which customer it serves.** `customerId` names the resource group
+and every resource inside it, and until this setting existed no line of BFF code could read it. That
+mattered because — per D-12 — `tenantId` is **identical for every Model 1 customer** (they share the
+Spaarke Entra tenant), so a `tenantId`-keyed cache key, log scope or metric dimension separates *Entra
+tenants*, not *customers*, and its tests pass anyway because there is only ever one value.
+
+| | |
+|---|---|
+| **Setting** | `Customer__Id` (configuration key `Customer:Id`) |
+| **Value** | the customerId — 3–8 chars, lowercase letters and digits, starting with a letter. See [`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The `customerId` standard"](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). |
+| **Emitted by** | `infrastructure/bicep/customer.bicep` and `infrastructure/bicep/stacks/model2-full.bicep`, from the `customerId` they already hold — **no operator action on a stamp deployed from either** |
+| **Assignment authority** | Dataverse `sprk_dataverseenvironment.sprk_customerid`. Bicep CONSUMES it; nothing mints one. |
+
+**Resolution order, and what happens when it fails:**
+
+1. **`Customer__Id` if set** — the intended path.
+2. **Otherwise derived from `WEBSITE_RESOURCE_GROUP`**, which App Service sets automatically and which is
+   literally `rg-spaarke-{customerId}-{env}`. This is why an older per-customer stamp keeps working with
+   no change. ⚠️ **The derived path logs a WARNING every boot, by design** — a stamp running on the
+   fallback forever is a stamp whose settings were never finished.
+3. **Otherwise the BFF refuses to start**, with a message naming both sources. There is deliberately
+   **no default**: an absent customer identity must never resolve to a shared value. (Development and
+   Testing environments are exempt from the startup failure; there the identity simply stays unresolved
+   and throws if anything asks for it.)
+
+🔴 **Resource groups that are NOT customers.** `rg-spaarke-platform-{env}`, `rg-spaarke-shared-{env}` and
+`rg-spaarke-byok-prod` match the per-customer *shape* but name platform functions. Derivation refuses
+them by name — otherwise the platform stamp would invent `customerId = "platform"`, which is exactly the
+silently-shared value this mechanism exists to prevent. **A BFF in one of those groups must set
+`Customer__Id` explicitly**:
+
+```bash
+az webapp config appsettings set \
+  --resource-group rg-spaarke-platform-prod \
+  --name <app-service-name> \
+  --settings Customer__Id=<customerId>
+```
+
+⚠️ **Pre-existing stamps need this before the branch carrying task 123 is deployed.** `Deploy-BffApi.ps1`
+defaults to `rg-spaarke-dev` (which is not a per-customer shape at all) and documents
+`rg-spaarke-platform-prod` (deny-listed). Neither derives, and App Service runs as the `Production`
+environment, so neither is exempt from the startup failure. What customerId those pre-D-12 stamps should
+carry is an **owner decision** — do not invent one.
+
+#### 6.5.2 Customer workforce tenants (`WorkforceIdentity__CustomerTenantIds__N`) — required per stamp
+
+> Added 2026-10-01 by `unified-access-control-r2` task 141 (owner decision I1 = (b)). Contract:
+> [`141-link-contract.md`](../../projects/unified-access-control-r2/notes/141-link-contract.md).
+
+A customer employee **without a Power Apps licence** ("Type 2") signs in to Teams / the SPA with company SSO.
+On their FIRST sign-in the BFF binds them to a contact by their Entra object id (`oid`): onto the one active,
+unbound contact carrying their email, or — when none does — a new contact keyed by the oid. **Only a MEMBER of
+one of this deployment's customer workforce tenants gets that first-sign-in bind or creation.** The setting
+names those tenants.
+
+| | |
+|---|---|
+| **Setting** | `WorkforceIdentity__CustomerTenantIds__0`, `__1`, … (configuration key `WorkforceIdentity:CustomerTenantIds`, a string array) |
+| **Value** | the customer's Entra **tenant id(s)** (GUIDs) whose employees use this stamp |
+| **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; a Type-2 first sign-in gets `sdap.access.deny.workforce_tenant_list_empty`. Existing oid bindings still resolve. |
+| **Never** | a fallback to `AzureAd:TenantId`, or `TenantRouting:Tenants[]` |
+| **Startup check** | a non-GUID, the all-zero GUID, or the CIAM tenant id **fails startup** (`ValidateOnStart`) |
+| **Written by** | provisioning (`customer-provisioning-orchestration-r1`) — handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+
+🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
+lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
+sign in with the **customer's** `tid`. Keying the member test on `AzureAd:TenantId` would refuse every Model-1
+Type-2 employee **and** auto-bind Spaarke's own staff into the customer's environment. Set the CUSTOMER's tenant
+here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
+nothing is inferred.
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings WorkforceIdentity__CustomerTenantIds__0=<customer-tenant-guid>
+```
+
+**The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A token with no `acct` claim fails
+closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
+a `#EXT#` UPN.
+
+**The identity-link reconciliation job** (`identity-link-reconciliation`, every 5 minutes) links every licensed
+user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,
+empty or unparseable writes nothing. Review one report-only run (App Insights `[ID-LINK-RECON] before-state`
+lines and the run's ResultJson) before enabling writes on a new stamp.
+
+The same switch gates the **inline link** a licensed user would otherwise get at their first Teams/SPA sign-in,
+so between the BFF deploy and the switch nothing links a licensed user to a contact and the report-only run is a
+true preview. Two writes are **not** gated, by design: a Type-2 (unlicensed) member's own first sign-in (bind or
+create, behind the member test) and the link written when the BFF itself creates a systemuser during demo
+provisioning. Do not run demo registrations while the report-only run is under review, or its counts will drift.
+
+**Which environments the job reconciles.** The BFF's own `Dataverse:ServiceUrl` AND every environment it
+provisions users into: `DATAVERSE_URL` (registration's default) and every **active** `sprk_dataverseenvironment`
+row — the only environments the approve endpoint provisions into. Each is reconciled the same way (pass 1 links or
+flags every enabled interactive systemuser; pass 2 re-evaluates and clears resolved flags), through the
+registration service's existing per-environment token path (the BFF's own managed identity — it must be an
+application user in each, which demo provisioning already requires). So **a registration link that does not land
+is retried**: whether it faulted, was refused, lost a race or raised a collision flag, the next run re-decides that
+user and re-evaluates that flag (App Insights: `[ID-BIND] New systemuser … contact link NOT made … re-decides the
+user on its next run`). One environment's failure fails the run (`[ID-LINK-RECON] {environment}: …`, and the
+ResultJson's `provisioningTargets.environments[]`) but never stops the others. Deactivating a registry row stops
+the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
+own environment and this was a recorded gap.)
+
+**Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
+reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
+
+**Cost of leaving a stamp report-only.** Each run reads every enabled interactive systemuser; a user with no
+verified link costs roughly 2–4 further Dataverse reads per run (every 5 minutes) for as long as writes stay off.
+Fine at dev scale; on a large stamp, enable writes after the review rather than leaving the job report-only.
+
+**Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141**, in the BFF's own environment and
+in every provisioning target above. The BFF selects the new columns, so without them every binding read fails
+closed (`sdap.access.deny.binding_column_missing`) and CIAM and Type-2 sign-ins are denied.
+
+```powershell
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0 (re-run until the key is Active)
+```
+
+**Uniqueness lives on a mirror column (owner decision, 2026-10-01).** Dataverse refuses an alternate key on a
+field-secured column ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity)),
+and the binding `contact.sprk_externalobjectid` must stay field-secured (only the BFF may write it — it decides
+whose grants a caller inherits). So the script creates an UNSECURED mirror, `contact.sprk_externalobjectidkey`,
+copies every existing binding into it, and puts the alternate key `sprk_ExternalObjectIdUniqueKey` on the mirror.
+The BFF writes the mirror with the same oid, in the same request, as every bind and create; the platform's unique
+index then guarantees **exactly one contact per oid**, including when two first sign-ins race. Every read that
+decides who a contact IS uses the secured binding; nothing resolves by the mirror. A user with Write on contact
+can therefore only **deny service** through the mirror (put someone's oid into it): that person's bind or create is
+refused, the BFF denies `sdap.access.deny.contact_key_conflict`, and the holder is flagged with reason **"Key mirror
+held by another contact"** (§6.5.3) — visible, never a takeover. The script also adds the plane and collision
+columns (backfilling existing bindings as External), the "Contacts with Identity Collisions" view, and the
+field-level security that lets ONLY the BFF write `contact.sprk_externalobjectid` and
+`systemuser.sprk_primarycontact` while every user keeps reading them. It refuses `-Apply` (before any write) if
+an edit ever puts the key and field security on one column again, and reports a mirror value its own binding does
+not carry as `FAIL` without touching it. **A business unit created later needs `-Apply` re-run**, so its default
+team joins the reader profile.
+
+#### 6.5.3 Identity collisions — the operator procedure
+
+A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
+contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; an invite
+whose email matches a workforce-bound contact or a contact a systemuser links to; or an oid whose unique-index slot
+another contact holds in its `sprk_externalobjectidkey` mirror without the binding. Every collision is refused
+(403 at sign-in, 409 at invite) **and flagged on the contact** — `sprk_identitycollisionon` (when),
+`sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why),
+for the FIRST identity; `sprk_identitycollisionparties` lists EVERY identity that collided with the contact.
+A repeated collision by the same identity does not write again; a different identity's collision is added.
+
+**Find them**: Contacts → view **"Contacts with Identity Collisions"**.
+
+**Resolve** (System Administrator — the fields are field-secured):
+
+1. Decide which identity owns the contact. One contact carries one sign-in; it is never shared or merged.
+2. **The colliding identity should own it** — clear ALL THREE of `sprk_externalobjectid`,
+   `sprk_externalobjectidkey` and `sprk_identityplane` on the contact (clearing the binding without its marker
+   leaves it UNREADABLE, which denies; clearing it without the mirror leaves the oid's unique-index slot held, which
+   also denies — reason "Key mirror held by another contact"). The other identity's next sign-in or the next
+   reconciliation run binds it correctly.
+   **The existing binding is right** — leave the binding. For an invite, invite a different email; for a
+   licensed user whose `sprk_primarycontact` points at someone else's contact, point it at the user's own contact
+   (or clear it and let the job create one). ⚠️ Changing a licensed user's link changes their Assigned-To access —
+   it is deliberately never done automatically.
+   **Duplicate email** (reason "Email carried by more than one contact") — deactivate or correct the duplicate
+   contact(s); only ACTIVE contacts take part in an email match.
+   **Duplicate oid** (reason "Oid carried by more than one contact") — clear all three binding columns
+   (`sprk_externalobjectid`, `sprk_externalobjectidkey`, `sprk_identityplane`) on every contact that is not that
+   person's. Deactivating is NOT enough here: the oid lookup reads contacts of every state, so an oid left on an
+   inactive duplicate keeps the oid ambiguous. (Once the `sprk_ExternalObjectIdUniqueKey` alternate key exists it
+   can only recur through a binding someone wrote by hand without its mirror; the schema script refuses to create
+   the key while two contacts would share a mirror value.)
+   **Key mirror held** (reason "Key mirror held by another contact") — the flagged contact carries an oid in
+   `sprk_externalobjectidkey` that its binding `sprk_externalobjectid` does not: someone with Write on contact put
+   it there, or a binding was cleared without its mirror. The identity named in the flag cannot be bound or get a
+   contact until the slot is freed. If the flagged contact is NOT that person's, clear its `sprk_externalobjectidkey`;
+   if it IS, ask an administrator holding the identity-link writer profile to restore the binding (or clear the
+   mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
+   contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
+   cleared.
+   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
+   created.
+   **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
+   summary columns name only the first.
+3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
+   party, drops the ones that no longer collide (the summary columns then name the next one), and clears the flag
+   only once none does. Two exceptions, cleared by hand AFTER resolving every collision on the contact (clear all
+   five `sprk_identitycollision*` columns): a flag listing **20 parties** (a later identity was not recorded), and
+   one whose `sprk_identitycollisionparties` no longer reads as the BFF wrote it (someone edited it). The job never
+   clears either, so that an unrecorded collision cannot vanish.
 
 ---
 
@@ -463,9 +709,9 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
 
 **H1** verifies target subscription is reachable + Lighthouse delegation (`CustomerOwned` only).
 
-**H2a** deploys the per-customer Bicep stack:
-- **Model 2**: `customer.bicep` — 15 resources per §7.2 of design.md
-- **Model 1**: `model1-shared.bicep` — dedicated KV/Cosmos/Storage/UAMI only
+**H2a** deploys the per-customer Bicep stack — **the same stack in both models** (D-12):
+- `customer.bicep` — 15 resources per §7.2 of design.md, into the customer's own subscription + resource group
+- ⚠️ `model1-shared.bicep` is a **retired artifact** (§3.2) and is not deployed
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -477,6 +723,28 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 - `-TenantId` is **mandatory** (I1 enforcement — no default per v3.3 code fix `1834b77bc`)
 - Grants ~14 permissions per `Infrastructure/Auth/GraphAppRoles.cs`
 - Client secret stored as KV URI reference (never cleartext)
+
+**Office add-in SPA redirect URIs (Outlook/Word add-in sign-in — REQUIRED, per add-in host).** If the environment serves the Spaarke Office add-in, register BOTH of the following as **Single-page application (SPA)** platform redirect URIs on the app registration:
+
+- `brk-multihub://<addin-host>` — the Nested-App-Authentication (NAA) broker redirect used by **desktop** Office (Windows/Mac).
+- `https://<addin-host>/auth-callback.html` — the standard MSAL popup redirect used by **Office on the web** (which does not support NAA, so `OfficeNaaStrategy` falls back to a standard `PublicClientApplication`).
+
+`<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
+
+**The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
+The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
+"member" is read from the `acct` claim (`0` member, `1` guest). Step 1 of the script adds it to a NEW
+registration; an EXISTING one needs it added once:
+
+```powershell
+.\scripts\Register-EntraAppRegistrations.ps1 -TenantId <tenant-of-the-registration> `
+  -AcctClaimOnly -AcctClaimAppId <bff-app-registration-appid>
+```
+
+It is idempotent and keeps every other optional claim. Optional claims on the resource registration apply to
+every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
+Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
@@ -493,6 +761,22 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
+**After H6 — record numbering (interim; required in EVERY environment).** Matters and Projects are numbered by
+Dataverse's platform autonumber (`MAT-######` / `PRJ-######`, `spaarkeai-word-add-in-r1` task 076; interim until the
+numbering function). `SpaarkeCore` carries the column format and the alternate keys, but **the seed is per environment
+and is not carried by a solution import** — without this step the first number is `MAT-001000`, and an environment
+whose format is missing creates **nameless** Matters and Projects (the number is the primary name; the BFF logs
+`record_number_unassigned`). The first `-Apply` also numbers any existing blank rows, oldest first (each write updates
+the row's `modifiedon`). Production: check existing matter numbers are unique first (the script lists duplicates and
+writes nothing for that table). Where the tables are managed, the format and keys must arrive with the `SpaarkeCore`
+import — the script never customises a managed component (ADR-027); it then only seeds and backfills.
+
+```powershell
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com           # dry run: every write it would make
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
+```
+
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
 **H8** provisions container-type + root container. **T6 fix**: uses confidential-client (app-only) token with cert bootstrapped from KV — delegated tokens produce `public client not allowed` 403s.
@@ -503,11 +787,19 @@ Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId
 
 ### 7.6 Phase 6 — BFF Deployment (H9)
 
-**H9** invokes `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (customerId-driven, no `spaarkedev1` hardcode per Gap 2).
+**H9** (`H9BffDeployHandler`) deploys the CI-published BFF artifact — nothing is built at provision time. In order:
+
+1. Scan the hardened `Deploy-Release.ps1` Phase 4 for a `spaarkedev1` hardcode (Gap 2) — blocks if found.
+2. Resolve and verify the artifact manifest (`latest.json`) — blocks on a missing or red gate result recorded by CI.
+3. Download the artifact zip (UAMI RBAC).
+4. **Scheduled-jobs slot guard** — set `Scheduling__RunScheduledJobs=false` on the staging slot and make it slot-sticky on the site (merge, never replace; a re-run writes nothing). Fails closed: if it cannot be set, nothing is deployed, because a slot without it runs the BFF's scheduled jobs against production data (ADR-036 A1 rule 2).
+5. Kudu zip-deploy to the staging slot.
+6. Staging `/healthz` probe, then the NFR-01 publish-size check.
+7. Swap staging → production, production `/healthz` smoke test, re-swap rollback on failure.
 
 **Blue-green** via staging slot in upgrade mode; rollback via re-swap.
 
-r3-era gates (all must pass):
+r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
 - God-class ratchet (no NEW server `.cs` > 2,000 LOC; 13 frozen files respect +100 grace)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
@@ -539,7 +831,7 @@ Then syncs Graph app-role parity from `GraphAppRoles.cs` constant onto UAMI SP.
 
 Both consume the **declarative seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9).
 
-**H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (Model 2 dedicated; Model 1 shared with per-tenant attribution). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
+**H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
@@ -584,6 +876,7 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 **Verification lifecycle**:
 
 - **At code time**: 5 ArchTests (CI Tier-1 blocking, coordinated PR with `ci-cd-unit-test-remediation-r1`)
+  - **Functions projects** live under `src/server/functions/` ([ADR-052](../adr/ADR-052-workload-placement.md) §5). The I2 and I3 ArchTests scan all of `src/server/**`, so a Model-1 shared Function carries those invariants automatically; I4 and I5 currently scan BFF paths only (`Sprk.Bff.Api/Services`, `Sprk.Bff.Api/Infrastructure/{Graph,Auth}`), so a Function's SPE-container and Graph-token code is covered by review until those scans are widened.
 - **At provisioning time**: H13 samples a query in each of the 5 classes
 - **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced for anomaly detection
 
@@ -673,7 +966,7 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
 1. Complete §2.5 preflight naming collision check
 2. Verify §2.4 external lead-time items (Azure quota, SPE cert-bootstrap, Model 2 admin consent)
 3. Verify §2.2 identity + access role assignments
-4. Confirm §3.1/§3.2 tenancy model choice with customer / stakeholder
+4. Confirm the tenancy model with the customer (§3) — Model 1 = Spaarke tenant, Model 2 = customer tenant / stakeholder
 
 ### 12.2 Provisioning sequence (interim)
 
@@ -683,7 +976,7 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
     -CustomerId "acme" `
     -TenantId "<customer-tenant-guid>" `   # MANDATORY per I1
     -Environment "prod" `
-    -TenancyModel "Model2Dedicated" `      # or "Model1Shared"
+    -TenancyModel "Model2Dedicated" `      # covers BOTH models until the D-12 enum migration; "Model1Shared" is retired
     -SubscriptionId "<sub-guid>" `
     -Region "westus2"
 
@@ -917,6 +1210,11 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 |---|---|---|
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
+| 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+| 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
+| 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
+| 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
+| 2026-10-02 | §7.4: record numbering after H6 — `scripts/Set-RecordNumberingSchema.ps1` in every environment (the autonumber seed is not carried by a solution import; first run numbers blank rows) | `spaarkeai-word-add-in-r1` task 076 (owner decisions 2026-10-02: platform autonumber, interim until the numbering function) |
 
 ---
 

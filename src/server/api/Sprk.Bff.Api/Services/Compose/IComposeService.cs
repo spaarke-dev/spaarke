@@ -291,7 +291,11 @@ public interface IComposeService
     /// <c>Services/Compose</c> stays pure (no AI internals, no Graph types — ADR-007/ADR-013).
     /// </remarks>
     /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
-    /// <param name="driveId">SPE drive (container) id. Required.</param>
+    /// <param name="requestedDriveId">SPE drive (container) id as named by the CALLER. Required, but it is
+    /// a claim rather than the write target: the implementation resolves the drive RECORDED on the owning
+    /// <c>sprk_document</c> row and uses that when the row has one, falling back to this value only for a
+    /// row that carries no drive id (legacy) or no row at all. See
+    /// <c>ComposeRecordResolution.TryResolveRecordedDriveIdAsync</c>.</param>
     /// <param name="documentSpeId">SPE drive-item id of the persisted document. Required.</param>
     /// <param name="resolvedTemplateBytes">The resolved firm/matter <c>.dotx</c> package bytes
     /// (task 031's <c>IComposeTemplateSource.ResolveAsync</c> output). Required, non-empty.</param>
@@ -301,7 +305,7 @@ public interface IComposeService
     /// merge degradation warnings (loud, never silent), and the post-merge canonical content model.</returns>
     Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
         HttpContext httpContext,
-        string driveId,
+        string requestedDriveId,
         string documentSpeId,
         byte[] resolvedTemplateBytes,
         string templateName,
@@ -734,7 +738,8 @@ public sealed record ComposeMountProjection
 /// <b>Create-on-save (FR-05)</b>: <see cref="DocumentSpeId"/> and <see cref="DriveId"/> are
 /// OPTIONAL. When <see cref="DocumentSpeId"/> is absent the caller is saving a TRANSIENT draft
 /// (Browse / Upload / AI-drafted — task 010/012) that has no SPE drive-item yet; the Save then
-/// CREATES the drive-item in the client-supplied <see cref="ContainerId"/> under OBO before the
+/// CREATES the drive-item under OBO in a container the SERVER derives (see the ContainerId
+/// tombstone below and <c>ComposeService.ResolveCreateOnSaveContainerAsync</c>) before the
 /// record + indexing steps. When <see cref="DocumentSpeId"/> is present the Save replaces the
 /// existing item's content (the original R1 behavior). Both cases are idempotent.
 /// </remarks>
@@ -742,23 +747,43 @@ public sealed record SaveComposeDocumentRequest
 {
     /// <summary>SPE drive (container) id. Required for the replace-content path (when
     /// <see cref="DocumentSpeId"/> is present); ignored for the transient create path, where the
-    /// drive is derived from <see cref="ContainerId"/>.</summary>
+    /// drive comes from the SERVER-derived container, never from this request.</summary>
     public string? DriveId { get; init; }
 
     /// <summary>SPE drive-item id. Null/absent for a TRANSIENT create-on-save draft (FR-05,
-    /// Fork B) — the Save creates the drive-item in <see cref="ContainerId"/>. Present for the
+    /// Fork B) — the Save creates the drive-item in the SERVER-derived container. Present for the
     /// replace-content path (a document already backed by SPE).</summary>
     public string? DocumentSpeId { get; init; }
 
-    /// <summary>
-    /// CLIENT-SUPPLIED SPE container (or drive) id for the create-on-save path (FR-05, Fork A).
-    /// The client resolves this via the existing wizard cascade
-    /// (<c>resolveBusinessUnitContainerId</c> → <c>businessunit.sprk_containerid</c>) and passes
-    /// it in. Required when <see cref="DocumentSpeId"/> is absent; the BFF does NOT resolve a
-    /// business-unit → container mapping server-side (multi-container INV-7 — the resolver stays
-    /// in the wizards). Ignored when <see cref="DocumentSpeId"/> is present.
-    /// </summary>
-    public string? ContainerId { get; init; }
+    // ══ ContainerId DELETED — issue #858, unified-access-control-r2, 2026-09-01 ═══════════════════
+    //
+    // Was: `public string? ContainerId { get; init; }`, documented as "CLIENT-SUPPLIED SPE container
+    // (or drive) id for the create-on-save path… the BFF does NOT resolve a business-unit → container
+    // mapping server-side (multi-container INV-7 — the resolver stays in the wizards)."
+    //
+    // Deleted rather than deprecated, because a field that still EXISTS is a capability that still
+    // exists: the server wrote bytes into whatever container the caller named, having authorized the
+    // caller against nothing (the /api/compose group carries a bare RequireAuthorization(), which asks
+    // only "are you anyone?"). Same defect class as task 073 (route deleted), 076 (route converted) and
+    // 085 (SaveRequest.ContainerId deleted). SPE permissions are additive-only, so content placed in a
+    // shared container cannot be retracted — which is why the shape is removed, not gated.
+    //
+    // The container is now chosen by ComposeService.ResolveCreateOnSaveContainerAsync:
+    //   matter bound to the session  -> that matter's container, AFTER authorizing the caller against
+    //                                   the matter (RecordContainerResolver.ResolveForRecordAsync)
+    //   no matter (the designed       -> the acting user's business-unit container, server-derived
+    //   empty-state draft flow)          (RecordContainerResolver.ResolveForActingUserAsync)
+    //
+    // The record identity comes from SERVER-SIDE session state, never from this request. Threading the
+    // owning record through the save request — issue #858's own proposal — would have RELOCATED the
+    // defect: the caller would name a matter instead of a container and the server would resolve it.
+    //
+    // ⚠️ The INV-7 citation above was INVERTED. INV-7 (spaarke-multi-container-multi-index-r1
+    // design.md:82-88) PRESCRIBES server-side resolution — record's own field → parent's BU → tenant
+    // default — so it was the reason to resolve server-side, not the reason not to. "The resolver stays
+    // in the wizards" was a SCOPE boundary from that project ("we are not doing that work here") which
+    // got cited downstream as a technical limit. Four unrelated invariants in this repo are numbered
+    // "INV-7"; cite the source project when quoting it.
 
     /// <summary>
     /// E1 (FR-01/FR-06, task 022): the retained load-time original <c>.docx</c> bytes, supplied as the
@@ -884,6 +909,23 @@ public sealed record SaveComposeDocumentRequest
     /// behavior.
     /// </summary>
     public NdaReviewSummaryPageInput? SummaryPage { get; init; }
+
+    /// <summary>
+    /// spaarkeai-compose-r8 (UAT item 8, "Include document revision report"): optional Document Revision
+    /// Report content, deterministically derived from the ONE ledgered
+    /// <c>compose-summarize-word-changes</c> result (<c>{summary, changes[]}</c>) plus the document
+    /// identity the report is scoped to — NO second LLM call (see
+    /// <see cref="ComposeRevisionReportGenerator"/>). When present, <see cref="SaveAsync"/> appends it as
+    /// a page-broken, non-tracked section at the END of <c>contentToPersist</c> via
+    /// <see cref="ComposeDocumentRenderer.AppendSection"/> — the SAME shipped path
+    /// <see cref="SummaryPage"/> uses, not a parallel mechanism.
+    /// <para>
+    /// Null/absent (every ordinary Compose save) → no report appended, unchanged behavior. Supplying an
+    /// input the generator finds empty (no summary AND no changes) also appends nothing: a report over no
+    /// changes is the fabricated-change failure the upstream producer refuses to enable.
+    /// </para>
+    /// </summary>
+    public ComposeRevisionReportInput? RevisionReport { get; init; }
 
     /// <summary>
     /// G7 (FR-06, task 022): a CLIENT-MINTED stable key for a TRANSIENT (not-yet-promoted) Compose draft,
@@ -1136,7 +1178,7 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// so the synchronous aggregate is <see cref="JobAwareState.Partial"/> on the
     /// happy path (record exists + indexed, profile dispatched off-thread). A record with no SPE
     /// file OR no index is never a success — see
-    /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
+    /// <see cref="ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }

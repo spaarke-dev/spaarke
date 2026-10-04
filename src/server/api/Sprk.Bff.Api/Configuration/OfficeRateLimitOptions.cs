@@ -13,7 +13,6 @@ namespace Sprk.Bff.Api.Configuration;
 /// - POST /office/quickcreate/*: 5 requests per minute per user
 /// - GET /office/search/*: 30 requests per minute per user
 /// - GET /office/jobs/*: 60 requests per minute per user
-/// - POST /office/share/*: 20 requests per minute per user
 /// </para>
 /// <para>
 /// Rate limit state is stored in Redis (when enabled) for distributed consistency
@@ -89,18 +88,4 @@ public class EndpointLimits
     /// </summary>
     [Range(1, 1000)]
     public int JobsRequestsPerMinute { get; set; } = 60;
-
-    /// <summary>
-    /// POST /office/share/* - Requests per minute per user.
-    /// Default: 20
-    /// </summary>
-    [Range(1, 1000)]
-    public int ShareRequestsPerMinute { get; set; } = 20;
-
-    /// <summary>
-    /// GET /office/recent - Requests per minute per user.
-    /// Default: 30
-    /// </summary>
-    [Range(1, 1000)]
-    public int RecentRequestsPerMinute { get; set; } = 30;
 }

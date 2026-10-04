@@ -4,7 +4,7 @@
     <title>Publish-size baseline + /conflict-check + PR #266 (OpenXml 3.5.1) sequencing decision</title>
     <phase>0 Coordination &amp; Prerequisites</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>No source modified — measures a baseline, runs a coordination check, and records a sequencing decision.</rigor-reason>
     <model-tier>sonnet</model-tier>

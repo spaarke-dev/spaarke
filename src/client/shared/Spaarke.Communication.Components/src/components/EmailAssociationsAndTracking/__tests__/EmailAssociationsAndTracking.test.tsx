@@ -17,7 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { EmailConnectionsReview } from '../EmailConnectionsReview';
 import { EmailTrackingPanel } from '../EmailTrackingPanel';
@@ -490,33 +490,177 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
   });
 });
 
-describe('EmailTrackingPanel', () => {
-  const ACCESS_OPTIONS = [
-    { value: 100000000, label: 'Standard' },
-    { value: 100000001, label: 'Limited' },
-    { value: 100000002, label: 'Restricted' },
-  ];
+describe('R3-CARD-2: "See all" candidates modal (top-3 strip cap)', () => {
+  beforeEach(() => {
+    _resetNavPropCacheForTests();
+    global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
+  });
 
+  /** Four above-floor candidates → the strip shows top-3, the 4th ("Delta") is off-strip. */
+  function fourCandidateProps(overrides: Partial<EmailConnectionsReviewProps> = {}): EmailConnectionsReviewProps {
+    return baseProps({
+      associationProvenanceJson: provenance([
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Alpha', 0.95, { number: 'MAT-1' }),
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-2', 'Bravo', 0.9, { number: 'MAT-2' }),
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-3', 'Charlie', 0.85, { number: 'MAT-3' }),
+        cand('sprk_regardingmatter', 'sprk_matter', 'mtr-4', 'Delta', 0.8, { number: 'MAT-4' }),
+      ]),
+      ...overrides,
+    });
+  }
+
+  it('shows a "See all (N)" trigger ONLY when more above-floor candidates exist than the top-3 strip', () => {
+    // 4 candidates → 1 hidden → trigger with the full count.
+    const { unmount } = renderWithProvider(<EmailConnectionsReview {...fourCandidateProps()} />);
+    expect(screen.getByTestId('see-all-candidates')).toHaveTextContent('See all (4)');
+    unmount();
+
+    // 2 candidates (baseProps) → nothing hidden → no trigger.
+    renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+    expect(screen.queryByTestId('see-all-candidates')).not.toBeInTheDocument();
+  });
+
+  it('the modal lists EVERY candidate including the off-strip 4th ("Delta"), which the strip does not show', () => {
+    renderWithProvider(<EmailConnectionsReview {...fourCandidateProps()} />);
+
+    // The strip caps at 3 — Delta is NOT rendered as a strip radio card.
+    expect(screen.queryByRole('radio', { name: /Delta/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('see-all-candidates'));
+    const modal = screen.getByTestId('see-all-candidates-modal');
+    // All four compact rows are present in the modal, the hidden 4th included.
+    expect(within(modal).getByText('MAT-1 : Alpha')).toBeInTheDocument();
+    expect(within(modal).getByText('MAT-4 : Delta')).toBeInTheDocument();
+    expect(within(modal).getAllByRole('button', { name: 'Confirm' })).toHaveLength(4);
+  });
+
+  it('confirming the off-strip 4th candidate in the modal files it via the additive applyRegardingSelection path', async () => {
+    const props = fourCandidateProps();
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('see-all-candidates'));
+    const modal = screen.getByTestId('see-all-candidates-modal');
+    // Rows are rendered in ranked order — the 4th Confirm is Delta's (mtr-4).
+    const confirms = within(modal).getAllByRole('button', { name: 'Confirm' });
+    fireEvent.click(confirms[3]);
+
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    expect(call[0]).toBe('sprk_communication');
+    expect(call[1]).toBe(HOST_ID);
+    const payload = call[2] as Record<string, unknown>;
+    // Bound to the hidden 4th record; additive (no nulled sibling lookups).
+    const bind = Object.entries(payload).find(([k]) => k.endsWith('@odata.bind'));
+    expect(bind?.[1]).toEqual(expect.stringContaining('mtr-4'));
+    const nulled = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
+    expect(nulled).toHaveLength(0);
+  });
+
+  it('the "See all" trigger works in the reconcile variant too', () => {
+    renderWithProvider(<EmailConnectionsReview {...fourCandidateProps({ variant: 'reconcile' })} />);
+    expect(screen.getByTestId('see-all-candidates')).toHaveTextContent('See all (4)');
+  });
+
+  it('readOnly: the modal opens but candidate rows carry no Confirm button', () => {
+    renderWithProvider(<EmailConnectionsReview {...fourCandidateProps({ readOnly: true })} />);
+    fireEvent.click(screen.getByTestId('see-all-candidates'));
+    const modal = screen.getByTestId('see-all-candidates-modal');
+    expect(within(modal).getByText('MAT-4 : Delta')).toBeInTheDocument();
+    expect(within(modal).queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  });
+});
+
+describe('R3-CARD-1: a GUID-only candidate shows type + reason, never the raw GUID', () => {
+  const GUID = '99999999-8888-7777-6666-555555555555';
+
+  beforeEach(() => {
+    _resetNavPropCacheForTests();
+    global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
+  });
+
+  it('renders the match reason + entity type for a thread match with no recoverable name (GUID target)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          variant: 'reconcile',
+          // A thread-continuity match: GUID target, no targetName, no name="…" contributor.
+          associationProvenanceJson: JSON.stringify({
+            version: 1,
+            direction: 'inbound',
+            decision: {
+              status: '',
+              autoFiled: false,
+              killSwitchEnabled: false,
+              autoFileThreshold: 0.85,
+              topDeterministicConfidence: 0,
+              topConfidence: 0,
+              aiInvolved: false,
+              reason: '',
+            },
+            rungsFired: [],
+            candidates: [
+              {
+                field: 'sprk_regardingmatter',
+                targetEntity: 'sprk_matter',
+                targetId: GUID,
+                reinforcedConfidence: 0.9,
+                deterministicConfidence: 0.9,
+                written: false,
+                conflict: false,
+                contributors: [{ rung: 'ThreadContinuity', confidence: 0.9, provenance: 'thread-continuity' }],
+              },
+            ],
+            signals: [],
+          }),
+        })}
+      />
+    );
+
+    // The raw GUID is never shown to the reviewer …
+    expect(screen.queryByText(new RegExp(GUID, 'i'))).not.toBeInTheDocument();
+    // … instead the card shows the plain-English reason as its identity and the entity type.
+    expect(screen.getByText(/Matched from email thread/)).toBeInTheDocument();
+    expect(screen.getByText(/Matter ·/)).toBeInTheDocument();
+  });
+});
+
+describe('EmailTrackingPanel', () => {
   function baseTrackingProps(overrides: Partial<EmailTrackingPanelProps> = {}): EmailTrackingPanelProps {
     return {
       monitor: false,
       highPriority: true,
-      accessPermission: 100000001,
-      accessPermissionOptions: ACCESS_OPTIONS,
       onMonitorChange: jest.fn(),
       onHighPriorityChange: jest.fn(),
-      onAccessPermissionChange: jest.fn(),
       ...overrides,
     };
   }
 
-  it('reads current monitor/high-priority/access-permission values from the record', () => {
+  it('reads current monitor/high-priority values from the record', () => {
     renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
 
     const switches = screen.getAllByRole('switch');
     expect(switches[0]).not.toBeChecked(); // monitor: false
     expect(switches[1]).toBeChecked(); // highPriority: true
-    expect(screen.getByRole('radio', { name: 'Limited' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  // unified-access-control-r2 task 138 (owner Q6): a communication INHERITS its parent's Access
+  // Permission; its own column is retired, so the panel offers no access-permission control at all.
+  it('renders NO access-permission control — a communication inherits its parent permission (owner Q6)', () => {
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
+
+    expect(screen.queryByRole('button', { name: /access/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Standard')).not.toBeInTheDocument();
+    expect(screen.queryByText('Limited')).not.toBeInTheDocument();
+    expect(screen.queryByText('Restricted')).not.toBeInTheDocument();
+  });
+
+  it('a read-only panel disables both switches (no write affordance)', () => {
+    const onMonitorChange = jest.fn();
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ readOnly: true, onMonitorChange })} />);
+
+    const switches = screen.getAllByRole('switch');
+    expect(switches[0]).toBeDisabled();
+    expect(switches[1]).toBeDisabled();
   });
 
   it('writes back a monitor toggle', () => {
@@ -525,14 +669,6 @@ describe('EmailTrackingPanel', () => {
 
     fireEvent.click(screen.getAllByRole('switch')[0]);
     expect(onMonitorChange).toHaveBeenCalledWith(true);
-  });
-
-  it('writes back an access-permission change', () => {
-    const onAccessPermissionChange = jest.fn();
-    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ onAccessPermissionChange })} />);
-
-    fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
-    expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
   });
 
   it('surfaces an inline error when the write callback rejects', async () => {
@@ -553,15 +689,15 @@ describe('EmailTrackingPanel', () => {
   });
 
   it('compact mode (reading-pane header band placement) hides the "Tracking" label and field captions, but keeps the controls read/write functional', () => {
-    const onAccessPermissionChange = jest.fn();
-    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ compact: true, onAccessPermissionChange })} />);
+    const onHighPriorityChange = jest.fn();
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ compact: true, onHighPriorityChange })} />);
 
     expect(screen.queryByText('Tracking')).not.toBeInTheDocument();
     expect(screen.queryByText('Monitor')).not.toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
-    expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
+    fireEvent.click(screen.getAllByRole('switch')[1]);
+    expect(onHighPriorityChange).toHaveBeenCalledWith(false);
   });
 });
 

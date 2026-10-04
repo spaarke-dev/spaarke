@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -85,23 +86,14 @@ public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunic
         var expectedSubject = "Re: Contract terms";
         var messageId = "<abc@contoso.com>";
 
-        _factory.EntityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q =>
-                    q.EntityName == "sprk_communication"
-                    && q.Criteria.Conditions.Count == 1
-                    && q.Criteria.Conditions[0].AttributeName == "sprk_internetmessageid"
-                    && (string)q.Criteria.Conditions[0].Values[0] == messageId),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                var entity = new Entity("sprk_communication", expectedCommunicationId);
-                entity["sprk_communicationid"] = expectedCommunicationId;
-                entity["sprk_subject"] = expectedSubject;
-                entity["sprk_internetmessageid"] = messageId;
-                var collection = new EntityCollection(new[] { entity });
-                return collection;
-            });
+        // Programmed on the DELEGATED client (task 127 / #1020). The app-only service is no longer
+        // on this path, so programming EntityServiceMock alone would now yield a 404.
+        _factory.SetupUserQuery(
+            // Discriminate on the message id: this fixture is SHARED across the class, so matching on
+            // the entity set alone would leak this row into the not-captured tests below.
+            Uri.EscapeDataString(messageId),
+            "{\"value\":[{\"sprk_communicationid\":\"" + expectedCommunicationId + "\","
+            + "\"sprk_subject\":\"" + expectedSubject + "\"}]}");
 
         // Act — note the client URL-encodes the messageId
         var response = await _client.GetAsync(
@@ -216,28 +208,14 @@ public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunic
             Guid.Parse("33333333-3333-3333-3333-333333333333"),
         };
 
-        _factory.EntityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q =>
-                    q.EntityName == "sprk_todo"
-                    && q.TopCount == 10
-                    && q.Criteria.Conditions.Count == 1
-                    && q.Criteria.Conditions[0].AttributeName == "sprk_regardingcommunication"
-                    && (Guid)q.Criteria.Conditions[0].Values[0] == commId),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                var entities = todoIds.Select((id, idx) =>
-                {
-                    var e = new Entity("sprk_todo", id);
-                    e["sprk_todoid"] = id;
-                    e["sprk_name"] = $"Todo {idx + 1}";
-                    e["statecode"] = new OptionSetValue(0);
-                    e["statuscode"] = new OptionSetValue(1);
-                    return e;
-                }).ToArray();
-                return new EntityCollection(entities);
-            });
+        // Programmed on the DELEGATED client (task 127 / #1020). Dataverse trims this query under
+        // the caller's own context now, so the rows a test programs here stand in for "what this
+        // caller is permitted to see" rather than "every row linked to the communication".
+        var rows = string.Join(",", todoIds.Select((id, idx) =>
+            "{\"sprk_todoid\":\"" + id + "\",\"sprk_name\":\"Todo " + (idx + 1)
+            + "\",\"statecode\":0,\"statuscode\":1}"));
+        // Discriminated on the commId for the same shared-fixture reason as above.
+        _factory.SetupUserQuery(commId.ToString(), "{\"value\":[" + rows + "]}");
 
         // Act
         var response = await _client.GetAsync(
@@ -293,12 +271,56 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
 {
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
 
+    /// <summary>
+    /// The DELEGATED (user-OBO) Dataverse client - the boundary these routes read through since
+    /// unified-access-control-r2 task 127 (GitHub #1020). Mocking this interface is allowed by
+    /// docs/standards/TEST-ARCHITECTURE.md mock-boundary rules: it is a module boundary, not an
+    /// HttpMessageHandler (which ADR-038 bans).
+    /// <para>
+    /// <see cref="EntityServiceMock"/> is retained because the fixture still has to displace the
+    /// app-only registration to keep the host off real Dataverse - but these three routes no longer
+    /// read through it, and a test that programs it alone will now get a 404.
+    /// </para>
+    /// </summary>
+    public Mock<IDataverseUserClient> UserClientMock { get; } = new();
+
+    /// <summary>
+    /// Default for any delegated GET a test has not programmed: an empty, SUCCESSFUL page.
+    ///
+    /// <para>This is the honest default. Under the caller's own security context, "you may not see
+    /// this record" and "this record does not exist" are meant to be indistinguishable — Dataverse
+    /// returns no rows either way, and the handlers turn that into a 404. Defaulting to a FAILURE
+    /// instead would make unprogrammed tests exercise the delegated-context-broken path, which is a
+    /// different branch entirely.</para>
+    /// </summary>
+    private void SetupEmptyUserQueryDefault()
+        => UserClientMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse("{\"value\":[]}");
+                return DataverseUserResponse.Ok(200, doc.RootElement.Clone());
+            });
+
+    /// <summary>Programs a delegated OData GET whose path contains <paramref name="pathFragment"/>.</summary>
+    public void SetupUserQuery(string pathFragment, string json)
+        => UserClientMock
+            .Setup(c => c.GetAsync(
+                It.Is<string>(pth => pth.Contains(pathFragment, StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                return DataverseUserResponse.Ok(200, doc.RootElement.Clone());
+            });
+
     private readonly bool _disableAuth;
 
     public OfficeCommunicationsTestWebAppFactory() : this(disableAuth: false) { }
 
     private OfficeCommunicationsTestWebAppFactory(bool disableAuth)
     {
+        SetupEmptyUserQueryDefault();
         _disableAuth = disableAuth;
     }
 
@@ -420,6 +442,12 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
             // program Dataverse responses.
             services.RemoveAll<IGenericEntityService>();
             services.AddSingleton(EntityServiceMock.Object);
+
+            // task 127 (#1020): the three Office communications routes read through the DELEGATED
+            // client now, so the fixture must displace it too - otherwise the host resolves the real
+            // typed HttpClient and every read fails closed against no Dataverse.
+            services.RemoveAll<IDataverseUserClient>();
+            services.AddSingleton(UserClientMock.Object);
 
             // Replace IDataverseService to avoid real Dataverse boot. This mirrors the
             // shape used by OfficeTestWebAppFactory.

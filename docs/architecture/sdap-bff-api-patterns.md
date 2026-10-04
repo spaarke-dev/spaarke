@@ -12,7 +12,7 @@
 
 Sprk.Bff.Api is a single .NET 10 Minimal API that serves as the Backend-for-Frontend (BFF) for the entire SDAP platform. It provides 120+ endpoints across 7 functional domains: SPE/Documents, AI Platform, Office Add-ins, Email/Communication, Finance Intelligence, Workspace/Portfolio, and Background Processing. The API uses a modular DI registration system where each domain is encapsulated in a startup module, and endpoints are registered through extension methods organized by domain.
 
-The architecture is shaped by three key ADRs: ADR-001 (Minimal API + BackgroundService, no Azure Functions), ADR-008 (endpoint filters for authorization, no global middleware), and ADR-010 (DI minimalism with concrete types and feature modules).
+The architecture is shaped by three key ADRs: ADR-001 (Minimal API for every endpoint; where background work runs is [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)), ADR-008 (endpoint filters for authorization, no global middleware), and ADR-010 (DI minimalism with concrete types and feature modules).
 
 ## Component Structure
 
@@ -105,7 +105,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 | `DocumentAuthorizationFilter` | `Api/Filters/` | SPE document Read access |
 | `AnalysisAuthorizationFilter` | `Api/Filters/` | AI analysis document access (delegates to IAiAuthorizationService) |
 | `ExternalCallerAuthorizationFilter` | `Api/Filters/` | Power Pages portal user validation |
-| `FinanceAuthorizationFilter` | `Api/Filters/` | Finance endpoint access |
+| `FinanceAuthorizationFilter` | `Api/Filters/` | Per-route, per-record caller check on `/api/finance/*` and the finance + scorecard recalculate routes: each route declares the id(s) it authorizes and from which source (route / body / query); Read on the matter/project; invoice-review confirm = Write+Append on the document (it holds the invoice lookup), AppendTo on matter + vendor, and the caller's Create privilege on `sprk_invoice` (via `CallerRecordAccessProbe`) before the app creates the team-owned invoice; uniform 404 on recalculate (task 130) |
 | `WorkspaceAuthorizationFilter` | `Api/Filters/` | Workspace access |
 | `WorkspaceLayoutAuthorizationFilter` | `Api/Filters/` | Workspace layout CRUD |
 | `OfficeAuthFilter` | `Api/Filters/` | Office Add-in token validation |
@@ -156,7 +156,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| API style | .NET 10 Minimal API + BackgroundService | No Azure Functions overhead; single deployable unit | ADR-001 |
+| API style | .NET 10 Minimal API + BackgroundService | Single deployable unit for every BFF endpoint; where background work runs is decided per workload | ADR-001, ADR-052 |
 | Authorization | Endpoint filters per-endpoint | No global middleware; fine-grained per-resource checks | ADR-008 |
 | DI pattern | Feature modules with concrete types | Minimize DI registrations; forwarding delegates don't count | ADR-010 |
 | Caching | Redis-first via IDistributedCache | No hybrid L1 cache unless profiling proves need | ADR-009 |
@@ -178,7 +178,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 | Consumed by | Office Add-ins | REST endpoints (OBO auth) | Outlook/Word save and search |
 | Consumed by | M365 Copilot Agent | `/api/agent/*` endpoints | Bot framework gateway via AgentModule |
 | Consumed by | Power Pages Portal | `/api/v1/external/*` endpoints | Portal JWT auth (not Azure AD) |
-| Consumed by | Dataverse Webhooks | `/api/v1/emails/webhook-trigger` | HMAC-SHA256 validated, enqueues jobs |
+| ~~Consumed by~~ | ~~Dataverse Webhooks~~ | ~~`/api/v1/emails/webhook-trigger`~~ | **Retired** — `MapEmailEndpoints` removed (email-communication-solution-r4 task 007); inbound email is Graph-only via `IncomingCommunicationProcessor`. `scripts/Register-EmailWebhook.ps1` deleted 2026-09-25. A future generic Dataverse → BFF change signal (ADR-002 WP-5) is described in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §6 |
 | Depends on | Microsoft Graph | `GraphClientFactory` (OBO + app-only) | SPE file operations, email fetch |
 | Depends on | Dataverse | `IDataverseService` / `DataverseWebApiService` | Entity CRUD, metadata queries |
 | Depends on | Azure AI Search | `RagService` | RAG search with OData filter builder |
@@ -297,8 +297,8 @@ All handlers follow the same pattern: idempotency check, acquire Redis processin
 - **MUST** follow SPE First, Dataverse Second ordering for all upload flows
 - **MUST** use `IDistributedCache` (Redis) for all caching — no in-process L1 cache (ADR-009)
 - **MUST** use `SpeFileStore` facade for SPE operations — no `GraphServiceClient` injection into endpoints (ADR-007)
-- **MUST NOT** add Azure Functions — all background work via BackgroundService + Service Bus (ADR-001)
-- **MUST NOT** make HTTP/Graph calls from Dataverse plugins
+- **MUST NOT** put Azure Functions inside the BFF assembly (ADR-001); where background work runs is ADR-052 (queue work: ADR-004 `IJobHandler`; scheduled work: ADR-036 `IScheduledJob`)
+- **MUST NOT** add Dataverse plugins — record invariants live in the BFF server-side write path (ADR-002 WP-1…WP-8, updated 2026-09-25)
 
 ---
 

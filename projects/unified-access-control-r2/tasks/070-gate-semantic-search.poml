@@ -3,7 +3,17 @@
   <metadata>
     <title>Authorize POST /api/ai/search per document: constrain to the caller's accessible-record set, refuse scope=all, and stop emitting SPE pointers</title>
     <phase>0c Secure Documents — Wave 1</phase>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 8ce4b7cac (Phase 0c Wave 1 — 070/071/074) + 675a7fb3d ("mark task 070 COMPLETE")
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Closes a live tenant-wide disclosure on the flagship Matter form. Touches the BFF authorization surface and the AI search path.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -13,7 +23,7 @@
     <parallel-group>wave1</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches the shared access-evaluation surface (AccessibleRecordSetService / CallerPrincipal); concurrent edits to authorization paths produce silent merge damage.</parallel-reason>
-    <deps>046</deps>
+    <deps>046, 136</deps>
     <tags>bff-api, api, auth, ai, security</tags>
     <estimated-effort>4-6 hours</estimated-effort>
     <origin>Filed 2026-08-25 from the Fable security-boundary review. Verified first-hand in code: `SemanticSearchAuthorizationFilter.ValidateScopeAuthorization` returns `new AuthorizationResult(true, null)` for entity, documentIds, all, AND default. Exploitable now by any authenticated non-admin.</origin>
@@ -114,4 +124,46 @@ BROKER-ONLY DECISION (2026-08-25, see SECURE-DOCUMENTS-BUILD-PLAN.md): the BFF i
   </acceptance-criteria>
 
   <notes>The class remarks already name this gap as a "future enhancement" — this is that enhancement, and it is not optional. The contact path is the reference implementation; if this fix does not end up looking like `ExternalProjectDataEndpoints`, question why.</notes>
+
+  <amendments date="2026-09-30" source="session 26 defect verification (C2) and owner Q7 approval in session 27 (notes/session26-uac-defects-and-synopsis.md; notes/session27-owner-decisions-and-research.md)">
+    <verdict>REFERENCE WITHDRAWN; DEPENDENCY ADDED; the shipped state is unaffected and the status stays
+    completed. This POML names ExternalProjectDataEndpoints as "the reference implementation" to copy
+    (context background, "THE REFERENCE IMPLEMENTATION ALREADY SHIPS", and the notes line "if this fix
+    does not end up looking like ExternalProjectDataEndpoints, question why"). That reference is the
+    presence-only gate of defect C2. CallerPrincipal.HasProjectAccess
+    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:161 at the time;
+    :203 after task 136) was ProjectAccess.Any(...) and never checked AccessRights.Read. ExternalProjectDataEndpoints
+    gated on it at :273, :290, :322, :562, :694, :766, :792, :823 and :840 (after task 136 the seven READ routes
+    are :283, :300, :334, :721, :792, :849, :866 through HoldsReadOnProject (:499), and the two MUTATING routes
+    :589, :818 keep HasProjectAccess, now Read-gated, before their Create check). Copying it would admit
+    None-rights keys, including Secure-suppressed org grants.</verdict>
+    <delivered>task 136 gate delivered 2026-10-01 (branch task/uac-r2-136): HasProjectAccess requires Read;
+    every project read route tests Read via HoldsReadOnProject; the evaluator removes entries without Read
+    at the end of every composition and both plane strategies prune at construction. Amendment n=1's anchors
+    into SemanticSearchAuthorizationFilter.cs (:413, :497-498, :500, :604-607), SemanticSearchEndpoints.cs
+    (:171-178, :292) and DataverseAccessDataSource.cs (:429) re-verified unchanged; the amended negative grep
+    re-run 2026-10-01 returns zero. Evidence: notes/task-136-rights-based-read-gates.md §7.</delivered>
+    <amendment n="1" title="What actually shipped (verified 2026-09-30)">
+    The implementation did NOT copy the presence gate. The workforce scope checks are rights-based:
+    SemanticSearchAuthorizationFilter calls AuthorizationService.GetCallerRecordAccessAsync
+    (src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs:497-498) and requires
+    AccessRights.Read (:500 for scope=entity). The documentIds scope checks each document through
+    GetCallerAccessAsync (:604-607) and also requires Read. Both are RetrievePrincipalAccess as the caller
+    over OBO. scope=all is authorized per result row against its parent: the filter sets RequiresPerRowParentAuthorization
+    (SemanticSearchAuthorizationFilter.cs:413) and src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs
+    enforces it (:171-178 search; :292 count refused). A caller with no systemuser is denied (caller_not_a_dataverse_user,
+    src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs:429). So no C2 exposure was introduced
+    by this task, and nothing here is re-opened.</amendment>
+    <amendment n="2" title="Binding for any re-execution, extension or follow-up on this route">
+    The reference to copy is task 136's rights-based gate (Read required; a None-rights key admits
+    nothing), NOT HasProjectAccess and NOT a key-presence check on any AccessibleXIds set. This applies to:
+    admitting contact or CIAM callers to semantic search; moving the workforce path onto the
+    accessible-record set after task 036; and any change to the scope=all per-row parent authorization.
+    Such work depends on task 136, which is why 136 is added to deps.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Any future change to this route that consults a CallerPrincipal or an accessible-record set denies a record whose rights lack Read. The test asserts denial (no result row, or 403), not only RightsFor == None.</criterion>
+      <criterion testable="true">Negative: no code path on /api/ai/search authorizes by key presence alone (grep for HasProjectAccess and for Accessible*Ids.Contains under src/server/api/Sprk.Bff.Api/Api/Ai, Services/Ai/SemanticSearch and Api/Filters/SemanticSearchAuthorizationFilter.cs returns zero authorization uses; verified zero on 2026-09-30).</criterion>
+      <criterion testable="true">Unchanged by this amendment: status stays completed, the shipped code is not modified under this id, and scripts/check-task-status-drift.ps1 remains clean for id 070.</criterion>
+    </acceptance-criteria-amended>
+  </amendments>
 </task>

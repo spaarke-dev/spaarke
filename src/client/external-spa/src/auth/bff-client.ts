@@ -162,6 +162,47 @@ export async function bffApiCall<T>(path: string, options: RequestInit = {}): Pr
 }
 
 /**
+ * Make an authenticated call to the BFF API that returns BINARY content.
+ *
+ * Identical auth/retry semantics to {@link bffApiCall} — it deliberately shares
+ * `acquireActiveBffToken` + `executeFetch` rather than forking a second fetch
+ * path — but resolves the body as a `Blob` instead of parsing it as JSON.
+ *
+ * Why this exists: the external document-download route
+ * (`GET /api/v1/external/projects/{id}/documents/{documentId}/content`) streams
+ * the file itself as `application/octet-stream`. It deliberately NEVER returns a
+ * signed URL or any SPE pointer — see `ExternalProjectDataEndpoints.cs`
+ * ("Pointers are never surfaced to the client"). So a JSON-parsing caller can
+ * never consume it; the bytes must be read directly.
+ *
+ * @param path    API path relative to BFF_API_URL
+ * @param options Standard RequestInit options
+ * @returns The response body as a Blob.
+ */
+export async function bffApiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  const token = await acquireActiveBffToken();
+  let response = await executeFetch(path, options, token);
+
+  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
+  if (response.status === 401) {
+    const freshToken = await acquireActiveBffToken();
+    response = await executeFetch(path, options, freshToken);
+  }
+
+  if (!response.ok) {
+    let message: string;
+    try {
+      message = await response.text();
+    } catch {
+      message = `HTTP ${response.status}`;
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return response.blob();
+}
+
+/**
  * Internal helper: perform the actual fetch with the Authorization header set.
  *
  * This is the SOLE Bearer-literal site in the external SPA — the project's

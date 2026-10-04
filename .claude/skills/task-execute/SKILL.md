@@ -805,7 +805,27 @@ UPDATE task file <metadata><status> to "completed"
 ADD <notes> section with completion summary
 
 UPDATE TASK-INDEX.md with ✅ completed status
+
+VERIFY both writes landed (MANDATORY — added 2026-09-03 by unified-access-control-r2):
+  pwsh scripts/check-task-status-drift.ps1
+  → exit 0 = the POML status and the index marker agree
+  → exit 1 = one of the two writes was skipped; the output names the task and which side is behind
+  → FIX IT NOW, before Step 11. Do not proceed on a red check.
 ```
+
+**Why this verification exists.** Completion is recorded in **two** places — the POML `<status>` and
+the `TASK-INDEX.md` marker — and nothing kept them in agreement. A 2026-09-03 audit of
+`unified-access-control-r2` found **17 disagreements across 92 tasks**: 14 tasks finished *and merged*
+whose POML still said `pending`, plus one finished task the index still showed as `🔄`. The index is
+updated as work proceeds; the POML status is a separate write, and it was skipped 14 times.
+
+**Both artifacts drift, in both directions** — in that audit the POML was stale 14 times and the index
+once. So when the check goes red, resolve it from **evidence** (a git completion commit touching
+`projects/<name>/`), not by assuming one artifact is authoritative.
+
+⚠️ The check gates **only the current project** (inferred from the `work/<name>` branch). Repo-wide
+drift is 82 disagreements across 151 projects, concentrated in archived work — gating on that total
+would be red on day one and waived on day two. `-All` gives a non-blocking repo-wide report instead.
 
 ### Step 10.5: Script Library Maintenance
 

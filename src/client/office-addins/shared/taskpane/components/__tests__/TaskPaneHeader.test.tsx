@@ -50,7 +50,7 @@ describe('TaskPaneHeader', () => {
 
   it('shows user menu when authenticated', () => {
     renderWithProvider(
-      <TaskPaneHeader isAuthenticated={true} userName="John Doe" userEmail="john@example.com" onSignOut={() => {}} />
+      <TaskPaneHeader isAuthenticated={true} userName="John Doe" userEmail="john@example.com" onSignOut={() => { /* no-op */ }} />
     );
 
     const userButton = screen.getByLabelText(/signed in as john doe/i);

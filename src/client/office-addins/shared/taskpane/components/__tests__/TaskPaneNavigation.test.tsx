@@ -9,20 +9,58 @@ const renderWithProvider = (ui: React.ReactElement) => {
 };
 
 describe('TaskPaneNavigation', () => {
-  it('renders all navigation tabs', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} />);
+  it('renders the enabled navigation tabs (Save + To Do for Outlook)', () => {
+    renderWithProvider(
+      <TaskPaneNavigation
+        selectedTab="save"
+        onTabChange={() => {
+          /* no-op */
+        }}
+        hostType="outlook"
+      />
+    );
 
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /share/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /search/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /recent/i })).toBeInTheDocument();
+    // Task 091 (UAT-2): the tab's accessible/visible label is "To Do", not "Create To Do".
+    expect(screen.getByRole('tab', { name: /^to do$/i })).toBeInTheDocument();
+    // Share/Search/Recent are disabled ("V1") — not rendered.
+    expect(screen.queryByRole('tab', { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
+  });
+
+  it('renders Save, Find and To Do tabs for Word', () => {
+    renderWithProvider(
+      <TaskPaneNavigation
+        selectedTab="save"
+        onTabChange={() => {
+          /* no-op */
+        }}
+        hostType="word"
+      />
+    );
+
+    expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /find/i })).toBeInTheDocument();
+    // Create To Do is a shared capability (task 049 / FR-14 / FR-19) — no longer Outlook-only.
+    expect(screen.getByRole('tab', { name: /^to do$/i })).toBeInTheDocument();
+    // Share/Recent are disabled ("V1") — not rendered on Word either.
+    expect(screen.queryByRole('tab', { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /recent/i })).not.toBeInTheDocument();
   });
 
   it('highlights selected tab', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="share" onTabChange={() => {}} />);
+    renderWithProvider(
+      <TaskPaneNavigation
+        selectedTab="createTodo"
+        onTabChange={() => {
+          /* no-op */
+        }}
+        hostType="outlook"
+      />
+    );
 
-    const shareTab = screen.getByRole('tab', { name: /share/i });
-    expect(shareTab).toHaveAttribute('aria-selected', 'true');
+    const createTodoTab = screen.getByRole('tab', { name: /^to do$/i });
+    expect(createTodoTab).toHaveAttribute('aria-selected', 'true');
 
     const saveTab = screen.getByRole('tab', { name: /save/i });
     expect(saveTab).toHaveAttribute('aria-selected', 'false');
@@ -30,24 +68,39 @@ describe('TaskPaneNavigation', () => {
 
   it('calls onTabChange when tab is clicked', () => {
     const handleTabChange = jest.fn();
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} />);
+    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={handleTabChange} hostType="outlook" />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /share/i }));
-    expect(handleTabChange).toHaveBeenCalledWith('share');
-
-    fireEvent.click(screen.getByRole('tab', { name: /recent/i }));
-    expect(handleTabChange).toHaveBeenCalledWith('recent');
+    fireEvent.click(screen.getByRole('tab', { name: /^to do$/i }));
+    expect(handleTabChange).toHaveBeenCalledWith('createTodo');
   });
 
   it('disables tabs when disabled prop is true', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} disabled={true} />);
+    renderWithProvider(
+      <TaskPaneNavigation
+        selectedTab="save"
+        onTabChange={() => {
+          /* no-op */
+        }}
+        disabled={true}
+      />
+    );
 
-    const tablist = screen.getByRole('tablist');
-    expect(tablist).toHaveAttribute('aria-disabled', 'true');
+    // Fluent v9's TabList spreads `disabled` onto each rendered `<button role="tab">` (a real HTML
+    // `disabled=""` attribute), not onto the `role="tablist"` container as `aria-disabled` — verified
+    // by inspecting the rendered DOM (task 071).
+    expect(screen.getByRole('tab', { name: /save/i })).toBeDisabled();
   });
 
   it('renders smaller tabs in compact mode', () => {
-    renderWithProvider(<TaskPaneNavigation selectedTab="save" onTabChange={() => {}} compact={true} />);
+    renderWithProvider(
+      <TaskPaneNavigation
+        selectedTab="save"
+        onTabChange={() => {
+          /* no-op */
+        }}
+        compact={true}
+      />
+    );
 
     // In compact mode, tab text should not be visible (icon only)
     // The tab should still exist but with just the icon

@@ -70,6 +70,7 @@ public class ActionSeamTests
         _entityServiceMock.Object,
         _fieldMappingMock.Object,
         _scopeFactoryMock.Object,
+        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
         NullLogger<ActionSeam>.Instance);
 
     // ── CreateNotification: parity + negative case ────────────────────────────────────────────
@@ -229,7 +230,11 @@ public class ActionSeamTests
         captured!.LogicalName.Should().Be("sprk_event");
         captured.Attributes.Keys.Should().BeEquivalentTo(new[]
         {
-            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid"
+            // statuscode added 2026-09-29: TaskActionCore now sets Open (659490001) EXPLICITLY, because
+            // the sprk_event default is Draft(1) and DailyBriefingCollector's task channels filter on
+            // statuscode = Open -- so a Draft task is invisible to the briefing meant to surface it.
+            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid",
+            "statuscode"
         });
         captured.GetAttributeValue<EntityReference>("sprk_eventtype_ref").Id.Should().Be(
             Guid.Parse("124f5fc9-98ff-f011-8406-7c1e525abd8b"), "event type = Task");

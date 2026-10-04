@@ -60,6 +60,7 @@ public class CommunicationServiceArchiveTests
             null!, // JobSubmissionService — not reached
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<CommunicationService>>());
     }
 

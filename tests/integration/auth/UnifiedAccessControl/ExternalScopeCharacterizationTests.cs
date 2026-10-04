@@ -47,9 +47,17 @@ public class ExternalScopeCharacterizationTests
     /// would have passed VACUOUSLY — green, fast, correctly named, and indistinguishable from a real
     /// pass. It now calls the real guard, so these facts fail if the fix regresses.
     /// </summary>
+    /// <remarks>
+    /// Task 134 added a third, COLUMN signal to the guard. These are JOIN characterizations, so the guard
+    /// is given a column allow-list holding exactly the column the plain fixture reads — a column refusal
+    /// can then never stand in for the join refusal these facts are about.
+    /// </remarks>
     private static bool GuardRejects(string fetchXml, string moduleRecordEntity) =>
         !ExternalModuleDataEndpoints
-            .EvaluateFetchXmlGuard(fetchXml, moduleRecordEntity, new FetchXmlEntityExtractor())
+            .EvaluateFetchXmlGuard(
+                fetchXml, moduleRecordEntity,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_name" },
+                new FetchXmlEntityExtractor())
             .IsAllowed;
 
     // ─────────────────────────────────────────────────────────────────────────────

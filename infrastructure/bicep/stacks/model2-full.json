@@ -5,16 +5,16 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14355353923734186146"
+      "templateHash": "7375813717364040300"
     }
   },
   "parameters": {
     "customerId": {
       "type": "string",
       "minLength": 3,
-      "maxLength": 10,
+      "maxLength": 8,
       "metadata": {
-        "description": "Customer identifier (lowercase, alphanumeric only)"
+        "description": "Customer identifier. 3-8 chars, lowercase letters and digits, starting with a letter. Drives every per-customer Azure resource name; the 8-char limit comes from the Key Vault name it composes (see AZURE-RESOURCE-NAMING-CONVENTION.md)."
       }
     },
     "environment": {
@@ -1576,6 +1576,7 @@
           "vnetIntegrationSubnetId": "[if(parameters('enableVnet'), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('vnet-{0}', variables('baseName'))), '2025-04-01').outputs.snetAppId.value), createObject('value', ''))]",
           "appSettings": {
             "value": {
+              "Customer__Id": "[parameters('customerId')]",
               "DATAVERSE_URL": "[parameters('dataverseUrl')]",
               "SPE_CONTAINER_TYPE_ID": "[parameters('containerTypeId')]",
               "Redis__Enabled": "true",
@@ -2290,7 +2291,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "17774924923741831122"
+              "templateHash": "11129456632631642405"
             }
           },
           "parameters": {
@@ -2417,7 +2418,7 @@
               "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('openAiName'), parameters('deployments')[copyIndex()].name)]",
               "sku": {
-                "name": "Standard",
+                "name": "[coalesce(tryGet(parameters('deployments')[copyIndex()], 'sku'), 'Standard')]",
                 "capacity": "[parameters('deployments')[copyIndex()].capacity]"
               },
               "properties": {

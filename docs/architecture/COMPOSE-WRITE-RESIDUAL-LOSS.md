@@ -17,7 +17,7 @@
 > **the nested-field half retired 2026-08-26** by task 058 — a conditional merge block
 > (`{ IF { MERGEFIELD State } = … }`, the shape a template is built from) moved to §3, leaving only the
 > **unterminated** field in §2.
-> **Owner sign-off**: ✅ **ACCEPTED 2026-08-25** — see [Sign-off](#sign-off).
+> **Owner sign-off**: ✅ **ACCEPTED** — five rows 2026-08-25, the sixth (`section-break-flattened`) 2026-09-02. See [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
 > list and the code disagree **in either direction**.
@@ -57,6 +57,7 @@ called out explicitly in the last row of the table rather than left for someone 
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
 | **Hyperlink display attributes** — `w:docLocation`, `w:tgtFrame`, `w:tooltip`, `w:history`. The link's **target** is carried (§3); these four are not | The link still works and still points where it did; a custom hover tooltip, a target frame, a sub-document location, and the visited-state flag are dropped | **none — this one IS silent** (see the exception below) |
+| **Interior section break** (`w:sectPr` nested in a paragraph's `w:pPr`) — the marker that changes page setup, headers/footers or orientation partway through a document. The **trailing** document section is promoted and kept, and an untouched paragraph's break is cloned intact — see §1 | The break is removed, so page setup and headers from that point on follow the final section: a landscape schedule reverts to portrait, a differing header stops differing | `section-break-flattened` |
 
 > **The one exception to "nothing is silent" (recorded 2026-08-26, D-1).** The four hyperlink display
 > attributes above are dropped without a warning code. They are scalars and carrying them is
@@ -83,6 +84,8 @@ of the list is enforced too — if a future change starts losing one, the parity
 | **Embedded objects** (`w:drawing`, `w:object`, `w:pict`) — a picture, chart, shape or OLE embed | The object's own OOXML subtree is carried **verbatim**, so properties nobody enumerated survive for the same reason cloning an untouched block preserves them. The picture's bytes never travel: they stay in their own package part and only the reference moves, and the save **resolves that reference against the document before authoring it** — a subtree naming a relationship the package does not have is refused rather than written, because a file Word reports as *damaged* is worse than a missing picture. Works for a keystroke edit too, without the object's markup ever reaching the browser: when the posted content model does not carry it, the object is restored from the paragraph's pre-edit base (fixed task 056). **Not** a text box — that stays in §2 |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
+| **Paragraph STYLE, when the content model does not determine it** — `BlockQuote`, `Quote`, `Caption`, a firm's own `SchedulePara`, and every other style the editor has no node for | Carried from the base paragraph onto the re-authored block. **This row is new (2026-09-01, issue #777) and it replaces a loss**: an unmodeled style used to be flattened to `Normal` and reported as `paragraph-style-flattened`. The warning was retired *with its premise* — a code that no longer describes real loss is worse than no code, because it trains users to ignore the channel. A style the model DOES determine (Heading 1–6, List Paragraph) is still model-owned and is not inherited, or the base would fight the edit. Two things are deliberately still **not** inherited even when the style is: `w:numPr` and `w:sectPr` — numbering is the model's, and an interior section break has no carrier, which is why it stays in §2 |
+| **Indentation** | Carried on every style outcome — inherited, model-determined, or already-styled alike. Also 2026-09-01 (#777): `indentation-dropped` was retired the same way, its premise having stopped being true |
 | Comments, tracked changes | Carried on the content model itself |
 | **Hyperlinks** — external (`r:id`) and internal cross-references (`w:anchor`) | Carried on the content model as the run's target. An **internal** cross-reference ("see Section 4.2") is carried as its bookmark name: a self-contained scalar, so there is nothing to re-derive and nothing that can dangle — the bookmark it names survives independently, by clone or by `CarryUnmodeledConstructs`. **This row previously read "hyperlinks · carried on the content model itself" and was FALSE for internal links** — the projection nulled the anchor while the read walk still emitted a live `#anchor` href into the editor, so `formattingUnchanged` could never match and a paragraph holding a cross-reference was re-authored **on every save even when untouched**, taking any footnote ref / inline `w:sdt` / text box in that paragraph with it. That is the §1 untouched-block guarantee, not a §3 edited-block loss, which is why it is called out here rather than quietly corrected (found by UAT 2026-08-26 D-1; fixed same day, pinned by the `hyperlinkInternal` parity family). **Not** the link's `w:docLocation`, `w:tgtFrame`, `w:tooltip` or `w:history` — those are dropped on any re-authored hyperlink, external ones included, and are named in §2 |
 
@@ -267,10 +270,10 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 
 | Field | Value |
 |---|---|
-| Version | 2026-08-25 (objects carried; supersedes the 2026-08-23 first publication) |
-| Measured against | `spaarkeai-compose-r8` @ task 056, corpus of 24 documents |
-| Signed off by | **Project owner** — accepted in session, 2026-08-25 |
-| Date | 2026-08-25 |
+| Version | **2026-09-02** (sixth row `section-break-flattened` ACCEPTED by the owner; supersedes the 2026-09-01 unsigned amendment and the 2026-08-25 five-row signature) |
+| Measured against | `spaarkeai-compose-r8` @ #777 + drive-provenance, corpus of 25 documents |
+| Signed off by | **Project owner** — five rows accepted in session 2026-08-25; the sixth (`section-break-flattened`) accepted 2026-09-02 |
+| Date | 2026-08-25 (rows 1-5) · 2026-09-02 (row 6) |
 
 
 **What was accepted — and what was NOT.** The owner **declined** the original field and embedded-object
@@ -297,6 +300,65 @@ the same codes. What it changed is that the second half of the sentence above �
 every time"* — is now true in two situations where it was not
 ([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26)). A signature given on a condition is
 worth what the condition is worth, so the repair is recorded here rather than left in a commit message.
+
+### ⚠️ 2026-09-01 — §2 gained a row. This one DOES need the owner's eye (issue #777)
+
+Two changes landed together, and they pull in opposite directions, so they are stated separately rather
+than netted off:
+
+**In the owner's favour — two rows LEFT §2.** `indentation-dropped` and `paragraph-style-flattened` were
+retired *with their premises*: unmodeled paragraph styles and indentation are now **carried**, so both now
+appear in §3 instead. A warning code whose premise has stopped being true is worse than no code — it
+trains users to ignore the channel that carries the real ones. Like the task-058 narrowing above, a strictly
+smaller promise does not re-open the sign-off.
+
+**Against it — one row ENTERED §2: `section-break-flattened`.** This is **not a new loss**. Editing a
+paragraph that carries an interior `w:sectPr` has always dropped it. What was wrong was the accounting: the
+warning fired at *open*, whole-document, so it described a document rather than a loss — and the loss
+itself was **absent from this list**. An unlisted loss is precisely the failure mode [§5](#5-parity--why-you-can-trust-this-list)
+exists to prevent, which is why this is written up rather than quietly added.
+
+**So the signed set grows from five rows to six**, and that is an owner decision, not a documentation
+revision. Per the rule stated above — *"declining any single item makes it a scope question — fix it —
+rather than a documentation revision"* — the honest options are:
+
+| Option | What it means |
+|---|---|
+| **Accept** the sixth row | Editing a paragraph that holds an interior section break drops it, reported by name every time (`section-break-flattened`), and the prior version stays in SPE version history |
+| **Decline** it | Carrying an interior `w:sectPr` onto a re-authored block becomes scope. It is genuinely harder than the other carries: the renderer detaches and re-attaches the **trailing** section, so an interior one has no carrier — this is why it was excluded from property inheritance in the first place |
+
+### ✅ RESOLVED — owner ACCEPTED the sixth row, 2026-09-02
+
+**Decision: Accept.** Editing a paragraph that holds an interior section break drops it, is reported by
+name every time (`section-break-flattened`), and the prior version stays in SPE version history. **The
+signed set is now six rows.**
+
+**Accepted on an explicit basis: "ship with it named" — NOT "never fix".** The owner asked what carrying
+it would actually cost before signing, and the answer changed the framing above, so it is recorded here
+rather than left as the reason people re-read:
+
+- The *"an interior one has no carrier"* wording overstates the blocker. `InheritProperties` excludes
+  `w:sectPr` to **prevent duplication** — the renderer detaches and re-attaches the TRAILING section
+  itself — which is a reason for care, not a structural impossibility.
+- **The carrier survives the body swap with its header/footer parts still referenced.** So an interior
+  `sectPr`'s `headerReference r:id` would still resolve if carried. That is the fact that would otherwise
+  sink the whole idea, and it holds.
+- The renderer already enumerates paragraph-level `sectPr`s (`interiorSectionBreaksAtRisk`) and already
+  has the value rule that a break identical to the trailing section is a no-op.
+
+So the remaining work is: distinguish interior from final (the final section is sometimes parked in the
+LAST paragraph's `pPr` by third-party generators — review finding 011-P1 already handles that shape),
+carry only the interior ones, and add a corpus case. **The risk is specific**: a duplicated or misplaced
+`sectPr` is the malformed-OOXML shape that triggers Word's "unreadable content" repair dialog — a hard
+fail in the fidelity gate. That is why it needs a corpus case rather than a careful patch, and why it is
+scoped work rather than a drive-by.
+
+**Why accepting is still right**: the exposure is narrow (untouched paragraphs keep their break through
+the clone path; only the paragraph CARRYING it loses it, and those are typically section-terminating or
+empty paragraphs rather than prose). What argues the other way is the surprise-to-cause ratio — the cause
+is one paragraph, the visible effect is a whole section changing orientation or losing its headers.
+Carrying it is therefore recommended for the follow-on project, and this acceptance should be revisited
+(and this row retired) when that lands.
 
 ## 7. Related
 

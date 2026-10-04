@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { useAuth } from '@spaarke/auth';
 
-import type { AnchoredAnnotation } from '../types/compose-contracts';
+import type { AnchoredAnnotation, ImportedComment, ImportedRevision } from '../types/compose-contracts';
 import type { PriorAnchorInput } from './ComposeReanchor.types';
 
 // ---------------------------------------------------------------------------
@@ -94,15 +94,18 @@ export function selectSaveRedlineAnnotations(opts: {
   return opts.getRedlineAnnotations();
 }
 
+// R8 UAT item 8: these two were `{ [key: string]: unknown }` placeholders — the endpoints were wired
+// (task 103) but the only consumer summed `.length`, so the payload's real shape was never described.
+// The Document Revision Report reads the fields, so they are typed now, and typed BY REUSE rather than
+// re-declaration: the server's `RecoveredRevision`/`RecoveredComment` are exactly the `ImportedRevision`/
+// `ImportedComment` vocabulary MINUS `paraId`, which the Load projection adds and this endpoint does not.
+// Forking the shape here is explicitly forbidden by the contract comment on those types.
+
 /** A native comment recovered from the current SPE document (mirror of BFF `RecoveredComment`). */
-export interface RecoveredComment {
-  [key: string]: unknown;
-}
+export type RecoveredComment = Omit<ImportedComment, 'paraId'>;
 
 /** A native revision recovered from the current SPE document (mirror of BFF `RecoveredRevision`). */
-export interface RecoveredRevision {
-  [key: string]: unknown;
-}
+export type RecoveredRevision = Omit<ImportedRevision, 'paraId'>;
 
 /** BFF response for `POST /api/compose/document/{id}/pull-annotations` (FR-25). */
 export interface PullAnnotationsResult {
@@ -149,44 +152,14 @@ export function anchoredAnnotationsToPriorAnchors(annotations: readonly Anchored
     }));
 }
 
-/**
- * Maps the Compose session's anchored annotations to the {@link DocxAnnotationInput}s the
- * push-annotations endpoint renders as native Word track-changes + comments (FR-24). Only
- * annotations that carry the fields the server's `DocxAnnotation.Validate()` requires are emitted
- * (a comment/deletion needs a non-empty `targetText`; an insertion needs `newText`) — the rest are
- * dropped so the push never 400s on an incomplete annotation.
- */
-export function anchoredAnnotationsToDocxAnnotations(
-  annotations: readonly AnchoredAnnotation[]
-): DocxAnnotationInput[] {
-  const result: DocxAnnotationInput[] = [];
-  for (const a of annotations) {
-    const targetText = a.anchor?.textPattern ?? '';
-    const author = a.author || 'Spaarke Compose';
-    const date = a.timestamp || new Date().toISOString();
-
-    switch (a.type) {
-      case 'insertion-suggestion':
-        if (a.body) {
-          result.push({ kind: DocxTrackChangeKind.Insertion, targetText, newText: a.body, author, date });
-        }
-        break;
-      case 'deletion-suggestion':
-        if (targetText) {
-          result.push({ kind: DocxTrackChangeKind.Deletion, targetText, author, date });
-        }
-        break;
-      case 'comment':
-      case 'explanation':
-      default:
-        if (targetText && a.body) {
-          result.push({ kind: DocxTrackChangeKind.Comment, targetText, commentText: a.body, author, date });
-        }
-        break;
-    }
-  }
-  return result;
-}
+// `anchoredAnnotationsToDocxAnnotations` was DELETED here (spaarke-ontology-platform-r1 task 080 /
+// C-5, 2026-10-03). It mapped the Compose session's anchored annotations to the
+// `DocxAnnotationInput`-shaped `annotations` save field, which the server's `SaveComposeDocumentBody`
+// never deserialized — every comment sent that way was silently dropped. It had zero production
+// callers (only its own unit test and `jest.mock` stand-ins in the `ComposeWorkspace.*.test.tsx`
+// suites, which stub the module and never invoke the real implementation). The live comment-export
+// path is `composeSessionCommentThreadsToAnchoredComments` (`ComposeCommentThread.types.ts`); the live
+// redline path is `redlineMarksToDocxAnnotations` below.
 
 // ---------------------------------------------------------------------------
 // Redline → Word bridge (UAT-R7 #2/#3): PENDING redline marks → DocxAnnotationInput[]
@@ -214,8 +187,10 @@ interface RedlineAccumulator {
  * SAVE renders them as NATIVE Word `w:ins`/`w:del` via `DocxAnnotationWriter` (the proven server
  * writer), instead of the client `tipTapToDocxBytes` flattening them to plain text.
  *
- * This is the previously-ABSENT producer the redline marks (`usePendingRedline`) never had — the
- * sibling of {@link anchoredAnnotationsToDocxAnnotations} (which already maps the COMMENT half). It
+ * This is the previously-ABSENT producer the redline marks (`usePendingRedline`) never had. (Its
+ * erstwhile sibling for the COMMENT half, `anchoredAnnotationsToDocxAnnotations`, was deleted —
+ * spaarke-ontology-platform-r1 task 080 / C-5 — the live comment path is
+ * `composeSessionCommentThreadsToAnchoredComments` in `ComposeCommentThread.types.ts`.) It
  * reads the redline text straight from the marks in the editor's JSON (the `insertion` / `deletion`
  * marks carry the content + a `ledgerRef` in their attrs), grouping by `ledgerRef`:
  *  - deletion-marked text → the original `target_text`;

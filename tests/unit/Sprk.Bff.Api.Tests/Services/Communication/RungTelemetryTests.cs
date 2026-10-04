@@ -33,7 +33,7 @@ public class RungTelemetryTests
 
         var logger = new CapturingLogger<IncomingAssociationResolver>();
         var engine = new IncomingAssociationResolver(
-            rungs, _dv.Object, _dv.Object, AssociationTestSupport.Mapper(), logger);
+            rungs, _dv.Object, _dv.Object, AssociationTestSupport.Mapper(), Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), logger);
         return (engine, logger);
     }
 

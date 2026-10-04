@@ -17,7 +17,10 @@ public static class DelegationRuleFilterExtensions
     /// </summary>
     /// <remarks>
     /// Applied at the GROUP rather than per route, deliberately. The group is a closed
-    /// mutation-only surface, and <see cref="DelegationRuleFilter"/> denies any request whose target
+    /// access-management surface — mutations, plus two reads: task 063's share list (which discloses who can
+    /// reach a record) and task 118's <c>/can-manage-access</c> (which reports THIS filter's verdict to the
+    /// client, so the Manage Access affordance gates on the server's rule rather than on a table-level proxy
+    /// for it) — and <see cref="DelegationRuleFilter"/> denies any request whose target
     /// it cannot identify — so a seventh route added tomorrow is gated from its first request
     /// instead of inheriting a hole. That failure is loud and immediate (the author hits 403 on the
     /// first call) rather than silent, which is the correct direction for an authorization default.
@@ -234,8 +237,53 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                     return FromProjectId(close.ProjectId);
 
                 // ── /provision-project ────────────────────────────────────────
+                // Task 144: a project, matter OR work assignment. The target comes from the SAME resolver the
+                // handler uses (recordType + recordId, else the legacy projectId), so the record whose Write is
+                // checked here is the record the handler re-owns — a request cannot authorize against a project
+                // it can write and then re-own a matter it cannot. An unknown recordType resolves to nothing and
+                // is denied by the null path below.
                 case ProvisionProjectRequest provision:
-                    return FromProjectId(provision.ProjectId);
+                    return FromGrantRoot(ProvisionProjectEndpoint.ResolveRoot(provision));
+
+                // ── /unsecure-project (task 061; three root types since task 144) ──
+                // Removing the secure designation is at least as consequential as applying it, so it
+                // is gated by the same Write-on-the-record check, evaluated as the caller, on the root the
+                // handler's own resolver names. Omitting this case would not have opened a hole — an
+                // unresolved target denies — but it would have made the route permanently 403.
+                case UnsecureProjectRequest unsecure:
+                    return FromGrantRoot(UnsecureProjectEndpoint.ResolveRoot(unsecure));
+
+                // ── /set-record-share-expiry (task 098, FR-33) ────────────────
+                // Changing when every share on a record ends changes who can access it, so it takes the same
+                // Write-on-the-record check. The target comes from the SAME ResolveRoot the handler uses, and
+                // that request has no legacy projectId — so the record authorized here is the record whose
+                // shares are written. Without this case the route would deny every caller (default branch).
+                case SetRecordShareExpiryRequest shareExpiry:
+                    return FromGrantRoot(SetRecordShareExpiryEndpoint.ResolveRoot(shareExpiry));
+
+                // ── /share-user, /unshare-user, /user-shares (task 063, FR-29) ─────
+                // Internal system-user shares change — or, for the list, disclose — who can reach a record, so they
+                // take the same Write-on-the-record check. Each target comes from the SAME explicit-root resolver its
+                // handler uses, and none of these requests has a legacy projectId, so the record authorized is the
+                // record whose shares are read or written. Without these cases every call would deny (default branch).
+                case ShareRecordWithUserRequest shareUser:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(shareUser.RecordType, shareUser.RecordId));
+
+                case UnshareRecordWithUserRequest unshareUser:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(unshareUser.RecordType, unshareUser.RecordId));
+
+                case RecordUserSharesQuery userShares:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(userShares.RecordType, userShares.RecordId));
+
+                // ── /can-manage-access (task 118, FR-07 / D-1 option C) ───────────
+                // The one route on this group whose PURPOSE is to be gated. It reports this filter's own verdict
+                // to the client so the Manage Access affordance asks the server's question instead of guessing at
+                // it from a table-level privilege. Mapping it here is what makes the answer true: without this
+                // case the default branch would deny every caller, and the client — which reads any non-200 as
+                // "no" — would hide the affordance from everyone, which is precisely the failure the task's
+                // code-before-config ordering exists to prevent.
+                case RecordAccessGateQuery gate:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
             }
         }
 

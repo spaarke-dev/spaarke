@@ -251,10 +251,17 @@ internal static class ComposeContentModelProjector
         var paraId = p.ParagraphId?.Value?.ToUpperInvariant(); // renderer dedups/mints (AssignParaIds)
         var alignment = MapAlignment(p);
 
-        // Uncounted-flatten closure (review finding 020-R3): the model has no indentation field (the read
-        // walk renders w:ind via AppendIndentDeclarations — re-lost on save until a widening task carries
-        // it).
-        if (p.ParagraphProperties?.Indentation is not null) ctx.AddWarning("indentation-dropped", 1);
+        // `indentation-dropped` was RETIRED here (#777, 2026-09-01). Its premise — "re-lost on save until a
+        // widening task carries it" — stopped being true when task 041 added property inheritance:
+        // ComposeBlockMerge.InheritProperties never excluded w:ind, so an edited block inherits it from its
+        // base counterpart and an untouched block is cloned whole. Indentation is not lost on either path,
+        // and ComposeParagraphStyleInheritanceSeamTests pins that in both directions.
+        //
+        // It therefore warned about nothing, once per indented paragraph, across the WHOLE document at open —
+        // "Some indentation was simplified ×84" on a 40-page contract the user had not touched. Owner
+        // direction 2026-09-01: do not surface routine docx→TipTap reconciliation; a warning the user cannot
+        // act on trains them to dismiss the banner that matters. See ADR-049 honest-lossiness: the guarantee
+        // is that REAL loss is never silent, not that every display-time difference is announced.
 
         // Task 025 (020-R11): paragraph-MARK revisions are MODEL data — w:pPr/w:rPr/w:del (mark pending-
         // deleted; accepting merges with the next paragraph) or w:ins (paragraph created while tracking).
@@ -302,18 +309,27 @@ internal static class ComposeContentModelProjector
             };
         }
 
-        // Task 023: an INTERIOR section break (pPr-nested w:sectPr — this paragraph ends a section) is not
-        // model data; on render its content joins the FINAL section's page setup — a real pagination/
-        // header-scope change, counted LOUDLY. Full multi-section modeling is a follow-up (the trailing
-        // body-level sectPr is preserved by RenderIntoCarrier and is not this warning's subject).
-        // EXCEPTION (review 023-F1): the 011-P1 promotion shape — the FINAL section's sectPr parked in the
-        // LAST body paragraph's pPr with NO body-level sectPr (third-party generators) — loses NOTHING:
-        // RenderIntoCarrier promotes a clone to body level, so warning would be a false loss report (and a
-        // spurious Partial status). The predicate mirrors the renderer's promotion condition exactly.
-        if (p.ParagraphProperties?.SectionProperties is not null && !IsPromotedTrailingSectPr(p))
-        {
-            ctx.AddWarning("section-break-flattened", 1);
-        }
+        // `section-break-flattened` IS NO LONGER EMITTED HERE (#777, r8 2026-09-01) — it moved to the SAVE
+        // path, where the loss actually happens. It is NOT retired: unlike `indentation-dropped` and
+        // `paragraph-style-flattened` (whose premises were falsified and which were deleted outright), an
+        // interior `w:sectPr` on an EDITED paragraph is still real, unavoidable loss, and it is still
+        // reported — see ComposeBlockMerge.WarnForConstructsLostOnThisBlock.
+        //
+        // Why it could not stay here. This runs at PROJECTION, i.e. when the document is OPENED, and it
+        // fired for every interior section break in the file. But an interior sectPr on a paragraph the user
+        // never touches SURVIVES: ComposeBlockMerge.Capture clones each unchanged body child whole (only the
+        // BODY-level trailing sectPr is excluded there), so the clone carries `pPr/sectPr` verbatim. Only a
+        // block the user actually edits is re-rendered, and only then does InheritParagraphProperties drop it.
+        //
+        // So the open-time warning reported loss on a document nothing had been done to — the same
+        // over-firing shape as the two retired codes ("×6" on an untouched contract), and the same thing the
+        // owner directive names: do not show a user a warning they cannot act on. The save-path emission
+        // counts one warning per ACTUALLY-lost section break, which is both real and actionable.
+        //
+        // Moving it also retires the 023-F1 promotion exception as a special case. The save-side check
+        // compares the base sectPr against the authored body's trailing one, so the promoted shape — where
+        // the two are the same section — reports nothing by construction rather than by a predicate that has
+        // to be kept in step with the renderer.
 
         // Task 023: paragraph-level page break — model data (w:pPr/w:pageBreakBefore, OnOff semantics).
         var pageBreakBefore = ComposeOoxmlPrimitives.IsOn(p.ParagraphProperties?.PageBreakBefore);
@@ -383,13 +399,18 @@ internal static class ComposeContentModelProjector
         // headings, which ComposeOoxmlPrimitives.HeadingLevel's "Heading" prefix cannot classify) cannot be carried by the thin
         // model: the render path emits Normal, so heading-ness/outline/custom look flattens — counted,
         // never silent. Localized heading-id mapping is a 021/026-shaped follow-up.
-        var flattenedStyleId = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-        if (!string.IsNullOrEmpty(flattenedStyleId)
-            && !string.Equals(flattenedStyleId, "Normal", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(flattenedStyleId, "ListParagraph", StringComparison.OrdinalIgnoreCase))
-        {
-            ctx.AddWarning("paragraph-style-flattened", 1);
-        }
+        // `paragraph-style-flattened` was RETIRED here (#777, 2026-09-01), for the same reason and by the
+        // same change as `indentation-dropped` above. Its premise is stated in the comment block that used to
+        // sit here — "the render path emits Normal, so heading-ness/outline/custom look flattens" — and that
+        // is no longer what the render path does: ComposeBlockMerge.InheritProperties now carries an UNMODELED
+        // w:pStyle onto an edited block (a firm body style, Quote, the localized "Überschrift1" this comment
+        // named), and excludes only the styles the model itself owns, where a missing pStyle is the user
+        // demoting the block rather than a gap.
+        //
+        // What remains true is display-only: the EDITOR draws a Quote as Normal because the thin model has no
+        // field for it. That is routine docx→TipTap reconciliation, not loss, and per owner direction
+        // 2026-09-01 it is not something to warn about — the document is unharmed and there is no action for
+        // the user to take. Pinned by ComposeParagraphStyleInheritanceSeamTests.
 
         return new ComposeBlock
         {
@@ -446,13 +467,12 @@ internal static class ComposeContentModelProjector
         return result;
     }
 
-    /// <summary>Review 023-F1: whether <paramref name="p"/> is the LAST direct body paragraph of a body
-    /// with NO body-level <c>sectPr</c> — the 011-P1 shape whose pPr-nested <c>sectPr</c> the renderer
-    /// PROMOTES to body level (nothing flattens; mirrors <c>RenderIntoCarrier</c>'s promotion predicate).</summary>
-    private static bool IsPromotedTrailingSectPr(Paragraph p) =>
-        p.Parent is Body body
-        && !body.Elements<SectionProperties>().Any()
-        && ReferenceEquals(body.Elements<Paragraph>().LastOrDefault(), p);
+    // `IsPromotedTrailingSectPr` DELETED (#777, r8 2026-09-01) with its only caller. It mirrored
+    // RenderIntoCarrier's promotion predicate — a duplicate of the renderer's condition that had to be kept
+    // in step with it by hand. The save-side check that replaced it
+    // (ComposeDocumentRenderer.WarnIfSectionBreakFlattened) compares the base section against the trailing
+    // one BY VALUE, so the promotion shape reports nothing by construction and there is no second copy of
+    // the renderer's logic to drift.
 
     /// <summary>Ordered-vs-bullet from the R4.5 <see cref="ComposeNumbering.NumberingModel"/> (override-aware via
     /// <see cref="ComposeNumbering.NumberingModel.ResolveLevel"/>), with <c>ComposeDocxProjectionBuilder.ResolveOrdered</c>'s tolerant posture:

@@ -369,35 +369,55 @@ public class OfficeEmailEnricher
     }
 
     /// <summary>
-    /// Generates a sanitized filename for the .eml file.
-    /// Format: YYYY-MM-DD_Subject.eml (max 100 chars, special chars removed)
+    /// Generates the human-readable name for the .eml file.
+    /// Format: YYYY-MM-DD_Subject.eml (subject max 80 chars, special chars removed). This is the name the document
+    /// is SHOWN under (<c>sprk_documentname</c>); <see cref="GenerateEmlNames"/> gives the name it is STORED under.
     /// </summary>
     public static string GenerateEmlFileName(EmailMetadata metadata)
     {
         var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var sanitizedSubject = SanitizeFileName(metadata.Subject);
 
-        // Limit subject to 80 chars to leave room for date and extension
-        if (sanitizedSubject.Length > 80)
-        {
-            sanitizedSubject = sanitizedSubject[..80];
-        }
+        // Subject capped at 80 chars to leave room for the date prefix and the extension.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(metadata.Subject, maxLength: 80);
 
         return $"{datePrefix}_{sanitizedSubject}.eml";
     }
 
     /// <summary>
-    /// Sanitizes a string for use as a filename.
+    /// Task 046 (b): the two names an Office email save needs, from ONE generator.
+    /// <c>DocumentName</c> is <see cref="GenerateEmlFileName"/>: the readable name, written to
+    /// <c>sprk_documentname</c> and never suffixed. <c>StoredFileName</c> is the SPE upload path and
+    /// <c>sprk_filename</c>. For a SYSTEM-DERIVED name (<see cref="EmailMetadata.IsNameSystemDerived"/>) it carries a
+    /// short unique suffix, <c>{yyyy-MM-dd}_{subject}_{8 hex}.eml</c>; for a name the user typed it is
+    /// <c>DocumentName</c>, unchanged.
     /// </summary>
-    public static string SanitizeFileName(string name)
+    /// <remarks>
+    /// <para><b>Why.</b> The create upload is PATH-keyed under <c>ConflictBehavior.Replace</c>, so two emails with
+    /// the same subject and date in one container shared a path, and the second silently overwrote the first
+    /// email's file.</para>
+    /// <para><b>Why random, not derived from the message.</b> Like the attachment children's
+    /// <c>{parentDocumentId:N}_</c> prefix, the suffix is unique per save. A per-message value would make the SAME
+    /// email filed to two records in one container collide with itself. 8 hex digits = 32 bits, so two same-date,
+    /// same-subject emails in one container share a name with probability 2^-32.</para>
+    /// <para>The <c>.eml</c> extension stays last, so SPE still infers <c>message/rfc822</c>. The server-side
+    /// inbound and outbound archives do not use this generator: they already fold the communication id into the
+    /// stored name (<c>{communicationId:N}_…</c>), which makes their paths unique.</para>
+    /// </remarks>
+    public static (string DocumentName, string StoredFileName) GenerateEmlNames(EmailMetadata metadata)
     {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "untitled";
-        }
+        var documentName = GenerateEmlFileName(metadata);
+        if (!metadata.IsNameSystemDerived)
+            return (documentName, documentName);
 
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
-        return string.IsNullOrWhiteSpace(sanitized) ? "untitled" : sanitized.Trim();
+        var stem = documentName[..^".eml".Length];
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        return (documentName, $"{stem}_{suffix}.eml");
     }
+
+    // SanitizeFileName MOVED 2026-08-29 to Infrastructure/Graph/SpeUploadPath.SanitizeFileName, together
+    // with its explicit Windows-strict character set. It was the only PUBLIC implementation of a function
+    // seven other places had privately re-written, and callers now span Api/, Services/Communication/,
+    // Services/Workspace/, Services/Ai/, Services/Compose/ and Workers/ — reaching into Services/Office
+    // from all of those is the inverted dependency that produced the copies in the first place
+    // (root CLAUDE.md §11). Read the rationale at the new site; do not re-add a local copy here.
 }

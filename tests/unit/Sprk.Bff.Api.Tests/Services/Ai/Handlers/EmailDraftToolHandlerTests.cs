@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
@@ -33,7 +34,9 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
     private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi> _emailDraftAi = new();
 
     private EmailDraftToolHandler CreateHandler() =>
-        new(_dataverse.Object, _emailDraftAi.Object, CreateLogger<EmailDraftToolHandler>());
+        new(_dataverse.Object, _emailDraftAi.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            CreateLogger<EmailDraftToolHandler>());
 
     private static AnalysisTool BuildDraftTool() =>
         BuildAnalysisTool(handlerClass: nameof(EmailDraftToolHandler), name: "SYS-Email Draft");

@@ -21,7 +21,7 @@ last-reviewed: 2026-05-17
 
 ## Purpose
 
-Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZIP import. This skill is **PCF-specific** — for other Dataverse operations (web resources, plugins, solution export), see `dataverse-deploy`.
+Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZIP import. This skill is **PCF-specific** — for other Dataverse operations (web resources, solution export), see `dataverse-deploy`.
 
 **When to Use**:
 - "deploy pcf", "build and deploy pcf control"
@@ -31,7 +31,7 @@ Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZI
 
 **When NOT to Use**:
 - Deploying web resources → Use Dataverse UI directly or `dataverse-deploy`
-- Deploying plugins → Use `dataverse-deploy`
+- Solutions / web resources → Use `dataverse-deploy` (Spaarke ships no plugins — ADR-002)
 - Deploying Azure infrastructure → Use `azure-deploy`
 - **Authoring/modifying the PCF's React component code** → Use `fluent-v9-component` FIRST. This skill is for build+pack+deploy mechanics, not component design.
 
@@ -121,7 +121,7 @@ useEffect(() => {
 
 **If the PCF imports from `@spaarke/ui-components/dist/...`, you MUST compile the shared library BEFORE the PCF build.** The PCF webpack bundles pre-compiled JS from the shared lib's `dist/` folder — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will contain OLD code regardless of how many times you rebuild.
 
-**Automated guard (added 2026-07-07, `spaarke-matter-ui-enhancement-r1`)**: the 9 PCFs that import deep `dist/*` subpaths (`MatterHeader`, `EmailProcessingMonitor`, `RegardingResolver`, `RelatedDocumentCount`, `AssociationResolver`, `ScopeConfigEditor`, `DocumentRelationshipViewer`, `SemanticSearchControl`, `VisualHost`) each wire `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script. It compares the newest `src/` mtime against the newest `dist/` mtime and rebuilds automatically (via `npm run build` in the shared lib) if stale — no-op when fresh. This closes the gap that let `dist/` sit ~4 weeks stale in production (missing the entire `RecordHeader` component) before it was caught. The manual Step 0 below is now a fallback for PCFs NOT yet on this convention, or for direct `tsc` invocation when you only want to compile specific changed files. **Any NEW PCF added to this deep-import list MUST add the same `prebuild`/`prebuild:prod` wiring** (see any of the 9 `package.json`s above for the exact line).
+**Automated guard (added 2026-07-07, `spaarke-matter-ui-enhancement-r1`)**: the 8 PCFs that import deep `dist/*` subpaths (`MatterHeader`, `RegardingResolver`, `RelatedDocumentCount`, `AssociationResolver`, `ScopeConfigEditor`, `DocumentRelationshipViewer`, `SemanticSearchControl`, `VisualHost`) each wire `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script. It compares the newest `src/` mtime against the newest `dist/` mtime and rebuilds automatically (via `npm run build` in the shared lib) if stale — no-op when fresh. This closes the gap that let `dist/` sit ~4 weeks stale in production (missing the entire `RecordHeader` component) before it was caught. The manual Step 0 below is now a fallback for PCFs NOT yet on this convention, or for direct `tsc` invocation when you only want to compile specific changed files. **Any NEW PCF added to this deep-import list MUST add the same `prebuild`/`prebuild:prod` wiring** (see any of the 9 `package.json`s above for the exact line).
 
 **Step 0 (fallback/manual) — Compile shared lib `dist/`:**
 
@@ -414,7 +414,7 @@ When the user wants to deploy manually for fastest iteration:
 
 | Skill | Relationship |
 |-------|-------------|
-| **dataverse-deploy** | General Dataverse operations (plugins, web resources, solution export). This skill (`pcf-deploy`) is PCF-specific. |
+| **dataverse-deploy** | General Dataverse operations (web resources, solution export). This skill (`pcf-deploy`) is PCF-specific. |
 | **task-execute** | May invoke `pcf-deploy` when task tags include `pcf` + `deploy` |
 | **adr-aware** | ADR-006 (PCF over webresources), ADR-022 (React 16), ADR-021 (Fluent v9) |
 | **code-page-deploy** | For Code Page web resources (HTML). PCF solutions do NOT include code pages. |
@@ -448,4 +448,4 @@ When the user wants to deploy manually for fastest iteration:
 
 ---
 
-*For Claude Code: This skill handles PCF control deployment ONLY. For web resources, plugins, and other Dataverse components, use `dataverse-deploy` or deploy via Dataverse UI.*
+*For Claude Code: This skill handles PCF control deployment ONLY. For web resources and other Dataverse components, use `dataverse-deploy` or deploy via Dataverse UI.*

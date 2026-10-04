@@ -46,8 +46,13 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
+    // Fill the content area and center vertically + horizontally. `safe center`
+    // degrades to top-alignment if the success content is ever taller than the
+    // area (many links/warnings), so nothing is clipped.
+    justifyContent: 'safe center',
+    flexGrow: 1,
     gap: tokens.spacingVerticalL,
-    paddingTop: tokens.spacingVerticalXXL,
+    paddingTop: tokens.spacingVerticalXL,
     paddingBottom: tokens.spacingVerticalXL,
     textAlign: 'center',
   },

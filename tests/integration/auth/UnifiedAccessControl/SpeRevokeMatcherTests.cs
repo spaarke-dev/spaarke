@@ -190,6 +190,27 @@ public class SpeRevokeMatcherTests
                     return result;
                 });
 
+            // ISS-004 (#968), task 024: the ORGANIZATION sweep now batches into one call. Modelled
+            // here for the same reason as above — an un-stubbed virtual returns a null Task and the
+            // endpoint NREs, which is a fixture gap masquerading as a product defect.
+            mock.Setup(s => s.RemoveMembershipsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                {
+                    var results = new Dictionary<string, SpeContainerMembershipResult>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var email in emails)
+                    {
+                        CallCount++;
+                        CapturedContainerId = containerId;
+                        CapturedEmail = email;
+                        results[email] = result;
+                    }
+
+                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                });
+
             return mock;
         }
     }
@@ -217,6 +238,16 @@ public class SpeRevokeMatcherTests
 
     private static RevokeAccessResponse Body(IResult result) =>
         result.Should().BeOfType<Ok<RevokeAccessResponse>>().Subject.Value!;
+
+    /// <summary>
+    /// M2 (task 024 → task 065): the <see cref="SpeContainerRevokeOutcome.Failed"/> path is now a 500
+    /// ProblemDetails, not a 200 <see cref="RevokeAccessResponse"/> — <see cref="Body"/> intentionally
+    /// stays narrow (it must keep failing loudly if a non-Failed test regresses to a Problem shape), and
+    /// this sibling asserts the Problem shape for the tests that were flipped by M2. Mirrors
+    /// <c>ProjectClosureCascadeTests.Problem</c>'s exact convention (<c>.ProblemDetails.Extensions[...]</c>).
+    /// </summary>
+    private static ProblemHttpResult ProblemBody(IResult result) =>
+        result.Should().BeOfType<ProblemHttpResult>().Subject;
 
     private static readonly SpeContainerMembershipResult Removed =
         new(true, "permission-abc-123", null);
@@ -314,17 +345,25 @@ public class SpeRevokeMatcherTests
     /// must be reported as a failure the operator can act on — the distinction ADR-003 asks for.
     /// </summary>
     [Fact]
-    public async Task Revoke_WhenGraphFails_ReportsFailedRatherThanAbsent()
+    public async Task Revoke_WhenGraphFails_ReportsFailedAsA500Problem()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065). Was
+        // Revoke_WhenGraphFails_ReportsFailedRatherThanAbsent, asserting a 200
+        // Ok<RevokeAccessResponse> with SpeContainerOutcome.Failed buried in the body. /revoke now aligns
+        // with /close-project for this exact shape: "we could not tell" is a 500, not a 200.
         var stub = new SpeServiceStub();
         var spe = stub.Build(GraphError);
 
         var result = await Revoke(DataverseFor(ContactId, ContactEmail), spe);
 
-        var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed,
-            "'we could not tell' must never be reported as 'there was nothing there'");
-        body.SpeContainerMembershipRevoked.Should().BeFalse();
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError,
+            "'we could not tell' must never be reported as a 200 'there was nothing there'");
+        problem.ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1,
+            "the Dataverse row WAS deactivated even though the SPE half failed — owner directive 2026-09-10");
     }
 
     /// <summary>
@@ -332,14 +371,17 @@ public class SpeRevokeMatcherTests
     /// exist is unfindable. That is an unknown state, not an absence.
     /// </summary>
     [Fact]
-    public async Task Revoke_WhenTheContactHasNoEmail_ReportsFailedRatherThanAbsent()
+    public async Task Revoke_WhenTheContactHasNoEmail_ReportsFailedAsA500Problem()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var stub = new SpeServiceStub();
         var spe = stub.Build(NotFound);
 
         var result = await Revoke(DataverseFor(ContactId, contactEmail: null), spe);
 
-        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
         stub.CallCount.Should().Be(0,
             "with no key to match on there is nothing to ask Graph — and asking with an empty key could " +
             "match the wrong permission");
@@ -350,15 +392,17 @@ public class SpeRevokeMatcherTests
     /// state is unknown.
     /// </summary>
     [Fact]
-    public async Task Revoke_WhenTheEmailLookupFails_ReportsFailedAndCallsNoSpeRevoke()
+    public async Task Revoke_WhenTheEmailLookupFails_ReportsFailedAsA500ProblemAndCallsNoSpeRevoke()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var stub = new SpeServiceStub();
         var spe = stub.Build(Removed);
 
         var result = await Revoke(
             DataverseFor(ContactId, ContactEmail, emailLookupThrows: true), spe);
 
-        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
+        ProblemBody(result).ProblemDetails.Extensions["speContainerOutcome"].Should()
+            .Be(SpeContainerRevokeOutcome.Failed);
         stub.CallCount.Should().Be(0);
     }
 
@@ -666,6 +710,34 @@ public class SpeRevokeMatcherTests
                     return _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                 });
 
+            // ── ISS-004 (#968), task 024 ────────────────────────────────────────────────────────
+            // The org sweep now resolves every member's email FIRST and asks for them in ONE call,
+            // because the per-member path re-read the whole container each time (N reads, and N ×
+            // pages after task 024's paging). The endpoint therefore lands here, not on
+            // RevokeMembershipAsync above — which is kept, since the PER-CONTACT revoke path still
+            // uses it.
+            //
+            // CapturedEmails still receives one entry per member, in order, so every existing
+            // assertion about WHICH KEY was used — the whole of finding A-13 — is unchanged.
+            mock.Setup(s => s.RemoveMembershipsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                {
+                    if (containerId != ContainerId.ToString())
+                        throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
+
+                    var results = new Dictionary<string, SpeContainerMembershipResult>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var email in emails)
+                    {
+                        CapturedEmails.Add(email);
+                        results[email] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
+                    }
+
+                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                });
+
             return mock;
         }
     }
@@ -719,8 +791,11 @@ public class SpeRevokeMatcherTests
     /// must NOT stop the others from being cleaned up — stopping early leaves strictly MORE access in place.
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_WhenOneMemberFails_ReportsFailedAndStillCleansTheOthers()
+    public async Task Revoke_OfAnOrganizationGrant_WhenOneMemberFails_ReportsFailedAsA500ProblemAndStillCleansTheOthers()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
+        // The per-member sweep behaviour (all three members still attempted) is UNCHANGED; only the
+        // outcome's HTTP shape flips from 200-with-Failed-in-body to a 500 Problem.
         var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
         var stub = new SpeMemberStub(Removed, new Dictionary<string, SpeContainerMembershipResult>
         {
@@ -732,13 +807,14 @@ public class SpeRevokeMatcherTests
         stub.CallCount.Should().Be(3,
             "a per-member failure must not abort the loop — the other members must still lose access");
 
-        var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed,
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError,
+            "'some members retain access' must never be reportable as a 200 SPE success");
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed,
             "one member retaining file access is enough to make the org cleanup incomplete");
-        body.SpeContainerMembershipRevoked.Should().BeFalse(
-            "'some members retain access' must never be reportable as an SPE success");
-        body.SpeOrgMemberCleanup.Should().Be(
-            new SpeOrgMemberCleanupSummary(MembersEnumerated: 3, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 1));
+        problem.ProblemDetails.Extensions["speOrgMemberCleanup"].Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 3, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 1),
+            "the per-member arithmetic must survive the 500 — it is what lets the caller say '2 of 3 removed'");
     }
 
     /// <summary>
@@ -746,8 +822,9 @@ public class SpeRevokeMatcherTests
     /// absence — the same judgement task 017 made per-contact, applied per member.
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ReportsFailedRatherThanAbsent()
+    public async Task Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ReportsFailedAsA500Problem()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var org = new OrgRevokeFixture(
             junctionThrows: false, membersWithoutEmail: new[] { MemberTwo }, overflowRows: 0,
             MemberOne, MemberTwo, MemberThree);
@@ -760,9 +837,11 @@ public class SpeRevokeMatcherTests
             "with no key to match on there is nothing to ask Graph for that member — and asking with an " +
             "empty key could match the wrong permission");
 
-        var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
-        body.SpeOrgMemberCleanup!.Failed.Should().Be(1);
+        var problem = ProblemBody(result);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        var orgCleanup = problem.ProblemDetails.Extensions["speOrgMemberCleanup"]
+            .Should().BeOfType<SpeOrgMemberCleanupSummary>().Subject;
+        orgCleanup.Failed.Should().Be(1);
     }
 
     /// <summary>
@@ -771,8 +850,11 @@ public class SpeRevokeMatcherTests
     /// list would read like a complete answer.
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_WhenMembersCannotBeEnumerated_ReportsFailedAndRemovesNothing()
+    public async Task Revoke_OfAnOrganizationGrant_WhenMembersCannotBeEnumerated_ReportsFailedAsA500ProblemAndRemovesNothing()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
+        // The load-bearing null (MembersEnumerated) must survive the 500 exactly as it survives the 200 —
+        // it is the only signal distinguishing "we swept everyone" from "we do not know who to sweep".
         var org = new OrgRevokeFixture(
             junctionThrows: true, membersWithoutEmail: null, overflowRows: 0,
             MemberOne, MemberTwo, MemberThree);
@@ -782,11 +864,15 @@ public class SpeRevokeMatcherTests
 
         stub.CallCount.Should().Be(0);
 
-        var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed,
-            "'we could not tell who the members are' must never be reported as 'there was nothing there'");
-        body.SpeOrgMemberCleanup!.MembersEnumerated.Should().BeNull(
-            "a null member count is what distinguishes 'we never looked' from 'we looked and it was empty'");
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError,
+            "'we could not tell who the members are' must never be reported as a 200 'there was nothing there'");
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        var orgCleanup = problem.ProblemDetails.Extensions["speOrgMemberCleanup"]
+            .Should().BeOfType<SpeOrgMemberCleanupSummary>().Subject;
+        orgCleanup.MembersEnumerated.Should().BeNull(
+            "a null member count is what distinguishes 'we never looked' from 'we looked and it was empty' " +
+            "— and it must survive the 500 exactly as it survives the 200 (see the serialization test below)");
     }
 
     /// <summary>
@@ -818,8 +904,9 @@ public class SpeRevokeMatcherTests
     /// project exists to remove.
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_ReportsFailedRatherThanTruncating()
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_ReportsFailedAsA500ProblemRatherThanTruncating()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var org = new OrgRevokeFixture(
             junctionThrows: false, membersWithoutEmail: null,
             overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
@@ -830,9 +917,11 @@ public class SpeRevokeMatcherTests
 
         stub.CallCount.Should().Be(0, "a partial sweep would produce counts that read like a complete answer");
 
-        var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
-        body.SpeOrgMemberCleanup!.MembersEnumerated.Should().BeNull(
+        var problem = ProblemBody(result);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        var orgCleanup = problem.ProblemDetails.Extensions["speOrgMemberCleanup"]
+            .Should().BeOfType<SpeOrgMemberCleanupSummary>().Subject;
+        orgCleanup.MembersEnumerated.Should().BeNull(
             "the member list is a truncation, not the membership — reporting its length would assert " +
             "something we do not know");
     }
@@ -960,6 +1049,36 @@ public class SpeRevokeMatcherTests
             "'we do not know who the members are'");
     }
 
+    /// <summary>
+    /// M2's counterpart to <see cref="SpeOrgMemberCleanupSummary_UnknownMembership_SerializesAnExplicitNull"/>
+    /// above. As of M2 (task 024 → task 065) a <see cref="SpeContainerRevokeOutcome.Failed"/> outcome can
+    /// NEVER reach a 200 <see cref="RevokeAccessResponse"/> any more — the endpoint's Failed branch always
+    /// returns <c>RevokeIncomplete</c>'s 500 Problem instead — so the load-bearing null this task's ADR-003
+    /// constraint cares about now travels through <c>ProblemDetails.Extensions</c>, not the DTO. Runs the
+    /// REAL handler (the "members cannot be enumerated" scenario) rather than hand-building the extensions
+    /// dictionary, so a shape change to <see cref="RevokeExternalAccessEndpoint"/>'s Problem construction
+    /// is caught here rather than only in a test that duplicates it.
+    /// </summary>
+    [Fact]
+    public async Task RevokeIncomplete_SerializesTheOrgMemberCleanupNullAsAnExplicitNull()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: true, membersWithoutEmail: null, overflowRows: 0,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        var problem = ProblemBody(result);
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            problem.ProblemDetails.Extensions,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        json.Should().Contain("\"membersEnumerated\":null",
+            "the same load-bearing null the 200 path preserves must survive the 500 path too — an omitted " +
+            "field reads as 'undefined' to a client, not 'we do not know who the members are'");
+    }
+
     [Fact]
     public void AggregateOrgOutcome_WhenNobodyHeldAPermission_IsAbsentNotFailure() =>
         RevokeExternalAccessEndpoint.AggregateOrgOutcome(new SpeOrgMemberCleanupSummary(3, 0, 3, 0))
@@ -1052,17 +1171,24 @@ public class SpeRevokeMatcherTests
     /// rows were still revoked, and that is the part that actually governs access.
     /// </summary>
     [Fact]
-    public async Task Revoke_WhenSpeFails_StillReportsTheDataverseRowsDeactivated()
+    public async Task Revoke_WhenSpeFails_StillReportsTheDataverseRowsDeactivatedInTheProblemExtensions()
     {
+        // ✅ INVERTED BY M2 (task 024 → task 065). Was
+        // Revoke_WhenSpeFails_StillReportsTheDataverseRowsDeactivated, reading DeactivatedCount off a 200
+        // Ok<RevokeAccessResponse>. The Dataverse sweep is still authoritative and still ran — an SPE
+        // cleanup failure must not hide it — but the count now rides in the 500 Problem's extensions
+        // (owner directive 2026-09-10: "if revoked, a user message should be provided not just a 500
+        // error", and DeactivatedCount is the fact that message is built on).
         var stub = new SpeServiceStub();
         var spe = stub.Build(GraphError);
 
         var result = await Revoke(DataverseFor(ContactId, ContactEmail), spe);
 
-        var body = Body(result);
-        body.DeactivatedCount.Should().Be(1,
-            "the Dataverse sweep is the authoritative revocation; an SPE cleanup failure must not hide it");
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
+        var problem = ProblemBody(result);
+        problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1,
+            "the Dataverse sweep is the authoritative revocation; an SPE cleanup failure must not hide it, " +
+            "even behind a 500");
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
     }
 
     /// <summary>

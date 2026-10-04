@@ -102,6 +102,7 @@ public class AssociationMappingTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             _loggerMock.Object,
             scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }

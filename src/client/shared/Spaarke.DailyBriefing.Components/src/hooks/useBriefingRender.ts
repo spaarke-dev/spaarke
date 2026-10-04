@@ -70,7 +70,13 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
   // to keep the widget out of the empty state — operators want flagged records
   // visible even when narrative channels are empty.
   const hasHighPriority = Array.isArray(response.highPriorityItems) && response.highPriorityItems.length > 0;
-  return !hasHighPriority;
+  if (hasHighPriority) return false;
+  // unified-access-control-r2 task 152: a section that could not be loaded is NOT "all caught up" — keep the widget
+  // out of the empty state so the "could not be loaded" warning is shown.
+  const hasFailures =
+    (Array.isArray(response.failedChannels) && response.failedChannels.length > 0) ||
+    (Array.isArray(response.highPriorityFailedEntityTypes) && response.highPriorityFailedEntityTypes.length > 0);
+  return !hasFailures;
 }
 
 // ---------------------------------------------------------------------------

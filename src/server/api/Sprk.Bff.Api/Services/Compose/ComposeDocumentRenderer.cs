@@ -451,6 +451,26 @@ public sealed partial class ComposeDocumentRenderer
                     ?.ParagraphProperties?.SectionProperties?.CloneNode(true) as SectionProperties;
             }
 
+            // #777: interior section breaks that will be lost if NO merge runs. Counted HERE because the
+            // body is about to be emptied, and it is the only place the source's own paragraphs are still
+            // readable.
+            //
+            // Why it is needed at all. On the merge path every surviving break is reported per EDITED block
+            // by WarnIfSectionBreakFlattened, and an untouched one is cloned intact. But the merge does not
+            // always run: `mergeUnchangedBlocks: false`, and — the case that matters in production —
+            // ComposeBlockMerge.Capture FAILING OPEN (no blocks, or the re-projection threw). That path
+            // rebuilds the whole body from the model, so it loses EVERY interior section break at once.
+            // Since the projection-time warning is gone, saying nothing here would make the worst case the
+            // quietest one, which is the exact inversion ADR-049's never-silent rule exists to prevent.
+            //
+            // Same value rule as the merge path: a break equal to the trailing section is the promotion
+            // shape (or a break that merely repeated the final setup) and changes nothing a reader sees.
+            var interiorSectionBreaksAtRisk = body.Elements<Paragraph>()
+                .Select(p => p.ParagraphProperties?.SectionProperties)
+                .Count(s => s is not null
+                    && !(trailingSectPr is not null
+                         && string.Equals(trailingSectPr.OuterXml, s.OuterXml, StringComparison.Ordinal)));
+
             // ═══════════════════════════════════════════════════════════════════════════════════
             // THE BASE SIDE (ADR-049 R8 third amendment · task 040).
             //
@@ -560,11 +580,18 @@ public sealed partial class ComposeDocumentRenderer
 
             if (mergeBaseline is not null)
             {
-                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats);
+                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats, trailingSectPr);
             }
             else
             {
                 RenderBlocks(body, renderBlocks, state);
+
+                // #777: no base side, so nothing was cloned and every interior section break counted above
+                // is gone. One warning per lost break, matching the merge path's per-instance granularity.
+                for (var i = 0; i < interiorSectionBreaksAtRisk; i++)
+                {
+                    state.Warn("section-break-flattened");
+                }
             }
 
             ResolveHyperlinkRelationships(body, mainPart, state);
@@ -1949,7 +1976,8 @@ public sealed partial class ComposeDocumentRenderer
         IReadOnlyList<ComposeBlock> posted,
         ComposeMergeBaseline baseline,
         ListRenderState state,
-        ComposeMergeStats? stats)
+        ComposeMergeStats? stats,
+        SectionProperties? trailingSectPr)
     {
         var steps = ComposeBlockMerge.Plan(posted, baseline, stats);
 
@@ -1992,6 +2020,59 @@ public sealed partial class ComposeDocumentRenderer
             // every REF field, so dropping one breaks cross-references ELSEWHERE in the document) and a
             // block-level content-control shell. Taken from the BASE block, never from a client payload.
             ComposeBlockMerge.CarryUnmodeledConstructs(body, before, baseElement, code => state.Warn(code));
+
+            WarnIfSectionBreakFlattened(baseElement, trailingSectPr, state);
         }
+    }
+
+    /// <summary>
+    /// #777 (r8, 2026-09-01): reports <c>section-break-flattened</c> for an interior <c>w:sectPr</c> lost
+    /// because the user EDITED the paragraph that carried it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why here and not at projection.</b> This warning used to be emitted by
+    /// <c>ComposeContentModelProjector</c> while the document was being OPENED, once per interior section
+    /// break in the file. But an interior <c>sectPr</c> only dies when its paragraph is RE-RENDERED:
+    /// <c>ComposeBlockMerge.Capture</c> clones an untouched body child whole, so the untouched case carries
+    /// its <c>pPr/sectPr</c> through verbatim. Warning at open therefore reported loss on a document nothing
+    /// had been done to (the "×6" on an untouched contract), which is exactly the non-actionable noise the
+    /// owner directive rules out. Here it fires once per section break that a save actually flattened.</para>
+    ///
+    /// <para><b>Why it is KEPT rather than retired</b>, unlike <c>indentation-dropped</c> and
+    /// <c>paragraph-style-flattened</c>: those two had their premise falsified — the properties are carried
+    /// now, so the warnings were false. This one is still true. An edited paragraph's interior section break
+    /// IS dropped (<c>InheritParagraphProperties</c> excludes <c>SectionProperties</c> because the renderer
+    /// owns the trailing section), the content joins the final section's page setup, and pagination and
+    /// header scope really do change. It is real, and "open it in Word" is a real thing to do about it.</para>
+    ///
+    /// <para><b>The promotion shape falls out for free.</b> Review 023-F1's exception — the 011-P1 generator
+    /// idiom where the FINAL section's <c>sectPr</c> is parked in the last paragraph and
+    /// <c>RenderIntoCarrier</c> promotes it to body level — used to need a predicate mirroring the renderer's
+    /// promotion condition. Comparing by VALUE against the trailing section retires that duplication, and is
+    /// the more honest test anyway: if the section this paragraph ended is the same section its content now
+    /// sits in, the reader sees no change, and a warning would be a false loss report.</para>
+    ///
+    /// <para><paramref name="trailingSectPr"/> is passed in because the caller DETACHES it before the merge
+    /// and re-attaches it afterwards — during this loop the body carries no section properties of its own,
+    /// so reading them from <paramref name="baseElement"/>'s document would find nothing.</para>
+    /// </remarks>
+    private static void WarnIfSectionBreakFlattened(
+        OpenXmlElement baseElement, SectionProperties? trailingSectPr, ListRenderState state)
+    {
+        if (baseElement is not Paragraph baseParagraph
+            || baseParagraph.ParagraphProperties?.SectionProperties is not { } baseSectPr)
+        {
+            return;
+        }
+
+        // Same section, so the content's page setup is unchanged — the promotion shape, and any interior
+        // break that merely repeated the final section's setup.
+        if (trailingSectPr is not null
+            && string.Equals(trailingSectPr.OuterXml, baseSectPr.OuterXml, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.Warn("section-break-flattened");
     }
 }

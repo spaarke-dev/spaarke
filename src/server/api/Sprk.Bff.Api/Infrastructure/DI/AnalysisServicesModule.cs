@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -804,7 +805,7 @@ public static class AnalysisServicesModule
         services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader,
                                Sprk.Bff.Api.Services.Ai.Classification.DataverseAgreementTypeRegistryReader>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Classification.AgreementTypeRegistryPromptAssembler>();
-        services.AddScoped<IScopeManagementService, ScopeManagementService>();
+
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
         // IWorkingDocumentService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 3,
         // RB-T028-04 cluster residual — 2026-06-01). Phase 1c re-re-triage surfaced
@@ -951,8 +952,8 @@ public static class AnalysisServicesModule
         Console.WriteLine("✓ IOrganizationalContextProvider registered (task 060 FR-B-11; Null-Object default — Work IQ provider deferred)");
 
         // ICallerContactResolver — deterministic claims→Dataverse-contact resolver (task 055, FR-B-06).
-        // Maps the caller's AAD oid claim to a Dataverse contact via the
-        // contact.azureactivedirectoryobjectid cross-reference (ADR-028) so "assign it to me" resolves
+        // Maps the caller's AAD oid claim to the Dataverse contact BOUND to it
+        // (contact.sprk_externalobjectid — unified-access-control-r2 task 141) so "assign it to me" resolves
         // server-side, never a model guess. Scoped: wraps IDataverseService (Singleton) and is consumed
         // by ContextBinder (Scoped, registered immediately below). §F.1 asymmetric-registration audit:
         // sole consumer is ContextBinder in THIS compound-ON block; the compound-OFF path's

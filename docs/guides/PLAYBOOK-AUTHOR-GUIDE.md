@@ -841,7 +841,7 @@ Three pre-R3 playbooks shared a common defect class: their "user's matters" filt
   "outputVariable": "myMatters",
   "configJson": {
     "entityType": "sprk_matter",
-    "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+    "targeting": "people",                       // task 152: notification playbooks target PEOPLE
     "includeRelated": false
   }
 },
@@ -865,6 +865,15 @@ Three pre-R3 playbooks shared a common defect class: their "user's matters" filt
 ```
 
 The other two migrated playbooks (`notification-new-emails.json`, `notification-new-events.json`) follow the same shape: `Start → LookupUserMembership → QueryDataverse with joinIds → Condition → CreateNotification`, with explicit `sprk_executortype` on every node.
+
+> **`targeting` (unified-access-control-r2 task 152, ADR-034 Amendment A3).** A LookupUserMembership node whose output
+> reaches a **CreateNotification, SendEmail or briefing** node MUST set `"targeting": "people"`. It selects the records
+> FOR the user — the ones they created (a human Created By), the ones naming them in an "Assigned *" contact column
+> (through their linked contact), and the ones they personally own — and never records reached only through team,
+> business-unit or organization ownership (a BU's default team contains the whole BU, so the default surface notifies
+> everyone in the unit about a team-owned record). Omit `targeting` only for AI scoping (retrieval context). Any other
+> value fails node validation. Do not combine it with a `roles` filter unless you mean to drop terms: a `roles` filter
+> that omits `createdBy` drops Created By.
 
 ### How to audit your existing playbooks for similar issues
 

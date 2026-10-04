@@ -19,6 +19,7 @@
  */
 import { getXrm } from '../../services/xrmGlobal';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { cleanGuid } from '../../utils/guid';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import type {
   IRecordLookupTarget,
@@ -131,7 +132,7 @@ export async function resolveCurrentUserEmail(): Promise<string | undefined> {
     const xrm = getXrm();
     const userId: string | undefined = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm?.WebApi || !userId) return undefined;
-    const clean = String(userId).replace(/[{}]/g, '');
+    const clean = cleanGuid(userId);
     const rec = await xrm.WebApi.retrieveRecord('systemuser', clean, '?$select=internalemailaddress');
     const email = rec?.internalemailaddress;
     return typeof email === 'string' && email.includes('@') ? email : undefined;
@@ -173,7 +174,7 @@ export function createXrmEmailComposeHandlers(options?: {
     });
     const picked = results?.[0];
     if (!picked) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(picked.id);
     return { entityType, id, name: picked.name, url: buildRecordUrl(entityType, id) };
   };
 
@@ -191,7 +192,7 @@ export function createXrmEmailComposeHandlers(options?: {
     for (const p of results) {
       const field = RECIPIENT_EMAIL_FIELD[p.entityType as string];
       if (!field) continue;
-      const id = String(p.id).replace(/[{}]/g, '');
+      const id = cleanGuid(p.id);
       try {
         const rec = await xrm.WebApi.retrieveRecord(p.entityType, id, `?$select=${field}`);
         const email = rec?.[field];
@@ -220,7 +221,7 @@ export function createXrmEmailComposeHandlers(options?: {
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];
     if (!picked?.id || !picked?.entityType) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(picked.id);
     return { entityType: picked.entityType, id, name: picked.name, url: buildRecordUrl(picked.entityType, id) };
   };
 
@@ -235,14 +236,22 @@ export function createXrmEmailComposeHandlers(options?: {
           const xrm = getXrm();
           if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
 
-          // Single SPE container per deployment, resolved from the current user's owning
-          // Business Unit (`businessunit.sprk_containerid`). No per-record container.
+          // 🔴 PARENTLESS UPLOAD. Task 076: this flow genuinely has no owning record when the bytes
+          // move — the `sprk_document` is created AFTER the upload and deliberately unassociated,
+          // because the email may have no persisted regarding yet. So it uses the record-LESS route
+          // (`PUT /api/obo/me/files/{path}`), where the SERVER derives the container from the acting
+          // user's business unit. Task 076's classification (project notes
+          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+          // parentless, alongside the Analysis wizard's standalone-document flow — the only other
+          // caller of `uploadFilesWithoutRecord` at HEAD.
+          //
+          // The client no longer resolves or names that container. The value is the same one it used
+          // to compute here; the difference is that the client is no longer the authority for it.
           const userId: string | undefined = xrm.Utility?.getGlobalContext?.()?.userSettings?.userId;
           if (!userId) throw new Error('Could not resolve the current user for upload.');
+          // Still needed for the SEARCH-INDEX routing fields below; the container half of this
+          // result is no longer read by anything on this path.
           const bu = await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
-          if (!bu.containerId) {
-            throw new Error('No document storage container is configured for your business unit.');
-          }
 
           const svc = new EntityCreationService(xrm.WebApi, authenticatedFetch, bffBaseUrl);
           const uploaded: IUploadedFile = {
@@ -252,7 +261,7 @@ export function createXrmEmailComposeHandlers(options?: {
             fileType: deriveUploadedFileType(file.type),
             file,
           };
-          const uploadResult = await svc.uploadFilesToSpe(bu.containerId, [uploaded]);
+          const uploadResult = await svc.uploadFilesWithoutRecord([uploaded]);
           const meta = uploadResult.uploadedFiles[0];
           if (!meta) throw new Error(uploadResult.errors[0]?.error ?? 'File upload failed.');
 
@@ -264,7 +273,9 @@ export function createXrmEmailComposeHandlers(options?: {
             sprk_filename: meta.name,
             sprk_filesize: meta.size,
             sprk_graphitemid: meta.id,
-            sprk_graphdriveid: bu.containerId,
+            // The drive the SERVER put the bytes in, read off the upload response — not a container
+            // this client chose. These were the same value before only by coincidence.
+            sprk_graphdriveid: meta.driveId,
             sprk_filepath: meta.webUrl ?? null,
             sprk_hasfile: true,
           };

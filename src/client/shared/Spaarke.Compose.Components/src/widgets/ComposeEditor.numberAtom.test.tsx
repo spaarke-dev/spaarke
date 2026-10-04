@@ -105,14 +105,24 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
     expect(atom?.textContent).toBe('4.1');
   });
 
-  it('the native <ol> marker is suppressed (list-style-type: none) — the atom is the SOLE source of the number, avoiding "1. 4.2" double-numbering', async () => {
-    renderEditor('<ol><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>');
+  it('suppresses the native <ol> marker for a PROJECTED list only — scoped, not global (UAT round 2)', async () => {
+    renderEditor(
+      '<ol data-projected-list="1"><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>'
+    );
     await screen.findByRole('textbox');
 
     const rules = allCssRuleText();
-    const olRule = rules.find(text => / \.ProseMirror ol\s*\{/.test(text));
-    expect(olRule).toBeDefined();
-    expect(olRule).toMatch(/list-style-type:\s*none/);
+
+    // The atom stays the SOLE source of a document-sourced number, avoiding "1. 4.2" double-numbering.
+    const projectedRule = rules.find(text => /\.ProseMirror ol\[data-projected-list\]\s*\{/.test(text));
+    expect(projectedRule).toBeDefined();
+    expect(projectedRule).toMatch(/list-style-type:\s*none/);
+
+    // UAT round 2: the suppression must NOT be global any more. It was, and that is why a list the USER
+    // created rendered with no number at all and "Numbered list" looked like a dead button. An
+    // unqualified `.ProseMirror ol { list-style-type: none }` is the regression this catches.
+    const unscopedRule = rules.find(text => /\.ProseMirror ol\s*\{/.test(text) && /list-style-type:\s*none/.test(text));
+    expect(unscopedRule).toBeUndefined();
 
     // Negative — bullet (<ul>) lists are untouched by this suppression (no legal number involved).
     const ulRule = rules.find(text => / \.ProseMirror ul\s*\{/.test(text) && /list-style-type:\s*none/.test(text));
@@ -159,5 +169,44 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
     expect(computed.userSelect).toBe('none');
     expect(computed.pointerEvents).toBe('none');
     expect(atom.getAttribute('contenteditable')).toBe('false');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Editor typography (UAT round 2) — readability, not document spacing
+// ---------------------------------------------------------------------------
+
+describe('ComposeEditor — editor typography defaults', () => {
+  it('gives headings a UNITLESS line-height so a large glyph is not trapped in a fixed 20px line box', async () => {
+    renderEditor('<h1 data-paraid="TYPO0001">A heading long enough to wrap onto more than one line</h1>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const headingRule = rules.find(t => /\.ProseMirror h1/.test(t) && /line-height/.test(t));
+    expect(headingRule).toBeDefined();
+    // The bug was inheriting FluentProvider's root line-height, a FIXED PIXEL value (20px) smaller than a
+    // ~28px heading glyph. A unitless ratio scales with font-size; a px value would reintroduce it at a
+    // different size, so the absence of a unit is the actual contract here.
+    expect(headingRule).toMatch(/line-height:\s*1(\.\d+)?\s*[;}]/);
+    expect(headingRule).not.toMatch(/line-height:\s*\d+px/);
+  });
+
+  it('gives body paragraphs their own line-height and bottom margin', async () => {
+    renderEditor('<p data-paraid="TYPO0002">Body prose.</p>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const paraRule = rules.find(t => /\.ProseMirror p\b/.test(t) && /line-height/.test(t));
+    expect(paraRule).toBeDefined();
+    expect(paraRule).not.toMatch(/line-height:\s*\d+px/);
+  });
+
+  it('keeps list and table paragraphs tight — the prose margins must not space list rows apart', async () => {
+    renderEditor('<ul><li><p data-paraid="TYPO0003">Item</p></li></ul>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const tightRule = rules.find(t => /\.ProseMirror li p/.test(t) && /margin-bottom/.test(t));
+    expect(tightRule).toBeDefined();
   });
 });

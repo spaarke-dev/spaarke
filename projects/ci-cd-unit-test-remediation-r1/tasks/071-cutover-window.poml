@@ -1,7 +1,7 @@
 <task id="CICD-071" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Cutover (~4h window): restore Release matrix, flip branch protection to CI/Router only, enable merge queue (batch=1)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>3 - Cutover</phase>
     <stream>A+B+C - Cutover</stream>
@@ -57,6 +57,61 @@
     — that serializes merging, which is exactly north star #2, and it reverses the 2026-06-05
     strict=false decision. The correct instrument for the semantic-conflict risk strict addresses is
     the merge queue (step 5 of this task).
+  </correction>
+  <correction date="2026-09-29" source="task-execute Step 9 verification against spec.md">
+    STEP 2 AND ITS ACCEPTANCE CRITERION ARE WITHDRAWN. They instruct restoring the `Release` matrix
+    to sdap-ci.yml during cutover. That directly violates a BINDING spec MUST NOT, and the successor
+    workflow already names a different task as the owner:
+      - spec.md:197  "MUST NOT restore `Release` matrix before Phase 2 deletion has merged AND
+                      surviving suite green >= 7 days"
+      - spec.md:128  FR-B07, same 7-consecutive-day rule
+      - spec.md:225  explicitly records that this clock is NOT amended
+      - ci-tier2-advisory.yml:249-250  "Debug-only is BINDING through Phase 2 per spec MUST 125 /
+                      FR-B07. Restore Release here ONLY after surviving suite green >= 7 days
+                      (CICD-075)."
+    The 7-day soak IS task 075, which runs AFTER this task. Executing step 2 here would break the
+    rule the soak exists to satisfy. Per project CLAUDE.md, spec.md is the binding source where it
+    conflicts with a task file, so the spec wins.
+
+    WHERE IT ACTUALLY BELONGS: task 075, in `.github/workflows/ci-tier2-advisory.yml` (the SUCCESSOR),
+    NOT in sdap-ci.yml. The original step said "sdap-ci.yml (or its successor)" -- the successor is
+    the operative half. Restoring Release into sdap-ci.yml would also have been self-defeating:
+    task 077 DELETES that workflow ~14 days later, so the coverage would cost ~35 extra job-minutes
+    per push for two weeks and then vanish, leaving zero Release coverage behind it.
+
+    CONSEQUENCE FOR THIS TASK: step 2 and step 3 are SKIPPED, and acceptance criterion 1 is
+    superseded by task 075's. This task's remaining scope is: verify branch protection (step 4,
+    already done 2026-08-29), enable the merge queue (step 5), verify (6), test PR (7), monitor (8),
+    record (9), merge #869 (9b).
+  </correction>
+
+  <correction date="2026-09-29" source="owner decision during task-execute step 5">
+    STEP 5 (ENABLE MERGE QUEUE) IS DECLINED BY THE OWNER, and acceptance criteria 3 and 4 are
+    withdrawn with it. This is a deliberate scope reduction, not an omission.
+
+    MEASURED COST. A full CI run on a code change is 17-27 minutes wall-clock. At the specified
+    batch=1 every PR runs CI IN the queue, serially, so the 17 non-draft PRs open at decision time
+    would take roughly 5-7.5 hours to drain. That is the same serialization the owner rejected on
+    2026-06-05 when choosing strict=false, and this task's OWN step-4 correction says of strict=true:
+    "that serializes merging, which is exactly north star #2".  A merge queue at batch=1 is
+    automated serialization rather than manual serialization -- better, but still serialization,
+    and still against north star #2 ("CI must not hold up high-frequency master builds and pushes").
+
+    MEASURED BENEFIT: NOT DEMONSTRATED ON THIS REPO. A merge queue guards the semantic conflict --
+    two PRs that each pass alone and break together. The only such incident this project recorded,
+    PR #934, was NOT that shape: #934 changed IOfficeService.QuickCreateAsync's signature without
+    updating its caller WITHIN THE SAME PR. A merge queue would not have caught it. Widening Tier 1's
+    compile scope to the whole solution (PR #944) did, and that has already shipped.
+
+    So the queue would cost hours of throughput against a stated north star to guard a failure mode
+    this repo has not exhibited, while the mode it DID exhibit is already covered.
+
+    REVERSIBILITY is why this is cheap to decline: enabling a merge queue is a settings change that
+    takes minutes. If a genuine semantic conflict lands later, turn it on then -- and prefer batch>1
+    over batch=1 for throughput, accepting bisect-on-failure as the trade.
+
+    CONSEQUENCE: this task's scope is now branch-protection VERIFY (step 4, done), pipeline
+    verification (steps 6-7), the stability check (step 8), the record (step 9), and #869 (step 9b).
   </correction>
 
   <role>CI/CD engineer executing the synchronized cutover.</role>
@@ -114,4 +169,34 @@
     <criterion testable="true">sdap-ci.yml still running in parallel (NOT yet deleted)</criterion>
     <criterion testable="true">Step 9.5 pass</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-09-29">
+    COMPLETE. Record: notes/cutover-success.md.
+
+    This task changed NO configuration, and that is the honest accounting:
+      - branch protection -> `Router` was ALREADY DONE 2026-08-29 (ruleset 21824191); step 4 VERIFIED it
+      - `Release` matrix restore: WITHDRAWN -- violates spec.md:197 / FR-B07 MUST NOT; owned by task 075,
+        and belongs in ci-tier2-advisory.yml (the successor), since task 077 deletes sdap-ci.yml
+      - merge queue: DECLINED by owner -- batch=1 serializes merging at 17-27 min/PR (~5-7.5h to drain
+        17 open PRs) against north star #2, to guard a semantic-conflict mode this repo has not
+        exhibited; the one real incident (#934) was intra-PR and is covered by #944's compile widening
+
+    The cutover in substance happened 2026-08-29 and has run as the enforcing gate for a month.
+
+    Stability (spec §152 rollback triggers), measured over 2026-08-30..09-29 rather than a 4-hour vigil:
+      Tier 1 failure rate 0.0% (80 jobs, 0 failures) vs "over 2%" trigger
+      master green rate  100.0% (60 runs, 0 failures) vs "under 90%" trigger
+      false-positive blocks 0 vs "more than 3" trigger
+      merge-queue stalls N/A (declined)
+
+    Shadow window: SATISFIED (8/8, 0 false greens, 24.1/5 days) after PR #1028 fixed two script
+    defects -- the readiness check could never fire once any false green existed, and the window start
+    had not moved past #944's config change. Target 20 -> 8 recorded as an owner decision.
+
+    Step 9b: PR #869 (alls-green 1.2.2 -> 1.3.0) was 754 commits stale with August CI; refreshed
+    against master before merge. v1.3.0 is a SECURITY fix (GHSA-gj76-h2ch-5m76 template injection)
+    with an unchanged input/output interface.
+
+    sdap-ci.yml STILL RUNNING in parallel -- deletion is task 077, gated on the 075 soak.
+  </notes>
 </task>

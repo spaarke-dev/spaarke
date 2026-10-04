@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-013 (#990) — DataverseImpersonation fails closed in the shared helper; Entra oid (CallerObjectId) support; the NFR-04 canary covers the helper path</title>
+    <phase>1 One evaluator — prerequisite of 036 (register-driven, owner rule 2026-09-15)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security boundary in shared Spaarke.Dataverse; tags auth/security/bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A helper that silently degrades to an app-only, unscoped query is an org-wide disclosure (project fact 1: the BFF filter is the entire boundary). Shared hot path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Spaarke.Dataverse / DataverseWebApiService.cs are parallel-unsafe in this project (project CLAUDE.md).</parallel-reason>
+    <deps>035</deps>
+    <tags>auth, security, dataverse, bff-api, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Register ISS-013 / GitHub #990 — kept in the project under the owner's 2026-09-15 rule: material (the evaluator's impersonated root sets, task 036, rely on it).</origin>
+  </metadata>
+
+  <prompt>DataverseImpersonation.Apply adds no header when the id is null or Guid.Empty, and returns — the request then goes out as an app-only query. The fail-closed refusal lives only in DataverseWebApiService.RetrieveMultipleImpersonatedAsync, so any new call site that uses the helper directly silently degrades to an unscoped read. Task 036 turns impersonated root sets on in the evaluator; harden the helper before that happens.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, Dataverse Web API impersonation, fail-closed security design. Follow ADRs strictly.</role>
+  <goal>A caller that asks to impersonate can never produce an app-only request: the impersonating entry point throws on an empty id (and on a tenant / environment mismatch where the helper can know it) before anything is sent; callers that do not impersonate are unchanged and say so explicitly; the helper stamps CallerObjectId from an Entra oid (Microsoft-preferred) or MSCRMCallerID from a systemuserid — never both; task 034's NFR-04 canary also runs through the helper path.</goal>
+
+  <context>
+    <background>GitHub #990 (prerequisite P3 of the owner-accepted ADR-052 §6 rule; ADR-028 A5's warning). The helper's own doc comment defines null / empty as "no header — existing consumers unchanged". That contract serves callers that do NOT impersonate, so do not reinterpret it silently: inventory every caller first, then separate the two intents (e.g. an explicit required-impersonation entry point). Premises to verify and cite on Microsoft Learn: MSCRMCallerID takes the systemuserid; CallerObjectId takes the Entra object id and is preferred. Task 034 (the NFR-04 canary) is blocked-shipped — the harness exists; its live run needs prvActOnBehalfOfAnotherUser (036's runbook).</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs — RetrieveMultipleImpersonatedAsync (the existing refusal; line numbers in project CLAUDE.md are :953-989 — verify)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs — task 035, the consumer 036 turns on</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/tasks/034-fr20-negative-canary-merge-gate.poml — the canary to extend</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/WorkloadPlacementGuardTests.cs — already allows impersonation under src/server/functions/** only through this helper</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: every impersonating entry point. Fail closed — never fall back to app-only.</constraint>
+    <constraint source="project">Scope: the helper API. Non-impersonating callers stay byte-unchanged; the new behaviour is explicit, not a reinterpretation of null.</constraint>
+    <constraint source="#990">Scope: headers. Exactly one impersonation header per request.</constraint>
+    <constraint source="project">Scope: tenant / environment check. Implement only what the helper can know (e.g. the request host against the configured org); do not invent a tenant source — escalate.</constraint>
+    <constraint source="root CLAUDE.md Hot-Path Watchlist">Scope: this task's PR. Spaarke.Dataverse is shared — run /conflict-check first; report publish size against a fresh master (§10).</constraint>
+    <constraint source="owner directive">Scope: tests. No Dataverse test in CI — the canary extension follows task 034's run conditions.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Inventory every caller of DataverseImpersonation.Apply and every MSCRMCallerID / CallerObjectId use across src/ (grep). Record which callers intend no impersonation. Verify the premises above.</step>
+    <step order="1">Separate the intents; move the refusal into the helper's impersonating entry point; add the oid (CallerObjectId) path.</step>
+    <step order="2">Point RetrieveMultipleImpersonatedAsync (and ImpersonatedRootSetSource, if it uses the helper) at the fail-closed entry point; remove the duplicate check only where the helper now provably covers it.</step>
+    <step order="3">Extend task 034's canary with a helper-path case; tests; perturbations; build, full suite, publish size; notes/task-104-impersonation-helper-fail-closed.md; TASK-INDEX; comment on #990.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any existing caller relies on Apply(null / Empty) meaning "impersonate if possible, else app-only" on an access-scoped read, STOP and escalate with the list — that caller is already fail-open.</trigger>
+    <trigger>If a tenant / environment check needs data the helper cannot get without a new dependency, STOP and escalate rather than inventing a source.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs (+ DataverseWebApiService.cs)</output>
+    <output type="test">tests/ (KEEP path) + the task 034 canary</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-104-impersonation-helper-fail-closed.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The impersonating entry point, given Guid.Empty or an empty oid, throws and sends nothing.</criterion>
+    <criterion testable="true">Given a systemuserid → exactly one MSCRMCallerID header; given an Entra oid → exactly one CallerObjectId header; never both.</criterion>
+    <criterion testable="true">Negative: a non-impersonating caller's request is byte-identical to before (regression).</criterion>
+    <criterion testable="true">Negative: a call site that uses the helper directly with an empty id cannot produce an app-only query.</criterion>
+    <criterion testable="true">Regression: RetrieveMultipleImpersonatedAsync still refuses Guid.Empty.</criterion>
+    <criterion testable="true">Task 034's canary has a helper-path case: impersonated rows are a strict subset of, and strictly fewer than, app-only (under 034's run conditions).</criterion>
+    <criterion testable="true">Perturbation: removing the throw fails at least one test; stamping both headers fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green (incl. ArchTests); publish size against a fresh master and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-013; GitHub #990 (label unified-access-control-r2). Prerequisite P3 of ADR-052 §6. Task 036 depends on this task.
+
+COMPLETED 2026-09-15 (session 12). Commits: `6be320e82` (implementation), `134bdb73e` (Step 9.5 fixes), `43ac00a18` (ADR-028 A5 factual correction). Full record: notes/task-104-impersonation-helper-fail-closed.md.
+- Helper: `ApplyAsSystemUser(request, Guid)` → MSCRMCallerID and `ApplyAsEntraUser(request, oid, tokenTenant, orgTenant)` → CallerObjectId replace `Apply(request, Guid?)`. Both throw on Guid.Empty, the oid path also on a tenant mismatch, and a request carries exactly one header.
+- Service: the request builder is the single enforcement point; it runs the helper only for a supplied id, before the token. A protected test ctor (DI cannot reach it) takes a TokenCredential.
+- Escalation triggers did not fire. Trigger 1: the only impersonating writers (the Communication apply services) already reject Guid.Empty. Trigger 2: the tenant ids arrive as parameters; the environment is not knowable in the helper, which is documented rather than invented.
+- Premise corrections: the POML's `:953-989` line numbers were stale. Microsoft Learn documents CallerObjectId + oid as preferred and MSCRMCallerID as legacy; it does not document what happens with both headers, or for unknown, disabled or foreign-tenant users.
+- Acceptance, all met: criterion 1 at the helper and the builder (for UpdateRecordFieldsAsync only the app-only metadata lookup can precede the refusal, by design since review F1); criterion 6 is the live Test 4, run under 034's conditions. Perturbations 6/6; ArchTests 323/323; full suite 14,590 / 0 / 86; publish 45.43 MB vs master 45.35 MB (214 files each; task increment ≈0); no CVEs.
+- Step 9.5: adr-check 0 violations / 7 warnings; code-review approved with changes (0 High). The fixes landed in `134bdb73e`. The residuals are recorded on #990 and in the notes §5.
+- Side finding: ISS-016 / #993. DataverseWebApiClient receives the container's TokenCredential. Handed off: not material to this project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

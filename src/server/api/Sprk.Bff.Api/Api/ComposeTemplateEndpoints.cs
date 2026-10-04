@@ -178,6 +178,28 @@ internal static class ComposeTemplateEndpoints
                         "automatically within a few minutes.",
                 type: "https://tools.ietf.org/html/rfc4918#section-11.3");
         }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
+        {
+            // #776 — apply-template now asserts the version it MERGED (T1). Reaching here means a sibling
+            // tab saved between that read and this write, so the merged bytes never contained their change
+            // and writing would have erased it at the head version. Unlike the save path this does NOT
+            // retry (`rebaseOnConflict: false`): nothing rebased the merge, so a retry would clobber.
+            //
+            // 409, matching the save route's choice of Conflict over 412: nothing about the caller's state
+            // is stale, so "reload and reapply" would be wrong advice. Their document is untouched and the
+            // template simply did not apply — re-applying is the whole remedy. Without this catch the
+            // precondition would surface through the generic handler as an opaque 500, which would trade
+            // a silent clobber for an unactionable error.
+            logger.LogWarning(ex,
+                "Compose apply-template: If-Match precondition failed — a concurrent save landed inside the merge window; nothing was overwritten. TraceId={TraceId}",
+                httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Document Busy",
+                detail: "Someone else saved this document while the template was being applied, so the " +
+                        "template was not applied. Nothing was overwritten — try applying it again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Compose apply-template: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);

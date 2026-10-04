@@ -12,7 +12,7 @@
  * Phase-3 reading-pane tracking view (React 19, task 035) can consume ONE
  * shared component.
  *
- * Entity-agnostic (FR-14): the shared core bakes in NO `sprk_communication`
+ * Entity-agnostic (FR-14): the shared core bakes in NO entity-specific
  * option integers, labels, or field-display strings. Every access-permission
  * segment (value + label + color) and every field label is passed IN via
  * props (`ITrackingFieldTrioProps`, see `types.ts`). The caller (the PCF's
@@ -38,6 +38,17 @@
  * `onOpenEmailMembers`), so existing consumers see no change. This
  * component builds ONLY the toolbar shell + click affordances — the modal
  * and email-dialog contents are implemented by the caller in tasks 041/042.
+ *
+ * Read-only + secure display (unified-access-control-r2 task 138):
+ *   - `disabled` (the host form is read-only) disables all three controls, and
+ *     `accessPermissionDisabled` the pill alone; a disabled pill's menu cannot
+ *     open, so no write the form would refuse is ever offered.
+ *   - `showAccessPermission={false}` hides the pill when the host has no
+ *     access-permission column bound (placeholders keep the grid aligned).
+ *   - `secureAccessPermission` (owner O1 FINAL): on a SECURE record the closed
+ *     pill reads "Secure" in red for every underlying value. The menu is the
+ *     unchanged Standard / Limited / Restricted list — the secure display is a
+ *     closed-label change only and never rewrites the stored value.
  */
 
 import * as React from 'react';
@@ -237,11 +248,22 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   onOpenGrantModal,
   onOpenEmailMembers,
   canGrantAccess,
+  disabled = false,
+  accessPermissionDisabled = false,
+  showAccessPermission = true,
+  secureAccessPermission,
 }) => {
   const styles = useStyles();
-  // Fail-open only when the caller hasn't wired an access decision at all
-  // (canGrantAccess omitted); an explicit `false` disables the icon.
-  const grantEnabled = canGrantAccess !== false;
+  // Task 138: the pill is disabled by the whole control's read-only state OR by its own column's
+  // security. Either way the menu never opens and onAccessPermissionChange never fires.
+  const pillDisabled = disabled || accessPermissionDisabled;
+  // 🔴 FAIL CLOSED (task 118, unified-access-control-r2). Only an explicit `true` enables the
+  // icon: `false`, `undefined` and a prop the host never wired all disable it. This was
+  // `canGrantAccess !== false` until v1.0.31, which meant "enabled unless someone says no" —
+  // so a host that could not evaluate the access question offered the affordance to everyone.
+  // The server's own rule denies what it cannot evaluate (`DelegationRuleFilter` +
+  // `CallerRecordAccessProbe`); this now matches it rather than contradicting it.
+  const grantEnabled = canGrantAccess === true;
 
   // Governance icons (person + email) — rendered EITHER inside the opt-in header
   // row (when `title` is set, task 073 UAT #3) OR in the prior absolute
@@ -302,7 +324,8 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
         <>
           <Text className={styles.caption}>{monitorLabel}</Text>
           <Text className={styles.caption}>{highPriorityLabel}</Text>
-          <Text className={styles.caption}>{accessPermissionLabel}</Text>
+          {/* An empty cell when the pill is hidden keeps the 3-column grid aligned (task 138). */}
+          {showAccessPermission ? <Text className={styles.caption}>{accessPermissionLabel}</Text> : <span />}
         </>
       )}
 
@@ -310,17 +333,23 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
       <div className={styles.controlCell}>
         <Switch
           checked={monitor}
-          onChange={(_, data) => onMonitorChange(data.checked)}
+          onChange={(_, data) => {
+            if (!disabled) onMonitorChange(data.checked);
+          }}
           label={monitor ? 'Yes' : 'No'}
           labelPosition="after"
+          disabled={disabled}
         />
       </div>
       <div className={styles.controlCell}>
         <Switch
           checked={highPriority}
-          onChange={(_, data) => onHighPriorityChange(data.checked)}
+          onChange={(_, data) => {
+            if (!disabled) onHighPriorityChange(data.checked);
+          }}
           label={highPriority ? 'Yes' : 'No'}
           labelPosition="after"
+          disabled={disabled}
         />
       </div>
       <div className={styles.controlCell}>
@@ -328,39 +357,55 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
             pill (current value; default "Standard" when unset) that opens a menu
             of the three options. Single value + responsive; reads as a pill
             consistent with the app's badge language. */}
-        {(() => {
-          const selIdx = accessPermissionOptions.findIndex(o => o.value === accessPermission);
-          const idx = selIdx >= 0 ? selIdx : 0;
-          const selOpt = accessPermissionOptions[idx];
-          const colors = selOpt ? getSelectedSegmentColors(idx, selOpt) : undefined;
-          return (
-            <Menu positioning="below-start">
-              <MenuTrigger disableButtonEnhancement>
-                <MenuButton
-                  className={styles.accessPill}
-                  appearance="transparent"
-                  size="small"
-                  aria-label={accessPermissionLabel}
-                  // Suppress the chevron so the fixed-width pill centers its label
-                  // (owner UAT v1.0.28). The colored pill is affordance enough.
-                  menuIcon={null}
-                  style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
-                >
-                  {selOpt?.label ?? ''}
-                </MenuButton>
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {accessPermissionOptions.map(opt => (
-                    <MenuItem key={opt.value} onClick={() => onAccessPermissionChange(opt.value)}>
-                      {opt.label}
-                    </MenuItem>
-                  ))}
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          );
-        })()}
+        {showAccessPermission &&
+          (() => {
+            const selIdx = accessPermissionOptions.findIndex(o => o.value === accessPermission);
+            const idx = selIdx >= 0 ? selIdx : 0;
+            const selOpt = accessPermissionOptions[idx];
+            // Owner O1 FINAL (task 138): a SECURE record's closed pill reads the secure label in red
+            // for every underlying value; otherwise the selected option's own tint applies.
+            const colors = secureAccessPermission
+              ? { bg: tokens.colorPaletteRedBackground2, fg: tokens.colorPaletteRedForeground2 }
+              : selOpt
+                ? getSelectedSegmentColors(idx, selOpt)
+                : undefined;
+            const pillLabel = secureAccessPermission ? secureAccessPermission.label : (selOpt?.label ?? '');
+            return (
+              // A disabled pill never opens: `open={false}` pins the menu shut in addition to the
+              // disabled trigger, so no onAccessPermissionChange can fire on a read-only form.
+              <Menu positioning="below-start" {...(pillDisabled ? { open: false } : {})}>
+                <MenuTrigger disableButtonEnhancement>
+                  <MenuButton
+                    className={styles.accessPill}
+                    appearance="transparent"
+                    size="small"
+                    aria-label={accessPermissionLabel}
+                    disabled={pillDisabled}
+                    // Suppress the chevron so the fixed-width pill centers its label
+                    // (owner UAT v1.0.28). The colored pill is affordance enough.
+                    menuIcon={null}
+                    style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
+                  >
+                    {pillLabel}
+                  </MenuButton>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    {accessPermissionOptions.map(opt => (
+                      <MenuItem
+                        key={opt.value}
+                        onClick={() => {
+                          if (!pillDisabled) onAccessPermissionChange(opt.value);
+                        }}
+                      >
+                        {opt.label}
+                      </MenuItem>
+                    ))}
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            );
+          })()}
       </div>
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}

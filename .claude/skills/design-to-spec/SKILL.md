@@ -351,10 +351,10 @@ IDENTIFY resource types from extracted content:
 1. RESOURCE TYPES → ADR CONSTRAINTS
    - API endpoints → Reference ADR-001, ADR-008, ADR-010, ADR-019 (constraints only)
    - PCF controls → Reference ADR-006, ADR-011, ADR-012, ADR-021 (constraints only)
-   - Plugins → Reference ADR-002 (constraints only)
+   - Record invariants / create-update paths / any plugin idea → Reference ADR-002 (no plugins; server-side write path WP-1…WP-8)
    - Storage → Reference ADR-005, ADR-007, ADR-009 (constraints only)
    - AI features → Reference ADR-013, ADR-014, ADR-015, ADR-016 (constraints only)
-   - Background jobs → Reference ADR-004, ADR-017 (constraints only)
+   - Background / scheduled / event-driven work → Reference ADR-052 (where it runs), ADR-004 (queue), ADR-036 (schedule), ADR-017 (constraints only)
 
 2. EXTRACT KEY CONSTRAINTS
    - Read applicable ADRs for MUST/MUST NOT rules
@@ -455,7 +455,8 @@ back-filled later. Two parts:}
 ```
 
 {If BFF=Y: add a one-line Placement Justification per major new component citing
-`.claude/constraints/bff-extensions.md`, and note the ≤60 MB publish-size ceiling applies per task.}
+`.claude/constraints/bff-extensions.md`, and note the ≤60 MB publish-size ceiling applies per task. For
+background, scheduled or event-driven work, name the host chosen under ADR-052 and the signals behind it.}
 
 ### New Components (§11 three-question gate)
 {For each NEW service/abstraction/endpoint/DI-registration/package/Dataverse-column this design introduces,

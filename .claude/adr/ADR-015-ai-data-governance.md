@@ -86,7 +86,7 @@ The constraints above apply to **application logs** (Tier 1). R2 introduces two 
 
 - **MUST** treat Tier 1 (app logs) as strict — ADR-015 original constraints apply in full
 - **MUST** store only metadata + hashes in Tier 2 audit log — never verbatim prompts or responses
-- **MUST** partition all Tier 2/3 data by `tenantId` — no cross-tenant queries
+- 🟡 **AMENDED 2026-09-28 (D-12 §3).** Was *"**MUST** partition all Tier 2/3 data by `tenantId` — no cross-tenant queries"*. Now: **MUST** hold all Tier 2/3 data in the customer's **own dedicated Cosmos account** — that boundary, not a partition predicate, is what delivers no cross-**customer** query capability and backs the 7-year audit + GDPR Art. 17 guarantees. **MUST NOT** partition by `/tenantId`: it is one constant value inside a dedicated account, so every document lands in a single hot logical partition. Aligns this ADR with [ADR-042](ADR-042-memory-architecture-governance.md), which already rejected `/tenantId` on capacity grounds while this one still mandated it.
 - **MUST** apply immutable policy to Tier 2 (append-only, no updates/deletes)
 - **MUST** support user-initiated deletion in Tier 3 (GDPR right to erasure)
 - **MUST** define retention policy on every Cosmos container at provisioning time
@@ -101,7 +101,9 @@ The constraints above apply to **application logs** (Tier 1). R2 introduces two 
 
 | Container | Tier | Partition Key | Purpose |
 |-----------|------|---------------|---------|
-| `audit` | 2 | `/tenantId` | Append-only compliance log |
+> ⚠️ **Partition keys below are the pre-2026-09-28 state and are to be re-keyed** — `/tenantId` is a single constant inside a per-customer account. The replacement key per container is a follow-up; existing containers are not migrated by this amendment (ADR-042 keeps the legacy container as-is).
+
+| `audit` | 2 | ⚠️ `/tenantId` | Append-only compliance log |
 | `sessions` | 3 | `/tenantId` | Work history (messages, widgets, artifacts) |
 | `prompts` | 3 | `/tenantId` | Saved prompt templates |
 | `memory` | 3 | `/tenantId` | Matter-scoped AI memory (structured facts) |

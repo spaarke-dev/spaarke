@@ -3660,6 +3660,18 @@ public sealed class SpeAdminGraphService
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentNullException.ThrowIfNull(fileStream);
 
+        // SANITIZED 2026-08-29. Both upload strategies below call ItemWithPath(fileName), which is the same
+        // path-keyed Graph navigation SpeFileStore uses — so a '/' here creates folders too. This surface was
+        // NOT covered by the 2026-08-28 sweep, and it is not covered by SpeUploadPathIsFlatGuardTests either:
+        // that scanner probes for UploadSmallAsync / UploadSmallAsUserAsync / CreateUploadSessionAsUserAsync,
+        // and this is a separate admin facade with its own sink names.
+        //
+        // Folders on THIS surface are legitimate — it is the SPE Admin file manager — but they come from the
+        // explicit `folderId` parent and the explicit CreateFolder action, never as a side effect of a file
+        // name. The endpoint's existing Path.GetFileName() is not sufficient on its own: it splits on the
+        // HOST OS separator, so on the linux-x64 runtime a backslash-bearing name passes straight through.
+        fileName = SpeUploadPath.SanitizeFileName(fileName);
+
         _logger.LogInformation(
             "Uploading file '{FileName}' ({FileSize} bytes) to container {ContainerId}, FolderId: {FolderId}",
             fileName, fileSize, containerId, folderId ?? "(root)");

@@ -11,9 +11,10 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <c>POST /api/v1/external-access/provision-project</c> — the re-scoped provisioning contract
 /// (task 021, 2026-08-25).
 ///
-/// <para><b>What provisioning now does:</b> resolves the ONE canonical Secure Project business unit by
-/// name from configuration, assigns the project to that business unit's default owner team, creates the
-/// project's own SPE container, and records it on <c>sprk_containerid</c>. It creates no business unit,
+/// <para><b>What provisioning now does:</b> resolves the ONE canonical Secure Record business unit by
+/// name from configuration, assigns the project to that business unit's NAMED owner team (task 144 — never its
+/// default team; the named-team invariants are pinned in <see cref="SecureNamedOwnerTeamProvisioningTests"/>), creates
+/// the project's own SPE container, and records it on <c>sprk_containerid</c>. It creates no business unit,
 /// no account, and never writes <c>sprk_externalaccount</c>.</para>
 ///
 /// <para><b>The four defects these tests pin.</b></para>
@@ -201,7 +202,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
-    /// An absent Secure Project business unit fails closed — and provisions nothing.
+    /// An absent Secure Record business unit fails closed — and provisions nothing.
     /// </summary>
     /// <remarks>
     /// The alternative behaviours are both disclosures: falling back to the ROOT business unit (what
@@ -255,16 +256,17 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The project ends up owned by the Secure Project business unit's default owner team.
+    /// The project ends up owned by the Secure Record business unit's NAMED owner team — never its default team.
     /// </summary>
     /// <remarks>
-    /// Design.md §5.1a: the default owner team, NOT a service account. Every business unit is created
-    /// with one, so it needs no provisioning — no licence, no credential to rotate, no extra identity
-    /// to audit. Ownership is asserted by reading the row back rather than by observing the PATCH,
-    /// because observing the PATCH is exactly what the old code did wrong.
+    /// <b>Rewritten by task 144 (#967).</b> This test used to pin the business unit's DEFAULT owner team. That was the
+    /// defect: Dataverse maintains a default team's membership from each user's business unit and it cannot be
+    /// curated, so a user moved into the Secure Record BU silently became a member of the team owning every secure
+    /// record. Ownership is asserted by reading the row back rather than by observing the PATCH, because observing the
+    /// PATCH is exactly what the old code did wrong.
     /// </remarks>
     [Fact]
-    public async Task ProvisionProject_AssignsTheProject_ToTheBusinessUnitsDefaultOwnerTeam()
+    public async Task ProvisionProject_AssignsTheProject_ToTheBusinessUnitsNamedOwnerTeam_NeverItsDefaultTeam()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -273,11 +275,15 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         var response = await ProvisionAsync(client, projectId);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId)
+            .And.NotBe(ProvisionProjectTestFixture.SecureDefaultTeamId,
+                "the default team's membership follows every user placed in the business unit");
 
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("ownerTeamId").GetString()
             .Should().Contain(ProvisionProjectTestFixture.SecureOwnerTeamId.ToString());
+        body.RootElement.GetProperty("ownerTeamName").GetString()
+            .Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamName);
     }
 
     /// <summary>
@@ -285,7 +291,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     /// </summary>
     /// <remarks>
     /// Ownership is the SECURITY step; the container is the storage step. If the container step fails
-    /// after ownership, the project is at least correctly owned inside the Secure Project business
+    /// after ownership, the project is at least correctly owned inside the Secure Record business
     /// unit. Reversed, the same failure leaves a secure project owned by its creating user in an
     /// Operations business unit — strictly the worse posture. So the order is load-bearing, not
     /// incidental, and is pinned here.
@@ -303,7 +309,7 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         response.IsSuccessStatusCode.Should().BeFalse("a container that was not created is not a success");
         _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId,
             "ownership is assigned first precisely so a storage failure does not leave the record " +
-            "outside the Secure Project business unit");
+            "outside the Secure Record business unit");
     }
 
     /// <summary>
@@ -336,9 +342,12 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             "an orphan attached to an unsecured record");
     }
 
-    /// <summary>A business unit with no default owner team fails closed.</summary>
+    /// <summary>
+    /// A business unit with no NAMED owner team fails closed — and does not fall back to its default team, which the
+    /// roster always contains (task 144; rewritten from the default-team version of this test).
+    /// </summary>
     [Fact]
-    public async Task ProvisionProject_WhenTheBusinessUnitHasNoDefaultOwnerTeam_FailsClosed()
+    public async Task ProvisionProject_WhenTheNamedOwnerTeamIsMissing_FailsClosedAndNeverUsesTheDefaultTeam()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -349,7 +358,9 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
 
         response.IsSuccessStatusCode.Should().BeFalse();
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerTeamNotFound);
+        _fixture.Updates.Should().BeEmpty("the default team is present in the roster and must not be chosen instead");
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.OwningTeamOf(projectId).Should().BeNull();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -540,21 +551,78 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
-    /// The default Secure Project business-unit name matches the deployed environment.
+    /// The default Secure Record business-unit name matches the deployed environment.
     /// </summary>
     /// <remarks>
-    /// <b>SINGULAR.</b> design.md §5.1 and this task's own POML both specified "Secure Projects"
-    /// (plural); live Dataverse metadata (2026-08-25) says the business unit is named
-    /// <c>Secure Project</c>. Shipping the plural would have failed closed on every call — the correct
-    /// direction, but for a fabricated reason, and it would have looked like a missing environment
-    /// rather than a wrong string. Pinned here because a default that is wrong is worse than no
-    /// default: it fails only at runtime, in an environment nobody is watching.
+    /// <b>RENAMED 2026-09-29 (task 121, D-12 §2):</b> the deployed BU is now <c>Secure Record</c>. It
+    /// was renamed from <c>Secure Project</c> because the BU holds secure rows of THREE entity types
+    /// (<c>sprk_project</c>, <c>sprk_matter</c>, <c>sprk_workassignment</c> all carry
+    /// <c>sprk_issecure</c>), so naming it after one of them described the topology wrongly.
+    ///
+    /// <para><b>The lesson that put this test here, restated against the new name.</b> design.md §5.1
+    /// and the authoring POML both said "Secure Projects" (plural); live Dataverse metadata
+    /// (2026-08-25) said <c>Secure Project</c> — singular. Shipping the plural would have failed closed
+    /// on every call: the correct DIRECTION, for a fabricated reason, looking like a missing
+    /// environment rather than a wrong string. A default that is wrong is worse than no default —
+    /// it fails only at runtime, in an environment nobody is watching.</para>
+    ///
+    /// <para>So this test pins the EXACT deployed string, and the guard assertions below encode the two
+    /// ways this constant has been observed to go wrong: a pluralised variant, and a stale name left
+    /// behind by a half-finished rename. Both are spelled out rather than covered by a single equality
+    /// check, because the equality check alone reports "expected X, found Y" without saying which
+    /// mistake was made.</para>
     /// </remarks>
     [Fact]
     public void DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed()
     {
-        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().Be("Secure Project");
-        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotEndWith("Projects",
-            "the deployed business unit is singular; the plural came from a design doc, not from metadata");
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().Be("Secure Record");
+
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotEndWith("s",
+            "the deployed business unit is SINGULAR; the plural came from a design doc, not from metadata");
+
+        ProvisionProjectEndpoint.DefaultSecureBusinessUnitName.Should().NotContain("Project",
+            "the BU was renamed Secure Project -> Secure Record (task 121). A 'Project' here means the "
+            + "rename was only half applied — and because the name is a fail-closed lookup key, the "
+            + "symptom is 'business unit not found', which reads like a missing environment");
+    }
+
+    /// <summary>
+    /// The config key that overrides the default lives in the same section as its sibling.
+    /// </summary>
+    /// <remarks>
+    /// Task 121 renamed the config section <c>SecureProject:</c> → <c>SecureRecord:</c>. There are TWO
+    /// keys in it — this one and <c>UnsecureOwnerUserId</c> on
+    /// <see cref="UnsecureProjectEndpoint"/> — and renaming one without the other would split a single
+    /// section in two, leaving an operator to set half their configuration under each name. Nothing in
+    /// the repo set either key, so the rename orphaned nothing; this test is what stops them drifting
+    /// apart later.
+    /// </remarks>
+    [Fact]
+    public void SecureRecordConfigKeys_ShareOneSection()
+    {
+        const string section = "SecureRecord:";
+
+        ProvisionProjectEndpoint.SecureBusinessUnitNameConfigKey.Should().StartWith(section);
+        ProvisionProjectEndpoint.SecureOwnerTeamNameConfigKey.Should().StartWith(section);
+        UnsecureProjectEndpoint.UnsecureOwnerUserIdConfigKey.Should().StartWith(section);
+    }
+
+    /// <summary>
+    /// The default owner-team name is the one the owner chose (decision F9, 2026-09-30) and is NOT the business unit's
+    /// own name — the name its DEFAULT team carries.
+    /// </summary>
+    /// <remarks>
+    /// A fail-closed lookup key, like the BU name above: the live team, this default, guide §4 and this test move
+    /// together. The inequality is the load-bearing half. Were the two names equal, a configuration that dropped
+    /// <c>isdefault eq false</c> from the lookup would select the default team silently — exactly the team task 144
+    /// retires.
+    /// </remarks>
+    [Fact]
+    public void DefaultSecureOwnerTeamName_IsTheOwnersChoice_AndNotTheBusinessUnitsOwnName()
+    {
+        ProvisionProjectEndpoint.DefaultSecureOwnerTeamName.Should().Be("Secure Record Owners");
+        ProvisionProjectEndpoint.DefaultSecureOwnerTeamName.Should()
+            .NotBe(ProvisionProjectEndpoint.DefaultSecureBusinessUnitName,
+                "the BU's default team carries the BU's name; the owner team must be distinguishable from it");
     }
 }

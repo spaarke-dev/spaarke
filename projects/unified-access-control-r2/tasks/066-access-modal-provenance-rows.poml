@@ -32,7 +32,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="064" status="pending">Report endpoint + frozen DTO.</dependency>
-      <dependency task="065" status="pending">User-share rows + 403 deny state already in the modal.</dependency>
+      <dependency task="065" status="completed">User-share rows + 403 deny state already in the modal.</dependency>
     </dependencies>
   </context>
 
@@ -108,4 +108,7 @@
   <notes>spec.md FR-30. Deny-list management UI + standing-grant levels are task 067 (same files — later wave).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments>
+    <amendment n="S27" date="2026-09-30" source="session 27 remediation set">Client half of the session-27 changes: render LIMITED in the suppressed-row treatment alongside Secure and Restricted (task 138); show auto-grant provenance ("from Assigned Attorney") and the declined state (task 142); show a contact grantor as "granted by" for contact-issued grants (task 140); render the new refusal codes from 138/139/140/143 with the server message.</amendment>
+  </amendments>
 </task>

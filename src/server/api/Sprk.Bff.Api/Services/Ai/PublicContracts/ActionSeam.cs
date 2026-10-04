@@ -21,17 +21,23 @@ public sealed class ActionSeam : IActionSeam
     private readonly IGenericEntityService _entityService;
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly ILogger<ActionSeam> _logger;
 
     public ActionSeam(
         IGenericEntityService entityService,
         IFieldMappingDataverseService fieldMappingService,
         IServiceScopeFactory scopeFactory,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ILogger<ActionSeam> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -84,15 +90,18 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
-        var core = new TaskActionCore(_entityService, _logger);
+        var core = new TaskActionCore(_entityService, _coreAncestors, _identity, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
                 Subject: request.Subject,
                 Description: request.Description,
                 ScheduledEnd: request.DueDate?.ToUniversalTime(),
+                FinalDueDate: request.FinalDueDate?.ToUniversalTime(),
                 RegardingObjectId: request.RegardingObjectId,
                 RegardingObjectType: request.RegardingObjectType,
-                OwnerId: request.OwnerId),
+                OwnerId: request.OwnerId,
+                ActingUserId: request.ActingUserId,
+                AssignedToContactId: request.AssignedToContactId),
             cancellationToken);
 
         return new CreateTaskResult(true, taskId, null);

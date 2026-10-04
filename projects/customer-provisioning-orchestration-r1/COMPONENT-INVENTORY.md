@@ -128,21 +128,29 @@ Proxies Dataverse Custom API calls → BFF (e.g., file-preview URL generation).
 
 BFF `Sprk.Bff.Api` (.NET 8 Minimal API, ~35 DI modules / 269 registrations) → **Azure App Service** (`bff-deploy` / `Deploy-BffApi.ps1`; **≤60 MB compressed** ceiling). Backing Azure resources (per `infrastructure/bicep/**` + `auth-azure-resources.md`):
 
-| Resource | Purpose | Disposition (see §11) |
-|---|---|---|
-| App Service + Plan | BFF host | 🟡 shared (Model 1) / 🔴 dedicated (Model 2 / r1 D3) |
-| User-Assigned Managed Identity | Server-outbound identity (Graph app-only, Dataverse, Cosmos, KV) | 🔴 per-deployment |
-| Key Vault | All secrets; App Service resolves `@Microsoft.KeyVault(...)` via UAMI | 🔴 dedicated (cheap) |
-| Azure OpenAI (+ model deployments) | LLM inference, embeddings | **decision point** — see §11 |
-| Azure AI Search | Vector + semantic RAG (7-index catalog) | **decision point** — see §11 |
-| Cosmos DB (serverless) | AI sessions, prompts, audit, memory, feedback; **also ProvisioningRun state (r1 D13)** | 🟡 partition by `/tenantId` |
-| Redis | OBO token cache (ADR-009), session state | 🟡 key-prefix / 🔴 Premium+VNet |
-| Service Bus | Job queues + membership topic (ADR-034) | 🟢 shareable |
-| Storage | temp/doc-processing/AI-chunks | 🟡 container / 🔴 doc content |
-| App Insights + Log Analytics | Telemetry, audit, UAC-DIAG | 🟢 shareable |
-| Content Safety, Doc Intelligence | Prompt-injection detection, OCR | 🟢 shareable (stateless) |
-| SignalR (optional/Null-Object) | Notifications spine realtime | 🟢 |
-| Power BI Embedded | Reporting module | per-customer workspace |
+> 🔴 **REWRITTEN 2026-09-28 — this table is the authoritative BOM ("when the two disagree, INVENTORY
+> wins"), and 8 of its 14 rows contradicted D-12.** Dispositions follow owner decisions D-12 / D-13 and the
+> criteria in `projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md`.
+> **There is no longer a Model 1 / Model 2 split in this table** — both models are dedicated stamps
+> differing only in which Azure tenant owns the subscription.
+
+| Resource | Purpose | Disposition (both models) | Why |
+|---|---|---|---|
+| **BFF Entra app registration** | Dataverse application-user identity | 🔴 **DEDICATED per customer** | 🔴 **D-13 — BINDING.** The app registration determines the Dataverse application user, which determines the **business unit** every BFF-created record lands in. Do not re-open. |
+| App Service + Plan | BFF host | 🔴 **DEDICATED** | **Forced**, not chosen: an app cannot use a plan in another subscription, and each customer has their own (ADR-027 amended 2026-09-28). Largest per-customer fixed cost. |
+| User-Assigned Managed Identity | Server-outbound identity (Graph app-only, Dataverse, Cosmos, KV) | 🔴 per-deployment | unchanged |
+| Key Vault | All secrets; App Service resolves `@Microsoft.KeyVault(...)` via UAMI | 🔴 **DEDICATED** | holds secrets at rest; ~free to dedicate |
+| Azure OpenAI (+ model deployments) | LLM inference, embeddings | 🔴 **DEDICATED** *(decision CLOSED)* | ⚠️ **quota isolation, not data** — prompts/completions are not persisted by default. TPM quota is per-subscription-per-region, which the per-customer subscription delivers. Consumption-priced ⇒ free to dedicate. |
+| Azure AI Search | Vector + semantic RAG (7-index catalog) | 🔴 **DEDICATED** *(decision CLOSED)* | **Highest-value data case after Dataverse** — holds indexed document text + embeddings. A `tenantId` filter cannot separate Model 1 customers. Real monthly floor; pay it. |
+| Cosmos DB (serverless) | AI sessions, prompts, audit, memory, feedback; **also ProvisioningRun state (r1 D13)** | 🔴 **DEDICATED ACCOUNT** | ⚠️ **NOT** `/tenantId` partitioning — inside a dedicated account that is one constant value (single hot partition, 20 GB cap) separating nothing. See the ADR-015 amendment. Serverless ⇒ no fixed floor. |
+| Redis | OBO token cache (ADR-009), session state | 🔴 **DEDICATED — Standard tier** | Access control is **per-instance, not per-keyspace**, and it holds OBO tokens + the `uac-access` authorization cache. ✅ Premium not required: RDB persistence unneeded (upload bytes are *"the hot-tier peer of the durable blob copy"*); VNet injection unused and Microsoft-deprecated. ⚠️ confirm Standard meets the performance bar. |
+| Service Bus | Job queues + membership topic (ADR-034) | 🔴 **DEDICATED** | already per-customer; ~free |
+| Storage | temp/doc-processing/AI-chunks | 🔴 **DEDICATED ACCOUNT** | holds document bytes at rest; a container-level split is not the boundary |
+| App Insights + Log Analytics | Telemetry, audit, UAC-DIAG | 🔴 **DEDICATED** *(promoted 2026-09-28)* | **Customers may need access to their own output**, which cannot be granted on a workspace holding other customers' telemetry. Telemetry also carries user + record identifiers by design. Billed **per workspace** ⇒ cost directly attributable. |
+| Document Intelligence | OCR | 🔴 **DEDICATED** | already per-customer; consumption-priced |
+| Content Safety | Prompt-injection detection | 🟢 **SHAREABLE** — named exception | stateless, no persistence. Requires a `customerId` discriminator on anything logged or metered. |
+| SignalR (optional/Null-Object) | Notifications spine realtime | dedicate when enabled | transient; feature-gated |
+| Power BI Embedded | Reporting module | per-customer workspace | unchanged |
 
 > **RBAC provisioning steps (each a known failure point):** UAMI → KV Secrets User; **`keyVaultReferenceIdentity` PATCHed to UAMI** (silent-failure trap); UAMI → **Cognitive Services User** (wildcard, narrower OpenAI-User role insufficient for `kind=AIServices`); UAMI → Cosmos Data Contributor; **MI registered as Dataverse Application User** in every env (silent 403→500 if omitted); ~11 Graph app-role grants replicated onto MI; **two Exchange ApplicationAccessPolicies** (app-reg + MI); GitHub OIDC → Contributor. Staging slot has a **different MI** → grant KV RBAC to both slots.
 
@@ -157,7 +165,7 @@ BFF `Sprk.Bff.Api` (.NET 8 Minimal API, ~35 DI modules / 269 registrations) → 
 | external-spa (Entra External ID portal) | Static Web App / Power Pages code site | single shared; **BFF host baked at Vite build time** (rebuild+redeploy on host change) |
 | M365 Copilot declarative agent | CopilotAgent manifest package | 1 |
 
-> ⚠️ Office add-ins + external portal are **single shared instances**, not per-customer. If a customer needs an isolated add-in/portal, that provisioning **does not exist yet** (gap).
+> ✅ **DECIDED 2026-09-28 (D-12 §3)**: Office add-ins + external portal are a **named sharing exception** — static client bundles holding no customer data at rest; the privileged content they display is fetched per-request through the **per-customer** BFF. They remain single shared instances **by decision, not by omission**. ⚠️ They **MUST** carry a `customerId` discriminator for anything they read or write. If a customer ever needs an isolated add-in/portal, that provisioning still does not exist (gap).
 
 ---
 
@@ -221,12 +229,31 @@ Policy: **one container per client/business unit** (ADR-005 flat storage; hierar
 | SPE container | 1+ per customer | 🔴 per-customer |
 | M365 Copilot agent | 1 | shared/per-customer TBD |
 
-### Shared-vs-dedicated decision (the open architectural fork)
-- 🔴 **Always dedicated (cheap/customer-owned)**: Dataverse, SPE, Key Vault secrets, Storage, MI, Entra app config, CIAM.
-- 🟡 **The cost levers (fixed floors)**: **App Service Plan, Azure OpenAI (provisioned TPM), Azure AI Search (fixed tier)** — shared in Model 1; **dedicated under r1 decision D3**.
-- 🟢 **Safely shared**: Service Bus, App Insights/Log Analytics, Content Safety, Doc Intelligence.
+### Shared-vs-dedicated — ✅ DECIDED 2026-09-28 (was "the open architectural fork")
 
-> r1 **D3 (no shared resources) + D4 (subscription per customer)** dissolve the cost-allocation problem (native per-customer Azure bill) at the price of a per-customer fixed floor. If a **shared trial/SMB tier** is added, it requires an **APIM/gateway token-metering layer** (per-tenant attribution) + fixed-cost allocation for AI Search. See PROJECT-UPDATE §4–5.
+Superseded by owner decisions **D-12** (deployment models + resource disposition) and **D-13** (per-customer
+BFF app registration). Criteria and per-resource reasoning:
+`projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md`.
+
+**The rule**: a resource is dedicated if it **holds customer data at rest**, or its **access control is
+per-instance rather than per-object**, or it has **no genuinely distinct per-customer discriminator**
+(🔴 `tenantId` is not one — it is identical for every Model 1 customer).
+
+- 🔴 **DEDICATED**: Dataverse, SPE container, **BFF app registration (D-13)**, App Service + Plan, AI Search,
+  Cosmos, Redis (Standard), Storage, Key Vault, Service Bus, Azure OpenAI, Document Intelligence,
+  App Insights / Log Analytics, UAMI, CIAM, Power BI workspace.
+- 🟢 **SHAREABLE — exactly two named exceptions**, each requiring a **`customerId`** discriminator:
+  **Static Web Apps** (Office add-ins + external SPA) and **Content Safety**. The list is **CLOSED**; the
+  admission test is *holds no privileged legal content at rest*.
+
+> 🔴 **The shared trial/SMB tier is RETIRED (D-12 §1). Do not re-introduce it, and do not treat its
+> APIM/gateway token-metering prerequisite as live work.** It was documented, specified, funded and partly
+> built in Bicep, but **never implemented in the engine** — `H5DataverseEnvCreationHandler` creates a
+> Dataverse environment unconditionally, keyed `dvenv-{customerId}`.
+>
+> Per-customer **subscriptions** (ADR-027 amended 2026-09-28) dissolve the cost-allocation problem natively
+> — an Azure bill per customer — at the price of a per-customer fixed floor, chiefly the App Service Plan.
+> PROJECT-UPDATE §4–5's economic analysis predates and is superseded by D-12.
 
 ---
 
@@ -237,4 +264,4 @@ Policy: **one container per client/business unit** (ADR-005 flat storage; hierar
 3. ⚠️ Resolve the **two-source AI seed drift** (`scripts/seed-data` MVP vs `infra/dataverse` R7) → single authoritative source.
 4. ⚠️ Produce a **single validated env-var/app-setting manifest** reconciled against BFF code `[Required]` annotations (today split across two docs; ~25 settings found only by startup exceptions).
 5. ⚠️ Confirm **managed-solution export/fix/pack** pipeline (r1 H6) covers all 10 solutions.
-6. ⚠️ Decide per-customer vs shared for **Office add-ins, external SPA, Copilot agent** (currently shared).
+6. ✅ **RESOLVED 2026-09-28 (D-12 §3)** for Office add-ins + external SPA — named sharing exception, `customerId` required. ⚠️ **M365 Copilot agent remains undecided** (§11 still lists it "shared/per-customer TBD").

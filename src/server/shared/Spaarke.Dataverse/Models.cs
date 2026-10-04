@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Spaarke.Dataverse;
 
 /// <summary>
@@ -8,6 +10,310 @@ public class CreateDocumentRequest
     public required string Name { get; set; }
     public required string ContainerId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_document</c> — the acting user's business-unit DEFAULT OWNER
+    /// TEAM (owner decision, spaarkeai-word-add-in-r1 task 080). When set, <c>ownerid</c> is assigned to this
+    /// team and <c>owningbusinessunit</c> DERIVES from it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the caller supplies it rather than this library resolving it.</b> Resolving "business unit
+    /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
+    /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
+    /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
+    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
+    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
+    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
+    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
+    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
+    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
+    /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
+    /// and so the business unit — that owns the document it creates, including a secure business unit it has no
+    /// access to. The owner is a server-side decision (write-path invariant I-6), never a client input.</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
+    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
+    /// save stamps the <c>sprk_document</c> GUID INTO the bytes it uploads, and on a CREATE the upload
+    /// necessarily precedes the row — so the id has to be known before Dataverse would otherwise mint it. The
+    /// BFF pre-assigns it, stamps it, uploads, and then creates the row WITH that key. The alternatives were
+    /// worse: reordering the save to create-row-before-upload changes when content dedup runs (an explicit
+    /// escalation trigger on that task), and uploading unstamped then writing a second stamped version doubles
+    /// the SPE writes and leaves a window where the stored bytes carry no stamp.</para>
+    /// <para><b>Additive and opt-in.</b> Existing callers are unchanged; this is stated explicitly in the PR
+    /// per root CLAUDE.md §10 because <c>Spaarke.Dataverse</c> is consumed beyond the BFF.</para>
+    /// <para><b>Honest cost.</b> Microsoft's guidance prefers platform-generated sequential GUIDs for
+    /// clustered-index locality. A caller-supplied random GUID is supported but gives that up for these rows —
+    /// a performance note, not a correctness one.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen primary
+    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only the Office save path sets
+    /// it, in server code (task 080 found both properties bindable; neither was intended as a wire field).</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? Id { get; set; }
+}
+
+/// <summary>
+/// The ONE place that maps a caller-supplied association type onto an
+/// <see cref="UpdateDocumentRequest"/>'s lookup field.
+/// </summary>
+/// <remarks>
+/// <para>Created 2026-09-03 (unified-access-control-r2 item 7). It replaces <b>four</b> hand-written
+/// copies of the same switch that had already drifted apart:</para>
+/// <list type="bullet">
+///   <item><c>UploadFinalizationWorker.ApplyAssociationLookup</c> — accepted <b>only friendly</b>
+///     names ("matter"), warn-and-continue on a miss</item>
+///   <item><c>OfficeDocumentPersistence</c> — accepted friendly <b>and</b> logical, warn-and-continue</item>
+///   <item><c>EmailAttachmentProcessor</c> — accepted <b>only logical</b> names ("sprk_matter"),
+///     warn-and-continue</item>
+///   <item><c>RecordMatchEndpoints</c> — only logical, and the <b>only</b> one that failed closed</item>
+/// </list>
+/// <para>The drift was the defect: the same association token silently dropped in one path and
+/// applied in another purely because of which spelling that copy happened to list. This map accepts
+/// <b>both</b> spellings for every supported type, so a caller cannot lose an association by picking
+/// the "wrong" form.</para>
+///
+/// <para><b>Supported types are exactly those with a real lookup column on <c>sprk_document</c></b>,
+/// verified against live Dataverse metadata 2026-09-03: <c>sprk_matter</c>, <c>sprk_project</c>,
+/// <c>sprk_invoice</c>, <c>sprk_workassignment</c>, <c>sprk_event</c>. Do not add a case here without
+/// confirming the column exists — a case that sets a property no column backs produces a Dataverse
+/// write error, and one that is missing produces a silently unassociated document.</para>
+///
+/// <para>⚠️ <b>One known gap — deliberately NOT mapped, because no column exists: <c>account</c></b> (removed
+/// from the Office endpoint's allow-list 2026-09-04; see the alias table's remarks). CORRECTED 2026-09-30: this
+/// paragraph used to list <c>contact</c> and <c>sprk_todo</c> as unmapped too — both ARE mapped, to
+/// <c>sprk_relatedcontact</c> / <c>sprk_relatedtodo</c> (added 2026-09-04), as the alias table below shows.</para>
+/// </remarks>
+public static class DocumentAssociationMap
+{
+    /// <summary>
+    /// Every association spelling a caller may send, mapped to the entity's logical name. The ONE alias table:
+    /// <see cref="TryApply"/> resolves through it, and so does record ownership (task 080), which needs the
+    /// target's logical name to read its business unit. Two tables would drift exactly the way the four
+    /// switches this class replaced did.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <c>account</c> is deliberately ABSENT and must stay absent (owner decision, 2026-09-04).
+    /// <c>sprk_document</c> has NO account lookup in EITHER family, so a save filed to an account could only
+    /// ever land unassociated — the user believes it filed and it did not. The type was removed from the
+    /// Office endpoint's allow-list and from AssociationType rather than being accepted-and-dropped.
+    /// Spaarke's organization analogue is <c>sprk_organization</c> (<c>sprk_relatedorganization</c> /
+    /// <c>sprk_relatedvendororg</c> both exist on sprk_document); if "file to an organization" is wanted, add
+    /// THAT — do not re-add <c>account</c>.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> LogicalNameByAlias =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["matter"] = "sprk_matter",
+            ["sprk_matter"] = "sprk_matter",
+            ["project"] = "sprk_project",
+            ["sprk_project"] = "sprk_project",
+            ["invoice"] = "sprk_invoice",
+            ["sprk_invoice"] = "sprk_invoice",
+            ["workassignment"] = "sprk_workassignment",
+            ["sprk_workassignment"] = "sprk_workassignment",
+            ["event"] = "sprk_event",
+            ["sprk_event"] = "sprk_event",
+            // Added 2026-09-04 (unified-access-control-r2). Both columns EXIST and always did; the
+            // 2026-09-03 metadata check missed them because it enumerated only the bare `sprk_{type}`
+            // family and never looked at `sprk_related*`. See UpdateDocumentRequest.TodoLookup /
+            // ContactLookup for the queries that prove it.
+            ["todo"] = "sprk_todo",
+            ["sprk_todo"] = "sprk_todo",
+            ["contact"] = "contact",
+        };
+
+    /// <summary>
+    /// The logical name for an association type in either spelling (<c>matter</c> or <c>sprk_matter</c>), or
+    /// <see langword="null"/> when it is not a type a document can be associated to.
+    /// </summary>
+    public static string? ToLogicalName(string? entityTypeOrAlias) =>
+        !string.IsNullOrWhiteSpace(entityTypeOrAlias)
+        && LogicalNameByAlias.TryGetValue(entityTypeOrAlias.Trim(), out var logicalName)
+            ? logicalName
+            : null;
+
+    /// <summary>
+    /// Every association spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c> in <c>Sprk.Bff.Api.Tests</c>, unified-access-control-r2 task 151
+    /// review), which enumerates both this table and <c>EntityAccessFilter.EntitySetByType</c> to prove they
+    /// accept the same spellings and name the same entity. Internal (<c>InternalsVisibleTo</c>); production code
+    /// asks <see cref="ToLogicalName"/>.
+    /// </summary>
+    internal static IEnumerable<string> SupportedSpellings => LogicalNameByAlias.Keys;
+
+    /// <summary>
+    /// Apply <paramref name="recordId"/> to the lookup matching <paramref name="entityTypeOrAlias"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the association was applied; <see langword="false"/> when the type
+    /// is not one this codebase can associate a document to. A <see langword="false"/> return is the
+    /// caller's decision to make — a background worker logs and continues, a request handler should
+    /// reject — but it must never be ignored, or the document is created unassociated.
+    /// </returns>
+    public static bool TryApply(UpdateDocumentRequest request, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!recordId.HasValue || recordId.Value == Guid.Empty)
+            return false;
+
+        switch (ToLogicalName(entityTypeOrAlias))
+        {
+            case "sprk_matter":
+                request.MatterLookup = recordId;
+                return true;
+            case "sprk_project":
+                request.ProjectLookup = recordId;
+                return true;
+            case "sprk_invoice":
+                request.InvoiceLookup = recordId;
+                return true;
+            case "sprk_workassignment":
+                request.WorkAssignmentLookup = recordId;
+                return true;
+            case "sprk_event":
+                request.EventLookup = recordId;
+                return true;
+            case "sprk_todo":
+                request.TodoLookup = recordId;
+                return true;
+            case "contact":
+                request.ContactLookup = recordId;
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+/// <summary>
+/// One <c>sprk_document</c> record-link lookup. See <see cref="DocumentLinkFields.All"/>.
+/// </summary>
+/// <param name="LogicalName">
+/// Always lowercase. Safe for SDK-based access — <c>ColumnSet</c>, <c>QueryExpression</c>, and the
+/// <c>Microsoft.Xrm.Sdk.Entity</c> indexer are all logical-name-keyed, which is the ONLY access pattern
+/// either current consumer uses (both go through the SDK-based <see cref="IGenericEntityService"/>).
+/// </param>
+/// <param name="SchemaName">
+/// Case-SENSITIVE. Required ONLY for a Web API <c>@odata.bind</c> navigation property — NOT used by
+/// either current consumer, carried here so a FUTURE Web-API-based consumer has a pinned, verified value
+/// instead of deriving one by convention. See <see cref="DocumentLinkFields"/> remarks for why that
+/// convention is unsafe.
+/// </param>
+/// <param name="TargetEntityLogicalName">The entity this lookup points at.</param>
+public sealed record DocumentLinkField(string LogicalName, string SchemaName, string TargetEntityLogicalName);
+
+/// <summary>
+/// The ONE enumeration of every <c>sprk_document</c> record-link lookup — the READ-side counterpart to
+/// <see cref="DocumentAssociationMap"/> immediately above, hoisted here so the two cannot drift apart
+/// (unified-access-control-r2, 2026-09-05).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why this exists.</b> Two independent copies of this exact list lived in <c>Sprk.Bff.Api</c> —
+/// <c>AttachmentDocumentAssociationRung.DocumentLinkFields</c> (surfaces a document's OWN record links as
+/// association-candidate suggestions for an incoming communication) and
+/// <c>ComposeService.DocumentAssociationLookupAttributes</c> (a PDF-sourced Compose create-on-save copies
+/// these onto the new Word document so the two file alongside each other) — and the latter's own comment
+/// conceded it was "the SAME closed set". Root <c>CLAUDE.md</c> §11 forbids a third copy; this is the one
+/// home both now consume.
+/// </para>
+/// <para>
+/// <b>Both prior copies were INCOMPLETE</b> — neither listed <c>sprk_relatedinvoice</c> or
+/// <c>sprk_relatedworkassignment</c>, nor the further six columns enumerated below
+/// (<c>sprk_relatedagreement</c>, <c>sprk_relatedcommunication</c>, <c>sprk_relatedcontact</c>,
+/// <c>sprk_relatedorganization</c>, <c>sprk_relatedservicerequest</c>, <c>sprk_relatedtodo</c>,
+/// <c>sprk_relatedvendororg</c>). A document linked ONLY through an omitted column was invisible to every
+/// consumer of the old lists.
+/// </para>
+/// <para>
+/// <b>Every entry below is verified against LIVE Dataverse metadata</b> (<c>spaarkedev1</c>, 2026-09-05:
+/// <c>GET .../api/data/v9.2/EntityDefinitions(LogicalName='sprk_document')/Attributes</c>, filtered to
+/// <c>AttributeType eq 'Lookup'</c>) — not carried forward from any prior written list. Three separate
+/// prior records in this repo were wrong about exactly these columns; see
+/// <c>projects/unified-access-control-r2/notes/document-link-vocabulary-hoist.md</c> for the query and the
+/// raw response.
+/// </para>
+/// <para>
+/// 🔴 <b>THE <c>sprk_related*</c> SCHEMA NAMES ARE NOT UNIFORMLY CASED</b>, and neither are the 4
+/// "primary" (non-<c>related</c>) columns'. <see cref="DocumentLinkField.SchemaName"/> is case-SENSITIVE
+/// (required for a Web API <c>@odata.bind</c> navigation property) and is UNRELATED to
+/// <see cref="DocumentLinkField.LogicalName"/> (always lowercase). <b>Never derive a schema name by
+/// convention</b> — <c>$"sprk_Related{type}"</c> silently produces the WRONG value for 3 of the 12
+/// <c>related</c> columns:
+/// </para>
+/// <list type="bullet">
+///   <item><description>PascalCase (9): <c>sprk_RelatedAgreement</c>, <c>sprk_RelatedCommunication</c>,
+///     <c>sprk_RelatedContact</c>, <c>sprk_RelatedInvoice</c>, <c>sprk_RelatedOrganization</c>,
+///     <c>sprk_RelatedServiceRequest</c>, <c>sprk_RelatedToDo</c>, <c>sprk_RelatedWorkAssignment</c>,
+///     <c>sprk_RelatedEvent</c>.</description></item>
+///   <item><description>lowercase — the trap, since a convention-based builder gets these WRONG:
+///     <c>sprk_relatedmatter</c>, <c>sprk_relatedproject</c>, <c>sprk_relatedvendororg</c>.</description></item>
+///   <item><description>The 4 primary columns are PascalCase despite their plain lowercase logical
+///     names: <c>sprk_Matter</c>, <c>sprk_Project</c>, <c>sprk_Invoice</c>,
+///     <c>sprk_WorkAssignment</c>.</description></item>
+/// </list>
+/// <para>
+/// <b>"Related" targets the SAME entity as its primary counterpart</b> — "a related matter is still a
+/// matter" (061 UAT round-2, the type-agnostic design principle this list follows).
+/// <c>sprk_relatedcontact</c> targets the OOB <c>contact</c> table; <c>sprk_relatedorganization</c> AND
+/// <c>sprk_relatedvendororg</c> BOTH target <c>sprk_organization</c> — there is no separate "vendor org"
+/// entity in Spaarke's model.
+/// </para>
+/// <para>
+/// <b>Scope note.</b> Not every target entity here has a <c>sprk_communication</c> regarding field in the
+/// BFF-layer <c>RegardingFieldMap</c> (<c>Sprk.Bff.Api.Services.Communication.Engine</c>) —
+/// <c>sprk_agreement</c>, <c>sprk_communication</c>, and <c>sprk_todo</c> are absent from that map today.
+/// This is harmless for <c>AttachmentDocumentAssociationRung</c> (it already soft-skips a link whose
+/// target has no regarding field) but means those three targets are not yet surfaced as association
+/// candidates by that rung even though they now appear here. <c>ComposeCreateOnSavePromoter</c>'s
+/// link-inheritance copy does not go through <c>RegardingFieldMap</c> at all, so it is unaffected.
+/// Widening <c>RegardingFieldMap</c> is a separate decision, out of scope for this hoist.
+/// </para>
+/// </remarks>
+public static class DocumentLinkFields
+{
+    public static readonly IReadOnlyList<DocumentLinkField> All =
+    [
+        new("sprk_matter", "sprk_Matter", "sprk_matter"),
+        new("sprk_relatedmatter", "sprk_relatedmatter", "sprk_matter"),
+        new("sprk_project", "sprk_Project", "sprk_project"),
+        new("sprk_relatedproject", "sprk_relatedproject", "sprk_project"),
+        new("sprk_invoice", "sprk_Invoice", "sprk_invoice"),
+        new("sprk_relatedinvoice", "sprk_RelatedInvoice", "sprk_invoice"),
+        new("sprk_workassignment", "sprk_WorkAssignment", "sprk_workassignment"),
+        new("sprk_relatedworkassignment", "sprk_RelatedWorkAssignment", "sprk_workassignment"),
+        new("sprk_relatedagreement", "sprk_RelatedAgreement", "sprk_agreement"),
+        new("sprk_relatedcommunication", "sprk_RelatedCommunication", "sprk_communication"),
+        new("sprk_relatedcontact", "sprk_RelatedContact", "contact"),
+        new("sprk_relatedevent", "sprk_RelatedEvent", "sprk_event"),
+        new("sprk_relatedorganization", "sprk_RelatedOrganization", "sprk_organization"),
+        new("sprk_relatedservicerequest", "sprk_RelatedServiceRequest", "sprk_servicerequest"),
+        new("sprk_relatedtodo", "sprk_RelatedToDo", "sprk_todo"),
+        new("sprk_relatedvendororg", "sprk_relatedvendororg", "sprk_organization"),
+        // 🔴 ADDED 2026-09-29 (spaarkeai-compose-r8). The 2026-09-05 hoist enumerated SIXTEEN columns;
+        // the table carries SEVENTEEN. `sprk_email` (→ the OOB `email` activity) was missed, so a
+        // document linked ONLY to its source email was invisible to every consumer of this list — the
+        // exact failure mode the hoist's own remarks describe, one column short of being fixed.
+        // Re-verified today against live metadata (EntityDefinitions(sprk_document)/Attributes filtered
+        // to AttributeType eq 'Lookup' — 33 lookups total, 17 of them record links); the other sixteen
+        // casings above were all confirmed correct in the same sweep, including the three lowercase traps.
+        // SchemaName is `sprk_Email` — FETCHED, never derived, per this type's own warning.
+        new("sprk_email", "sprk_Email", "email"),
+    ];
+
+    /// <summary>Logical names only, in the same order as <see cref="All"/> — the shape a <c>ColumnSet</c>
+    /// or an <see cref="IGenericEntityService.RetrieveAsync"/> <c>columns</c> argument needs.</summary>
+    public static readonly IReadOnlyList<string> LogicalNames = All.Select(f => f.LogicalName).ToArray();
 }
 
 /// <summary>
@@ -163,6 +469,42 @@ public class UpdateDocumentRequest
     /// <summary>Invoice lookup (sprk_invoice). Maps to sprk_Invoice@odata.bind.</summary>
     public Guid? InvoiceLookup { get; set; }
 
+    /// <summary>
+    /// Work assignment lookup (<c>sprk_workassignment</c>). Added 2026-09-03 (unified-access-control-r2
+    /// item 7 / Q4 widening) — the column already existed on <c>sprk_document</c>; only this request
+    /// model and the association mappers were missing it, so a save filed to a work assignment was
+    /// created UNASSOCIATED.
+    /// </summary>
+    public Guid? WorkAssignmentLookup { get; set; }
+
+    /// <summary>
+    /// Event lookup. Added 2026-09-03, same reason as <see cref="WorkAssignmentLookup"/> — but the
+    /// column is <c>sprk_relatedevent</c>, NOT <c>sprk_event</c>, which does not exist on
+    /// <c>sprk_document</c> at all (corrected 2026-09-04; the original write failed every event-filed
+    /// save outright rather than dropping silently).
+    /// </summary>
+    public Guid? EventLookup { get; set; }
+
+    /// <summary>
+    /// To-do lookup (<c>sprk_relatedtodo</c>). Added 2026-09-04 (unified-access-control-r2).
+    /// <para>
+    /// ⚠️ This column ALWAYS existed. It was previously recorded across three places — the Q4 note,
+    /// <c>EntityAccessFilter</c>, and the inbound email-r2 coordination doc — as proof that a document
+    /// is <b>unmappable</b> to a to-do and that a SCHEMA change was required first. That was wrong in
+    /// exactly one way: the check looked for a bare <c>sprk_todo</c> column and never looked at the
+    /// <c>sprk_related*</c> family. <c>SELECT sprk_relatedtodo FROM sprk_document</c> succeeds.
+    /// </para>
+    /// </summary>
+    public Guid? TodoLookup { get; set; }
+
+    /// <summary>
+    /// Contact lookup (<c>sprk_relatedcontact</c>). Added 2026-09-04 per the owner decision that closed
+    /// the "account/contact saves are filed nowhere" gap: <c>contact</c> becomes real (the column
+    /// exists), and <c>account</c> is REJECTED up front rather than accepted and silently dropped —
+    /// <c>sprk_document</c> has no account lookup in either family.
+    /// </summary>
+    public Guid? ContactLookup { get; set; }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Document Source Tracking
     // ═══════════════════════════════════════════════════════════════════════════
@@ -245,11 +587,33 @@ public class DocumentEntity
     /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    /// <summary>
+    /// Comma-separated keywords. Maps to <c>sprk_filekeywords</c> (corrected
+    /// spaarkeai-word-add-in-r1 task 021 — this comment previously said "sprk_keywords", which is
+    /// not a column on <c>sprk_document</c>; the real column is the one
+    /// <c>DataverseServiceClientImpl</c>'s writer and <c>DocumentProfileFieldMapper</c> both already use).
+    /// </summary>
     public string? Keywords { get; set; }
 
-    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    /// <summary>
+    /// Document type classification (e.g., Contract, NDA, Invoice). Maps to <c>sprk_documenttype</c>,
+    /// a Choice (Picklist) column — verified live 2026-09-12. This is the Choice's DISPLAY LABEL
+    /// (from Dataverse's <c>FormattedValues</c>), not free text and not the raw option integer;
+    /// <see cref="DataverseServiceClientImpl.MapToDocumentEntity"/> is the one place that reads it —
+    /// see its remarks for the OptionSetValue-cast regression this comment exists to prevent
+    /// recurring.
+    /// </summary>
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// AI profiling status for this document (task 021 / FR-07). Maps to the <c>sprk_filesummarystatus</c>
+    /// Choice column — exactly SEVEN values, verified live: None=100000000, Pending=100000001,
+    /// Completed=100000002, OptedOut=100000003, Failed=100000004, NotSupported=100000005,
+    /// Skipped=100000006. <c>null</c> means the column has never been set on this row (Dataverse
+    /// applies no implicit default), which callers should treat identically to None — profiling has
+    /// not been attempted.
+    /// </summary>
+    public int? SummaryStatus { get; set; }
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }
@@ -587,6 +951,13 @@ public class CreateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>
+    /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
+    /// owner decision S1: a BFF-created event is app-only, so its Created By is the application user and cannot say
+    /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
+    /// </summary>
+    public Guid? AssignedToContactId { get; set; }
 }
 
 /// <summary>

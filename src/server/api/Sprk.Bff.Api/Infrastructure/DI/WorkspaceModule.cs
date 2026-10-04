@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -63,6 +64,9 @@ public static class WorkspaceModule
         // PortfolioService: Scoped because it accesses IDistributedCache per-request
         // and will eventually hold per-request Dataverse query context.
         // Concrete registration per ADR-010 (no interface seam needed).
+        // Task 152 (UAC-r2, verifier round 1 item 5): the matters come from the PEOPLE-TARGETING surface
+        // (IMembershipResolverService, Singleton) and are read AS THE CALLER through the existing
+        // IImpersonatedCommunicationQuery (CommunicationModule, unconditional) — ctor arguments, no new registration.
         services.AddScoped<PortfolioService>();
 
         // PriorityScoringService: Singleton — stateless, table-driven, thread-safe.
@@ -80,11 +84,10 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddScoped<WorkspaceAiService>();
 
-        // BriefingService: Scoped because it depends on PortfolioService (also scoped),
+        // BriefingService: Scoped because it depends on PortfolioService (also scoped) and
         // IDataverseService (Scoped — used for the AAD-oid → systemuserid cross-reference per
-        // ADR-028 and for the membership-resolved matter detail query), and
-        // IMembershipResolverService (Singleton — registered by MembershipModule; safe to
-        // inject into Scoped consumers, no captive-dependency issue). The IBriefingAi
+        // ADR-028). The top-priority matter's candidates and detail rows come from
+        // PortfolioService.ReadMattersForSystemUserAsync (task 152 verifier round 1). The IBriefingAi
         // facade is resolved as optional (null-safe) — when not registered
         // (DocumentIntelligence:Enabled = false), the service falls back to template narrative.
         // Concrete registration per ADR-010 (no interface seam needed).
@@ -95,6 +98,8 @@ public static class WorkspaceModule
         //   resolver and IDataverseService are pre-existing BFF registrations — no new DI
         //   binding is required here. See docs/architecture/membership-resolution-pattern.md
         //   "Wiring + Consumer Inventory (AS-BUILT)" for the updated consumer list.
+        //   Task 152 (UAC-r2): the candidates come from the PEOPLE-TARGETING surface and the detail rows are read AS
+        //   THE CALLER — both through PortfolioService (see above); no new registration.
         services.AddScoped<BriefingService>();
 
         // MatterPreFillService: Scoped to match HttpContext lifetime used for OBO file uploads.
@@ -120,11 +125,14 @@ public static class WorkspaceModule
             services.AddOptions<TodoGenerationOptions>();
         }
 
-        // TodoGenerationService: BackgroundService with 24-hour PeriodicTimer (ADR-001 mandate).
-        // Uses IServiceProvider to lazily resolve IDataverseService after host startup
-        // (avoids 500.30 if Dataverse connection fails during cold start).
-        // Concrete registration per ADR-010 (no interface seam needed).
-        services.AddHostedService<TodoGenerationService>();
+        // TodoGenerationService: an IScheduledJob on ScheduledJobHost (ADR-036) — migrated from a hand-rolled
+        // PeriodicTimer BackgroundService by unified-access-control-r2 task 152, which changed its behaviour
+        // (sprk_assignedto), and ADR-052 §1 migrates a timer service when it is next touched. Runs once per schedule
+        // across instances (distributed lease). Cron compiled from TodoGeneration:StartHourUtc / IntervalHours at
+        // startup. It still resolves IDataverseService lazily on its first run (avoids 500.30 on a Dataverse cold start).
+        var todoGeneration = configuration?.GetSection(TodoGenerationOptions.SectionName).Get<TodoGenerationOptions>()
+            ?? new TodoGenerationOptions();
+        services.AddScheduledJob<TodoGenerationService>(TodoGenerationService.BuildCronSchedule(todoGeneration));
 
         return services;
     }

@@ -27,9 +27,32 @@ targetScope = 'subscription'
 // PARAMETERS
 // ============================================================================
 
-@description('Customer identifier (lowercase, alphanumeric only). Drives all resource naming.')
+// CUSTOMER IDENTIFIER — the canonical standard. See
+// docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "The customerId standard" for the derivation.
+//
+// 🔴 THE LIMIT IS 8, NOT 10, AND IT IS DERIVED — NOT A PREFERENCE. THIS file composes its Key Vault name as
+// take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24). Key Vault names are 3-24 chars and MAY
+// NOT END IN A HYPHEN. With environmentName = 'staging' (the longest allowed value):
+//     len  8 -> 'sprk-xxxxxxxx-staging-kv'  (24) complete
+//     len  9 -> 'sprk-xxxxxxxxx-staging-k'  (24) truncated, loses the 'v'
+//     len 10 -> 'sprk-xxxxxxxxxx-staging-'  (24) INVALID — trailing hyphen, Azure REJECTS it
+// So the previous @maxLength(10) admitted a value that FAILS TO DEPLOY. take() hid it: the name was
+// silently shortened rather than the deployment refusing, so the error surfaced from Azure, not from here.
+//
+// 🔴 THE CHARACTER RULE CANNOT BE ENFORCED HERE. Bicep/ARM has NO regex constraint on parameters — there
+// is no @pattern decorator, and this repo has no bicepconfig.json enabling the experimental assertions
+// feature. Only the LENGTH is enforceable at this layer, and it is, above.
+//
+// That matters because the character rule is not cosmetic: the storage-account name strips hyphens
+// (replace(...,'-','')), so 'acme-x' and 'acmex' resolve to the SAME storage account with nothing
+// validating it. The rule is therefore enforced where the value is ASSIGNED — at provisioning intake —
+// and this parameter documents it so the two cannot drift apart silently.
+//
+// Leading letter is a READABILITY convention, not an Azure rule — the 'sprk' prefix already satisfies the
+// platform's start-character requirements.
+@description('Customer identifier. 3-8 chars, lowercase letters and digits, starting with a letter. Drives all resource naming; the 8-char limit comes from the Key Vault name composed below (see AZURE-RESOURCE-NAMING-CONVENTION.md).')
 @minLength(3)
-@maxLength(10)
+@maxLength(8)
 param customerId string
 
 @description('Environment name')
@@ -562,6 +585,19 @@ module bffApi 'modules/app-service.bicep' = {
     //     KV refs are runtime-resolved strings (and kvSecrets depends on THIS
     //     module for Communication-WebhookUrl — a dependsOn here would cycle).
     appSettings: {
+      // Customer runtime identity (D-14 / unified-access-control-r2 task 123). customerId names this
+      // whole resource group and everything in it; before this setting, no line of BFF code could read
+      // it. D-12 established that tenantId is IDENTICAL for every Model 1 customer, so tenant-keyed
+      // controls separate Entra tenants rather than customers — this is the runtime handle on the
+      // boundary the infrastructure already draws.
+      //
+      // The BFF can also DERIVE this from WEBSITE_RESOURCE_GROUP (which App Service sets automatically
+      // and which is literally rg-spaarke-{customerId}-{env}), so an older stamp without this setting
+      // still works. Emitting it explicitly is nonetheless correct: the derived path logs a WARNING by
+      // design, because a stamp running on the fallback forever is a stamp whose settings were never
+      // finished. Absent BOTH, the BFF refuses to start rather than defaulting to a shared value.
+      Customer__Id: customerId
+
       // UAMI pin — DefaultAzureCredential resolves this client ID (ADR-028 / T5).
       AZURE_CLIENT_ID: uami.outputs.clientId
       ManagedIdentity__ClientId: uami.outputs.clientId

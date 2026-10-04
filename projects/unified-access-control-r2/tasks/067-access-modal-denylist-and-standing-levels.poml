@@ -110,4 +110,45 @@
   <notes>spec.md FR-23/FR-25; design.md §6. Completes the Manage Access target table with 065/066.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments>
+    <amendment n="S27" date="2026-09-30" source="session 27 remediation set">The deny-list (ethical wall) UI must offer a USER picker as well as contact and organization (task 143, owner Q4: the No Access List applies to internal users on secure records), and show a "not enforceable for this user" state where 143 reports access that cannot be removed for one person (team/role/BU-held). Depends on 143.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 2)">Two additions to the No Access section, plus its data source.
+
+(1) DATA SOURCE. The section loads its entries from 064's RECORD-SCOPED No Access read (064 amendment UX): the record's own entries plus organization walls over its referenced organizations. It does not use the existing subject-to-records reader, and never reads sprk_noaccessentry client-side.
+
+(2) OPENABLE DIRECTLY (deep link). Task 153's access-status indicator inside TrackingFieldTrio opens Manage Access straight at the No Access section: the modal opens with that section expanded, scrolled into view and focused, without the user navigating from Current Access.
+- Today the open path carries no section: `onOpenGrantModal?: () => void` (`src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts:71`), the PCF host keeps only `isGrantModalOpen` (`src/client/pcf/TrackingFieldTrio/index.ts:280`), and `IAccessGrantModalProps` (`AccessGrantModal/types.ts:159`) has no initial-section prop.
+- Add an optional initial-section value through all three. The existing person-icon open (`TrackingFieldTrio.tsx:256-272`) keeps opening at the top, unchanged.
+- The person icon passes `onOpenGrantModal` straight to `onClick` (`TrackingFieldTrio.tsx:270`), so once the callback takes an argument React would hand it the click event. Wrap it (`() =&gt; onOpenGrantModal()`) so the person icon never passes an event as a section.
+- The PCF host stores the section beside `isGrantModalOpen` when opened (`src/client/pcf/TrackingFieldTrio/index.ts:1102-1104`), passes it to the modal (`:1170-1171`) and clears it in `onClose` (`:1172-1174`), so the next person-icon open starts at the top.
+- Today the person icon is disabled for a caller without Write (`TrackingFieldTrio.tsx:267-270`), so such a caller cannot open the modal at all. What the deep link does for that caller follows O2 below. RECOMMENDATION, consistent with O2's: no deep link — 153's indicator is not clickable for that caller, the modal stays unopenable as today, the caller sees only 153's summary, and no request to 064's entries route is made.
+
+(3) ENFORCED OR NOT, PER ENTRY (owner N5). Each entry row shows its enforcement state exactly as 064 returns it. The state describes Dataverse share removal only; the Teams/SPA veto applies to every active entry, and the explanations must not suggest otherwise.
+- "enforced" — no label;
+- "Not enforced: author lacks Write on record" (task 143 criterion 8a wording) — explanation: the entry is saved and Teams/SPA honour it, but its last modifier does not hold Write on this record, so no Dataverse access was removed (N5);
+- "Not enforceable in Dataverse" (the S27 state: team/role/BU-held access; owner N2: hidden in Teams/SPA, still admitted in MDA);
+- "not applicable" (non-secure record, or no systemuser to remove) — no label;
+- "unavailable" (064 shipped before 143) — a neutral "enforcement status unavailable" label, never shown as enforced.
+The state comes from the server, never computed client-side. Each labelled state carries a one-line explanation and is styled distinct from both the veto and the suppression styling (ADR-021 semantic tokens, dark-mode correct).
+
+ESCALATION TRIGGER (O1, open owner question — STOP and get the answer before building the plumbing in (2)). Must the banner itself be clickable? A standard form banner (`setFormNotification`) is text-only, with no link (platform limit, not repo-verified), so a clickable banner means rendering inside the TrackingFieldTrio control. RECOMMENDATION: BOTH — a standard banner at the top of the form naming the action ("open Manage Access"), plus a clickable indicator inside TrackingFieldTrio that opens Manage Access at the No Access section (this deep link). This task builds only the plumbing; task 153 builds the banner and the indicator. If O1 drops the TrackingFieldTrio indicator, the plumbing has no caller: ask whether it is still wanted rather than building it.
+
+ESCALATION TRIGGER (O2, open owner question — STOP before deciding who sees entries, including Reason). Today "Spaarke Core User" holds Global Read on sprk_noaccessentry. RECOMMENDATION: remove that Read; give Read/Write on the table to a dedicated access-administrator role; everyone else sees only the banner; Write-holders on the record see the entries through this section (Reason included — confirm), with the BFF reading on their behalf (064's entries tier). Without Write: no deep link, per (2).
+
+ADDITIONAL ACCEPTANCE (closed set):
+- (a) opening with the No Access initial section renders that section expanded, scrolled into view and focused; opening without it is unchanged;
+- (b) after a deep-link open and close, the next person-icon open starts at the top (section cleared), and a person-icon click never passes the click event as a section (component test);
+- (c) an entry whose 064 state is "not enforced: author lacks Write on record" renders that label and its explanation; "not enforceable in Dataverse" and "unavailable" render their labels; "enforced" and "not applicable" render none;
+- (d) a 064 read fault (any non-200, including 403) renders an error state in the section, never an empty list or "no entries";
+- (e) under the O2 recommendation, for a caller without Write the deep link is not offered, the modal does not open and no entries request is sent (component test). If O2 is answered otherwise, record the answer in notes/ and replace this criterion with it BEFORE implementing.
+
+ADDITIONAL UI TESTS (binding — part of this task's ui-tests):
+- Deep link: on a record with a No Access entry, as a Write-holder, click task 153's indicator in TrackingFieldTrio. Expected: Manage Access opens at the No Access section, listing the entry. If 153 has not landed when this task closes, this test runs at 153's live gate; record the hand-off in notes/.
+- Not enforced: as a user who can create No Access entries (per O2 / task 154) but lacks Write on secure project P, author an entry naming a systemuser who holds a share on P; then, as a Write-holder, open the section on P. Expected: the entry shows "Not enforced: author lacks Write on record" with its explanation, and the share is still listed in Current Access.
+- No Write: as a Read-only user on the same record, the person icon stays disabled and nothing opens Manage Access.
+- Dark mode: the labels are legible and distinct from the veto and suppressed styling.
+Depends on 064 (this amendment; already a dep). Task 153 depends on THIS task (it calls the plumbing); this task does not depend on 153.</amendment>
+  </amendments>
 </task>

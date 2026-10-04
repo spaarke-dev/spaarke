@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="unified-access-control-r2">
+  <metadata>
+    <title>C1 — one rule set for every contact sign-in: route the CIAM strategy through the SAME evaluator and veto pipeline as the workforce contact plane (Restricted, No Access List, Secure-direct-only)</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C1; re-opens the "every principal kind" claim of tasks 037 and 039)</phase>
+    <gate>after-131-109</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs change on the live CIAM plane (/api/v1/external); tags bff-api/auth/security; changes what every outside-counsel contact can see.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/authorization architecture: unifies two plane strategies onto one evaluator without duplicating the veto pipeline, and must keep two different term sets from drifting while one of them is still being retired by another task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hot-file rule: edits Infrastructure/ExternalAccess/CallerPrincipalResolver.cs and AccessibleRecordSetService.cs, which tasks 136 and 137 also edit (sequence 131 → 135 → 136 → 137). The same two files are edited by task 141 (CiamContactPrincipalStrategy deny codes at CallerPrincipalResolver.cs:362-373), task 138 (the suppression predicate in GrantedRightsFor and both contact-plane compositions) and task 109 (the junction read); merge serially and rebase onto whichever landed first.</parallel-reason>
+    <deps>131, 109</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <origin>Session 26 verified defect C1 [HIGH] (notes/session26-uac-defects-and-synopsis.md § C1; UC3 and UC6). Owner model confirmed 2026-09-30 round 2 item 3 (Restricted vs Secure) and C9 answer (contacts get only what they are granted). Tasks 037 and 039 claimed "every principal kind" but never touched CallerPrincipalResolver.cs; both were RE-OPENED 2026-09-30 (their POMLs now read status pending, deps +135/+136, with an amendments block naming this task and 136 as the completing work).</origin>
+  </metadata>
+
+  <prompt>The same person gets different answers depending on how they sign in. On a workforce token their contact grants pass through the Restricted veto, the No Access List veto and Secure direct-only suppression; on a CIAM token (the external SPA) none of the three runs, so a contact on the No Access List, or holding a grant on a Restricted record, or inheriting an organization grant on a Secure record, keeps full access. Make every contact sign-in go through one rule set.</prompt>
+
+  <role>SPAARKE BFF security engineer — the external-access evaluator (AccessibleRecordSetService) and the plane strategies (CallerPrincipalResolver). You are removing access that CIAM callers hold today, on purpose; treat every narrowing as an access-removal event and keep every fail direction closed.</role>
+
+  <goal>The CIAM strategy's record scope is produced by the SAME composition code as the workforce contact plane — the grant term with Secure pre-max suppression (DirectAccessLevel on sprk_issecure roots), then the deny-list veto (contact and its active organizations), then the Restricted veto (nothing contact-sourced survives) — for all three root types. There is exactly one implementation of those three rules. For the same contact, grants, flags and deny entries, a CIAM principal and a workforce contact-only principal carry identical rights maps.</goal>
+
+  <context>
+    <background>🔴 LIVE, verified 2026-09-30 against source.
+
+WHY CIAM BYPASSES THE VETOES. `CiamContactPrincipalStrategy.ResolveAsync` (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:339-405`) resolves the contact (`:362-364`), then builds the whole principal from `ExternalParticipationService.GetGrantSetAsync` alone (`:378-380`): projects via `CallerProjectAccess.FromLevel(p.ProjectId, p.AccessLevel)` (`:386-388`) and matters/work assignments via `RightsFromGrants` (`:417-429`), both on the ALL-SOURCES `AccessLevel`, never `DirectAccessLevel`. It never reads root flags, never reads the No Access List, never runs a veto. The resolver routes every ciamlogin.com / Ciam:TenantId token here (`:293-313`).
+
+WHERE THE VETOES LIVE. Only in `AccessibleRecordSetService` (`Infrastructure/ExternalAccess/AccessibleRecordSetService.cs`): Secure suppression inside `GrantedRightsFor(grants, entityType, isSecure)` (`:237-259`, `isSecure ? DirectAccessLevel : AccessLevel`); the ordered post-max pipeline `ApplyVetoPipeline` (`:357-407`: deny list `:375-378`, then Restricted `:391-406`); the deny set from `ResolveDenyVetoAsync` (`:596-672`); the contact plane composer `ComposeForContactAsync` (`:1114-1322`), which calls the flag read at `:1256-1257` and the pipeline at `:1298-1301`. The only consumer of `ComposeAsync` is `WorkforcePrincipalStrategy` (`CallerPrincipalResolver.cs:519-524`).
+
+THE FALSE PARITY CLAIM. `CallerPrincipalResolver.cs:48-50` says "Both planes now source these from the ONE evaluator's answer". They do not. Fix the comment as part of the fix.
+
+WHAT THE OWNER DECIDED (binding, 2026-09-30):
+- A contact gets ONLY the records it is granted, at the granted level (C9 answer).
+- Restricted (`sprk_accesspermission` = 100000002, `ExternalParticipationService.cs:521`) is a grant-access level on ANY record: NO contact-based access at all; internal users unaffected.
+- Secure (`sprk_issecure`) is a separate flag: contact access is allowed only through named DIRECT grants. Organization-wide, standing and derived access do not count. That is why Secure implies Limited for contacts.
+- The No Access List vetoes.
+The workforce contact plane already implements all four for grants (task 037, task 039).
+
+⚠️ THE TERM-SET DIFFERENCE YOU MUST NOT PAPER OVER. `ComposeForContactAsync` also composes two DERIVED-MEMBER terms that are not grants: standing-grant membership (`:1147-1175`) and organization expansion (`:1177-1249`). The CIAM plane has never had them, and under the owner's model a contact should not get them — "Assigned To *" access is to continue as explicit Collaborate grant rows added by a function (owner Q5), not as derived membership. Retiring the derived terms from the workforce contact plane (and replacing them with the Q5 auto-grants) belongs to task 142 (Assigned-To auto-grants), whose escalation (d) puts the retire-or-keep question to the owner with the recommendation to retire both after a backfill proves no subject loses access. THIS task therefore unifies the GRANT term and the THREE RULES, and must NOT add the derived terms to CIAM: adding them would widen CIAM beyond the owner's model, and removing them from the workforce plane here would drop "Assigned To *" access before its replacement exists, which the owner forbade (round 2 item 5).
+
+THE CACHE PRECONDITION. After this change CIAM reads `DirectAccessLevel` on secure roots. The grant cache (`ExternalParticipationService.cs:1134-1168`, `CachedParticipation` `:1242-1252`, `CachedRootGrant` `:1258-1268`) drops `DirectAccessLevel`, so on a cache hit a legitimate direct grant on a secure root would read None (defect C3). That is why this task waits for task 131 (C3: carries DirectAccessLevel through the cache and bumps CacheVersion 4→5).
+
+THE JUNCTION-FAULT PRECONDITION. The deny-veto subject comes from `ReadActiveOrgMembershipsAsync` (`AccessibleRecordSetService.cs:486`). Today only an EXCEPTION marks it `Unreadable`; a junction QUERY failure (non-success status, timeout) is swallowed inside ExternalParticipationService and arrives as "belongs to no organization", so the ORGANIZATION axis of the wall silently stops matching (documented at `AccessibleRecordSetService.cs:441-455`; #998). Task 109 fixes that one layer down. Without it this task's fail-closed criterion for an unreadable subject-organization set cannot be met on either plane, which is why 109 is a dependency.
+
+TASKS 037 AND 039. Both claimed "every principal kind" / "both planes"; their file lists exclude `CallerPrincipalResolver.cs`, and "both planes" meant systemuser vs contact on the WORKFORCE sign-in. Both POMLs were re-opened on 2026-09-30 (status pending; deps now include 135 and 136; an amendments block with amended acceptance criteria). Their status-notes say they return to completed only when BOTH 135 and 136 are completed, so THIS task records its completion in their amendments but does not close them — task 136 does. ⚠️ At authoring time TASK-INDEX.md rows 037 (:601) and 039 (:603) still show ✅ [done] while the POMLs say pending; step 0 checks whether that drift has been reconciled.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalResolverTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="modify">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/037-fr21-fr22-restricted-secure-vetoes.poml (completion cross-reference only)</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/039-fr23-deny-veto-wiring-pipeline-tests.poml (completion cross-reference only)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="C1 fix direction / CLAUDE.md §11">Scope: implementation shape. ONE implementation of the grant term with Secure suppression, the flag read, the deny-veto resolution and `ApplyVetoPipeline`. The CIAM strategy must reach them through `IAccessibleRecordSetService` (or a method on `AccessibleRecordSetService` both planes call). Copying the pipeline into `CiamContactPrincipalStrategy`, or adding a second veto implementation anywhere, fails this task.</constraint>
+    <constraint source="owner model 2026-09-30">Scope: the CIAM term set. CIAM gets the explicit grant term only (direct and organization grants from `GetGrantSetAsync`). It must NOT gain the standing-grant or organization-expansion membership terms. A test pins their absence on CIAM.</constraint>
+    <constraint source="owner round 2 item 5">Scope: the workforce contact plane. Do NOT remove or narrow its derived-member terms in this task — that would remove "Assigned To *" access before the C9 auto-grant replacement exists. The only permitted difference between the two contact planes after this task is those derived terms, and it must be named in code (one comment at the branch point) and in the task notes, pointing at task 142 escalation (d).</constraint>
+    <constraint source="spec FR-21 / owner item 3">Scope: Restricted. On a Restricted record nothing contact-sourced survives on the CIAM plane, whatever the grant level or source (`survivesRestricted` = empty, as on the workforce contact plane, `AccessibleRecordSetService.cs:1296-1301`).</constraint>
+    <constraint source="spec FR-22 / owner item 3">Scope: Secure. On an sprk_issecure root, CIAM rights come ONLY from the contact's own direct grant rows (`DirectAccessLevel`); an organization-inherited grant contributes nothing. Suppression is pre-max and structural, not a post-hoc subtraction (task 037's design crux).</constraint>
+    <constraint source="spec FR-23">Scope: No Access List. The deny subject on CIAM is the contact plus its active organizations, read from the SAME single junction read the workforce contact plane uses (`ReadActiveOrgMembershipsAsync`, task 043's single-snapshot invariant). All four key shapes apply (contact×record, contact×org, org×record, org×org). Vetoes run after the max, deny first, then Restricted.</constraint>
+    <constraint source="ADR-003 / spec NFR-01">Scope: faults. An unreadable root flag is Secure AND Restricted (`RootRecordFlags.Unreadable`, `ExternalCallerContext.cs:149`); an unreadable deny list or subject organization set denies every candidate; nothing on the CIAM plane may fall back to the old grants-only answer when the evaluator faults. A fault must never widen access.</constraint>
+    <constraint source="ADR-028 A1 / A3">Scope: identity and broker-only. CIAM contact resolution (`ResolveExternalContactAsync`) and its oid-first behaviour are unchanged by this task; all reads stay app-only; no OBO, no Graph types. Handlers stay plane-agnostic — no handler learns which plane it serves.</constraint>
+    <constraint source="spec NFR-02">Scope: request cost. No per-record round trips: one flag read per root type per composition, one batched deny resolution per composition, one junction read per composition — the same budget as the workforce contact plane.</constraint>
+    <constraint source="hot-file coordination">Scope: DI. Do not edit `Infrastructure/DI/ExternalAccessModule.cs`; the strategy's new constructor dependency resolves through the existing scoped registrations (`:177-179`, `:333`). If that proves impossible, escalate rather than editing it (task 134 owns edits there).</constraint>
+    <constraint source="owner 2026-09-10 / spec">Scope: verification. No Dataverse test in CI. The live check is a MANUAL gate with an existing CIAM test contact and existing non-admin test users in the correct BU; do not propose relocating users. Secure test records are created through the provisioning endpoint, never by editing `sprk_issecure` directly (owner round 2 item 2: the field is locked and endpoint-managed).</constraint>
+    <constraint source="ADR-038">Scope: tests. Plane-parity and veto tests belong at KEEP paths (`tests/integration/seam/ExternalAccess/` for the vertical slice, `tests/unit/.../ExternalAccess/` for the strategy). No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no constructor null-check tests.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing `.claude/constraints/bff-extensions.md`; publish size measured from a FRESH master worktree and a FRESH branch worktree, both at SHORT paths, same Compress-Archive method, equal file counts; report both sizes and the delta; ≤60 MB; no new HIGH CVE.</constraint>
+    <constraint source="CLAUDE.md §6.5">Scope: ADR conflicts. If any ADR rule blocks the single-implementation shape, surface it as path A/B/C in the task notes and stop for a decision; never resolve it silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/task-037-restricted-secure-vetoes.md</file>
+      <file>projects/unified-access-control-r2/tasks/037-fr21-fr22-restricted-secure-vetoes.poml</file>
+      <file>projects/unified-access-control-r2/tasks/039-fr23-deny-veto-wiring-pipeline-tests.poml</file>
+    </files>
+    <patterns>
+      <pattern name="the contact-plane pipeline to reuse" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">`ComposeForContactAsync` (`:1114-1322`): grants read, single junction read, candidate ids, ONE flag read, grant term with `IsSecure`, deny resolution, `ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights)`. The CIAM plane needs exactly this sequence minus the two derived-member terms.</pattern>
+      <pattern name="principal from evaluator rights" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">`WorkforcePrincipalStrategy.ResolveAsync` (`:483-548`; the three compositions at `:519-524`): three compositions, `ProjectAccess` from `Rights`, `MatterAccess`/`WorkAssignmentAccess` straight from the composed maps. Mirror it for CIAM.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify every anchor above (tasks 109, 131, 138 and 141 may have moved lines in the same files). Confirm task 131 has merged (DirectAccessLevel round-trips through the cache) and task 109 has merged (a junction query failure yields an Unreadable outcome); if either has not, the escalation below fires. Read the outcome of task 142's escalation (d) and task 138's status.</step>
+    <step order="1">Choose the entry point: either a contact-principal composition on `IAccessibleRecordSetService` that both the CIAM strategy and `ComposeForContactAsync` call, or a refactor of `ComposeForContactAsync` so its grant-term-plus-vetoes core is one private method with the derived terms applied only on the workforce plane. Decide by the §11 rule (extend, do not duplicate) and record the choice and why in the notes. ⚠️ If you pass the CIAM caller through as a `WorkforcePrincipal`, first check every place that reads `Kind`, `TenantId` or `Oid` downstream (identity caches, membership walks) so a CIAM caller is not treated as a workforce identity anywhere.</step>
+    <step order="2">Rewrite `CiamContactPrincipalStrategy` to build `ProjectAccess`, `MatterAccess` and `WorkAssignmentAccess` from the composed rights for all three root types; delete `RightsFromGrants` if it has no remaining caller; fix the parity comment at `:48-50` and the class doc at `:316-321`.</step>
+    <step order="3">Tests per the closed set, including the plane-parity test and perturbations.</step>
+    <step order="4">Build, full suite, ArchTests, publish size.</step>
+    <step order="5">MANUAL live gate against dev (see acceptance); record evidence in `projects/unified-access-control-r2/notes/task-135-ciam-unified-veto-pipeline.md`.</step>
+    <step order="6">Append a dated completion line to the existing 2026-09-30 amendments block of tasks 037 and 039 ("amendment n=1 (C1) delivered by task 135 on DATE; evidence: notes/task-135-ciam-unified-veto-pipeline.md"). Do NOT set 037 or 039 back to completed — their status-notes require 136 as well, and task 136 closes them. Update TASK-INDEX and this POML's status; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Task 131 (C3 grant cache) has not merged when this task starts. STOP — shipping this first makes CIAM direct grants on secure roots read as None on every cache hit (intermittent loss of legitimate access).</trigger>
+    <trigger>Task 109 has not merged when this task starts. STOP — without it a junction query failure silently drops the organization axis of the No Access wall on BOTH planes, and the fail-closed criterion below cannot be met. Do not re-implement 109's junction outcome here.</trigger>
+    <trigger>OWNER DECISION (carried by task 142 escalation (d)): if the owner decides to KEEP the workforce contact plane's standing-grant and organization-expansion read-time terms instead of retiring them after 142's backfill, the one permitted plane difference becomes permanent, which contradicts the single-rule-set goal. Put the choice to the owner: (i) CIAM also gains the derived terms, or (ii) the workforce plane keeps them as a documented, owner-signed exception. RECOMMENDATION: neither — retire them per 142 (d), because the owner's C9 rule is that a contact gets ONLY what it is granted and Q5 makes "Assigned To" access an explicit, removable grant row. This trigger does not block merging 135 (the derived terms stay off CIAM either way); it blocks deleting the plane-difference comment.</trigger>
+    <trigger>The Step 1 comparison shows that routing CIAM through the evaluator removes access from live CIAM contacts in dev (count the contacts and records whose CIAM answer changes). Report the count and list before merging — it is an access-removal event, even though it is the intended one.</trigger>
+    <trigger>Task 138 makes `sprk_accesspermission` = Limited (100000001) real by widening the FR-22 suppression predicate to "Secure OR Limited" (reuse, not fork). Because this task routes CIAM through the SAME composition, 138's predicate reaches CIAM with no CIAM-specific code. If 138 has already merged when this task runs, the plane-parity test MUST include a Limited case; if it has not, keep the single predicate as the only suppression point so 138 changes it once. If either task finds it needs CIAM-specific Limited code, STOP — that would be a second implementation.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalResolverTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-135-ciam-unified-veto-pipeline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-21 on CIAM: a CIAM contact holding a direct FullAccess grant on a Restricted project, matter or work assignment does not have that record in its principal (absent from ProjectAccess / MatterAccess / WorkAssignmentAccess) — one test per root type.</criterion>
+    <criterion testable="true">FR-23 on CIAM: a CIAM contact holding FullAccess on record R is denied R when a No Access entry exists for (contact, R), for (contact, an org R references), for (the contact's active org, R), and for (the contact's active org, an org R references) — the four key shapes.</criterion>
+    <criterion testable="true">FR-22 on CIAM: on a Secure record, an organization-only grant confers nothing; the same contact with a direct ViewOnly grant plus an organization Collaborate grant gets exactly Read (suppression is pre-max).</criterion>
+    <criterion testable="true">FR-22 survivor on CIAM: a direct Collaborate grant on a Secure, non-Restricted, non-denied record confers Collaborate rights on CIAM.</criterion>
+    <criterion testable="true">Owner model on CIAM: a CIAM contact whose contact or organization holds a standing grant gains NO standing-grant or organization-expansion membership records (pinned by test).</criterion>
+    <criterion testable="true">Plane parity: for identical grant rows, flags and deny entries, and with no derived-member data, the CIAM principal and the workforce contact-only principal have identical rights maps for all three root types (one parameterised seam test over the Restricted, Secure, deny and plain cases).</criterion>
+    <criterion testable="true">Fail closed on CIAM: a throwing or non-success root-flag read removes the affected records; a throwing deny-list reader or an unreadable subject-organization set — including a junction QUERY failure (non-success status), which task 109 turns into an Unreadable outcome — removes every candidate; no fault returns the old grants-only answer. Each fault is asserted on the CIAM plane through `CiamContactPrincipalStrategy`, not only on the evaluator.</criterion>
+    <criterion testable="true">Regression: a CIAM contact with plain grants on non-secure, non-restricted, non-denied records keeps exactly its granted rights on all three root types, and the existing CIAM identity tests (oid-first, email first-login bind, no-hijack) pass unmodified.</criterion>
+    <criterion testable="true">Single implementation: grep shows exactly one call site of `ApplyVetoPipeline` per composition path and no veto logic in `CallerPrincipalResolver.cs`; the CIAM strategy no longer reads `AccessLevel` from a grant directly.</criterion>
+    <criterion testable="true">The false parity comment at `CallerPrincipalResolver.cs:48-50` and the CIAM strategy class doc are corrected; the single remaining plane difference (derived terms) is named in one code comment pointing at the C9 task.</criterion>
+    <criterion testable="true">Perturbation: bypassing the veto pipeline on the CIAM path, reverting CIAM to `AccessLevel` on secure roots, or adding the derived terms to CIAM each turns at least one test red. All reverted before completion.</criterion>
+    <criterion testable="true">MANUAL live gate (dev, no CI), signed into the external SPA as an existing CIAM test contact: (a) a project the contact holds FullAccess on, then set Restricted → disappears from /me and its documents and document content return 403; (b) contact added to the No Access List for that project → same; (c) a Secure project (provisioned through the endpoint) reached only through the contact's organization grant → not accessible; (d) a direct grant on a Secure, non-Restricted project → accessible at the granted level. Evidence recorded in the task notes; test records restored afterwards.</criterion>
+    <criterion testable="true">Tasks 037 and 039 carry a dated completion line for amendment n=1 in their existing amendments blocks and both remain status pending (task 136 closes them); this task's POML and TASK-INDEX row agree (`check-task-status-drift.ps1` reports no drift for 135).</criterion>
+    <criterion testable="true">Build green; full BFF unit suite green; seam suite green; ArchTests green; publish size reported (both absolute sizes, delta, zip tool, file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in the task notes; no near-identical happy-path variants.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C1 [HIGH], ranked first with C2 in the session-26 fix priority. Compounds with C4 (a Write-holder can mint an organization grant or a grant to a denied contact, and today it takes full effect for CIAM callers); after this task those grants are neutralised at read time on both planes, while the C4 task removes them at write time.
+
+Task 136 (C2, rights-based read gates) edits the same files and runs next: after THIS task a Secure organization-only grant on CIAM yields a None-rights key instead of a full-level grant, and only 136 makes that key stop admitting reads. Do not treat that residue as a defect of this task — it is C2, and 136 closes it.
+
+C12 (fault caching of the grant set, `ExternalParticipationService.cs:857-862`, `:989-993`) is owned by task 132; do not change the grant-set fault path here. Contact identity resolution (`ResolveExternalContactAsync` and the CIAM strategy's deny codes) is owned by task 141 (C7).
+
+Related: tasks 037, 039, 043, 109, 131, 132, 136, 137, 138, 140 (contact-side grant depends on this task), 141, 142; spec FR-21/22/23; design register B-9/B-10/F-4.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5 unconditionally.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-135" base="task/uac-r2-109-f1" status="code-complete; manual live gate pending; publish size measured by the main session after merge">
+      Full record: projects/unified-access-control-r2/notes/task-135-ciam-unified-veto-pipeline.md.
+      - Fix: IAccessibleRecordSetService gains ComposeForCiamContactAsync(contactId, entityType, ct). It and the
+        workforce contact-only path (ComposeForContactAsync) call ONE private ComposeContactPlaneAsync, which holds
+        the only contact-plane grant read, junction read, batched flag read, Secure-suppressed grant term, deny
+        resolution and ApplyVetoPipeline call. CiamContactPrincipalStrategy keeps identity resolution unchanged and
+        maps the evaluator's rights for all three root types; RightsFromGrants is deleted; the strategy reads no
+        grant level. ApplyVetoPipeline has exactly two call sites (systemuser path, shared contact path). The false
+        parity comment and the CIAM class doc are corrected.
+      - Step 1 decision (§11 extend, do not duplicate): refactor the existing contact composition into one core with
+        one boolean (includeDerivedMemberTerms); take a contact id, never pass a CIAM caller as a WorkforcePrincipal.
+        On CIAM the junction is read after the candidate list and skipped when there are none (systemuser NFR-02 gate).
+      - Plane difference: the two derived-member terms stay on the workforce contact plane and stay OFF CIAM. Owner
+        decision A2 (round 3, 2026-09-30, binding) answered escalation 3: option (ii), an owner-signed exception.
+        Named in one comment at the branch point. Nothing added or retired beyond applying the three rules to CIAM.
+      - Escalations: trigger 1 (131) and trigger 2 (109) did not fire — both are on the base. Trigger 3 answered by
+        owner A2. Trigger 4 (access removal): READ-ONLY dev comparison, 31 active grant rows, 8 contacts, 14 records,
+        0 Restricted / 0 Secure targets, 0 No Access entries => 0 contacts and 0 records change (notes §5). Trigger 5:
+        138 not merged, so the single FR-22 predicate stays the only suppression point; no Limited case.
+      - Tests (KEEP paths): seam UnifiedEvaluatorSeamTests (CIAM FR-21 x3, FR-23 four key shapes + targeted control,
+        FR-22 x3 + survivor x3, owner model, plane parity x4 over all three roots, fail-closed x3 + escaping flag
+        fault, regression x3), auth OrganizationMembershipReadTests (CIAM junction QUERY fault over the real
+        transport, 500/403), unit CallerPrincipalResolverTests (strategy mapping; identity denies never reach the
+        evaluator). Contract fixture: stub now answers no orgs / no references and the deny reader denies nothing
+        (found empirically: the CIAM download contract test went 403 once the vetoes ran offline).
+      - Perturbations (all reverted, file byte-restored): skip the veto on CIAM -> 14 red; AccessLevel on secure
+        roots for CIAM -> 4 red; derived terms on CIAM -> 1 red; blanket organization deny -> 5 red.
+      - Runs: build 0 warnings / 0 errors; affected classes 171/171; full BFF unit suite 13,240 passed / 0 failed /
+        54 skipped (13,294); Spaarke.ArchTests 338/338. No package change, so no new CVE.
+      - Step 9.5: code-review 0 Critical (2 warnings + 3 suggestions accepted, notes §6); adr-check 0 violations.
+      - Placement (CLAUDE.md §10 / bff-extensions.md): in the BFF, inside the existing evaluator — per-request
+        authorization on /api/v1/external. New surface: one method on the existing IAccessibleRecordSetService seam
+        and one constructor dependency on the CIAM strategy. No new service, endpoint, option, job, DI registration or
+        package; ExternalAccessModule.cs not edited (strategies and evaluator are already scoped).
+        §11: existing = ComposeForContactAsync (grant term + three rules); extension = yes, one boolean, no copy;
+        cost of doing nothing = No Access / Restricted / Secure-org grants keep full access on CIAM tokens (C1).
+      - Pending manual gates: live gate (a)-(d) in notes §10 (dev, existing CIAM test contact, records restored);
+        publish size (main session, fresh worktrees); TASK-INDEX row 135 (main session).
+      - Not done (run rules): deploy, live writes, TASK-INDEX/current-task edits. Tasks 037/039 carry a dated
+        completion line for amendment n=1 and stay pending (task 136 closes them).
+    </outcome>
+  </execution>
+</task>

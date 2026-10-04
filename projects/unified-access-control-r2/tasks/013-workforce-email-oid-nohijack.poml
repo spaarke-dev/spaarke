@@ -5,6 +5,18 @@
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
     <status>pending</status>
+    <status-note>**RE-OPENED 2026-09-30** (owner Q7 approval, session 27). The no-hijack guard shipped here is INERT, because nothing in src writes a contact oid binding, so no contact is ever "bound to a different oid". That is defect C7. The notes at the time already said "Do not mark A-18 closed" (notes/wave2-parallel-merge-plan.md). The completing work is task 141, which builds the owner-approved identity binding (Entra oid stored in contact.sprk_externalobjectid, completing SPA-r2 FR-11 / task 023). See the amendments block. The history below is kept as written.
+
+**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 41fbe7081 (Wave A tasks 011/013/015/018/020/081 merged and verified)
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an identity-binding authorization path — an account-takeover vector under the multitenant workforce model (High) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,7 +25,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs — a known-contended directory (Infrastructure/ExternalAccess/**). Merge serially with /conflict-check.</parallel-reason>
-    <deps>001</deps>
+    <deps>001, 141</deps>
     <tags>bff-api, auth, security</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -31,7 +43,7 @@
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/WorkforceEmailNoHijackTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning the unguarded email fallback, flipped here.</dependency>
+      <dependency task="001" status="completed">Characterization test pinning the unguarded email fallback, flipped here.</dependency>
     </dependencies>
   </context>
 
@@ -40,7 +52,7 @@
     <constraint source="ADR-003">Fail closed: ambiguity (multiple contacts match the email, or binding state cannot be read) DENIES — it does not pick one contact. Scope: the resolution path.</constraint>
     <constraint source="project">Do NOT auto-write an oid binding as a side effect of a denied match; only an oid-verified resolution may create/confirm a binding. Scope: any binding write in the changed path.</constraint>
     <constraint source="project">Both edited files are consumed by the BFF (CLAUDE.md §10): report publish size vs ~44.96 MB baseline in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
-    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-18: Extract the contact-by-email resolution decision from IdentityNormalizationService:242-281 so the no-hijack oid check is assertable without Dataverse. Task 001 could not pin A-18; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock<HttpMessageHandler> stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
+    <constraint source="task-001">OWN-COVERAGE OBLIGATION (owner decision 2026-08-21, path B). A-18: Extract the contact-by-email resolution decision from IdentityNormalizationService:242-281 so the no-hijack oid check is assertable without Dataverse. Task 001 could not pin A-18; this task owns that coverage. Tests go at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001), following the Characterization_ + 'FLIPPED BY' convention there. Extract ONLY -- do not change behaviour in the same commit as the fix, so the pre-fix state can be pinned first. Mock&lt;HttpMessageHandler&gt; stays banned (ADR-038 B1); if unavoidable, escalate as CLAUDE.md 6.5 path A rather than silently excepting. Scope: this task's test deliverable.</constraint>
   </constraints>
 
   <knowledge>
@@ -97,4 +109,55 @@
   <notes>Spec FR-12; finding A-18 (register §A.2 rank 4). Related prerequisite E-6 (multitenant app registration) is environment work, out of Phase 0 code scope — this task hardens the code path that E-6 makes reachable.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="session 26 defect verification (C7) and owner round-2 decision item 4 / Q3 / Q7 in session 27 (notes/session26-uac-defects-and-synopsis.md; notes/session27-owner-decisions-and-research.md)">
+    <verdict>RE-OPENED. FR-12's acceptance ("an email matching a contact bound to a different oid is
+    denied") passes in unit tests but never happens in production, because no contact is ever bound. The
+    guard has nothing to guard. The completing work is task 141. No further code is authored under this id.</verdict>
+    <amendment n="1" defect="C7" completing-task="141">
+    Why the guard is inert, verified against current code:
+    (a) ExtractVerifiedEmail (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs:220-226)
+    verifies nothing. It returns email, else preferred_username, else upn.
+    (b) The workforce contact branch (src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs:242,
+    TryResolveContactByWorkforceIdentityAsync) binds on contact.azureactivedirectoryobjectid. Its own doc
+    comment says "Nothing here writes a binding" (:478), and the only write of that column anywhere in src
+    is to a SYSTEMUSER row (Services/Registration/RegistrationDataverseService.cs:372).
+    (c) In dev (spaarkedev1) contact has no azureactivedirectoryobjectid attribute at all. The email query
+    selects it (:598), throws, and is caught as null. So every non-systemuser workforce caller is denied
+    (403 principal_not_resolved), and the GuardInertNoBindingColumn warning (:353, emitted at :615-634)
+    cannot fire. That is an availability defect for Type-2 employees.
+    (d) Where the column exists but is empty, the unverified email claim is the only link, which is a
+    hijack path.</amendment>
+    <amendment n="2" title="Owner decision that task 141 implements (round 2 item 4, Q3 approved)">
+    Link by Entra oid, stored in contact.sprk_externalobjectid, the column the CIAM invite already binds
+    (the invite writes it at Api/ExternalAccess/InviteExternalUserEndpoint.cs:141-145; the CIAM first-login bind is ExternalParticipationService.BindOidToContactAsync, ~:460-493). A first-sign-in email bind
+    happens ONLY for tenant members (not guests) with EXACTLY one matching contact. After that, the oid is
+    the only link. Otherwise a contact keyed by oid is created. A collision (email matches a contact bound
+    to another oid) is refused and flagged. This supersedes this task's "Do NOT auto-write an oid binding"
+    constraint for the approved first-sign-in bind only. The constraint still holds for any DENIED match.
+    Task 141 also removes the dependency on the absent contact.azureactivedirectoryobjectid column.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Task 141 is completed: a Type-2 employee (tenant member, no systemuser) with exactly one matching contact resolves on first sign-in, and that contact's sprk_externalobjectid then holds the caller's oid.</criterion>
+      <criterion testable="true">Negative: a second identity whose email matches that now-bound contact is refused (no principal, no grants), and the collision is flagged.</criterion>
+      <criterion testable="true">Negative: a guest (non-member) token, or an email matching two or more contacts, never binds.</criterion>
+      <criterion testable="true">Oid only after binding: once a contact is bound, a later sign-in by the same oid resolves to it even when the email claim has changed, and the email claim is not consulted. Asserted by test.</criterion>
+      <criterion testable="true">No contact query names contact.azureactivedirectoryobjectid (task 141's source guard test is green), so the dev path no longer throws and is no longer caught as null.</criterion>
+      <criterion testable="true">MANUAL LIVE GATE (dev): an existing unlicensed home-tenant MEMBER test identity with no systemuser resolves after first sign-in and no longer gets 403 principal_not_resolved, and one of the live collision identities recorded by task 141 is refused and flagged. Recorded in notes (task 141 carries the escalation if no such member test account exists).</criterion>
+      <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 013.</criterion>
+    </acceptance-criteria-amended>
+    <a18-closure date="2026-10-01" closed-by="task 141 (branch task/uac-r2-141)">
+    The A-18 closure is task 141. The "do not mark A-18 closed" residual comment was removed from
+    IIdentityNormalizationService.cs, and the inert GuardInertNoBindingColumn and the email-by-contact.azureactivedirectoryobjectid
+    path it guarded were deleted. Every workforce, systemuser, CIAM and invite binding now runs one pure decision
+    (Infrastructure/ExternalAccess/ContactBindingDecision.cs). The amended criteria map to task 141 evidence as follows:
+    (1) first-sign-in bind: WorkforceEmailNoHijackTests.FirstSignIn_OfAMember_BindsTheOneUnboundMatch_InDFormat_PlaneWorkforce;
+    (2) second identity refused and flagged: AnEmailMatchBoundToAnotherOid_Denies_FlagsOnce_AndWritesNothingElse;
+    (3) guest or ambiguous never binds: ANonMember_GetsNoEmailBind_AndNoCreation_AndAnOwnDenyCode and TwoActiveContactsCarryingTheEmail_Deny_AndBothAreFlagged;
+    (4) oid only after binding: TheNextSignIn_ResolvesByOid_EvenWhenTheEmailClaimDiffers;
+    (5) no contact query names azureactivedirectoryobjectid: ContactAadObjectIdColumnGuardTests (shown to bite by seeding one);
+    (6) the MANUAL LIVE GATE is PENDING (task 141 notes §8, gates G-1 to G-5, live identity test.user@demo.spaarke.com per owner T2).
+    So criterion 7 holds this task at pending: its status and TASK-INDEX marker go back to completed only after
+    task 141's live gate passes. The main session owns that status change.
+    </a18-closure>
+  </amendments>
 </task>

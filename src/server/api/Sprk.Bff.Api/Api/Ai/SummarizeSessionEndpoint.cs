@@ -554,10 +554,20 @@ public static class SummarizeSessionEndpoint
 /// (max 20 per NFR-02). When omitted, the orchestrator defaults to ALL files in the session
 /// manifest (FR-08).
 /// </param>
-/// <param name="Style">
-/// Optional natural-language style hint passed through to the system prompt
-/// (e.g., <c>executive</c>, <c>detailed</c>, <c>bullet-points</c>).
-/// </param>
+/// <remarks>
+/// <para>
+/// A <c>Style</c> property was REMOVED here (2026-09-03, r8 dead-wire audit). It was declared and
+/// documented as "passed through to the system prompt", but nothing read it: the handler serializes
+/// only <c>fileIds</c> into the dispatch args, no client ever sent it, and no test covered it. A caller
+/// setting <c>style</c> got silent no-op behaviour from a field the contract advertised.
+/// </para>
+/// <para>
+/// It was deleted rather than implemented, and the distinction is the point. Threading a free-text
+/// caller string into a system prompt is exactly what ADR-039's CLOSED structured-operand vocabulary
+/// exists to prevent — so the property was not merely dead, it advertised a capability the architecture
+/// forbids. "Implement the documented behaviour" would have been the wrong repair. A summary style, if
+/// ever wanted, belongs in the Action/Binding row as a bounded enum, not as free text on the wire.
+/// </para>
+/// </remarks>
 public sealed record SummarizeSessionRequest(
-    IReadOnlyList<string>? FileIds = null,
-    string? Style = null);
+    IReadOnlyList<string>? FileIds = null);

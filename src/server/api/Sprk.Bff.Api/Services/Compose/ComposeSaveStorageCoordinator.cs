@@ -260,13 +260,25 @@ internal sealed class ComposeSaveStorageCoordinator
     /// The second attempt re-reads metadata rather than reusing the failed ETag: reusing it would fail
     /// identically, and the point of the retry is to rebase onto whatever landed.
     /// </remarks>
+    /// <param name="rebaseOnConflict">
+    /// <c>true</c> (default, the SAVE path): on a failed precondition, retry ONCE against the fresh
+    /// version — last-writer-wins. This is only sound because the save path has already rebased the
+    /// caller's edits onto those very bytes (<c>ReanchorStaleSaveAsync</c> re-downloaded them), so the
+    /// retried write CONTAINS the concurrent writer's change.
+    /// <para><c>false</c> (#776, the APPLY-TEMPLATE path): a failed precondition is terminal. That path
+    /// merges bytes it downloaded at T1 and never rebases them, so a retry against the fresh version
+    /// would write a payload that never contained the other writer's change — silently erasing them at
+    /// the head version, which is the exact defect the precondition was added to stop. Retrying there
+    /// would make the If-Match decorative.</para>
+    /// </param>
     internal async Task<FileHandleDto?> ReplaceWithPreconditionAsync(
         HttpContext httpContext,
         string driveId,
         string itemId,
         byte[] content,
         string? ifMatch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool rebaseOnConflict = true)
     {
         if (string.IsNullOrEmpty(ifMatch))
         {
@@ -286,7 +298,7 @@ internal sealed class ComposeSaveStorageCoordinator
         }
         // Only reachable with a non-empty `ifMatch` — the guard above returns for the blind-PUT case, so
         // this catch cannot fire on a request that never carried a precondition.
-        catch (EtagPreconditionFailedException)
+        catch (EtagPreconditionFailedException) when (rebaseOnConflict)
         {
             var fresh = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, cancellationToken)
                 .ConfigureAwait(false);

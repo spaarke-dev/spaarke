@@ -1,10 +1,9 @@
-import React, { useState, useCallback, useMemo, forwardRef, type KeyboardEvent } from 'react';
+import React, { useCallback, useMemo, type KeyboardEvent } from 'react';
 import {
   makeStyles,
   tokens,
   Checkbox,
   Text,
-  Button,
   Badge,
   Card,
   CardHeader,
@@ -306,8 +305,14 @@ export interface AttachmentSelectorProps {
  * />
  * ```
  */
-export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorProps>(
-  function AttachmentSelector(props, ref) {
+// Note (typecheck-debt task 006): previously `forwardRef<HTMLDivElement, ...>`, forwarding to the
+// root `Card`'s `ref`. No caller anywhere in the codebase (production or tests) ever passed a `ref`
+// to `<AttachmentSelector>`, and forwarding it no longer typechecks under this package's React 19 +
+// @fluentui/react-components@^9.54.0 combination — Fluent's `ForwardRefComponent<CardProps>`
+// ref-element inference resolves to `Ref<never>` for slot-based components under these React 19
+// types (see notes/typecheck-fix-patterns.md). Converted to a plain function component: zero
+// behavior change for any existing caller, and removes an already-broken, unused capability.
+export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
     const {
       attachments,
       selectedIds,
@@ -332,11 +337,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
       return results;
     }, [attachments]);
 
-    // Get selectable attachments (valid ones only)
-    const selectableAttachments = useMemo(() => {
-      return attachments.filter(att => validationResults.get(att.id)?.isValid);
-    }, [attachments, validationResults]);
-
     // Calculate total selected size
     const totalSelectedSize = useMemo(() => {
       return attachments.filter(att => selectedIds.has(att.id)).reduce((sum, att) => sum + att.size, 0);
@@ -344,11 +344,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
 
     // Check if total size exceeds limit
     const isTotalSizeExceeded = totalSelectedSize > MAX_TOTAL_SIZE;
-    const isTotalSizeWarning = totalSelectedSize > MAX_TOTAL_SIZE * 0.8;
-
-    // Check if all selectable are selected
-    const allSelected = selectableAttachments.length > 0 && selectableAttachments.every(att => selectedIds.has(att.id));
-    const someSelected = selectableAttachments.some(att => selectedIds.has(att.id));
 
     // Handle individual attachment toggle
     const handleToggle = useCallback(
@@ -369,27 +364,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
       [disabled, validationResults, selectedIds, onSelectionChange]
     );
 
-    // Handle select all toggle
-    const handleSelectAll = useCallback(() => {
-      if (disabled) return;
-
-      const newSelected = new Set(selectedIds);
-
-      if (allSelected) {
-        // Deselect all
-        selectableAttachments.forEach(att => {
-          newSelected.delete(att.id);
-        });
-      } else {
-        // Select all valid
-        selectableAttachments.forEach(att => {
-          newSelected.add(att.id);
-        });
-      }
-
-      onSelectionChange(newSelected);
-    }, [disabled, allSelected, selectableAttachments, selectedIds, onSelectionChange]);
-
     // Handle keyboard navigation
     const handleKeyDown = useCallback(
       (event: KeyboardEvent<HTMLDivElement>, attachmentId: string) => {
@@ -404,7 +378,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     // Loading state
     if (isLoading) {
       return (
-        <Card className={mergeClasses(styles.container, className)} ref={ref}>
+        <Card className={mergeClasses(styles.container, className)}>
           {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
           <div className={styles.loadingContainer}>
             <Spinner size="small" label="Loading attachments..." />
@@ -416,7 +390,7 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     // Empty state
     if (attachments.length === 0) {
       return (
-        <Card className={mergeClasses(styles.container, className)} ref={ref}>
+        <Card className={mergeClasses(styles.container, className)}>
           {showHeader && <CardHeader image={<AttachRegular />} header={<Text weight="semibold">{label}</Text>} />}
           <div className={styles.emptyState}>
             <AttachRegular style={{ fontSize: '32px', marginBottom: tokens.spacingVerticalS }} />
@@ -429,7 +403,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
     return (
       <Card
         className={mergeClasses(styles.container, className)}
-        ref={ref}
         role="group"
         aria-label={ariaLabel || label}
       >
@@ -528,7 +501,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
         )}
       </Card>
     );
-  }
-);
+};
 
 export default AttachmentSelector;

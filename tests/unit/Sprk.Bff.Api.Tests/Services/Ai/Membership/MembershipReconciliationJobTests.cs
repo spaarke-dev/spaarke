@@ -103,6 +103,11 @@ public class MembershipReconciliationJobTests
 
         var discovery = new Mock<IMembershipFieldDiscoveryService>(MockBehavior.Loose);
         var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        // Task 152: reconciliation reads systemuser.applicationid (an application user gets no junction row). Every
+        // user in these fixtures is a human — applicationid absent.
+        entityService
+            .Setup(s => s.RetrieveAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("systemuser", id));
 
         var services = new ServiceCollection();
         services.AddSingleton(updater.Object);
@@ -527,9 +532,14 @@ public class MembershipReconciliationJobTests
     [Fact]
     public void ReadLookupAsIdentity_UnknownIdentityType_ReturnsNullPair()
     {
-        var matter = BuildMatter(MatterA, owner: UserA, attorney: null);
-        var weird = OwnerDescriptor() with { IdentityType = "BusinessUnit" };
-        var (id, type) = MembershipReconciliationJob.ReadLookupAsIdentity(matter, weird);
+        // Task 152: the type comes from the VALUE's LogicalName (a polymorphic Owner always discovers as SystemUser).
+        // A business-unit value is derived, not a person or team — no junction identity.
+        var matter = new Entity(MatterEntity, MatterA)
+        {
+            ["owningbusinessunit"] = new EntityReference("businessunit", UserA),
+        };
+        var descriptor = OwnerDescriptor() with { Field = "owningbusinessunit", IdentityType = "BusinessUnit" };
+        var (id, type) = MembershipReconciliationJob.ReadLookupAsIdentity(matter, descriptor);
         id.Should().BeNull("BusinessUnit is derived, not a real lookup target per Q4");
         type.Should().BeNull();
     }

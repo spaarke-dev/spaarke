@@ -276,8 +276,35 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var document = new Entity("sprk_document");
         document["sprk_documentname"] = request.Name;
 
+        // FR-02 (spaarkeai-word-add-in-r1 task 014): honour a caller-supplied primary key. The Office document
+        // CREATE path pre-assigns the id so it can be stamped into the bytes it uploads before this row exists;
+        // see CreateDocumentRequest.Id. Every other caller leaves Id null and Dataverse mints the key as before.
+        if (request.Id is { } suppliedId && suppliedId != Guid.Empty)
+        {
+            document.Id = suppliedId;
+        }
+
         if (!string.IsNullOrEmpty(request.Description))
             document["sprk_documentdescription"] = request.Description;
+
+        // Ownership (spaarkeai-word-add-in-r1 task 080, owner decision 2026-09-22): assign the row to the
+        // acting user's business-unit DEFAULT OWNER TEAM. owningbusinessunit then DERIVES from the team and
+        // is never set directly.
+        //
+        // Until this, nothing set an owner here at all, so Dataverse defaulted it to the calling identity —
+        // an application user, which lives in the ROOT business unit. Measured 2026-09-22: ALL 512 existing
+        // sprk_document rows sit in root, with owningteam null on every one. Users sit in CHILD business
+        // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
+        // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
+        //
+        // Null keeps the pre-existing behaviour (the calling identity owns the row). The OFFICE writers always pass a
+        // team — OfficeDocumentPersistence refuses to call without one — and refuse the save when none resolves.
+        // Several OTHER BFF writers still pass null and so still create app-owned rows in root (Communication
+        // archive/inbound, the external portal); adopting the resolver there is GitHub #1034, not a guarantee here.
+        if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
+        {
+            document["ownerid"] = new EntityReference("team", owningTeamId);
+        }
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -303,6 +330,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
                     "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
                     "sprk_graphitemid", "sprk_graphdriveid", "statuscode", "createdon", "modifiedon",
+                    // Document Profile fields (task 021 / FR-07) — populated by AI via
+                    // DocumentProfileFieldMapper + written by CreateDocumentAsync below. Previously
+                    // selected nowhere: DocumentEntity already modeled Summary/Tldr/Keywords/
+                    // DocumentType as properties, but no caller of GetDocumentAsync ever selected or
+                    // mapped the underlying columns, so the pane-facing GET this task extends
+                    // (/api/v1/documents/{id}) always returned them null. sprk_filesummarystatus is
+                    // new (DocumentEntity.SummaryStatus, added task 021).
+                    "sprk_filesummary", "sprk_filetldr", "sprk_filekeywords", "sprk_filesummarystatus",
+                    "sprk_documenttype",
                     // Email fields (MapToDocumentEntityWithEmailFields)
                     "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
                     "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive", "sprk_parentdocument",
@@ -908,6 +944,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_project"] = new EntityReference("sprk_project", request.ProjectLookup.Value);
         if (request.InvoiceLookup.HasValue)
             document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
+        // ⚠️ The ATTRIBUTE name and the TARGET entity name are not the same thing, and sprk_document
+        // does not name them alike. The dictionary KEY is the lookup column; the EntityReference's
+        // first argument is the table it points AT. For events those differ.
+        //
+        // Corrected 2026-09-04 (unified-access-control-r2): this block previously read
+        // `document["sprk_event"]`. There is NO `sprk_event` column on sprk_document — the query
+        //     SELECT sprk_event FROM sprk_document
+        // fails with "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_event'".
+        // Setting an unknown attribute does not drop silently on this path; it fails the whole save,
+        // so every document filed to an event was breaking. The only event lookup is
+        // `sprk_relatedevent`, verified by a query that SUCCEEDS.
+        //
+        // The comment this replaces asserted "columns verified present ... against live Dataverse
+        // metadata 2026-09-03" — true for sprk_workassignment, false for the event beside it. It read
+        // as settled verification, which is what stopped anyone re-checking (FAILURE-MODES AP-12).
+        // The verification missed the `sprk_related*` family and so read `sprk_relatedevent` as
+        // evidence that "event" existed in the bare-name family. Re-verify per column, not per family.
+        if (request.WorkAssignmentLookup.HasValue)
+            document["sprk_workassignment"] = new EntityReference("sprk_workassignment", request.WorkAssignmentLookup.Value);
+        if (request.EventLookup.HasValue)
+            document["sprk_relatedevent"] = new EntityReference("sprk_event", request.EventLookup.Value);
+        // Added 2026-09-04. Both columns are in the sprk_related* family — the one the 2026-09-03
+        // check never looked at. Verified by queries that SUCCEED (contrast sprk_event above, whose
+        // query errors). sprk_relatedcontact targets the OOB `contact` table, not a Spaarke one.
+        if (request.TodoLookup.HasValue)
+            document["sprk_relatedtodo"] = new EntityReference("sprk_todo", request.TodoLookup.Value);
+        if (request.ContactLookup.HasValue)
+            document["sprk_relatedcontact"] = new EntityReference("contact", request.ContactLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)
@@ -1487,7 +1551,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
-    private DocumentEntity MapToDocumentEntity(Entity entity)
+    /// <summary>
+    /// Maps a raw Dataverse <c>sprk_document</c> <see cref="Entity"/> to the read-model
+    /// <see cref="DocumentEntity"/>. Pure (no ServiceClient / no I/O) and uses no instance state,
+    /// so it is <c>public static</c> for direct testability — the SAME precedent as
+    /// <see cref="StageAnalysisRegardingFields"/> (this file) and <c>TodoRegardingBuilder
+    /// .ApplyResolverFieldsAsync</c>: a test constructs a real <see cref="Entity"/> with real
+    /// Dataverse-typed attribute values (<see cref="OptionSetValue"/> for Choice columns, etc.) and
+    /// calls this method directly, avoiding the tests/CLAUDE.md B8 ban on internal/reflection tests.
+    /// </summary>
+    /// <remarks>
+    /// Task 021 fail-then-pass regression (spaarkeai-word-add-in-r1): <c>sprk_documenttype</c> is a
+    /// Choice (Picklist) column — verified live 2026-09-12 — not free text. Reading it via
+    /// <c>entity.GetAttributeValue&lt;string&gt;("sprk_documenttype")</c> throws
+    /// <see cref="InvalidCastException"/> for any entity where the attribute is present, because the
+    /// underlying stored value is an <see cref="OptionSetValue"/>, not a <see cref="string"/>. Fixed
+    /// by preferring <c>entity.FormattedValues</c> (the SDK populates this on <c>Retrieve</c> with the
+    /// Choice's display label) and falling back to the raw numeric value only when no formatted value
+    /// is present. See <c>tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs</c> for the
+    /// regression test, which fails on the pre-fix line and passes on this one.
+    /// </remarks>
+    public static DocumentEntity MapToDocumentEntity(Entity entity)
     {
         // Handle ContainerId which could be either a lookup (EntityReference) or text field (string)
         string? containerId = null;
@@ -1519,6 +1603,33 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
             ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon"),
+
+            // Document Profile fields (task 021 / FR-07). GetAttributeValue<T> returns default(T) for
+            // any column not in the caller's ColumnSet, so this is safe to populate unconditionally
+            // across every caller of MapToDocumentEntity (list paths included) — callers that didn't
+            // select these columns simply get null back, exactly as before this change.
+            //
+            // sprk_filesummary / sprk_filetldr / sprk_filekeywords are Memo columns (verified live
+            // 2026-09-12) — stored as plain strings, so GetAttributeValue<string> is correct as-is.
+            Summary = entity.GetAttributeValue<string>("sprk_filesummary"),
+            Tldr = entity.GetAttributeValue<string>("sprk_filetldr"),
+            Keywords = entity.GetAttributeValue<string>("sprk_filekeywords"),
+            // sprk_documenttype is a Choice (Picklist) column — verified live 2026-09-12, corroborated
+            // by the writer at line ~850 (`new OptionSetValue(request.DocumentType.Value)`). The
+            // originally-shipped `entity.GetAttributeValue<string>("sprk_documenttype")` cast an
+            // OptionSetValue directly to string and threw InvalidCastException for any entity where
+            // the attribute was present — reachable from GET /api/v1/documents/{id} AND from
+            // VisualizationService's Find Similar entry point (GetDocumentAsync is its unconditional
+            // Step 1). Fixed: prefer the SDK-populated FormattedValues label (what the pane displays);
+            // fall back to the raw numeric value, stringified, only when no label is available. Never
+            // read as <string> or <OptionSetValue> without going through FormattedValues first — see
+            // tests/unit/domain/Dataverse/DocumentEntityMappingTests.cs for the fail-then-pass proof.
+            DocumentType = entity.FormattedValues.TryGetValue("sprk_documenttype", out var documentTypeLabel)
+                ? documentTypeLabel
+                : entity.GetAttributeValue<OptionSetValue>("sprk_documenttype")?.Value.ToString(),
+            SummaryStatus = entity.Contains("sprk_filesummarystatus")
+                ? entity.GetAttributeValue<OptionSetValue>("sprk_filesummarystatus")?.Value
+                : null,
 
             // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write) — used
             // by VisualizationService to bind the correct SearchClient for Find Similar against
@@ -1554,7 +1665,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid guidValue)
                 {
-                    entity[fieldName] = guidValue;
+                    // Lookup fields require an EntityReference, not a bare Guid — the same shape of
+                    // special case the OptionSet fields below already need. sprk_initiatedby is the
+                    // creator lookup (spaarkeai-word-add-in-r1 task 067): it records WHICH Dataverse
+                    // user asked for this job, so job status can be authorized after the in-memory
+                    // entry is gone. Assigning a raw Guid to a lookup attribute throws, and the caller
+                    // catches and silently falls back to an in-memory-only job — so getting this wrong
+                    // would disable job durability rather than fail loudly.
+                    if (fieldName == "sprk_initiatedby")
+                    {
+                        entity[fieldName] = new EntityReference("systemuser", guidValue);
+                        _logger.LogDebug("Set {FieldName} = EntityReference(systemuser, {Value})", fieldName, guidValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = guidValue;
+                    }
                 }
                 else if (value is decimal decimalValue)
                 {
@@ -1695,36 +1821,111 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("ProcessingJob {JobId} updated", id);
     }
 
-    public async Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
+    /// <summary>
+    /// Reads a ProcessingJob, resolving the job's CREATOR to an Entra object id in the same round trip.
+    /// </summary>
+    /// <remarks>
+    /// spaarkeai-word-add-in-r1 task 067 (finding F5). This used a plain <c>RetrieveAsync</c> and returned
+    /// no creator at all, which is why the job-status authorization checks had nothing to compare a caller
+    /// against and (until this task) waved everyone through. It is now a <c>QueryExpression</c> with a
+    /// LEFT OUTER join onto <c>systemuser</c>, so the creator's <c>azureactivedirectoryobjectid</c> comes
+    /// back with the row rather than costing a second round trip on a polled path.
+    /// <para>
+    /// <b>Why the OID and not the systemuserid.</b> <c>sprk_initiatedby</c> necessarily stores a
+    /// systemuser reference, but every ownership comparison upstream is against the Entra OID that
+    /// <c>OfficeAuthFilter</c> extracts from the token. Resolving the join here means the two sides of that
+    /// comparison are the same identity currency by construction, instead of two namespaces that happen to
+    /// line up. Canonicalized bare-lowercase per ADR-044.
+    /// </para>
+    /// <para>
+    /// The join is LEFT OUTER on purpose: rows created before the creator was persisted still return, with
+    /// a null <c>InitiatedByOid</c>. The caller refuses those (the legacy-row rule) — that decision belongs
+    /// upstream, not in this reader, which reports honestly rather than filtering.
+    /// </para>
+    /// </remarks>
+    public async Task<ProcessingJobRecord?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _serviceClient.RetrieveAsync(
-            "sprk_processingjob",
-            id,
-            new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                           "sprk_idempotencykey", "sprk_correlationid"),
-            ct);
+        const string initiatorAlias = "initiator";
 
-        if (entity == null) return null;
-
-        // Return a dynamic object with the data
-        return new
+        var query = new QueryExpression("sprk_processingjob")
         {
-            Id = entity.Id,
-            Name = entity.GetAttributeValue<string>("sprk_name"),
-            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
-            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
-            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
-            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
+            ColumnSet = new ColumnSet(ProcessingJobColumns),
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition("sprk_processingjobid", ConditionOperator.Equal, id);
+
+        var initiator = query.AddLink("systemuser", "sprk_initiatedby", "systemuserid", JoinOperator.LeftOuter);
+        initiator.EntityAlias = initiatorAlias;
+        initiator.Columns = new ColumnSet("azureactivedirectoryobjectid");
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
+
+        return entity == null
+            ? null
+            : ToProcessingJobRecord(entity) with
+            {
+                InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
+            };
+    }
+
+    /// <summary>
+    /// The <c>sprk_processingjob</c> columns both job reads return. Task 060 added <c>sprk_currentstage</c>,
+    /// <c>sprk_result</c> (the Office save's own view of its job), the error columns and the two timestamps; the
+    /// Office job's effective state is read from them.
+    /// </summary>
+    private static readonly string[] ProcessingJobColumns =
+    {
+        "sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress", "sprk_currentstage", "sprk_idempotencykey",
+        "sprk_correlationid", "sprk_initiatedby", "sprk_result", "sprk_errorcode", "sprk_errormessage", "createdon",
+        "sprk_completeddate"
+    };
+
+    private static ProcessingJobRecord ToProcessingJobRecord(Entity entity) => new()
+    {
+        Id = entity.Id,
+        Name = entity.GetAttributeValue<string>("sprk_name"),
+        JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
+        Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
+        Progress = entity.GetAttributeValue<int?>("sprk_progress"),
+        CurrentStage = entity.GetAttributeValue<string>("sprk_currentstage"),
+        IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
+        CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid"),
+        InitiatedBy = entity.GetAttributeValue<EntityReference>("sprk_initiatedby")?.Id,
+        Result = entity.GetAttributeValue<string>("sprk_result"),
+        ErrorCode = entity.GetAttributeValue<string>("sprk_errorcode"),
+        ErrorMessage = entity.GetAttributeValue<string>("sprk_errormessage"),
+        CreatedOn = entity.GetAttributeValue<DateTime?>("createdon"),
+        CompletedDate = entity.GetAttributeValue<DateTime?>("sprk_completeddate"),
+    };
+
+    /// <summary>
+    /// Reads an aliased join column as a canonical bare-lowercase GUID string (ADR-044), or null when the
+    /// join produced no row. Kept explicit because an aliased value arrives wrapped in
+    /// <see cref="AliasedValue"/> and silently reads as null if unwrapped.
+    /// </summary>
+    private static string? ExtractAliasedGuid(Entity entity, string aliasedAttributeName)
+    {
+        if (!entity.Contains(aliasedAttributeName))
+        {
+            return null;
+        }
+
+        var aliased = entity[aliasedAttributeName] as AliasedValue;
+        return aliased?.Value switch
+        {
+            Guid g when g != Guid.Empty => g.ToString("D"),
+            string s when Guid.TryParse(s, out var parsed) && parsed != Guid.Empty => parsed.ToString("D"),
+            _ => null
         };
     }
 
-    public async Task<object?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    public async Task<ProcessingJobRecord?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
     {
         var query = new QueryExpression("sprk_processingjob")
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                                       "sprk_idempotencykey", "sprk_correlationid"),
+            ColumnSet = new ColumnSet(ProcessingJobColumns),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -1734,22 +1935,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             },
             TopCount = 1
         };
+        // The NEWEST row with this key decides (spaarkeai-word-add-in-r1 task 039). A key can carry several rows
+        // once a failed attempt is retried, and the caller treats a Failed/Cancelled row as "not performed" — so
+        // an unordered TOP 1 could return the old failed row and re-run a save whose retry already completed.
+        query.AddOrder("createdon", OrderType.Descending);
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         var entity = results.Entities.FirstOrDefault();
 
-        if (entity == null) return null;
-
-        return new
-        {
-            Id = entity.Id,
-            Name = entity.GetAttributeValue<string>("sprk_name"),
-            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
-            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
-            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
-            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
-        };
+        return entity == null ? null : ToProcessingJobRecord(entity);
     }
 
     public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
@@ -2074,6 +2268,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateExistingRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateRecordFieldsIfUnchangedAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException("UpdateRecordFieldsIfUnchangedAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
     // ========================================
     // Generic Entity Operations (Finance Intelligence Module R1)
     // ========================================
@@ -2280,85 +2502,159 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Updates N records of ONE table in one request, <b>all-or-nothing</b> — see
+    /// <see cref="IGenericEntityService.BulkUpdateAsync"/> for the full contract.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Mechanism.</b> Sends the single <c>ExecuteTransactionRequest</c> built by
+    /// <see cref="BuildBulkUpdateTransaction"/> — one <c>UpdateRequest</c> per row, in input order. Dataverse
+    /// rolls the whole transaction back if any update faults. The SDK may retry the request on throttling.</para>
+    /// <para><b>Limits.</b> Keep each call to at most 1,000 updates (<c>ExecuteMultiple</c>'s documented batch
+    /// size; the transaction documentation states no figure of its own). An <c>ExecuteTransactionRequest</c>
+    /// cannot CONTAIN an <c>ExecuteMultiple</c> or another <c>ExecuteTransaction</c>.</para>
+    /// <para><b>Failure.</b> Worded by <see cref="DescribeBulkUpdateFailure"/>. Cancellation propagates as
+    /// <see cref="OperationCanceledException"/> rather than being wrapped.</para>
+    /// <para>Until 2026-09-10 this sent an <c>ExecuteMultipleRequest</c>, which is NOT transactional
+    /// (task 096, ISS-005 / #970).</para>
+    /// </remarks>
     public async Task BulkUpdateAsync(
         string entityLogicalName,
         List<(Guid id, Dictionary<string, object> fields)> updates,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(entityLogicalName))
-            throw new ArgumentNullException(nameof(entityLogicalName));
-
-        if (updates == null || updates.Count == 0)
-            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+        // Argument validation lives in the builder and throws before any I/O, unwrapped — as it did before.
+        var transaction = BuildBulkUpdateTransaction(entityLogicalName, updates);
 
         try
         {
-            // Use ExecuteMultipleRequest for batch operations
-            var executeMultipleRequest = new Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest
-            {
-                Settings = new Microsoft.Xrm.Sdk.ExecuteMultipleSettings
-                {
-                    ContinueOnError = false, // Stop on first error for transactional behavior
-                    ReturnResponses = false  // Don't need individual responses for updates
-                },
-                Requests = new Microsoft.Xrm.Sdk.OrganizationRequestCollection()
-            };
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var failure = DescribeBulkUpdateFailure(entityLogicalName, updates, ex);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                updates.Count,
+                entityLogicalName,
+                failure);
+            throw new InvalidOperationException(failure, ex);
+        }
 
-            // Build update requests
-            foreach (var (id, fields) in updates)
-            {
-                var entity = new Entity(entityLogicalName, id);
+        _logger.LogInformation(
+            "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction",
+            updates.Count,
+            entityLogicalName);
+    }
 
-                foreach (var field in fields)
+    /// <summary>
+    /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
+    /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
+    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
+    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
+    ///
+    /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
+    /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
+    /// cannot be captured at a seam without reflection or transport mocking (ADR-038 B8 / B1). Same precedent
+    /// as <see cref="StageAnalysisRegardingFields"/>; the owner chose this approach at task 096.</para>
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildBulkUpdateTransaction(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (updates is null || updates.Count == 0)
+            throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
+        {
+            Requests = new OrganizationRequestCollection(),
+            ReturnResponses = false // no caller reads per-update responses
+        };
+
+        for (var index = 0; index < updates.Count; index++)
+        {
+            var (id, fields) = updates[index];
+            if (fields is null)
+                throw new ArgumentException($"The update at index {index} has no fields dictionary.", nameof(updates));
+
+            var entity = new Entity(entityLogicalName, id);
+
+            foreach (var field in fields)
+            {
+                if (field.Value is DBNull)
                 {
-                    if (field.Value != null)
-                    {
-                        entity[field.Key] = field.Value;
-                    }
+                    throw new ArgumentException(
+                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
+                        "column; use UpdateAsync with DBNull.Value instead.",
+                        nameof(updates));
                 }
 
-                var updateRequest = new Microsoft.Xrm.Sdk.Messages.UpdateRequest
+                if (field.Value != null)
                 {
-                    Target = entity
-                };
-
-                executeMultipleRequest.Requests.Add(updateRequest);
+                    entity[field.Key] = field.Value;
+                }
             }
 
-            // Execute batch
-            var response = (Microsoft.Xrm.Sdk.Messages.ExecuteMultipleResponse)
-                await Task.Run(() => _serviceClient.Execute(executeMultipleRequest), ct);
-
-            _logger.LogInformation(
-                "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records",
-                updates.Count,
-                entityLogicalName);
-
-            // Check for errors if ContinueOnError was true (currently false)
-            if (response.Responses.Any(r => r.Fault != null))
-            {
-                var faultCount = response.Responses.Count(r => r.Fault != null);
-                _logger.LogError(
-                    "[DATAVERSE] Bulk update had {FaultCount} failures out of {TotalCount} requests",
-                    faultCount,
-                    updates.Count);
-
-                var firstFault = response.Responses.First(r => r.Fault != null).Fault;
-                throw new InvalidOperationException(
-                    $"Bulk update failed: {firstFault.Message}");
-            }
+            transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
         }
-        catch (Exception ex)
+
+        return transaction;
+    }
+
+    /// <summary>
+    /// Pure wording of a <see cref="BulkUpdateAsync"/> failure. It states only what is actually known:
+    /// <list type="bullet">
+    /// <item>An <see cref="ExecuteTransactionFault"/> naming an in-range request can only come from a
+    /// transaction that rolled back, so the message names that request's index and record and states that
+    /// NO update was applied.</item>
+    /// <item>Any other Dataverse fault is reported with the atomicity guarantee alone — all or none, never
+    /// partial. The SDK throws the client-wide last error, and with the singleton <c>ServiceClient</c> a
+    /// concurrent request's fault can surface here (GitHub #971), so claiming more would be unsafe.</item>
+    /// <item>No Dataverse fault anywhere in the exception chain (e.g. a timeout, which can land after the
+    /// commit): the outcome is unknown — all or none, never partial.</item>
+    /// </list>
+    /// Residual (#971): if two bulk updates fail concurrently, one could be handed the other's transaction
+    /// fault. The fault is looked for through <see cref="Exception.InnerException"/> because the SDK may
+    /// surface it wrapped.
+    /// </summary>
+    public static string DescribeBulkUpdateFailure(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        Exception failure)
+    {
+        OrganizationServiceFault? fault = null;
+        for (var current = failure; current is not null && fault is null; current = current.InnerException)
         {
-            _logger.LogError(
-                exception: ex,
-                message: "[DATAVERSE] Error in bulk update for {EntityLogicalName}. RecordCount: {RecordCount}",
-                entityLogicalName,
-                updates.Count);
-
-            throw new InvalidOperationException(
-                $"Failed to bulk update {entityLogicalName} records: {ex.Message}", ex);
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                fault = faultException.Detail;
+            }
         }
+
+        if (fault is null)
+        {
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) did not complete: {failure.Message}. " +
+                   "Dataverse returned no fault, so the outcome is unknown — the updates were sent (if at all) as ONE " +
+                   "transaction, so either all of them were applied or none were, never a partial set.";
+        }
+
+        if (fault is ExecuteTransactionFault transactionFault
+            && transactionFault.FaultedRequestIndex >= 0
+            && transactionFault.FaultedRequestIndex < updates.Count)
+        {
+            var index = transactionFault.FaultedRequestIndex;
+            return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed at request index {index} " +
+                   $"({entityLogicalName} {updates[index].id}): {fault.Message}. " +
+                   "The transaction was rolled back — NO updates were applied.";
+        }
+
+        return $"Bulk update of {updates.Count} {entityLogicalName} record(s) failed: {fault.Message}. " +
+               "Dataverse did not identify which request faulted. The updates were sent as ONE transaction, so " +
+               "either all of them were applied or none were, never a partial set.";
     }
 
     public async Task<Entity> RetrieveByAlternateKeyAsync(

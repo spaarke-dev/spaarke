@@ -5,6 +5,7 @@
     <phase>1 One evaluator</phase>
     <gate>after-032</gate>
     <status>pending</status>
+    <status-note>RE-OPENED 2026-09-30 (owner Q7 approval, session 27). This task was marked completed on 2026-09-04, and its title and FR-22 claim cover "every principal kind". But its file list excluded Infrastructure/ExternalAccess/CallerPrincipalResolver.cs, so the CIAM plane (CiamContactPrincipalStrategy) applies neither the Restricted veto nor Secure suppression. That is defect C1. Also, the Secure suppression it built yields None-rights keys that the presence-only external read gates still admit, which is defect C2. The work delivered on 2026-09-04 stands; it is incomplete. The completing work is task 135 (CIAM veto parity) and task 136 (rights-based external read gates). See the amendments block. Set this back to completed only when both are completed.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation of two security vetoes; tags bff-api/auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list).</parallel-reason>
-    <deps>032</deps>
+    <deps>032, 135, 136</deps>
     <tags>bff-api, auth, security, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -33,7 +34,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">The rights-map evaluator with named pre-max suppression hook + ordered post-max veto slots.</dependency>
+      <dependency task="032" status="completed">The rights-map evaluator with named pre-max suppression hook + ordered post-max veto slots.</dependency>
     </dependencies>
   </context>
 
@@ -93,7 +94,70 @@
     <criterion testable="true">Non-secure, non-restricted records: full existing suite behavior unchanged; build green; publish size reported and ≤60 MB.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-21/FR-22; design §4.5 (vetoes 7-8) + §5.1; register B-9/B-10, C-10, F-4. The deny-list slot stays a no-op here — task 039 fills it. The org-EXPANSION membership term (Phase 2, task 043) must route through the same suppression hook; leave the hook plane-agnostic.</notes>
+  <notes>Spec FR-21/FR-22; design §4.5 (vetoes 7-8) + §5.1; register B-9/B-10, C-10, F-4. The deny-list slot stays a no-op here — task 039 fills it. The org-EXPANSION membership term (Phase 2, task 043) must route through the same suppression hook; leave the hook plane-agnostic.
+
+COMPLETED 2026-09-04. Full record: notes/task-037-restricted-secure-vetoes.md.
+
+Step 1 (live metadata): all THREE root types carry BOTH sprk_issecure and sprk_accesspermission, identical option sets, Restricted = 100000002. ESCALATION TRIGGER 1 DID NOT FIRE. ⚠️ The brief cited TrackingFieldTrio/index.ts for the raw value, but that file's own comment scopes those constants to sprk_communication ("entity-specific: lives ONLY here"). The value is right for all three roots — established by querying metadata, not by trusting the citation.
+
+DESIGN CRUX (and the reason this task was not mechanical): ExternalParticipationService merges org-grant rows into the direct lists and dedupes by record id keeping the MAX level. That destroys exactly what Secure suppression needs — a ViewOnly DIRECT grant plus a Collaborate ORG grant collapses to Collaborate, and no arithmetic recovers Read afterwards. Fixed with an ADDITIVE DirectAccessLevel on ExternalParticipation + ExternalRootGrant (null iff every contributing row was org-inherited). ESCALATION TRIGGER 2 DID NOT FIRE — the brief permits an additive provenance field, which is what this is.
+
+REJECTED ALTERNATIVE: deduping by (recordId, provenance) and keeping two entries. Duplicate ids would reach CallerPrincipal.ProjectAccess, whose GetEffectiveRights does FirstOrDefault — authorization that depends on list order.
+
+Suppression is STRUCTURAL, not subtractive: the org contribution is never added, so it cannot enter the max. Perturbation-verified — making suppression a no-op fails 3 of 37 tests (ordering proof, org-vs-direct survivor pair, Type-1-via-contact).
+
+Deviation from the brief's file list: Infrastructure/DI/ExternalAccessModule.cs was NOT modified. The flag read was added to the already-registered ExternalParticipationService (which owns the app-only read plumbing) rather than as a new service, so no DI change was needed — less surface, not more.
+
+Surfaced: FIVE existing ExternalParticipationService test doubles silently failed CLOSED (they construct with credential:null!, so the real flag read threw). That is the production fail-closed path working, seen from an unexpected direction; each double now supplies flags, and one keeps the fault deliberately to cover NFR-01.
+
+Verified: 12,082 unit passed / 0 failed; ArchTests 191/191; publish 45.47 MB vs a fresh same-day master build of 45.46 MB = +0.01 MB (ceiling 60); no vulnerable packages.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="session 26 defect verification (C1, C2) and owner Q7 approval in session 27 (notes/session26-uac-defects-and-synopsis.md; notes/session27-owner-decisions-and-research.md)">
+    <verdict>RE-OPENED. Not a regression. The claim "for every principal kind" was never true for the CIAM
+    plane, and the FR-22 read effect was never true for presence-gated routes. The 2026-09-04 code is
+    correct for what it covers and stays. This task closes when tasks 135 and 136 complete. No further code
+    is authored under this id.</verdict>
+    <amendment n="1" defect="C1" completing-task="135">
+    The CIAM strategy builds its principal from ExternalParticipationService.GetGrantSetAsync alone
+    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:322 class,
+    :379 the grant read, :387 FromLevel with the all-sources AccessLevel, :402-403 and :417 RightsFromGrants).
+    It never reads root flags and never calls ComposeAsync. ComposeAsync is consumed only by the workforce
+    strategy (:520-524). So on /api/v1/external with a CIAM token:
+    (a) FR-21 Restricted does not remove any grant;
+    (b) FR-22 does not suppress ORG-INHERITED grants on sprk_issecure roots, which confer their full level
+    instead of None.
+    The file's own parity comment (:49, "Both planes now source these from the ONE evaluator's answer") is
+    false. Task 135 routes the CIAM strategy through the same flag read and veto pipeline, and uses
+    DirectAccessLevel on secure roots.
+    COMPLETION (2026-10-01): amendment n=1 (C1) delivered by task 135 on 2026-10-01 (branch task/uac-r2-135); evidence: notes/task-135-ciam-unified-veto-pipeline.md. Code and tests only; its manual live gate is still pending. This task stays pending: task 136 (C2) closes it.</amendment>
+    <amendment n="2" defect="C2" completing-task="136">
+    FR-22 suppression on the workforce plane keeps the record id in the map with AccessRights.None
+    (AccumulateTerm). The external read gates test presence, not rights: CallerPrincipalResolver.cs:161
+    HasProjectAccess is ProjectAccess.Any(...), and the module id sets are Keys views. So an org-only grant
+    on a secure project still passes project, document list and content-download reads. Task 136 makes
+    those gates require AccessRights.Read, or prunes None-valued keys before the principal is built. It
+    adds seam tests asserting that the read is DENIED, not merely that RightsFor is None.
+    COMPLETION (2026-10-01): amendment n=2 (C2) delivered by task 136 on 2026-10-01 (branch task/uac-r2-136);
+    evidence: notes/task-136-rights-based-read-gates.md §8. Both fix shapes were applied, as two layers: the
+    gates require Read (HasProjectAccess, the GetAccessible*Ids views, AccessibleRecordSet.Contains, every
+    project read route) AND None-rights entries are pruned (end of every composition; both strategies at
+    construction). Amended criteria 1-4 are met by tests, including route-level 403s on BOTH planes through the
+    real handlers (tests/integration/contract/Api/ExternalAccess/). Criterion 5 (MANUAL LIVE GATE) is NOT met:
+    neither 135 nor 136 could run it under read-only live rules. So, per criterion 6, this task STAYS PENDING;
+    the main session closes it once the live gate is recorded.</amendment>
+    <amendment n="3">Correction to this task's acceptance criteria as executed: criteria that assert
+    "RightsFor(record) == None" are necessary but not sufficient. For a suppressed or vetoed record, the
+    closing evidence is that the record is unreadable on every external read route for BOTH workforce and
+    CIAM tokens. That evidence is produced by tasks 135 and 136, not here.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Task 135 is completed: a CIAM contact holding FullAccess on a Restricted root cannot list or read it on /api/v1/external, and a CIAM contact whose only access to a secure root is org-inherited cannot list or read it.</criterion>
+      <criterion testable="true">Negative control (the fix is not a blanket deny): on the CIAM plane, a contact with a DIRECT grant on a secure, non-Restricted, non-denied root keeps that grant's own level and can list and read the root (owner round 2 item 3: a secure record MAY have contact access; only named direct grants count). A CIAM contact with any grant on a non-secure, non-Restricted root is unaffected.</criterion>
+      <criterion testable="true">Fail-closed on CIAM: a faulted root-flag read denies the affected records' contact-sourced access on the CIAM plane (throwing-flag-reader test through CallerPrincipalResolver).</criterion>
+      <criterion testable="true">Task 136 is completed: a None-rights key admits no read on any /api/v1/external project read route or module fetch/record read, content download included.</criterion>
+      <criterion testable="true">MANUAL LIVE GATE (dev, existing CIAM test contact; no user created or relocated): with a ciamlogin.com token, (i) the contact cannot list or download from a project set Restricted while it holds a grant on it; (ii) on a secure project where its only access is its organization's grant, it cannot list or download; (iii) on a secure project where it holds a direct grant, it can. Each observation, with record ids, is recorded in notes.</criterion>
+      <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 037.</criterion>
+    </acceptance-criteria-amended>
+  </amendments>
 </task>

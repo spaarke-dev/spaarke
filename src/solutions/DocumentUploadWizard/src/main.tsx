@@ -4,7 +4,7 @@
  * Opened via Xrm.Navigation.navigateTo:
  *   Xrm.Navigation.navigateTo(
  *     { pageType: "webresource", webresourceName: "sprk_DocumentUploadWizard",
- *       data: "parentEntityType=sprk_document&parentEntityId=...&parentEntityName=...&containerId=..." },
+ *       data: "parentEntityType=sprk_document&parentEntityId=...&parentEntityName=..." },
  *     { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } }
  *   )
  *
@@ -45,7 +45,12 @@ const appParams = dataEnvelope
 const parentEntityType = appParams.get("parentEntityType") ?? "";
 const parentEntityId = appParams.get("parentEntityId") ?? "";
 const parentEntityName = appParams.get("parentEntityName") ?? "";
-const containerId = appParams.get("containerId") ?? "";
+// `containerId` is deliberately NOT read from the URL any more (task 076, 2026-09-03). It was the
+// head of the last client-supplied-container chain in this repo: three launch envelopes appended
+// it, this line consumed it, and it ended up naming the SPE destination for every upload the wizard
+// performed. The server now derives the container from the parent record. A caller that still
+// appends `&containerId=…` is simply ignored — the parameter is not read, so it cannot select
+// anything.
 
 // ---------------------------------------------------------------------------
 // Theme detection
@@ -106,7 +111,6 @@ async function bootstrap(): Promise<void> {
                 parentEntityType={parentEntityType}
                 parentEntityId={parentEntityId}
                 parentEntityName={parentEntityName}
-                containerId={containerId}
             />
         </FluentProvider>
     );

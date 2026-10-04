@@ -29,7 +29,7 @@ _TODO: ADR-013 mandates the AI Tool Framework (`IAiToolHandler`, `AiToolService`
 
 ## Hosting model notes
 
-_TODO: In-process via `InProcessExecution` for stateless requests; durable hosting via the `04-hosting/` samples (Azure Functions, Durable Tasks) for long-running. ADR-001 prohibits Azure Functions for new work — confirm whether Agent Framework durable hosting is in scope at all, or always defer durability to Foundry Agent Service._
+_TODO: In-process via `InProcessExecution` for stateless requests; durable hosting via the `04-hosting/` samples (Azure Functions, Durable Tasks) for long-running. Placement is decided per workload under [ADR-052](../../docs/adr/ADR-052-workload-placement.md), which permits Durable Task in its own host, never inside the BFF (§7) — confirm whether Agent Framework durable hosting is in scope at all, or always defer durability to Foundry Agent Service._
 
 ---
 

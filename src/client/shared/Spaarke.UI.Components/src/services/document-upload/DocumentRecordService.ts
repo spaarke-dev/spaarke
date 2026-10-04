@@ -2,9 +2,10 @@
  * Document Record Service
  *
  * Creates Document records in Dataverse using an IDataverseClient abstraction.
- * Supports two implementations via strategy pattern:
- * - PcfDataverseClient: wraps ComponentFramework.WebApi (PCF controls)
+ * Current implementation (strategy pattern):
  * - ODataDataverseClient: direct OData fetch calls with token auth (Code Pages)
+ * (The PCF-side PcfDataverseClient had zero instantiation sites and was deleted
+ * 2026-10-03, reuse audit C-26.)
  *
  * Queries navigation property metadata dynamically via NavMapClient -> BFF API -> Dataverse.
  *
@@ -26,6 +27,7 @@ import type {
   EntityDocumentConfig,
 } from './types';
 import { consoleLogger } from './types';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Function that resolves an EntityDocumentConfig for a given entity name.
@@ -128,7 +130,7 @@ export class DocumentRecordService {
    */
   async updateSummary(documentId: string, summary: string): Promise<boolean> {
     try {
-      const sanitizedGuid = documentId.replace(/[{}]/g, '').toLowerCase();
+      const sanitizedGuid = cleanGuid(documentId);
 
       const payload: Record<string, unknown> = {
         sprk_filesummary: summary,
@@ -175,7 +177,8 @@ export class DocumentRecordService {
           sprk_graphitemid: file.id,
           // Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL
           // on sprk_document (design.md INV — Phase F backfill audit depends on this).
-          sprk_graphdriveid: parentContext.containerId,
+          // Sourced from the SERVER's answer since task 076 — see buildRecordPayload for why.
+          sprk_graphdriveid: file.driveId ?? null,
           sprk_filepath: file.webUrl || null,
           sprk_documentdescription: formData.description || null,
           // Upload to SPE succeeded by the time we reach here — mark the file flag.
@@ -203,7 +206,7 @@ export class DocumentRecordService {
           fileName: file.name,
           recordId: result.id,
           documentId: result.id,
-          driveId: parentContext.containerId,
+          driveId: file.driveId,
           itemId: file.id,
         };
       }
@@ -266,7 +269,7 @@ export class DocumentRecordService {
         fileName: file.name,
         recordId: result.id,
         documentId: result.id,
-        driveId: parentContext.containerId,
+        driveId: file.driveId,
         itemId: file.id,
       };
     } catch (error: unknown) {
@@ -311,7 +314,7 @@ export class DocumentRecordService {
     searchIndexId?: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
-    const sanitizedGuid = parentContext.parentRecordId.replace(/[{}]/g, '').toLowerCase();
+    const sanitizedGuid = cleanGuid(parentContext.parentRecordId);
 
     const payload: Record<string, unknown> = {
       // Document name (use form input or file name as fallback)
@@ -324,8 +327,15 @@ export class DocumentRecordService {
       // SharePoint Embedded metadata.
       // Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL
       // on sprk_document (design.md INV — Phase F backfill audit depends on this).
+      //
+      // 🔴 SOURCE CHANGED 2026-09-03 (task 076): `parentContext.containerId` -> `file.driveId`.
+      // This column is the pointer every later download and RAG index-file call follows. It used to
+      // be the container the CLIENT resolved when the wizard opened, which agreed with reality only
+      // because the client also NAMED the upload destination. The server now picks the container,
+      // so for a secure record the two provably disagree — bytes in the record's own container, the
+      // column pointing at the shared BU one, 404-ing on exactly the records that matter most.
       sprk_graphitemid: file.id,
-      sprk_graphdriveid: parentContext.containerId,
+      sprk_graphdriveid: file.driveId ?? null,
 
       // SharePoint file URL
       sprk_filepath: file.webUrl || null,

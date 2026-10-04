@@ -26,4 +26,6 @@ export * from './types';
 export * from './output-widgets';
 export * from './source-widgets';
 
-export * from './chat-history';
+// chat-history (ChatHistoryPanel, ChatSessionCard, useChatHistoryFilter) was
+// DELETED 2026-10-03 (reuse audit C-14): zero consumers — SpaarkeAi's
+// HistoryOverlay is the live chat-history UI.

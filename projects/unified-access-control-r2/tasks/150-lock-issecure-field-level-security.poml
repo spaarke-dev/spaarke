@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="unified-access-control-r2">
+  <metadata>
+    <title>Lock sprk_issecure — field-level security so ONLY the BFF (through the secure/unsecure endpoints) changes it on project, matter and work assignment; every other writer removed; readers never masked</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 2)</phase>
+    <gate>after 144 (the endpoints this task routes every secure/unsecure change through are generalized to matter and work assignment there) and 151 (both edit Infrastructure/Dataverse/RecordContainerResolver.cs). Not concurrently with 133 or 148 (all edit ProvisionProjectEndpoint.cs / UnsecureProjectEndpoint.cs — whichever lands second rebases).</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse field-level security on an isolation flag, plus .cs and .ts/.tsx changes to the secure-create flow and a new client surface; tags bff-api, auth, security, frontend.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive platform configuration whose most likely failure is SILENT and fail-open: a field-secured flag that a caller cannot read comes back absent, and every reader treats absent as not-secure, routing secure content to a shared SPE container that cannot be retracted.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ProvisionProjectEndpoint.cs and SECURE-PROJECT-ENVIRONMENT-SETUP.md after task 144 (133 and 148 also edit the endpoint files — not concurrently); RecordContainerResolver.cs after task 151; CreateProjectWizard.tsx / projectService.ts / SummarizeFilesDialog.tsx are shared with other wizard work; the new-environment setup step is shared with task 145.</parallel-reason>
+    <deps>144, 151</deps>
+    <tags>bff-api, auth, security, dataverse, solution, fields, frontend, fluent-ui, ribbon, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+    <origin>Owner round 2 item 2 (2026-09-30): "sprk_issecure is LOCKED and managed through the endpoint. Field-level security plus endpoint-only writes." Session 27 live fact: 0 fieldpermission rows cover sprk_issecure; anyone with Write can change it.</origin>
+  </metadata>
+
+  <prompt>Make sprk_issecure on sprk_project, sprk_matter and sprk_workassignment a field that no user and no client can write. Only the BFF's app identity, acting through the secure/unsecure endpoints, may set or clear it. Every current writer is found and moved onto the endpoint, the form control becomes read-only, users get a supported way to secure and unsecure a record through the endpoint, and every reader of the flag keeps seeing its true value.</prompt>
+
+  <role>SPAARKE platform developer — Dataverse field-level security, BFF ExternalAccess endpoints, and the Create Project wizard (Fluent v9). Fail closed (ADR-003); prove every live claim by an impersonated read or write.</role>
+
+  <goal>(1) sprk_issecure is field-secured on all three roots; a field security profile grants Read to every user and Create/Update to nobody but the BFF app identity (explicitly associated, not relying on System Administrator); the platform's non-narrowable System Administrator field permission is the only other writer, and the owner has ruled on it (escalation); (2) no client code writes the flag — the Create Project wizard and the Summarize Files create-project path send "secure requested" to the BFF, which sets the flag; (3) a secure-requested create whose provisioning fails uploads nothing to a shared container; (4) the MDA form controls are read-only, and users can secure and unsecure a project, matter or work assignment through an endpoint-backed surface; (5) a non-admin user's MDA/Web API write of the flag is refused, and the same user's read of it returns the true value; (6) setup guide and pipeline carry the FLS configuration.</goal>
+
+  <context>
+    <background>🔴 THE FAILURE MODE TO DESIGN AGAINST IS READ MASKING, NOT WRITE ACCESS. Dataverse field-level security masks a secured column for any caller without a Read grant — the row comes back WITHOUT the attribute, no error. Every reader of sprk_issecure maps "absent" to "not secure":
+- BFF: `Infrastructure/Dataverse/RecordContainerResolver.cs:211-227` — its own comment names this exact hazard ("FIELD-LEVEL SECURITY on sprk_issecure returns the row with the attribute masked out … the latter would silently route content to the shared container"). It reads through the app-only `IGenericEntityService`, so it is safe only while the app identity can read the field.
+- Client, user context: `src/client/shared/Spaarke.UI.Components/src/services/RecordContainerResolver.ts:268-287` (`record[SECURE_FLAG_ATTRIBUTE] === true`), `src/client/pcf/TrackingFieldTrio/index.ts:934-955`.
+- Any impersonated BFF read that selects the flag (the task 035/036 impersonated root sets run as the user — masking applies to them).
+- BFF app-only readers of the root flags for the external plane (`Infrastructure/ExternalAccess/ExternalParticipationService.cs:605` `IsSecure: row.sprk_issecure == true`, `ExternalDataService.cs:1148`) — masked for the app identity, a secure root reads as not secure and the FR-22 Secure suppression is lost.
+- The MDA form business rule that shows the secure section only when `sprk_issecure = true` (`src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md:205`).
+So "lock" means Update/Create restricted, Read granted to every user. A lock that masks reads turns a secure record into an unprotected one on every client upload path, silently and irreversibly (SPE permissions are additive-only).
+
+THE PRECEDENT, AND ITS LESSON. This repo already field-secures one column: `contact.sprk_standinggrant` (IsSecured=TRUE, "Standing Grant Administrators" profile; recipe and live evidence in `projects/teams-app-r1/notes/050-standing-grant-field-schema.md` §2 (`:30-43`, incl. the System Administrator auto-permission at `:40`), §5 item 4 (`:85`) and its reproduction script §8 (`:106-145`)). Two facts from it bind this task: (a) marking a column IsSecured auto-creates a permission for the built-in System Administrator profile with full Read/Create/Update — so every holder of the System Administrator security role (humans AND the BFF app users, which hold it — session27 live facts) can write the flag regardless of any profile this task creates, and that profile cannot be narrowed; (b) the BFF app user's FLS Read on that column was left as an operator step and never applied, so the feature read "no standing grant" for every contact with no error (`Infrastructure/ExternalAccess/SubjectStandingGrantReader.cs:168-186`, `:226-236`). Here the same miss routes secure content to a shared container.
+
+THE BFF'S OWN SAFETY NET IS DOCUMENTED AS THE OPPOSITE OF THIS TASK. `RecordContainerResolver.cs:211-217` says the live assertion "that sprk_issecure is neither field-secured nor NULL on any securable row belongs with task 047", and the ABSENT branch (`:218-225`) only logs a warning and then treats absent as not-secure (`:227`). After this task the column IS field-secured, so that comment is wrong and the warning is the only signal that the app identity lost its FLS Read.
+
+TODAY'S WRITERS (verified 2026-09-30):
+- Client create, user context: `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts:280-285` sets `sprk_issecure = true` in the Xrm create payload. Reached from `CreateProjectWizard.tsx` (provisioning after create at `:683-722`) and from `SummarizeFilesWizard/SummarizeFilesDialog.tsx:515-531` (same ProjectService; its own provisioning call and failure copy at `:538-570`, including the "marked Secure but could not be provisioned" branch whose wording stops being true once the client no longer writes the flag).
+- BFF: `Api/ExternalAccess/UnsecureProjectEndpoint.cs:232-238` clears it (app identity). `ProvisionProjectEndpoint.cs:279-284` REQUIRES it already true and does not set it.
+- MDA forms of all three roots (live, not in source control) — the only way a matter or work assignment is marked secure today.
+- Unknown until inventoried live: business rules, classic workflows, Power Automate flows, data imports.
+No matter or work-assignment wizard writes it (grep of src/client for `issecure`, case-insensitive).
+
+THE ORDERING TRAP WHEN THE FLAG MOVES SERVER-SIDE. Today a secure-requested project is born with the flag true, so if provisioning then fails, the wizard's upload step (`CreateProjectWizard.tsx:725-736`) hits `RecordContainerResolver`'s fail-closed branch and uploads nothing. If the client simply stops writing the flag and provisioning fails, the project is born NOT secure and the same upload step puts the files in the shared business-unit container — permanently. The wizard also creates an event (`:625-660`) before provisioning.
+
+THE MIXED-VERSION TRAP. Once IsSecured is on, a create payload that still carries `sprk_issecure` from a user without Create permission on the field is refused — so a cached old client bundle would fail EVERY secure project create. And during rollout, records created by the old client arrive at provisioning already flagged true. Provisioning must therefore accept "already flagged, not yet provisioned" as well as "not flagged", and the FLS import must come after the client that stops writing the flag is deployed. So the server must set the flag as its first mutation, and the client must not upload or create children for a secure-requested record whose provisioning did not succeed.
+
+NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no client calls `/unsecure-project`; secure matters and work assignments have no secure surface except the form field this task locks. Locking without an endpoint-backed surface would remove a capability.
+
+`sprk_accesspermission` stays editable by Write-holders (owner-accepted, session 27) — out of scope.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectRequest.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/projectService.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/provisioningService.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/SecureProjectSection.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx</file>
+      <file role="modify">Dataverse solution: sprk_project / sprk_matter / sprk_workassignment attribute sprk_issecure (IsSecured) + a FieldSecurityProfile component; MDA main and quick-create forms of the three roots (control read-only); the command-bar surface chosen in step 5</file>
+      <file role="modify">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-150-issecure-lock.md</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs (the ABSENT-branch comment `:211-217` and, per the escalation answer, the ABSENT-branch behaviour `:218-227` — after task 151)</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/SecureFlagFieldSecurityAssertion.cs + tests (standing manual assertion: the BFF app identity and every BU default team can READ sprk_issecure on all three roots; only expected principals can WRITE it — a sibling of SecureBuRoleDepthAssertion, kept separate so 144/145 do not share the file)</file>
+      <file role="read">projects/teams-app-r1/notes/050-standing-grant-field-schema.md (the existing FLS precedent: profile creation recipe, System Administrator auto-permission, the missed BFF read grant)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SubjectStandingGrantReader.cs (FLS-absent observability precedent)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (:605 app-only root-flag reader)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/services/RecordContainerResolver.ts</file>
+      <file role="read">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: every reader of sprk_issecure (BFF app-only, BFF OBO/impersonated, client Xrm.WebApi, PCF). None may be masked. The FLS profile grants Read to every principal that can read the row; a design that leaves any reader masked is rejected even if every write test passes.</constraint>
+    <constraint source="owner round 2 item 2">Scope: writes. After this task the ONLY writer of sprk_issecure is the BFF app identity inside the secure (provision) and unsecure endpoints. The BFF app user(s) are associated with the writer profile explicitly; do not rely on System Administrator bypassing FLS. Under D-13 (per-customer BFF app registration) the association is an environment-setup/pipeline step, not a hard-coded identity. The platform's System Administrator field-security permission (auto-created, full, not narrowable) is the one residual human writer — it is surfaced to the owner (escalation), never silently accepted and never "fixed" by removing the System Administrator role from anyone.</constraint>
+    <constraint source="project">Scope: rollout compatibility. Provisioning accepts both a record that is not yet flagged (the new client) and one already flagged true but not provisioned (the old client, and records created before this task) and treats both identically; an already-provisioned record keeps the existing 409. The live order is: BFF, then client, then the IsSecured import — never IsSecured before the client that stops writing the flag is live.</constraint>
+    <constraint source="ADR-003">Scope: the BFF app identity's own read. Its FLS Read on sprk_issecure (all three roots) is a standing, checked invariant (the sibling assertion), not only an operator step — the standing-grant precedent shows an unchecked operator step stays unapplied. The stale `RecordContainerResolver.cs:211-217` comment is rewritten to state the new invariant.</constraint>
+    <constraint source="project">Scope: the secure-create flow (CreateProjectWizard and SummarizeFilesDialog). The client never writes sprk_issecure. The BFF sets it true as the FIRST mutation of provisioning, verified by read-back. A secure-requested create whose provisioning returns non-success uploads no file and creates no child record in any shared container; the user sees the existing authored provisioning-failure copy (task 068).</constraint>
+    <constraint source="project">Scope: the new secure/unsecure surface. It calls task 144's generalized provision/unsecure endpoints only (no new BFF endpoint), is shown on sprk_project, sprk_matter and sprk_workassignment, and relies on the endpoints' delegation filter (Write on the record) for authorization — the client does not decide who may secure.</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: enforcement. FLS is platform configuration, not a plugin; no plugin is added. Live proof is a MANUAL gate with the existing non-admin test users in their current BU — no Dataverse in CI, no user relocation.</constraint>
+    <constraint source="ADR-021 / pcf constraints">Scope: any UI touched. Fluent v9 semantic tokens only, dark-mode compliant; mirror the existing `SecureProjectSection.tsx` copy/toggle styling for the secure control rather than inventing a new look.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing bff-extensions.md; publish size against a FRESH master build (short path, same zip tool, both sizes, delta, file counts); at most 60 MB; no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Scope: tests added or changed. No Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="project">Scope: sprk_accesspermission. Not field-secured, not changed (owner-accepted).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/tasks/144-secure-named-owner-team.poml</file>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="secure toggle copy and styling" location="src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx">Mirror this component's Fluent v9 layout and authored copy for any secure/unsecure affordance.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory every writer and reader of sprk_issecure on the three roots: grep src/ (server and client, case-insensitive), plus a live read-only inventory of forms (systemform formxml), business rules, workflows and cloud flows referencing the column. Classify each reader by identity (app-only, OBO, impersonated, client user context). Record in the task note.</step>
+    <step order="2">Design the FLS configuration: one profile granting Read to every user (determine the live mechanism that covers all current AND future users — e.g. association with every business unit's default team plus a setup step for new BUs — and verify it on a user in each BU), and one granting Read/Create/Update to the BFF app identity. Record the choice and why in the note.</step>
+    <step order="3">Server: provisioning sets sprk_issecure true as its first mutation (read-back verified) instead of requiring it, and accepts an already-flagged, not-yet-provisioned record unchanged (rollout constraint); the unsecure path clears it last (unchanged ordering). Request contract per task 144's generalized DTO. Rewrite the `RecordContainerResolver.cs:211-217` comment and apply the owner's answer on the ABSENT branch. Add the sibling standing assertion (BFF app identity + every BU default team can read; writer set is exactly the expected principals) with seeded unit tests both ways.</step>
+    <step order="4">Client: projectService stops writing the flag; CreateProjectWizard and SummarizeFilesDialog pass "secure requested" to provisioning and skip file upload and child creation for a secure-requested record whose provisioning failed.</step>
+    <step order="5">Add the endpoint-backed secure/unsecure affordance for project, matter and work assignment (command-bar command via ribbon-edit, or an extension of an existing form control); confirm the choice against the escalation trigger first.</step>
+    <step order="6" mode="prescriptive">Live (dev), in order: deploy the BFF; deploy the client changes (and confirm no cached old bundle is still served); create the profiles and their team/user associations (readers, BFF app identity) FIRST; then apply IsSecured on the three columns together with the profiles' field permissions in ONE solution import, so no reader is ever masked (if the platform forces a gap between IsSecured and the field-permission rows, measure it, keep it to one scripted step, and record it); make the form controls read-only; publish; run the sibling assertion by hand and record its output.</step>
+    <step order="7">Manual live gate: with an existing non-admin test user, a Web API PATCH and a form edit of sprk_issecure are refused; the same user's Web API read returns the true value on a secure row; the client RecordContainerResolver path for that user resolves a secure record to its own container; secure and unsecure via the new surface work for all three entity types. Record outputs.</step>
+    <step order="8">Update the setup guide (FLS profiles, associations, new-BU step) and the schema doc; add the FLS setup (profiles, reader associations incl. the new-BU step, BFF app identity association under D-13) to the same new-environment step task 145 establishes — whichever of 145/150 lands first creates the step, the other extends it; never a second mechanism.</step>
+    <step order="9">Build and test (BFF unit/integration, UI component tests), publish-size measurement, TASK-INDEX.md `✅ [done]`, POML status, deviations in the task note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>No maintainable mechanism grants Read on the secured column to ALL current and future users (the live test shows a user whose read is masked): STOP — do not ship a lock that masks reads. Present the options to the owner (as a CLAUDE.md §6.5 block if the answer bends ADR-003's fail-closed rule). Recommendation: associate the reader profile with every business unit's DEFAULT team (membership is automatic, so every current and future user of an existing BU is covered), make "associate the new BU's default team" part of the new-environment/new-BU step, and have the sibling assertion fail on any BU default team without it — verified live on a user in each BU before step 6's IsSecured import.</trigger>
+    <trigger>The live inventory finds a flow, workflow, business rule or integration that writes sprk_issecure as a user: STOP and report it before locking; removing it may break a process the owner relies on.</trigger>
+    <trigger>The choice of secure/unsecure surface (command-bar button vs extending an existing control) is a product decision; present a recommendation with a sketch before building if the existing SecureProjectSection pattern cannot be reused on matter and work-assignment forms.</trigger>
+    <trigger>WHO may unsecure: the endpoint's delegation filter admits any Write-holder, but the shipped wizard copy (`SecureProjectSection.test.tsx:112-117`) tells users "an administrator can remove the secure designation later". Exposing unsecure to every Write-holder changes that promise; ask the owner whether the surface is shown to Write-holders or restricted (and how), before building it.</trigger>
+    <trigger>Removing the secure-requested upload in the failure case changes the wizard's contract in a way the task-068 copy cannot explain (including the SummarizeFilesDialog "marked Secure but could not be provisioned" branch and the CreateProjectWizard "an administrator can secure it" branch): ask for authored copy rather than writing new user-facing wording.</trigger>
+    <trigger>OPEN OWNER QUESTION — human System Administrators. Marking the column IsSecured auto-grants the built-in System Administrator field profile full Read/Create/Update, and it cannot be narrowed (teams-app-r1 050 note §2). So "only the BFF writes the flag" holds for every user EXCEPT holders of the System Administrator role, who can still edit it in the form or Web API. Before step 6, put this to the owner. Recommendation: accept it as the platform's administrator boundary (a System Administrator can already reassign, share or delete any secure record), document it in the guide and the schema doc, and have the sibling assertion list every System Administrator holder so the residual writer set is visible — do not strip System Administrator from anyone (it is how the BFF app users hold `prvActOnBehalfOfAnotherUser`).</trigger>
+    <trigger>OPEN OWNER QUESTION — the ABSENT branch. Once the column is secured, `sprk_issecure` absent on a securable row read by the BFF app identity means either a NULL value or a lost FLS Read — and today both route content to the shared container (`RecordContainerResolver.cs:218-227`). Recommendation: backfill NULL to false on the three roots (column default false, verified live), then make ABSENT fail closed (a typed `SdapProblemException`, like `secure_record_container_missing`) so a lost FLS Read refuses uploads instead of mis-routing them. It changes behaviour for every upload path, so ask before step 3's resolver change.</trigger>
+    <trigger>Securing an EXISTING record through the new surface before task 148 merges re-owns the root but leaves its existing children (documents, events, to-dos, communications) in ordinary business units and its existing files in the shared container. If step 5 is ready before 148 has merged, ask the owner. Recommendation: ship the lock, the create-time secure path and the unsecure action now, and enable "secure an existing record" in the same release as 148's provisioning transition — or show authored copy that existing content is not moved.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep of src/ for `sprk_issecure` writers: `projectService.ts:283-284` (client create) and `UnsecureProjectEndpoint.cs:237` (BFF clear). Session 27 live query: 0 `fieldpermission` rows on sprk_issecure. Grep of src/solutions and src/dataverse `*.xml` for `sprk_issecure` returns no FieldSecurityProfile. `SecureProjectSection.test.tsx:113`: no client calls `/unsecure-project`. The ONE existing field-security precedent is `contact.sprk_standinggrant` + the "Standing Grant Administrators" profile (teams-app-r1 050 note; `SubjectStandingGrantReader.cs:168-186`); grep of tests/ for `IsSecured|fieldpermission` returns nothing — no standing check of any FLS configuration exists.</existing>
+    <extension>The endpoints are extended (task 144), not added. The FLS profiles are new platform configuration, created with the standing-grant precedent's recipe (050 note §8) rather than a new mechanism; a profile per purpose (reader / BFF writer) is required because the standing-grant profile secures a different column for a different audience. The UI affordance extends an existing surface where one fits (SecureProjectSection pattern / existing form control) and adds a command only if none does. The sibling assertion is new because no FLS check exists and SecureBuRoleDepthAssertion checks roles, not field permissions; it lives beside it at the same KEEP path.</extension>
+    <cost-of-doing-nothing>Any user with Write can clear sprk_issecure on a secure record in the MDA form, bypassing the unsecure endpoint's ownership move and share sweep — the record then reads as non-secure to every container resolver and new content lands in the shared container; any user can also flag a record secure without provisioning, producing a record that 409s every upload.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/projectService.test.ts</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SecureFlagFieldSecurityAssertion.cs</output>
+    <output type="docs">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-150-issecure-lock.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Secure flag is read-only on the form">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={secure-matter-id}</url>
+      <steps>
+        <step>Sign in as an existing non-admin test user with Write on the matter</step>
+        <step>Open the matter form; locate the Secure field</step>
+        <step>Attempt to change the value</step>
+      </steps>
+      <expected>The control is locked (FLS lock icon or disabled); the value shown is the true value, not blank.</expected>
+    </test>
+    <test name="Secure and unsecure through the endpoint-backed surface">
+      <steps>
+        <step>On a non-secure project, matter and work assignment, invoke the secure affordance</step>
+        <step>Reload; verify the flag reads true and the record shows as secure</step>
+        <step>Invoke the unsecure affordance; reload; verify the flag reads false</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>Each action succeeds via the BFF; no console errors; a user without Write sees the action refused with authored copy.</expected>
+    </test>
+    <test name="Secure create with failed provisioning uploads nothing">
+      <steps>
+        <step>Run the Create Project wizard with Secure on and a file attached, with provisioning forced to fail — against a locally-run BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, NEVER by changing the shared dev BFF's configuration</step>
+        <step>Finish the wizard</step>
+      </steps>
+      <expected>The task-068 provisioning-failure copy is shown; no sprk_document row exists for the file and no file exists in any shared container.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify the secure affordance and any changed wizard copy adapt (no hard-coded colours)</step>
+      </steps>
+      <expected>All colours use Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_issecure is IsSecured on sprk_project, sprk_matter and sprk_workassignment in dev; the reader profile covers every existing user (verified on a user in each business unit) and the setup covers future users/BUs; the BFF app identity is explicitly associated with the writer profile.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE, NEGATIVE: an existing non-admin test user with Write on a record cannot change sprk_issecure via Web API PATCH, via the MDA form, or via a create payload on any of the three roots — each attempt is refused or the value is unchanged on read-back.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE, NO MASKING: the same user's Web API read of a secure row returns sprk_issecure = true (present, not absent); the client RecordContainerResolver.ts path as that user resolves the secure record to its own container, not a fallback; the BFF RecordContainerResolver logs no "ABSENT (not false)" warning for it.</criterion>
+    <criterion testable="true">No file under src/client writes sprk_issecure; projectService.test.ts asserts the create payload has no sprk_issecure key when secure is requested.</criterion>
+    <criterion testable="true">Provisioning sets the flag true as its first mutation, verified by read-back; a record already flagged true but not provisioned is provisioned exactly like an unflagged one; a record that is already secure and provisioned still returns the existing 409.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE, BFF READ: the sibling assertion, run by hand against dev, passes (BFF app identity and every BU default team can read sprk_issecure on all three roots; the writer set is exactly the BFF app identity's profile plus the System Administrator profile) and FAILS when seeded with a census lacking the BFF read or listing an extra writer (unit tests both ways); outputs recorded.</criterion>
+    <criterion testable="true">`RecordContainerResolver.cs`'s ABSENT-branch comment states the new invariant, and the ABSENT branch behaves as the owner decided under the escalation trigger (with a test for the chosen behaviour).</criterion>
+    <criterion testable="true">The owner's rulings on the System Administrator residual writer, the ABSENT branch, who may unsecure, and securing existing records before task 148 are recorded in the task note, and the shipped behaviour matches them.</criterion>
+    <criterion testable="true">NEGATIVE: a secure-requested create whose provisioning fails leaves no uploaded file and no child sprk_document/event in any container (both wizard paths), and shows the existing failure copy.</criterion>
+    <criterion testable="true">AUTHORIZATION: a caller without Write on the record is refused by the secure and unsecure endpoints (403) for all three entity types; nothing changes.</criterion>
+    <criterion testable="true">Users can secure and unsecure a project, matter and work assignment through the new endpoint-backed surface (manual live gate, recorded).</criterion>
+    <criterion testable="true">The live writer inventory (forms, business rules, workflows, flows) is recorded in the task note with each writer's disposition.</criterion>
+    <criterion testable="true">sprk_accesspermission is unchanged (not field-secured).</criterion>
+    <criterion testable="true">Setup guide and pipeline/runbook step carry the FLS profiles and associations; the schema doc states the field is secured and who may write it.</criterion>
+    <criterion testable="true">BFF unit/integration and UI component suites green; publish size reported per CLAUDE.md §10 and at most 60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the negative, masking and authorization cases above. Anything beyond needs a one-line justification in the note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner round 2 item 2 and live fact "0 fieldpermission rows" (session27 note). Relates to defect C10 (session26 note): the flag is the label that drives container placement and the evaluator's Secure suppression, so a user-writable flag undoes both. Depends on task 144 (generalized endpoints). Task 145 establishes the pipeline/runbook step that the FLS setup joins. Task 148 (transitions) edits the same endpoints and makes "secure an existing record" carry its children; task 151 edits RecordContainerResolver.cs first. Precedent: teams-app-r1 task 050/051 (contact.sprk_standinggrant FLS; the BFF read grant that was never applied). #1037 (show a secure record disabled with the reason) is word-add-in-r1's and unaffected.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. Step 6 is prescriptive; the BFF and client ship together (the client stops writing the flag in the same release the server starts setting it).</protocol>
+  </execution>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: F3 = removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint (securing stays open to Write-holders). F5 superseded: securing an existing standard record is a RIBBON BUTTON on project/matter/work-assignment forms (enabled with 148, per F7). NEW owner UX requirement (assignment pending research): a red notification banner on secure records, linking to Share/Manage Access where possible.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 4 and the sprk_issecure findings)">(1) PREMISE CORRECTION — there is no form control to lock.
+- No live form or view on the three roots references sprk_issecure. The only reference is the default "Attributes" view (live research, spaarkedev1, 2026-10-01).
+- So "make the form control read-only" has nothing to act on, wherever it appears: prompt, goal (4), relevant-files (main and quick-create form controls), step 6, step 7's "form edit" check and the ui-test "Secure flag is read-only on the form". Do not add the field to a form in order to lock it. If step 1's live inventory DOES find a form referencing it, the original read-only step applies to that form.
+- What STILL applies, unchanged:
+  - the field-level security lock (IsSecured, the reader profile and the BFF-writer profile, the no-masking rules);
+  - endpoint-only writes;
+  - step 1's live inventory, which must still cover business rules, classic workflows and flows. The research checked forms and views. The "visible when sprk_issecure = true" business rule in `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md:205` is a design-document placement, not verified live.
+- Replace that ui-test's check with: the live inventory shows no form references the field, and a non-admin Web API PATCH of sprk_issecure is refused while the read returns the true value (the existing NEGATIVE and NO MASKING gates).
+- The red "this record is secure" banner the owner asked for is task 153, not this task.
+
+(2) THE SECURE/UNSECURE SURFACE JOINS TASK 142's SHARED "Access" RIBBON GROUP. This settles step 5's surface choice and its "choice of secure/unsecure surface" escalation trigger; the R3b amendment already made it a ribbon button, F3 answers the "WHO may unsecure" trigger, and F7 answers the "Securing an EXISTING record ... before task 148" trigger.
+- Add "Make Secure" and "Remove Secure" to the ONE Access group that task 142 defines, in task 142's ONE ribbon source file (`infrastructure/dataverse/ribbon/AccessRibbons/`) and ONE command script (`Spaarke.Access.Ribbon`). REBASE on 142's group: no second group, no second ribbon file, no second script, no second MSAL chain.
+- The work-assignment form ribbon is NOT in source control (`infrastructure/dataverse/ribbon/WorkAssignmentRibbons/` holds only the `createtodo-button.xml` merge snippet). Task 142 exports and checks it in; build on 142's checked-in export, re-exported fresh before editing (the same before/after command-list check as 142).
+- Secure state for the enable rules: `sprk_issecure` is on no form, so a ribbon ValueRule cannot read it. The script reads it with `Xrm.WebApi.retrieveRecord` (every user can read it under this task's reader profile — the NO MASKING gate). A read failure hides BOTH commands (fail closed).
+- Make Secure: available when the record is not secure and the caller has Write (the cached `can-manage-access` enable rule from 142's script). Enabled only together with task 148 (R3b, F7): it is not imported into the ribbon until 148's provisioning transition is deployed in that environment, in the same release. It confirms first; the confirmation copy (what 148's transition does to existing children and files) is AUTHORED copy obtained from the owner, as this task's existing "ask for authored copy" trigger requires for new user-facing wording, not implementer wording. It calls 144's generalized provision endpoint.
+- Remove Secure: available when the record is secure and the caller has Write. The server's unsecure endpoint enforces owner F3 (Full Access holders plus the creator), and a refusal shows the endpoint's ProblemDetails message. The client does not decide who may unsecure; the enable rule only hides the command from callers without Write.
+- Both refresh the form and show the outcome as 142's script does. ADR-006 permits a thin ribbon-command script. No new BFF endpoint.
+
+SEQUENCING / ESCALATION TRIGGER. The ribbon part of step 5 waits for task 142's Access group (a PARTIAL dependency: "142 (ribbon step only)" — not a whole-task `deps` entry, which would hold the FLS lock behind 142). If this task reaches step 5 before 142 has merged, STOP the ribbon work and tell the orchestrator. Do not create the group here. The field-level security lock, the server changes and the wizard changes do not wait.
+
+ADDITIONAL ACCEPTANCE (closed set):
+- (a) Make Secure and Remove Secure appear inside 142's Access group on all three main forms, from 142's file and script;
+- (b) Make Secure is absent from the ribbon in any environment where 148's transition is not deployed, and present (subject to (e)) where it is;
+- (c) Remove Secure by a Collaborate holder who is not the creator is refused with the F3 message shown, and the record stays secure; Remove Secure by the creator, and by a Full Access holder, succeeds;
+- (d) every command on 142's before-import list, plus Update Access, is present and runs after import;
+- (e) a Read-only user sees neither Make Secure nor Remove Secure; on a secure record Make Secure is hidden, and on a non-secure record Remove Secure is hidden;
+- (f) a failed read of `sprk_issecure` hides both commands.
+
+ADDITIONAL UI TESTS (binding — part of this task's ui-tests):
+- Access group: on a secure project, open Access. Expected: Update Access and Remove Secure are listed, and Make Secure is not.
+- Make Secure (after 148): on a non-secure matter, as a Write-holder, open Access and choose Make Secure; confirm. Expected: the authored confirmation copy, then the record reads secure after refresh.
+- F3 refusal: as a Collaborate holder who is not the creator, choose Remove Secure. Expected: the endpoint's refusal message, and the record stays secure.
+- Read-only user: on a secure and on a non-secure work assignment, open Access. Expected: neither Make Secure nor Remove Secure is available.</amendment>
+  </amendments>
+</task>

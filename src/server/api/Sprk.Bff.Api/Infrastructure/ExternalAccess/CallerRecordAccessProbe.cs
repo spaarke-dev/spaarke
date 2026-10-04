@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Identity.Client;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -27,7 +28,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 ///   fail-closed — but it is registered inside a compound AI gate AND behind
 ///   <c>ToolFramework:Enabled</c>. Six unconditionally-mapped routes depending on a twice-gated
 ///   service is the asymmetric-registration anti-pattern (CLAUDE.md §10 F.1 / ADR-032), and it would
-///   be a CRUD→AI dependency besides (§10 bullet 3).</description></item>
+///   be a CRUD→AI dependency besides (§10 bullet 3). <b>Both objections were removed on 2026-09-29</b>
+///   by unified-access-control-r2 task 126: the client moved to <c>Infrastructure/Dataverse/</c> (no
+///   longer AI-internal) and is now registered unconditionally in <c>AddSpaarkeCore</c>. This probe was
+///   not migrated — it predates that and works — but the reasons recorded here for avoiding the client no
+///   longer hold.</description></item>
 ///   <item><description><see cref="DataverseWebApiClient"/> — already injected into every one of
 ///   these handlers — is app-only. An app-only Write probe answers "can the APPLICATION write",
 ///   which is finding A-2 rebuilt.</description></item>
@@ -56,9 +61,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// the same obligation for task 005's document-path use of it.</para>
 ///
 /// <para><b>ADR-010.</b> Concrete class, registered as a concrete (no interface). The substitution
-/// seam for tests is <c>virtual</c> on <see cref="GetCallerRightsAsync"/>, following the
-/// <see cref="DataverseWebApiClient"/> precedent that ADR-038 §4 designates as the module
-/// boundary.</para>
+/// seam for tests is <c>virtual</c> on <see cref="GetCallerRightsAsync"/> and
+/// <see cref="GetCallerRightsForRecordsAsync"/>, following the <see cref="DataverseWebApiClient"/>
+/// precedent that ADR-038 §4 designates as the module boundary. The three steps underneath (the OBO
+/// exchange, <c>WhoAmI</c>, <c>RetrievePrincipalAccess</c>) are <c>protected virtual</c> (task 084) so a
+/// test can count them and prove the multi-record path asks for the caller's identity once.</para>
 /// </remarks>
 public class CallerRecordAccessProbe
 {
@@ -220,7 +227,285 @@ public class CallerRecordAccessProbe
             return AccessRights.None;
         }
 
-        string dataverseToken;
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"{entitySet}({recordId})", ct).ConfigureAwait(false);
+
+        if (dataverseToken is null)
+            return AccessRights.None;
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+        {
+            return AccessRights.None;
+        }
+
+        return await RetrievePrincipalAccessAsync(
+            dataverseToken, callerSystemUserId.Value, entitySet, recordId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Most <see cref="RetrievePrincipalAccessAsync"/> calls <see cref="GetCallerRightsForRecordsAsync"/> runs at once.
+    /// </summary>
+    internal const int MaxConcurrentRecordLookups = 4;
+
+    /// <summary>
+    /// The caller's rights on SEVERAL records, as Dataverse itself reports them: one entry per target, in
+    /// target order.
+    /// </summary>
+    /// <param name="callerBearerToken">The caller's bearer token from the inbound request.</param>
+    /// <param name="targets">Each record as (entity SET name, id).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// <see cref="AccessRights.None"/> for any record whose question could not be answered, exactly as
+    /// <see cref="GetCallerRightsAsync"/> does for one record.
+    /// </returns>
+    /// <remarks>
+    /// <para>Added by spaarkeai-word-add-in-r1 task 084, so the Office picker can mark each row it offers
+    /// with whether the save would accept it ("pickable equals savable", #1037). The per-record answer comes
+    /// from the SAME private steps as <see cref="GetCallerRightsAsync"/>: the OBO exchange, <c>WhoAmI</c>,
+    /// then <c>RetrievePrincipalAccess</c>. The one difference is that the exchange and <c>WhoAmI</c> run once
+    /// for the whole set rather than once per record, because they depend only on the caller.</para>
+    ///
+    /// <para><b>Fail closed, per record and for the set.</b> If the caller cannot be established, every entry
+    /// is <see cref="AccessRights.None"/>. A record whose lookup fails gets <see cref="AccessRights.None"/>
+    /// without affecting the others. At most <see cref="MaxConcurrentRecordLookups"/> lookups run at once, so
+    /// a page of results cannot fan out unboundedly against Dataverse.</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyList<AccessRights>> GetCallerRightsForRecordsAsync(
+        string? callerBearerToken,
+        IReadOnlyList<(string EntitySet, Guid RecordId)> targets,
+        CancellationToken ct = default)
+    {
+        var results = new AccessRights[targets.Count];
+        if (targets.Count == 0)
+            return results;
+
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Rights check cannot run for {Count} record(s): hasToken={HasToken}, " +
+                "canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}. Denying all (fail closed).",
+                FallbackMarker, targets.Count,
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
+
+            return results;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"{targets.Count} record(s)", ct).ConfigureAwait(false);
+        if (dataverseToken is null)
+            return results;
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+            return results;
+
+        using var gate = new SemaphoreSlim(MaxConcurrentRecordLookups);
+        var lookups = targets.Select(async (target, index) =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                results[index] = await RetrievePrincipalAccessAsync(
+                    dataverseToken, callerSystemUserId.Value, target.EntitySet, target.RecordId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(lookups).ConfigureAwait(false);
+        return results;
+    }
+
+    /// <summary>
+    /// The calling user's Dataverse <c>systemuserid</c>, or <c>null</c> when it cannot be established.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by unified-access-control-r2 task 061. Secure-project provisioning has to share the
+    /// record back to its creator (design §5.1: <i>"All human access is by explicit Dataverse share,
+    /// including the creating attorney's"</i>), so it needs to know who the creator IS as a Dataverse
+    /// principal.</para>
+    ///
+    /// <para><b>Why here rather than a new helper</b> (CLAUDE.md §11): this class already resolves
+    /// exactly this value on every delegation check, by the one method that cannot be fooled —
+    /// <c>WhoAmI()</c> on the caller's OBO token answers for the token's subject and nothing else. A
+    /// second identity path (an <c>azureactivedirectoryobjectid</c> lookup, say) could silently map to
+    /// the wrong user or miss, and a share aimed at the wrong principal is a disclosure, not an
+    /// inconvenience.</para>
+    ///
+    /// <para><b>Null means "do not proceed."</b> It is deliberately indistinguishable between "no
+    /// caller token", "the OBO exchange failed" and "WhoAmI answered nothing" — every one of them
+    /// means the caller's identity is unproven, and the caller of this method fails closed.</para>
+    /// </remarks>
+    public virtual async Task<Guid?> GetCallerSystemUserIdAsync(
+        string? callerBearerToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Cannot resolve the caller's systemuserid: hasToken={HasToken}, " +
+                "canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}.",
+                FallbackMarker,
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
+
+            return null;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, "caller identity", ct).ConfigureAwait(false);
+
+        return dataverseToken is null
+            ? null
+            : await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether the CALLER holds the named Dataverse table privilege (e.g. <c>prvCreatesprk_Invoice</c>) at
+    /// any depth, as Dataverse itself reports it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by unified-access-control-r2 task 130 (owner decision G5, 2026-10-01): confirming an
+    /// AI-classified document as an invoice creates the <c>sprk_invoice</c> APP-ONLY (owned by the matter's
+    /// team, never the user), but only for a caller who could create an invoice themselves. A record right
+    /// cannot answer that — there is no record yet — so this asks the table privilege.</para>
+    ///
+    /// <para><b>Why here, and why OBO rather than <c>UserPrivilegeChecker</c></b> (CLAUDE.md §11). That checker
+    /// answers only <i>Read</i> privileges, impersonates with the app identity (the caller's id is DATA, the
+    /// A-2 shape this class's remarks reject), and caches the set for up to 24 h — an owner who removes
+    /// Create from a role would see it honoured a day later, against the round-3 "minutes, not hours" rule.
+    /// This class already owns the one caller-scoped credential path: <c>WhoAmI()</c> on the caller's OBO
+    /// token, then <c>systemusers({me})/RetrieveUserSetOfPrivilegesByNames</c> — the caller asking about
+    /// themselves, uncached.</para>
+    ///
+    /// <para><b>Fail closed.</b> No token, a failed exchange, an unresolved caller, a non-success response, an
+    /// unparseable body, or any exception answers <c>false</c>.</para>
+    /// </remarks>
+    public virtual async Task<bool> CallerHoldsPrivilegeAsync(
+        string? callerBearerToken,
+        string privilegeName,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(privilegeName)
+            || string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Privilege check {Privilege} cannot run: hasToken={HasToken}, canDoObo={CanDoObo}, " +
+                "hasEnvironmentUrl={HasEnvironmentUrl}. Denying (fail closed).",
+                FallbackMarker, privilegeName, !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable,
+                !string.IsNullOrEmpty(_environmentUrl));
+
+            return false;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"privilege {privilegeName}", ct).ConfigureAwait(false);
+        if (dataverseToken is null)
+        {
+            return false;
+        }
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+        {
+            return false;
+        }
+
+        var names = JsonSerializer.Serialize(new[] { privilegeName });
+        var url = $"{_environmentUrl}/api/data/v9.2/systemusers({callerSystemUserId.Value})"
+                  + "/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)"
+                  + $"?@p1={Uri.EscapeDataString(names)}";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[{Marker}] RetrieveUserSetOfPrivilegesByNames returned {StatusCode} for {Privilege}. Denying.",
+                    FallbackMarker, (int)response.StatusCode, privilegeName);
+                return false;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var holds = ResponseGrantsPrivilege(body, privilegeName);
+
+            _logger.LogInformation("[DELEGATION] Caller holds {Privilege}: {Holds}", privilegeName, holds);
+            return holds;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] RetrieveUserSetOfPrivilegesByNames threw for {Privilege}. Denying.", FallbackMarker, privilegeName);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads a <c>RetrieveUserSetOfPrivilegesByNames</c> response: <c>true</c> only when its
+    /// <c>RolePrivileges</c> array names <paramref name="privilegeName"/> (any depth). Anything else —
+    /// an empty array, a different privilege, a missing array, malformed JSON — is <c>false</c>.
+    /// </summary>
+    /// <remarks>Pure and <c>internal</c> so the wire-format reading is assertable without a transport mock
+    /// (ADR-038 ban B1) — the same reason as <see cref="NotFoundRetryDelay"/>. Response shape verified against
+    /// spaarkedev1 2026-10-01 (read-only): <c>{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvCreatesprk_Invoice",…}]}</c>.</remarks>
+    internal static bool ResponseGrantsPrivilege(string? responseBody, string privilegeName)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody) || string.IsNullOrWhiteSpace(privilegeName))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (!document.RootElement.TryGetProperty("RolePrivileges", out var privileges)
+                || privileges.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var privilege in privileges.EnumerateArray())
+            {
+                if (privilege.ValueKind == JsonValueKind.Object
+                    && privilege.TryGetProperty("PrivilegeName", out var name)
+                    && name.ValueKind == JsonValueKind.String
+                    && string.Equals(name.GetString(), privilegeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Exchanges the caller's bearer token for a Dataverse token on their behalf, or <c>null</c> on
+    /// any failure (already logged).
+    /// </summary>
+    /// <param name="callerBearerToken">The caller's bearer token.</param>
+    /// <param name="context">What the exchange is for — log context only, never a decision input.</param>
+    /// <param name="ct">Cancellation token.</param>
+    protected virtual async Task<string?> ExchangeForDataverseTokenAsync(
+        string callerBearerToken,
+        string context,
+        CancellationToken ct)
+    {
         try
         {
             // Asked PER EXCHANGE rather than held in a field. The provider owns the one client cache
@@ -236,16 +521,16 @@ public class CallerRecordAccessProbe
                 .ExecuteAsync(ct)
                 .ConfigureAwait(false);
 
-            dataverseToken = result.AccessToken;
+            return result.AccessToken;
         }
         catch (MsalException ex)
         {
             // ADR-015: MSAL error CODE only — never the assertion or token material.
             _logger.LogWarning(
-                "[{Marker}] OBO exchange for the delegation check failed ({ErrorCode}) on {EntitySet}({RecordId}). Denying.",
-                FallbackMarker, ex.ErrorCode, entitySet, recordId);
+                "[{Marker}] OBO exchange failed ({ErrorCode}) for {Context}. Denying.",
+                FallbackMarker, ex.ErrorCode, context);
 
-            return AccessRights.None;
+            return null;
         }
         catch (InvalidOperationException ex)
         {
@@ -255,29 +540,18 @@ public class CallerRecordAccessProbe
             // assertion" — the two need different operator responses, and the generic catch below
             // would flatten them into one message.
             _logger.LogWarning(
-                "[{Marker}] No usable confidential credential for the delegation check on " +
-                "{EntitySet}({RecordId}): {Message}. Denying.",
-                FallbackMarker, entitySet, recordId, ex.Message);
+                "[{Marker}] No usable confidential credential for {Context}: {Message}. Denying.",
+                FallbackMarker, context, ex.Message);
 
-            return AccessRights.None;
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[{Marker}] OBO exchange for the delegation check threw on {EntitySet}({RecordId}). Denying.",
-                FallbackMarker, entitySet, recordId);
+                "[{Marker}] OBO exchange threw for {Context}. Denying.", FallbackMarker, context);
 
-            return AccessRights.None;
+            return null;
         }
-
-        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
-        if (callerSystemUserId is null)
-        {
-            return AccessRights.None;
-        }
-
-        return await RetrievePrincipalAccessAsync(
-            dataverseToken, callerSystemUserId.Value, entitySet, recordId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -290,7 +564,7 @@ public class CallerRecordAccessProbe
     /// that could silently miss (<see cref="DataverseAccessDataSource"/> returns
     /// <see cref="AccessRights.None"/> exactly there, which reads as "denied" rather than "unmapped").
     /// </remarks>
-    private async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
+    protected virtual async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
     {
         try
         {
@@ -343,7 +617,7 @@ public class CallerRecordAccessProbe
     /// (<c>"ReadAccess,WriteAccess,..."</c>) parsed by <see cref="DataverseAccessRightsMapper"/>, the
     /// single place in the codebase that reads that wire format.
     /// </remarks>
-    private async Task<AccessRights> RetrievePrincipalAccessAsync(
+    protected virtual async Task<AccessRights> RetrievePrincipalAccessAsync(
         string dataverseToken,
         Guid principalSystemUserId,
         string entitySet,

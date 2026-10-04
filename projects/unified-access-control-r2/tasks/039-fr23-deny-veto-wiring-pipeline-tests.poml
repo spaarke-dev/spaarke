@@ -5,6 +5,18 @@
     <phase>1 One evaluator</phase>
     <gate>after-037-038</gate>
     <status>pending</status>
+    <status-note>**RE-OPENED 2026-09-30** (owner Q7 approval, session 27). The goal says "ComposeAsync (both planes)", and the FR-23 acceptance applies to a No-Access contact "even holding Full Access". But the wiring never reached CallerPrincipalResolver.cs. The CIAM strategy never calls ComposeAsync, so a No-Access contact keeps FULL access with a CIAM token. That is defect C1. The completing work is task 135 (CIAM veto parity), with task 136 (rights-based read gates) as co-requisite for the combined pipeline's Secure output. See the amendments block. The history below is kept as written.
+
+**Status corrected 2026-09-03 by a full project status audit.** The POML still read
+`pending` while `TASK-INDEX.md` marked it ✅ and git carried completion evidence — the task was DONE and
+only step 1 of root CLAUDE.md §7 ("update the task .poml status") had been skipped. This happened to **14
+tasks**, systematically, because the index is updated during execution while the POML status is a separate
+write that nothing enforces.
+
+Evidence for THIS task: 620b69e73 ("mark 039 complete") + 800b82af4 (wire the FR-23 deny veto)
+
+Two independent signals were required before flipping (git completion evidence AND the index marker); no
+status was changed on the index alone.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation completing the veto pipeline; tags bff-api/auth; modifies tests (TEST-MODIFYING override also applies).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,7 +25,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list).</parallel-reason>
-    <deps>032, 037, 038</deps>
+    <deps>032, 037, 038, 135, 136</deps>
     <tags>bff-api, auth, security, testing</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -31,9 +43,9 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">Veto slots on the evaluator.</dependency>
-      <dependency task="037" status="pending">Restricted veto + Secure suppression occupying their slots (ordering is tested against them).</dependency>
-      <dependency task="038" status="pending">INoAccessListReader + the sprk_noaccessentry store.</dependency>
+      <dependency task="032" status="completed">Veto slots on the evaluator.</dependency>
+      <dependency task="037" status="completed">Restricted veto + Secure suppression occupying their slots (ordering is tested against them).</dependency>
+      <dependency task="038" status="completed">INoAccessListReader + the sprk_noaccessentry store.</dependency>
     </dependencies>
   </context>
 
@@ -91,4 +103,46 @@
   <notes>Spec FR-19 (order) + FR-23 (keying, acceptance); register B-9/B-10/B-11. The org-typed column inventory produced in step 1 is input for task 041 — write it to notes/ deliberately. Per-child deny entries become end-to-end effective in Phase 3; the keying must already support them.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="session 26 defect verification (C1) and owner Q7 approval in session 27 (notes/session26-uac-defects-and-synopsis.md; notes/session27-owner-decisions-and-research.md)">
+    <verdict>RE-OPENED. "Both planes" in this task meant systemuser and contact on the WORKFORCE plane. The
+    CIAM plane, which is the live surface for external counsel, was never wired. The deny veto shipped on
+    2026-09-04 is correct where it runs and stays. This task closes when task 135 (and 136) complete. No
+    further code is authored under this id.</verdict>
+    <amendment n="1" defect="C1" completing-task="135">
+    The deny veto runs only inside AccessibleRecordSetService.ComposeAsync (ApplyVetoPipeline at
+    src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:357, invoked at
+    :1090 and :1301). The only consumer of ComposeAsync is WorkforcePrincipalStrategy
+    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:520-524).
+    CiamContactPrincipalStrategy (:322) builds its principal from GetGrantSetAsync (:379) with no deny-list
+    read. So the owner's ethical wall holds only for a person's workforce sign-in. The same contact on a
+    ciamlogin.com token still lists and streams the denied record. Task 135 applies the deny-list read and
+    veto on the CIAM plane, keyed on the CIAM contact and that contact's active organizations, in the same
+    order (deny, then Restricted). It adds CIAM veto tests to the CallerPrincipalResolver test suite.
+    COMPLETION (2026-10-01): amendment n=1 (C1) delivered by task 135 on 2026-10-01 (branch task/uac-r2-135); evidence: notes/task-135-ciam-unified-veto-pipeline.md. The CIAM veto tests drive CiamContactPrincipalStrategy end-to-end in tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs (the strategy's own contract stays in CallerPrincipalResolverTests). The deny-then-Restricted order is the single shared ApplyVetoPipeline. Its manual live gate is still pending. This task stays pending: task 136 closes it.</amendment>
+    <amendment n="2" defect="C2" related-task="136">
+    The deny veto REMOVES keys, so its own effect does not depend on the presence-only gates. It is listed
+    as a co-requisite because this task's pipeline tests also cover Secure pre-max suppression (see the
+    title). That suppression's read effect is only real once task 136 makes the external read gates require
+    AccessRights.Read.
+    COMPLETION (2026-10-01): amendment n=2 (C2) delivered by task 136 on 2026-10-01 (branch task/uac-r2-136);
+    evidence: notes/task-136-rights-based-read-gates.md §8. Every external project read route and the module
+    /fetch and /record scope now require Read; the evaluator and both plane strategies drop entries without
+    Read. Amended criteria 1-4 are met by tests (task 135's CIAM seam tests, still green on this branch).
+    Criterion 5 (MANUAL LIVE GATE) is NOT met: neither task 135 nor task 136 could run it (the run rules allow
+    read-only live checks only, and the gate needs a No Access entry added and removed). So, per criterion 6,
+    this task STAYS PENDING; the main session closes it once the live gate is recorded.</amendment>
+    <amendment n="3">Adjacent defects handled elsewhere. They are not re-homed onto this task, and are
+    recorded so they are not mistaken for gaps here. A junction-read fault that drops the org axis of the
+    wall is task 109 (ISS-019). The admin-tid cache invalidation that delays revocation for CIAM callers is
+    defect C5. Both are tracked separately.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Task 135 is completed: a CIAM contact with a contact-by-org (or contact-by-record, org-by-org, org-by-record) No Access entry matching a record on which the contact holds FullAccess cannot list, read or download that record on /api/v1/external. Asserted by test through CallerPrincipalResolver with a CIAM principal.</criterion>
+      <criterion testable="true">Negative: a CIAM deny-list read fault denies the queried candidates or fails the composition. The veto is never skipped (throwing-reader test on the CIAM path).</criterion>
+      <criterion testable="true">Negative control (the veto is targeted): on the CIAM plane, the same contact keeps its access to a record with no matching No Access entry, and a different contact of the same organization with no matching entry is unaffected by a contact-by-record entry naming the first contact.</criterion>
+      <criterion testable="true">Order on CIAM: with both a matching deny entry and Restricted applicable, the deny veto runs first and the record is absent (same ordering proof as the workforce pipeline tests, through the CIAM strategy).</criterion>
+      <criterion testable="true">MANUAL LIVE GATE (dev, existing CIAM test contact; no user created or relocated): add that contact to a record's No Access List while it holds a grant on the record; with a ciamlogin.com token it can no longer list or download the record; remove the entry and access returns (subject to cache TTL, noted). Recorded in notes.</criterion>
+      <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 039.</criterion>
+    </acceptance-criteria-amended>
+  </amendments>
 </task>

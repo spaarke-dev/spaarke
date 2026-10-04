@@ -96,6 +96,8 @@ import {
 import { resolveAnchorParaIds } from './composeAnchorResolution';
 import { describeAnchorlessProposal } from './redlineFailureCopy';
 import type { ComposeActionEnqueue } from './ComposeAiToolbar';
+import { getComposeAiToolbarActions } from './ComposeAiToolbar';
+import { useComposeChangeSummary } from './hooks/useComposeChangeSummary';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
 // widget registration (`register-workspace-widgets.ts` transitively pulls in
@@ -136,13 +138,19 @@ import {
   ConfirmModal,
   type LookupResult,
 } from '@spaarke/ui-components';
-// FR-14 (task 051) — "Create Summary Memo" toolbar control: shared types + pure email-body formatting
-// for the persisted review-memo record (render-from-persisted; see file docblock).
+// FR-14 (task 051) — Review Summary toolbar control: shared types + pure email-body formatting for the
+// persisted record (render-from-persisted; see file docblock). R8 §GAPS-5 Phase 3 adds the WRITE-path
+// payload builder + its two messages.
 import {
   buildReviewMemoEmailBody,
   buildReviewMemoEmailSubject,
+  buildGenerateReviewSummaryRequest,
+  buildReviewSummaryGeneratedMessage,
+  buildSummaryPageInput,
+  type SummaryPageInput,
   selectMemoNegativeMessage,
   MEMO_NO_MEMO_MESSAGE,
+  MEMO_NO_FINDINGS_MESSAGE,
   type ReviewMemoReadResponse,
 } from './reviewMemoFormatting';
 
@@ -1059,6 +1067,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // create. `onReviewedDocumentCreatedRef` mirrors the host callback; `hasReviewFindingsRef` mirrors
   // "a review actually ran on this doc" (reviewSummaryFindings.length > 0, defined further down — the
   // ref lets the earlier-declared save callback read it without a stale closure). Updated via effects.
+  // nda-r1 t041 (2026-09-07) — the Summary Page appendix payload, mirrored into a ref for the SAME
+  // reason `hasReviewFindingsRef` above exists: `reviewSummaryFindings` is declared BELOW `triggerSave`,
+  // so the save closure cannot list it as a dependency without a temporal-dead-zone error. Updated by an
+  // effect next to that state.
+  const summaryPageInputRef = React.useRef<SummaryPageInput | null>(null);
   const onReviewedDocumentCreatedRef = React.useRef(onReviewedDocumentCreated);
   React.useEffect(() => {
     onReviewedDocumentCreatedRef.current = onReviewedDocumentCreated;
@@ -1076,19 +1089,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // FR-05 (task 100): keep the latest host-resolved BU container id in a ref so the Browse
   // handler + upload effect (whose closures would otherwise capture a stale prop) always thread
-  // the current value into `mountTransient` → `documentRef.containerId`. triggerSave also falls
-  // back to this ref if the reducer state predates resolution (async-resolve race).
+  // the current value into `mountTransient` → `documentRef.containerId`.
+  //
+  // #858 (2026-09-01): `triggerSave` no longer reads this — the save path's container send and its
+  // pre-save gate are both deleted, because the server derives the container itself. The ref and its
+  // six `mountTransient`/`documentRef` senders are KEPT DELIBERATELY and NOT bulk-deleted: they feed
+  // client state, not a request body, and unpicking that chain is a separate change from closing the
+  // #858 send. What remains true is that nothing downstream reads `documentRef.containerId` today
+  // (`ComposeEditorDocumentRef` declares the field and never uses it), so this is now vestigial
+  // plumbing rather than a live capability — worth retiring, on its own pass, with its own reasoning.
   const containerIdRef = React.useRef<string | undefined>(containerId);
   React.useEffect(() => {
     containerIdRef.current = containerId;
   }, [containerId]);
 
-  // UAT-11 (honest/safe): keep the host's save-time container RETRY resolver in a ref so the save
-  // callback can re-resolve without re-subscribing (mirrors containerIdRef). See the prop docs.
-  const resolveContainerRef = React.useRef(resolveContainer);
-  React.useEffect(() => {
-    resolveContainerRef.current = resolveContainer;
-  }, [resolveContainer]);
+  // `resolveContainerRef` DELETED (#858, 2026-09-01). Its ONLY reader was the pre-save container gate
+  // in `triggerSave`, which is gone: a client-side pre-check for a decision the server makes
+  // authoritatively can only produce false refusals. The `resolveContainer` PROP stays declared (a
+  // host passes it — removing it from the public interface is a host-breaking change and belongs in
+  // the same pass that retires the plumbing above), but it is no longer invoked from here.
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
@@ -1553,6 +1572,128 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
 
+  // -------------------------------------------------------------------------
+  // R8 UAT item 8 — "Summarise changes" (Word menu). The flow hook owns the four outcomes; this
+  // block owns what each one MEANS to the user:
+  //   needs-save  → ask (the summary reads STORED bytes, so unsaved edits would be missing from it)
+  //   no-changes  → tell them (the action was ASKED for; silence would read as a broken button, and
+  //                 dispatching anyway is what makes the model invent a change that is not there)
+  //   dispatched  → nothing here; the Assistant renders the result
+  //   failed      → tell them, without server detail (ADR-019)
+  // -------------------------------------------------------------------------
+  const [changeSummaryMessage, setChangeSummaryMessage] = React.useState<string | null>(null);
+  const [changeSummarySavePrompt, setChangeSummarySavePrompt] = React.useState(false);
+  // The generated report, held so the Save menu can offer to append it. Null until a summary runs —
+  // which is what gates the toggle: there is no appendix to promise before one exists.
+  const [revisionReportResult, setRevisionReportResult] = React.useState<{
+    summary: string;
+    changes: Array<{ kind: string; location: string; description: string }>;
+    /** When the tracked changes were READ — not when the save happens. The report states the version
+     *  it describes, and those two moments differ (a summary generated now can be appended later). */
+    generatedAt: string;
+    /** The version the summary was generated FROM — captured at read time for the same reason. */
+    generatedFromVersionId: string | null;
+  } | null>(null);
+  const [includeRevisionReport, setIncludeRevisionReport] = React.useState(false);
+  // nda-r1 task 041 (client wiring 2026-09-07) — "Include review summary page". Opt-in per save, like
+  // the revision report: an appendix the user asks for, never one a save adds on its own.
+  const [includeSummaryPage, setIncludeSummaryPage] = React.useState(false);
+
+  const { running: changeSummaryRunning, requestSummary } = useComposeChangeSummary({
+    isEditorDirty: () => editorRef.current?.isDirty() ?? false,
+    pull: pullAnnotations,
+    dispatch: async changesText => {
+      // The bindingId is read at CLICK time from the activation registry rather than held in state:
+      // `useComposeToolbarActivation` fills it in asynchronously after the capabilities fetch, and a
+      // snapshot taken at mount would be the empty stub forever.
+      const bindingId = getComposeAiToolbarActions().find(a => a.id === 'compose-summarize-word-changes')?.bindingId;
+      if (!bindingId) {
+        // The catalog Binding is not deployed in this environment. Honest and specific — the generic
+        // failure copy would send someone hunting for a bug in the document instead.
+        throw new Error('binding-not-deployed');
+      }
+      if (!enqueueComposeAction) throw new Error('no-enqueue');
+      const dispatched = await enqueueComposeAction({
+        id: `compose-summarize-word-changes#${Date.now()}`,
+        bindingId,
+        args: { slots: { changesText } },
+      });
+
+      // Capture the ledgered {summary, changes[]} so the Save menu can offer the appendix. Taken from
+      // the dispatch RESULT rather than re-read from a ledger or re-derived: this is the exact payload
+      // the Assistant rendered, so the appendix and the on-screen summary cannot disagree.
+      const payload = (dispatched as { result?: unknown } | undefined)?.result as
+        | { summary?: unknown; changes?: unknown }
+        | undefined;
+      if (payload && typeof payload.summary === 'string' && Array.isArray(payload.changes)) {
+        setRevisionReportResult({
+          summary: payload.summary,
+          changes: payload.changes as Array<{ kind: string; location: string; description: string }>,
+          generatedAt: new Date().toISOString(),
+          generatedFromVersionId: state.versionId ?? null,
+        });
+      }
+    },
+  });
+
+  const runChangeSummary = React.useCallback(async (): Promise<void> => {
+    const speId = state.documentRef?.speDriveItemId;
+    if (!speId || !effectiveDriveId || !tenantId) {
+      setChangeSummaryMessage(
+        'This document has not been saved to the DMS yet, so there are no tracked changes to read.'
+      );
+      return;
+    }
+
+    setChangeSummaryMessage(null);
+    const outcome = await requestSummary({ documentSpeId: speId, driveId: effectiveDriveId, tenantId });
+
+    switch (outcome.kind) {
+      case 'needs-save':
+        setChangeSummarySavePrompt(true);
+        return;
+      case 'no-changes':
+        setChangeSummaryMessage('This document has no tracked changes or comments to summarise.');
+        return;
+      case 'failed':
+        setChangeSummaryMessage(outcome.message);
+        return;
+      case 'dispatched':
+        // The Assistant renders the summary. Nothing to say here — a banner would duplicate it.
+        return;
+    }
+  }, [state.documentRef?.speDriveItemId, effectiveDriveId, tenantId, requestSummary]);
+
+  const handleSummarizeChanges = React.useCallback((): void => {
+    void runChangeSummary();
+  }, [runChangeSummary]);
+
+  // "Save and summarise" must actually summarise. `requestSave` is fire-and-forget (it can route
+  // through the name modal), so completion is observed the way the rest of this file observes it —
+  // a bump in `state.saveSuccessToken` — and the summary resumes on that edge.
+  //
+  // The name-modal detour is unreachable HERE by construction: `runChangeSummary` refuses unless the
+  // document already has an speDriveItemId, and a document that is already in the DMS never needs a
+  // name. So "user cancels the name modal, leaving this armed" cannot strand the flag.
+  const resumeSummaryAfterSaveRef = React.useRef(false);
+  const lastSeenSaveTokenRef = React.useRef(state.saveSuccessToken);
+
+  React.useEffect(() => {
+    const token = state.saveSuccessToken;
+    const previous = lastSeenSaveTokenRef.current;
+    lastSeenSaveTokenRef.current = token;
+
+    if (!resumeSummaryAfterSaveRef.current || token === previous) return;
+    resumeSummaryAfterSaveRef.current = false;
+    void runChangeSummary();
+  }, [state.saveSuccessToken, runChangeSummary]);
+
+  // A failed save must DISARM the resume — otherwise the next unrelated successful save would fire a
+  // summary the user never asked for at that moment.
+  React.useEffect(() => {
+    if (state.errorMessage) resumeSummaryAfterSaveRef.current = false;
+  }, [state.errorMessage]);
+
   // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
   // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
   // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
@@ -1806,8 +1947,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             )
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
-      // `let` (UAT-11): the transient-create gate below may REPLACE this with a save-time retry result.
-      let saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+      // `saveContainerId` DELETED — issue #858 client cutover (2026-09-01). It read
+      // `state.documentRef.containerId ?? containerIdRef.current` and was sent on the create-on-save
+      // body; the server no longer accepts a container from the caller (the field is gone from
+      // SaveComposeDocumentRequest) and derives it from the session-bound matter, else the acting
+      // user's business unit. See the deleted gate below for why sending it was not the worst half.
       // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
       // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
       // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
@@ -1869,42 +2013,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         dispatch({ kind: 'saveFailed', errorMessage });
       };
 
-      if (isTransientCreate) {
-        let resolvedContainerId = saveContainerId;
-        // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
-        // useEffect([]) — if Xrm wasn't ready, a transient 401, or a Dataverse fault made it fail,
-        // `containerId` stays undefined and the OLD gate emitted a DISHONEST "your BU has no storage
-        // container configured" for what may be a correctly-configured BU. RETRY here (if the host
-        // supplied a resolver) and only claim "no container configured" when the query actually
-        // confirms the BU has none — otherwise say honestly that we couldn't determine it.
-        let containerOutcome: 'resolved' | 'no-container' | 'unavailable' | 'unknown' = resolvedContainerId
-          ? 'resolved'
-          : 'unknown';
-        if (!resolvedContainerId && resolveContainerRef.current) {
-          try {
-            const retry = await resolveContainerRef.current();
-            containerOutcome = retry.outcome;
-            if (retry.containerId) {
-              resolvedContainerId = retry.containerId;
-              containerIdRef.current = retry.containerId; // cache for subsequent saves this mount
-            }
-          } catch {
-            containerOutcome = 'unavailable';
-          }
-        }
-        if (!resolvedContainerId) {
-          const errorMessage =
-            containerOutcome === 'no-container'
-              ? 'Cannot save this new document — your Business Unit has no storage container configured. ' +
-                'Contact an administrator to set the container on your Business Unit.'
-              : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
-                "Cannot save this new document yet — we couldn't determine your storage container " +
-                '(the Dataverse context may still be loading). Please try again in a moment.';
-          failEarly(errorMessage);
-          return;
-        }
-        saveContainerId = resolvedContainerId;
-      } else if (!saveDriveId) {
+      // ══ THE PRE-SAVE CONTAINER GATE IS DELETED — issue #858 client cutover (2026-09-01) ═════════
+      //
+      // What stood here: resolve the acting user's BU container client-side (mount value, then a
+      // save-time retry through the host's `resolveContainer`), and REFUSE the save when it came back
+      // empty — "your Business Unit has no storage container configured" / "we couldn't determine your
+      // storage container".
+      //
+      // Why it goes, and why deleting it is a FIX rather than only a cleanup. The server now derives
+      // the container itself (session-bound matter, authorized, else the acting user's business unit)
+      // and `SaveComposeDocumentRequest.ContainerId` no longer exists, so the resolved value had
+      // nowhere to go. But the gate was worse than redundant: it ran the SAME derivation on the
+      // client, over a browser Xrm context that can be slow, unavailable, or 401 at mount — and on
+      // failure it BLOCKED a save the server would have completed. A client-side pre-check for a
+      // decision the server makes authoritatively can only ever produce false refusals; it cannot
+      // produce a save that would otherwise have failed.
+      //
+      // The honest failure is not lost, it moved to the side that actually knows: an underivable
+      // container returns the `storage-failed` outcome (BuildContainerFailedResult), which the outcome
+      // gate below renders — with the create-specific copy that names the admin action, so the one
+      // genuinely actionable thing the deleted gate said survives its deletion.
+      if (!isTransientCreate && !saveDriveId) {
         failEarly('Cannot save — SPE drive configuration missing.');
         return;
       }
@@ -2083,7 +2212,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // G7 (task 022): `transientKey` = the transient dedup key (repeated create-on-save → ONE record);
           // `forkNew` = the Save-New fork flag (skips dedup → a deliberately new record).
           const createCommon = {
-            containerId: saveContainerId,
+            // `containerId` DELETED (#858, 2026-09-01) — the server derives the container from the
+            // session-bound matter (authorized first) or the acting user's business unit, and the wire
+            // field is gone from SaveComposeDocumentRequest. Sending it would now be ignored at best.
             tenantId,
             sessionId: state.sessionId,
             // FR-07(a) (task 012): a Save-New fork sends the uniquified name so the SPE PUT-by-path
@@ -2186,6 +2317,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // the op-log path it re-anchors. The server prefers its own save-stamp when this session has
             // already saved — this covers the first-save-of-a-pre-existing-item gap.
             baselineETag: state.etag ?? undefined,
+            // R8 UAT item 8 — the "Include revision report" appendix. Sent on ALL THREE replace shapes
+            // (it rides `replaceCommon` rather than one branch) because the appendix is orthogonal to
+            // which authoring path the save takes. Undefined unless the user opted in AND a summary
+            // exists; the server additionally appends nothing when the report carries nothing to say.
+            revisionReport:
+              includeRevisionReport && revisionReportResult
+                ? {
+                    summary: revisionReportResult.summary,
+                    changes: revisionReportResult.changes,
+                    documentName: state.documentRef.fileName ?? null,
+                    documentVersion: revisionReportResult.generatedFromVersionId,
+                    asOf: revisionReportResult.generatedAt,
+                  }
+                : undefined,
+            // nda-r1 task 041 — the NDA-REVIEW Summary Page appendix. Rides `replaceCommon` for the same
+            // reason the revision report does: the appendix is orthogonal to which authoring path the
+            // save takes. Gated ONLY on the user's opt-in — deliberately NOT on findings being non-empty,
+            // because a clean NDA is itself a finding and the page says so.
+            summaryPage: includeSummaryPage ? (summaryPageInputRef.current ?? undefined) : undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -2296,8 +2446,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               payload.outcome === 'partially-recorded'
                 ? 'Partly saved — the document was stored, but not everything was recorded. Reload the ' +
                   'document to see what landed, then redo anything missing.'
-                : 'Not saved — the server accepted the request but could not store the document. Your ' +
-                  'changes are still here — try again, and contact an administrator if it keeps failing.',
+                : isTransientCreate
+                  ? // #858 (2026-09-01): the create-specific copy that carries the ADMIN ACTION the
+                    // deleted client-side container gate used to name. On a first save the dominant
+                    // cause of `storage-failed` is exactly what BuildContainerFailedResult reports —
+                    // no container could be derived for this draft — and "contact an administrator"
+                    // is useless without saying what to ask them for. Deliberately hedged ("usually
+                    // means"): the server does not tell us WHICH of its two causes fired, and naming
+                    // one as certain would be the dishonest half of the gate we just removed.
+                    "Not saved — this new document couldn't be stored. That usually means your " +
+                    'Business Unit has no storage container configured; ask an administrator to set ' +
+                    'one. Your changes are still here — nothing was lost.'
+                  : 'Not saved — the server accepted the request but could not store the document. Your ' +
+                    'changes are still here — try again, and contact an administrator if it keeps failing.',
           });
           return;
         }
@@ -2620,6 +2781,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       effectiveDriveId,
       tenantId,
       onCreateOnSaveComplete,
+      // 2026-09-07 — these three were MISSING, and their absence was a live bug, not a lint nit. The
+      // save body reads all of them, so without them here the memoized closure kept the values from the
+      // render when the OTHER deps last changed: ticking an appendix toggle re-renders but does not
+      // recreate this callback, so the save still saw `false`. "Include revision report" (R8 item 8)
+      // shipped with exactly this defect — the toggle appeared to work and the appendix never rode the
+      // request. `reviewSummaryFindings`/`reviewSummaryOverallRisk` cannot be listed (declared below
+      // this callback) and go through `summaryPageInputRef` instead, the same way `hasReviewFindingsRef`
+      // already handles that ordering.
+      includeRevisionReport,
+      revisionReportResult,
+      includeSummaryPage,
     ]
   );
 
@@ -2986,6 +3158,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // round-5 #2) `overallRisk` prop — NOT re-introducing the removed banner, just completing the data
   // path so it is available/correct rather than silently dropped.
   const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
+  // nda-r1 t041 — keep the Summary Page payload current for the earlier-declared save closure. Null when
+  // no review has run; a CLEAN review (zero findings) is NOT null, because the page's whole point is that
+  // "no material deviations were found" is itself a finding worth writing down.
+  React.useEffect(() => {
+    summaryPageInputRef.current = hasReviewFindingsRef.current
+      ? buildSummaryPageInput(reviewSummaryFindings, reviewSummaryOverallRisk, deriveOverallRisk(reviewSummaryFindings))
+      : null;
+  }, [reviewSummaryFindings, reviewSummaryOverallRisk]);
   // Task 032 (128KB budget, Leg B) — see `ComposeReviewFindingsDegraded` JSDoc for the full rationale.
   const [reviewFindingsDegraded, setReviewFindingsDegraded] = React.useState<ComposeReviewFindingsDegraded | null>(
     null
@@ -3058,7 +3238,82 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [bffBaseUrl, state.sessionId, memoNegativeFromError]);
 
   /**
-   * "Generate memo" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
+   * "Generate" — the WRITE half of the Review Summary (R8 §GAPS-5 Phase 3).
+   *
+   * Until this existed, `POST .../review-memo` had NO production caller anywhere in the repo: the read
+   * half was built against it as though it were already being called. The consequence was that both
+   * toolbar actions always hit the 404 "generate first" banner, telling the user to do a thing the UI
+   * offered no way to do. The feature could not succeed for anyone.
+   *
+   * POSTs the panel's live findings, then READS BACK before reporting success. The read-back is not
+   * ceremony: because `PersistReviewMemoAsync` leaves `OutputTypeId` null, the row is found by matching
+   * its display name, so "written" and "findable" are genuinely separate facts. Confirming both here
+   * surfaces a mismatch immediately, instead of at Download time as a mystery "no Review Summary yet".
+   */
+  const handleCreateReviewSummary = React.useCallback(async (): Promise<void> => {
+    if (!bffBaseUrl || !state.sessionId || memoActionInFlight) return;
+
+    // A summary of nothing is itself the defect (the rule R8 item 8 established for the change
+    // summary). Refuse locally with the actionable message rather than round-tripping to earn the
+    // server's identical 400 — while still handling that 400, since a race can empty the findings.
+    const built = buildGenerateReviewSummaryRequest(
+      reviewSummaryFindings,
+      reviewSummaryOverallRisk,
+      deriveOverallRisk(reviewSummaryFindings)
+    );
+    if (built.request.sections.length === 0) {
+      setMemoActionMessage(MEMO_NO_FINDINGS_MESSAGE);
+      return;
+    }
+
+    setMemoActionInFlight(true);
+    setMemoActionMessage(null);
+    try {
+      await authenticatedFetch(
+        `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/review-memo`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(built.request),
+        }
+      );
+
+      const readBack = await fetchReviewMemo();
+      if (readBack.kind === 'negative') {
+        // Persisted, then not found by the read path. Do NOT report success — say exactly that, since
+        // the generic "generate first" banner would send the user round the same loop forever.
+        setMemoActionMessage(
+          'The Review Summary was saved but could not be read back. Try again; if it recurs, the saved ' +
+            'record may not be categorised as expected.'
+        );
+        return;
+      }
+
+      const dropped =
+        built.droppedCount > 0
+          ? ` ${built.droppedCount} finding(s) were left out because they carry no quoted text.`
+          : '';
+      setMemoActionMessage(buildReviewSummaryGeneratedMessage(readBack.memo.memo.sectionCount) + dropped);
+    } catch (err) {
+      const negative = await memoNegativeFromError(err);
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not create the Review Summary.')
+      );
+    } finally {
+      setMemoActionInFlight(false);
+    }
+  }, [
+    bffBaseUrl,
+    state.sessionId,
+    memoActionInFlight,
+    reviewSummaryFindings,
+    reviewSummaryOverallRisk,
+    fetchReviewMemo,
+    memoNegativeFromError,
+  ]);
+
+  /**
+   * "Download (.docx)" — downloads the SERVER-RENDERED .docx (title, doc/analysis metadata, per-section
    * table) via the docx READ endpoint. A blob download, not a client-side render — the .docx byte
    * authoring stays server-side (ComposeDocumentRenderer), matching every other Compose document write.
    */
@@ -3076,7 +3331,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
       const match = /filename\*?=(?:UTF-8''|")?([^";]+)"?/i.exec(disposition);
-      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary Memo.docx';
+      const fileName = match?.[1] ? decodeURIComponent(match[1]) : 'Review Summary.docx';
 
       const url = URL.createObjectURL(blob);
       try {
@@ -3093,7 +3348,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // Split negatives (agreements-r1 UAT round-1 #2): 404/no-memo → "generate first";
       // 400/session-not-bound → "promote to an Analysis first" (never a dead-end "Failed (400)").
       const negative = await memoNegativeFromError(err);
-      setMemoActionMessage(negative ?? (err instanceof ApiError ? err.message : 'Could not generate the review memo.'));
+      setMemoActionMessage(
+        negative ?? (err instanceof ApiError ? err.message : 'Could not download the Review Summary.')
+      );
     } finally {
       setMemoActionInFlight(false);
     }
@@ -3120,7 +3377,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       setMemoEmailBody(buildReviewMemoEmailBody(outcome.memo));
       setMemoEmailOpen(true);
     } catch (err) {
-      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the review memo.');
+      setMemoActionMessage(err instanceof ApiError ? err.message : 'Could not load the Review Summary.');
     } finally {
       setMemoActionInFlight(false);
     }
@@ -3258,6 +3515,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — carry the FR-05 discrete fields, which
+          // projectLedgerFindingsToAdvisoryComments already recovered from the ledger payload above
+          // and this mapping silently dropped. The header comment on this materializer claimed
+          // flaggedClause/assessment restored "intact"; that was true of the gutter and false here.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         })),
       ]);
       setReviewSummaryFailedCount(prev => prev + result.failed.length);
@@ -3639,6 +3902,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           riskLevel: item.riskLevel,
           explanation: item.explanation,
           standardRef: item.standardRef,
+          // R8 §GAPS-5 Phase 1 — the SSE event carries these (PaneEventTypes) and the gutter mapping
+          // 30 lines above already consumes them; only this summary mapping dropped them, so the panel
+          // string-parsed a fused blob that post-split payloads no longer mark up.
+          flaggedClause: item.flaggedClause,
+          assessment: item.assessment,
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
@@ -4957,6 +5225,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             onClearRedlineError={() => editorRef.current?.clearRedlineError()}
             composeDraftError={composeDraftError}
             memoActionMessage={memoActionMessage}
+            changeSummaryMessage={changeSummaryMessage}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
@@ -5008,6 +5277,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void openInWordFlushed('desktop');
               }}
               wordActionsDisabled={wordActionsDisabled}
+              // R8 UAT item 8 — the Word-menu "Summarise changes" trigger.
+              onSummarizeChanges={handleSummarizeChanges}
+              // R8 UAT item 8 — the Save-menu appendix toggle. Both are undefined until a summary has
+              // been generated, which is what keeps the menu item hidden until there is a report.
+              includeRevisionReport={revisionReportResult ? includeRevisionReport : undefined}
+              onIncludeRevisionReportToggle={revisionReportResult ? setIncludeRevisionReport : undefined}
+              includeSummaryPage={reviewSummaryFindings.length > 0 ? includeSummaryPage : undefined}
+              onIncludeSummaryPageToggle={reviewSummaryFindings.length > 0 ? setIncludeSummaryPage : undefined}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
               // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also
@@ -5089,6 +5366,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 // persisted review-memo record server-side (render-from-persisted); the negative "no
                 // memo yet" state surfaces via the memoActionMessage banner above, never a silent
                 // empty export.
+                onCreateReviewSummary: () => void handleCreateReviewSummary(),
                 onGenerateMemo: () => void handleGenerateMemo(),
                 onEmailMemo: () => void handleEmailMemo(),
                 isMemoActionInFlight: memoActionInFlight,
@@ -5192,6 +5470,32 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           void forceCloseAndAcquire();
         }}
         onCancel={discardAndCancel}
+      />
+
+      {/* R8 UAT item 8 — the unsaved-changes question (owner requirement, 2026-09-03).
+          `pull-annotations` reads the document's STORED bytes, so a summary generated now would
+          silently omit whatever is unsaved. That is tolerable in a panel and a defect in a memo the
+          user attaches to an email, so we ask rather than proceed.
+
+          Confirm SAVES and then re-runs; Cancel abandons. The flow hook never saves on the user's
+          behalf — that decision lives here, with the user, which is why the hook returns
+          `needs-save` instead of handling it. */}
+      <ConfirmModal
+        open={changeSummarySavePrompt}
+        busy={changeSummaryRunning}
+        title="Unsaved changes"
+        message="There are unsaved changes. The summary is generated from the last saved version, so anything unsaved would be left out of it. Save before generating the summary?"
+        confirmLabel="Save and summarise"
+        cancelLabel="Cancel"
+        onClose={() => setChangeSummarySavePrompt(false)}
+        onConfirm={() => {
+          setChangeSummarySavePrompt(false);
+          // Arm the resume BEFORE requesting the save, so a synchronous completion cannot land
+          // between the two. Deliberately not a silent save inside the flow hook: the user has now
+          // asked for it explicitly, which is the whole point of the prompt.
+          resumeSummaryAfterSaveRef.current = true;
+          requestSave('version');
+        }}
       />
 
       {/* FR-C05 (r8 task 052) — the stale-target question. NOT an ADR-041 Gate (task-050 assessment

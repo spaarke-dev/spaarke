@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="145" project="unified-access-control-r2">
+  <metadata>
+    <title>ACTIVELY TRACKED (owner) — the Secure Record Owner role must hold the privileges every child re-own needs, in every environment: verify word-add-in-r1 task 082's grant, extend the ONE codified set to every table UAC-r2 re-owns, standing census clause, new-environment provisioning step</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 11; GitHub #1046)</phase>
+    <gate>Steps 1-2 (tracking, census of tables) startable now. Steps 3-6 (live extension grant, census clause, pipeline) wait for word-add-in-r1 task 082 to land its codified JSON set, its script, its guide rows and its five-table grant (#1046) — or for the owner's decision under the first escalation trigger. Step 5 (census clause retarget) and the named-team verification wait for task 144 (the role's holder moves to 144's named team; 144 rewrites SecureBuRoleDepthAssertion clause 2).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a live Dataverse security role on the secure-isolation boundary; tags auth, security, dataverse; adds a standing check and a provisioning step.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Least-privilege security-role work on the isolation anchor: an over-grant recreates the hole the Secure Record BU exists to close, an under-grant makes every secure child write fail closed. Cross-project coordination with word-add-in-r1 task 082 on one shared live role.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SecureBuRoleDepthAssertion*.cs after task 144 (144 rewrites clause 2 in the same file), extends the codified set file owned by word-add-in-r1 task 082, and changes a live role shared with 082. Tasks 146, 148 and 149 depend on this one.</parallel-reason>
+    <deps>144 (census clause + named-team verification); external: word-add-in-r1 task 082 / #1046 (codified set, script, guide rows, five-table grant)</deps>
+    <tags>dataverse, auth, security, security-role, provisioning, testing</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+    <origin>Owner round 2 item 11 (2026-09-30): "The Secure Record Owner role's missing child-table privileges must be ACTIVELY TRACKED as a UAC-r2 issue and task, not left in the peer's notes." Peer record: word-add-in-r1 note 080 §6.12, task 082, GitHub #1046, PR #1045. Agreed split recorded in session27 note "Peer follow-through".</origin>
+  </metadata>
+
+  <prompt>Dataverse refuses to make a team the owner of a row unless the team's role holds the required privilege on that row's table. The Secure Record Owner role covers only the root tables and sprk_document in dev (and only the three root tables in any environment built from the guide), so every child of a secure record that is re-owned to the secure team fails closed. Word-add-in-r1 task 082 grants the five tables its Office writers and the owner named need and builds the ONE codified set. This task makes sure that happens (it is the owner's tracker), extends the set to every other table UAC-r2's C10 part 2 re-owns, adds the standing census check, and makes every new environment end up with the same role.</prompt>
+
+  <role>SPAARKE platform developer on the secure-record isolation boundary. Least-privilege discipline: every privilege added names the writer that needs it and is proven by a recorded refusal before and success after.</role>
+
+  <goal>(1) Word-add-in-r1 task 082's grant (Read at User depth on sprk_document, sprk_todo, sprk_communication, sprk_event, sprk_memo) is verified live and recorded, or — if 082 has not landed — the owner has decided who applies it and it is applied once; (2) the ONE codified set (082's JSON data file) lists every child table that any UAC-r2 writer (task 146 census, 147 client-created children, 148 backfill/transitions) can assign to the secure team, each with its reason, and the live role holds Read at User depth on every one of them, and nothing beyond what a recorded failure forced; (3) the NFR-05 census has a clause that fails naming any table in the set the role lacks, reading the same file; (4) the role is held only by task 144's named owner team; (5) a new environment gets the Secure BU, the named owner team, the role and the full set through the provisioning pipeline or runbook step with no hand-edited list; (6) #1046 is closed once, citing both tasks.</goal>
+
+  <context>
+    <background>🔴 THIS GAP HAD TWO OWNERS AND THEREFORE NONE. Word-add-in-r1's note 080 §6.12 said "UAC-r2's C10 adds the child-table privileges"; UAC-r2's session-27 note said "fails closed until UAC C10 lands". The owner ruled 2026-09-30 that it is ACTIVELY TRACKED in UAC-r2 — this task. Word-add-in-r1 then filed GitHub #1046 and authored task 082 (branch work/spaarkeai-word-add-in-r1, status not-started 2026-09-30), stating ownership moved to it "at the owner's instruction". The two sessions AGREED a split (session27 note, "Peer follow-through"; 082 background "Agreed with unified-access-control-r2"):
+- 082: grants Read at User depth on sprk_todo, sprk_communication, sprk_event, sprk_memo (sprk_document already present in dev) on the EXISTING role; creates the ONE codified set as a machine-readable JSON DATA FILE (one entry per table: logical name, privilege name, the writer or owner decision that requires it) plus `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (reads the file, derives ids from metadata, dry-run default, add-only, `-Verify`); edits guide §5.1 table and child-entities row, §5.3 `$securable`, §5.4 `$keep`, §7 check 1 to read or point to the file; puts the drift to the owner; does NOT edit `SecureBuRoleDepthAssertion*`.
+- UAC-r2: owns `SecureBuRoleDepthAssertion*` (144 rewrites clause 2 for the named team; THIS task adds the "role lacks Read on a codified table" clause); extends the codified set to every table its C10 part-2 tasks re-own (tasks 146/147/148 treat this task as the owner of those privileges — 148's escalation: "the fix belongs in 145's codified set").
+This task is UAC-r2's tracker for the whole gap: it verifies 082 rather than duplicating it, and does everything 082 does not.
+
+THE PREMISE THE GUIDE STILL STATES IS FALSE. `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md:161-168` grants `Read` at User depth on `sprk_project`, `sprk_matter` and `sprk_workassignment` only, and `:193` says "Anything on child entities — Nothing assigns children to this team. Granting here would be privilege without a purpose." Record-first ownership (`Services/Dataverse/RecordOwnershipResolver.cs:144-180`, wired for Office on PR #1045) and the C10 part-2 child re-own both assign children to the secure team. The guide's strip script keeps only the three root Reads (`:252`, `$keep`), and its §7 check 1 expects "exactly 3" (`:353`) — so re-running the documented procedure REMOVES whatever child privilege dev has. (082 fixes these rows; this task verifies they read the codified file.)
+
+LIVE ROLE, measured by the peer 2026-09-30 (spaarkedev1, role e4ebabd9-b4a0-f111-aaac-000d3a99d1d7, 36 privileges): sprk_document all 8 at User; sprk_todo, sprk_communication, sprk_event, sprk_memo NONE; the three roots all 8 at User; the SharePoint four at Global. The drift is the 7 non-Read privileges on each of the 4 root and document tables (28) plus the SharePoint four — 082 puts it to the owner.
+
+THE TABLE SET IS NOT JUST THE FIVE THE OWNER NAMED. design.md §5.1d (`design.md:552-603`) enumerates 18 business entities with a lookup to sprk_project (agreement, analysis, billingevent, budget, communication, communicationthread, document, event, externalrecordaccess, invoice, kpiassessment, memo, reportcard, servicerequest, spendsignal, spendsnapshot, todo, workassignment) plus `email`; sprk_matter and sprk_workassignment have their own child sets. The required set is exactly the set of tables that any writer can assign to the secure team — derived from the writers (task 146's census, 147, 148), not from this paragraph.
+
+NEW ENVIRONMENTS. No provisioning code creates the Secure Record BU, the owner team or this role: grep of `src/server/services` for `Secure Record` returns nothing, and `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` does not mention it. Security roles ship in the Tier-1 base solution (`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/CanonicalSolutionCatalog.cs:44`), but a solution cannot create a role inside a child BU nor assign it to a team, and the guide requires the role to be created in the Secure BU (`SECURE-PROJECT-ENVIRONMENT-SETUP.md:213-215`). Neither 082 nor any other task puts this setup into the provisioning pipeline — this task does.</background>
+    <relevant-files>
+      <file role="modify">the codified set JSON data file created by word-add-in-r1 task 082 (path handed over by 082 — extended here with the tables UAC-r2 re-owns; never copied)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (§12 operator runbook, if the runbook route is chosen)</file>
+      <file role="modify">the customer-provisioning pipeline step that runs the setup for new environments (identify in step 6: a control-plane handler under src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ or the operator runbook §12 of SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-145-secure-owner-role-privileges.md</file>
+      <file role="read">scripts/Set-SecureRecordOwnerRolePrivileges.ps1 (word-add-in-r1 task 082; extended only if the JSON extension needs a code change)</file>
+      <file role="read">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md (§5.1/§5.3/§5.4/§7 rows owned by 082; verified here, not re-edited)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="read">projects/unified-access-control-r2/design.md</file>
+      <file role="read">projects/unified-access-control-r2/tasks/146-server-child-writers-secure-owner.poml, 147 (client-created children), 148-secure-child-backfill-and-transitions.poml (the tables they re-own)</file>
+      <file role="read">projects/spaarkeai-word-add-in-r1/tasks/082-secure-owner-role-child-privileges.poml (on branch work/spaarkeai-word-add-in-r1; worktree C:\code_files\spaarke-wt-spaarkeai-word-add-in-r1)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: every privilege added. Default is `Read` at User (Basic) depth. Any other access type (Append, AppendTo, Assign, …) or depth is added ONLY when a recorded Dataverse refusal names it for a real re-own of that table; the refusal text is recorded in the task note. Never Business Unit, Deep or Global depth (guide §5.1 and §8).</constraint>
+    <constraint source="project">Scope: the table set. Each table in the codified set names the writer (file:line) or the C10 part-2 task that assigns rows of it to the secure team. A table with neither is not added. A writer that can assign a table not in the set is a defect this task fixes by adding the table.</constraint>
+    <constraint source="project">Scope: the live role. Do NOT remove or narrow any existing privilege, including the drift (28 non-Read privileges on the root and document tables, and the SharePoint four). Removal is an owner decision — 082 asks it; if 082 has not, this task asks, with evidence and a recommendation. Never ask twice.</constraint>
+    <constraint source="project">Scope: the role's holders. The role is held by exactly one principal — task 144's named owner team. Never a user, never another team, never the Secure BU default team; never add a broad role to the owner team (guide §5.1, §8). SecureBuRoleDepthAssertion clauses 2 and 3 stay green.</constraint>
+    <constraint source="coordination">Scope: the codified set, the script and the guide rows. ONE set: word-add-in-r1 task 082's JSON data file. This task EXTENDS that file (adds entries) and applies it with 082's script; it never creates a second list, a second script, or a copy of the list inside a test, a doc or a handler. The guide §5.1/§5.3/§5.4/§7 rows are 082's; this task verifies they read the file and edits them only if 082 has not (see the first escalation trigger).</constraint>
+    <constraint source="coordination">Scope: every live write. Before any live write, read 082's POML status in the word-add-in-r1 worktree and message the word-add-in-r1 session. If 082 has applied its grant, this task VERIFIES it against the codified set and adds only the remainder; it never re-applies or reverts 082's changes. Never race the peer on the shared role.</constraint>
+    <constraint source="project">Scope: codification mechanics. Privilege ids and names are derived from metadata (`EntityDefinitions(...)/Privileges`), never hard-coded GUIDs (guide §5.3 casing warning). The apply is dry-run by default, idempotent, add-only, and pins the environment URL explicitly (guide §2); auth by an explicit-URL `az` token — no new client secret (ADR-028 A4).</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: enforcement. No Dataverse plugin. The standing check is the NFR-05 live assertion family run as a MANUAL gate — no Dataverse in CI. The census clause's evaluation logic is unit-tested with seeded census input (no Dataverse).</constraint>
+    <constraint source="owner D-13">Scope: the new-environment step. It runs per customer environment against that environment's Secure BU and named team; it never assumes a shared app registration or a fixed role id.</constraint>
+    <constraint source="project">Scope: live probes. Every probe record created to prove a grant is deleted afterwards and the deletion recorded. Probes use existing records/test users in their current BU — no user relocation.</constraint>
+    <constraint source="ADR-038">Scope: tests added or changed. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no ctor null-check tests; keep the census tests at their KEEP path (tests/integration/auth/UnifiedAccessControl).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/patterns/api/provisioning-pipeline.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Tracking: read 082's status in the word-add-in-r1 worktree, #1046, and PR #1045's state; message the word-add-in-r1 session with this task's plan. Re-measure the live role (privileges, depths, holders) — do not inherit the 2026-09-30 list. Record both in the task note. If 082 has not started or is stalled, fire the first escalation trigger now — do not wait.</step>
+    <step order="2">Enumerate the tables any writer can assign to the secure team: Office I-6 writers (082's list), the #1034 writers, and the C10 part-2 scope (tasks 146, 147, 148 POMLs; design.md §5.1d; the matter and work-assignment child sets from live `OneToManyRelationships`). Record writer file:line (or task id) per table.</step>
+    <step order="3">Once 082 has landed: verify its five-table grant live (depth, holder) and that the guide rows read the codified file. For each ADDITIONAL table from step 2: negative control first — a probe re-own of a row of that table to the secure owner team is refused and the refusal names the missing privilege (record it). Remember the principal-privilege cache lags (guide §7: stable across 3 polls, cross-check privilegeCount).</step>
+    <step order="4">Extend 082's JSON file with the additional tables (reason per entry); run 082's script dry run and record the plan; apply; re-run each probe until stable; read back `owningteam`; delete the probes.</step>
+    <step order="5">After task 144: add the census clause (in `SecureBuRoleDepthAssertion`, reading the same JSON file): the role lacks the required privilege on any table in the set → FAIL naming the table; the role is held by anything but the named team → FAIL (clause 3, as 144 retargets it). Seed both ways in unit tests and run it by hand against dev; record both outputs.</step>
+    <step order="6">New environments: add the setup (Secure BU, named owner team per task 144, role created in the Secure BU, privileges from the codified file via the script, role assigned to the named team, default team holding no role) to the provisioning pipeline — a control-plane handler step or an operator-runbook step in SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §12 — per the owner's answer under the pipeline escalation trigger. Task 150's FLS setup joins the same step (whichever task lands first creates it; the other extends it).</step>
+    <step order="7">Drift: record the owner's answer from 082; if 082 did not ask, put the drift decision to the owner as a 🔔 with a recommendation and record the answer.</step>
+    <step order="8">Update TASK-INDEX.md (`✅ [done]`) and the POML status; close #1046 once, coordinating with word-add-in-r1 so it cites both 082 and this task; write the task note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>OPEN OWNER QUESTION — who applies the five-table grant. The owner told UAC-r2 to actively track this gap; word-add-in-r1 then recorded ownership of the same change in its task 082 "at the owner's instruction". If 082 has not landed by the time step 3 is due, or is stalled, STOP and ask the owner. Recommendation: keep 082 as the implementer (the agreed split, and PR #1045's Office To Dos depend on it) with this task tracking it to closure; if the owner wants it done now, this task applies 082's scope under 082's own contract (JSON data file, script, guide rows) with the peer's agreement, so nothing is done twice.</trigger>
+    <trigger>Word-add-in-r1 task 082 is in progress or plans a set that conflicts with step 2's table list when this task starts: STOP before any live write and reconcile with the peer (and the owner if they disagree); do not race the peer on a shared role.</trigger>
+    <trigger>A probe re-own is refused naming anything other than `Read` (e.g. AppendTo on the parent, Assign): record the exact message and escalate before granting — the guide's evidence says Read alone suffices, and a different answer changes the least-privilege design.</trigger>
+    <trigger>Removing or narrowing ANY existing privilege on this role (the drift) — owner decision under CLAUDE.md §6.</trigger>
+    <trigger>OPEN OWNER QUESTION — pipeline route. Adding the setup to the control-plane pipeline requires a new handler id or changes the handler DAG owned by customer-provisioning-orchestration; the alternative is an operator-runbook step in SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §12. Recommendation: a control-plane handler step (a runbook step is the hand-edited path that produced today's drift), coordinated with customer-provisioning-orchestration — surface the design to the owner before building it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The only procedure that sets this role is hand-run PowerShell in `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §5.3-§5.4 (`:217-257`). Grep of `src/server/services` for `Secure Record` returns nothing; grep of `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` for `Secure Record` returns nothing. Word-add-in-r1 task 082 creates the JSON codified set and `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (not yet on this branch). `SecureBuRoleDepthAssertion.cs:67` pins the role name; its clauses (2 at `:240-258`, 3 after it) check holders, not table coverage.</existing>
+    <extension>Everything here extends something existing: 082's JSON file (entries added), 082's script (reused), the NFR-05 census (one clause added), and the customer-provisioning runbook/handlers (one step). No new file of this task's own except its note; no second list anywhere.</extension>
+    <cost-of-doing-nothing>Every secure-record To Do is refused by Dataverse today; every environment built from the guide also refuses secure-target document saves; re-running guide §5.4 in dev removes prvReadsprk_Document and breaks secure saves there with no signal; task 146's re-own of any table outside 082's five (invoice, analysis, communicationthread, agreement, …) is refused, so those children stay in ordinary BUs; a new customer environment has no Secure BU role at all.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">word-add-in-r1 task 082's codified set JSON file (extended)</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (or the control-plane handler, per the owner's choice)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-145-secure-owner-role-privileges.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TRACKING: the task note records 082's status, #1046's state and the peer exchange at start and at close; if 082 had not landed when step 3 was due, the owner's decision under the first escalation trigger is recorded and followed.</criterion>
+    <criterion testable="true">The codified set (ONE JSON file) lists every table any writer can assign to the secure team, each with its writer file:line or C10 part-2 task cited; it includes at least sprk_document, sprk_communication, sprk_memo, sprk_event and sprk_todo, and every table in task 146's census, 147's client-created children and 148's backfill scope. No second copy of the list exists anywhere (grep recorded).</criterion>
+    <criterion testable="true">MANUAL LIVE GATE, NEGATIVE CONTROL: before the grant, a probe re-own of a row of each table this task adds to the secure owner team is REFUSED and the recorded message names the missing privilege. If one is not refused, the premise for that table is recorded as wrong and it is not added.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE, POSITIVE: after the grant, the same probes succeed and read-back shows `owningteam` = the secure owner team, stable across 3 polls; 082's five tables are verified the same way (probe or recorded 082 evidence); probes deleted and the deletion recorded.</criterion>
+    <criterion testable="true">Every privilege added is at User (Basic) depth; any non-Read access type added cites the recorded refusal that forced it; every privilege present before the change is still present (before/after lists with count and diff in the note).</criterion>
+    <criterion testable="true">AUTHORIZATION: the role is held by exactly one principal, task 144's named owner team; no user and no other team (including the Secure BU default team) holds it; NFR-05 clauses 2 and 3 pass against dev (manual run, output recorded).</criterion>
+    <criterion testable="true">NEGATIVE: the census clause FAILS naming the table when the census input lacks one table's required privilege (unit test with seeded input AND a recorded manual run), and passes with the full set.</criterion>
+    <criterion testable="true">Re-running the guide's procedure (§5.3 then §5.4) against a role holding the set removes nothing in the set; §5.1, §5.3, §5.4 and §7 all read or point to the codified file.</criterion>
+    <criterion testable="true">A new environment gets the Secure BU, the named owner team, the role and the full privilege set through the chosen provisioning step, with no hand-edited privilege list; the step's dry run writes nothing and a second apply changes nothing.</criterion>
+    <criterion testable="true">The drift decision was put to the owner exactly once (by 082 or by this task) with a recommendation and the answer is recorded; nothing was removed without it.</criterion>
+    <criterion testable="true">#1046 closed once, citing this task and word-add-in-r1 task 082; the peer was told the outcome.</criterion>
+    <criterion testable="true">Test scope: the negative controls, the positive probes, the census clause's two seeded directions and the existing NFR-05 clauses. Anything beyond needs a one-line justification in the note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner round 2 item 11 (session27 note) — this task exists so the gap is tracked in UAC-r2 and not lost between projects; it stays open until the live role is verified in dev AND new environments get it. Related: defect C10 (session26 note), task 144 (named owner team — the role's holder; rewrites clause 2), tasks 146/147/148 (child re-own; they define the table set and depend on this task), task 150 (FLS setup joins the same new-environment step), word-add-in-r1 task 082 and note 080 §6.12, PR #1045 (their Office secure saves and To Dos fail closed until the grant lands), #1034 (writers not yet on I-6). UPDATE 2026-09-30 (main session): 082 is LIVE in dev (role 36→40 privileges, +Read at Basic on todo/communication/event/memo; negative refusals captured before -Apply). Its codified set is `config/secure-record-owner-role.json` (schemaVersion 1; tables[].privilegeName, kind root|child, reason, evidence, addedBy; a howToExtend block) and `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify`, in word-add-in-r1 PR #1051 (docs+script+config). This task's census clause reads that file and asserts depth mask 1; 146 extends the set via howToExtend. The live census needs AZURE_TOKEN_CREDENTIALS=AzureCliCredential on a workstation (plain DefaultAzureCredential resolved only EnvironmentCredential) — document it in the runbook.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. Coordinate with word-add-in-r1 before the first live write. Run alone: the live role is shared.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-145">
+      COMPLETED-WITH-ESCALATION. Code, tests, docs and the new-environment handler design are done. Every live change is a
+      PENDING MANUAL GATE (this run was read-only against Dataverse by instruction). Full record:
+      notes/task-145-secure-owner-role-privileges.md; handler design: notes/handoffs/INCOMING-145-secure-setup-handler.md.
+
+      TRACKING. word-add-in-r1 task 082 is completed (PR #1051 merged; codified set config/secure-record-owner-role.json,
+      script, guide rows). #1046 was CLOSED by the peer 2026-09-30. The drift decision (F1) was asked once, jointly, and
+      done by the peer (role 40 -> 8). First escalation trigger did not fire. Re-measured live, read-only: 8 privileges,
+      all Read at Basic, nothing outside the file; ONE holder = the Secure Record DEFAULT team; the named team does not
+      exist (task 144's cutover is pending); 0 users in the BU.
+
+      CODED.
+      (1) config/secure-record-owner-role.json: + sprk_invoice (prvReadsprk_Invoice, child). Writer: task 130
+          InvoiceReviewService.CreateInvoiceRecordAsync (InvoiceReviewService.cs:604 on work/unified-access-control-r2),
+          owned by the matter's team record-first; owner amendment Q12. Evidence: the peer's recorded control refusal
+          (4 of 4 polls, privilegeCount=8); the verbatim text is re-captured by the gate's negative control.
+      (2) NFR-05 clause 5 in SecureBuRoleDepthAssertion: exactly one Secure Record Owner role in the secure BU must hold
+          Read at Basic on every codified table. Each missing / wider-than-Basic / not-in-environment table is a finding
+          (SecureOwnerRoleLacksCodifiedPrivilege) naming it; 0 or 2 owner roles, or an empty set, are findings too. Same
+          rule as -Verify. Ranked below every exposure verdict (fail-closed, not a disclosure).
+      (3) SecureRecordOwnerRoleSet (new static parser): reads the ONE file, embedded into Sprk.Bff.Api by csproj LINK
+          (no copy); validation mirrors the script.
+      (4) Both census readers (scheduled job + manual live gate) read guarded Reads + the set's privileges; only the
+          guarded three must resolve exactly (else throw); a codified one missing is a clause-5 finding (code-review
+          fix: throwing would have blinded clauses 1-4). The job logs clause-5 findings at Error, not Critical.
+      (5) Guide §7 rows 1, 9, 11 updated (stale "32 pending"; clause 5; Error vs Critical).
+
+      LIVE NFR-05 RUN (read-only, spaarkedev1, twice, final code): 18 findings - 15 clause 1, 1 SecureOwnerTeamNotResolved,
+      1 SecureOwnerRoleHeldBeyondOwnerTeam, 1 SecureOwnerRoleLacksCodifiedPrivilege naming prvReadsprk_Invoice
+      ("covering 8 of 9"). Clause 5 FAIL direction recorded live; PASS direction in seeded tests (live PASS = gate step 4).
+
+      ESCALATIONS.
+      (E1) NEW EXPOSURE: Chelsea Friez and Lori Witkin (created 2026-10-01, root BU "Spaarke", Spaarke Core User +
+           Spaarke Office Add In User, Read Deep on project/matter/work assignment) reach the Secure Record BU and read the
+           dev secure project. Not in the peer's 2026-09-30 census. Moving users / narrowing depth is an owner decision.
+           Recommendation: move both to a non-ancestor BU (design §5.2 Fix A) and find what places new users in root.
+      (E2) The hotmail #EXT# account still fails clause 1 (owner F11: owner will change it; no exception added).
+      (E3) Cascade-Assign hazard (open, untested): project/matter cascade Assign to sharepointdocumentlocation and
+           sharepointdocument; the F1 strip removed the SharePoint four; dev has 0 location rows, so whether assigning a
+           root WITH location rows is now refused is unknown. Probe described in the handoff note, open item 1.
+
+      PENDING MANUAL GATES (exact commands in the task note section 4).
+      (G1) Grant sprk_invoice: negative control (record verbatim refusal) -> script dry run -> -Apply -> guide §5.4 strip
+           (AddPrivilegesRole re-injects the SharePoint four) -> -Verify -> positive probes stable over 3 polls, read back
+           owningteam, delete probes -> live NFR-05 run expecting clause 5 PASS. Before task 130 is deployed against a
+           secure matter in dev.
+      (G2) Task 144's §4.3 cutover (named team created, role moved off the default team) - owned by 144; until then
+           clauses 2b/3 fail live and the AUTHORIZATION criterion is not met.
+      (G3) New environments: owner F10 = (a) control-plane handler; design handed off (INCOMING-145-secure-setup-handler.md)
+           for customer-provisioning-orchestration-r1 to build. Not built here (their DAG).
+      (G4) #1046 comment citing 145 + 082 (draft text in the task note section 8) - for the main session to post once.
+
+      PLACEMENT (CLAUDE.md §10). Everything is in the BFF because both census runners are: the scheduled
+      SecureRecordIsolationCensusJob (BFF, ADR-052 "BFF, schedule", task 144) and the manual gate in the BFF test project
+      both use the BFF's evaluator. No new endpoint, DI registration, option, job or package. Publish size: one ~6 KB
+      embedded JSON; measurement skipped by instruction (main session measures after merge).
+      JUSTIFICATION (§11) for the one new file, SecureRecordOwnerRoleSet.cs:
+        existing - the file is read today only by scripts/Set-SecureRecordOwnerRolePrivileges.ps1 (PowerShell) and the
+          guide snippets; grep of src/ for "secure-record-owner-role" found no C# reader.
+        extension - SecureBuRoleDepthAssertion.cs could host it, but it is already the evaluator + census builder
+          (~900 lines); the parser has its own reason to change (the file's schema), so it is a separate static class
+          beside it. No interface, no DI.
+        cost of doing nothing - the census cannot know which tables the role must cover, so a stripped or never-granted
+          child privilege (the guide's old strip removed prvReadsprk_Document; sprk_invoice is missing live today) is
+          found only when a secure save is refused.
+
+      TESTS. Affected (SecureBuRoleDepthAssertionTests + SecureRecordIsolationCensusJobTests): 60 passed, 0 failed.
+      Full BFF unit suite and NetArchTest: see the structured result. Every new guard seeded and watched fail, then
+      restored (task note section 9).
+      QUALITY GATES. code-review: 0 critical; 1 warning FIXED (codified-privilege throw blinding clauses 1-4); suggestions
+      noted (SecureBuRoleDepthAssertion.cs is ~900 lines - cohesive evaluator + builder + census records; a later split of
+      the builder is optional). adr-check: 0 violations.
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-145-f1" round="verifier-1">
+      Verifier round 1 closed (task note section 10). No live call of any kind in this round.
+      (F2) Clause-5 ranking pinned: Evaluate test (clause-1 exposure + clause-5 gap headlines the exposure) and a theory over
+           all 7 exposure/unknown verdicts with the clause-5 finding enumerated first. Seeded rank 7 -> -1: 8 red; the
+           verifier's exact rank 7 -> 0: 7 red.
+      (F3) Owner-role secure-BU filter pinned: Build test with a same-named role in a sibling BU (count 1, secure role
+           graded). Seeded filter -> true: 2 red.
+      (F4) Replica now detected, matching the comment, the script (Set-SecureRecordOwnerRolePrivileges.ps1:134-138) and
+           handoff S4: SecureOwnerRoleCoverage.InheritedFromRootRoleId (optional record parameter, default null) set when
+           the one owner role in the secure BU has roleid != parentrootroleid; clause 5 reports it and does not grade it.
+           Seeded builder detection off: 1 red; evaluator branch off: 1 red.
+      (F5) sprk_invoice evidence now opens "VERBATIM REFUSAL PENDING", names G1 step 1 as the step that replaces it, and
+           states the revert if the create is not refused (AC 3); note section 4 step 1 spells out both branches. The
+           verbatim Secure-team text needs a live create - it is G1 step 1, not capturable read-only.
+      (F7/F11) TRACKING corrected to PARTIALLY MET: the peer exchange at start and close was not done; the plan and close
+           messages are drafted (note section 8a) for the main session.
+      (F8) Publish size not measured (orchestrator instruction); main session measures after merge.
+      (F12-F19) Criteria status recorded honestly in note section 10: codified set 9 tables (146/147 add theirs by binding
+           constraint); negative control, positive probes, before/after = pending G1; AUTHORIZATION not met (G2, task 144
+           cutover); live PASS of clause 5 pending G1; new-environment step not built (F10 = (a), handed off); #1046
+           comment + peer told = main session.
+      PLACEMENT/JUSTIFICATION: no new service, DI registration, endpoint, option, job or package; one optional parameter
+      on an existing census record. TESTS: affected 70/70; full suite and ArchTests in the structured result.
+    </outcome>
+    <outcome date="2026-10-02" status="completed">G1 run 2026-10-02 (notes §11): verbatim refusal recorded, -Apply + §5.4 strip, -Verify 9/9 Basic, probes 3/3, census clause 5 PASS live. New-environment handler handed to customer-provisioning-orchestration-r1 (owner F10 = a) via handoffs/INCOMING-145 incl. §6 production topology (round 5).</outcome>
+  </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. UPDATE 2026-10-01: the owner will change that account themselves ("this is in dev and we'll change this") — add NO census exception; clause 1 must pass on its own. Also: 082 (F1) removed the 32 drifted privileges live (role 40 to 8, all Read at Basic); AddPrivilegesRole re-injects the SharePoint four, so after any -Apply that extends the codified set, re-run the guide section 5.4 strip and -Verify.</amendment>
+  </amendments>
+</task>

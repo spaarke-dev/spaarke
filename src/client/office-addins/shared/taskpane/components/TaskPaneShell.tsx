@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { TaskPaneHeader, type HostType } from './TaskPaneHeader';
-import { TaskPaneNavigation, type NavigationTab, getDefaultTab } from './TaskPaneNavigation';
+import type { HostType } from './TaskPaneHeader';
+import { getDefaultTab, type NavigationTab } from './TaskPaneNavigation';
+import { TaskPaneToolbar } from './TaskPaneToolbar';
 import { TaskPaneFooter, type ConnectionStatus } from './TaskPaneFooter';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
@@ -12,7 +13,9 @@ import type { ThemePreference } from '../hooks/useTheme';
  *
  * Provides:
  * - Consistent header with host-specific branding
- * - Tab-based navigation (Save, Share, Search, Recent)
+ * - Tab-based navigation (r1: Save + Find, both hosts; Create To Do, Outlook only —
+ *   Share/Search/Recent remain modeled but hidden placeholders, task 015 / FR-03).
+ *   Tabs render via `TaskPaneToolbar` below, the one live tab-row renderer.
  * - Content area with error boundary
  * - Footer with version info
  * - Responsive layout for different task pane widths
@@ -123,7 +126,6 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 }
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
-  title = 'Spaarke',
   hostType = 'outlook',
   userName,
   userEmail,
@@ -184,34 +186,25 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
 
   return (
     <div className={styles.shell}>
-      {/* Header */}
-      <TaskPaneHeader
-        title={title}
+      {/* Single consolidated toolbar: logo + tabs (left) + overflow tools (right). */}
+      <TaskPaneToolbar
         hostType={hostType}
-        userName={userName}
-        userEmail={userEmail}
+        showTabs={showNavigation}
+        selectedTab={selectedTab}
+        onTabChange={handleTabChange}
         isAuthenticated={isAuthenticated}
-        onSignOut={onSignOut}
-        onSettings={onSettings}
+        {...(userName ? { userName } : {})}
+        {...(userEmail ? { userEmail } : {})}
+        {...(onSignOut ? { onSignOut } : {})}
+        {...(onSettings ? { onSettings } : {})}
         themePreference={themePreference}
-        onThemeChange={onThemeChange}
-        compact={isCompact}
+        {...(onThemeChange ? { onThemeChange } : {})}
       />
-
-      {/* Navigation (only show if authenticated and enabled) */}
-      {showNavigation && isAuthenticated && (
-        <TaskPaneNavigation
-          selectedTab={selectedTab}
-          onTabChange={handleTabChange}
-          hostType={hostType}
-          compact={isCompact}
-        />
-      )}
 
       {/* Main Content with Error Boundary */}
       <main className={contentClassName}>
         <ErrorBoundary
-          onError={onError}
+          {...(onError ? { onError } : {})}
           showDetails={showErrorDetails}
           onReset={() => {
             // Optionally navigate back to default tab on error reset
@@ -225,9 +218,9 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Footer */}
       <TaskPaneFooter
         version={version}
-        buildDate={buildDate}
+        {...(buildDate !== undefined ? { buildDate } : {})}
         appName={appName}
-        connectionStatus={connectionStatus}
+        {...(connectionStatus !== undefined ? { connectionStatus } : {})}
         showHelpLink={true}
         compact={isCompact}
       />

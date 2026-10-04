@@ -23,13 +23,10 @@ public enum OfficeRateLimitCategory
     Search,
 
     /// <summary>GET /office/jobs/* - 60 requests/minute/user</summary>
-    Jobs,
+    Jobs
 
-    /// <summary>POST /office/share/* - 20 requests/minute/user</summary>
-    Share,
-
-    /// <summary>GET /office/recent - 30 requests/minute/user</summary>
-    Recent
+    // The Share and Recent categories were removed with their routes by spaarkeai-word-add-in-r1
+    // task 058: both route families served fabricated data, and no client called them.
 }
 
 /// <summary>
@@ -77,7 +74,6 @@ public static class OfficeRateLimitFilterExtensions
 /// - QuickCreate: 5 requests/minute
 /// - Search: 30 requests/minute
 /// - Jobs: 60 requests/minute
-/// - Share: 20 requests/minute
 /// </para>
 /// </remarks>
 public class OfficeRateLimitFilter : IEndpointFilter
@@ -364,8 +360,6 @@ public class OfficeRateLimitService : IOfficeRateLimitService
             OfficeRateLimitCategory.QuickCreate => _options.Limits.QuickCreateRequestsPerMinute,
             OfficeRateLimitCategory.Search => _options.Limits.SearchRequestsPerMinute,
             OfficeRateLimitCategory.Jobs => _options.Limits.JobsRequestsPerMinute,
-            OfficeRateLimitCategory.Share => _options.Limits.ShareRequestsPerMinute,
-            OfficeRateLimitCategory.Recent => _options.Limits.RecentRequestsPerMinute,
             _ => 30 // Default fallback
         };
     }

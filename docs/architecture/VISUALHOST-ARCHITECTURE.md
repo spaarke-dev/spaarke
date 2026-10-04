@@ -106,7 +106,6 @@ DueDateCard and DueDateCardList build their own FetchXML with a link-entity for 
 | StatusDistributionBar | Colored status bar |
 | CalendarVisual | Calendar heat map |
 | MiniTable | Compact ranked table |
-| TrendCard | Trend sparkline |
 | DueDateCard | Single event card (presentational; PCF container fetches + passes props) |
 | DueDateCardList | Event card list (presentational; PCF container fetches + passes props) |
 | GaugeVisual (v1.3.0) | SVG semicircular arc with color thresholds. Two modes: `"single"` (0–1 field value) and `"ratio"` (field / totalField) |
@@ -157,7 +156,7 @@ Parameters are passed as a URL-encoded string in the `data` property of `navigat
 
 ### AI Summary: Pre-Populated Field (Not Live AI Call)
 
-The AI Summary sparkle icon (v1.3.0) reads a pre-populated Dataverse text field via `context.webAPI.retrieveRecord()` — it does NOT call Azure OpenAI at render time. The field is populated upstream (background service or plugin). Configured via `"aiSummaryField": "sprk_aisummary"` in `sprk_optionsjson`.
+The AI Summary sparkle icon (v1.3.0) reads a pre-populated Dataverse text field via `context.webAPI.retrieveRecord()` — it does NOT call Azure OpenAI at render time. The field is populated upstream by a server-side process (e.g. a BFF AI job/Action or a flow) — never a Spaarke plugin (Spaarke ships none, ADR-002). Note: no Spaarke code writes `sprk_aisummary` today; it is an example column name. Configured via `"aiSummaryField": "sprk_aisummary"` in `sprk_optionsjson`.
 
 ### Caching Strategy
 
@@ -207,13 +206,13 @@ When a chart definition sets `sprk_createwizardenabled = Yes`, the toolbar/CardC
 2. Resolves the host record's display name, then opens the page with `Xrm.Navigation.navigateTo` as a **webresource dialog (60% × 70%)**, passing a launch envelope: `entityType`, `entityId` (normalized with the shared `cleanGuid` per **ADR-044**), `recordName`, `themeOption`.
 3. The Code Page pins the host record as the parent (Associate-To hidden) and **owns its own auth** (`@spaarke/auth`).
 
-**Why navigateTo (not inline embedding):** the previous model mounted the wizard React tree *inside* the PCF, which forced VisualHost to bundle `@spaarke/auth`/`@spaarke/sdap-client` and created a React 16/17-vs-19 types skew. `navigateTo` decouples the two surfaces entirely — the PCF only marshals an envelope; the page is a normal Code Page. This is the same pattern `sprk_wizard_commands.js` uses for ribbon-launched wizards, and it means **the PCF carries no create-flow auth** (ADR-028). The local `resolveWizardPage` map deliberately mirrors the shared `wizardRegistry.ts` resolution order but is kept in the PCF so importing it does *not* pull the wizard components (and their auth deps) back into the bundle.
+**Why navigateTo (not inline embedding):** the previous model mounted the wizard React tree *inside* the PCF, which forced VisualHost to bundle `@spaarke/auth`/`@spaarke/sdap-client` and created a React 16/17-vs-19 types skew. `navigateTo` decouples the two surfaces entirely — the PCF only marshals an envelope; the page is a normal Code Page. This is the same pattern `sprk_wizard_commands.js` uses for ribbon-launched wizards, and it means **the PCF carries no create-flow auth** (ADR-028). The local `resolveWizardPage` map is the single source of truth for "+" wizard keys; it is kept in the PCF so resolving a key never pulls the wizard components (and their auth deps) into the bundle. (The shared `wizardRegistry.ts` it once mirrored had zero consumers and was deleted 2026-10-03 — reuse audit C-20.)
 
 ## Component Homes (where each piece lives)
 
 | Home | What lives there | Reusable in |
 |------|------------------|-------------|
-| **`@spaarke/visuals`** (presentational package) | All 16 leaf visual components — MetricCard, MetricCardMatrix, BarChart, LineChart, DonutChart, GaugeVisual, HorizontalStackedBar, StatusDistributionBar, TrendCard, GradeMetricCard, MiniTable, EventDueDateCard, ErrorBoundary, **and (props-in as of VHVU-050) `CalendarVisual`, `DueDateCard`, `DueDateCardList`** — + 7 pure utils (chartColors, valueFormatters, gradeUtils, tokenSetColors, trendAnalysis, cardConfigResolver, logger) + the viz **types** (`VisualType`, `IChartData`, `IAggregatedDataPoint`, `ICardConfig`, `TrendDirection`, …). Presentational-only: no `Xrm`/`WebAPI`/FetchXML. | PCF, future code-page dashboards, standalone apps — anything that binds data itself |
+| **`@spaarke/visuals`** (presentational package) | All 15 leaf visual components — MetricCard, MetricCardMatrix, BarChart, LineChart, DonutChart, GaugeVisual, HorizontalStackedBar, StatusDistributionBar, GradeMetricCard, MiniTable, EventDueDateCard, ErrorBoundary, **and (props-in as of VHVU-050) `CalendarVisual`, `DueDateCard`, `DueDateCardList`** — + 7 pure utils (chartColors, valueFormatters, gradeUtils, tokenSetColors, trendAnalysis, cardConfigResolver, logger) + the viz **types** (`VisualType`, `IChartData`, `IAggregatedDataPoint`, `ICardConfig`, `TrendDirection`, …). Presentational-only: no `Xrm`/`WebAPI`/FetchXML. | PCF, future code-page dashboards, standalone apps — anything that binds data itself |
 | **`@spaarke/ui-components`** | `AiSummaryPopover`, `AppInsightsService`, `useWizardPageBootstrap`, `cleanGuid` (via `PolymorphicResolverService`) | consumed by VisualHost (AI popover + telemetry) and the wizard Code Pages |
 | **PCF host** (`VisualHost/control/`) | `VisualHostRoot` (orchestration + the "+" handler), `ChartRenderer` (visual-type dispatch — consumes `webAPI`), the 3 thin **data-fetching containers** (`CalendarVisual`, `DueDateCard`, `DueDateCardList` — each fetches + maps records + owns navigation, then renders the matching presentational component from `@spaarke/visuals`), `CardChrome`, `ThemeProvider`, all `services/` (Config/Aggregation/FieldPivot/View/ClickAction) + the pure FetchXML builders (`fetchXmlBuilders.ts`) | PCF only — these are host-coupled by design |
 

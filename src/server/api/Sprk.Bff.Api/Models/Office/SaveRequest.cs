@@ -21,15 +21,30 @@ public record SaveRequest
     /// </summary>
     public SaveEntityReference? TargetEntity { get; init; }
 
-    /// <summary>
-    /// Target container ID for file storage.
-    /// </summary>
-    public string? ContainerId { get; init; }
+    // ContainerId DELETED 2026-08-30 by task 085. It was the container-selection defect in its purest
+    // form: the route authorizes the caller against TargetEntity (via AddEntityAccessFilter) and then
+    // wrote the bytes into ContainerId — a DIFFERENT client-supplied field on this same body. The
+    // authorization key and the write destination were two independently caller-chosen values for one
+    // decision, on an app-only MI write with no SPE ACL to catch a mismatch. That is option (B), which
+    // task 083 explicitly rejected.
+    //
+    // Two facts made it worse than it looked. TargetEntity is OPTIONAL, and EntityAccessFilter calls
+    // next() when the target is absent — so a save could run on baseline Office authentication alone
+    // and still name its own container. And the value did not stop at the request: it was serialized
+    // into the ProcessingJob payload, so a client-chosen container outlived the call.
+    //
+    // No shipped client ever sent it (the add-in request body is contentType/email/targetEntity/
+    // aiOptions/documentMetadata), so the hole was the CONTRACT, not the traffic. Do not reintroduce
+    // it: the server now derives the container from the authorized record. Returning the chosen
+    // container/drive id in the RESPONSE is fine and necessary — the client needs driveId for
+    // sprk_graphdriveid and indexFile(). ACCEPTING one is the vulnerability.
 
-    /// <summary>
-    /// Target folder path within the container.
-    /// </summary>
-    public string? FolderPath { get; init; }
+    // FolderPath DELETED 2026-08-28 (stop minting SPE folders on upload paths). It was client-supplied
+    // and always null: no producer under src/client/** ever set it (zero hits for `folderPath` there),
+    // and no server code constructed one. Its only effect, had a client ever sent it, would have been to
+    // make Graph implicitly create the named folder inside the container as a side effect of the upload —
+    // which is the defect this change removes. Do not reintroduce it; a deliberate folder is what the SPE
+    // Admin "New Folder" action is for.
 
     /// <summary>
     /// Email-specific metadata (required when ContentType is Email).
@@ -181,6 +196,19 @@ public record EmailMetadata
     /// Used to respect user's attachment selection in the add-in UI.
     /// </summary>
     public List<string>? SelectedAttachmentFileNames { get; init; }
+
+    /// <summary>
+    /// Task 046 (b): <c>true</c> when <see cref="Subject"/> — and so the generated <c>.eml</c> name — is
+    /// SYSTEM-DERIVED (the email's own subject); <c>false</c> when the user TYPED it in the pane's "Document Name"
+    /// box. Only a system-derived name is STORED with a short unique suffix, so two emails with the same subject and
+    /// date never share a file. A name the user typed is never changed automatically (owner, 2026-09-15).
+    /// </summary>
+    /// <remarks>
+    /// Absent (an older client) reads as <c>false</c>, i.e. "typed": an older pane may be sending a typed name, and
+    /// that must never be changed. The cost is only that such a client keeps today's same-name collision exposure
+    /// until it updates; for typed names that exposure is task 025's refuse-and-ask to close.
+    /// </remarks>
+    public bool IsNameSystemDerived { get; init; }
 }
 
 /// <summary>
@@ -358,6 +386,15 @@ public record DocumentMetadata
     /// </summary>
     [MaxLength(1000)]
     public string? VersionComment { get; init; }
+
+    /// <summary>
+    /// Task 025 (spaarkeai-word-add-in-r1): the pane's explicit "Keep both" retry after an OFFICE_020
+    /// name-collision refusal — asks the server to upload under a Graph-generated non-colliding name
+    /// instead of refusing again. Ignored on a version save (<c>ExistingDocumentId</c> set): that path
+    /// never collides by name, it targets an existing item by id. Defaults to <c>false</c>, so an
+    /// ordinary create still refuses-before-writing on a collision, exactly as before this field existed.
+    /// </summary>
+    public bool AllowRename { get; init; }
 }
 
 /// <summary>

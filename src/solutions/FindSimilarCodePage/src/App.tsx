@@ -24,7 +24,7 @@ import {
   DismissRegular,
   SearchRegular,
 } from "@fluentui/react-icons";
-import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, cleanGuid } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -257,7 +257,7 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
       if (results && results.length > 0) {
         const record = results[0];
         handleRecordSelected(
-          record.id.replace(/[{}]/g, ""),
+          cleanGuid(record.id),
           record.name || "Selected Document"
         );
       }

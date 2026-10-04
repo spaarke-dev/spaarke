@@ -54,11 +54,26 @@ namespace Spaarke.ArchTests;
 /// <see cref="PolicyOnlyRoutes"/> — retirement removed the defect and the shape together. Its
 /// wrong-resource-domain shape survives only as an INLINE fixture inside
 /// <see cref="RetroactivelyDetectsAllFourHistoricalMisses"/>, which feeds the scanner literal source text
-/// and never reads the file. The shape is NOT extinct in the codebase: the drive-keyed
-/// <c>PUT /api/drives/{driveId}/upload</c> and <c>DELETE /api/drives/{driveId}/items/{itemId}</c> in
-/// <c>DocumentsEndpoints.cs</c> are the same policy-only pattern, still live and still waived, and
-/// <c>PUT /api/obo/containers/{id}/files/{*path}</c> is the same shape protected only by running under OBO
-/// rather than app-only. See
+/// and never reads the file.</para>
+///
+/// <para><b>The policy-only shape is now EXTINCT in this codebase, as of 2026-09-07.</b> This paragraph
+/// previously said it was not, and named the three survivors; all three are gone, each by deletion rather
+/// than by gating:</para>
+/// <list type="bullet">
+///   <item><c>PUT /api/drives/{driveId}/upload</c> and <c>DELETE /api/drives/{driveId}/items/{itemId}</c>
+///   in <c>DocumentsEndpoints.cs</c> — "still live and still waived" when that sentence was written.
+///   Task 083 deleted both routes, the file, and the now-orphaned <c>canwritefiles</c> policy behind
+///   them. These were the last two <c>UNOWNED</c> waivers in <see cref="Waivers"/>.</item>
+///   <item><c>PUT /api/obo/containers/{id}/files/{*path}</c> — the same shape "protected only by running
+///   under OBO rather than app-only". Task 076 deleted it once the last of its 11 call sites moved to a
+///   record-keyed contract.</item>
+/// </list>
+///
+/// <para>⚠️ Extinct is not the same as impossible, and this file is what keeps the difference. The shape
+/// died by three separate deletions across three tasks, none of which any structural rule here could
+/// detect — a policy pointed at the wrong resource domain is a real, fail-closed mechanism, so it reads
+/// as gated. What actually caught them was the waiver list demanding an OWNER for each one. Preserve that
+/// property when editing: an unnamed exemption is how this shape survived four recounts. See
 /// <c>projects/unified-access-control-r2/notes/task-074-route-authorization-forcing-function.md</c> §5.</para>
 /// </summary>
 public class RouteAuthorizationGuardTests
@@ -90,6 +105,20 @@ public class RouteAuthorizationGuardTests
     {
         RouteLevelGate,
         HandlerAuthorized,
+
+        /// <summary>
+        /// The file registers its routes on a route GROUP that carries the authorization filters, so
+        /// no per-route filter appears in the fluent chain and Rule A deliberately does not apply.
+        /// Added 2026-08-30 by task 091.
+        /// <para>
+        /// This scope exists because forcing such a file into <see cref="RouteLevelGate"/> would make
+        /// Rule A demand a per-route filter that correctly is not there — the guard would flag the
+        /// code it protects, which per tests/CLAUDE.md is how a guard gets deleted rather than obeyed.
+        /// Leaving it unclassified was the other option, and that is precisely the blind spot task 091
+        /// closed.
+        /// </para>
+        /// </summary>
+        GroupGated,
     }
 
     private sealed record GovernedFile(string RelativePath, Scope Scope, string Reason);
@@ -98,9 +127,11 @@ public class RouteAuthorizationGuardTests
     {
         // ---- Rule A applies: the per-route gate is the convention here ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes (content, download, eml-render) and URL minting "
-            + "(preview-url, view-url, office, open-links, share-link). Eight of nine routes already carry "
-            + "AddDocumentAuthorizationFilter(\"read\"); the ninth is finding #3."),
+            "/api/documents/{documentId}/* — file bytes (content, download, eml-render, preview) and URL "
+            + "minting (preview-url, view-url, office, open-links, share-link), plus POST resolve-identity "
+            + "(added by spaarkeai-word-add-in-r1 task 012). All ten routes carry AddDocumentAuthorizationFilter; "
+            + "share-link has since task 072 (finding #3), and resolve-identity pairs DocumentUrlIdentityFilter "
+            + "with it (read)."),
 
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows plus a byte download, and a container-keyed document "
@@ -117,9 +148,13 @@ public class RouteAuthorizationGuardTests
             "document-id-keyed version history and prior-version BYTES, both gated \"read\" by task 079. "
             + "The drive-keyed pair was DELETED; the SPE pointer is now read off the authorized row."),
 
-        new GovernedFile("Api/DocumentsEndpoints.cs", Scope.RouteLevelGate,
-            "drive-keyed upload and item delete."),
-
+        // Api/DocumentsEndpoints.cs entry DELETED 2026-09-07 — task 083 deleted the file, retiring its
+        // last two routes (drive-keyed upload + item delete) rather than gating them. Same reason the
+        // UploadEndpoints.cs entry below was deleted: ScanFile's File.ReadAllText is unguarded, so an
+        // entry naming a deleted path throws FileNotFoundException rather than reporting anything
+        // useful. Its wrong-resource-domain shape is preserved as an INLINE fixture in
+        // RetroactivelyDetectsAllFourHistoricalMisses, which feeds the scanner literal source text.
+        //
         // Api/UploadEndpoints.cs entry DELETED 2026-08-27 — task 073 deleted the file (218 lines, zero
         // additions), retiring all three app-only container-keyed write routes. Left in place it would
         // throw FileNotFoundException from ScanFile's unguarded File.ReadAllText and account for 4 of the
@@ -134,12 +169,112 @@ public class RouteAuthorizationGuardTests
             + "to 075/076 because content-CREATION has no document to authorize against yet. "
             + "AddDocumentAuthorizationFilter still appears ZERO times in this file."),
 
+        // ---- Group-gated: authorization is inherited from the /api/spe group ----
+        new GovernedFile("Api/SpeAdmin/ContainerItemEndpoints.cs", Scope.GroupGated,
+            "Nine routes serving container file BYTES (content, preview, thumbnails), plus sharing-link "
+            + "minting, delete, upload and folder-create. Added by task 091, which found them registered "
+            + "on the ROOT app while spelling out absolute /api/spe/... paths — so they sat at admin URLs "
+            + "carrying NEITHER SpeAdminAuthorizationFilter NOR SpeAdminTenantScopeFilter, reachable by "
+            + "any authenticated caller with configId an unchecked cross-tenant bearer capability. "
+            + "Proven empirically: as a non-admin they answered 500/400 from inside the handler, never "
+            + "403. This census governed 12 files and did not include this one, which is how the surface "
+            + "stayed invisible through four hand recounts. Rule A does not apply (the gate is on the "
+            + "group, not the route); the enforcing tests are "
+            + "GroupGatedFilesRegisterNoAbsolutePaths below, the RouteGroupBuilder parameter on "
+            + "MapContainerItemEndpoints (which makes a root-app registration a COMPILE error), and "
+            + "tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs (which requests "
+            + "every route as a non-admin and requires 403)."),
+
         new GovernedFile("Api/Ai/SemanticSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search — document names, AI summaries, TL;DRs, driveId, speFileId. Finding #1. Never "
             + "touches SPE, so container ACLs are irrelevant to it."),
 
         new GovernedFile("Api/Ai/RecordSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search/records — Dataverse record content over the same AI search surface."),
+
+        // ---- Office add-in surface: added 2026-09-29 by task 120 (GitHub #1015) ----
+        //
+        // This census governed 14 files and did not include either of these, which classified the whole
+        // Office surface as "serves neither document nor Dataverse content" by omission. That is false:
+        // /save creates sprk_document rows and uploads bytes to SPE, /search/entities reads matter,
+        // project, invoice, account and contact content, /todo and /quickcreate write Dataverse, and all
+        // three communications routes read sprk_communication and sprk_todo.
+        //
+        // Both are RouteLevelGate rather than GroupGated. The group chain here is a bare
+        // .RequireAuthorization() with no policy name — "are you anyone?" — so there is nothing for a
+        // route to inherit. The per-route filter is the convention on this surface (/save and the two
+        // /jobs routes already follow it); the files that do not are findings, not a different design.
+        new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
+            "/api/office/* — the Office add-in surface. Gates as of the 2026-09-30 merge: /save carries "
+            + "AddEntityAccessFilter (+ AddOfficeVersionSaveAuthorizationFilter); both /jobs routes carry "
+            + "AddJobOwnershipFilter; POST /todo carries AddTodoSourceAccessFilter; POST /quickcreate carries "
+            + "AddQuickCreateSourceAccessFilter; generate-profile carries a document authorization filter. "
+            + "/search/entities is gated INSIDE its query (impersonated read) and /search/matter-types is "
+            + "reference data — both Permanent-waived. The document-search, recent-items and share stub routes "
+            + "were DELETED by task 058. None of the named gates was visible to this guard before task 120 widened "
+            + "FilterMarker. CAVEATS Rule A cannot express, stated so 'gated' is not read as 'gated in every "
+            + "case': (1) EntityAccessFilter passes through when a /save carries no TargetEntity "
+            + "(EntityAccessFilter.cs ExtractTargetEntity), so a new-document save with no related record "
+            + "reaches the handler with no per-record check — an owner-confirmed required use case, tracked "
+            + "on #1025, where the authorization subject is the destination container rather than a record. "
+            + "(2) QuickCreateSourceAccessFilter gates only the SOURCE read and passes through when no source "
+            + "is named; whether the caller holds CREATE privilege for the entity type is not checked, and "
+            + "the write runs on the app identity — a privilege question outside Rule A's per-resource subject."),
+
+        new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
+            "/api/office/communications/* — three routes reading sprk_communication, candidate record "
+            + "display names, and linked sprk_todo rows. No endpoint filter, BY DESIGN since task 127 "
+            + "(#1020): every read runs through IDataverseUserClient under the CALLER's Dataverse security "
+            + "context, so the delegated query is the authorization boundary; denial surfaces as the ordinary "
+            + "404 or empty list, never 403, so there is no existence oracle. The routes carry Permanent "
+            + "waivers recording that shape. (Before task 127: zero filters, app-only reads keyed solely on a "
+            + "caller-supplied id, with the caller's object id used only as a log argument.)"),
+
+        // ---- AI visualization: added 2026-09-08 by spaarkeai-word-add-in-r1 task 032 ----
+        new GovernedFile("Api/Ai/VisualizationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/visualization/* — document names, types, keywords, SPE file ids and record URLs for "
+            + "every NEIGHBOUR of a source document, returned as graph nodes. Added 2026-09-08 by "
+            + "spaarkeai-word-add-in-r1 task 032 (plan.md finding F-b). The file was ABSENT from this "
+            + "census while carrying the exact shape the census exists to find: the cosine-KNN search in "
+            + "VisualizationService trimmed its rows by tenantId and self-exclusion alone, and "
+            + "VisualizationAuthorizationFilter authorized only the SOURCE document — so Read on one "
+            + "document served its neighbours from anywhere in the tenant. POST /related-from-content "
+            + "carried no filter at all, which is also WHY the file could not be listed here before: a "
+            + "file cannot be classified RouteLevelGate while one of its routes has no gate, so the gap "
+            + "kept itself out of the guard. Both routes now publish VisualizationAuthorization and both "
+            + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
+            + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
+
+        // ---- Finance + scorecard: added 2026-09-30 by unified-access-control-r2 task 130 (defect C8) ----
+        //
+        // All three files were ABSENT from this census, so they were NotGoverned by omission while serving
+        // Dataverse content: four recalculate routes that read a matter's/project's invoices, budgets or KPI
+        // assessments APP-ONLY, wrote derived fields back APP-ONLY, and returned the numbers to any signed-in
+        // caller (bare RequireAuthorization() — there is no default/fallback policy in the BFF); and four
+        // /api/finance routes gated by ONE group-level filter that authorized whatever id a route→query
+        // fallback chain found first, always against sprk_documents. RouteLevelGate, not GroupGated: the gate
+        // that matters is the per-route declaration of WHICH id is authorized, so it has to be visible in each
+        // route's own fluent chain. No route in these files carries a waiver.
+        new GovernedFile("Api/Finance/FinanceEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/* — summary (Read on sprk_matters(route matterId)), invoice search (query matterId "
+            + "REQUIRED, Read on that matter — an unscoped search was tenant-wide), and invoice-review confirm / "
+            + "reject (Write on the BODY DocumentId; confirm also Write+Append on that document, which holds the "
+            + "invoice lookup, AppendTo on the matter and vendor organization, and the caller's Create privilege "
+            + "on sprk_invoice — owner G5). Each route carries its own "
+            + "AddFinanceAuthorizationFilter declaring the id it authorizes from the SAME source its handler "
+            + "binds; the group-level 'finance.read' filter and its id-fallback chain were deleted by task 130."),
+
+        new GovernedFile("Api/Finance/FinanceRollupEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects}/{id}/recalculate — reads invoices/budgets app-only, writes "
+            + "nine rollup fields app-only, returns spend/budget/utilization/12-month timeline. Gated by task 130 "
+            + "with Read on the parent as the caller, denied with a 404 identical for absent and unreadable ids. "
+            + "The check is at the endpoint because SpendSnapshotGenerationJobHandler calls the service with no "
+            + "caller."),
+
+        new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/{matters|projects}/{id}/recalculate-grades — reads KPI assessments app-only and writes six "
+            + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
+            + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
 
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
@@ -276,21 +411,37 @@ public class RouteAuthorizationGuardTests
         // defect and the shape together. Regression guard:
         // tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs.
 
-        // ---------- PENDING — still live, still ungated, in DocumentsEndpoints.cs ----------
-        // Re-pointed off "073" 2026-08-27: these two are NOT in the file 073 deleted, and 073's scope did
-        // not extend to them. Leaving them owned by a completed task would read as done; deleting them
-        // would silently un-waive two live holes — one of them a DESTROY.
-        new Waiver("PUT /api/drives/{driveId}/upload", WaiverKind.Pending, "UNOWNED",
-            "Drive-keyed write with the canwritefiles policy only — the same wrong-domain shape 073 retired "
-            + "on the container-keyed twin, surviving here because it lives in DocumentsEndpoints.cs, "
-            + "outside 073's scope. Needs an owner."),
-
-        new Waiver("DELETE /api/drives/{driveId}/items/{itemId}", WaiverKind.Pending, "UNOWNED",
-            "Drive-keyed DESTROY with the canwritefiles policy only. A destroy path is the worst case for a "
-            + "wrong-domain check, and this is the route the merge plan flagged as REACHABLE via "
-            + "src/dataverse/webresources/spaarke_documents/DocumentOperations.js:578, which reads "
-            + "driveId/itemId off form attributes and so depends on no deleted route. Needs an owner, and "
-            + "that task must FIRST resolve whether the web resource is deployed."),
+        // ---------- task 083: TWO WAIVERS REMOVED 2026-09-07, the routes are GONE ----------
+        //
+        // PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/{itemId} were RETIRED
+        // by task 083, which deleted Api/DocumentsEndpoints.cs outright rather than gating it — the same
+        // disposition, for the same reason, as 073 on the container-keyed twin above. These two carried
+        // WaiverKind.Pending / "UNOWNED"; they were the last UNOWNED waivers in this list.
+        //
+        // DELETED, NOT CONVERTED TO PERMANENT. That distinction is the whole point of the Pending kind:
+        // this file's own rule (maintenance rule 3) forbids promoting a Pending waiver to Permanent to
+        // make a build green, because doing so converts "someone must fix this" into "this is fine" with
+        // no fix in between — inverting the forcing function. The route being gone is the only clean way
+        // a Pending waiver is allowed to leave.
+        //
+        // What 083 actually closed: both took an SPE drive id off the ROUTE and wrote (or DESTROYED)
+        // app-only as the managed identity, so SPE applied no caller-side check, behind
+        // RequireAuthorization("canwritefiles") -> ResourceAccessRequirement("upload_file") ->
+        // ResourceAccessHandler, which resolves DOCUMENT rights from a DRIVE id. Wrong resource domain,
+        // not a missing mechanism — invisible to every structural rule in this file, which is why they
+        // needed a waiver rather than tripping a check. The now-orphaned canwritefiles + canreadfiles
+        // policies were deleted with them, and "canwritefiles" was removed from ResourcePolicies below.
+        //
+        // ⚠️ The second waiver's own instruction was DISCHARGED, not dropped: it said the owning task
+        // "must FIRST resolve whether the web resource is deployed." Deployment of
+        // src/dataverse/webresources/spaarke_documents/ is genuinely not determinable from the repo
+        // (manual portal deploy, per its README). That question turned out not to gate the decision:
+        // that file's getAuthToken returns null and its apiCall sends only credentials:'include', while
+        // the BFF's schemes are JwtBearer + ApiKey + Ciam with no cookie scheme — so a deployed copy
+        // 401s on every call. Deployed or not, it cannot reach these routes. Recorded because the
+        // waiver asked, and "could not determine" is a worse answer than "determined it does not matter".
+        //
+        // Regression guard: tests/integration/regression/DriveKeyedWriteRouteRetirementTests.cs.
 
         // ---------- PENDING — the OBO upload trio, re-pointed from 071 to 073/075/076 ----------
         //
@@ -315,15 +466,61 @@ public class RouteAuthorizationGuardTests
         // 🔎 CITATION FIXED 2026-08-27: this block previously cited "ADR-008 §6.5". ADR-008 has no §6.5 —
         // §6.5 is root CLAUDE.md's ADR Conflict Resolution Protocol. Pre-existing error, corrected here.
         //
-        // ⚠️ 076's rewrite to option (C) (2026-08-27) changes the DISPOSITION of all three: the first is
-        // CONVERTED to a record-keyed contract and gated; the other two are DELETED, because their client
-        // (Spaarke.SdapClient UploadOperation.ts:98) first calls GET /api/obo/containers/{id}/drive, which
-        // is mapped NOWHERE — the chunked path is dead by 404. So all three entries below should be gone
-        // when 076 lands, and none should become Permanent.
-        new Waiver("PUT /api/obo/containers/{id}/files/{*path}", WaiverKind.Pending, "075/076",
-            "Finding #2 — writes into a caller-named container. Authorization subject is the OWNING RECORD, "
-            + "not a document that does not exist yet; 11 live call sites via EntityCreationService.ts:493. "
-            + "Latent: OBO means SPE denies without a container ACL and no user holds one."),
+        // ⚠️ CORRECTED 2026-08-28 when 076 landed. This block previously PREDICTED that all three
+        // entries would be gone — "the first is CONVERTED to a record-keyed contract and gated". Two of
+        // three came true (the chunked pair was deleted; see the 076 block below). The prediction about
+        // the FIRST one did not, and the prediction is corrected here rather than left to read as an
+        // unmet promise.
+        //
+        // 076 DID build the gated record-keyed replacement —
+        //   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}
+        //   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session
+        // both carrying .AddRecordRouteAccessAuthorizationFilter(...).
+        //
+        // 🔴 THE PENDING WAIVER FOR "PUT /api/obo/containers/{id}/files/{*path}" WAS DELETED HERE
+        // 2026-09-03 — because THE ROUTE WAS DELETED, which is the only way a Pending waiver is
+        // allowed to leave this list. It was NOT converted to Permanent: it was a work item, and the
+        // work item was completed.
+        //
+        // It survived this long because three client paths uploaded bytes before any owning record
+        // existed (EmailComposer local attachments, the Analysis wizard's standalone document, and
+        // DocumentUploadWizard "skip associate"). PUT /api/obo/me/files/{*path} gave all three a
+        // callable upload that names no container, DocumentUploadWizard — the last client on the old
+        // route — cut over, and the route went with it. `NoWaiverNamesARouteThatNoLongerExists` is
+        // what would have caught this entry being left behind.
+
+        // ---------- task 076: the record-LESS upload route. PERMANENT, and honestly so. ----------
+        //
+        // Added 2026-09-03 with PUT /api/obo/me/files/{*path}. This is Permanent under maintenance
+        // rule 2's SECOND clause — "a create with no pre-existing resource" — not rule 4's forbidden
+        // build-go-green move. The distinction matters, so state it plainly: there is no resource to
+        // authorize because the record does not exist yet; that is the whole reason the route exists.
+        // It is the same reasoning the Permanent waiver on POST /api/v1/documents already carries.
+        //
+        // What makes it safe is NOT a filter, and pretending otherwise would be the dishonest version:
+        //   - The route has NO container parameter, so a caller cannot name where bytes go. That is
+        //     the property finding #2 was about, and it holds here by construction.
+        //   - The container is derived SERVER-side from the acting user's business unit
+        //     (RecordContainerResolver.ResolveForActingUserAsync), so exposure is bounded to a
+        //     container the caller is entitled to anyway.
+        //   - A caller who cannot be resolved to a Dataverse principal gets a typed 403
+        //     (acting_user_not_resolvable) rather than a shared-container fallback.
+        //   - Secure content can never arrive here: secure records resolve through the RECORD-keyed
+        //     route and fail closed. Acting-user BU is admissible ONLY where no record exists — for a
+        //     secure record it is provably the WRONG container, since users sit in the Operations
+        //     subtree while secure records are owned in `Secure Record`.
+        //
+        // If someone later adds a record id to this route "for convenience", this waiver is wrong and
+        // the route needs the record-keyed filter instead. That is the only way it becomes stale.
+        new Waiver("PUT /api/obo/me/files/{*path}", WaiverKind.Permanent, "076",
+            "Record-LESS upload: content that has no owning record at the moment the bytes move "
+            + "(EmailComposer local attachment, Analysis wizard standalone document, "
+            + "DocumentUploadWizard 'skip associate'). There is no pre-existing resource to authorize — "
+            + "the record is created afterwards. The route takes NO container parameter; the container "
+            + "is derived server-side from the acting user's business unit per the owner's 2026-08-28 "
+            + "resolution order, so the caller can only ever write into a container they are already "
+            + "entitled to, and an unresolvable caller is refused with a typed 403 rather than given a "
+            + "shared-container fallback. Secure content never reaches this route."),
 
         // ---------- task 076: TWO WAIVERS REMOVED 2026-08-27, the routes were DELETED ----------
         //
@@ -351,16 +548,26 @@ public class RouteAuthorizationGuardTests
         // 079 perturbation-proved the gates are what keeps Rule A green here, not a waiver: removing them
         // makes Rule A FAIL naming the two NEW route keys, which the old drive-keyed waivers do not cover.
 
-        // ---------- PENDING — found by this rule; now owned by task 078 ----------
-        new Waiver("GET /api/v1/containers/{containerId}/documents", WaiverKind.Pending, "078",
-            "FOUND BY THIS RULE ON ITS FIRST RUN and present in no Wave 1 task. Lists the documents of an "
-            + "arbitrary container id behind RequireAuthorization() alone — no filter, no resource policy. "
-            + "This is the sixth miss on a surface that has been recounted four times. Owner re-pointed "
-            + "UNOWNED -> 078 on 2026-08-27: the entry suggested folding it into 073, and 073 has now "
-            + "landed having correctly NOT done so — this is a collection READ whose control is result "
-            + "trimming against the caller's accessible-record set, which is a different mechanism from the "
-            + "per-resource write gate 073 owned. Task 078 owns it and already depends on 075's "
-            + "container->record mapping."),
+        // ---------- task 078: ONE WAIVER REMOVED 2026-08-28, the route is now GATED ----------
+        //
+        // GET /api/v1/containers/{containerId}/documents — the sixth miss, and the one this rule found
+        // itself on its first run — now carries .AddContainerDocumentAuthorizationFilter()
+        // (DataverseDocumentsEndpoints.cs:605). The filter resolves container -> OWNING RECORD through
+        // task 075's RecordContainerResolver.ResolveOwningRecordAsync (the one such mapping, reverse
+        // direction) and requires the caller's Read on that record via
+        // AuthorizationService.GetCallerRecordAccessAsync, evaluated OBO as the caller. A container that
+        // resolves to no owning record is REFUSED (ADR-003), not listed.
+        //
+        // Deleted rather than converted to Permanent: the waiver stopped being TRUE, which is the forcing
+        // function working. Converting it would have inverted the mechanism — see task 074's constraint.
+        //
+        // Note the earlier entry's own suggestion — that the control here is result trimming (Wave 3) —
+        // was right about the SHARED-container case and wrong that it made a per-resource gate impossible.
+        // The route names one resource, so it has an authorization subject; the shared case is precisely
+        // what the filter refuses, because trimming does not exist yet.
+        //
+        // 078 perturbation-proved the gate is what keeps Rule A green here, not a waiver: removing
+        // .AddContainerDocumentAuthorizationFilter() makes Rule A FAIL naming this route again.
 
         // ---------- PERMANENT ----------
         new Waiver("POST /api/v1/documents", WaiverKind.Permanent, "-",
@@ -372,6 +579,108 @@ public class RouteAuthorizationGuardTests
             "COLLECTION READ. Correctness here is RESULT TRIMMING, not a per-record gate — a per-resource "
             + "filter has no single resource to check. Trimming the collection to the caller's accessible "
             + "record set is Wave 3's subject (AccessibleRecordSetService), not a waiver-able gate."),
+
+        // ---------- task 120 (GitHub #1015): the Office surface, first time it is inside the guard ----------
+        //
+        // WHY THIS BLOCK EXISTS. Api/Office/* was never in GovernedFiles, so the whole surface was
+        // classified "serves neither document nor Dataverse content" by omission — and FilterMarker could
+        // not have recognised its gates even if it had been, because the Office filters are named without
+        // the word "Authorization". Task 120 opened that blind spot on 2026-09-29 with NINE Pending waivers
+        // and ONE Permanent: not nine new holes, one blind spot. (This header said TEN at first — a miscount
+        // in the very file whose job is to prevent drift.)
+        //
+        // STATE AFTER THE 2026-09-30 MASTER MERGE — two projects closed the same holes independently, and
+        // the attribution below says which fix SURVIVED, not merely which project found it:
+        //   • /communications ×3 (#1020) — unified-access-control-r2 task 127. Permanent: query-is-the-gate.
+        //   • /search/entities (#1021)   — spaarkeai-word-add-in-r1 task 062 (impersonated read). This
+        //                                  branch's task 126 (OBO) fixed it too and was SUPERSEDED at merge.
+        //   • POST /todo (#1022)         — word-add-in-r1 task 064, TodoSourceAccessFilter: NO waiver, it is
+        //                                  a real endpoint filter credited in ExplicitlyCreditedFilterTypeNames.
+        //                                  (This branch's task 128 gated only the regarding id; superseded.)
+        //   • POST /quickcreate          — word-add-in-r1 QuickCreateSourceAccessFilter: NO waiver for the
+        //                                  same reason. Its old Permanent "CREATE, nothing to authorize"
+        //                                  waiver went stale the moment the source-record read was gated.
+        //   • /search/matter-types       — NEW from master (task 038); reference data, Permanent.
+        //   ⇒ FOUR Pending (#1023 ×2, #1024 ×2 — latent stubs; word-add-in-r1 task 058 deletes those routes
+        //     and must delete these waivers with them) and FIVE Permanent.
+        //
+        // The outcome to prefer is the /todo and /quickcreate one: a real filter Rule A can SEE. A waiver —
+        // even a Permanent one — is a note explaining why the mechanical check cannot see a control.
+        // Maintenance rule 4 still binds: never convert "someone must fix this" into "this is fine" to make
+        // a build green.
+
+        // ✅ RESOLVED 2026-09-29 by task 127. Permanent rather than deleted: the SHAPE of the control
+        // is what a future reader needs before "simplifying" it back. There is still no endpoint
+        // filter, and correctly so — the record is not known until the query resolves it, so the
+        // DELEGATED QUERY ITSELF is the authorization boundary. Denial returns the ordinary 404, never
+        // a 403: answering 403 would confirm the record exists, trading an IDOR for an existence
+        // oracle (the separation task 022 removed from bulk download).
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): reads through IDataverseUserClient under the CALLER's Dataverse "
+            + "security context, so a communication the caller may not read simply does not return and "
+            + "the handler 404s. Previously read app-only on a caller-supplied message id with the "
+            + "caller's object id used EXCLUSIVELY as a log argument."),
+
+        // ✅ RESOLVED 2026-09-29 by task 127 — and this one needed TWO fixes, not one. Trimming only
+        // the communication lookup would have left the worse leak intact behind a route that looked
+        // fixed: candidate DISPLAY NAMES were resolved app-only, so even an entitled caller received
+        // the names of candidate records they had no right to see.
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}/suggestions", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): BOTH the communication lookup AND the candidate display-name "
+            + "resolution now run under the caller's context. A candidate the caller cannot read is "
+            + "DROPPED rather than merely unnamed — returning the id alone would still disclose that "
+            + "the record exists and was associated with the email."),
+
+        // ✅ RESOLVED 2026-09-29 by task 127.
+        new Waiver("GET /api/office/communications/{commId:guid}/linked-todos", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): the sprk_todo query runs under the caller's context, so Dataverse "
+            + "returns only to-dos they may see. A communication the caller cannot see yields an empty "
+            + "list — indistinguishable from one that simply has no to-dos, which is the intended "
+            + "conflation. Previously filtered solely on the caller-supplied commId, app-only."),
+
+        // ✅ RESOLVED by spaarkeai-word-add-in-r1 task 062 — arrived with the 2026-09-30 master merge. This
+        // branch's task 126 fixed the same hole with a different mechanism (OBO via IDataverseUserClient) and
+        // was SUPERSEDED at merge: ADR-028 Amendment A5 sanctions app-only IMPERSONATED read for "what may
+        // this workforce user see" sets, and this project's own task 036 was headed the same way.
+        //
+        // Kept Permanent, NOT deleted, because the shape of the control is what a future reader needs
+        // before "simplifying" it: there is no endpoint filter and correctly so — there is no target record
+        // to authorize before the query runs, so the QUERY IS the boundary. TotalCount/HasMore derive from
+        // the trimmed set (a count over untrimmed matches is the same disclosure, restated).
+        //
+        // What was wrong, for the record: the search ran app-only with no user predicate, so any
+        // authenticated Office caller could enumerate every matter, project, invoice, account and contact
+        // in the tenant from a 2-character substring plus paging.
+        new Waiver("GET /api/office/search/entities", WaiverKind.Permanent, "#1021",
+            "RESOLVED (word-add-in-r1 task 062): authorization is the IMPERSONATED query itself, not an "
+            + "endpoint filter. The handler resolves the caller's Dataverse systemuserid (ICallerSystemUserResolver) "
+            + "and refuses when it cannot; OfficeService.QuerySearchEntityAsync then runs each per-type query "
+            + "app-only WITH MSCRMCallerID = that systemuserid (IImpersonatedCommunicationQuery), so Dataverse "
+            + "applies row-level security inside the query. FAILS CLOSED — no app-only fallback. Depends on the "
+            + "BFF application user holding prvActOnBehalfOfAnotherUser; without it the route errors rather "
+            + "than leaking. A per-resource filter is not applicable: the route names no single resource."),
+
+        // NEW from master (spaarkeai-word-add-in-r1 task 038). First measured by this census at the
+        // 2026-09-30 merge — master never governed Api/Office/*, so it never had to pass Rule A there.
+        new Waiver("GET /api/office/search/matter-types", WaiverKind.Permanent, "-",
+            "REFERENCE-DATA READ. Returns the active sprk_mattertype_ref rows — a small, load-once lookup list "
+            + "behind the pane's required Matter Type field (5 rows in dev), not customer record content — and "
+            + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
+            + "returns customer rows, this waiver is WRONG and the route needs a gate."),
+
+        // The four Pending waivers for the Office STUB routes (document search and recent items, #1023; share
+        // links and share attach, #1024) were DELETED 2026-09-30 WITH THE ROUTES by spaarkeai-word-add-in-r1
+        // task 058. All four served fabricated data behind the authentication filter only, and no client called
+        // them, so the routes were removed rather than gated.
+
+        // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
+        // "CREATE. There is no pre-existing resource to authorize", which stopped being true when
+        // spaarkeai-word-add-in-r1 added QuickCreateSourceAccessFilter: the route now reads a caller-named
+        // SOURCE record to copy fields from, and gates that read. The filter is credited in
+        // ExplicitlyCreditedFilterTypeNames, so Rule A sees the gate directly. The old waiver's two caveats
+        // were real and moved to the OfficeEndpoints GovernedFile entry rather than being lost.
+        // (NoWaiverIsStale would NOT have caught this: it inspects PENDING waivers only, so a Permanent
+        // waiver can outlive its premise silently.)
     };
 
     /// <summary>
@@ -387,8 +696,16 @@ public class RouteAuthorizationGuardTests
         // "PUT /api/upload-session/chunk" used to appear twice in this file, and why removing it from one
         // list is not enough. TheSetOfPolicyOnlyRoutesIsPinned compares against what the scanner actually
         // finds, so a stale entry here fails as `removed`, not silently.
-        "PUT /api/drives/{driveId}/upload",
-        "DELETE /api/drives/{driveId}/items/{itemId}",
+        //
+        // 🔴 THE SET IS NOW EMPTY (2026-09-07, task 083). The last two entries —
+        // "PUT /api/drives/{driveId}/upload" and "DELETE /api/drives/{driveId}/items/{itemId}" — went
+        // with the deletion of Api/DocumentsEndpoints.cs. Finding #4's shape (a real, fail-closed
+        // policy pointed at the wrong resource domain) no longer occurs anywhere in the governed set.
+        //
+        // Keep the set and its pin. An empty pinned set is a stronger statement than a missing one: it
+        // makes the NEXT route to be gated by a named policy alone fail TheSetOfPolicyOnlyRoutesIsPinned
+        // as `added`, forcing the resource-key-vs-resource-domain question to be asked out loud. That
+        // question is the one nothing else in this file can ask, because the mechanism looks correct.
     };
 
     /// <summary>
@@ -405,7 +722,13 @@ public class RouteAuthorizationGuardTests
         "candeletefiles", "canmovefiles", "cancopyfiles", "cancreatefolders",
         "cansharefiles", "canmanagefilepermissions",
         "canviewversions", "canrestoreversions",
-        "canwritefiles",
+        // "canwritefiles" REMOVED 2026-09-07 (task 083) — the POLICY no longer exists. Its only two
+        // consumers were the drive-keyed write/destroy routes 083 deleted, so AuthorizationModule's
+        // registration went with them. A name left in this set after its policy is gone is worse than
+        // unused: this set is what makes a route count as GATED, so a future
+        // RequireAuthorization("canwritefiles") would be classified as a genuine resource decision by
+        // this guard while ASP.NET Core threw at startup for an unregistered policy. The guard would be
+        // asserting safety about a route that cannot run.
     };
 
     // Census: the total routing surface. A new endpoint file must be classified before the build goes
@@ -478,7 +801,78 @@ public class RouteAuthorizationGuardTests
     // confirm it survives as the aggregator rather than assumed gone from the count alone; and the
     // anonymous webhook inside ComposeSyncEndpoints.cs was read before being classified rather than
     // assumed authenticated because its siblings are.
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 116 (2026-09-07, unified-access-control-r2 task 083). A DOWNWARD move, the census's fifth
+    // firing and the second in the delete direction:
+    //
+    //   083  -1  Api/DocumentsEndpoints.cs DELETED. Task 090 had already removed six of its eight
+    //            routes (unsatisfiable "canmanagecontainers" on collection endpoints); 083 removed the
+    //            last two — PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/
+    //            {itemId} — so the file had no Map{Verb} call left and was deleted outright.
+    //
+    // Unlike the 110 -> 117 firing above, this one moves a GOVERNED file OUT of the set, so the same
+    // discipline applies in reverse: its GovernedFiles entry (Scope.RouteLevelGate) was DELETED in the
+    // same edit, and so were its two Pending/"UNOWNED" waivers. Bumping the count alone would have left
+    // Rule A scanning a path that no longer exists — which ScanFile treats as unparseable and therefore
+    // FAILS on, so in this direction the census and the governed set cannot silently disagree. That is
+    // the opposite of the ComposeEndpoints case, where the count could have gone green while the guarded
+    // surface escaped; worth recording that the two directions have different failure modes.
+    //   061  +1  Api/ExternalAccess/UnsecureProjectEndpoint.cs ADDED — POST /unsecure-project, the
+    //            reverse of secure-project provisioning (design §5.1 "the designation is reversible").
+    //            Classified per the maintenance procedure: it serves NEITHER document metadata nor file
+    //            bytes. It mutates a Dataverse sprk_project's ownership, POA shares and sprk_issecure
+    //            flag, so there is no GovernedFiles entry to add — the count alone moves.
+    //
+    //            Its authorization is NOT weaker for being outside GovernedFiles: the route sits in the
+    //            external-access admin group, so it inherits AddDelegationRuleFilter() — the FR-07
+    //            Write-on-the-target check evaluated as the CALLER over OBO — exactly as
+    //            /provision-project does. DelegationRuleFilter's target map gained the matching
+    //            UnsecureProjectRequest case in the same change; without it the filter would resolve no
+    //            target and deny every call, which is fail-closed but reads as a bug.
+    //
+    // 117 -> 118 (2026-09-11, unified-access-control-r2 task 098):
+    //
+    //   098  +1  Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs ADDED — POST /set-record-share-expiry,
+    //            the Manage Access toolbar Expiration (spec FR-33): one expiry written to every active
+    //            sprk_externalrecordaccess row of a record in one transaction. Classified per the maintenance
+    //            procedure: it serves NEITHER document metadata nor file bytes — it mutates the expiry of
+    //            share rows — so there is no GovernedFiles entry to add; the count alone moves.
+    //
+    //            Same shape as 061: the route sits in the external-access admin group, so it inherits
+    //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
+    //            DelegationRuleFilter's target map gained the matching SetRecordShareExpiryRequest case in
+    //            the same change. Caught by this census at review time, before CI — it is doing its job.
+    //
+    // 118 -> 119 (2026-09-15, unified-access-control-r2 task 063):
+    //
+    //   063  +1  Api/ExternalAccess/InternalShareEndpoints.cs ADDED — POST /share-user, POST /unshare-user and
+    //            GET /user-shares, the server half of the Manage Access "+ User" picker (spec FR-29): internal
+    //            system-user POA shares on a project, matter or work assignment. Classified per the maintenance
+    //            procedure: it serves NEITHER document metadata nor file bytes — it writes and lists POA shares on
+    //            root records — so there is no GovernedFiles entry to add; the count alone moves.
+    //
+    //            Same shape as 061 and 098: the routes sit in the external-access admin group and inherit
+    //            AddDelegationRuleFilter() (Write on the record, evaluated as the CALLER over OBO), and
+    //            DelegationRuleFilter's target map gained one case per request type in the same change —
+    //            ShareRecordWithUserRequest, UnshareRecordWithUserRequest and the GET's RecordUserSharesQuery.
+    // 119 -> 120 (2026-09-21, unified-access-control-r2 task 118):
+    //
+    //   118  +1  Api/ExternalAccess/RecordAccessGateEndpoint.cs ADDED — GET /can-manage-access, which answers
+    //            the delegation question for ONE record so the Manage Access affordance can gate on the rule
+    //            the server enforces instead of on a table-level Create privilege that asked a different
+    //            question with the opposite fail direction (spec FR-07 / owner decision D-1 option C).
+    //            Classified per the maintenance procedure: it serves NEITHER document metadata nor file bytes —
+    //            it returns one boolean about a root record — so there is no GovernedFiles entry to add; the
+    //            count alone moves. Same shape as 061, 098 and 063.
+    //
+    //            Worth stating because this file is unlike its neighbours: it is the first route whose ENTIRE
+    //            PURPOSE is to be gated. It carries no rights logic, and its 200 means only "AddDelegationRuleFilter()
+    //            let me through" — so for this one file, being inside the group is not merely how it is protected,
+    //            it is how it is CORRECT. DelegationRuleFilter's target map gained the matching
+    //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
+    //            affordance would vanish for every user. Both directions are pinned by
+    //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
+    private const int ExpectedEndpointFileCount = 120;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
@@ -788,9 +1182,14 @@ public class RouteAuthorizationGuardTests
     }
 
     /// <summary>
-    /// Filters that legitimately reach a decision without an authorization service — claims-only or
-    /// signature-only. Each carries a reason, for the same purpose as the waiver reasons: an unexplained
-    /// exemption here is how a decorative filter gets in.
+    /// Filters that legitimately reach a decision without an authorization service — claims-only,
+    /// signature-only, or (added 2026-09-29 by task 120) OWNER-COMPARISON: the filter loads the resource
+    /// and compares its stored creator/owner against the caller. Each carries a reason, for the same
+    /// purpose as the waiver reasons: an unexplained exemption here is how a decorative filter gets in.
+    ///
+    /// <para>The owner-comparison shape was added rather than admitting <c>IOfficeService</c> to
+    /// <see cref="DecisionServices"/>, which would have passed any filter that merely touched that
+    /// service. A category with a written reason per entry is narrower than a loose vocabulary entry.</para>
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> ClaimOnlyFilters =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -826,6 +1225,15 @@ public class RouteAuthorizationGuardTests
                 "SPE administrative surface. Decides from admin role claims rather than per-record rights, "
                 + "because the resources are CONTAINERS and container types, which are not Dataverse rows "
                 + "and have no RetrievePrincipalAccess answer.",
+            ["JobOwnershipFilter"] =
+                "OWNER-COMPARISON. Loads the job via IOfficeService and 403s unless its CreatedBy equals "
+                + "the caller's object id — a genuine per-resource decision, but made by comparing a "
+                + "stored owner rather than by consulting an authorization service. IOfficeService is a "
+                + "general service, not an authorization seam, so it is deliberately NOT in "
+                + "DecisionServices. Its fail-OPEN — an absent or blank CreatedBy skipped the comparison "
+                + "entirely and let any authenticated caller read the job — was closed independently by "
+                + "unified-access-control-r2 task 120 and spaarkeai-word-add-in-r1 task 067 (finding F5); the "
+                + "2026-09-30 merge kept 067's version, which now denies unproven ownership per ADR-003.",
             ["ReportingAuthorizationFilter"] =
                 "Power BI embed surface. Decides from role claims checked against a configured privilege "
                 + "list (IConfiguration), not from record rights — a report is not a Dataverse row. "
@@ -870,7 +1278,7 @@ public class RouteAuthorizationGuardTests
         "AccessRights",                  // the rights enum — a filter comparing rights is deciding
         "IAccessibleRecordSetService",   // the accessible-record-set gate (external / contact plane)
         "RetrievePrincipalAccess",       // the impersonated Dataverse call
-        "IDataverseAccessGrantService",  // explicit grants
+        "IDataverseRecordShareService",  // explicit grants + revokes (renamed from IDataverseAccessGrantService, uac-r2 task 060)
         "ICommunicationAccessFilter",    // the communication-scoped decision seam
 
         // Added after running Rule B against the real 30-filter surface. Both of these ARE genuine
@@ -878,11 +1286,66 @@ public class RouteAuthorizationGuardTests
         // positive constraint demands be reached by widening the definition, not by waiving real gates:
         "IDataversePrivilegeChecker",    // DataverseAuthorizationFilter: HasReadPrivilegeAsync / GetReadableEntitiesAsync
         "WorkspaceLayoutService",        // WorkspaceLayoutAuthorizationFilter: GetLayoutByIdAsync(layoutId, userId) — ownership-scoped lookup, denies on mismatch
+
+        // Added 2026-09-29 by task 120, for the same reason and by the same test as the two above: Rule B
+        // was widened over the Office surface and reported EntityAccessFilter as consulting nothing. It
+        // consults this — GetCallerRightsAsync asks Dataverse RetrievePrincipalAccess as the CALLER over
+        // OBO and fails closed on every degraded path — so the finding was a gap in this vocabulary, not
+        // in the filter. Widening the definition is the correct repair; waiving a real gate is not.
+        "CallerRecordAccessProbe",       // EntityAccessFilter: GetCallerRightsAsync -> RetrievePrincipalAccess over OBO, fails closed
     };
 
     // =============================================================================================
     // CENSUS — the anti-drift ratchet (the task's mechanism (c))
     // =============================================================================================
+
+    [Fact(DisplayName = "Task 091 Rule E: a group-gated endpoint file declares no absolute route paths")]
+    public void GroupGatedFilesRegisterNoAbsolutePaths()
+    {
+        // A group-gated file inherits its authorization from the prefix group. A route that spells its
+        // own absolute "/api/..." path is a route that resolves WITHOUT the group — which is exactly
+        // how ContainerItemEndpoints came to be registered on the root app while still answering on
+        // /api/spe URLs. The absolute path is not merely a style difference; it is what made the
+        // mis-registration invisible, because the URLs looked right in every review.
+        //
+        // Note what this rule can and cannot see. It cannot verify that the file is registered on a
+        // group — source scanning cannot follow the call site. The RouteGroupBuilder parameter type is
+        // what enforces THAT, at compile time. This rule closes the complementary half: keeping the
+        // paths group-relative is what keeps the compile-time constraint meaningful, since a file
+        // taking a group but declaring absolute paths would silently double the prefix.
+        var offenders = new List<string>();
+
+        foreach (var file in GovernedFiles.Where(f => f.Scope == Scope.GroupGated))
+        {
+            var source = File.ReadAllText(
+                Path.Combine(BffRoot, file.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+            foreach (Match match in Regex.Matches(
+                         source, @"\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*""(?<route>[^""]+)"""))
+            {
+                var route = match.Groups["route"].Value;
+                if (route.StartsWith("/api/", StringComparison.Ordinal))
+                {
+                    offenders.Add($"{file.RelativePath}: \"{route}\"");
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "These routes are in a GROUP-GATED file but declare an absolute path, so they do not depend "
+            + "on the group to resolve. Make them group-relative (drop the group's prefix). Task 091's "
+            + "nine routes had this exact shape and were registered on the root app for it — they "
+            + "answered on /api/spe URLs while inheriting neither the admin-role filter nor the "
+            + "tenant-scope filter.\n\n  " + string.Join("\n  ", offenders));
+
+        // Non-vacuity: the scan must actually reach a group-gated file, or this rule passes by
+        // examining nothing.
+        Assert.True(
+            GovernedFiles.Any(f => f.Scope == Scope.GroupGated),
+            "No GroupGated file is classified, so this rule asserts nothing. If the last one was "
+            + "removed, delete this rule rather than leaving it to pass vacuously.");
+    }
 
     [Fact(DisplayName = "Task 074 census: the set of BFF endpoint files is pinned, so a new route surface must be classified")]
     public void TheEndpointFileCensusIsPinned()
@@ -970,6 +1433,20 @@ public class RouteAuthorizationGuardTests
         // container id against document rights. Asserting the honest classification is the point — a
         // detector that called this "gated" would be lying, and one that called it "ungated" would be
         // wrong about the mechanism.
+        //
+        // ⚠️ POLICY NAME CHANGED 2026-09-07 (task 083), and the change is deliberate rather than a
+        // relaxation. This fixture reproduced the historical route verbatim, including
+        // .RequireAuthorization("canwritefiles") — but 083 DELETED that policy along with its last two
+        // consumers, and removed the name from ResourcePolicies. Left as-was, this control would have
+        // started asserting ResourcePolicy for a policy that no longer exists, i.e. failing for a reason
+        // that has nothing to do with the detector it exists to test.
+        //
+        // "canuploadfiles" (ResourceAccessRequirement("driveitem.content.upload"), AuthorizationModule
+        // :238) is substituted because what is under test here is the SHAPE — a container-keyed write
+        // whose only gate is a named resource policy — not the literal string. The alternative was to
+        // keep a dead name in ResourcePolicies so this line would still classify, which would have made
+        // the set lie about which policies exist in order to keep a test green: the set is what marks a
+        // route GATED, so a stale name there is a guard vouching for a route that cannot start.
         var upload = ScanText("Api/UploadEndpoints.cs", new[]
         {
             "        app.MapPut(\"/api/containers/{containerId}/files/{*path}\", async (",
@@ -977,7 +1454,7 @@ public class RouteAuthorizationGuardTests
             "        {",
             "            return TypedResults.Ok();",
             "        })",
-            "        .RequireAuthorization(\"canwritefiles\");",
+            "        .RequireAuthorization(\"canuploadfiles\");",
         });
         Assert.Single(upload);
         Assert.Equal(AuthMechanism.ResourcePolicy, upload[0].Mechanism);
@@ -1136,6 +1613,127 @@ public class RouteAuthorizationGuardTests
         Assert.Equal(AuthMechanism.None, commentOnly[0].Mechanism);
     }
 
+    [Fact(DisplayName = "Task 120 negative control: baseline authentication, rate limiting and idempotency are NOT gates")]
+    public void AuthFilterRecognition_NegativeControl_BaselineAuthnIsNotAGate()
+    {
+        // THE CONTROL THAT MAKES THE WIDENING SAFE. Task 120 taught FilterMarker two new filter names. The
+        // tempting version of that change was `\.Add\w*Filter\s*\(`, which would have been one line shorter
+        // and would have marked six ungated Office routes as authorized — a guard reporting green over a
+        // hole, which is strictly worse than the blind spot it replaced.
+        //
+        // Each filter below is on the real /api/office chain. None of them looks at a route id, a body, or
+        // any Dataverse record: OfficeAuthFilter checks IsAuthenticated and stashes the caller's oid
+        // (OfficeAuthFilter.cs:76-135), the rate-limit filter counts requests and is explicitly fail-OPEN,
+        // and the idempotency filter replays cached responses. If this test ever goes green-by-accident,
+        // FilterMarker has been widened past authorization into "has a filter of some kind".
+        var baselineOnly = ScanText("Api/Fake/OfficeBaseline.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/office\").RequireAuthorization();",
+            "        group.MapGet(\"/search/entities\", SearchEntitiesAsync)",
+            "            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)",
+            "            .AddOfficeAuthFilter();",
+            "        group.MapPost(\"/todo\", CreateTodoAsync)",
+            "            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)",
+            "            .AddIdempotencyFilter()",
+            "            .AddOfficeAuthFilter();",
+        });
+
+        Assert.Equal(2, baselineOnly.Count);
+        Assert.All(baselineOnly, r => Assert.Equal(AuthMechanism.None, r.Mechanism));
+    }
+
+    [Fact(DisplayName = "Task 120 positive control: the two real Office gates ARE recognised, on the real files")]
+    public void AuthFilterRecognition_PositiveControl_OfficeGatesAreRecognised()
+    {
+        // The other half of the pair, per tests/CLAUDE.md: a detector that fires on everything is as
+        // useless as one that fires on nothing, and a guard that flags the code it protects gets deleted
+        // rather than obeyed. Run against the REAL file, not a fixture — a fixture would still pass if
+        // someone removed the filters from the shipping registration.
+        var routes = ScanFile("Api/Office/OfficeEndpoints.cs")
+            .ToDictionary(r => r.Key, r => r.Mechanism, StringComparer.Ordinal);
+
+        foreach (var key in new[]
+                 {
+                     "POST /api/office/save",                  // .AddEntityAccessFilter()
+                     "GET /api/office/jobs/{jobId:guid}",      // .AddJobOwnershipFilter()
+                     "GET /api/office/jobs/{jobId:guid}/stream",
+                     // Pinned at the 2026-09-30 merge: both arrived from spaarkeai-word-add-in-r1 and were
+                     // INVISIBLE to this guard until credited, so Rule A reported them ungated. Pinning them
+                     // here means dropping either name from ExplicitlyCreditedFilterTypeNames fails loudly
+                     // on the real file, rather than silently demoting a real gate to "needs a waiver".
+                     "POST /api/office/todo",                  // .AddTodoSourceAccessFilter()
+                     "POST /api/office/quickcreate/{entityType}", // .AddQuickCreateSourceAccessFilter()
+                 })
+        {
+            Assert.True(routes.ContainsKey(key), $"Expected to find {key} — has the route been renamed?");
+            Assert.Equal(AuthMechanism.Filter, routes[key]);
+        }
+    }
+
+    [Fact(DisplayName = "Task 120: Rule B covers every filter Rule A credits — the two widenings cannot drift apart")]
+    public void RuleBCoversEveryFilterRuleACredits()
+    {
+        // WHY THIS EXISTS. Rule A credits a route for CARRYING a filter; Rule B is the only thing that
+        // proves the filter decides anything. They read two different lists, and nothing but this test
+        // stops someone adding a name to FilterMarker (one line, obvious, in the file they are already
+        // editing) without adding it to AuthorizationFilterFiles (elsewhere, easy to miss).
+        //
+        // That drift produces the SemanticSearchAuthorizationFilter shape from the opposite direction: a
+        // filter that reads as a gate at the call site, is credited as one, and is never checked.
+        var credited = AuthorizationFilterFiles().Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+
+        var missing = ExplicitlyCreditedFilterFileNames
+            .Where(name => !credited.Contains(name))
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            "FilterMarker credits filter(s) that Rule B never inspects:\n  " + string.Join("\n  ", missing));
+
+        // And the names must correspond to real files — a typo here disables Rule B's coverage silently.
+        var notOnDisk = ExplicitlyCreditedFilterFileNames
+            .Where(name => !Directory.EnumerateFiles(BffRoot, name, SearchOption.AllDirectories).Any())
+            .ToList();
+
+        Assert.True(
+            notOnDisk.Count == 0,
+            "ExplicitlyCreditedFilterFileNames names file(s) that do not exist. A renamed filter must be "
+            + "renamed here too, or Rule B stops covering it without anything failing:\n  "
+            + string.Join("\n  ", notOnDisk));
+    }
+
+    [Fact(DisplayName = "Task 120 negative control: a route on a NESTED group resolves to its full path, not a fragment")]
+    public void NestedGroupPrefix_NegativeControl_ResolvesThroughTheParent()
+    {
+        // Found by running the guard over the Office surface — the first governed file to nest its groups.
+        // Before this, `var jobs = group.MapGroup("/jobs")` produced `GET /jobs/{jobId}`: a FRAGMENT, not a
+        // route. Route keys are what the waiver list matches on, so a waiver would have been written
+        // against a string that several BFF surfaces could each produce, and NoWaiverIsStale would have
+        // been comparing fiction to fiction.
+        var nested = ScanText("Api/Fake/Nested.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/office\").RequireAuthorization();",
+            "        var jobs = group.MapGroup(\"/jobs\");",
+            "        jobs.MapGet(\"/{jobId:guid}\", GetJobStatusAsync).AddJobOwnershipFilter();",
+        });
+
+        Assert.Single(nested);
+        Assert.Equal("GET /api/office/jobs/{jobId:guid}", nested[0].Key);
+
+        // Inheritance must survive the nesting too: an inner group that declares no chain of its own
+        // inherits the outer group's, or a route would lose a gate the parent legitimately carries.
+        var inherited = ScanText("Api/Fake/NestedInherit.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/spe\").AddSpeAdminAuthorizationFilter();",
+            "        var items = group.MapGroup(\"/containers\");",
+            "        items.MapGet(\"/{id}/content\", GetContentAsync);",
+        });
+
+        Assert.Single(inherited);
+        Assert.Equal("GET /api/spe/containers/{id}/content", inherited[0].Key);
+        Assert.Equal(AuthMechanism.Filter, inherited[0].Mechanism);
+    }
+
     [Fact(DisplayName = "Task 074: the scanner reads the real governed files and finds every registration in them")]
     public void ScannerAccountsForEveryRegistrationInTheGovernedFiles()
     {
@@ -1177,18 +1775,53 @@ public class RouteAuthorizationGuardTests
         // reaching either one; and the chunk route had no client at all, because even that client PUT
         // straight to Graph's session.uploadUrl. Both waivers were deleted with them.
         //
-        // The 1 survivor is PUT /api/obo/containers/{id}/files/{*path} — the LIVE upload route, which
-        // 076 CONVERTS to the record-keyed contract rather than deleting. Its waiver goes when the
-        // conversion lands, and it must not become Permanent.
+        // 1 → 3: task 076 ADDED the record-keyed upload pair, and did NOT delete the container-keyed
+        // route it was built to replace. Both halves of that sentence are deliberate:
+        //
+        //   +1  PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}   GATED
+        //   +1  POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session  GATED
+        //
+        // Both carry .AddRecordRouteAccessAuthorizationFilter(...), so Rule A sees them as Filter and
+        // neither needs a waiver — which is the shape 076 exists to produce: the caller names the owning
+        // RECORD, the filter authorizes the caller against it, and the container is then resolved from
+        // that same record server-side.
+        //
+        // The upload-session route also RESTORES a capability rather than only re-keying one: files
+        // too large for a single PUT had no working upload path after the dead chunked pair was
+        // deleted earlier in this task.
+        // (Corrected 2026-09-02: this said the threshold was 4 MiB "because the small route is capped
+        // at PathValidator.SmallUploadMaxBytes". That constant was never enforced and has been
+        // deleted; the simple PUT handles 250 MB, so the real threshold is 250 MB.)
+        //
+        // ⚠️ WHY THE COUNT IS 3 AND NOT 2. PUT /api/obo/containers/{id}/files/{*path} SURVIVES, and its
+        // Pending waiver survives with it — deliberately, and this is the honest state rather than a
+        // passing grade. Three live client upload paths have NO owning record at the moment the bytes
+        // move (EmailComposer local attachments, the Analysis wizard's standalone document,
+        // DocumentUploadWizard "skip associate"), so deleting the route would break them and giving the
+        // record-keyed routes a container parameter "for just those three" is option (B), which was
+        // rejected. That is a MODELLING gap escalated to the owner, not a routing gap 076 could close.
+        // The waiver must NOT be converted to Permanent while it stands: it is a work item.
         //
         // Update this number when routes are added or removed here — that is the ratchet working, not a
-        // nuisance. Note the retroactive-validation test above is unaffected by the deletions: it feeds
-        // the scanner INLINE source text, so it still proves the rule catches finding #2's shape even
-        // though that route no longer exists in the file.
+        // nuisance. Note the retroactive-validation test above is unaffected by any of this: it feeds
+        // the scanner INLINE source text, so it still proves the rule catches finding #2's shape.
+        //
+        // 3 → 4 on 2026-09-03: the record-LESS route was added — the fourth and last row of the
+        // container-resolution order the owner settled on 2026-08-28 (acting user's business unit,
+        // SERVER-derived), and what finally gave the three no-owning-record client paths a callable
+        // upload that names no container.
+        //
+        // 4 → 3 on 2026-09-03, later the same day: with every client moved, PUT
+        // /api/obo/containers/{id}/files/{*path} was DELETED and its Pending waiver deleted with it.
+        // ⚠️ A future 3 → 4 here is the thing to look at hardest: the shape that was removed is a
+        // route that writes bytes to a CALLER-NAMED destination. If one comes back, it needs a
+        // per-resource authorization decision, not a waiver.
         Assert.True(
-            ScanFile("Api/OBOEndpoints.cs").Count == 1,
-            "Expected 1 registration in OBOEndpoints.cs after task 076 deleted the dead chunked pair, "
-            + "leaving only the live upload route. A drop here would make that route invisible.");
+            ScanFile("Api/OBOEndpoints.cs").Count == 3,
+            "Expected 3 registrations in OBOEndpoints.cs: the two GATED record-keyed upload routes "
+            + "(PUT files + POST upload-session) and the record-LESS route for content that has no "
+            + "owning record yet. A drop here would make one of them invisible; a RISE means a new "
+            + "upload route was added and needs its authorization decision stated.");
     }
 
     // =============================================================================================
@@ -1217,14 +1850,55 @@ public class RouteAuthorizationGuardTests
 
     private static readonly Regex MapCall = new(@"\.Map(Get|Post|Put|Patch|Delete)\s*\(", RegexOptions.Compiled);
 
-    // `var docs = app.MapGroup("/api/documents")` — receiver variable -> path prefix.
+    // `var docs = app.MapGroup("/api/documents")` — receiver variable -> (parent receiver, path segment).
+    //
+    // 🔴 THE PARENT CAPTURE IS LOAD-BEARING (task 120). A group may be declared ON another group:
+    // `var jobs = group.MapGroup("/jobs")` under `var group = app.MapGroup("/api/office")`. Capturing only
+    // the literal made such a route report as `GET /jobs/{jobId:guid}` — a fragment, not a route. That is
+    // not cosmetic: route keys are what the WAIVER LIST matches on, so a waiver would have been written
+    // against an ambiguous fragment that three other BFF surfaces could also produce, and NoWaiverIsStale
+    // would have been comparing fiction to fiction. Found by running the guard over the Office surface,
+    // which is the first governed file to nest its groups.
     private static readonly Regex GroupDecl =
-        new(@"var\s+(\w+)\s*=\s*\w+\s*\.MapGroup\s*\(\s*""([^""]*)""", RegexOptions.Compiled);
+        new(@"var\s+(\w+)\s*=\s*(\w+)\s*\.MapGroup\s*\(\s*""([^""]*)""", RegexOptions.Compiled);
 
-    // A per-resource filter, in either of the two forms this codebase uses.
+    // A per-resource filter, in the forms this codebase uses.
+    //
+    // 🔴 THE THIRD ALTERNATION IS AN ALLOW-LIST ON PURPOSE (task 120, GitHub #1015). The Office surface
+    // names its filters without the word "Authorization", so neither of the first two alternations sees
+    // them. The obvious repair — matching `\.Add\w*Filter\s*\(` — would have been WRONG in the direction
+    // that matters: it would also credit AddOfficeAuthFilter, AddOfficeRateLimitFilter and
+    // AddIdempotencyFilter, marking six ungated routes as authorized. Those three are authentication,
+    // throughput and replay protection respectively; none of them looks at a route id, a body, or any
+    // Dataverse record (OfficeAuthFilter.cs:76-135 is the whole of what it does).
+    //
+    // A guard that reports green over an ungated route is worse than one with a known blind spot, so new
+    // filter names are enumerated here one at a time, each only after reading what it enforces. The cost
+    // is one line per filter; the alternative cost is a false negative nobody is looking for.
+    // AuthFilterRecognition_NegativeControl_BaselineAuthnIsNotAGate pins this.
+    //
+    // 🔴 ONE LIST, TWO CONSUMERS — Rule A's regex below and Rule B's file discovery both derive from it.
+    // The first draft of task 120 kept them as two lists and added a test that they agreed. That test was
+    // VACUOUS: it iterated the same list it checked, so adding a name to the regex alone would have passed
+    // it. Deriving both from one source makes the drift impossible rather than merely detected — which is
+    // the right instrument, because the drift produces a credited-but-never-inspected filter, i.e. the
+    // SemanticSearchAuthorizationFilter shape reached from the opposite direction.
+    private static readonly IReadOnlyList<string> ExplicitlyCreditedFilterTypeNames = new[]
+    {
+        "EntityAccessFilter",            // Office /save: OBO RetrievePrincipalAccess (AppendTo) on SaveRequest.TargetEntity, fails closed
+        "JobOwnershipFilter",            // Office /jobs: job creator vs caller, denies on mismatch AND on a blank creator
+        // Both below arrived with the 2026-09-30 master merge (spaarkeai-word-add-in-r1). Neither name contains
+        // "Authorization", so FilterMarker could not see them and Rule A reported their routes UNGATED — the
+        // same blind spot task 120 opened for the Office surface, one merge later. Each consults
+        // CallerRecordAccessProbe (in DecisionServices) and returns 403 on deny, so Rule B holds.
+        "TodoSourceAccessFilter",        // Office POST /todo (task 064): Read on EVERY caller-supplied id, one constant deny body
+        "QuickCreateSourceAccessFilter", // Office POST /quickcreate: Read on the caller-named SOURCE record it copies fields from
+    };
+
     private static readonly Regex FilterMarker = new(
         @"\.Add\w*AuthorizationFilter\s*[<(]"
-        + @"|\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>",
+        + @"|\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>"
+        + "|" + string.Join("|", ExplicitlyCreditedFilterTypeNames.Select(n => $@"\.Add{n}\s*\(")),
         RegexOptions.Compiled);
 
     private static readonly Regex NamedPolicy =
@@ -1258,11 +1932,63 @@ public class RouteAuthorizationGuardTests
         var groupPrefix = new Dictionary<string, string>(StringComparer.Ordinal);
         var groupMechanism = new Dictionary<string, AuthMechanism>(StringComparer.Ordinal);
 
+        // Pass 1: record each group's own segment, its parent receiver, and its own chain.
+        var groupParent = new Dictionary<string, string>(StringComparer.Ordinal);
+        var groupSegment = new Dictionary<string, string>(StringComparer.Ordinal);
+
         foreach (Match g in GroupDecl.Matches(text))
         {
             var variable = g.Groups[1].Value;
-            groupPrefix[variable] = g.Groups[2].Value;
+            groupParent[variable] = g.Groups[2].Value;
+            groupSegment[variable] = g.Groups[3].Value;
             groupMechanism[variable] = MechanismOf(StatementFrom(text, g.Index));
+        }
+
+        // Pass 2: compose each group's FULL prefix by walking up to the root. Depth is bounded by the
+        // number of declarations, so a cycle (which C# could not compile anyway) cannot spin here.
+        foreach (var variable in groupSegment.Keys)
+        {
+            var segments = new List<string>();
+            var cursor = variable;
+            var guard = groupSegment.Count + 1;
+
+            while (guard-- > 0 && groupSegment.TryGetValue(cursor, out var segment))
+            {
+                segments.Insert(0, segment);
+                if (!groupParent.TryGetValue(cursor, out var parent) || parent == cursor)
+                {
+                    break;
+                }
+
+                cursor = parent;
+            }
+
+            groupPrefix[variable] = segments.Aggregate(string.Empty, Combine);
+        }
+
+        // A nested group inherits its parent's authorization when it declares none of its own — the same
+        // inheritance a route already gets from its group, applied one level up. Without this, a route on
+        // an inner group would lose a gate that the outer group legitimately carries.
+        foreach (var variable in groupSegment.Keys)
+        {
+            if (groupMechanism.TryGetValue(variable, out var own) && own != AuthMechanism.None)
+            {
+                continue;
+            }
+
+            var cursor = variable;
+            var guard = groupSegment.Count + 1;
+
+            while (guard-- > 0 && groupParent.TryGetValue(cursor, out var parent) && parent != cursor)
+            {
+                if (groupMechanism.TryGetValue(parent, out var inherited) && inherited != AuthMechanism.None)
+                {
+                    groupMechanism[variable] = inherited;
+                    break;
+                }
+
+                cursor = parent;
+            }
         }
 
         foreach (Match m in MapCall.Matches(text))
@@ -1326,11 +2052,18 @@ public class RouteAuthorizationGuardTests
     /// <summary>
     /// The registration statement beginning at <paramref name="start"/>: text up to the first <c>;</c> that
     /// sits outside every parenthesis and brace opened after that point. Inline handler lambdas therefore
-    /// stay INSIDE the statement instead of truncating it, which is what makes the trailing
-    /// <c>.RequireAuthorization("canwritefiles")</c> on <c>PUT /api/drives/{driveId}/upload</c> in
-    /// <c>DocumentsEndpoints.cs</c> visible at all — it comes after a long lambda body. (This example named
-    /// <c>UploadEndpoints.cs</c> until 2026-08-27, when task 073 deleted that file; the surviving
-    /// drive-keyed route is the same shape.)
+    /// stay INSIDE the statement instead of truncating it, which is what makes a trailing
+    /// <c>.RequireAuthorization(…)</c> that comes AFTER a long lambda body visible at all.
+    ///
+    /// <para>This doc comment has now outlived two successive examples: it named
+    /// <c>PUT /api/containers/{containerId}/files/{*path}</c> in <c>UploadEndpoints.cs</c> until task 073
+    /// deleted that file (2026-08-27), was re-pointed at <c>PUT /api/drives/{driveId}/upload</c> in
+    /// <c>DocumentsEndpoints.cs</c>, and task 083 deleted that one too (2026-09-07). It is deliberately
+    /// left WITHOUT a concrete route this time: every route that motivated it has been retired, and
+    /// re-pointing it a third time would just queue up the same edit. The BEHAVIOUR is what matters and
+    /// it is pinned by <see cref="RetroactivelyDetectsAllFourHistoricalMisses"/>, whose inline fixtures
+    /// exercise exactly this trailing-call-after-lambda parse and cannot go stale, because they feed the
+    /// scanner literal source text rather than naming a file on disk.</para>
     /// </summary>
     private static string StatementFrom(string text, int start)
     {
@@ -1501,10 +2234,27 @@ public class RouteAuthorizationGuardTests
             .Where(f => MapCall.IsMatch(Decomment(File.ReadAllText(f))))
             .OrderBy(f => f, StringComparer.Ordinal);
 
-    /// <summary>Every <c>*AuthorizationFilter.cs</c> under the BFF — Rule B's subject.</summary>
+    /// <summary>
+    /// Every filter the guard treats as a per-resource gate — Rule B's subject.
+    ///
+    /// <para>🔴 THIS MUST STAY IN STEP WITH <see cref="FilterMarker"/> (task 120, GitHub #1015). Rule A
+    /// credits a route for carrying a filter; Rule B is what proves the filter decides anything. Widening
+    /// Rule A's regex WITHOUT widening this list hands gate credit to a filter nothing ever inspects —
+    /// which is precisely the SemanticSearchAuthorizationFilter shape Rule B was written to catch, arrived
+    /// at from the opposite direction. <c>RuleBCoversEveryFilterRuleACredits</c> fails if the two drift.</para>
+    ///
+    /// <para>The <c>*AuthorizationFilter.cs</c> glob covers the naming convention; the explicit names cover
+    /// the Office surface, which does not follow it. Both halves derive from
+    /// <see cref="ExplicitlyCreditedFilterTypeNames"/>, so Rule A and Rule B cannot drift apart.</para>
+    /// </summary>
+    private static readonly IReadOnlyList<string> ExplicitlyCreditedFilterFileNames =
+        ExplicitlyCreditedFilterTypeNames.Select(n => n + ".cs").ToList();
+
     private static IEnumerable<string> AuthorizationFilterFiles()
         => Directory
-            .EnumerateFiles(BffRoot, "*AuthorizationFilter.cs", SearchOption.AllDirectories)
+            .EnumerateFiles(BffRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(f => Path.GetFileName(f).EndsWith("AuthorizationFilter.cs", StringComparison.Ordinal)
+                        || ExplicitlyCreditedFilterFileNames.Contains(Path.GetFileName(f), StringComparer.Ordinal))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .OrderBy(f => f, StringComparer.Ordinal);

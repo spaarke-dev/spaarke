@@ -1,6 +1,15 @@
 # ADR-034: User-Record Membership Resolution Pattern (Concise)
 
-> **Status**: Accepted — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+> **Status**: Accepted, as amended — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+>
+> ⚠️ **Amendment A1 (2026-09-04, `unified-access-control-r2`, path B)**: discovery over the 6 identity
+> tables stays correct for **AI scoping** and is **over-inclusive for authorization**. The
+> access-conferring allow-list becomes an **explicit registry** (contact- **and** org-typed), replacing
+> the `sprk_assigned*` prefix convention — which silently admits `sprk_assignedmonitor`, silently denies
+> `sprk_leadcontact`, and lets a **rename** grant or revoke access. The registry is a filter **inside**
+> the canonical resolver, not a second mechanism. **The 1-hop cap is NOT amended** — FR-26 denormalizes
+> the core ancestor, so every chain is one hop by construction. Full rationale + the live-consumer check:
+> [full ADR](../../docs/adr/ADR-034-user-record-membership.md#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface).
 > **Domain**: BFF API / Dataverse Membership / Identity Normalization
 > **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 100)
 > **Source project**: `spaarke-platform-foundations-r3` Part 1 (closes the "no canonical mechanism for records this user is associated with" gap surfaced during R2 UAT — notification-new-documents.json silently produced zero rows because its FetchXML joined through a non-existent `sprk_matterteammember` entity).
@@ -59,6 +68,13 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST** publish `MembershipChangedEvent` to the Service Bus **topic** `sprk-membership-changes` (NOT queue, NOT reuse `ServiceBusJobProcessor` queue) — D3 owner clarification. Subscriptions per consumer.
 - **MUST** use **fire-and-forget** event-publishing semantics per Q2 owner clarification: publish best-effort; mutation succeeds even if publish fails. Nightly `MembershipReconciliationJob` is the defense-in-depth backstop. Log publish failures as structured warnings with correlationId (NFR-08).
 - **MUST** keep Phase 1A → Phase 2 endpoint contract identical (strangler-fig). Consumers see byRole map, ids[], count regardless of internal storage mechanism.
+- **MUST** (Amendment A1) distinguish the two **consumption surfaces**: **AI scoping** uses **all** discovered descriptors (unchanged); **authorization** uses **registry-listed columns ONLY**. Generosity is correct for retrieval and is a disclosure for permission.
+- **MUST** (A1) derive the authorization surface's conferring columns from an **explicit registry**, covering **contact-typed AND organization-typed** lookups — not from the `sprk_assigned*` prefix convention, which silently admits `sprk_assignedmonitor` and silently denies `sprk_leadcontact`.
+- **MUST** (**A1.1**, 2026-09-17, `unified-access-control-r2` task 043, owner-approved — CLAUDE.md §6.5 path B) treat the **Dataverse platform ownership columns** — `ownerid`, `owningteam`, `owningbusinessunit` — as **structurally conferring on the authorization surface, WITHOUT a registry entry**. A1 as originally written covered only the maker-authored contact/org axis, which made ownership **inexpressible**: the registry validator rejects any declared `IdentityType` outside `{Contact, Organization}` as malformed, so `ownerid` could not be added even deliberately.
+  - **Why ownership is not a registry concern.** FR-24's rationale is that a *maker-authored* lookup must not confer by naming accident — a rename could silently grant access, so conferral needs review. The three ownership columns are platform-maintained and fixed by the Dataverse data model (see `MembershipFieldDiscoveryService.OwnerAttributeTargets`, "fixed … regardless of solution / entity"); nobody can rename their way into them, and **being the owner IS Dataverse access** — the very thing this filter approximates until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer.
+  - **MUST NOT** widen this to every `SystemUser`/`Team`/`BusinessUnit`-typed lookup. A maker-authored `sprk_reviewer → systemuser` still requires a reviewed registry entry; otherwise register **A-8**'s over-inclusion returns through a different door. The allowance is keyed on the three platform **names**, never on the identity type.
+  - **Evidence this is load-bearing**: omitting owner-based membership caused a production outage once already — R7 W12 task 130 (2026-06-30) recorded *"`sprk_matter` resolved rows=0 for a user who owns 44 matters via `ownerid` … verified via raw SQL"*. ⚠️ And `owningteam` is the column that matters most where records are team/BU-owned: a polymorphic Owner column always resolves to **SystemUser** and binds the caller's own id — on a team-owned record `ownerid` holds the *team's* id and never matches. 🔴 **Mechanism corrected 2026-09-22** (challenged by the `spaarkeai-word-add-in-r1` session, then traced to the call site): this previously read *"discovery binds the FIRST matching target and `IncludedIdentityTables` starts at `systemuser`"*. The first-match part is right — `MembershipFieldDiscoveryService.cs:288-300` scans `lookup.Targets` in order and `break`s on the first hit. But `IncludedIdentityTables` order is **NOT** the determinant: the scan tests against `identityTypeByTable`, a **dictionary** (unordered). The real determinant is that an `AttributeTypeCode.Owner` attribute is given **synthetic** targets (`:531-534`) from the hardcoded `OwnerAttributeTargets = { "systemuser", "team" }` (`:94-95`) — **`systemuser` is first in that array**. So the binding follows the hardcoded array, not operator configuration, and **reordering `IncludedIdentityTables` would NOT change it**. That distinction matters: it means the hazard cannot be configured away.
+- **MUST** (A1) treat adding a conferring column as a **registry edit**. **Renaming a column MUST NOT grant or revoke access** (FR-24).
 
 ### ❌ MUST NOT
 
@@ -68,6 +84,8 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST NOT** extend a transitive-membership query beyond 1 hop. Reject deeper chains with 400 before any Dataverse query (Q3).
 - **MUST NOT** assume the Phase 1A per-request FetchXML approach is sufficient for all future scale. Monitor AC-1A.5 (p95 ≤300ms); Phase 2 junction table is the escape hatch when margin shrinks.
 - **MUST NOT** confuse the new "Membership" terminology with the existing `AssociationResolver` PCF (record-to-record FieldMapping). The naming-collision register is binding.
+- **MUST NOT** (A1) use unfiltered discovered descriptors as an **access answer**. That set is over-inclusive by design; on the authorization surface it must pass the registry filter first.
+- **MUST NOT** (A1) build a second membership mechanism for the registry. It is a filter **inside** the canonical resolver (M1) — an extension, not a parallel engine.
 
 ---
 
@@ -78,8 +96,19 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 
 public interface IMembershipResolverService
 {
+    // The systemuser plane.
     Task<MembershipResponse> ResolveAsync(
         Guid systemUserId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct);
+
+    // The CONTACT plane — added after this ADR was written and omitted from it until 2026-09-04.
+    // It is how a caller with no systemuser (external contact / unlicensed workforce) resolves
+    // membership at all; a reader who assumed the systemuser overload was the whole interface would
+    // conclude, wrongly, that the contact plane had no membership path.
+    Task<MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
         string entityType,
         MembershipResolveOptions? options,
         CancellationToken ct);
@@ -90,7 +119,16 @@ public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? IdentityTypes = null,
     IReadOnlyList<string>? IncludeRelated = null,  // 1-hop max per Q3
     int Limit = 500,
-    string? ContinuationToken = null);
+    string? ContinuationToken = null,
+    // A1 opt-in: apply the access-conferring registry filter on the SYSTEMUSER plane
+    // (ResolveByContactAsync always applies it). Default false keeps AI scoping unfiltered.
+    // Added by unified-access-control-r2 task 041; omitted from this block until 2026-09-17.
+    bool AccessConferringOnly = false,
+    // Org-expansion (design §4.5 term 4): the organizations to bind into the resolved identity on the
+    // CONTACT plane, so registry-listed org-typed descriptors emit conditions instead of nothing.
+    // SUPPLIED BY THE CALLER — see the contract table's contact-plane row below for why the resolver
+    // does not read the junction itself. Added by task 043.
+    IReadOnlyList<Guid>? OrganizationIds = null);
 
 public sealed record MembershipResponse(
     [property: JsonPropertyName("entityType")] string EntityType,
@@ -99,7 +137,10 @@ public sealed record MembershipResponse(
     [property: JsonPropertyName("byRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
     [property: JsonPropertyName("count")] int Count,
     [property: JsonPropertyName("cacheExpiresAt")] DateTimeOffset CacheExpiresAt,
-    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null);
+    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null,
+    // 1-hop transitive results (includeRelated). Omitted from this ADR until 2026-09-04; null on the
+    // paths that do not compute it.
+    [property: JsonPropertyName("relatedByRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>>? RelatedByRole = null);
 
 public sealed record PersonIdentity(
     Guid SystemUserId,
@@ -118,11 +159,12 @@ public sealed record PersonIdentity(
 | Source field type | Resolves via | Match value |
 |---|---|---|
 | `Lookup → systemuser` | Direct | `systemUserId` |
-| `Lookup → contact` | Direct; cross-referenced to `systemUserId` via `azureactivedirectoryobjectid` (ADR-028) | `contactId` |
+| `Lookup → contact` | Direct. systemuser→contact resolution is **`systemuser.sprk_primarycontact` FIRST**, with the `azureactivedirectoryobjectid` AAD cross-ref (ADR-028) as **fallback** — corrected 2026-09-04 (A1); this table previously documented only the AAD path, which is the fallback, not the primary | `contactId` |
 | `Lookup → team` | Expand `teammembership` to systemusers | `teamIds[]` (cached) |
 | `Lookup → businessunit` | User's BU + any descendant BUs (configurable per role) | `businessUnitId` |
 | `Lookup → account` | User's primary contact's `parentcustomerid` (if contact) | `accountId` (when applicable) |
-| `Lookup → sprk_organization` | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (systemuser plane) | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (**contact plane**) | The **`sprk_contactorganization` junction** (`statecode eq 0` = active), read by the CALLER and passed in via `MembershipResolveOptions.OrganizationIds` — **not** by this service. Added 2026-09-17 (`unified-access-control-r2` task 043) because A1's org-typed axis had no documented contact-plane source, and a reader consulting only this table would conclude the contact plane has no org path at all. Two reasons the resolver does not read it itself: the junction lives behind `Infrastructure/ExternalAccess/ExternalParticipationService`, so reading it here would invert the layering; and the accessible-record-set composer ALREADY performs that read for the FR-23 deny veto, so a second read would be a second cache that can disagree with the first mid-composition. ⚠️ The `UserLookupField` mechanism in the row above is **not** a substitute — it resolves `sprk_organization`→`systemuser` and returns nothing for a contact. | `organizationIds[]` |
 | Text (email) | Substring `like` | `primaryEmail` |
 | Text (display name) | NOT supported (too fuzzy) | — |
 

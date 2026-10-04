@@ -409,9 +409,17 @@ describe('useEntitySearch', () => {
         result.current.setQuery('smith');
       });
 
-      // Immediately call searchNow
+      // The mock/simulated search path used when no apiBaseUrl/getAccessToken is supplied awaits a
+      // real `setTimeout(resolve, 200)` (useEntitySearch.ts:159). Under this suite's
+      // `jest.useFakeTimers()` (global beforeEach) that timer never fires on its own, so a bare
+      // `await result.current.searchNow()` hung to the 10s jest test timeout — the fake-timer clock has
+      // to be advanced WHILE the promise is pending (task 071). `advanceTimersByTimeAsync` (Jest 29
+      // modern fake timers) advances the clock and flushes the microtask queue it releases, so the
+      // internal setTimeout's `resolve()` can actually run before `searchNow()`'s own await continues.
       await act(async () => {
-        await result.current.searchNow();
+        const searchPromise = result.current.searchNow();
+        await jest.advanceTimersByTimeAsync(250);
+        await searchPromise;
       });
 
       // Should have results or at least have completed loading

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="unified-access-control-r2">
+  <metadata>
+    <title>SPE Admin client calls two routes the server does not serve — fix both, and guard the class</title>
+    <phase>0c Secure Documents — Wave 2 (found by task 091's caller inventory)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shipped client surface and adds a build-failing guard; one of the two defects is a live user-visible breakage.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The judgement is which side of each mismatch is authoritative — changing the wrong one turns a broken feature into a breaking contract change.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small edits; the value is in the guard's scope and in not over-reaching into a client test framework that does not exist.</effort-reason>
+    <parallel-group>wave2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to the SpeAdminApp client plus one new ArchTest file. No shared authorization surface.</parallel-reason>
+    <deps>091</deps>
+    <tags>bff-api, api, frontend, spe-admin</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>Found 2026-08-30 by task 091's client-caller inventory. Filed and executed immediately per owner direction ("these need to be fixed — do not defer").</origin>
+  </metadata>
+
+  <prompt>The SPE Admin client declares two endpoints that do not exist on the server. One is dead client code; the other is a live button whose 404 surfaces to the user as a generic "Failed to create sharing link."</prompt>
+
+  <role>SPAARKE full-stack engineer.</role>
+
+  <goal>Every URL the SPE Admin client calls resolves to a real server route, and a build-failing guard keeps it that way.</goal>
+
+  <context>
+    <background>Two mismatches, found while inventorying callers for task 091:
+
+1. **`createSharingLink` — LIVE BREAKAGE.** `speApiClient.ts:1088` posts to
+   `…/items/{itemId}/sharing`; the server serves **`/share`**
+   (`ContainerItemEndpoints.cs:102`, `WithName("CreateSharingLink")`). Called from
+   `FileDetailPanel.tsx:483` behind the "create sharing link" UI. The 404 is caught and rendered as
+   *"Failed to create sharing link."* — so the feature has never worked, and the error message gives
+   nobody a reason to suspect a routing bug.
+
+2. **`items.get` — DEAD.** `speApiClient.ts` declares `GET …/items/{itemId}`. **No such server route
+   exists** (the file's nine routes are enumerated in task 091's notes), and the method has **zero
+   callers** in the client.
+
+WHICH SIDE IS AUTHORITATIVE. For (1) the CLIENT is wrong: the server route is the published contract
+(`WithName`, OpenAPI), changing a server URL is a breaking change even when currently unused, and task
+091's route-gate suite already pins `/share` and proves it is gated. For (2) neither side is worth
+keeping — a client method with no server route and no callers is dead in both directions, and this
+project's standing disposition is DELETE rather than convert (task 083's constraint; precedent in tasks
+071 and 073).
+
+WHY A GUARD, AND WHY THIS SHAPE. `SpeAdminApp` has **no test framework at all** — no vitest/jest, no
+test files, no `test` script. Introducing one to assert two URL strings would be scope creep and a new
+component to justify (CLAUDE.md §11). The defect is anyway not a client-logic bug but a client/server
+AGREEMENT bug, so the honest instrument is a source-scanning cross-check in
+`tests/Spaarke.ArchTests/**` — the same shape as this project's other guards, no new framework, and it
+catches the whole class rather than these two instances.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpeAdminApp/src/services/speApiClient.ts</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/types/spe.ts</file>
+      <file role="create">tests/Spaarke.ArchTests/SpeAdminClientRouteAgreementTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerItemEndpoints.cs</file>
+      <file role="reference">tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Fix the CLIENT for the sharing-link mismatch. Do NOT rename the server route — it is the published contract and task 091's suite pins it.</constraint>
+    <constraint source="task-083">Delete `items.get` rather than inventing a server route for it. Zero callers plus no route is dead in both directions; DELETE rather than convert is this project's standing disposition.</constraint>
+    <constraint source="CLAUDE.md §11">Do NOT introduce a client-side test framework to assert two URLs. Justify any new component; prefer the existing ArchTest surface.</constraint>
+    <constraint source="ADR-038">The new guard lives under `tests/Spaarke.ArchTests/**` (structural fitness function, the eighth KEEP path) and MUST carry a negative control proving it fires and a positive control proving it does not fire on the sanctioned shape.</constraint>
+    <constraint source="project">The guard must fail CLOSED: a client call it cannot parse is reported, never skipped. An unparseable call site is how the next mismatch hides.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-091-spe-admin-container-items.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify both mismatches at current HEAD and re-confirm `items.get` still has zero callers.</step>
+    <step order="1">Fix `createSharingLink` to `/share` — the call itself plus both doc comments (`speApiClient.ts`, `types/spe.ts`).</step>
+    <step order="2">Delete `items.get` and any type that exists only to serve it.</step>
+    <step order="3">Add the agreement guard: extract the SpeAdmin client's `/spe/...` URLs, extract the server's `/api/spe` routes, assert every client URL matches a server route template. Fail closed on unparseable call sites.</step>
+    <step order="4">Controls: a negative control proving the guard fires on a seeded mismatch (use the two real ones as literal fixtures, so the proof runs on every build), and a positive control proving it does not fire on the corrected client.</step>
+    <step order="5">Build, full ArchTests against the proven baseline, typecheck the client.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `items.get` turns out to have a caller after all, STOP — deleting it then breaks the admin app, and the right fix becomes adding the server route instead.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`tests/Spaarke.ArchTests/**` already hosts source-scanning structural guards; `RouteAuthorizationGuardTests` already parses server route tables.</existing>
+    <extension>A new focused test file rather than an extension of the route-authorization guard, which answers a different question (is this route gated) and would be muddied by a client-agreement rule. No new framework, no new project, no new package.</extension>
+    <cost-of-doing-nothing>The SPE Admin sharing-link button 404s in production today and reports a generic failure, so nobody can diagnose it from the UI. Two instances already shipped undetected; without a mechanical check the next route rename repeats it silently, and the symptom is always a generic client error rather than anything pointing at the route.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">SpeAdmin client calling only routes the server serves</output>
+    <output type="test">tests/Spaarke.ArchTests/SpeAdminClientRouteAgreementTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`createSharingLink` posts to `/share`; no `/sharing` reference to this endpoint remains in the client, including doc comments.</criterion>
+    <criterion>`items.get` is deleted; no dangling references.</criterion>
+    <criterion>Every `/spe/...` URL the client declares matches a real server route template — asserted mechanically, not by inspection.</criterion>
+    <criterion>The guard fails closed on a client call site it cannot parse.</criterion>
+    <criterion>Negative control: the guard fires on both real mismatches supplied as literal fixtures. Positive control: it does not fire on the corrected client.</criterion>
+    <criterion>Client typecheck passes; ArchTests match the proven pre-existing baseline.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-08-30.
+
+FIXES. `createSharingLink` now posts to `/share` (client was wrong; server route is the published
+contract and task 091's suite pins it). `items.get` DELETED — zero callers and no server route, dead in
+both directions; `mapDriveItem`/`WireDriveItem` survive because `list`/`upload`/`createFolder` still use
+them. Client typecheck clean (real run — the first attempt was VACUOUS because `node_modules` was
+missing and every error was a cascading "cannot find module 'react'"; deps installed, re-run, zero
+errors in either edited file).
+
+GUARD. New `tests/Spaarke.ArchTests/SpeAdminClientRouteAgreementTests.cs` extracts every `/spe/...` URL
+the client builds and every route under `Api/SpeAdmin/**`, and asserts agreement. No client test
+framework was introduced — `SpeAdminApp` has none, and adding one to compare two strings would be a new
+component to justify for a defect that is not client logic but an AGREEMENT bug between two files.
+
+⚠️ THE GUARD'S OWN CONTROLS CAUGHT FOUR DEFECTS IN THE GUARD. Recorded because the pattern is the point
+— every one produced a plausible-looking wrong answer rather than an obvious failure:
+
+1. **Verb-blindness.** The first version compared PATHS only. `DELETE …/items/{itemId}` exists while
+   `GET …/items/{itemId}` does not, so the client's dead GET matched the server's DELETE and the guard
+   reported agreement. The negative control caught it. Both sides are now verb-qualified. Note this also
+   means my original "no such server route" finding was verb-blind reasoning that happened to be right.
+2. **Nested `MapGroup` ignored.** Four files nest one level (`group.MapGroup("/security")` then
+   `security.MapGet("/alerts")`). Reading only the leaf produced nine FALSE mismatches against correct
+   client calls. Had I "fixed" the client to match, I would have broken four working surfaces.
+3. **Paren depth.** A term like `encodeURIComponent(typeId)` contains a `)`, which ended the URL
+   expression early and silently truncated `/spe/containertypes/{}/owners` to `/spe/containertypes/{}`.
+   A wrong template that still parses is worse than one that fails to parse.
+4. **Missing helper.** `postAction` was absent from the verb map, yielding six `UNKNOWN` verbs. The
+   default now reports loudly instead of guessing, and `EveryClientCallSiteIsParseable` fails on any
+   UNKNOWN with a message naming the real fix.
+
+Final state: all 63 client URLs match a real server route, verb-qualified. Controls: negative (both
+historical mismatches as literal fixtures), positive (the corrected `/share` DOES match), a
+query-vs-path-segment control (`"/spe/configs" + query` must not become `/spe/configs/{}` — a guard that
+flags correct call sites gets disabled), and two fail-closed checks (unparseable literal count, UNKNOWN
+verbs).
+
+Verification: ArchTests 144 passed / 6 failed == the clean-tree baseline (137) plus task 091's Rules E
+and F plus this file's 5. Client typecheck clean. No server change, so no publish-size or CVE delta.</notes>
+</task>

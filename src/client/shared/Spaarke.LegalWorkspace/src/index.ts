@@ -39,7 +39,6 @@
 // (`src/solutions/LegalWorkspace/src/index.ts`), which already curates the
 // public surface consumers need:
 //   - `LegalWorkspaceApp` (+ type `ILegalWorkspaceAppProps`)
-//   - `LegalWorkspaceRenderer` (WorkspaceRenderer-typed binding)
 //   - `setLegalWorkspaceRuntimeConfig`
 //   - Section-registry factories: `SECTION_REGISTRY`,
 //     `createLegalWorkspaceSectionRegistry`, `getSectionById`,

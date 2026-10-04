@@ -2,8 +2,8 @@
 
 > **Domain**: Authorization, Access Control, Permission Management
 > **Status**: Verified (Production-Ready Internal; Design External)
-> **Last Updated**: 2026-08-20
-> **Last Reviewed**: 2026-08-20
+> **Last Updated**: 2026-09-10 — corrected stale app-only/`userAccessToken: null` claims: `AuthorizationService` now fails closed and runs AS THE CALLER (task 004 / FR-02, finding A-2, code changed 2026-08-21, one day after this doc's prior correction pass)
+> **Last Reviewed**: 2026-09-10
 > **Reviewed By**: unified-access-control-r2 (drift correction); previously ai-procedure-refactoring-r2 (2026-04-05)
 > **Source ADRs**: ADR-003, ADR-008, ADR-009, ADR-028 (Amendment A1 — broker-only external access)
 
@@ -23,7 +23,7 @@
 | Direct-query `DataverseAccessDataSource` | BOTH auth modes (app-only service principal AND OBO) use the same direct query (`GET sprk_documents({id})?$select=sprk_documentid`, `Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) and grant at most `Read` (`:368-372`). `RetrievePrincipalAccess` has ZERO call sites in this path — it appears only in comments |
 | `CachedAccessDataSource` decorator (ADR-009) | Cache permission **data**, not decisions; fail-open on Redis errors (falls through to Dataverse) |
 | Endpoint filters, not global middleware (ADR-008) | 23 domain-specific filters apply authorization at endpoint level |
-| Single `OperationAccessRule` | Dataverse's own row-level security (roles, teams, business units, record sharing) is enforced by the direct-query probe — the record is only retrievable if the probe identity can read it — so one rule is sufficient. NOTE: `AuthorizationService` passes `userAccessToken: null` (`Spaarke.Core/Auth/AuthorizationService.cs:48-52`), so the probe runs as the service principal, NOT scoped to the calling user |
+| Single `OperationAccessRule` | Dataverse's own row-level security (roles, teams, business units, record sharing) is enforced by the direct-query probe — the record is only retrievable if the probe identity can read it — so one rule is sufficient. NOTE (corrected 2026-09-10): `AuthorizationService` FAILS CLOSED (denies) when no caller token is present and otherwise forwards the caller's own bearer token — the probe runs AS THE CALLER, never as the service principal (`Spaarke.Core/Auth/AuthorizationService.cs:45-54` fail-closed check, `:74` "Evaluate AS THE CALLER", `:223-225` forwards the caller's token; task 004 / FR-02, finding A-2, "ZERO app-only consumers" verified 2026-08-21) |
 
 ---
 
@@ -41,14 +41,14 @@
 
 ## Dual-Mode DataverseAccessDataSource
 
-Two auth modes exist, but BOTH run the SAME direct-query check (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) — `RetrievePrincipalAccess` is NOT called in either mode (zero call sites; corrected 2026-08-20):
+Two auth modes exist on `DataverseAccessDataSource.GetUserAccessAsync` (its `userAccessToken` parameter still defaults to `null`), but BOTH run the SAME direct-query check (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323`) — `RetrievePrincipalAccess` is NOT called in either mode (zero call sites; corrected 2026-08-20):
 
 | Auth Mode | When Used | Method |
 |-----------|-----------|--------|
-| **App-only** | Default — `AuthorizationService` always passes `userAccessToken: null` (`Spaarke.Core/Auth/AuthorizationService.cs:48-52`) | Direct query: `GET sprk_documents({id})?$select=sprk_documentid` with the service principal token |
-| **OBO** | Only when a caller passes a user token (e.g. `AiAuthorizationService`) | Same direct query with the OBO-exchanged user token |
+| **App-only** | NOT reachable via `AuthorizationService` (corrected 2026-09-10): `AuthorizationService.GetCallerAccessAsync` FAILS CLOSED (returns `AccessRights.None`, data source not consulted) when no caller token is present, rather than degrading to app-only (`Spaarke.Core/Auth/AuthorizationService.cs:45-54`, `:207-221`; task 004 / FR-02, finding A-2, "ZERO app-only consumers" verified 2026-08-21) | Direct query: `GET sprk_documents({id})?$select=sprk_documentid` with the service principal token, if reached by some other caller of the data source |
+| **OBO** | `AuthorizationService.AuthorizeAsync` / `GetCallerAccessAsync` (mandatory caller token — `:74` "Evaluate AS THE CALLER", `:223-225` forwards it) and `AiAuthorizationService` | Same direct query with the OBO-exchanged user token |
 
-Direct query pattern: query the document directly → 200 = grant `AccessRights.Read` (at most — Write/Delete etc. are never granted by this probe, `:368-372`); 403/404 = access denied (empty permission set). In app-only mode the probe runs as the service principal, so it is NOT scoped to the calling user's Dataverse privileges. See [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md) for the OBO bugs that were fixed.
+Direct query pattern: query the document directly → 200 = grant `AccessRights.Read` (at most — Write/Delete etc. are never granted by this probe, `:368-372`); 403/404 = access denied (empty permission set). Via `AuthorizationService`, the probe always runs AS THE CALLER (OBO) — an absent caller token denies rather than degrading to app-only (corrected 2026-09-10; see the Key Design Decisions table above). See [sdap-auth-patterns.md Pattern 5](sdap-auth-patterns.md) for the OBO bugs that were fixed.
 
 ---
 
@@ -64,7 +64,7 @@ Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 3 (`Infrastructure/ExternalAccess/ExternalParticipationService.cs:28-34`), 60s TTL — invalidated by the grant/revoke endpoints.
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 
@@ -81,7 +81,7 @@ The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant
 | `FinanceAuthorizationFilter` | Finance module |
 | + 18 more | Various domains |
 
-NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter:85`, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
+NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter` — for its document checks; since unified-access-control-r2 task 130 its matter/project/vendor-organization checks use the entity-generic `AuthorizationService.GetCallerRecordAccessAsync` + `OperationAccessPolicy.HasRequiredRights`, invoice confirm also asks the caller's Create privilege on `sprk_invoice` through `CallerRecordAccessProbe` (OBO), and each finance/scorecard route declares exactly which id it authorizes, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
 
 ---
 
@@ -111,6 +111,34 @@ Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/Cal
 | View Only | Read | n/a — NOT IMPLEMENTED (broker-only) |
 | Collaborate | Read + Create + Write | n/a — NOT IMPLEMENTED (broker-only) |
 | Full Access | Read + Create + Write + Delete | n/a — NOT IMPLEMENTED (broker-only) |
+
+---
+
+## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
+
+**The gate is Write.** `DelegationRuleFilter` admits a caller to every `/api/v1/external-access/*` route (grant, invite, share, revoke, `/can-manage-access`) only when the caller holds **Write** on the record, evaluated as the caller over OBO (owner decision B-14, retained). Share is never consulted by the gate, and the record's Access Permission / Secure flags do not change it — they govern WHICH grant types apply, at write time (task 138).
+
+**Internal (POA) share levels** — `Services/Access/RecordShareLevels.cs`, the ONE level-to-rights table, in Dataverse's own `AccessRights` numbers:
+
+| Level | Rights | Stored mask | Legacy mask (read as this level) |
+|---|---|---|---|
+| View Only | Read | 1 | — |
+| Collaborate | Read, Write, Append, AppendTo, **Share** | 262167 | 23 |
+| Full Access | Collaborate + Delete | 327703 | 65559 |
+
+No level carries Assign. Collaborate and Full Access carry Share so a Write-holder can also use the model-driven app's own **Share** command (Dataverse's native sharing rule still stops a sharer handing out a right they lack). Colleagues named at secure provisioning receive exactly the creator's rights (the Collaborate level). Shares written before 2026-09-30 still read as their level; `scripts/Upgrade-LegacyRecordShareMasks.ps1` (operator-run, dry-run by default) upgrades them.
+
+**The grantor ceiling.** Every MANUAL grant is capped at the grantor's own level — `/grant` (contact and organization-wide), `/invite-and-grant`, and `/share-user`:
+
+- The handler re-probes the caller's rights as the caller (`CallerRecordAccessProbe`), never trusting the filter's earlier answer. A probe that throws → **500** `sdap.access.grant.caller_rights_unreadable` (`/share-user`: `sdap.access.user_share.read_failed`); nothing is written or onboarded.
+- `ExternalAccessLevels.GrantCeilingFor` maps the rights to a ceiling over Read / Write / Delete only: Full Access iff Read+Write+Delete; Collaborate iff Read+Write; View Only iff Read; otherwise none (→ **403** `sdap.access.grant.caller_cannot_grant`). Create, Append, AppendTo and Share are not consulted (RetrievePrincipalAccess need not report CreateAccess on an existing record).
+- A request above the ceiling is **narrowed, not refused**: written at the ceiling, and the response says so (`grantedAccessLevel`, `narrowed: true`). `/share-user` intersects right by right (Dataverse's own rule) and reports its existing `narrowed` flag.
+- **Never silently lower.** When the request was narrowed and the grantee already holds more (a higher active grant row, or share rights the narrowed mask lacks), the write is refused with **409** `sdap.access.grant.would_lower_existing` — the grant upsert updates levels in place and ModifyAccess replaces rights, so without this a "Full Access please" capped to Collaborate would lower someone else's Full Access grant. An explicit request for a lower level (not narrowed) is a deliberate downgrade and is applied.
+- **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` → `ResolveDenyVetoAsync`). A deny-list fault refuses too (fail closed). The internal-user No Access list on `/share-user` is task 143's.
+
+**Where the checks live (WP-1).** The policy (task 138), ceiling, never-lower and No Access checks run inside the one grant-writing core, `GrantExternalAccessEndpoint.CreateGrantAsync`, which takes a REQUIRED `GrantCeiling`; `/invite-and-grant` runs the same `CheckGrantAsync` BEFORE onboarding (resolving an existing contact by email read-only), so a refusal leaves no Contact or CIAM account behind. The ArchTest `GrantCeilingGuardTests` pins that the core is the only writer of a grant's level and that every call supplies a ceiling. Assigned-To auto-grants (task 142) are uncapped Collaborate (owner rule 5) and supply their own named ceiling.
+
+**A secure record always keeps someone who can see it** (owner round 3, S5): `/unshare-user` refuses to remove the last enabled user whose share can read a secure record (**409** `sdap.access.user_share.last_reader_on_secure_record`).
 
 ---
 

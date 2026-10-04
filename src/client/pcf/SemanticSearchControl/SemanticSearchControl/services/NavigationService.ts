@@ -14,6 +14,7 @@ import { getEffectiveDarkMode } from './ThemeService';
 // React-free, so this is safe under React 16/17. spaarke-modal-system P7
 // task 090 (FR-11/FR-18): single source of truth for OOB dialog dimensions.
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 
 /**
  * Envelope literal type for `searchMode`. MUST stay aligned with the
@@ -116,7 +117,7 @@ export function buildSemanticSearchEnvelope(
 
   // entityId — strip braces, omit when empty
   if (typeof f.entityId === 'string' && f.entityId.length > 0) {
-    const stripped = f.entityId.replace(/[{}]/g, '');
+    const stripped = cleanGuid(f.entityId);
     if (stripped.length > 0) {
       push('entityId', stripped);
     }
@@ -348,27 +349,16 @@ export class NavigationService {
       contact: 'contact',
     };
     const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : 'sprk_matter';
-    const cleanId = scopeId ? scopeId.replace(/[{}]/g, '').toLowerCase() : '';
+    const cleanId = cleanGuid(scopeId);
 
-    // Resolve container ID from business unit
-    let containerId = '';
-    try {
-      const userSettings = xrm.Utility.getGlobalContext().userSettings;
-      const userId = userSettings.userId.replace(/[{}]/g, '');
-      const user = await xrm.WebApi.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
-      const buId = user._businessunitid_value as string;
-      if (buId) {
-        const bu = await xrm.WebApi.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
-        containerId = (bu.sprk_containerid as string) ?? '';
-      }
-    } catch (err) {
-      console.warn('NavigationService.openAddDocument: Failed to resolve container ID:', err);
-    }
-
-    if (!containerId) {
-      console.error('NavigationService.openAddDocument: No container ID available');
-      return;
-    }
+    // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
+    // business-unit container lookup, and the `if (!containerId) return;` guard behind it.
+    //
+    // Two things went with it. The lookup answered a question the wizard no longer asks — the
+    // server resolves the upload container from the parent record. And the guard REFUSED TO OPEN
+    // THE WIZARD AT ALL whenever the acting user's BU had no `sprk_containerid`, including for a
+    // secure record that has a perfectly good container of its own. The wizard's ability to launch
+    // was gated on a value that never had anything to do with where the bytes would land.
 
     // Resolve display name from parent record
     let parentEntityName = '';
@@ -402,8 +392,8 @@ export class NavigationService {
       cleanId +
       '&parentEntityName=' +
       encodeURIComponent(parentEntityName) +
-      '&containerId=' +
-      containerId +
+      // `&containerId=` REMOVED 2026-09-03 (task 076) — the wizard no longer reads it, and the
+      // server resolves the container from `(parentEntityType, parentEntityId)` above.
       '&theme=' +
       theme;
 

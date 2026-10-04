@@ -47,7 +47,8 @@ public static class ReviewMemoDocumentBuilder
 
         var blocks = new List<ComposeBlock>
         {
-            Heading("Review Summary Memo", level: 1),
+            // R8 §GAPS-5 Phase 4 — user-facing title; "Memo" dropped (collided with sprk_memo/Notepad).
+            Heading("Review Summary", level: 1),
             Paragraph(Run(BuildMetadataLine(memo, documentName, analysisName))),
         };
 

@@ -15,36 +15,47 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 ///   reads an account (firms are <c>sprk_organization</c>), and the column it was aimed at,
 ///   <c>sprk_externalaccount</c>, is the project's CLIENT lookup. Both the creation and the write are
 ///   gone.</item>
-///   <item><c>WasUmbrellaBu</c> — there is one canonical Secure Project business unit, so there is no
+///   <item><c>WasUmbrellaBu</c> — there is one canonical Secure Record business unit, so there is no
 ///   longer a create-vs-reuse distinction to report.</item>
 /// </list>
-/// <para>Two members were added: the owner team that now holds the record, which is the thing that
-/// actually makes the project secure (design.md §5.1a).</para>
+/// <para><b>Task 144 (2026-10-01)</b> added <c>RecordType</c> / <c>RecordId</c> (a matter or work assignment can now
+/// be provisioned) and changed what <c>OwnerTeamId</c> names: the business unit's NAMED owner team, never its
+/// default team. The JSON contract is additive.</para>
 /// </remarks>
 /// <param name="BusinessUnitId">
-/// The canonical Secure Project business unit this project now belongs to, RESOLVED by name — not
-/// created. Reported for operator confirmation; it is not written to the project record. The retired
-/// <c>sprk_securitybu</c> stamp existed to record a per-project business unit, and there is no longer
-/// a per-project business unit to record.
+/// The canonical Secure Record business unit the record now belongs to, RESOLVED by name — not created. Reported for
+/// operator confirmation; it is not written to the record.
 /// </param>
 /// <param name="BusinessUnitName">
-/// The configured name that resolved (<c>SecureProject:BusinessUnitName</c>, default
-/// <c>Secure Project</c>).
+/// The configured name that resolved (<c>SecureRecord:BusinessUnitName</c>, default <c>Secure Record</c>).
 /// </param>
 /// <param name="OwnerTeamId">
-/// The business unit's default owner team, which now owns the project. This is the security-relevant
-/// outcome: the record sits in the Secure Project business unit because a team there owns it, and no
-/// human holds access through that ownership.
+/// The business unit's NAMED, non-default owner team (<c>SecureRecord:OwnerTeamName</c>, default
+/// <c>Secure Record Owners</c>), which now owns the record — proven memberless, in a business unit proven to hold no
+/// users, before the assignment. This is the security-relevant outcome: no human holds access through that ownership.
 /// </param>
 /// <param name="OwnerTeamName">Display name of the owner team.</param>
 /// <param name="SpeContainerId">
-/// The SPE FileStorageContainer provisioned for this project, recorded on the project as
-/// <c>sprk_containerid</c>. A response containing this id means the write succeeded — if it could not
-/// be written the endpoint returns a non-2xx that carries the id instead (ADR-003).
+/// The SPE FileStorageContainer provisioned for this record, recorded on it as <c>sprk_containerid</c>. A response
+/// containing this id means the write succeeded — if it could not be written the endpoint returns a non-2xx that
+/// carries the id instead (ADR-003).
 /// </param>
+/// <param name="SharedToCreatorSystemUserId">
+/// The creating user the record was explicitly shared to (task 061). Because the owner team has no members, this share
+/// is what makes the record reachable at all — a successful response always carries it.
+/// </param>
+/// <param name="AdditionalPrincipalsShared">
+/// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort).
+/// </param>
+/// <param name="RecordType">The provisioned record's type token: <c>project</c> | <c>matter</c> | <c>workassignment</c>.</param>
+/// <param name="RecordId">The provisioned record's id.</param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
     Guid OwnerTeamId,
     string OwnerTeamName,
-    string SpeContainerId);
+    string SpeContainerId,
+    Guid SharedToCreatorSystemUserId,
+    int AdditionalPrincipalsShared,
+    string RecordType,
+    Guid RecordId);

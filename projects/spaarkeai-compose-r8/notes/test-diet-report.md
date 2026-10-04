@@ -1,110 +1,116 @@
 # Test diet report — `spaarkeai-compose-r8`
 
-**Run date**: 2026-08-28 · **Branch**: `work/spaarkeai-compose-r8` · **Scope**: `origin/master...HEAD`
+**Run date**: 2026-09-01
+**Branch**: `work/spaarkeai-compose-r8`
+**Scope**: `.cs` tests touched between `origin/master` and `HEAD` (27 commits)
 
-> ⚠️ **Run EARLY, deliberately.** `/test-diet` is normally a project-close gate (task 090) and the skill
-> states it is *not applicable during active development*, because build-class scaffolding is still
-> load-bearing while work continues. It was run now at the owner's request to answer a specific
-> question — *are all these tests necessary and helpful?* — with data instead of impression. **Re-run at
-> 090**; treat the DELETE column here as signal, not as an instruction.
+> **Scope note, stated because it bounds the claim.** This pass covers the work that is still
+> UNMERGED. Earlier phases of this project (tasks 001–069, PR #806 and its siblings) already reached
+> master and were dieted at their own merges. `/test-diet` also only reads `tests/**/*.cs` — the
+> client-side additions are listed at the end, classified by hand against the same criteria, because
+> leaving them out entirely would misrepresent what this project added.
 
-## Scope
+## Summary
 
-| | |
-|---|---|
-| Test files touched | **60** (26 added · 31 modified · 3 deleted) |
-| Test methods in added files | **187** |
-
-**Path distribution** — 7 of 8 ADR-038 KEEP paths are respected:
-
-| Path | Files | KEEP path? |
+| Class | Methods | Action |
 |---|---|---|
-| `integration/seam` | 33 | ✅ (since 2026-07-09, ADR-038 §2) |
-| `unit/Sprk.Bff.Api.Tests` | 14 | ❌ **not a KEEP path** |
-| `integration/contract` | 7 | ✅ |
-| `integration/tenant` | 2 | ✅ |
-| `integration/regression` | 2 | ✅ |
-| `Spaarke.ArchTests` | 2 | ✅ (fitness functions — heuristic 0) |
+| MAINTAIN (KEEP path, confirmed) | 75 | none |
+| FITNESS FUNCTION (`Spaarke.ArchTests/**`, heuristic 0) | 15 | none |
+| AMBIGUOUS (reviewer judgment) | 2 | see below |
+| PATH-VIOLATION (pre-existing, swept) | 24 | see below — **recommend no action this PR** |
+| **SCAFFOLDING (delete candidates)** | **0** | — |
+| **Total in scope** | **116** | |
 
-## The 14 outside a KEEP path are mostly NOT this project's debt
+**Zero scaffolding.** No method in scope matched any of B1–B17. That is a result, not an absence of
+looking: the scan checked for `Mock<HttpMessageHandler>` / `Mock<IServiceClient>` (B1/B2),
+`GetRequiredService` assertions and ctor-null tests (B3/B4), `BindingFlags.NonPublic` (B8), and
+bare `NotThrow()`/`NotNull()` assertions (B10). Every `Mock<HttpMessageHandler>` hit in the tree is a
+**comment declaring compliance**, not a usage. The one `GetRequiredService` hit obtains a real
+`IServiceScopeFactory` for fixture setup; it does not assert that a type is registered.
 
-| File | Status | Classification |
+Split by who wrote it (the touch-radius rule — *"you added this, defend it"* and *"this was already
+here, we noticed it in passing"* deserve different scrutiny):
+
+| Origin | Files | Methods |
 |---|---|---|
-| `Mocks/InMemorySessionFileBlobGateway.cs` | A | **Not a test** — a test double. Out of scope for the classifier. |
-| `Services/Ai/Sessions/SessionFileBlobStoreConfigurationTests.cs` | A | **AMBIGUOUS** — the only test file this project added outside a KEEP path. Name suggests configuration/wiring (B3 territory); needs a read before judgement. |
-| `Services/Compose/ComposeEditBatchTests.cs` | **D** | ✅ already deleted by this project |
-| `Services/Compose/ComposeEditTransactionTests.cs` | **D** | ✅ already deleted |
-| `Services/Compose/ComposeEditValidatorTests.cs` | **D** | ✅ already deleted (FR-C04 retired `ComposeEditValidator`) |
-| 9 further files | M | **PATH-VIOLATION-PROTECTED** — pre-existing files at a pre-existing wrong path. This project modified them; it did not put them there. Not its debt to pay. |
+| Written by this project (new files) | 9 | 52 |
+| Pre-existing, modified/swept | 7 | 64 |
 
-**Net: the project added ONE test file outside a KEEP path and deleted THREE.** That is the right
-direction, and it is the opposite of the "lots of tests" impression.
+## Delete commands
 
-## The real finding: a ban that exists and is not enforced
+**None.** Nothing was classified SCAFFOLDING.
 
-Mechanical scan of all 60 touched files against the enforceable bans:
+## Path-move commands — emitted, and I recommend NOT executing them in this PR
 
-| Ban | Pattern | Files |
+```bash
+# PATH-VIOLATION (heuristic 1): not under integration/{auth,regression,data-mutation,tenant,contract,seam}/**,
+# unit/domain/**, or Spaarke.ArchTests/**.
+git mv tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceApplyTemplateTests.cs \
+       tests/integration/data-mutation/Compose/ComposeApplyTemplateBehaviourTests.cs
+git mv tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCreateOnSaveTests.cs \
+       tests/integration/data-mutation/Compose/ComposeCreateOnSaveBehaviourTests.cs
+```
+
+**Why I am not running these, stated so the skip is a decision rather than an omission.**
+
+Both files **pre-date this project** (r6 task 032 and earlier) and this branch touched them lightly —
+106 added lines in one, a 9-line rename port in the other. They are genuine behaviour tests: real
+OOXML through the real merge engine, mocked only at the SPE/Dataverse boundaries. They are at the
+wrong path, and that is worth fixing.
+
+But moving 24 pre-existing test methods during a wrap-up PR whose subject is Compose defect closure
+mixes two changes with different risk profiles, and the diet is the wrong moment to take on a rename
+that touches neither this project's code nor its defects. **A whole sibling directory
+(`tests/unit/Sprk.Bff.Api.Tests/Services/Compose/**`, 13 files) sits at the same wrong path** — moving
+two of thirteen because they happened to be touched would leave the directory in a worse, more
+confusing state than leaving all thirteen consistent.
+
+**Recommendation**: file the directory as a single follow-up rather than move two files here. That is a
+deferral, so it is named as one — it is not "handled".
+
+## Ambiguous — reviewer judgment
+
+| File : Method | Why ambiguous | My read |
 |---|---|---|
-| **B1/B2/B7** | `Mock<HttpMessageHandler>` — **explicitly banned by ADR-038** | **24** |
-| B3 | `GetRequiredService` assertions (DI-registration tests) | 6 |
-| B4 | `Throws<ArgumentNullException>` on ctor | **0** ✅ |
-| B13 | names without a scenario (`Test1`, `_Works`) | **0** ✅ |
+| `ComposeDriveProvenanceTests.cs : TryResolveRecordedDriveId_AsksForTheDriveColumn` | B13 — `{Method}_{ExpectedResult}` with no explicit scenario clause | **MAINTAIN.** The scenario is "always", and the test is load-bearing: a widened retrieve that quietly narrows again would make every caller silently fall back to the client's claim while every other test still passed. Renaming it `_AlwaysAsksForTheDriveColumn` would satisfy the heuristic and add nothing |
+| `ComposeCitationParityCorpusTests.cs : TheCorpusIsPresentAndNonTrivial` | B13 — no method-under-test prefix | **MAINTAIN.** It is a non-vacuity guard, not a behaviour test: every `[Theory]` case in that file would pass over an empty corpus, so this is what makes a failed load or an emptied file fail loudly. There is no "method under test" to name |
 
-**Attribution of the 24**: **4 added by this project**, **20 pre-existing**. By path: 15 `integration/seam`,
-5 `integration/contract`, 2 `integration/regression`, 2 `unit`.
+Both are naming-heuristic hits on tests whose deletion would remove real protection. Reported rather
+than silently reclassified, per the skill's "ambiguity is honest" contract.
 
-⚠️ **Judgement required, not mechanical deletion.** The classifier flags `Mock<HttpMessageHandler>`
-unconditionally, but a seam test that stubs an *outbound HTTP boundary* is not the same thing as a unit
-test whose *subject* is the mocked handler. 15 of the 24 are seam tests, where that stub is plausibly the
-sanctioned boundary. Deleting them on the heuristic alone would be exactly the "confident nonsense" the
-skill's own heuristic-0 note warns about. **Classified AMBIGUOUS pending a read.**
+## Maintain — confirmed (sample; all 75 listed by file above)
 
-### ADR-038 is documented but NOT enforced
+| File : Method | KEEP path | Why maintain |
+|---|---|---|
+| `ComposeSaveIdentitySelfHealTests.cs : CreateOnSave_WhenTheGraphItemIdIsDuplicated_LandsOnTheCanonicalRowAndMintsNoNewOne` | `data-mutation` | Regression for the 2026-08-17 dev incident; the load-bearing assertion is that `UpsertAsync` is never called |
+| `ComposeDriveProvenanceTests.cs : SaveDocument_WhenTheCallerNamesADifferentDrive_WritesToTheDriveTheRecordRecords` | `data-mutation` | Pins where a write lands; negative control confirmed it fails when the resolution is not applied |
+| `ComposeCitationParityCorpusTests.cs : ResolveCitation_OverTheSharedCorpus_MatchesTheClientResolver` | `seam` | Cross-runtime contract — the only mechanism that can detect C#/TS parser drift |
+| `ComposeHeaderFooterPageBreakSeamTests.cs : Save_WhenNoBaselineIsCaptured_StillReportsEveryInteriorSectionBreakItDestroys` | `seam` | Guards the fail-open path where the worst outcome would otherwise be the quietest |
+| `ComposeIdentityKeyHealthCheckContractTests.cs : Healthz_WhenTheIdentityKeyIsBroken_StaysHealthySoInstancesAreNotRecycled` | `contract` | Pins the `catalog` tag routing — a broken key must not recycle App Service instances |
 
-Verified: **no ArchTest checks any of B1–B17.** The bans live in `docs/adr/ADR-038-testing-strategy.md`,
-in `.claude/constraints/testing.md`, and in this skill's classifier — all of which are consulted by a
-human or an agent that chooses to look. Nothing fails a build.
+## Reliability registry
 
-The consequence is visible above: a pattern the ADR names as banned appears in **24 touched files**, and
-grew by 4 during this project, without anything objecting.
+`tests/.reliability-registry.json` holds 2 entries, **neither Compose-related**. No stale entry to
+retire under the registry's `_exitRule`.
 
-**Recommendation** — a source-scan ArchTest, the same shape as the `CallerIdentityGuardTests` /
-`ServiceBusClientGuardTests` pattern that #839 armed. It costs ~40 lines and turns a document into a
-forcing function.
+## Client-side tests (outside `/test-diet`'s `.cs` scope, classified by hand)
 
-Two design notes learned the hard way this week, both from #839:
+| File | Methods | Class |
+|---|---|---|
+| `composeCitationResolver.parity.test.ts` (new) | 2 (one `it.each` over 45 cases) | MAINTAIN — the client half of the cross-runtime contract |
+| `ComposeWorkspace.renderOnSave.test.tsx` (modified) | 2 assertions **inverted** | MAINTAIN — they previously pinned the #858 defect (`containerId === 'bu-container-1'`); they now pin its absence |
 
-1. **Do not use a bare count ceiling.** The ADR-010 ratchet went 153→155 while *seven* interfaces were
-   added and five removed — the net number hid five additions. Use a **checked-in inventory of the
-   accepted set**, so the failure names the file, and net-zero churn is impossible to hide.
-2. **Arm it in the same PR that adds it.** `CredentialGuardTests` shipped red and CI reported green for
-   six days because it was never added to the Tier-1 filter. A guard that is not armed is a file that
-   looks like enforcement.
+No client test was added that a ban would catch. Full client suite: 1,381 / 1,381 across 105 suites.
 
-## Not classified per-method
+## Count delta
 
-187 added test methods were **not** individually read. The path check, the ban scan and the
-added-vs-modified attribution are mechanical and complete; per-method MAINTAIN/SCAFFOLDING judgement is
-not, and is deferred to the 090 run. Stated rather than implied, because a report that looks exhaustive
-and is not is worse than one that says where it stopped.
+- Methods added by this project: **52**
+- Classified MAINTAIN or FITNESS FUNCTION: **52**
+- Classified SCAFFOLDING: **0**
+- Net post-diet expected count: **unchanged**
 
-## Commands
+## Industry citation
 
-**None emitted.** Nothing here is safe to delete mechanically: the only clear SCAFFOLDING signal is the
-`Mock<HttpMessageHandler>` bucket, and 15 of those 24 are seam tests where the stub may be legitimate.
-Per the skill's binding contract — *ambiguity is honest, not biased toward DELETE*.
-
-## Answer to the question that prompted this run
-
-> *"Is all this work necessary and helpful? It seems we have a lot of tests."*
-
-**Volume is not this project's problem — distribution is.** 187 methods across 26 files, one path
-violation added, three scaffolding files removed. What the scan actually found is a **banned pattern
-nothing enforces**, and a second problem coverage measurement had already exposed on the same day:
-
-> The `usePendingRedline` anchorless suite had **29 tests, and 23 of them exercised the same population**
-> — every pre-existing test omitted `origin`, so the live-anchorless path (the only one a user can hit
-> since task 051) had **zero** coverage. That is the shape of the real waste: not too many tests, but many
-> tests clustered on one path while a live path has none. **Test count hides that; branch coverage finds
-> it.**
+Build-vs-maintain criteria per ADR-038 §7 (Beck "delete the scaffolding"; Feathers
+characterization-vs-behavior; Google test-sizes; DHH less-tests). 17-ban classifier B1–B17;
+heuristic 0 (fitness functions) per ADR-038 Amendment A1.

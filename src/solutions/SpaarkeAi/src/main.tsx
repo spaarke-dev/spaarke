@@ -83,6 +83,7 @@ import {
   setDefaultWorkspaceRenderer,
   AppErrorBoundary,
   AppInsightsService,
+  cleanGuid,
 } from "@spaarke/ui-components";
 import type { WorkspaceRenderer } from "@spaarke/ui-components";
 // G-P3 UAT round-4 R4-2 (2026-07-07): the renderer wrapper translates a chat-opened
@@ -360,8 +361,8 @@ async function bootstrap(): Promise<void> {
   };
   setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
 
-  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget +
-  // getVisibleState into the WorkspaceWidgetRegistry (additive; the module also
+  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget
+  // into the WorkspaceWidgetRegistry (additive; the module also
   // registers as a top-level side effect, this explicit call documents intent
   // and guards against tree-shaking).
   registerComposeWidget();
@@ -510,8 +511,7 @@ async function bootstrap(): Promise<void> {
   // deprecated `Xrm.Page` may be absent); fall back to `Xrm.Page` for older embed
   // contexts. Returns the parent form's { entityName, entityId } or undefined.
   const readParentFormRecordRef = (): { entityName: string; entityId: string } | undefined => {
-    const clean = (raw?: string): string | undefined =>
-      raw ? raw.replace(/^\{|\}$/g, "").toLowerCase() : undefined;
+    const clean = (raw?: string): string | undefined => (raw ? cleanGuid(raw) : undefined);
     for (const w of [window.parent, window.top]) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

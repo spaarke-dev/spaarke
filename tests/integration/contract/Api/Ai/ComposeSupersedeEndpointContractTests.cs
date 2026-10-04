@@ -42,6 +42,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
 
@@ -328,6 +329,36 @@ public sealed class ComposeSupersedeFixture : WebApplicationFactory<Program>
                 .ReturnsAsync((ChatSession?)null);
             services.RemoveAll<IChatDataverseRepository>();
             services.AddSingleton(chatRepoMock.Object);
+
+            // WARM tier (Cosmos, ADR-015 Tier 3 / decision D-06) — the boundary this fixture MISSED,
+            // and the reason Supersede_WhenSessionUnknown_Returns404 used to fail locally after ~2m6s
+            // with TaskCanceledException while passing in CI on the same commit (repaired 2026-08-28).
+            //
+            // ChatSessionManager.GetSessionAsync is a THREE-tier lookup: Redis hot → Cosmos warm →
+            // Dataverse cold. This fixture doubled the hot tier (in-memory cache) and the cold tier
+            // (above) but left the warm tier REAL: AiPersistenceModule registers a live CosmosClient
+            // against CosmosPersistence:Endpoint (https://test.documents.azure.com — a hostname that
+            // RESOLVES to a live Azure IP via wildcard DNS and answers TCP) holding a real
+            // DefaultAzureCredential. Four of the five tests here create their session first, so they
+            // hit the hot tier and never noticed. Supersede_WhenSessionUnknown_Returns404 asks for a
+            // random GUID BY DESIGN — a guaranteed hot-tier miss — so it alone fell through to Cosmos
+            // and paid ~6 s per failed local credential-chain attempt (az CLI + Az.Accounts + the
+            // Visual Studio identity cache are all present on a developer machine and absent in CI)
+            // inside the SDK's retry loop, until the test client's default 100 s HttpClient.Timeout
+            // fired. Nothing about the product was wrong: the file's own header says "only external
+            // boundaries mocked", and Cosmos is an external boundary.
+            //
+            // Returning null keeps the documented semantics exactly — an unknown session is absent
+            // from the warm tier too, so the lookup proceeds to the cold tier and honestly 404s.
+            // TestInfrastructure/TestOutboundNetworkGuard.cs is the assembly-wide safety net for the
+            // same class of gap in other fixtures; this double is what makes THIS fixture hermetic
+            // rather than merely fast.
+            var sessionPersistenceMock = new Mock<ISessionPersistenceService>();
+            sessionPersistenceMock
+                .Setup(p => p.LoadSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((StoredSession?)null);
+            services.RemoveAll<ISessionPersistenceService>();
+            services.AddSingleton(sessionPersistenceMock.Object);
         });
     }
 

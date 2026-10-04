@@ -966,17 +966,14 @@ export const speApiClient = {
       return wire.map(mapDriveItem);
     },
 
-    /**
-     * GET /api/spe/containers/{containerId}/items/{itemId}?configId={id}
-     * Get details for a single drive item.
-     */
-    async get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
-      return mapDriveItem(
-        await get<WireDriveItem>(
-          "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
-        ),
-      );
-    },
+    // `get(containerId, itemId, configId)` DELETED by task 092. It declared
+    // GET /api/spe/containers/{id}/items/{itemId}, which the server has never served — the item
+    // surface exposes /versions, /thumbnails, /content, /preview, POST /share, DELETE and upload, but
+    // no single-item GET. It also had zero callers, so it was dead in both directions. Per this
+    // project's standing disposition (task 083; precedent in 071 and 073) a dead path is DELETED
+    // rather than converted — inventing a server route to satisfy an uncalled client method would be
+    // building a feature to justify dead code. Callers needing item details take them from
+    // `list(...)`, which is what every current caller already does.
 
     /**
      * POST /api/spe/containers/{containerId}/items/upload?configId={id}&folderId={folderId}
@@ -1077,8 +1074,15 @@ export const speApiClient = {
     },
 
     /**
-     * POST /api/spe/containers/{containerId}/items/{itemId}/sharing?configId={id}
+     * POST /api/spe/containers/{containerId}/items/{itemId}/share?configId={id}
      * Create a sharing link for a drive item.
+     *
+     * The path is `/share`, NOT `/sharing`. It was `/sharing` here from the start while the server has
+     * always served `/share` (ContainerItemEndpoints.cs, WithName("CreateSharingLink")), so this call
+     * 404'd for the life of the feature — and because FileDetailPanel catches the failure and renders
+     * "Failed to create sharing link.", the UI gave no hint that the cause was a wrong URL. Fixed by
+     * task 092; kept honest by SpeAdminClientRouteAgreementTests, which fails the build if any URL in
+     * this file has no matching server route.
      */
     createSharingLink(
       containerId: string,
@@ -1087,7 +1091,7 @@ export const speApiClient = {
       body: { type: SharingLinkType; scope: SharingLinkScope; expirationDateTime?: string },
     ): Promise<SharingLink> {
       return post<typeof body, SharingLink>(
-        "/spe/containers/" + containerId + "/items/" + itemId + "/sharing" + qs({ configId }),
+        "/spe/containers/" + containerId + "/items/" + itemId + "/share" + qs({ configId }),
         body,
       );
     },

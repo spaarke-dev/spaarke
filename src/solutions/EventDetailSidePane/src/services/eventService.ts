@@ -7,6 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
+import { cleanGuid } from '@spaarke/ui-components';
 import {
   IEventRecord,
   EVENT_HEADER_SELECT_FIELDS,
@@ -102,7 +103,7 @@ export async function loadEventHeader(eventId: string): Promise<ILoadEventResult
 
   try {
     // Normalize GUID (remove braces if present)
-    const normalizedId = eventId.replace(/[{}]/g, "");
+    const normalizedId = cleanGuid(eventId);
 
     const record = await webApi.retrieveRecord(
       EVENT_ENTITY,
@@ -153,7 +154,7 @@ export async function loadEventFull(eventId: string): Promise<ILoadEventResult> 
   }
 
   try {
-    const normalizedId = eventId.replace(/[{}]/g, "");
+    const normalizedId = cleanGuid(eventId);
 
     const record = await webApi.retrieveRecord(
       EVENT_ENTITY,
@@ -203,7 +204,7 @@ export async function updateEventField(
   }
 
   try {
-    const normalizedId = eventId.replace(/[{}]/g, "");
+    const normalizedId = cleanGuid(eventId);
 
     await webApi.updateRecord(EVENT_ENTITY, normalizedId, {
       [fieldName]: value,
@@ -349,7 +350,7 @@ export async function saveEvent(
   }
 
   try {
-    const normalizedId = eventId.replace(/[{}]/g, "");
+    const normalizedId = cleanGuid(eventId);
 
     // Split payload into scalar fields and lookup bindings.
     // Lookups use @odata.bind which can require separate handling.

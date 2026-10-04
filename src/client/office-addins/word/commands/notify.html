@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spaarke</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f3f2f1;
+        color: #201f1e;
+      }
+      .message {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 20px;
+        font-size: 14px;
+        text-align: center;
+      }
+      .message.error {
+        color: #a4262c;
+      }
+      body.error {
+        flex-direction: column;
+      }
+      #dismiss {
+        display: none;
+        margin-top: 4px;
+        padding: 4px 16px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      body.error #dismiss {
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      spaarkeai-word-add-in-r1 task 037 (FR-17): the Word ribbon commands' notification surface.
+
+      Word has no equivalent of Outlook's `Office.context.mailbox.item.notificationMessages` (Mailbox-
+      only). `Office.context.ui.displayDialogAsync` (DialogApi, Excel/Outlook/PowerPoint/Word — see
+      `@types/office-js`'s `Office.UI.displayDialogAsync` doc comment, which explicitly says this IS
+      callable "from a UI-less command button") is the genuine host-native mechanism for a Word
+      ExecuteFunction command to show the user something without opening the task pane. This page is
+      deliberately minimal: no Office.js bootstrap, no bundling — it reads `message`/`status` from its
+      own query string and renders them, then closes itself. `word/commands/index.ts`'s `notify()`
+      helper is the only caller.
+
+      Auto-close timing and exact popup behavior are UNVERIFIED against a live Word host in this
+      session (no interactive Office/browser environment was available) — see
+      projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md. Deferred to task 042's UAT,
+      matching this project's established convention for anything only a live host can confirm.
+    -->
+    <!--
+      Task 089 (UAT-9): an ERROR now says why — often the server's own reason — so it must stay readable. A success
+      still closes after 2.2 s; an error stays 8 s and has a Close button. The message is rendered with
+      textContent only (never parsed as HTML), so a server-supplied reason cannot inject markup.
+    -->
+    <div id="message" class="message"></div>
+    <button id="dismiss" type="button">Close</button>
+    <script>
+      (function () {
+        var SUCCESS_CLOSE_MS = 2200;
+        var ERROR_CLOSE_MS = 8000;
+
+        var params = new URLSearchParams(window.location.search);
+        var message = params.get('message') || '';
+        var status = params.get('status') || 'info';
+        var isError = status === 'error';
+
+        var el = document.getElementById('message');
+        el.textContent = message;
+        if (isError) {
+          el.classList.add('error');
+          el.setAttribute('role', 'alert');
+          document.body.classList.add('error');
+        }
+
+        // Best-effort close. `window.close()` on a window this add-in itself opened via
+        // displayDialogAsync is the standard self-closing pattern for a transient Office dialog.
+        function closeSelf() {
+          try {
+            window.close();
+          } catch (e) {
+            // Some hosts refuse a script-initiated close — the message stays visible; harmless.
+          }
+        }
+
+        var dismiss = document.getElementById('dismiss');
+        if (dismiss) {
+          dismiss.addEventListener('click', closeSelf);
+        }
+
+        setTimeout(closeSelf, isError ? ERROR_CLOSE_MS : SUCCESS_CLOSE_MS);
+      })();
+    </script>
+  </body>
+</html>

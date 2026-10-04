@@ -11,8 +11,25 @@ import type { AuthStrategy } from './AuthStrategy';
 /** Buffer (ms) before token expiry to consider it stale. Matches config.TOKEN_EXPIRY_BUFFER_MS. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
-/** NAA broker redirect URI — required when running inside Office hosts that support NAA. */
-const NAA_REDIRECT_URI = 'brk-multihub://localhost';
+/**
+ * NAA broker redirect URI — required when running inside Office hosts that support NAA.
+ *
+ * PORTABLE by design (email-communication-intelligence-r2 UAT 2026-09-03): derived from the serving
+ * host, NOT hardcoded. The value MUST match a `brk-multihub://<host>` redirect URI registered under the
+ * Entra app's **SPA** platform for Office-on-the-web (the pure-SPA flow validates the redirect against
+ * that list; a mismatch → AADSTS7000471 "reply address scheme is reserved for brokered application
+ * requests"). Because it tracks `window.location.hostname`, each environment (dev SWA, and every future
+ * production customer SWA / custom domain) works as long as its Entra app registers
+ * `brk-multihub://<that-host>` — no code change per environment. Falls back to `localhost` for
+ * non-browser/test contexts.
+ *
+ * Was previously hardcoded to `brk-multihub://localhost`, which is only in the dev app's publicClient
+ * (native) list — so desktop (native broker) worked but Office-on-the-web (SPA flow) failed.
+ */
+function naaRedirectUri(): string {
+  const host = typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
+  return `brk-multihub://${host}`;
+}
 
 /**
  * Decode a JWT and return its `exp` claim as a Unix-ms timestamp.
@@ -97,7 +114,14 @@ async function detectNaaSupport(): Promise<boolean> {
     console.info(`[OfficeNaaStrategy] platform=${platform} version=${version}`);
 
     if (platform === OfficeRef.PlatformType?.OfficeOnline) {
-      return true;
+      // Office-on-the-web: use the STANDARD MSAL popup (https redirect), NOT NAA.
+      // Empirically (email-communication-intelligence-r2 UAT 2026-09-03, Word/Outlook on the web) the
+      // NAA broker does not actually engage for this add-in/app-registration — MSAL opens a real popup
+      // still carrying the brk-multihub:// redirect, which Entra rejects for the now-non-brokered
+      // request (AADSTS7000471). The desktop native broker works, so NAA stays enabled there. The web
+      // standard-popup path uses the registered https://<origin>/auth-callback.html redirect and is
+      // reliable + portable (any customer domain that registers its auth-callback.html SPA redirect).
+      return false;
     }
 
     if (platform === OfficeRef.PlatformType?.PC) {
@@ -169,9 +193,9 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
-   *               redirectUri, bffApiScope). The Office redirectUri default of
-   *               `brk-multihub://localhost` is applied internally when NAA is
-   *               active — callers do NOT need to override `config.redirectUri`.
+   *               redirectUri, bffApiScope). The Office NAA redirectUri is derived
+   *               internally from the serving host (`brk-multihub://<hostname>`) when
+   *               NAA is active — callers do NOT need to override `config.redirectUri`.
    * @param options Office-specific overrides (fallback redirect URI; forced fallback).
    */
   constructor(config: Required<IAuthConfig>, options: IOfficeNaaConfig = {}) {
@@ -182,7 +206,16 @@ export class OfficeNaaStrategy implements AuthStrategy {
   async acquire(): Promise<TokenResult> {
     const msal = await this._ensureInitialized();
     if (!msal) return { accessToken: '', expiresOn: 0 };
+    const token = await this._tryAcquireWith(msal);
+    return token ?? { accessToken: '', expiresOn: 0 };
+  }
 
+  /**
+   * Run the silent→popup acquisition ladder against a given MSAL instance. Shared by the primary
+   * (NAA or fallback) attempt and the NAA-failure fallback retry so both paths validate/expire tokens
+   * identically. Returns a validated TokenResult or null if both steps fail.
+   */
+  private async _tryAcquireWith(msal: IPublicClientApplication): Promise<TokenResult | null> {
     const scopes = [this._config.bffApiScope];
     const account = this._pickAccount(msal);
 
@@ -200,9 +233,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
       }
     }
 
-    // 2. acquireTokenPopup — under NAA this routes through the Office broker
-    //    (no real popup); under fallback PCA it opens an interactive popup.
-    //    Either way it's the documented last-resort for getting the user signed in.
+    // 2. acquireTokenPopup — under NAA this routes through the Office broker (no real popup);
+    //    under fallback PCA it opens an interactive popup.
     try {
       const loginHint = account?.username;
       console.info(
@@ -220,7 +252,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
       console.warn('[OfficeNaaStrategy] acquireTokenPopup failed:', err);
     }
 
-    return { accessToken: '', expiresOn: 0 };
+    return null;
   }
 
   clearCache(): void {
@@ -298,6 +330,27 @@ export class OfficeNaaStrategy implements AuthStrategy {
     return { accessToken: result.accessToken, expiresOn };
   }
 
+  /**
+   * Clear a stale MSAL "interaction in progress" lock from session storage. MSAL sets
+   * `msal.<clientId>.interaction.status` = `interaction_in_progress` while an interactive request runs
+   * and clears it on completion — but a popup the user closes / a request that errored mid-flight (e.g.
+   * the prior AADSTS7000471 attempts) can leave it stuck, after which every subsequent interactive call
+   * throws `interaction_in_progress`. This removes ONLY that lock key (tokens + accounts untouched) so a
+   * fresh attempt can proceed. Best-effort; never throws.
+   */
+  private _clearStaleInteractionLock(): void {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.includes('interaction.status')) {
+          sessionStorage.removeItem(key);
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+
   /** Pick the most recently signed-in account, or null if none cached. */
   private _pickAccount(msal: IPublicClientApplication): AccountInfo | null {
     const accounts = msal.getAllAccounts();
@@ -310,6 +363,11 @@ export class OfficeNaaStrategy implements AuthStrategy {
     if (!this._initPromise) {
       this._initPromise = (async () => {
         try {
+          // Release any stale MSAL interaction lock left by a prior FAILED interactive attempt
+          // (a closed/blocked popup leaves `msal.*.interaction.status` set → the next acquire throws
+          // `interaction_in_progress` forever). Only the lock is cleared, never tokens/accounts.
+          this._clearStaleInteractionLock();
+
           const useNaa = !this._options.forceFallback && (await detectNaaSupport());
 
           // Dynamic import keeps MSAL out of the bundle if a non-Office strategy is used
@@ -357,8 +415,9 @@ export class OfficeNaaStrategy implements AuthStrategy {
         clientId: this._config.clientId,
         authority: this._config.authority,
         // NAA always uses the brk-multihub broker URI regardless of caller-provided redirectUri.
-        // Honor caller override only if it's the canonical brk-multihub form, otherwise force.
-        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : NAA_REDIRECT_URI,
+        // Honor caller override only if it's the canonical brk- form, otherwise derive from the host
+        // (portable across dev + prod customer domains — see naaRedirectUri).
+        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : naaRedirectUri(),
         supportsNestedAppAuth: true,
         navigateToLoginRequestUrl: false,
       },

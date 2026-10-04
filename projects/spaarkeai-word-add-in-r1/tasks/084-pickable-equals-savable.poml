@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Pickable equals savable: the record picker, Outlook's suggestion cards and the ribbon quick-save offer only records the save will accept (#1037, #1075)</title>
+    <phase>5 Remediation — authorization affordance</phase>
+    <status>completed</status>
+    <status-note>2026-10-01, `91e73b6fc`. The search (`access=file` → `canFile`) and the suggestions (`filingAccess`) carry the save's own verdict, from ONE evaluator (`OfficeSearchService.EvaluateFilingAccessAsync`). The probe gained a multi-record method (identity once, ≤4 lookups at once). The pane shows a non-fileable record disabled with the verbatim reason and never selects it. The ribbon sends the friendly type (#1075), does not auto-file a non-fileable prediction, and its notifications now use `replaceAsync` within the 150-character limit (two defects found in review). Parity test over 6 rights masks; seeded control 6 failures. Suite 13,064/0/54 (+24 exact); ArchTests 337; jest 61/809; lint 0; tsc 68/0 production; publish +5,043 B. OPEN, stated: the live check (no deploy), and latency measured from a workstation (≈0.71 s modelled p50, under the 1 s trigger); confirm on the dev BFF after the next deploy. Record: `notes/084-pickable-equals-savable.md`.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF endpoints and the caller-rights probe (bff-api, auth), the pane (.tsx), and tests/**. It decides what a user is shown as fileable, which is an authorization affordance.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-adjacent and cross-layer. The evaluator must be the save's own, not a copy, and the cost bound on a typeahead route is a judgment the task must measure, not assume.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the Office search code that task 059 moves into `OfficeSearchService`, plus `OfficeEndpoints.cs`, which the 060 → 068 → 075 track also edits.</parallel-reason>
+    <deps>059</deps>
+    <tags>bff-api, office, auth, react, fluent-ui, testing</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/1037</issue>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/1075</issue>
+  </metadata>
+
+  <prompt>The pane lets a user pick a record they can READ, and then the save refuses it because filing needs APPENDTO. Make every place that offers a filing target agree with the save. The search and the suggestions route return, per row, whether the caller can file to it, decided by the save's own evaluator. The pane shows a record the caller cannot file to as DISABLED, with the reason. The ribbon quick-save stops auto-filing to such a record, and stops sending a type name the save refuses.</prompt>
+
+  <role>SPAARKE platform developer making an authorization affordance agree with its enforcement, without creating a second copy of the rule.</role>
+
+  <goal>For any record and any caller, the pane offers the record as selectable exactly when `POST /api/office/save` would accept it as the target. A record the caller can read but not file to is shown disabled, with the reason. The Outlook ribbon quick-save files only to a predicted record the caller can file to, and sends the friendly type name the save accepts.</goal>
+
+  <context>
+    <background>
+      **The defect (#1037, ISS-010).**
+      - The picker's search returns every record the caller can READ. Task 062 made it run app-only with
+        `MSCRMCallerID` impersonation (`IImpersonatedCommunicationQuery`), so Dataverse trims the query itself.
+      - `POST /api/office/save` authorizes its target by **AppendTo**: `EntityAccessFilter` →
+        `CallerRecordAccessProbe.GetCallerRightsAsync` → `OperationAccessPolicy.HasRequiredRights(rights,
+        "entity.associate_document")` (`OperationAccessPolicy.cs:176-186` maps it to `AccessRights.AppendTo`).
+      - So a user with Read but not AppendTo on a record can pick it, and the save is refused with 403 `OFFICE_009`
+        `insufficient_rights`. It fails closed, so this is a correctness and UX defect, not a leak.
+      - Under the owner's model (team-owned records, BU + children depth), the realistic source is a secure record
+        reached through a UAC view-only grant.
+
+      **Owner decision (2026-09-30, relayed by UAC-r2; go given 2026-10-01): option A.** Show such a record DISABLED
+      with the reason; do not hide it.
+
+      **Research for this task (2026-10-01) corrected ISS-010 in two places:**
+      - `POST /api/office/todo` demands **Read** (`TodoSourceAccessFilter`), not AppendTo. Only `/save` demands
+        AppendTo. **The To Do flow is out of scope.** Its regarding record is the saved context, not the picker; its
+        only search is the Contact assignee lookup (`App.tsx:415-450`), which must NOT pay for this.
+      - There are **three** places that offer a filing target, not one:
+        1. the Save tab search rows: `RelatedToPicker.tsx` (`renderCard` :301-348), fed by `SaveFlow.tsx` `relatedSearch`
+           :947-989 → `GET /api/office/search/entities`;
+        2. Outlook's suggestion cards: `SaveFlow.tsx` :897-917 `fetchRelatedCandidates` →
+           `GET /api/office/communications/by-message-id/{id}/suggestions` (`CommunicationsEndpoints.cs:110`), rendered
+           and selectable exactly like search rows. That route resolves names under the user's token but checks no
+           AppendTo;
+        3. the Outlook ribbon quick-save: `outlook/commands/index.ts:107-147` auto-files to `fetchEnginePreSelection`'s
+           `predicted` record, with no picker.
+
+      **#1075 (ISS-014), folded in here because it changes the same ribbon path.**
+      - `quickSaveHelpers.ts:81-85` sends `entityType: target.logicalName` (`"sprk_matter"`), and
+        `quickSaveHelpers.test.ts:37` pins that value.
+      - `ValidateSaveRequest` (`OfficeEndpoints.cs:444-455`) accepts only friendly names and returns 400 `OFFICE_002`
+        for anything else. So every predicted quick-save is refused.
+      - It is latent: the button exists only in the unified JSON manifest (`outlook/manifest.json:101`). Production
+        Outlook runs the XML manifest, which has no quick-save. Task 078's package, still awaiting the owner's install,
+        would make it live.
+      - The predicted object already carries the friendly `entityType` (`communicationSuggestionsService.ts:162-169`).
+
+      **The single evaluator (do not create a second one).** "May this caller file to record X" is decided by exactly:
+      1. `EntityAccessFilter.TryResolveEntitySet(entityType, out entitySet)`, the one type → entity-set map, which is
+         closed with a fail-closed miss;
+      2. `CallerRecordAccessProbe.GetCallerRightsAsync(bearer, entitySet, id, ct)`
+         (`Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:210`). It does OBO, then `WhoAmI`, then
+         `RetrievePrincipalAccess`. It checks one record per call, has no cache, and returns `None` on every failure;
+      3. `OperationAccessPolicy.HasRequiredRights(rights, "entity.associate_document")`.
+
+      Today the operation string is a `private const` in `EntityAccessFilter` (:87).
+
+      **Cost precedents** (why per-row evaluation was rejected for 062's TRIM, and why it is acceptable here):
+      - 062 rejected per-row post-trimming because a typeahead could fan out to about 250 round trips across 5 types.
+      - Here the evaluation is opt-in and only the Save picker opts in. That picker asks for ONE type at `top=10`
+        (`SaveFlow.tsx:957`), so the cost is at most 10 RPA calls per keystroke.
+      - Bounded per-row precedents: `RecordSearchEndpoints.AuthorizeRowsAsync` (cap 50),
+        `VisualizationEndpoints.AuthorizeRowsAsync` (cap 100), and `PermissionsEndpoints` batch capability flags
+        (`POST /api/documents/permissions/batch`, the ONE per-item flags precedent, which reuses
+        `OperationAccessPolicy.HasRequiredRights` "so there is no second capability calculus").
+
+      **After task 059**, the search code (`SearchEntitiesAsync`, `QuerySearchEntityAsync`, `MapSearchRow`, …) lives in
+      `Services/Office/OfficeSearchService.cs`, not `OfficeService.cs`. Read 059's note before starting.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11 / this task">ONE evaluator. Every `canFile` value comes from `EntityAccessFilter.TryResolveEntitySet` + `CallerRecordAccessProbe` + `OperationAccessPolicy.HasRequiredRights(…, "entity.associate_document")`. Expose the operation name from ONE place, for example by making `EntityAccessFilter.AssociateOperation` `internal` or moving it to a named constant beside the policy entry. Do not write `AccessRights.AppendTo`, the literal `"entity.associate_document"`, or a type → entity-set map anywhere new.</constraint>
+    <constraint source="this task">Opt-in. `GET /api/office/search/entities` evaluates filing access only when the request carries `access=file`. Without it, the probe is never called and every row's `canFile` is null or absent, exactly as today. The Save picker sends `access=file`; the To Do Contact search (`App.tsx`) does NOT.</constraint>
+    <constraint source="this task">Fail closed, consistent with the save. A row whose type does not resolve to an entity set, or whose probe returns `None` or throws, gets `canFile = false`. Never `true` on doubt. One row's failure never fails the search or another row.</constraint>
+    <constraint source="this task">Bound the cost. With `access=file`, evaluate at most 50 rows per request (a named constant). Rows past the cap get `canFile = null`, the client treats them as today (selectable; the save still enforces), and a test pins the cap. Evaluate concurrently with a fixed limit of at most 4. If you extend `CallerRecordAccessProbe` with a multi-record method, it does the OBO exchange and `WhoAmI` ONCE per request and keeps the per-record fail-closed semantics. Do not cache rights across requests.</constraint>
+    <constraint source="ADR-008 / route census">Add NO endpoint filter to `/api/office/search/entities` or to the suggestions route. `/search/entities` keeps its Permanent waiver (#1021) in `RouteAuthorizationGuardTests`; a filter there is a different decision. This task adds a response field, not a gate.</constraint>
+    <constraint source="this task">No new endpoint and no new DI registration. `CallerRecordAccessProbe` is already registered; confirm its registration is unconditional before injecting it into the search and suggestions handlers (root CLAUDE.md §10 bullet 6).</constraint>
+    <constraint source="unified-access-control-r2 rule">In `CommunicationsEndpoints.cs`, no code line may contain `entityService` or `IGenericEntityService` (doc comments are exempt). Run `/conflict-check`; if `email-communication-intelligence-r2` or UAC-r2 has open edits to that file, coordinate before editing.</constraint>
+    <constraint source="this task">Suggestions: add filing access to the existing response keyed by candidate `targetId`, in the same shape as the existing `names` map. Do not change the engine's ranking or `derivePrimaryReview` (ADR-045: no forked candidate model).</constraint>
+    <constraint source="this task — exact copy">Disabled-row reason, verbatim: "You can view this record but can't file to it. Filing needs Append To permission on the record." Ribbon notification when the prediction is not fileable, verbatim: "Spaarke suggests {name}, but you can't file to it. Open Spaarke to choose where to file." Do not invent other user-facing text; if a third string is needed, stop and ask.</constraint>
+    <constraint source="ADR-021 / ADR-012 path A">Fluent v9 tokens only (dark mode included); no `@spaarke/ui-components` import. Model the disabled row on `components/AttachmentSelector.tsx:428-478`: `aria-disabled="true"`, `tabIndex={-1}`, no enabled select control, and an inline reason with an icon.</constraint>
+    <constraint source="this task">A `canFile === false` row is never selected: not by click, not by Enter or Space, not by any pre-selection. Treat `canFile` true, null and absent as today (selectable).</constraint>
+    <constraint source="#1075">The ribbon sends `target.entityType` (friendly) as `targetEntity.entityType`. Do not widen `ValidateSaveRequest` to accept logical names; the save's contract is the friendly name, and the finalization worker matches on it.</constraint>
+    <constraint source="ADR-019">No new error code. The save's existing 403 `OFFICE_009` `insufficient_rights` stays the enforcement when rights change between search and save.</constraint>
+    <constraint source="ADR-038">Server tests go in KEEP paths: extend `tests/integration/contract/Api/Office/OfficeEntitySearchAuthorizationContractTests.cs`, plus a sibling contract test for the parity check and the suggestions route. Do not edit `tests/integration/auth/UnifiedAccessControl/*` (UAC-r2's); read `OfficeSaveTestFixture` and reuse its rights-injection approach. Client tests go in `__tests__` (project ADR-038 Path A), and every new suite goes into `ci-gated-suites.txt`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">**Parity (the core test).** For each injected rights mask in {None, Read, Read|Write, AppendTo, Read|AppendTo, Read|Write|Append|AppendTo}: `GET /api/office/search/entities?…&amp;access=file` returns `canFile` for a row EQUAL to whether `POST /api/office/save` with that row as `TargetEntity` passes `EntityAccessFilter` under the SAME injected rights (403 `OFFICE_009` ⇔ `canFile = false`). One test drives both routes through one fixture.</criterion>
+    <criterion testable="true">Without `access=file`: every row's `canFile` is null or absent, and the probe is called **0** times (asserted by a call count).</criterion>
+    <criterion testable="true">With `access=file`: a probe that returns `None` or throws for one row gives that row `canFile = false`, the other rows keep their own values, and the response is 200. A row whose type has no entity set (for example `Account`) gets `canFile = false`.</criterion>
+    <criterion testable="true">The cost bound is pinned. With `access=file`, probe calls ≤ the number of rows returned and ≤ the named cap; rows past the cap carry `canFile = null`. If a multi-record probe method is added: the OBO exchange and `WhoAmI` happen once per request (asserted by a count).</criterion>
+    <criterion testable="true">The suggestions route returns filing access per candidate `targetId`, from the same evaluator. A parity test on {Read, Read|AppendTo} agrees with the save.</criterion>
+    <criterion testable="true">Pane, search rows: a `canFile === false` row renders `aria-disabled="true"`, shows the verbatim reason, and cannot be selected by click, Enter or Space. A `true`, null or absent row behaves exactly as before (the existing `RelatedToPicker` tests stay green unchanged).</criterion>
+    <criterion testable="true">Pane wiring: `SaveFlow`'s `relatedSearch` sends `access=file` and carries `canFile` through its explicit field map (`SaveFlow.tsx:980-986`). The To Do Contact search does not send `access=file`. Seeded: removing `canFile` from the map makes a test fail.</criterion>
+    <criterion testable="true">Pane, suggestion cards: a candidate whose filing access is false renders disabled the same way and is never pre-selected.</criterion>
+    <criterion testable="true">Ribbon (#1075), reproduce first. A contract test shows `targetEntity.entityType = "sprk_matter"` → 400 `OFFICE_002` (recorded before the fix). After the fix, `buildEmailSaveRequest` sends `"Matter"`, and `quickSaveHelpers.test.ts` pins the friendly name. Also add a client test asserting that every value `LOGICAL_TO_ENTITY_TYPE` produces is accepted by the save's type list (mirror the server list in the test with a comment naming `OfficeEndpoints.ValidateSaveRequest`).</criterion>
+    <criterion testable="true">Ribbon: when the predicted record's filing access is false, `quickSave` does NOT post a save. It shows the verbatim notification and opens the pane, the same path as "no prediction".</criterion>
+    <criterion testable="true">Seeded negative controls, both outputs recorded: (1) server, forcing `canFile = true` makes the parity test FAIL; (2) client, removing the disabled branch makes the picker test FAIL.</criterion>
+    <criterion testable="true">Gates: full BFF suite green, with the count reconciled against the previous run; ArchTests green, with the route census unchanged (no new filter, the `/search/entities` waiver still valid); office-addins gated jest suites green; lint 0; `tsc` ≤ the pinned baseline (68) with 0 production errors; publish-size delta measured against a fresh build of master (root CLAUDE.md §10, short-path worktrees, file counts equal); `dotnet list package --vulnerable --include-transitive` clean.</criterion>
+    <criterion testable="true">Latency, measured, not assumed. Record the search route's server time for `access=file&amp;top=10` against dev (or a local BFF against dev Dataverse), with and without `access=file`.</criterion>
+    <criterion testable="true">Live check after the next deploy from master, as Test User 1 in Word: a matter search shows selectable rows and a save to one succeeds. If no user holding Read without AppendTo on a record exists in dev, record that the disabled path was verified only by tests and why. Leave this criterion open, stating why, if no deploy has happened.</criterion>
+    <criterion testable="true">Records: `docs/architecture/office-outlook-teams-integration-architecture.md` (search section) documents `access=file` and `canFile`. `notes/084-pickable-equals-savable.md` holds the evidence. ISS-010 and ISS-014 are closed in `notes/defer-issues.md`. #1037 and #1075 are commented with the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The measured server time for `access=file&amp;top=10` exceeds the time without it by more than 1 second at p50 in dev. STOP and present the options: (a) keep it inline; (b) a separate lazy capability call, with rows disabled until known; (c) evaluate on selection only.</trigger>
+    <trigger>`CallerRecordAccessProbe` turns out to hold shared per-request state that makes concurrent calls unsafe. Evaluate sequentially and re-measure; if that fires the trigger above, stop there.</trigger>
+    <trigger>The parity test shows a rights mask where search and save disagree for a reason other than rights (for example, the save refuses a type the search marks fileable). STOP; do not special-case it in one place.</trigger>
+    <trigger>`/conflict-check` reports open edits by another project to `CommunicationsEndpoints.cs` or `EntityAccessFilter.cs`. Coordinate before editing.</trigger>
+    <trigger>Any user-facing string beyond the two given verbatim is needed.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read 059's note and the current search code location. Run `/conflict-check`. Confirm `CallerRecordAccessProbe`'s registration is unconditional.</step>
+    <step>Reproduce first: write the #1075 contract test (`"sprk_matter"` → 400 `OFFICE_002`) and a parity test that FAILS today (with `access=file`, the search has no `canFile`). Record both outputs.</step>
+    <step>Server: expose the operation constant from one place. Add `canFile` (nullable) to `EntitySearchResult` and per-candidate filing access to the suggestions response. Evaluate with the single evaluator under the opt-in, the cap and the concurrency limit; extend the probe with a multi-record method only if it removes per-row OBO/WhoAmI.</step>
+    <step>Client: extend `EntitySearchResult` (`hooks/useEntitySearch.ts`) and `RelatedCandidate`; carry `canFile` through `SaveFlow`'s map and the suggestions mapping; render the disabled row in `RelatedToPicker`; send `access=file` from the Save picker only.</step>
+    <step>Ribbon: send the friendly type; skip auto-filing to a non-fileable prediction, showing the verbatim notification and opening the pane.</step>
+    <step>Tests and seeded negative controls; measure latency; run the gates (suite, ArchTests, jest, lint, tsc, publish size, CVE).</step>
+    <step>Docs and records: the architecture doc's search section, `notes/084-pickable-equals-savable.md`, defer-issues ISS-010/014 closed, TASK-INDEX 084 → ✅, and comments on #1037 and #1075.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Save picker: a record the caller can file to is selectable">
+      <steps>
+        <step>As Test User 1, open the Spaarke pane in Word on a new document and go to the Save tab.</step>
+        <step>Search Matter for two or more characters that match a matter Test User 1's BU owns.</step>
+        <step>Select a row and save.</step>
+      </steps>
+      <expected>Rows look and behave as before this task. The row selects with a click, and with Enter or Space after tabbing to it. The save succeeds and files the document to the matter.</expected>
+    </test>
+    <test name="Save picker: a record the caller can only view is disabled with the reason">
+      <steps>
+        <step>Use a user holding Read but not AppendTo on a record, for example one shared view-only through UAC Manage Access on a secure project. If no such user exists in dev, record that and rely on the jest tests.</step>
+        <step>Search for that record in the Save tab.</step>
+        <step>Try to select it by click, and by Tab followed by Enter or Space.</step>
+      </steps>
+      <expected>The row is visible, visibly disabled, and shows "You can view this record but can't file to it. Filing needs Append To permission on the record." It cannot be selected by mouse or keyboard. A screen reader announces it as disabled. Other rows stay selectable.</expected>
+    </test>
+    <test name="Outlook suggestion cards and the ribbon quick-save">
+      <steps>
+        <step>In Outlook, open an email that the Association Engine has suggestions for, and open the pane's Save tab.</step>
+        <step>Observe the suggestion cards; for a candidate the user cannot file to, try to select it.</step>
+        <step>Install the TEST unified package (task 078), then use the ribbon quick-save on an email with a fileable prediction, and on one whose prediction is not fileable.</step>
+      </steps>
+      <expected>A non-fileable candidate card is disabled with the same reason and is never pre-selected. A fileable prediction is filed by the ribbon (no `OFFICE_002`). A non-fileable prediction is NOT filed: the ribbon shows "Spaarke suggests {name}, but you can't file to it. Open Spaarke to choose where to file." and opens the pane.</expected>
+    </test>
+    <test name="ADR-021 dark mode for the disabled row">
+      <steps>
+        <step>With a disabled row on screen, switch the Office theme between light and dark.</step>
+      </steps>
+      <expected>The disabled row, its icon and its reason text stay legible in both themes and use Fluent tokens (no hard-coded colour). The disabled state is distinguishable from the selectable rows in both themes.</expected>
+    </test>
+  </ui-tests>
+
+  <justification>
+    <existing>The save already decides fileability (`EntityAccessFilter` + `CallerRecordAccessProbe` + `OperationAccessPolicy`). The search and suggestions responses already exist, and so does the ribbon's "no prediction → open the pane" path. `PermissionsEndpoints`' batch capability flags are the precedent for returning a policy-derived per-item flag.</existing>
+    <extension>Yes. This extends two existing responses with one field each and reuses the save's evaluator. It adds no endpoint, filter, service, registration or column. The only possible new member is a multi-record method on `CallerRecordAccessProbe`, which exists only to avoid one OBO exchange and one `WhoAmI` per row.</extension>
+    <cost-of-doing-nothing>A user holding Read without AppendTo on a record (a secure record shared view-only through UAC) picks it and then the save is refused with 403. And once task 078's unified package is installed, every Outlook ribbon quick-save is refused with 400 `OFFICE_002` (#1075).</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeSearchService.cs (after 059; else OfficeService.cs)</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Models/Office/EntitySearchResponse.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs (the operation constant only)</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs (only if a multi-record method is added)</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/communicationSuggestionsService.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+    <file role="edit">src/client/office-addins/outlook/commands/index.ts</file>
+    <file role="edit">tests/integration/contract/Api/Office/OfficeEntitySearchAuthorizationContractTests.cs</file>
+    <file role="read">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Api/PermissionsEndpoints.cs</file>
+    <file role="read">src/client/office-addins/shared/taskpane/components/AttachmentSelector.tsx</file>
+    <file role="read">tests/integration/auth/UnifiedAccessControl/OfficeSaveTestFixture.cs</file>
+    <file role="read">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/084-pickable-equals-savable.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/062-entity-search-trim.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/uac-r2-findings-2026-09-30.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Models/Office/EntitySearchResponse.cs</file>
+    <file>src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/084-pickable-equals-savable.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Start only after 059 has landed.</protocol>
+  </execution>
+</task>

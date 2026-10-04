@@ -185,7 +185,7 @@ Current 6 registrations: `get-started`, `quick-summary`, `latest-updates`, `todo
 
 Each workspace tab carries a `visibleToAssistant: boolean` (`WorkspaceTab` in `@spaarke/ai-widgets/types`). Privacy defaults: **agent-created tabs default `true`; user-created tabs default `false`**. The user flips it per tab via the `AddToAssistantToggle` Fluent Switch (`src/solutions/SpaarkeAi/src/components/workspace/AddToAssistantToggle.tsx` — controlled component; dispatches a `workspace.tab_edited` PaneEventBus event carrying `tabId` + `editedFields: ['visibleToAssistant']` — field NAMES only, per ADR-015).
 
-Effect: only tabs with `visibleToAssistant === true` enter the agent's per-turn prompt snapshot — `SprkChatAgentFactory` filters on the flag when building workspace-tab context, and each widget type contributes its `SerializedWidgetState` shape (e.g. Summary: `{ widgetType, summary, tldr, hasUserEdits }`; DocumentViewer: filename/MIME/selection; Table: rowCount/sort/filter/selection — see `@spaarke/ai-widgets/types/SerializedWidgetState.ts`). Hidden tabs contribute nothing. Assistant-opened layout tabs (§2.6) are agent-created and therefore visible by default.
+Effect: only tabs with `visibleToAssistant === true` enter the agent's per-turn prompt snapshot — `SprkChatAgentFactory` filters on the flag when building workspace-tab context, and the BFF derives each visible tab's agent-visible state **server-side** from the raw `widgetData` (`SprkChatAgentFactory.TryDeriveVisibleState`, typed by `WorkspaceTabVisibleState.cs` — e.g. Summary: `{ widgetType, summary, tldr, hasUserEdits }`; DocumentViewer: filename/MIME/selection; Table: rowCount/sort/filter/selection). That server path is the **only** Pillar 9 enforcement point: the client-side `SerializedWidgetState` union, `pillar9-visibility.ts` derivations and registry `getVisibleState` slot were never called in production and were deleted 2026-10-03 (reuse audit C-21, #1112). Hidden tabs contribute nothing. Assistant-opened layout tabs (§2.6) are agent-created and therefore visible by default.
 
 ---
 
@@ -270,6 +270,8 @@ As of project `spaarke-multi-container-multi-index-r1`, document storage and sea
 2. For Documents, the wizard reads the parent record's values first, then falls back to the parent's BU.
 3. Explicit overrides on the create form persist (e.g., a "Protected Matter" with `sprk_searchindexname = "spaarke-file-index"` keeps that value).
 4. No Dataverse plugins, no Power Automate flows, no new field mappings — the wizards are the canonical cascade mechanism.
+
+> **(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)** Item 4 describes the original design. Under [ADR-002](../adr/ADR-002-no-heavy-plugins.md) **WP-2** the wizard is **not** the canonical enforcement point: it may preview the container/index defaults, but the authoritative owner is the BFF server-side write path (target) — `RecordContainerResolver` (container; done for uploads) and `RecordCreationService` (search-index default; Matter/Project on `work/spaarkeai-word-add-in-r1`, not yet on master). Records created outside a wizard are corrected by WP-5 async fix-up / reconciliation, never a plugin. See [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](DATAVERSE-WRITE-PATH-ARCHITECTURE.md) (registry rows I-4, I-5).
 
 **Resolution at search time** (`IKnowledgeDeploymentService.GetSearchClientAsync` — see `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs`):
 

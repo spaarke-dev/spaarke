@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="129" project="unified-access-control-r2">
+  <metadata>
+    <title>Retire ScopeManagementService — 35% of #229's remaining surface was dead code queued for implementation</title>
+    <phase>Register-driven (authored 2026-09-29, session 26; owner decision, D-15 §2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes a service, an interface and a DI registration. The blast radius is whatever else happened to live in those files — which turned out to be the whole risk.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A deletion is only as safe as the check that nothing depends on it, and the interface file co-located live contracts that a coarse delete would have taken with it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AnalysisServicesModule.cs (BFF DI hot path) plus five integration-test fixtures.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, deletion, testing, docs</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <origin>Owner decision 2026-09-29: "ok delete; i don't know what this does so no plans to use/consume it; make sure that does not impact ScopeResolverService → AnalysisActionService, and that the removal is documented in case comes up again." Arising from the #229 re-cut sizing.</origin>
+  </metadata>
+
+  <prompt>Seven stub markers were queued for implementation in a service nothing calls. Remove it — and find out what else is living in its files before you do.</prompt>
+
+  <role>SPAARKE platform developer — AI analysis services. You are deleting; the danger is taking something live with you.</role>
+
+  <goal>`ScopeManagementService` and its interface are gone, nothing that was live is gone with them, `ScopeResolverService` is demonstrably unaffected, and the removal is written down where it will be found.</goal>
+
+  <context>
+    <background>Seven of #229's twenty remaining stub markers (35%) were in `ScopeManagementService`,
+returning in-memory placeholders. It was on the list to be IMPLEMENTED.
+
+Verified 2026-09-29 by direct search: `ScopeManagementService` / `IScopeManagementService` appeared in
+exactly THREE files under `src/` — the class, the interface, and one DI line
+(`AnalysisServicesModule.cs:808`). Nothing injected it. It had been superseded by `ScopeResolverService`,
+which reaches real Dataverse and does NOT route through it — it injects `AnalysisActionService` and
+`AnalysisSkillService` directly.</background>
+    <relevant-files>
+      <file role="delete">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeManagementService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeManagementService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file role="delete">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ScopeManagementServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>🔴 Confirm at the owner's explicit request that `ScopeResolverService` → `AnalysisActionService` is unaffected — by reading the file, not by reasoning about layering.</constraint>
+    <constraint>Before deleting any FILE, enumerate every public type it declares and check each for remaining references. A file name is not a statement about its contents.</constraint>
+    <constraint>Document the retirement somewhere a future reader will find it — the absence of a service is invisible, and `#229`'s body will keep listing its markers.</constraint>
+    <constraint>Deleting tests requires the ADR-038 path check: these pin in-memory behaviour of a service with no callers, so they go with it rather than needing replacement.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Verify zero consumers, and verify the ScopeResolverService path directly.</step>
+    <step>Enumerate the public types in each file before deleting it.</step>
+    <step>Delete the dead surface; keep whatever was live.</step>
+    <step>Record the decision in a note.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>`ScopeManagementService` and `IScopeManagementService` no longer exist; no residual references.</criterion>
+    <criterion>`ScopeResolverService` → `AnalysisActionService` demonstrably unaffected.</criterion>
+    <criterion>Everything live that shared those files still compiles and is still referenced.</criterion>
+    <criterion>The retirement is documented with the reasoning and the re-litigation guard.</criterion>
+    <criterion>BFF + test projects build; unit suite and NetArchTest green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 26) on the owner's decision. Recorded in D-15 §2.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. Deleted `ScopeManagementService.cs` (verified to declare no other
+    public type), the `IScopeManagementService` interface declaration, the DI line, and
+    `ScopeManagementServiceTests.cs` (23 tests). Removed five defensive
+    `Mock&lt;IScopeManagementService&gt;` registrations from `Spe.Integration.Tests` fixtures — those
+    registered a loose mock so the host could boot; they were not consumers. BFF, unit and integration
+    test projects all build; unit suite 12,668 pass / 0 fail; NetArchTest 337/337.</outcome>
+
+    <finding>✅ OWNER'S QUESTION ANSWERED DIRECTLY: `ScopeResolverService.cs` contains NO reference to
+    ScopeManagement of any kind. It injects `AnalysisActionService` and `AnalysisSkillService` as
+    concrete types (`:19-20`, `:32-33`), so the deletion cannot affect that path. Checked by reading the
+    file rather than reasoning about layering.</finding>
+
+    <deviation>🔴 THE FIRST ATTEMPT BROKE FIVE LIVE SERVICES, and the compiler is the only reason it did
+    not ship. `IScopeManagementService.cs` declared the dead interface AND **13 live types** — ten
+    request records (`CreateActionRequest`, `UpdateActionRequest`, `CreateSkillRequest`,
+    `UpdateSkillRequest`, `CreateKnowledgeRequest`, `UpdateKnowledgeRequest`, `CreateToolRequest`,
+    `UpdateToolRequest`, `CreateOutputRequest`, `UpdateOutputRequest`), plus `AnalysisOutput`,
+    `OutputFieldType`, `ScopeType` and `ScopeOwnershipException` — consumed by `AnalysisActionService`,
+    `AnalysisSkillService` and `AnalysisKnowledgeService`. They lived there only because the interface
+    happened to share the file. The instruction "delete the class and its interface" was therefore too
+    coarse: a file name is not a statement about what a file contains. Resolved by removing only the
+    interface declaration and RENAMING the file to `AnalysisScopeContracts.cs`, which now says what it
+    holds, with a header comment recording the retirement.</deviation>
+
+    <finding>This is the argument for enumerating a file's public types before deleting it, rather than
+    trusting the name. The audit that recommended the deletion said "delete the class + interface +
+    registration + test file" — correct about the dead surface, silent about the co-located live one.</finding>
+  </execution>
+</task>

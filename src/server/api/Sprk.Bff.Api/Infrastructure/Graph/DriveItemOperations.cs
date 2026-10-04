@@ -42,7 +42,10 @@ public class DriveItemOperations
         string? itemId = null,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListChildren");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -140,7 +143,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFile");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -190,7 +196,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DeleteFile");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -243,7 +252,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetFileMetadata");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -333,7 +345,10 @@ public class DriveItemOperations
         ListingParameters parameters,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListChildrenAsUser");
         activity?.SetTag("containerId", containerId);
 
@@ -443,7 +458,10 @@ public class DriveItemOperations
             return null;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileWithRangeAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -591,7 +609,10 @@ public class DriveItemOperations
             return null;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "UpdateItemAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -680,7 +701,10 @@ public class DriveItemOperations
             return false;
         }
 
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DeleteItemAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -733,7 +757,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetFileMetadataAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -800,7 +827,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -858,7 +888,10 @@ public class DriveItemOperations
         string versionId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "DownloadFileVersionAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -921,7 +954,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetCurrentVersionIdAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -986,7 +1022,10 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "ListFileVersionsAsUser");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -1044,6 +1083,80 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// Lists the versions of a file using APP-ONLY (broker) authentication.
+    /// </summary>
+    /// <remarks>
+    /// The app-only sibling of <see cref="ListFileVersionsAsUserAsync"/>, added by
+    /// unified-access-control-r2 for the external-access surface.
+    ///
+    /// ⚠️ This method performs NO authorization of its own — app-only means the broker identity can
+    /// read any item in any container it owns. Every caller MUST authorize the principal against the
+    /// owning record BEFORE calling it. The external document endpoints do exactly that (project
+    /// participation + document→project scoping, uniform 403), which is why they cannot use the
+    /// AsUser variant: an external CIAM contact is not a Dataverse principal and holds no delegated
+    /// permission on the drive item to exchange.
+    ///
+    /// Same Graph route and the same newest-first <see cref="VersionInfoDto"/> projection as the OBO
+    /// variant, so a version list does not change shape depending on which surface asked for it.
+    /// </remarks>
+    public async Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
+        activity?.SetTag("operation", "ListFileVersions");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation(
+            "Listing versions of file {ItemId} in drive {DriveId} (app-only)", itemId, driveId);
+
+        try
+        {
+            var graphClient = _factory.ForApp();
+
+            var versions = await graphClient.Drives[driveId].Items[itemId]
+                .Versions.GetAsync(cancellationToken: ct);
+
+            if (versions?.Value == null)
+            {
+                _logger.LogWarning(
+                    "No versions returned for file {ItemId} in drive {DriveId}", itemId, driveId);
+                return Array.Empty<VersionInfoDto>();
+            }
+
+            var mapped = versions.Value
+                .Where(v => v.Id != null)
+                .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
+                .Select(v => new VersionInfoDto(
+                    Id: v.Id!,
+                    ETag: null,
+                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+                    Size: v.Size ?? 0))
+                .ToList();
+
+            _logger.LogInformation(
+                "Listed {Count} versions of file {ItemId} (app-only)", mapped.Count, itemId);
+            return mapped;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "File {ItemId} not found in drive {DriveId} when listing versions", itemId, driveId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Graph API error listing file versions (app-only): {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.
     /// Used for server-side file viewing with correlation ID tracking.
@@ -1054,7 +1167,10 @@ public class DriveItemOperations
         string? correlationId = null,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
+        // start the Activity, and disposing it here ended the request's own trace span early (see
+        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        var activity = Activity.Current;
         activity?.SetTag("operation", "GetPreviewUrl");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
@@ -1232,6 +1348,139 @@ public class DriveItemOperations
             LastModifiedDateTime: item.LastModifiedDateTime,
             CreatedDateTime: item.CreatedDateTime);
     }
+
+    /// <summary>
+    /// FR-01 (task 012): resolves an absolute document URL — in practice <c>Office.context.document.url</c> — to
+    /// the SPE drive item it names, via Graph <c>GET /shares/u!{base64url}/driveItem</c>, AS THE CALLER (OBO).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>OBO, not app-only, deliberately.</b> Graph then resolves only files the caller can already reach, so
+    /// the identity route cannot be used to look up files the caller has no access to. It is also the only kind of
+    /// identity that can read SPE at all: the owning app or a container-type-REGISTERED app. A <c>/shares</c> call
+    /// from az CLI or Graph Explorer 403s whatever the URL (spike-1 §20).</para>
+    /// <para>Every Graph answer is classified by <see cref="ResolveAcrossFormsAsync"/>. OBO token-exchange failures
+    /// propagate, exactly as they do for the sibling OBO helpers above.</para>
+    /// </remarks>
+    public async Task<SpeSharedItemResolution> ResolveSharedItemAsUserAsync(
+        HttpContext ctx,
+        Uri documentUrl,
+        CancellationToken ct = default)
+    {
+        var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+        var resolution = await ResolveAcrossFormsAsync(
+            SharingUrlToken.BuildCandidates(documentUrl),
+            async (url, token) =>
+            {
+                var item = await graphClient.Shares[SharingUrlToken.Encode(url)]
+                    .DriveItem
+                    .GetAsync(req => req.QueryParameters.Select = new[] { "id", "parentReference" }, cancellationToken: token);
+                return (item?.Id, item?.ParentReference?.DriveId);
+            },
+            _logger,
+            ct);
+
+        // One line per resolution, carrying each form's status — the running evidence for which encoding Graph
+        // accepts over SPE paths. Logs the host, not the URL: the path carries the file name.
+        _logger.LogInformation(
+            "Graph /shares resolution {Outcome} | Host: {Host} | Attempts: {Attempts}",
+            resolution.Outcome,
+            documentUrl.Host,
+            string.Join("; ", resolution.Attempts.Select(a =>
+                $"{a.Form}={a.StatusCode?.ToString() ?? "none"}{(a.ErrorCode is null ? "" : "/" + a.ErrorCode)}")));
+
+        return resolution;
+    }
+
+    /// <summary>
+    /// Tries each encoding form in turn and classifies every answer. Separated from the Graph call so the
+    /// classification is tested through its contract with a fake fetch — a transport mock is banned (ADR-038 B1).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>A drive item with both ids → <see cref="SpeSharedItemOutcome.Resolved"/>.</item>
+    /// <item>400 / 404 → try the next form; on every form → <see cref="SpeSharedItemOutcome.NotFound"/>.</item>
+    /// <item>403 → try the next form; if none resolves → <see cref="SpeSharedItemOutcome.AccessDenied"/>.</item>
+    /// <item>401 (it describes the token, not the item), 429, 5xx, an error body Kiota could not parse as OData, a
+    /// Polly timeout or open circuit, a transport failure, or an HttpClient timeout →
+    /// <see cref="SpeSharedItemOutcome.Unavailable"/>, at once.</item>
+    /// <item>A 200 without both ids → try the next form; if none resolves → Unavailable, not NotFound: Graph found
+    /// something and would not describe it.</item>
+    /// </list>
+    /// A cancellation the caller requested propagates. So does any other exception: an unexpected fault is a defect
+    /// to surface as a 500, not an outage to report as a 503.
+    /// </remarks>
+    public static async Task<SpeSharedItemResolution> ResolveAcrossFormsAsync(
+        IReadOnlyList<(string Form, string Url)> candidates,
+        Func<string, CancellationToken, Task<(string? ItemId, string? DriveId)>> fetch,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var attempts = new List<SpeSharedItemAttempt>();
+        var accessDenied = false;
+        var incomplete = false;
+
+        foreach (var (form, url) in candidates)
+        {
+            try
+            {
+                var (itemId, driveId) = await fetch(url, ct);
+                if (!string.IsNullOrEmpty(itemId) && !string.IsNullOrEmpty(driveId))
+                {
+                    attempts.Add(new SpeSharedItemAttempt(form, 200, null));
+                    return new SpeSharedItemResolution(SpeSharedItemOutcome.Resolved, driveId, itemId, form, attempts);
+                }
+
+                incomplete = true;
+                attempts.Add(new SpeSharedItemAttempt(form, 200, "incomplete_drive_item"));
+            }
+            // ODataError derives from ApiException; Kiota throws the base type when an error body is empty or not OData.
+            catch (Microsoft.Kiota.Abstractions.ApiException ex)
+            {
+                attempts.Add(new SpeSharedItemAttempt(form, ex.ResponseStatusCode, (ex as ODataError)?.Error?.Code));
+
+                if (ex.ResponseStatusCode is 400 or 404)
+                    continue;
+
+                if (ex.ResponseStatusCode == 403)
+                {
+                    accessDenied = true;
+                    continue;
+                }
+
+                logger.LogWarning(ex, "Graph /shares resolution unavailable ({Form}, status {Status})",
+                    form, ex.ResponseStatusCode);
+                return Unresolved(SpeSharedItemOutcome.Unavailable, attempts);
+            }
+            catch (Exception ex) when (IsSharesOutage(ex, ct))
+            {
+                attempts.Add(new SpeSharedItemAttempt(form, null, ex.GetType().Name));
+                logger.LogWarning(ex, "Graph /shares resolution unavailable ({Form}, {Failure})", form, ex.GetType().Name);
+                return Unresolved(SpeSharedItemOutcome.Unavailable, attempts);
+            }
+        }
+
+        var outcome = incomplete ? SpeSharedItemOutcome.Unavailable
+            : accessDenied ? SpeSharedItemOutcome.AccessDenied
+            : SpeSharedItemOutcome.NotFound;
+        return Unresolved(outcome, attempts);
+    }
+
+    private static SpeSharedItemResolution Unresolved(SpeSharedItemOutcome outcome, List<SpeSharedItemAttempt> attempts)
+        => new(outcome, null, null, null, attempts);
+
+    /// <summary>
+    /// Outages, as opposed to answers: a transport failure, the Graph pipeline's Polly timeout or open circuit
+    /// (<c>GraphHttpMessageHandler</c>), or an HttpClient timeout — a cancellation the CALLER did not request.
+    /// </summary>
+    private static bool IsSharesOutage(Exception ex, CancellationToken ct) => ex switch
+    {
+        HttpRequestException => true,
+        global::Polly.Timeout.TimeoutRejectedException => true,
+        global::Polly.CircuitBreaker.BrokenCircuitException => true,
+        OperationCanceledException => !ct.IsCancellationRequested,
+        _ => false,
+    };
 
     /// <summary>
     /// Downloads file content via OBO context. Equivalent to

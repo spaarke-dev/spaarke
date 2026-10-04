@@ -115,7 +115,7 @@ public class TodoGenerationServiceTests
 
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
-        svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, _builderLoggerMock.Object));
+        svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _builderLoggerMock.Object));
 
         return svc;
     }

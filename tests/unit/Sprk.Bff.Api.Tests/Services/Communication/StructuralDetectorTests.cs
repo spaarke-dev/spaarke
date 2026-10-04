@@ -139,7 +139,7 @@ public class StructuralDetectorTests
 
         var engine = new IncomingAssociationResolver(
             new IAssociationRung[] { new StructuralDetectorRung(new IStructuralDetector[] { new CalendarInviteDetector() }) },
-            dv.Object, dv.Object, AssociationTestSupport.Mapper(), Mock.Of<ILogger<IncomingAssociationResolver>>());
+            dv.Object, dv.Object, AssociationTestSupport.Mapper(), Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Mock.Of<ILogger<IncomingAssociationResolver>>());
 
         var commId = Guid.NewGuid();
         await engine.ResolveAsync(

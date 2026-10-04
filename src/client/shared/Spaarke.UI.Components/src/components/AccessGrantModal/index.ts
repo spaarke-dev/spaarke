@@ -1,10 +1,19 @@
-export { AccessGrantModal } from './AccessGrantModal';
+export { AccessGrantModal, describeAccessPermission } from './AccessGrantModal';
+// Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).
+export { resolveAccessPermissionState } from './accessPermissionState';
+export type { IAccessPermissionValues } from './accessPermissionState';
 export type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
   IAccessGrantRecord,
   IContactSearchResult,
   IOrganizationPick,
+  // Re-exported 2026-09-21: both are `export interface` in ./types and are consumed by the
+  // TrackingFieldTrio PCF host through THIS barrel, but were never listed here. Nothing caught it
+  // because the host file had been reviewed and never compiled — the first production build of
+  // v1.0.31 failed on TS2305 for exactly these two names.
+  IUserPick,
+  ISecureOwnerInfo,
   ExternalGrantRootType,
   IAccessLevelOption,
   AccessPermissionState,

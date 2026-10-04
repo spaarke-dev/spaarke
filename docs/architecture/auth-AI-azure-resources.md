@@ -335,7 +335,7 @@ Current production index with 3072-dim vectors and document visualization suppor
 | **Document Vector Field** | `documentVector3072` - 3072 dimensions (averaged from chunks) |
 | **Vector Algorithm** | HNSW (m=4, efConstruction=400, efSearch=500, cosine) |
 | **Semantic Config** | `knowledge-semantic-config` |
-| **Multi-Tenant Fields** | `tenantId`, `deploymentId`, `deploymentModel` |
+| **Tenant-scoping Fields** | `tenantId`, `deploymentId`, `deploymentModel` — ⚠️ `tenantId` is an **Entra tenant GUID**. It scopes queries by tenant and is defence in depth; it does **not** separate customers (see *RAG Deployment Models* below) |
 | **File Fields** | `speFileId` (required), `documentId` (optional for orphans), `fileName`, `fileType` |
 | **Parent Entity Fields** | `parentEntityType`, `parentEntityId`, `parentEntityName` *(R1 - NEW)* |
 
@@ -351,17 +351,35 @@ Current production index with 3072-dim vectors and document visualization suppor
 
 **Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
 
-### RAG Deployment Models (R3)
+### RAG knowledge-index placement
 
-The RAG system supports 3 deployment models for multi-tenant isolation:
+> 🔴 **REWRITTEN 2026-09-28 for owner decision D-12** ([note](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)).
+> This section previously said the RAG system *"supports 3 deployment models"* and marked **Shared** —
+> one `spaarke-knowledge-index-v2` for everyone behind a `tenantId` filter — as the **Default**. Under D-12
+> Model 1, every customer's environment lives in **Spaarke's** Azure tenant, so `tenantId` holds the **same
+> GUID for every Model 1 customer** and that filter **cannot separate customers**, while its tests pass. The
+> Shared option is **retired as a customer-serving placement.** The old "Dedicated" row named the index
+> `{tenantId}-knowledge`, which has the same defect in the *name*: it is per-**tenant**, not per-customer.
 
-| Model | Index Location | Use Case |
-|-------|---------------|----------|
-| **Shared** | `spaarke-knowledge-index-v2` with `tenantId` filter | Default, cost-effective |
-| **Dedicated** | `{tenantId}-knowledge` in Spaarke subscription | Per-customer isolation |
-| **CustomerOwned** | Customer's own Azure AI Search instance | Full data sovereignty (BYOK) |
+**Spaarke has two deployment models, and the AI Search service is dedicated per customer in both.** The
+difference is only which Azure tenant owns the customer's subscription.
 
-**Service**: `IKnowledgeDeploymentService` routes requests to the correct deployment model based on tenant configuration.
+| Deployment model | AI Search placement | Notes |
+|---|---|---|
+| **Model 1** (customer's subscription in **Spaarke's** Azure tenant) | A **dedicated AI Search service per customer**, in that customer's own subscription and resource group | Spaarke operates it. No admin consent, no Lighthouse delegation |
+| **Model 2** (customer's subscription in the **customer's own** Azure tenant) | A **dedicated AI Search service per customer**, in the customer's tenant (BYOK) | Requires H0.5 admin consent + Azure Lighthouse delegation |
+
+**Why a boundary and not a filter**: this index holds document text and embeddings — the highest-value
+segregation case after Dataverse. A shared service means one filter defect exposes another firm's
+privileged material. A filter must be written correctly in every query, forever, by everyone; a resource
+boundary cannot be forgotten.
+
+**Still in force as belt-and-braces**: every document carries `tenantId` and every query filters on it.
+That control is retained, just no longer credited with separating customers.
+
+**Service**: `IKnowledgeDeploymentService` still routes requests to the configured placement. ⚠️ Its
+`Shared` value is a **retired option** for customer-serving deployments; any index naming scheme must key on
+the **customer**, not on `tenantId`, which is identical across Model 1 customers.
 
 ---
 

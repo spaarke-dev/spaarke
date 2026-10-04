@@ -2,12 +2,25 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
+| Updated | 2026-09-04 (Amendment A1) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
 | Cross-references | extends ADR-013 (AI architecture); reinforces ADR-009 (Redis caching), ADR-010 (DI minimalism), ADR-024 (polymorphic resolver pattern), ADR-028 (Spaarke Auth v2). |
+
+> ⚠️ **[Amendment A1](#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface) adds a consumption-surface distinction that this ADR did not originally make.**
+> Discovery over the 6 identity tables remains **correct for AI scoping** and is **over-inclusive for
+> authorization**. Nothing below is retired — A1 *narrows one consumer*, it does not change the
+> mechanism. The 1-hop cap, the event semantics, the canonical-resolver rule and the
+> non-existent-entity ban are all unchanged.
+>
+> ⚠️ **[Amendment A3](#amendment-a3-2026-10-02-accepted-the-people-targeting-surface--who-a-record-is-for) (accepted by the owner, round 3 D1; task 152) adds a THIRD surface — people targeting —**
+> for "which records are FOR this person" (briefing, notifications): a human Created By, the user-valued owner, and
+> the "Assigned *" contacts through the linked contact; never team / business-unit ownership. It admits `createdby` on
+> that surface only, and states the event semantics: an owner event names the row's REAL owner (team or user) in
+> Dataverse ids.
 
 ---
 
@@ -227,6 +240,239 @@ See spec.md AC-1A.1 through AC-1.Docs + AC-1B.* + AC-1C.* + AC-1D.* + AC-1P2.*. 
    - **Answer**: Fire-and-forget. Publish best-effort; mutation succeeds even on publish failure. Nightly `MembershipReconciliationJob` is the defense-in-depth backstop. Log failures as structured warnings (correlationId-tagged) for diagnostic visibility.
 7. **Task 032 mechanism choice (2026-06-21)**: How does the BFF resolve user → sprk_organization mappings — N:N relationship, configurable lookup field, or team-based?
    - **Answer**: Option (b) config-driven Lookup field. Operators set `Membership:OrganizationLookup:UserLookupField` to point at a Lookup column on `sprk_organization` that targets systemuser. Fail-soft empty when unset.
+
+---
+
+## Amendment A1 (2026-09-04): The access-conferring allow-list becomes first-class and per-surface
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5).
+> **Driver project**: `unified-access-control-r2` (spec ADR Tensions row 2; FR-24; register B-12 / H-5).
+> **Evidence**: [`projects/unified-access-control-r2/notes/investigation/02-membership-spine.md`](../../projects/unified-access-control-r2/notes/investigation/02-membership-spine.md) §4.2, §8, §10.4.
+> **Sequencing**: merges **before** task 041 builds the registry it sanctions.
+
+### Why
+
+This ADR made discovery **convention-based** on purpose, and for its original consumer — AI scoping —
+that is still the right answer: when a playbook asks "which matters is this user associated with?",
+being generous is correct, because the answer feeds retrieval, not permission.
+
+**Authorization is a different question with a different failure mode.** The same discovered set, used
+as an access answer, is **over-inclusive** — and over-inclusive means disclosure. Two concrete defects:
+
+1. **The `sprk_assigned*` prefix convention is not a policy.** It *silently admits*
+   `sprk_assignedmonitor` (a watcher, who should confer nothing) and *silently denies*
+   `sprk_leadcontact` (who should confer access). Nobody chose either outcome; a naming convention did.
+   A convention cannot express intent, and worse, it changes behaviour when a column is **renamed** —
+   so an access grant can appear or vanish through a schema edit that no reviewer would read as a
+   security change.
+2. **Org-typed lookups confer too.** M4 already resolves `sprk_assignedlawfirm1/2` to `Organization` —
+   the conferring precedent exists — but the *filter* today covers contact-typed lookups only
+   (`FilterToAccessConferringContactRoles`). Unfiltered org expansion confers access from **any**
+   organization named on a record, **including opposing counsel**.
+
+### The per-surface policy (new)
+
+| Consumption surface | Which descriptors apply | Rationale |
+|---|---|---|
+| **AI scoping** (playbook nodes, briefing collectors, `/api/users/me/memberships/*`) | **All discovered descriptors** — unchanged | Generosity is correct for retrieval; the caller already has access to what they are shown |
+| **Authorization** (the evaluator's derived-member and org-expansion terms) | **Registry-listed columns ONLY** | Over-inclusion here is a disclosure, not a nuisance |
+
+**One mechanism, two policies.** The registry lives **inside** the canonical resolver as a filter over
+its output. It is an *extension* of M1, not a parallel mechanism — a second membership engine would be
+a violation of this ADR, and A1 does not create one (investigation 02 §8).
+
+### New MUST rules
+
+- **MUST** derive the authorization surface's conferring columns from an **explicit registry**, not
+  from the `sprk_assigned*` prefix convention. The registry names columns; the convention guesses.
+- **MUST** cover **contact-typed AND organization-typed** lookups in that registry. Org-typed conferral
+  is real (M4's `sprk_assignedlawfirm1/2`) and currently unfiltered.
+- **MUST** treat adding a conferring column as a **registry edit** — a reviewable change whose subject
+  is access. **Renaming a column MUST NOT grant or revoke access** (FR-24 acceptance). This is the
+  property the prefix convention could not provide.
+- **MUST** keep the registry inside the canonical resolver (M1). A parallel membership mechanism
+  remains forbidden.
+
+### Explicitly NOT amended
+
+- **The 1-hop cap (M7 / N4) stands unchanged, and needs no exception.** FR-26 denormalizes the **core
+  ancestor** onto each child record, so every child→core chain is **one hop by construction**. There is
+  no multi-hop request to permit — the data model removed the need, rather than the rule being relaxed.
+  Requests deeper than 1 hop still return `400` with `transitive-chain-too-deep`.
+- **M8 / M9 event semantics** (topic not queue; fire-and-forget with the nightly reconciliation
+  backstop) — unchanged.
+- **N2, the non-existent-entity ban** — unchanged. Precision worth recording: the ban is on joining
+  through entities that do not exist (e.g. `sprk_matterteammember`). Real `teammembership` **is**
+  legitimately used and always was; the ban is narrower than some project docs assert (investigation
+  02 §10.4).
+- **M1, the canonical resolver** — reinforced, not weakened.
+
+### A sanctioned future extension (not built here)
+
+A **record → members** inverse read ("who can see this record?", for the Manage Access UI and
+attestation) is a **future extension of this same canonical mechanism** — the resolver answering the
+existing question in the opposite direction. It is explicitly **not** a licence for a second resolver
+(investigation 02 §8 direction note).
+
+### Live-consumer check (done before amending)
+
+Codifying a per-surface split is only safe if nothing outside the authorization surface currently
+depends on unfiltered systemuser-plane descriptors *as an access answer*. Every consumer of
+`IMembershipResolverService` was enumerated and classified:
+
+| Consumer | Surface |
+|---|---|
+| `AccessibleRecordSetService` | Authorization — the one this project rehomes (Phase 1) |
+| `MembershipEndpoints` (`/api/users/me/memberships/*`) | Scoping — returns the caller's **own** memberships under OBO; a self-query, not a decision about another principal |
+| `DailyBriefingCollector`, `BriefingService` | AI scoping |
+| `LookupUserMembershipNodeExecutor`, `NodeService` | AI scoping (playbook node) |
+| `IThreadPrivateGrantProvider` | **Not a consumer** — a doc-comment cross-reference only; no code dependency |
+
+**No consumer outside `AccessibleRecordSetService` uses these descriptors as an access answer**, so the
+narrowing changes no other surface's behaviour contract.
+
+---
+
+## Amendment A3 (2026-10-02, accepted): The people-targeting surface — who a record is FOR
+
+> **Status**: **Accepted** (resolution path **B — amendment**, per root CLAUDE.md §6.5). The owner approved it in
+> round 3 (2026-09-30), consolidated decision **D1** — "Path B for both" ADR-034 amendments, of which (2) is "let a
+> human 'Created By' count as membership for briefings and notifications only, not for access or AI scoping" — accepted
+> as recommended and clarified ("Created By decides who a record is FOR; it never decides who can OPEN it").
+> Source: `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md` round 3, and
+> `notes/raw/session27-owner-questions.json` (D1). The concise version in `.claude/adr/ADR-034-user-record-membership.md`
+> is applied by the main session (sub-agents cannot write `.claude/`) with, or before, the task 152 PR.
+> **Numbering**: A3 is the next free number at drafting time (A1 and A1.1 exist; task 036 has claimed
+> "Amendment 2"). If task 142's ADR-034 amendment merges first and takes A3, renumber this one at merge.
+> **Driver project**: `unified-access-control-r2` task 152 (GitHub #1073; membership half of #1044).
+> **Owner decisions**: round 2 item 9 ("target Created By and Assigned To. A team-owned record does not fan out to
+> team members") and Q8 (the "for" person is `sprk_todo.sprk_assignedto` plus Created By); round 3 D1 ("Created By
+> decides who a record is FOR — never who can open it; the briefing only lists records the user can access");
+> round 3 A7 (Office quick-create names its maker in the internal Assigned-To); round 3 S1 (BFF-created child rows
+> name their person in Assigned To). Recorded in
+> `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`.
+
+### Why
+
+A1 split the resolver's output into two surfaces: **AI scoping** (generous, every discovered descriptor) and
+**authorization** (the registry + platform ownership). The Daily Briefing, the Workspace top-priority matter and every
+notification playbook's `LookupUserMembership` node were filed under AI scoping — but they do not retrieve context for
+an answer, they decide **whose attention a record deserves**. Used for that, both existing surfaces are wrong:
+
+1. **Team and business-unit ownership fan out to the whole unit.** `owningteam` binds every team the caller is in, and
+   a business unit's **default** team contains every user in the unit (`teammembership` carries no `isdefault`
+   exclusion); `owningbusinessunit` binds the caller's own unit. A team- or BU-owned matter therefore surfaced in the
+   briefing of every user in that unit. That is correct for **access** (A1.1, unchanged) and wrong for **attention**.
+2. **The person who made a record is invisible.** M3 excludes `createdby` as touch-history on every surface. The owner
+   requires Created By to make a record "for" its maker.
+3. **The person a record names is reachable only through a contact.** The "Assigned *" columns are CONTACT lookups; an
+   internal user matches them only through a reliable systemuser↔contact link — built by task 141.
+
+No compliant shape exists (§6.5 path C rejected): with `createdby` excluded there is no column that says "the person
+who made it", and `createdonbehalfby` is also excluded and empty for app-only creates. A project-scoped exception
+(path A) was rejected because the briefing and notification surfaces are repo-wide and permanent.
+
+### The third surface (new)
+
+| Consumption surface | Option | Which descriptors bind |
+|---|---|---|
+| AI scoping (unchanged) | `options: null` | All discovered descriptors |
+| Authorization (A1 / A1.1, unchanged) | `AccessConferringOnly: true` | Registry Contact/Organization columns + `ownerid` / `owningteam` / `owningbusinessunit` |
+| **People targeting (A3)** | `PeopleTargeting: true` | A **human** `createdby` = the caller; the user-valued owner (`ownerid` / `owninguser`) = the caller; registry **Contact**-typed "Assigned *" columns = the caller's **linked** contact. **Nothing else.** |
+
+**One mechanism, three policies.** People targeting is a filter inside `MembershipResolverService`, beside
+`AccessConferringOnly` — not a second resolver.
+
+### New MUST / MUST NOT rules
+
+- **MUST** select records for a person's briefing, notifications and attention surfaces through the people-targeting
+  surface — never through the AI-scoping default, never through ad-hoc `createdby` / `owninguser` conditions in a
+  consumer (the A1/D5 anti-pattern).
+- **MUST** admit `createdby` **on the people-targeting surface only**, and **only when the caller is a HUMAN
+  systemuser** (`systemuser.applicationid` null). An application user (e.g. the BFF's own identity, Created By of every
+  BFF-created row) binds no `createdby` condition; an unreadable systemuser row is treated the same way. The M3
+  global exclusion of `createdby` **stays** for AI scoping and authorization.
+- **MUST** bind the "Assigned *" term only through the caller's linked contact (`PersonIdentity.ContactId`, task 141).
+  **MUST NOT** fall back to an email, UPN or display-name match (the C7 hijack path). No link → the term binds
+  nothing, with a structured warning.
+- **MUST NOT** let `owningteam`, `owningbusinessunit`, a team-valued `ownerid`, or any Team-, BusinessUnit-,
+  Organization- or Account-typed descriptor select anything on this surface. A team-owned record never fans out to the
+  team's members. Team/BU ownership keeps conferring ACCESS (A1.1).
+- **MUST** reject `PeopleTargeting` together with `AccessConferringOnly` (`ArgumentException`) — the two surfaces
+  answer different questions and are never merged.
+- **MUST** include `PeopleTargeting` in the resolver's options hash, so a people-targeted call and an AI-scoping call
+  for the same user and entity never share a cache entry (the task-043 hazard, in the opposite direction).
+- **MUST** read every row a people-targeted consumer SHOWS under the caller's Dataverse security
+  (`IImpersonatedCommunicationQuery`, MSCRMCallerID = the caller). Selecting is not authorizing (owner D1). A failed
+  caller-context read is reported as failed — never answered app-only, never shown as "nothing to report".
+- **MUST**, in the **Daily Briefing and Workspace consumers** (`DailyBriefingCollector`, `PortfolioService` and,
+  through it, `BriefingService`'s top-priority matter), read the people-targeted set to completion
+  (`PeopleTargetedSet`: the resolver's 5,000-row ceiling plus one confirmation read). The resolver pages in
+  primary-id order, so a default 500-row page is an arbitrary subset; a set larger than the ceiling is reported
+  failed / unavailable — never a silently truncated list (task 152 verifier round 1).
+  **Scope note — the `LookupUserMembership` node is NOT covered by this rule.** With `"targeting": "people"` it reads
+  ONE page at `MembershipResolveOptions.DefaultLimit` (500) and exposes `continuationToken`, exactly as it did before
+  A3 (pre-existing paging, unchanged). It is not routed through `PeopleTargetedSet` because the notification playbooks
+  interpolate `myMatters.ids` into a downstream FetchXML `in` condition, and a 5,000-value `in` list is not a safe
+  query (Dataverse passes `in` values as SQL parameters; SQL Server refuses more than 2,100). A person with more than
+  500 people-targeted matters can therefore get notifications for a subset only. Closing that needs the downstream
+  query to page or chunk its `in` list — a separate change to the node/query contract.
+- **MUST** make server-created records name a person in an "Assigned *" column, because their Created By is the
+  application user: the to-do and task writers fill `sprk_assignedto` (a supplied assignee is kept; else the
+  triggering person's linked contact; else the regarding parent's `sprk_assignedtointernal`, then
+  `sprk_assignedattorney1`; else blank + `todo_unassigned`; never a team). Office quick-create fills the matter /
+  project `sprk_assignedtointernal` with its maker (A7).
+
+### Event semantics (M8 / M9 — clarified, wire contract unchanged)
+
+- A `MembershipChangedEvent` describes the row's **actual owner after the write**: `PersonIdType = Team, PersonId =
+  teamid` for a team-owned row; `PersonIdType = User, PersonId = systemuserid` for a user-owned row. The polymorphic
+  owner is typed from the value (`EntityReference.LogicalName`), never from the descriptor (which is always SystemUser
+  for an Owner column).
+- Both junction writers — the create-time publishers and `MembershipReconciliationJob` — key the junction in the
+  **same identity space** (Dataverse ids, never the AAD oid) and treat an **application-user** owner identically (no
+  event, no row; an unreadable check never deletes an existing row).
+- `createdby` produces **no** events: the junction stores association, and the people-targeting surface resolves
+  Created By live.
+- `schemaVersion` stays 1 and the closed enums / property names are unchanged; the only consumer
+  (`MembershipJunctionUpdater`) writes `PersonId` verbatim and no consumer parses the old caller-oid semantics.
+  Rows written under the old semantics (caller oid as User) are orphans and the reconciliation orphan scan removes them.
+
+### Explicitly NOT amended
+
+- **A1 / A1.1** — `AccessConferringOnly: true` returns exactly what it did; `AccessibleRecordSetService` is untouched.
+  The BU over-grant on the authorization plane is task 036's.
+- **The AI-scoping default** — byte-identical (descriptors, FetchXML, cache key) for every caller that does not opt in.
+- **The 1-hop cap, M1, N2** — unchanged.
+
+### Owner confirmations (all answered — binding owner decisions, session27 rounds 2 and 3)
+
+- The amendment itself: **round 3 D1** — path B for both ADR-034 amendments (this one is D1 (2)); accepted as
+  recommended and clarified (Created By decides who a record is FOR, never who can open it).
+- (a) Personal user ownership (`ownerid` / `owninguser` = the caller) as a third person term: **round 3 B1, option
+  (1) — keep it**, accepted as recommended. It names exactly one person and covers records reassigned to the caller in
+  MDA.
+- (b) High Priority = the flagged records in the caller's people-targeted set that the caller can read: **answered by
+  round 2 item 9** (`raw/session27-owner-questions.json` `droppedAsAnswered`, entry "152(b)": "Show only flagged
+  records in the user's people-targeted set that they can read").
+- (c) App-only creates: answered by the owner's round 3 **S1** (events default Assigned To to the acting user's
+  contact) and **A7** (Office quick-create defaults the internal Assigned-To to the maker).
+- (d) External-portal to-do Assigned To and parent grants: **round 3 A6, option (a)** — a child-entity Assigned field
+  confers no root grant.
+- Deployment order with task 146: **round 3 B2, option (1)** — if 152 cannot deploy with or before 146, an interim
+  drop-out of some to-dos from the Daily Briefing is accepted, announced and recorded in the PR. (This is the
+  round 3 consolidated B2, not round 4's "B2" for the `sprk_externalobjectid` alternate key.)
+
+### Live-consumer check (done before amending)
+
+| Consumer | Surface after A3 |
+|---|---|
+| `DailyBriefingCollector` (render + email + High Priority) | People targeting |
+| `PortfolioService` (Workspace portfolio / health metrics) and, through it, `BriefingService.GetTopPriorityMatterAsync` | People targeting (was an app-only ad-hoc `ownerid` = caller filter; fixed in task 152 verifier round 1) |
+| `LookupUserMembershipNodeExecutor` with `"targeting": "people"` (every notification playbook) | People targeting (one 500-row page + `continuationToken`, pre-existing paging; see the completeness MUST's scope note) |
+| `LookupUserMembershipNodeExecutor` without `targeting` | AI scoping (unchanged) |
+| `MembershipEndpoints` (`/api/users/me/memberships/*`) | AI scoping (unchanged) |
+| `AccessibleRecordSetService` | Authorization (unchanged) |
 
 ---
 

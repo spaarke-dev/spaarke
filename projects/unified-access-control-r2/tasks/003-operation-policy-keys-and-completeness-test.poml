@@ -4,7 +4,8 @@
     <title>FR-03: Register missing OperationAccessPolicy keys + call-site completeness test</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>completed</status>
+    <status>pending</status>
+    <status-note>RE-OPENED 2026-09-30 (owner Q7 approval, session 27), for its A-20 finance claim ONLY. The four policy keys and the completeness gate shipped here are correct and stay. But A-20's user-visible outcome, "finance endpoints resolve instead of always denying", is still false for GET /api/finance/matters/{matterId}/summary, which returns 403 for every caller. FinanceAuthorizationFilter passes the MATTER id into the document-only access data source, so the answer is always None. That is defect C8 (summary half). The completing work is task 130. See the amendments block.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (Spaarke.Core/Auth) and adds tests — FULL per root CLAUDE.md §8 (auth tag + TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -13,7 +14,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches src/server/shared/Spaarke.Core/Auth/** — a known contended path (task 004 modifies AuthorizationService.cs in the same directory).</parallel-reason>
-    <deps>001</deps>
+    <deps>001, 130</deps>
     <tags>bff-api, auth, security, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -34,7 +35,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationPolicyCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization tests pinning the unknown-operation denials, to be flipped here.</dependency>
+      <dependency task="001" status="completed">Characterization tests pinning the unknown-operation denials, to be flipped here.</dependency>
     </dependencies>
   </context>
 
@@ -124,4 +125,38 @@
   Spec FR-03; findings A-3 + A-20 (policy-key half — the Read-ceiling half is task 005). The endpoints remain functionally broken for Write+ callers until 004/005 land; this task only guarantees key resolution and least-privilege requirements.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="session 26 defect verification (C8, summary half) and owner Q7 approval in session 27 (notes/session26-uac-defects-and-synopsis.md; notes/session27-owner-decisions-and-research.md)">
+    <verdict>RE-OPENED for the A-20 finance-summary claim. A-20 was attributed only to the missing
+    "finance.read" key. Registering the key (correct, and it stays) moved the failure one layer down
+    instead of removing it. notes/task-003-operation-rights-decisions.md records the filter as fixed; it
+    is not. The completing work is task 130. No further code is authored under this id.</verdict>
+    <amendment n="1" defect="C8" completing-task="130">
+    The failure chain, verified against current code:
+    (1) GET /api/finance/matters/{matterId}/summary is filtered with "finance.read"
+    (src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs:64-65; group filter at :18).
+    (2) FinanceAuthorizationFilter takes matterId as ResourceId (src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs:66-67
+    ExtractResourceId, :80 ResourceId, :122-123 matterId first).
+    (3) AuthorizationService.AuthorizeAsync (src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs:28)
+    asks the document-only data source. Its RPA target and fallback probe are sprk_documents
+    (src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs:373 DocumentEntitySetName, :793
+    fallback probe). A matter id is not a document, so the result is None.
+    (4) "finance.read" requires Read (src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs:167), so
+    every honest caller gets 403.
+    This fails closed, so it is an availability defect, not a disclosure. The entity-generic seam that
+    answers the right question already exists: AuthorizationService.GetCallerRecordAccessAsync
+    (AuthorizationService.cs:255, added by task 070). Task 130 moves the filter onto it with the correct
+    entity set per route.</amendment>
+    <amendment n="2">Out of this task's scope, but tracked by the same completing task so it is not lost:
+    the recalculate IDOR (POST /api/finance/{matters|projects}/{id}/recalculate, auth-only groups at
+    src/server/api/Sprk.Bff.Api/Api/Finance/FinanceRollupEndpoints.cs:28-31 and :47-50) is C8's other half.
+    It was never part of A-20 and does not bear on this re-open. It belongs to task 130.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Task 130 is completed: a caller with Read on matter M gets 200 from GET /api/finance/matters/{M}/summary, and a caller without Read on M gets 403. Both asserted by test, with the authorization check evaluated against the MATTER, not a document.</criterion>
+      <criterion testable="true">Regression: the other routes in the same group (POST /invoice-review/confirm and /reject, GET /invoices/search, FinanceEndpoints.cs:22, :36, :50) still authorize against the entity their id actually names (document or invoice), and a caller without Read on that record still gets 403. Asserted by test; the summary fix must not re-point them at the matter.</criterion>
+      <criterion testable="true">Negative: the fail-closed unknown-operation denial and the completeness gate shipped by this task are unchanged, and their tests still pass.</criterion>
+      <criterion testable="true">MANUAL LIVE GATE (dev): an existing non-admin test user with Read on a matter loads that matter's finance summary, and gets 403 on a matter they cannot read. Recorded in notes.</criterion>
+      <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 003.</criterion>
+    </acceptance-criteria-amended>
+  </amendments>
 </task>

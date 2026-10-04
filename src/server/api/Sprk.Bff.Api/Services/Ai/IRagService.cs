@@ -156,6 +156,35 @@ public interface IRagService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes one file's leftover chunks — those whose <c>chunkIndex</c> is at or beyond
+    /// <paramref name="keepChunkCount"/> — from the index the file was just written to. Used after a re-index of a
+    /// new VERSION of the same SPE item (task 029, spaarkeai-word-add-in-r1), whose chunk ids
+    /// <c>{speFileId}_{index}</c> overwrite <c>0..keepChunkCount-1</c> in place but cannot reach the tail of a
+    /// previous, longer version.
+    /// </summary>
+    /// <remarks>
+    /// <para>Routing is the SAME as <see cref="IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, CancellationToken)"/>:
+    /// a non-empty <paramref name="searchIndexName"/> goes through the allow-listed 3-argument
+    /// <c>GetSearchClientAsync</c>; null/whitespace goes to the tenant default. Pass the value the batch used, so
+    /// the trim reaches the index the chunks are actually in (unlike <see cref="DeleteBySourceDocumentAsync"/>,
+    /// which only ever targets the tenant default).</para>
+    /// <para>Scoped by tenant and <paramref name="speFileId"/>, and only ids of this pipeline's shape
+    /// (<c>{speFileId}_{chunkIndex}</c>) are deleted — chunks another writer stored for the same file under its own
+    /// id scheme are left alone. Never deletes chunk <c>0..keepChunkCount-1</c>; a <paramref name="keepChunkCount"/>
+    /// below 1 is refused, so the file can never be left without chunks through this method.</para>
+    /// </remarks>
+    /// <returns>Number of chunks deleted (zero when there was no tail).</returns>
+    /// <exception cref="System.ArgumentOutOfRangeException"><paramref name="keepChunkCount"/> is below 1.</exception>
+    /// <exception cref="System.InvalidOperationException">Any leftover chunk could not be deleted — the caller should
+    /// retry; the chunks below <paramref name="keepChunkCount"/> are untouched either way.</exception>
+    Task<int> DeleteChunksBeyondCountAsync(
+        string tenantId,
+        string speFileId,
+        int keepChunkCount,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generate an embedding for text content.
     /// Uses caching when available.
     /// </summary>

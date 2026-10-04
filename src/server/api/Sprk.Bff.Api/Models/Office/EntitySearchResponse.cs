@@ -91,6 +91,19 @@ public record EntitySearchResult
     public string? PrimaryField { get; init; }
 
     /// <summary>
+    /// The entity's email address, when one exists and the type's search projection selects it.
+    /// </summary>
+    /// <remarks>
+    /// Task 091 (UAT-2): additive and DISPLAY-only — lets the Assigned-To contact picker tell apart two
+    /// contacts sharing a display name. Populated only for Contact today (<c>emailaddress1</c>, selected in
+    /// the same impersonated query as every other field; never added to the search <c>contains(...)</c>
+    /// predicate). <c>null</c> for every other entity type and for a Contact with no email on file —
+    /// deliberately separate from <see cref="PrimaryField"/>, whose own value is unchanged by this field.
+    /// </remarks>
+    /// <example>jane.cooper@acme.com</example>
+    public string? Email { get; init; }
+
+    /// <summary>
     /// Icon URL for entity type display.
     /// </summary>
     /// <example>/icons/matter.svg</example>
@@ -100,4 +113,16 @@ public record EntitySearchResult
     /// Last modified date for sorting by recency.
     /// </summary>
     public DateTimeOffset? ModifiedOn { get; init; }
+
+    /// <summary>
+    /// Whether the caller can file a document to this record: <c>false</c> means <c>POST /api/office/save</c>
+    /// would refuse it as the target; <c>null</c> means it was not checked.
+    /// </summary>
+    /// <remarks>
+    /// Computed only when the request asks with <c>access=file</c> (task 084, #1037), by the same evaluator as
+    /// the save's <c>EntityAccessFilter</c>. The pane shows a <c>false</c> row disabled, with the reason, instead
+    /// of letting the user pick a record the save then refuses. <c>null</c> is also returned past the per-request
+    /// check cap; the client treats it as selectable, and the save remains the enforcement.
+    /// </remarks>
+    public bool? CanFile { get; init; }
 }

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Two server defects found diagnosing UAT-9: a saved document's job row never reaches a terminal state, and `using var activity = Activity.Current` (20 sites) ends the request's own trace span early</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF `.cs` in `Workers/Office` and the shared `Infrastructure/Graph`, adds a guard test.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>(B) is mechanical with a guard; (A) needs a root-cause trace (why three rows closed and five did not) before any change — hence xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>UAT3-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave W2 with 089 (client-only, runs no `dotnet`). Server-only: 093 is the only W2 task that builds the BFF. `Infrastructure/Graph` is shared with other projects — run `/conflict-check` first.</parallel-reason>
+    <deps>088</deps>
+    <tags>bff-api, jobs, telemetry, observability, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Two defects found while diagnosing owner UAT-9 on 2026-10-03, recorded in `notes/042-uat-round3-2026-10-03.md` §4. Owner rule of 2026-09-21: every finding is fixed in this project.</prompt>
+
+  <role>SPAARKE BFF developer: Office save pipeline (ADR-004 jobs, ADR-017 job status) and OpenTelemetry/Azure Monitor tracing.</role>
+
+  <goal>(A) Every Office save's `sprk_processingjob` row ends in a terminal state that tells the truth about the pipeline; (B) request telemetry for every Graph-touching route reports its real status code and duration.</goal>
+
+  <context>
+    <background>
+      - **(A) Evidence (dev, 2026-10-02/03)**: every successful save since 10-02 20:49 (5 of 5) left its row at
+        `sprk_status = 1`, `sprk_currentstage = FileUploaded`, `sprk_progress = 70`. Three saves on 10-02 at 12:22,
+        12:25 and 13:27 ended `2 / Complete / 100`. In the 17:03 save the request logged
+        `recorded: Completed, Complete, 100%` (the save's own view, stored in `sprk_result`, which the pane reads —
+        **the pane is not affected**); about 1 s later `UploadFinalizationWorker` wrote Running/`FileUploaded`/70
+        (`UploadFinalizationWorker.cs` Step 9) and `QueueNextStageAsync` (`:826`) handed profiling to
+        `AppOnlyDocumentAnalysis` and RAG indexing to their own jobs, which do not know the Office job id. Nothing
+        closes the row. When `TriggerAiProcessing` is false the worker marks it Completed (`:353+`) — check whether
+        that explains the midday rows.
+      - **The row's meaning** (`OfficeJobStatusService.cs` header, task 060): `sprk_result` = the SAVE (pane);
+        `sprk_status`/`sprk_currentstage`/`sprk_progress` = the PIPELINE. Profiling and indexing have their own
+        outcome columns on the document (`sprk_filesummarystatus`, `sprk_searchindexed`).
+      - **(B) Evidence**: `UploadSessionManager.cs:122` `using var activity = Activity.Current;` disposes the REQUEST's
+        Activity when `UploadSmallAsync` returns. The request is then exported early: `resultCode 0`, `success false`,
+        1.4 s of a 3 s request, carrying the upload's tags (`operation=UploadSmall`, `driveId`, `filePath`). Both
+        "status 0" saves on 10-03 (16:48, 17:03) succeeded. The same line is at **20 sites**:
+        `DriveItemOperations.cs` ×15, `ContainerOperations.cs` ×4, `UploadSessionManager.cs` ×1 (grep
+        `using\s+var\s+\w+\s*=\s*Activity\.Current`).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-017">(A) The pipeline's terminal state must be persisted. Choose ONE owner of "pipeline finished" and state why. Preferred unless the trace shows otherwise: the finalization worker marks the row Completed once the follow-on jobs are queued (stage naming what was queued), because profiling and indexing already persist their own outcomes on the document; do NOT thread the Office job id into the shared `AppOnlyDocumentAnalysis` handler unless the trace proves it is the only correct owner.</constraint>
+    <constraint source="task 060">(A) Do not change `sprk_result` or what the pane reads; the save's own view stays exactly as it is.</constraint>
+    <constraint source="this task">(B) Do not dispose an Activity this code did not start. Either drop `using` (tags then go on the current span, as today, minus the early stop) or start a real child span from an `ActivitySource`; pick one for all 20 sites and state why. Behaviour of the Graph calls is unchanged.</constraint>
+    <constraint source="this task">(B) Add a guard that fails the build when `using` is applied to `Activity.Current` anywhere under `src/server` (an ArchTests source-scan test, the repo's existing pattern for text guards); seed it by reverting one site and watching it fail.</constraint>
+    <constraint source="CLAUDE.md §10">Publish size vs a FRESH master build (Compress-Archive, equal file counts); CVE check; `/conflict-check` before editing `Infrastructure/Graph`.</constraint>
+    <constraint source="ADR-038">(A) test in the existing `UploadFinalizationWorker` test class; (B) the ArchTests guard. No `Mock&lt;HttpMessageHandler&gt;`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">(A) The note states, from the code, why the 10-02 midday rows closed and the later ones did not.</criterion>
+    <criterion testable="true">(A) A successful save with AI processing ends with its row in a terminal status (Completed) and a stage that names what was handed on; a finalization failure ends Failed; a test pins both. `sprk_result` is byte-identical before/after for the same save.</criterion>
+    <criterion testable="true">(B) No `using` on `Activity.Current` remains under `src/server`; the guard test fails when one is reintroduced (seeded) and passes otherwise.</criterion>
+    <criterion testable="true">(B) A test proves the request Activity is still running after `UploadSmallAsync` returns (e.g. an `ActivityListener` sees no Stop for the parent before the caller stops it).</criterion>
+    <criterion testable="true">Gates: BFF Office test scope, the Graph infrastructure tests and ArchTests green; publish delta reported vs fresh master; CVE clean.</criterion>
+    <criterion testable="true">Live (after a deploy): a Word save's request shows its real status (202) and full duration in App Insights, and its job row reads Completed. If no deploy is available, leave open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The trace shows a consumer that relies on the row staying non-terminal (e.g. a monitor or reconciliation job reading `sprk_status` = In Progress) — STOP and report before changing it.</trigger>
+    <trigger>`/conflict-check` reports another active project editing `Infrastructure/Graph/DriveItemOperations.cs` or `ContainerOperations.cs` — coordinate before editing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`/conflict-check`; read the worker, `OfficeJobStatusService`, and the 20 sites.</step>
+    <step>(A) Root cause from the code; choose the owner; fix; tests.</step>
+    <step>(B) Fix all 20 sites one way; the Activity test; the ArchTests guard, seeded.</step>
+    <step>Gates and publish size; record in `notes/093-job-row-and-telemetry.md`; TASK-INDEX 093 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>The finalization worker, the job status service and the Graph operations exist; ArchTests already hosts source-scan guards.</existing>
+    <extension>Yes — fixes inside existing classes plus one guard test; no new service or route.</extension>
+    <cost-of-doing-nothing>Every saved document's job looks stuck forever (ADR-017's persisted outcome is false), and App Insights reports successful saves and file operations as failures with wrong durations, hiding real ones.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ContainerOperations.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobStatusService.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/093-job-row-and-telemetry.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/060-job-status-store-and-extraction.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/068-durability-siblings.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/093-job-row-and-telemetry.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    (A) Root cause traced before any change (notes/093-job-row-and-telemetry.md §1): `QueueNextStageAsync` has
+    queued to `sdap-jobs`/`AppOnlyDocumentAnalysisJobHandler` since commit `2f3dcbfac` (2026-01-28) and never
+    writes a terminal status to `sprk_processingjob`; the only code that ever did (`ProfileSummaryWorker`) is
+    orphaned — it listens on the legacy `"office-profile"` queue, which nothing has sent to since that same
+    commit. Every real save's `TriggerAiProcessing` evaluates true (ribbon hardcodes it; the pane's default
+    options also evaluate true), so every real save has been stuck Running/FileUploaded/70 forever for nine
+    months. The three 10-02 midday rows that closed were this project's own prior-task verification calls
+    (060/068 live checks), not owner UAT — timestamps match to the minute, and 068 §9 reused the same document
+    060 saved specifically to test Generate Profile as a separate step, which only makes sense if the original
+    save suppressed its own AI processing.
+    Fix: `UploadFinalizationWorker` (the preferred owner per the constraint) marks the row Completed with stage
+    "AiAnalysisQueued" right after queuing the follow-on AI work — profiling/indexing already persist their own
+    outcome on the DOCUMENT, so threading the Office job id into the shared AI handler was not warranted; the
+    escalation trigger (a consumer relying on non-terminal) does not fire, since the pane reads `sprk_result`
+    (already terminal at save time, task 060), never the raw pipeline columns, as its authoritative answer.
+    (B) All 20 `using var activity = Activity.Current;` sites fixed by dropping `using` (tags stay on the
+    ambient span; disposal removed). New ArchTests structural guard (`ActivityCurrentDisposalGuardTests`) bans
+    the pattern repo-wide; seeded-reverted and confirmed red naming the exact file:line, then green.
+    Tests: 2 new behavioral tests added to the existing `UploadFinalizationOwnerTeamTests` class (terminal
+    Completed-with-stage; terminal Failed), 1 new Activity-lifetime test, 1 new ArchTests guard (3 facts).
+    Gates: BFF build clean; BFF Office+Graph test scope 1008/0/9(pre-existing skips); ArchTests 349/349 (incl.
+    the 3 new); `dotnet format --verify-no-changes` clean; no vulnerable packages (no package changed).
+    Not done / left open: live deploy check (no deploy authorization this session — left open per the AC's own
+    fallback); deleting the orphaned `ProfileSummaryWorker`/`IndexingWorkerHostedService` (filed for the owner,
+    separate scope). Publish-size measurement owed to the main session (this worktree is not a fresh-master
+    baseline per CLAUDE.md §10).
+    Full trace, code citations, and the gate table: notes/093-job-row-and-telemetry.md.
+  </notes>
+</task>

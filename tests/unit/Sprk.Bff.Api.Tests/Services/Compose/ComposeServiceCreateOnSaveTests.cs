@@ -40,7 +40,10 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Microsoft.Extensions.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai;
@@ -86,6 +89,10 @@ public sealed class ComposeServiceCreateOnSaveTests
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
 
+        // Issue #858: the container is now SERVER-derived. With no session there is no matter, so the
+        // acting-user path runs — these are the two reads it makes. Strict mocks require them.
+        ComposeServiceCollaborators.SetupActingUserContainer(_dataverse, ContainerId);
+
         // Default: profiling succeeds (fields written under OBO) → profile step is terminal Completed.
         // Individual tests override this to capture args, simulate a skip/failure, or throw.
         _documentProfile
@@ -98,6 +105,8 @@ public sealed class ComposeServiceCreateOnSaveTests
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object,
         documentProfileAi: _documentProfile.Object);
 
     // Fire-and-forget SUT (compose-r2): profiling is DISPATCHED to a detached DI scope, not awaited.
@@ -118,9 +127,20 @@ public sealed class ComposeServiceCreateOnSaveTests
             _dataverse.Object,
             _indexing.Object,
             NullLogger<ComposeService>.Instance,
+            BuildContainerResolver(),
+            BuildAccessProbe().Object,
             documentProfileAi: facade,   // non-null availability gate
             scopeFactory: scopeFactory);
     }
+
+    /// <summary>Rights the next-built service's probe reports. Set before calling the builder.</summary>
+    private string _probeRights = ComposeServiceCollaborators.CanAssociate;
+
+    private Mock<CallerRecordAccessProbe> BuildAccessProbe() =>
+        ComposeServiceCollaborators.Probe(_probeRights);
+
+    private RecordContainerResolver BuildContainerResolver() =>
+        ComposeServiceCollaborators.Resolver(_dataverse.Object);
 
     private static DefaultHttpContext HttpContextWithBearer(string authorization = "Bearer obo-user-token")
     {
@@ -238,7 +258,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,           // transient draft — no SPE item yet
-            ContainerId = ContainerId,      // client-supplied (Fork A)
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -269,7 +288,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         // index exist, profile pending) — never Completed-on-claim — and the interim R5-E bar holds.
         StateOf(completion, ComposeService.StepProfileAnalysis).Should().Be(JobAwareState.Queued);
         completion.Aggregate.Should().Be(JobAwareState.Partial);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
     }
 
     // ── FR-07d (task 013): promote performs an ATOMIC UPSERT on the sprk_graphitemid_uk alternate key
@@ -293,7 +312,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -333,7 +351,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -365,7 +382,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -381,7 +397,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         profile.State.Should().Be(JobAwareState.Running);
         profile.Detail.Should().Contain("background");
         result.CompletionState!.Aggregate.Should().Be(JobAwareState.Partial);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         // The background profile runs on a DETACHED HttpContext (not the request one) carrying the
         // captured OBO bearer token — proving the user assertion survives the response boundary (OBO).
@@ -420,7 +436,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -436,7 +451,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         fake.Started.IsCompleted.Should().BeFalse("no dispatch occurred, so the facade was never invoked");
         fake.InvokedDocumentId.Should().BeNull();
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         provider.Dispose();
     }
@@ -457,7 +472,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -467,7 +481,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var result = await sut.SaveAsync(request, HttpContextWithBearer(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         // The background task runs, throws, and the exception is SWALLOWED by RunBackgroundProfileAsync
         // (never rethrown) — awaiting Finished completes without faulting the test.
@@ -478,16 +492,32 @@ public sealed class ComposeServiceCreateOnSaveTests
         provider.Dispose();
     }
 
-    // ── Acceptance (negative): missing client container fails the container step honestly ───────
+    // ── Acceptance (negative): NO CONFIGURED container fails the container step honestly ─────────
+    //
+    // REWRITTEN for issue #858. The original premise was "the client supplied no ContainerId, and there
+    // is no server-side resolver, so the step fails". Both halves are gone: the field was deleted and the
+    // server now derives the container. What still MATTERS — and is what this test was really protecting
+    // — is that when NO container can be resolved, the save fails honestly and writes NOTHING, rather
+    // than picking somewhere plausible. SPE permissions are CONTAINER-level, so a speculative write puts
+    // the content in front of everyone with access to whatever container it landed in, with no per-file
+    // deny to narrow it — and nothing announces that it happened.
+    //
+    // The post-#858 equivalent of "no container": the draft has no matter (no session → no host context)
+    // AND the acting user's business unit has no `sprk_containerid` stamped. That is a real, common state
+    // — three of six business units, verified live 2026-08-27.
     [Fact]
-    public async Task SaveAsync_TransientDraftWithoutContainer_FailsContainerStep_NeverSuccess()
+    public async Task SaveAsync_TransientDraftWithNoConfiguredContainer_FailsContainerStep_NeverSuccess()
     {
-        // No SPE facade / Dataverse / indexing calls should occur — Strict mocks assert that.
+        // The acting-user resolution finds a user and a business unit, but the BU has NO container.
+        // Deliberately NOT "the lookup failed" — a failed lookup throws; this is the configured-nothing
+        // case, which must degrade to the structured step failure the client renders.
+        ComposeServiceCollaborators.SetupActingUserContainer(_dataverse, containerId: string.Empty);
+
+        // No SPE facade / Dataverse write / indexing calls should occur — Strict mocks assert that.
         var sut = CreateSut();
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = null,             // missing — no server-side resolver, so container step fails
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -506,7 +536,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var completion = result.CompletionState!;
         StateOf(completion, ComposeService.StepContainer).Should().Be(JobAwareState.Failed);
         completion.Aggregate.Should().Be(JobAwareState.Failed);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse();
     }
 
     // ── Acceptance (negative interim R5-E): a record with no index is never a success ───────────
@@ -521,7 +551,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -533,7 +562,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         StateOf(completion, ComposeService.StepRecord).Should().Be(JobAwareState.Completed, "the row was created");
         StateOf(completion, ComposeService.StepIndexing).Should().Be(JobAwareState.Failed);
         completion.Aggregate.Should().Be(JobAwareState.Failed);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse("no index → never a success");
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse("no index → never a success");
     }
 
     // ── Acceptance: existing drive-item path replaces content, does NOT create a drive-item ─────
@@ -568,7 +597,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         _spe.Verify(s => s.UploadSmallAsUserAsync(
             It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
     }
 
     // ── Acceptance: idempotency — re-Save of an already-promoted document does not double-create ─
@@ -627,7 +656,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -649,7 +677,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = ReadOnlyMemory<byte>.Empty,
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -721,6 +748,8 @@ public sealed class ComposeServiceCreateOnSaveTests
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object,
         documentProfileAi: _documentProfile.Object,
         memoryCapture: memoryCapture);
 
@@ -778,7 +807,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = sessionId,
             TenantId = Tenant,
@@ -791,7 +819,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         // reached the response path.
         result.DocumentRecordId.Should().Be(recordId);
         result.WasPromotedThisSave.Should().BeTrue();
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
         capture.CallCount.Should().Be(1, "capture was attempted (and threw) — proving the Save absorbed the failure");
     }
 
@@ -816,7 +844,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = sessionId,
             TenantId = Tenant,
@@ -868,7 +895,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = sessionId,
             TenantId = Tenant,
@@ -877,7 +903,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
             "a missing memory-capture facade must never affect the Save");
     }
 
@@ -897,7 +923,6 @@ public sealed class ComposeServiceCreateOnSaveTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DocxBytes(),
             SessionId = sessionId,
             TenantId = Tenant,

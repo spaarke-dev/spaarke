@@ -54,6 +54,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
@@ -524,7 +525,7 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
             guidProvider.Object,
             TimeProvider.System,
             new WorkspaceLayoutService(entityService.Object, global::Sprk.Bff.Api.Tests.Services.Workspace.StubSystemUserIdentityResolver.Instance, Mock.Of<ILogger<WorkspaceLayoutService>>()),
-            Mock.Of<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>(),
+            Mock.Of<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(),
             ack.Object,
             sessionManager,
             Mock.Of<ILogger<SendWorkspaceArtifactHandler>>());

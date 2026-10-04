@@ -36,6 +36,16 @@ public static class RevokeExternalAccessEndpoint
     private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
+    /// M2 (task 024 → task 065). The reason code for the one incomplete-revoke shape this endpoint can
+    /// report: the Dataverse grant WAS deactivated, but the SPE container permission could not be
+    /// confirmed removed (<see cref="SpeContainerRevokeOutcome.Failed"/>). Reuses the
+    /// <c>sdap.*.incomplete.*</c> FAMILY <see cref="ProjectClosureEndpoint"/> established for the
+    /// identical failure shape, with its own leaf — a client switching on the code must be able to tell a
+    /// single-grant revoke from a project closure, not just "something is incomplete".
+    /// </summary>
+    internal const string RevokeSpeCleanupIncompleteReason = "sdap.revoke.incomplete.container_not_cleared";
+
+    /// <summary>
     /// Registers the revoke endpoint on the external-access group.
     /// </summary>
     public static RouteGroupBuilder MapRevokeExternalAccessEndpoint(this RouteGroupBuilder group)
@@ -214,6 +224,28 @@ public static class RevokeExternalAccessEndpoint
                 request.ContactId);
         }
 
+        // ── M2 (task 024 → task 065): align with /close-project for the identical failure shape ──
+        //
+        // ONLY Failed warrants a 500 — NotAttempted, PermissionRemoved and NoPermissionFound are all
+        // healthy, expected outcomes under the broker-only model (see SpeContainerRevokeOutcome's own doc
+        // comments) and stay a 200. Before this, /revoke reported Failed — "the grantee may RETAIN file
+        // access" — as a 200 with the failure buried in the body, while ProjectClosureEndpoint reported
+        // the identical shape as a 500. Per this task's ADR-003 constraint and the owner's 2026-09-10
+        // directive ("if revoked, a user message should be provided not just a 500 error"), the status
+        // code now matches AND deactivatedCount/speContainerOutcome/speOrgMemberCleanup ride in the
+        // ProblemDetails extensions so the caller can still render the specific, three-outcome message —
+        // never a bare 500.
+        if (speOutcome == SpeContainerRevokeOutcome.Failed)
+        {
+            logger.LogError(
+                "[EXT-REVOKE] Revoke of {AccessRecordId} INCOMPLETE: {Deactivated} Dataverse row(s) " +
+                "deactivated, but the SPE container permission could not be confirmed removed. The " +
+                "grantee may RETAIN file access. Reporting 500 (M2) rather than 200.",
+                request.AccessRecordId, deactivatedCount);
+
+            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup);
+        }
+
         // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
         // already fully inactive (a safe no-op), >1 means duplicates existed and were swept — the exact
         // condition that used to leave access standing after a "successful" revoke.
@@ -222,6 +254,54 @@ public static class RevokeExternalAccessEndpoint
             SpeContainerOutcome: speOutcome,
             DeactivatedCount: deactivatedCount,
             SpeOrgMemberCleanup: orgCleanup));
+    }
+
+    /// <summary>
+    /// The "SPE container permission could not be confirmed removed" shape: 500 + ProblemDetails carrying
+    /// a machine-readable reason code (ADR-003) and the correlation id (ADR-019) — the M2 alignment with
+    /// <see cref="ProjectClosureEndpoint"/>'s <c>ClosureIncomplete</c> for the identical failure shape.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>M2 (task 024 → task 065).</b> Only <see cref="SpeContainerRevokeOutcome.Failed"/> reaches
+    /// here. Reuses the <c>sdap.*.incomplete.*</c> shape closure established, with its OWN leaf
+    /// (<see cref="RevokeSpeCleanupIncompleteReason"/>) rather than closure's literal code — a client
+    /// switching on the code must be told a single-grant revoke from a project closure.</para>
+    ///
+    /// <para><b>Owner directive, 2026-09-10.</b> "if revoked, a user message should be provided not just a
+    /// 500 error" — <paramref name="deactivatedCount"/> rides in extensions for exactly the reason
+    /// <c>ClosureIncomplete</c>'s own remarks give: N grants WERE deactivated even when the SPE half
+    /// failed, and a bare 500 cannot distinguish that from nothing having happened.
+    /// <paramref name="speOutcome"/> and <paramref name="orgCleanup"/> are carried too — for an
+    /// organization revoke, <c>orgCleanup.MembersEnumerated == null</c> is the only signal distinguishing
+    /// "we swept everyone" from "we do not know who to sweep", the same load-bearing <c>null</c> the 200
+    /// path already preserves through serialization.</para>
+    /// </remarks>
+    private static IResult RevokeIncomplete(
+        HttpContext httpContext,
+        int deactivatedCount,
+        SpeContainerRevokeOutcome speOutcome,
+        SpeOrgMemberCleanupSummary? orgCleanup)
+    {
+        var detail = deactivatedCount > 0
+            ? $"Deactivated {deactivatedCount} Dataverse access grant(s), but the SPE container " +
+              "permission could not be confirmed removed. The grantee may RETAIN file access. Retry the " +
+              "revoke."
+            : "The SPE container permission could not be confirmed removed, and no Dataverse access " +
+              "grants were deactivated. Retry the revoke.";
+
+        return Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "External access revoke incomplete",
+            detail: detail,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = RevokeSpeCleanupIncompleteReason,
+                ["deactivatedCount"] = deactivatedCount,
+                ["speContainerOutcome"] = speOutcome,
+                ["speOrgMemberCleanup"] = orgCleanup,
+                ["traceId"] = httpContext.TraceIdentifier
+            });
     }
 
     // =========================================================================
@@ -367,7 +447,7 @@ public static class RevokeExternalAccessEndpoint
 
         // The service distinguishes "nobody matched" from "Graph refused". Only the former is benign:
         // under the broker-only model most contacts have no container ACL at all.
-        if (result.Error?.StartsWith("No permission found", StringComparison.OrdinalIgnoreCase) == true)
+        if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
         {
             logger.LogInformation(
                 "[EXT-REVOKE] No SPE container permission exists for Contact {ContactId} on {ContainerId} " +
@@ -395,13 +475,13 @@ public static class RevokeExternalAccessEndpoint
     /// had been told was revoked.</para>
     ///
     /// <para><b>Why sweeping by <c>statecode</c> alone.</b> The junction also carries
-    /// <c>sprk_enddate</c>, and this ignores it — deliberately, to match
-    /// <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c>, which grants inherited access on
-    /// <c>statecode</c> alone. A membership that has ended by date but was never deactivated therefore
-    /// still CONFERS access on the read side, so a revoke that skipped it would leave a live inheritance
-    /// standing. Over-including on a revoke removes more access (fail-closed); under-including does not.
-    /// The read-side asymmetry itself is recorded for the Phase 1 evaluator (FR-24/FR-25, task 043) —
-    /// changing who has access on the read path is out of scope here.</para>
+    /// <c>sprk_enddate</c> and <c>sprk_startdate</c>, and this ignores both — deliberately. Since task 109
+    /// the read side (<c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c>) confers
+    /// inherited access only through memberships that are date-current under an active organization, a
+    /// SUBSET of the <c>statecode</c>-active rows swept here. So this sweep is a superset of everyone the
+    /// read side can still let in: over-including on a revoke removes more access (fail-closed);
+    /// under-including does not. (Before task 109 the read side conferred on <c>statecode</c> alone, and
+    /// this sweep matched it exactly; the superset relation is what has to hold, and still does.)</para>
     ///
     /// <para><b>⚠️ What this CANNOT confirm.</b> Per-member <c>NoPermissionFound</c> is only as good as
     /// <see cref="SpeContainerMembershipService.RevokeMembershipAsync"/>'s match, and that method reads
@@ -453,10 +533,18 @@ public static class RevokeExternalAccessEndpoint
             return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
         }
 
-        // ── Sweep ────────────────────────────────────────────────────────────
+        // ── Resolve identities ───────────────────────────────────────────────
+        // Membership is written with userPrincipalName = the contact's email, so an email is the ONLY
+        // key that can match an ACL entry. Resolve them all first, then do ONE container read.
+        //
+        // ISS-004 (#968), closed by task 024: this loop used to call RevokeMembershipAsync per member,
+        // and each of those calls read the container's ENTIRE permission collection — N members = N
+        // full reads. Task 024's paging made that N × pages. The container is now read ONCE.
         var removed = 0;
         var notFound = 0;
         var failed = 0;
+
+        var resolved = new List<(Guid ContactId, string Email)>();
 
         foreach (var memberContactId in memberSet.ContactIds)
         {
@@ -477,37 +565,64 @@ public static class RevokeExternalAccessEndpoint
                     continue;
                 }
 
-                var result = await speContainerMembership.RevokeMembershipAsync(containerId, memberEmail, ct);
-
-                if (result.Success)
-                {
-                    removed++;
-                    logger.LogInformation(
-                        "[EXT-REVOKE] Removed SPE container permission {PermissionId} for member Contact " +
-                        "{ContactId} of Organization {OrganizationId} on {ContainerId}",
-                        result.PermissionId, memberContactId, organizationId, containerId);
-                }
-                else if (result.Error?.StartsWith("No permission found", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    notFound++;
-                }
-                else
-                {
-                    failed++;
-                    logger.LogError(
-                        "[EXT-REVOKE] Failed to remove the SPE container permission for member Contact " +
-                        "{ContactId} of Organization {OrganizationId} on {ContainerId}: {Error}. They may " +
-                        "RETAIN file access. Continuing with the rest.",
-                        memberContactId, organizationId, containerId, result.Error);
-                }
+                resolved.Add((memberContactId, memberEmail));
             }
             catch (Exception ex)
             {
                 failed++;
                 logger.LogError(ex,
-                    "[EXT-REVOKE] Unexpected error cleaning up member Contact {ContactId} of Organization " +
-                    "{OrganizationId} on {ContainerId}. They may RETAIN file access. Continuing with the rest.",
+                    "[EXT-REVOKE] Could not resolve the email for member Contact {ContactId} of " +
+                    "Organization {OrganizationId}; their permission on {ContainerId} cannot be matched " +
+                    "and may remain. Continuing with the rest.",
                     memberContactId, organizationId, containerId);
+            }
+        }
+
+        // ── Sweep: ONE paged read, then match every member against it ────────
+        // ⚠️ Behaviour note: results are keyed by EMAIL, so two contact rows sharing one address now
+        // both report the outcome of the single permission that address owns. Previously the second
+        // call found the permission already deleted and reported NoPermissionFound, which read as "this
+        // person never had access". Keying by identity is the more truthful of the two.
+        IReadOnlyDictionary<string, SpeContainerMembershipResult> speResults =
+            resolved.Count == 0
+                ? new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase)
+                : await speContainerMembership.RemoveMembershipsAsync(
+                    containerId, resolved.Select(r => r.Email).ToList(), ct);
+
+        foreach (var (memberContactId, memberEmail) in resolved)
+        {
+            if (!speResults.TryGetValue(memberEmail, out var result))
+            {
+                // A member we asked about but got no answer for is an unknown, not an absence.
+                failed++;
+                logger.LogError(
+                    "[EXT-REVOKE] No SPE outcome was returned for member Contact {ContactId} of " +
+                    "Organization {OrganizationId} on {ContainerId}. Treating as FAILED — they may " +
+                    "RETAIN file access.",
+                    memberContactId, organizationId, containerId);
+                continue;
+            }
+
+            if (result.Success)
+            {
+                removed++;
+                logger.LogInformation(
+                    "[EXT-REVOKE] Removed SPE container permission {PermissionId} for member Contact " +
+                    "{ContactId} of Organization {OrganizationId} on {ContainerId}",
+                    result.PermissionId, memberContactId, organizationId, containerId);
+            }
+            else if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                notFound++;
+            }
+            else
+            {
+                failed++;
+                logger.LogError(
+                    "[EXT-REVOKE] Failed to remove the SPE container permission for member Contact " +
+                    "{ContactId} of Organization {OrganizationId} on {ContainerId}: {Error}. They may " +
+                    "RETAIN file access. Continuing with the rest.",
+                    memberContactId, organizationId, containerId, result.Error);
             }
         }
 
@@ -604,8 +719,9 @@ internal readonly record struct OrganizationMemberSet(
 /// </summary>
 /// <remarks>
 /// <para><b>CLAUDE.md §11 justification (task 020).</b> <i>Existing</i>:
-/// <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c> reads the same junction in the INVERSE
-/// direction (contact → organizations). <i>Extension</i>: not callable — it is private and built on a raw
+/// <c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c> (named <c>QueryActiveOrgIdsAsync</c>
+/// until task 109) reads the same junction in the INVERSE direction (contact → organizations).
+/// <i>Extension</i>: not callable — it is private and built on a raw
 /// <c>HttpClient</c> with its own app-only token flow, whereas the revoke path holds a
 /// <c>DataverseWebApiClient</c>; reaching it would drag the participation service's token flow into the
 /// revoke path. So the QUERY SHAPE is mirrored, not the code. <i>Cost of doing nothing</i>: an
@@ -626,8 +742,9 @@ internal readonly record struct OrganizationMemberSet(
 /// revocation query reads as "nothing to revoke" — silently. Confirmed: collection
 /// <c>sprk_contactorganizations</c>; lookups <c>sprk_contact</c> → <c>contact</c> and
 /// <c>sprk_organization</c> → <c>sprk_organization</c>, projected as <c>_sprk_contact_value</c> /
-/// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1). This confirms the assumption
-/// standing as a caveat comment in <c>QueryActiveOrgIdsAsync</c> is CORRECT.</para>
+/// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1). This confirmed the assumption
+/// that stood as a caveat comment in <c>QueryActiveOrgIdsAsync</c>; task 109 removed that caveat and cites
+/// this record instead.</para>
 /// </remarks>
 internal static class ExternalOrganizationMembership
 {
@@ -653,9 +770,13 @@ internal static class ExternalOrganizationMembership
     /// The <c>$filter</c> selecting one organization's ACTIVE memberships.
     /// </summary>
     /// <remarks>
-    /// Mirrors <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c> term for term, inverted:
-    /// <c>statecode eq 0</c> only. It deliberately does NOT filter on <c>sprk_enddate</c> — see the
-    /// remarks on the caller for why matching the read path matters more than being date-correct here.
+    /// Mirrors the read path's junction <c>$filter</c> (<c>ExternalParticipationService
+    /// .BuildOrganizationMembershipFilter</c>), inverted: <c>statecode</c> only. It deliberately does NOT
+    /// filter on <c>sprk_enddate</c> / <c>sprk_startdate</c> — see the remarks on the caller for why a
+    /// superset of the read path's conferring set matters more than being date-correct here. (The read
+    /// filter also admits a NULL <c>statecode</c>, task 109; this one does not. Dataverse writes no null
+    /// <c>statecode</c>, so the two select the same rows — recorded rather than changed, because this
+    /// task's scope on the revoke path is comments only.)
     /// </remarks>
     internal static string ActiveMembersFilter(Guid organizationId)
         => $"_sprk_organization_value eq {organizationId} and statecode eq 0";

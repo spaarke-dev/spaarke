@@ -821,6 +821,123 @@ public partial class RagService : IRagService
     }
 
     /// <inheritdoc />
+    public async Task<int> DeleteChunksBeyondCountAsync(
+        string tenantId,
+        string speFileId,
+        int keepChunkCount,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+        ArgumentException.ThrowIfNullOrEmpty(speFileId);
+        // Structural form of the owner rule "the document must never be left without chunks" (task 029):
+        // this method can only remove a TAIL, never the whole file.
+        ArgumentOutOfRangeException.ThrowIfLessThan(keepChunkCount, 1);
+
+        // The SAME routing as IndexDocumentsBatchAsync, so the trim reaches the index the new chunks were written
+        // to (the per-record index, or the tenant default) — not DeleteBySourceDocumentAsync's default-only client.
+        var searchClient = string.IsNullOrWhiteSpace(searchIndexName)
+            ? await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken)
+            : await _deploymentService.GetSearchClientAsync(tenantId, searchIndexName, cancellationToken);
+
+        var filter =
+            $"tenantId eq '{EscapeFilterValue(tenantId)}' and speFileId eq '{EscapeFilterValue(speFileId)}' and chunkIndex ge {keepChunkCount}";
+
+        // Collect every id first and delete afterwards: paging with Skip over a set this method is deleting from
+        // would silently step over rows.
+        const int pageSize = 1000;
+        var idsToDelete = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var skip = 0; ; skip += pageSize)
+        {
+            var searchOptions = new SearchOptions
+            {
+                Filter = filter,
+                Size = pageSize,
+                Skip = skip,
+                Select = { "id", "chunkIndex" }
+            };
+
+            SearchResults<KnowledgeDocument> page;
+            if (_resilientClient != null)
+            {
+                page = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                    searchClient, "*", searchOptions, cancellationToken);
+            }
+            else
+            {
+                var response = await searchClient.SearchAsync<KnowledgeDocument>(
+                    "*", searchOptions, cancellationToken);
+                page = response.Value;
+            }
+
+            var returned = 0;
+            await foreach (var result in page.GetResultsAsync().WithCancellation(cancellationToken))
+            {
+                returned++;
+                var chunk = result.Document;
+
+                // Only ids of THIS pipeline's shape ({speFileId}_{chunkIndex}, FileIndexingService). Other writers
+                // store chunks for the same file under their own schemes (RagIndexingPipeline
+                // "{documentId}_{suffix}_{index}", the reference indexer "{sourceId}_ref_{index}"); those are not
+                // this file's leftovers and are never touched here.
+                if (chunk is not null
+                    && chunk.ChunkIndex >= keepChunkCount
+                    && string.Equals(chunk.Id, $"{speFileId}_{chunk.ChunkIndex}", StringComparison.Ordinal)
+                    && seen.Add(chunk.Id))
+                {
+                    idsToDelete.Add(chunk.Id);
+                }
+            }
+
+            if (returned < pageSize)
+            {
+                break;
+            }
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            _logger.LogDebug(
+                "No leftover chunks beyond {KeepChunkCount} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+                keepChunkCount, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+            return 0;
+        }
+
+        var deletedCount = 0;
+        foreach (var batch in idsToDelete.Chunk(pageSize))
+        {
+            IndexDocumentsResult deleteResult;
+            if (_resilientClient != null)
+            {
+                deleteResult = await _resilientClient.DeleteDocumentsAsync(
+                    searchClient, "id", batch, cancellationToken);
+            }
+            else
+            {
+                var deleteResponse = await searchClient.DeleteDocumentsAsync(
+                    "id", batch, cancellationToken: cancellationToken);
+                deleteResult = deleteResponse.Value;
+            }
+
+            deletedCount += deleteResult.Results.Count(r => r.Succeeded);
+        }
+
+        _logger.LogInformation(
+            "Deleted {DeletedCount}/{TotalCount} leftover chunks beyond {KeepChunkCount} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+            deletedCount, idsToDelete.Count, keepChunkCount, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+
+        if (deletedCount < idsToDelete.Count)
+        {
+            throw new InvalidOperationException(
+                $"{idsToDelete.Count - deletedCount} of {idsToDelete.Count} leftover chunk(s) could not be deleted " +
+                $"from index {searchIndexName ?? "(tenant-default)"}.");
+        }
+
+        return deletedCount;
+    }
+
+    /// <inheritdoc />
     public async Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default)

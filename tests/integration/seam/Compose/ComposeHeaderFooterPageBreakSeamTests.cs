@@ -202,14 +202,25 @@ public sealed class ComposeHeaderFooterPageBreakSeamTests
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void BuildContentModel_InteriorSectionBreak_CountsSectionBreakFlattened_AndStillRoundTrips()
+    public void BuildContentModel_InteriorSectionBreak_DoesNotWarnAtOpenBecauseNothingHasBeenLostYet()
     {
+        // #777 (2026-09-01): this assertion is INVERTED from what it was, and the inversion is the fix.
+        //
+        // The warning used to fire here, at PROJECTION — i.e. the moment the user opened the document,
+        // before they had done anything. But an interior sectPr on a paragraph they never touch SURVIVES:
+        // ComposeBlockMerge.Capture clones each unchanged body child whole, pPr/sectPr included. Warning at
+        // open reported loss on an untouched file ("×6" on a real contract) — non-actionable noise, which
+        // the owner directive rules out.
+        //
+        // The warning is NOT retired (unlike indentation-dropped / paragraph-style-flattened, whose
+        // premises were falsified). It moved to the save path, where the loss is real. The three tests
+        // below cover it there.
         var source = BuildInteriorSectionSource();
         var projection = _builder.BuildContentModel(source);
 
-        projection.Status.Should().Be(ComposeProjectionStatus.Partial, "an interior section break degrades loudly");
-        projection.Warnings.Should().ContainSingle(w => w.Code == "section-break-flattened")
-            .Which.Count.Should().Be(1, "one pPr-nested sectPr in the source");
+        projection.Warnings.Should().NotContain(w => w.Code == "section-break-flattened",
+            "opening a document loses nothing — the interior sectPr is still in the file, and an " +
+            "untouched block carries it through the clone path on save");
         projection.Model.Blocks.Should().HaveCount(3, "all three paragraphs' prose survives");
 
         // Round-trip still succeeds (no hard-fail; the content joins the final section).
@@ -228,7 +239,120 @@ public sealed class ComposeHeaderFooterPageBreakSeamTests
             .Should().Be(15840u, "the FINAL (trailing) section's landscape setup is the one preserved");
         body.Descendants<Paragraph>().Should().NotContain(
             p => p.ParagraphProperties != null && p.ParagraphProperties.SectionProperties != null,
-            "the interior sectPr flattened (its loss was counted at projection time)");
+            "the interior sectPr flattened (its loss is counted on the save path — see the tests below)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4a. #777 — the warning on the SAVE path, where the loss is real: per EDITED block, never
+    //     per document. This is the whole point of the move, so all three cases are pinned.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Saves <paramref name="source"/> back with the block at <paramref name="editedIndex"/>
+    /// changed, through the production merge path, and returns the degradations the save reported.</summary>
+    private List<ComposeProjectionWarning> SaveWithOneEditedBlock(byte[] source, int editedIndex)
+    {
+        var projection = _builder.BuildContentModel(source);
+        var blocks = projection.Model.Blocks.ToList();
+
+        if (editedIndex >= 0)
+        {
+            // A real text change, so the merge classifies this block as CHANGED and re-renders it while
+            // every other block is cloned. That asymmetry is the subject of these tests.
+            var edited = blocks[editedIndex];
+            blocks[editedIndex] = edited with
+            {
+                Runs = edited.Runs.Select(r => r with { Text = r.Text + " (edited)" }).ToList(),
+            };
+        }
+
+        var degradations = new List<ComposeProjectionWarning>();
+        _renderer.RenderIntoCarrier(
+            source,
+            projection.Model with { Blocks = blocks },
+            author: "seam-test",
+            degradations: degradations);
+        return degradations;
+    }
+
+    [Fact]
+    public void Save_WhenTheParagraphCarryingAnInteriorSectionBreakIsEdited_WarnsExactlyOnce()
+    {
+        // Block 1 is the paragraph whose pPr holds the interior sectPr. Editing it forces a re-render,
+        // and InheritParagraphProperties excludes SectionProperties — so the break is genuinely gone and
+        // the content joins the final (landscape) section. Real loss, honestly reported.
+        var degradations = SaveWithOneEditedBlock(BuildInteriorSectionSource(), editedIndex: 1);
+
+        degradations.Should().ContainSingle(w => w.Code == "section-break-flattened",
+            "editing the paragraph that ended a section drops that section break");
+    }
+
+    [Fact]
+    public void Save_WhenADifferentParagraphIsEdited_DoesNotWarnBecauseTheBreakWasCloned()
+    {
+        // THE test that would have caught the old behaviour. Block 0 is edited; block 1 — the one holding
+        // the section break — is untouched and therefore CLONED verbatim, sectPr and all. Nothing is lost,
+        // so nothing may be reported. Under the pre-#777 code this document warned no matter what the user
+        // did, including nothing.
+        var degradations = SaveWithOneEditedBlock(BuildInteriorSectionSource(), editedIndex: 0);
+
+        degradations.Should().NotContain(w => w.Code == "section-break-flattened",
+            "an untouched paragraph's section break survives through the clone path — warning here would " +
+            "report a loss that did not happen");
+    }
+
+    [Fact]
+    public void Save_WhenNoBaselineIsCaptured_StillReportsEveryInteriorSectionBreakItDestroys()
+    {
+        // THE case that must not go quiet. With no base side (mergeUnchangedBlocks:false here; in
+        // production, ComposeBlockMerge.Capture failing open) the whole body is rebuilt from the model, so
+        // EVERY interior section break dies at once — not just the edited one.
+        //
+        // Moving the warning off the projection path is what makes this test necessary: before #777 the
+        // open-time count covered this case by accident. Without it, the WORST outcome would have become
+        // the QUIETEST one, which is the precise inversion ADR-049's never-silent rule exists to prevent.
+        var source = BuildInteriorSectionSource();
+        var projection = _builder.BuildContentModel(source);
+
+        var degradations = new List<ComposeProjectionWarning>();
+        _renderer.RenderIntoCarrier(
+            source, projection.Model, author: "seam-test",
+            degradations: degradations, mergeUnchangedBlocks: false);
+
+        degradations.Should().ContainSingle(w => w.Code == "section-break-flattened",
+            "a full rebuild destroys the one interior section break in this fixture, and must say so");
+    }
+
+    [Fact]
+    public void Save_WhenTheEditedParagraphHoldsThePromotedTrailingSection_DoesNotWarn()
+    {
+        // Review 023-F1's shape, now handled on the save side: the FINAL section's sectPr parked in the
+        // LAST paragraph with no body-level sectPr. RenderIntoCarrier promotes it to body level, so the
+        // content keeps exactly the page setup it had — editing that paragraph loses nothing.
+        //
+        // The old projection-side guard mirrored the renderer's promotion predicate by hand. The save-side
+        // check compares the base section against the trailing one BY VALUE, so this case reports nothing
+        // by construction rather than by a second copy of the renderer's condition.
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("Body prose."))),
+                    new Paragraph(
+                        new ParagraphProperties(new SectionProperties(new PageSize { Width = 12240, Height = 15840 })),
+                        new Run(new Text("Last paragraph.")))));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var degradations = SaveWithOneEditedBlock(source, editedIndex: 1);
+
+        degradations.Should().NotContain(w => w.Code == "section-break-flattened",
+            "the renderer PROMOTES this section to body level — the same section, so no reader-visible " +
+            "change and no loss to report (023-F1)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -260,7 +384,10 @@ public sealed class ComposeHeaderFooterPageBreakSeamTests
         var projection = _builder.BuildContentModel(source);
         projection.Warnings.Should().NotContain(w => w.Code == "section-break-flattened",
             "the trailing pPr-nested sectPr is PROMOTED by RenderIntoCarrier — nothing flattens, so a " +
-            "warning would be a false loss report (023-F1)");
+            "warning would be a false loss report (023-F1). Since #777 NO shape warns at projection " +
+            "time; the promotion case is pinned on the save path by " +
+            "Save_WhenTheEditedParagraphHoldsThePromotedTrailingSection_DoesNotWarn, which is where it " +
+            "can now actually distinguish itself from a real flatten");
 
         // And the promotion really happens: the rendered body carries the setup at body level.
         var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");

@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="134" project="unified-access-control-r2">
+  <metadata>
+    <title>C6 — a per-module COLUMN allow-list on the external module read seam: /fetch and /record stop returning SPE pointers and internal/FLS columns inside granted scope</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C6)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization/disclosure change on a live, unconditionally mapped external read route (.cs); tags bff-api/auth/security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive (the route executes caller-authored FetchXML app-only, which bypasses field-level security); getting the allow-list wrong either leaks or silently blanks every outside-counsel grid.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hot-file rule (project CLAUDE.md §"parallel-safe:false"): edits Api/ExternalAccess/ExternalModuleDataEndpoints.cs, Infrastructure/ExternalAccess/ExternalModuleRegistry.cs and Infrastructure/DI/ExternalAccessModule.cs. ExternalAccessModule.cs is also modified by pending tasks 036, 137, 141, 142, 143 and 148; task 056 (pending) adds three NEW module registrations that this task's Register validation will require to carry an allow-list. Merge serially.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, api, auth, security, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Session 26 verified defect C6 (notes/session26-uac-defects-and-synopsis.md § C6). Known since investigation gap G-10 (notes/investigation/05-three-plane-completeness.md:36, :127) but never promoted to the register, spec, a task or an issue. Owner round 2 (2026-09-30): no scope cuts, nothing deferred.</origin>
+  </metadata>
+
+  <prompt>The external module read seam lets any CIAM or workforce caller write their own FetchXML (POST /api/v1/external/api/dataverse/fetch) or $select (GET /record), executes it app-only, and returns every column it asked for. Row scope is enforced; column scope is not. Add a per-module column allow-list and enforce it before execution and again on the result, so SPE pointers and internal or field-secured columns can no longer be projected by an external caller.</prompt>
+
+  <role>SPAARKE BFF security engineer — the external module-host read seam (FR-22 / ADR-028 A3) and FetchXML handling. You are narrowing what a shipped external SPA can read; treat every column you drop as a possible broken grid and prove it is not.</role>
+
+  <goal>Every ExternalModuleDescriptor declares the exact columns an external caller may read from its entity. /fetch refuses (400, stable error code) any FetchXML that uses all-attributes or references a non-allow-listed attribute anywhere (attribute, condition, order, aggregate/alias); /record refuses or drops non-allow-listed $select fields; and both responses strip any non-allow-listed key (including its @formattedValues entry) as defence in depth. The six outside-counsel grids still render with their live grid configurations.</goal>
+
+  <context>
+    <background>🔴 LIVE, verified 2026-09-30 against source.
+
+THE ROUTE. `Api/ExternalAccess/ExternalModuleDataEndpoints.cs:84` maps POST /fetch and `:95` maps GET /record/{entity}/{id}; the group is mounted unconditionally under /api/v1/external (EndpointMappingExtensions.cs:439) and reached by BOTH planes (CallerPrincipalAuthorizationFilter). The file header at `:26-27` promises "no Graph pointer ever reaches the client" — the code does not keep that promise.
+
+WHAT THE GUARD CHECKS TODAY. `EvaluateFetchXmlGuard` (`:502-548`) refuses (1) any entity other than the module's own (`:526-530`) and (2) any link-entity at any depth (`:545-547`, task 011 / FR-10). It never looks at `attribute`, `all-attributes`, `condition attribute=`, `order attribute=` or aliases.
+
+WHAT SCOPING CHECKS TODAY. `Tier2ScopeFilterInjector.Inject` (`Api/ExternalAccess/Tier2ScopeFilterInjector.cs:84`) appends a row filter, and `ExternalModuleDescriptor.ScopeRows` (`Infrastructure/ExternalAccess/ExternalModuleRegistry.cs:153-187`) drops out-of-scope ROWS. Nothing filters COLUMNS.
+
+WHAT EXECUTES. `FetchService.ExecuteAsync` (`Services/Dataverse/FetchService.cs:95-96`) runs the FetchXML through the app-only ServiceClient — which bypasses field-level security — and `ProjectEntity` (`:141-169`) copies EVERY returned attribute plus `@formattedValues` to the response. ⚠️ FetchService is SHARED with the internal /api/dataverse surface: do NOT put the external allow-list inside FetchService.
+
+WHAT LEAKS. A granted contact can request `sprk_graphdriveid`, `sprk_graphitemid`, `sprk_filepath` (the Graph webUrl) on every in-scope `sprk_document` — exactly the pointers the curated document read deliberately omits (`Infrastructure/ExternalAccess/ExternalDataService.cs:211`) and the upload path writes (`:252-260`). Any other internal or FLS-secured column on sprk_document / sprk_invoice / the three roots is equally readable.
+
+/record. `GetScopedRecordAsync` (`ExternalModuleDataEndpoints.cs:243-301`) passes `$select` straight through `ParseSelect` (`:632-645`) to `RecordService.GetRecordAsync` (`Services/Dataverse/RecordService.cs:57-74`). With no $select it projects only primary id + primary name (`:113-154`), which is safe; with a $select it projects anything. Child single-record reads fail the Tier-2 gate (`ExternalModuleRegistry.cs:125-144`), so /record exposes arbitrary columns of granted ROOT records (e.g. `sprk_project.sprk_containerid`) and of the grid-configuration records.
+
+THE REGISTERED MODULES (all in `Infrastructure/DI/ExternalAccessModule.cs`): collaboration/sprk_project `:224-230`, documents/sprk_document `:244-254`, invoices/sprk_invoice `:259-268`, work-assignments/sprk_workassignment `:274-280`, matters/sprk_matter `:286-292`, service-requests/sprk_servicerequest `:299-308`, grid-configuration/sprk_gridconfiguration `:318-324`. ⚠️ The type is `ExternalModuleDescriptor`, not "ExternalModuleDefinition" as the session-26 fix direction wrote.
+
+WHERE THE LEGITIMATE COLUMN LIST COMES FROM. The external SPA's grids (`src/client/external-spa/src/widgets/*`, via `gridDataverseClient.ts` and the shared `DataGrid`) do not carry their FetchXML in the repo: each grid loads a `sprk_gridconfiguration` record (the six ids at `ExternalAccessModule.cs:31-39`; its `sprk_fetchxml` / `sprk_layoutxml` / `sprk_configjson` columns) and may also load saved queries through the passthrough `/savedquery` routes. The allow-list must therefore be derived from those LIVE records plus each module's scope-dimension attributes (the injector filters on them and `ScopeRows` needs them projected, `ExternalModuleRegistry.cs:178`). The grid-configuration module's OWN allow-list comes from the columns the shared client selects when it reads a configuration record through /record (`src/client/shared/Spaarke.UI.Components/src/services/ConfigurationService.ts:68`, `:149`; `ViewService.ts:314`). An allow-list written from memory will blank a grid.
+
+NEW MODULES. Task 056 (pending) registers sprk_todo / sprk_event / sprk_communication as child modules. Whichever of 134 and 056 lands second must give those descriptors allow-lists; after this task, `Register` refuses a descriptor without one, so 056 cannot silently register an all-columns module.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalModuleRegistryTests.cs</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/ExternalModuleDataContractTests.cs</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</file>
+      <file role="canonical-reference">tests/integration/auth/UnifiedAccessControl/FetchXmlGuardSelfJoinTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FetchService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="reference">src/client/external-spa/src/services/gridDataverseClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: every refusal path added by this task. Fail CLOSED: a module with no declared allow-list refuses every /fetch and every /record $select for that module (registration must not silently default to "all columns"); an unparseable FetchXML refuses; an unmodelled verdict refuses — mirror the existing `default:` arm of `RejectFetchXml` (`ExternalModuleDataEndpoints.cs:603-613`).</constraint>
+    <constraint source="C6 fix direction">Scope: /fetch. REJECT, do not silently rewrite, a FetchXML that uses `all-attributes` or names a non-allow-listed attribute in ANY position: `attribute name=`, `attribute alias=` (an alias must not smuggle a column under another key), `condition attribute=` (a filter on a hidden column is a value oracle), `order attribute=`, and aggregate/groupby attributes. The response is 400 ProblemDetails with a new stable errorCode, distinct from `DV_FETCHXML_ENTITY_MISMATCH` and `DV_FETCHXML_LINK_ENTITY_NOT_PERMITTED`. Evaluate it inside the SAME single authority, `EvaluateFetchXmlGuard`, as a third ordered signal after entity identity and link-entity — no second guard method.</constraint>
+    <constraint source="C6 fix direction">Scope: /record. A `$select` naming any non-allow-listed column is refused with 400 and the same errorCode family (do not silently drop — a silently narrowed read is indistinguishable from a null value). The no-$select default projection (primary id + primary name) must itself be allow-listed for every module.</constraint>
+    <constraint source="C6 fix direction">Scope: defence in depth, both routes. After execution AND after `ScopeRows` (so row scoping still sees its scope attributes), strip every key not on the module allow-list from each returned row, including the matching entry inside `@formattedValues`; keep the synthetic `@logicalName` key that `ScopeRows` requires (`ExternalModuleRegistry.cs:195-204`). Aliased keys are not allow-listed columns and are stripped. This runs in the external endpoint, NOT in the shared FetchService or RecordService.</constraint>
+    <constraint source="broker-only / ADR-028 A1-A3">Scope: the allow-lists. `sprk_graphdriveid`, `sprk_graphitemid`, `sprk_filepath`, and any container / drive / item / webUrl pointer column (`sprk_containerid`, `sprk_specontainerid` and equivalents on the roots) MUST NOT appear on any external module's allow-list. File access stays on the document-id-keyed routes.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: the allow-list's home. Extend the existing `ExternalModuleDescriptor` (one new property) and validate it in `ExternalModuleRegistry.Register` (`:266-292`) — no new registry, no new service, no new filter, no configuration file.</constraint>
+    <constraint source="owner 2026-09-10 / spec">Scope: verification. No Dataverse test runs in CI. The live grid check is a MANUAL gate using the existing non-admin test users and an existing CIAM test contact in the correct BU. Do NOT propose relocating any user.</constraint>
+    <constraint source="ADR-038">Scope: tests. Authorization-behaviour tests go to the KEEP path `tests/integration/auth/UnifiedAccessControl/`; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no constructor null-check tests.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. State the placement decision (in BFF, extending the existing seam) citing `.claude/constraints/bff-extensions.md`; measure publish size against a FRESH master worktree and a fresh branch worktree, both from SHORT paths, same zip tool (Compress-Archive), equal file counts on both sides; report both sizes and the delta; ceiling 60 MB; no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/tasks/011-reject-same-entity-self-join.poml</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/grid-widget-empty-diagnosis.md</file>
+    </files>
+    <patterns>
+      <pattern name="single-authority FetchXML guard" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs">`EvaluateFetchXmlGuard` + `RejectFetchXml` (`:502-615`): ordered refusal signals, a verdict enum, one ProblemDetails arm per verdict, a fail-closed default. Add the column signal the same way task 011 added the join signal.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify every anchor above against current source; this project has repeated premise rot. Confirm FetchService/RecordService are shared with the internal /api/dataverse routes before deciding where stripping lives.</step>
+    <step order="1">Derive each module's allow-list from LIVE data: read the six `sprk_gridconfiguration` records (`ExternalAccessModule.cs:31-39`) and any saved query or saved view the external grids load, list every attribute they reference (attribute, condition, order, alias, aggregate positions), add each module's scope-dimension attributes and the /record default projection, derive the grid-configuration module's list from the shared client's /record `$select` (ConfigurationService.ts, ViewService.ts), and record the derivation (record id or source file → columns) in the task notes. Remove pointer columns per the broker-only constraint; if a live grid references one, or uses an alias or aggregate, fire the escalation.</step>
+    <step order="2">Add the allow-list property to `ExternalModuleDescriptor`, validate it at `Register` (non-empty; contains every scope-dimension attribute; contains the /record default columns; contains no pointer column), and declare it on every registration present at execution time (seven today; ten if task 056 has landed).</step>
+    <step order="3">Add the column signal to `EvaluateFetchXmlGuard` and its `RejectFetchXml` arm; enforce the /record `$select` rule; add post-execution key stripping on both routes.</step>
+    <step order="4">Fix the file-header promise at `ExternalModuleDataEndpoints.cs:26-27` so it describes the mechanism that now keeps it.</step>
+    <step order="5">Tests per the closed set below, with perturbations; build, full unit suite, ArchTests, publish size.</step>
+    <step order="6">MANUAL live gate against dev (see acceptance). Record the result in `projects/unified-access-control-r2/notes/task-134-external-module-column-allow-list.md`.</step>
+    <step order="7">Update TASK-INDEX.md (status token `✅ [done]`) and this POML's status; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A live grid configuration or saved query used by an external widget legitimately projects a pointer column (sprk_graphdriveid / sprk_graphitemid / sprk_filepath / a container id). STOP — that is a product decision about what the grid shows, not an allow-list detail. Report the record, the column and the widget.</trigger>
+    <trigger>The column list a widget needs cannot be derived because a grid configuration or saved query is unreadable or missing in dev. STOP rather than guessing a list; a guessed list either leaks or blanks a grid.</trigger>
+    <trigger>An internal (non-external) consumer turns out to reach FetchService or RecordService through the external route group. STOP; the fix must not change the internal /api/dataverse surface.</trigger>
+    <trigger>A live grid configuration or saved query used by an external widget projects an ALIASED or AGGREGATE attribute. STOP — the reject-alias rule and the post-execution strip would blank that column. Report the record and the expression; RECOMMENDATION: rewrite the grid's FetchXML to the plain attribute (the alias carries no security meaning) rather than allow-listing alias keys.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ExternalModuleDescriptor` (`Infrastructure/ExternalAccess/ExternalModuleRegistry.cs:72-238`) already carries each module's ROW scope (`ScopeDimensions`, `RecordIdAttribute`); `EvaluateFetchXmlGuard` (`ExternalModuleDataEndpoints.cs:502`) is the single FetchXML authority. Grep for a column allow-list on this seam (`AllowedColumns|AllowList|allowedAttributes` under Api/ExternalAccess and Infrastructure/ExternalAccess) finds none.</existing>
+    <extension>Yes — this task EXTENDS both: one new property on the existing descriptor and one new ordered signal inside the existing guard. No new type, service, filter or route.</extension>
+    <cost-of-doing-nothing>A CIAM contact granted on one project POSTs a FetchXML selecting sprk_graphdriveid, sprk_graphitemid and sprk_filepath on sprk_document and receives the SPE drive id, item id and Graph webUrl of every document on that project (app-only, FLS bypassed), contradicting the broker-only invariant the route's own header states.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-134-external-module-column-allow-list.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller granted on project P, when they POST /fetch for sprk_document selecting sprk_graphdriveid, sprk_graphitemid or sprk_filepath, then the request is refused 400 with the new column errorCode and Dataverse is not queried.</criterion>
+    <criterion testable="true">A FetchXML with `all-attributes` on any module is refused 400 with the column errorCode.</criterion>
+    <criterion testable="true">A non-allow-listed column used ONLY in a `condition`, ONLY in an `order`, or ONLY as an aliased/aggregate attribute is refused 400 — each position has its own test.</criterion>
+    <criterion testable="true">A FetchXML that uses only allow-listed attributes is admitted and returns the same scoped rows as before this task (regression).</criterion>
+    <criterion testable="true">The guard order is preserved: a cross-entity FetchXML still reports `DV_FETCHXML_ENTITY_MISMATCH`, and a link-entity FetchXML still reports `DV_FETCHXML_LINK_ENTITY_NOT_PERMITTED`, even when it also names a forbidden column.</criterion>
+    <criterion testable="true">GET /record with a `$select` naming a non-allow-listed column is refused 400; with an allow-listed `$select` or no `$select` it returns 200 with only allow-listed keys.</criterion>
+    <criterion testable="true">Defence in depth: when the executed result contains a key not on the allow-list (test double returns an extra attribute and an extra `@formattedValues` entry), both are stripped from the response and `@logicalName` survives.</criterion>
+    <criterion testable="true">Registration refuses (throws at startup) a descriptor with no allow-list, one missing a scope-dimension attribute, one missing the /record default columns, and one containing a pointer column. Every registration present at execution time (seven today; ten if task 056 has landed) declares an allow-list and the application starts.</criterion>
+    <criterion testable="true">Authorization negative: a caller with an empty accessible set submitting an allow-listed FetchXML still receives 0 rows without a Dataverse query (existing behaviour, `ExternalModuleDataEndpoints.cs:185-192`); the same caller submitting a non-allow-listed column receives the same 400 as any other caller, because the guard runs before scoping exactly as today (`:169-172`). Neither path queries Dataverse (asserted on the test double).</criterion>
+    <criterion testable="true">The internal /api/dataverse fetch and record routes are byte-for-byte unaffected (their existing tests pass unmodified).</criterion>
+    <criterion testable="true">Perturbation: removing the column signal, removing the post-execution strip, or removing the alias check each turns at least one test green-to-red. All reverted before completion.</criterion>
+    <criterion testable="true">MANUAL live gate (dev, no CI): signed in as an existing CIAM test contact and as an existing non-admin workforce test user, each of the six outside-counsel grids renders the same columns and rows as before the change, and a hand-crafted /fetch for sprk_graphitemid returns 400. Evidence (screenshots or response captures) recorded in the task notes.</criterion>
+    <criterion testable="true">The allow-list derivation (grid configuration id → columns) is recorded in the task notes.</criterion>
+    <criterion testable="true">Build green; full BFF unit suite green; ArchTests green; publish size reported (both absolute sizes, delta, zip tool, file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above (each FetchXML position, /record, stripping, registration refusals, guard order, empty set). Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C6 (notes/session26-uac-defects-and-synopsis.md § C6; UC3 caveat "OVER-EXPOSURE"). Impact is identifier and internal-field disclosure within already-granted scope — no cross-scope rows — which is why it ranks medium, but it breaks the broker-only invariant that every other external route keeps. Investigation gap G-10 was filed under the generic "field-level visibility out of scope" deferral (spec.md:27; design-register.md D-3), whose premise ("the SPA won't ask") fails when the caller authors the FetchXML. This task closes G-10; record that in the design register's D-3 entry at completion (a notes edit, not a spec change).
+
+Independent of tasks 135-137 in logic, but parallel-unsafe under the hot-file rule; run it before or after them, not beside. Task 136 relies on the module scope dimensions reading `CallerPrincipal` views and deliberately does not edit this task's files. Task 056 (child modules) must declare allow-lists for its three descriptors if it lands after this task — the main session should add that line to 056 (not edited here). After the criterion-8 follow-up, 056's descriptors must ALSO declare PrimaryNameAttribute (read from live EntityDefinitions) and add their entities to the LivePrimaryNames pin table.
+
+🔔 OWNER QUESTION (executor follow-up D1, open — no client code changed for it): the external grids mount the shared DataGrid with the default showViewSelector=true (src/client/external-spa/src/widgets/GridWidgetBody.tsx), so CIAM users can pick the entity's INTERNAL MDA main views from /savedqueries/{entity}. That is why each allow-list includes columns from sibling main views that render rows today (e.g. ownerid, sprk_assignedto, sprk_visibilitystate). Should external grids hide the ViewSelector (showViewSelector=false)? If yes, every allow-list can shrink to grid config + scope attributes + /record default projection, removing those internal columns from external reach; if no, the allow-lists stay as derived and any change to an internal main view's columns must also be mirrored in ReadableColumns. Owner decision required before either change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-134">
+      Code complete; the MANUAL live gate (criterion 12) is PENDING — no deploy or live write was permitted in this run.
+      Allow-lists derived from LIVE dev data (read-only): the six sprk_gridconfiguration records, every active main
+      view of the seven module entities, EntityDefinitions primary id/name, and IsSecured (none). No escalation trigger
+      fired: no pointer, alias or aggregate in any live grid or view; nothing unreadable; only the external grid client
+      reaches the seam. Premise corrections: grid FetchXML lives in sprk_configjson (no sprk_fetchxml/sprk_layoutxml
+      columns); the external config read is DataGrid.tsx:657, not ConfigurationService/ViewService (Xrm paths); the
+      external grids expose a ViewSelector of internal main views (owner follow-up D1 in the notes). Deviation D2: the
+      primary-NAME default column is pinned by a live-metadata test, not by Register (metadata is not derivable from the
+      one permitted property); Register enforces the primary id. Perturbations P1–P4 each turned tests red, all reverted.
+      Design-register D-3 annotated (G-10 closed for this seam). Full record:
+      notes/task-134-external-module-column-allow-list.md.
+    </outcome>
+    <outcome date="2026-09-30" branch="task/uac-r2-134" kind="verifier-follow-up">
+      Criterion 8 follow-up (verifier: PARTIALLY met — Register enforced the primary id but not the primary NAME the
+      no-$select /record projection needs). Deviation D2 is SUPERSEDED: ExternalModuleDescriptor gains a second
+      required property, PrimaryNameAttribute, and Register now refuses at startup a descriptor that does not declare
+      it (null/blank) or whose ReadableColumns lacks it, alongside the existing primary-id refusal. All seven
+      production descriptors declare it; each was re-verified READ-ONLY against live EntityDefinitions
+      (spaarkedev1, 2026-09-30): sprk_project=sprk_projectnumber, sprk_document=sprk_documentname,
+      sprk_invoice/sprk_workassignment/sprk_servicerequest/sprk_gridconfiguration=sprk_name,
+      sprk_matter=sprk_matternumber — unchanged from the original derivation. The live-metadata pin test is kept and
+      now also asserts each DECLARATION equals the live value; a new test fails if a registered module is missing
+      from the pin table. New tests: seeded descriptor missing the name column throws at Register (theory row +
+      exact-message fact), undeclared name (null/""/"  ") throws, case-insensitive match accepted. Perturbations
+      P5-P8 each turned tests red and were reverted (see notes §8). No allow-list content changed; no client change.
+      Runs: affected 117/117; full BFF unit 13120 passed / 0 failed / 56 skipped (13176); ArchTests 337/337.
+      MANUAL live gate (criterion 12) remains PENDING.
+    </outcome>
+  </execution>
+</task>

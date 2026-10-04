@@ -178,6 +178,46 @@ be extracted **last**, or given tests first.
 exercising `ComposeService` under another name is missing. Real coverage is therefore **≥** these
 numbers — the bias is conservative, which is the safe direction for this decision.
 
+## ✅ TASK 070 COMPLETE (2026-09-01) — all nine clusters extracted
+
+`ComposeService.cs`: **4,427 → 2,114 lines (−52%)**. What remains is the public `IComposeService`
+contract plus `SaveAsync`'s fork, which this document argued should stay whole — one decision with
+many branches, and the best-covered code in the file (94.9% line / 86.0% branch). Per
+[COMPONENT-COMPLEXITY.md](../../../docs/standards/COMPONENT-COMPLEXITY.md) that is a legitimate
+outcome, not a miss.
+
+**"Delete its waiver" (the task's second criterion) needs no action**: the God-class ratchet
+(`GodClassGuardTests`) was RETIRED 2026-08-20 — it gated on line count, the wrong instrument. There is
+no waiver left to delete. (Stale residue worth someone's attention, NOT ours: `bff-artifact-manifest.json`
+still lists `godClassRatchet` in its `required` gate set, so it requires an outcome nothing can now
+produce. That file is `ci-cd-unit-test-remediation-r1`'s surface.)
+
+### What the mutation discipline actually bought
+
+Two real coverage holes, both on shipped behaviour, neither visible to a green suite:
+
+| Hole | Consequence if it regressed | Closed by |
+|---|---|---|
+| `TryFindDocumentByTransientKeyAsync` could match NOTHING (cluster 2b) | duplicate `sprk_document` rows — "the 8-duplicate defect", already shipped once | `CreateOnSave_WhenTransientKeyMatchesAnExistingRow_ReplacesInPlaceAndMintsNoDuplicate` |
+| The G10 storm guard could be INVERTED (cluster 5a) | a profiling storm on every reopen, AND changed documents never re-profiled | `ComposeProfileRetriggerGuardSeamTests` (6 tests, both directions) |
+
+Each closing test was verified against the mutation that exposed the hole — red with it, green without.
+
+### Three ways the mutation tooling reported FALSE results (all hit in one session)
+
+Recorded because each one reads exactly like a genuine survival, and a false survival is what makes
+you write a test for a hole that does not exist — or worse, trust a move that was never verified:
+
+1. **`Copy-Item` preserves the backup's timestamp.** The restored source looks OLDER than the built
+   assembly, MSBuild skips the rebuild, and the test binary still contains the mutation. The disk
+   reads clean. Use `WriteAllText`, or touch the file after restoring.
+2. **A regex seed that silently does not match.** Reported "seeded" and cost a full 7-minute run that
+   looked like a clean survival.
+3. **LF-vs-CRLF in a literal `.Replace()`.** Same failure, same cost.
+
+**The rule now: assert the marker is present in the file BEFORE spending a suite run.** A mutation you
+did not actually apply is indistinguishable from a mutation nothing caught.
+
 ## Extraction progress (2026-08-29)
 
 Order follows the coverage evidence (**7 → 6 → 5b → 8 → 2b → 2a → 1 → 3 → 4 → 5a**), not the
@@ -189,7 +229,9 @@ structural order this file originally proposed.
 | 6 annotations | ✅ extracted | `ComposeAnnotationStore.cs` | `LedgerRefPattern` → `@".*"` → 1/7 red |
 | 5b profile + step signals | ✅ extracted | `ComposeProfileDispatcher.cs` | `if (result.JobSubmitted)` → `if (!…)` → 8/16 red |
 | 8 reference/paraId helpers | ✅ extracted | `ComposeReferenceMapping.cs` | off-by-one in `ResolveParaIdForHint` → 4 red |
-| 2b + 2a create-on-save | ⛔ **HELD** | — | `unified-access-control-r2` owns #858 inside this file |
+| 2b record resolution | ✅ extracted | `ComposeRecordResolution.cs` | three mutations; **one SURVIVED** → the transient-key dedup hole, closed (below) |
+| 2a create-on-save | ✅ extracted | `ComposeCreateOnSavePromoter.cs` | two mutations (success bar → 1 red; outcome projection → 8 red); no survivors |
+| 5a profile storm guard | ✅ extracted | `ComposeProfileRetriggerGuard.cs` | mutation seeded BEFORE the move **SURVIVED all 1,814** → the storm guard had no test at all; closed (below) |
 | 1 re-anchor | ✅ extracted | `ComposeReanchorCoordinator.cs` | **six** mutations across six members; four survived the whole suite → three coverage holes closed first (below) |
 | 3 save baseline + concurrency | ✅ extracted | `ComposeSaveStorageCoordinator.cs` | **seven** mutations, one per member; three survived the whole suite → three more holes closed (below) |
 

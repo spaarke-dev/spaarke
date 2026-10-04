@@ -46,6 +46,7 @@ import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
+import { provisionSecureProject } from '../CreateProjectWizard/provisioningService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -513,13 +514,62 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     // create-project step selected (Finish was disabled by canAdvance).
     if (currentSelectedActions.includes('create-project') && projectFormValidRef.current && dataService) {
       try {
-        const service = new ProjectService(dataService);
+        // authenticatedFetch + bffBaseUrl are REQUIRED here, not optional conveniences.
+        //
+        // This step renders the same `CreateProjectStep` the real wizard does, Secure toggle
+        // included. `projectService` writes `sprk_issecure = true` unconditionally and then
+        // cascades `sprk_containerid` from the acting user's business unit — but the thing that
+        // gives a secure project its OWN container, `provisionSecureProject`, lives in
+        // `CreateProjectWizard`'s onFinish, which THIS path does not go through.
+        //
+        // So before this fix a user could tick "Secure" here and get a project flagged secure
+        // whose documents land in the SHARED business-unit container, with no warning — the
+        // wizard's provisioning-failure message lives on a path this dialog bypasses. It looked
+        // secure in Dataverse and to anything reading the flag. That is the exact isolation gap
+        // unified-access-control-r2 exists to close.
+        const service = new ProjectService(dataService, authenticatedFetch, bffBaseUrl);
         const result = await service.createProject(currentProjectFormValues);
 
         if (result.success) {
           completedActions.push(`Project "${result.projectName}" created`);
           createdProjectId = result.projectId;
           createdProjectName = result.projectName;
+
+          // Mirror CreateProjectWizard.tsx onFinish (~:688): provisioning runs AFTER the record
+          // exists (it stamps fields on the project, so the row must be there first) and is
+          // NON-FATAL — the project was created either way, so a provisioning failure is a
+          // warning the admin can act on, never a thrown error that hides the created record.
+          if (currentProjectFormValues.isSecure && result.projectId) {
+            if (authenticatedFetch && bffBaseUrl) {
+              try {
+                const provisionResult = await provisionSecureProject(
+                  { projectId: result.projectId, projectRef: result.projectName ?? '' },
+                  authenticatedFetch,
+                  bffBaseUrl
+                );
+                if (!provisionResult.success) {
+                  warnings.push(
+                    `Secure Project provisioning failed: ${provisionResult.errorMessage} — ` +
+                      'the project was created but its dedicated document container was not ' +
+                      'provisioned, so its documents would go to the shared container. It needs ' +
+                      'to be provisioned before documents are added.'
+                  );
+                }
+              } catch (err) {
+                warnings.push(
+                  `Secure Project provisioning failed: ${err instanceof Error ? err.message : 'Unknown error'} — ` +
+                    'the project was created but is NOT yet isolated.'
+                );
+              }
+            } else {
+              // Fail LOUDLY rather than silently creating a secure-in-name-only project.
+              warnings.push(
+                'Project was marked Secure but could not be provisioned from this dialog ' +
+                  '(no authenticated BFF connection). Its documents would go to the shared ' +
+                  'container — provision it before adding documents.'
+              );
+            }
+          }
         } else {
           warnings.push(`Project creation failed: ${result.errorMessage}`);
         }

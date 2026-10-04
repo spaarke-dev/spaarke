@@ -33,17 +33,24 @@ namespace Sprk.Bff.Api.Services.Office;
 /// - Supports reconnection via sequence numbers
 /// - Graceful degradation when Redis unavailable
 /// </para>
+/// <para>
+/// Sequence numbers come from Redis (<c>INCR sdap:job:{jobId}:seq</c>), so one job's events share one number line
+/// across instances and restarts (task 068, #1086). They used to come from a dictionary on each instance, so two
+/// instances, or one restarted, numbered the same job's events independently.
+/// </para>
 /// </remarks>
-public class JobStatusService : IJobStatusService, IDisposable
+public class JobStatusService : IJobStatusService
 {
     private const string ChannelPrefix = "sdap:job:";
     private const string ChannelSuffix = ":status";
+    private const string SequenceSuffix = ":seq";
+
+    /// <summary>How long a job's counter outlives its last event. Office jobs finish in minutes.</summary>
+    private static readonly TimeSpan SequenceLifetime = TimeSpan.FromHours(24);
 
     private readonly IConnectionMultiplexer _redis;
     private readonly ISubscriber _subscriber;
     private readonly ILogger<JobStatusService> _logger;
-    private readonly SemaphoreSlim _sequenceLock = new(1, 1);
-    private readonly Dictionary<Guid, long> _jobSequences = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -110,7 +117,7 @@ public class JobStatusService : IJobStatusService, IDisposable
             var stopwatch = Stopwatch.StartNew();
 
             // Assign sequence number for ordering
-            var sequence = await GetNextSequenceAsync(update.JobId, cancellationToken);
+            var sequence = await GetNextSequenceAsync(update.JobId);
             var updateWithSequence = update with { Sequence = sequence };
 
             // Serialize and publish
@@ -172,6 +179,7 @@ public class JobStatusService : IJobStatusService, IDisposable
     /// <inheritdoc />
     public async IAsyncEnumerable<JobStatusUpdate> SubscribeToJobAsync(
         Guid jobId,
+        Action? onSubscribed = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("SubscribeToJob");
@@ -207,6 +215,7 @@ public class JobStatusService : IJobStatusService, IDisposable
 
             // Subscribe to Redis channel
             messageQueue = await _subscriber.SubscribeAsync(RedisChannel.Literal(channelName));
+            onSubscribed?.Invoke();
 
             // Start background task to process Redis messages
             var processingTask = ProcessRedisMessagesAsync(
@@ -415,29 +424,18 @@ public class JobStatusService : IJobStatusService, IDisposable
     }
 
     /// <summary>
-    /// Gets the next sequence number for a job's status updates.
+    /// The job's next sequence number, from the Redis counter every instance shares. Publishing already needs Redis,
+    /// so this adds no dependency; the counter's lifetime slides with each event.
     /// </summary>
-    private async Task<long> GetNextSequenceAsync(
-        Guid jobId,
-        CancellationToken cancellationToken)
+    private async Task<long> GetNextSequenceAsync(Guid jobId)
     {
-        await _sequenceLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (!_jobSequences.TryGetValue(jobId, out var sequence))
-            {
-                sequence = 0;
-            }
-
-            sequence++;
-            _jobSequences[jobId] = sequence;
-
-            return sequence;
-        }
-        finally
-        {
-            _sequenceLock.Release();
-        }
+        var database = _redis.GetDatabase();
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): SystemCacheKeys.JobStatusSequence — a per-job counter keyed by the job's GUID,
+        // shared by every instance; the job, not a tenant, owns the number line, beside the job's own sdap:job channel.
+        RedisKey key = $"{ChannelPrefix}{jobId}{SequenceSuffix}";
+        var sequence = await database.StringIncrementAsync(key);
+        await database.KeyExpireAsync(key, SequenceLifetime, CommandFlags.FireAndForget);
+        return sequence;
     }
 
     /// <summary>
@@ -499,13 +497,5 @@ public class JobStatusService : IJobStatusService, IDisposable
     private static string GetChannelName(Guid jobId)
     {
         return $"{ChannelPrefix}{jobId}{ChannelSuffix}";
-    }
-
-    /// <summary>
-    /// Cleans up resources.
-    /// </summary>
-    public void Dispose()
-    {
-        _sequenceLock.Dispose();
     }
 }

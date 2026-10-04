@@ -701,7 +701,6 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped<IPlaybookOrchestrationService>(sp =>
                 new MockPlaybookOrchestrationService(_scenario, _authorizedDocumentIds));
             services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);

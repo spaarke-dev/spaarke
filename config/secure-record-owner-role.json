@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "description": "The tables the 'Secure Record Owner' role must hold Read on, at User (Basic) depth, so that Dataverse accepts the Secure Record team as the OWNER of a row in that table. Dataverse refuses an owner whose roles lack Read on the table ('Read Privilege Check For Owner failed ... is missing prv<Read> privilege'). This file is the ONE list. SECURE-PROJECT-ENVIRONMENT-SETUP.md sections 5.1, 5.3, 5.4 and 7, scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and unified-access-control-r2's NFR-05 census all read it. Do not copy it anywhere else.",
+  "howToExtend": [
+    "Add a table ONLY when a writer assigns rows of it to the Secure Record team, or an owner decision requires it. State which in 'reason'.",
+    "Record the failure that forces it in 'evidence': create a probe row owned by the Secure Record team with the privilege missing, and quote the refusal. A NEW table without a recorded refusal does not belong here. (sprk_document is the one exception: it was already granted, so its evidence says why it could not be recorded.)",
+    "'privilegeName' is the Read privilege's name from metadata (EntityDefinitions(LogicalName='x')/Privileges, PrivilegeType eq 'Read'). The casing follows the schema name (prvReadsprk_Todo, not prvReadsprk_todo). The script checks it against metadata and refuses a mismatch.",
+    "Then run: scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl <url> (dry run), then -Apply, then -Verify.",
+    "Never add a depth or an access type here. The role grants Read at User (Basic) depth and nothing else, per SECURE-PROJECT-ENVIRONMENT-SETUP.md section 5.1."
+  ],
+  "roleName": "Secure Record Owner",
+  "businessUnitName": "Secure Record",
+  "access": "Read",
+  "depth": "Basic",
+  "tables": [
+    {
+      "logicalName": "sprk_project",
+      "privilegeName": "prvReadsprk_Project",
+      "kind": "root",
+      "reason": "Carries sprk_issecure. ProvisionProjectEndpoint assigns a secure project to the Secure Record team.",
+      "evidence": "unified-access-control-r2 task 046 (2026-08-25): 'Principal team ... is missing prvReadsprk_Project privilege'.",
+      "addedBy": "unified-access-control-r2 task 046"
+    },
+    {
+      "logicalName": "sprk_matter",
+      "privilegeName": "prvReadsprk_Matter",
+      "kind": "root",
+      "reason": "Carries sprk_issecure. A secure matter is owned by the Secure Record team.",
+      "evidence": "unified-access-control-r2 task 046: assigning a Matter to the team failed until this was added.",
+      "addedBy": "unified-access-control-r2 task 046"
+    },
+    {
+      "logicalName": "sprk_workassignment",
+      "privilegeName": "prvReadsprk_WorkAssignment",
+      "kind": "root",
+      "reason": "Carries sprk_issecure. A secure work assignment is owned by the Secure Record team.",
+      "evidence": "unified-access-control-r2 task 046: verified by assigning a probe record.",
+      "addedBy": "unified-access-control-r2 task 046"
+    },
+    {
+      "logicalName": "sprk_document",
+      "privilegeName": "prvReadsprk_Document",
+      "kind": "child",
+      "reason": "Write-path invariant I-6 (RecordOwnershipResolver, record-first). OfficeService.SaveAsync and UploadFinalizationWorker's attachment children own a document filed to a secure record by the Secure Record team. Owner decision C10 part 2 also names documents.",
+      "evidence": "No refusal of its own is recorded. The privilege was already on the dev role when task 082 started (origin unrecorded), and recording one would have meant removing it, which is an owner decision. It is required by the same owner Read check the sprk_todo entry records verbatim.",
+      "addedBy": "spaarkeai-word-add-in-r1 task 082"
+    },
+    {
+      "logicalName": "sprk_todo",
+      "privilegeName": "prvReadsprk_Todo",
+      "kind": "child",
+      "reason": "Write-path invariant I-6. OfficeService.CreateTodoAsync owns a To Do by the team of the record it regards (then its document, then its communication), so a To Do filed against a secure record is owned by the Secure Record team. Owner decision C10 part 2 also names to-dos.",
+      "evidence": "spaarkedev1, 2026-09-30, 3 of 3 polls: 'Read Privilege Check For Owner failed ... Principal team (Id=daec0b6f-80a0-f111-aaac-000d3a99d1d7, ..., privilegeCount=36, ...) is missing prvReadsprk_Todo privilege'.",
+      "addedBy": "spaarkeai-word-add-in-r1 task 082"
+    },
+    {
+      "logicalName": "sprk_communication",
+      "privilegeName": "prvReadsprk_Communication",
+      "kind": "child",
+      "reason": "Owner decision C10 part 2 (2026-09-30): communications must be as secure as the main record. unified-access-control-r2 task 146 re-owns them; the #1034 writers adopt I-6.",
+      "evidence": "spaarkedev1, 2026-09-30: '... privilegeCount=36 ... is missing prvReadsprk_Communication privilege'.",
+      "addedBy": "spaarkeai-word-add-in-r1 task 082"
+    },
+    {
+      "logicalName": "sprk_event",
+      "privilegeName": "prvReadsprk_Event",
+      "kind": "child",
+      "reason": "Owner decision C10 part 2 (2026-09-30): events must be as secure as the main record. unified-access-control-r2 task 146 re-owns them; the #1034 writers adopt I-6.",
+      "evidence": "spaarkedev1, 2026-09-30: '... privilegeCount=36 ... is missing prvReadsprk_Event privilege'.",
+      "addedBy": "spaarkeai-word-add-in-r1 task 082"
+    },
+    {
+      "logicalName": "sprk_memo",
+      "privilegeName": "prvReadsprk_Memo",
+      "kind": "child",
+      "reason": "Owner decision C10 part 2 (2026-09-30): memos must be as secure as the main record. unified-access-control-r2 task 146 re-owns them.",
+      "evidence": "spaarkedev1, 2026-09-30: '... privilegeCount=36 ... is missing prvReadsprk_Memo privilege'.",
+      "addedBy": "spaarkeai-word-add-in-r1 task 082"
+    },
+    {
+      "logicalName": "sprk_invoice",
+      "privilegeName": "prvReadsprk_Invoice",
+      "kind": "child",
+      "reason": "Write-path invariant I-6, owner G5 (round 3b): unified-access-control-r2 task 130's InvoiceReviewService.CreateInvoiceRecordAsync (Services/Finance/InvoiceReviewService.cs:604) creates a confirmed invoice OWNED BY THE MATTER'S TEAM (RecordOwnershipResolver, record-first), which for a secure matter is the Secure Record owner team. Owner amendment Q12 (2026-10-01): sprk_invoice is a child of a secure matter or project and belongs in this set.",
+      "evidence": "spaarkedev1, 2026-10-02, 3 of 3 polls (03:52:35Z, 03:53:00Z, 03:53:25Z; unified-access-control-r2 task 145 gate G1 step 1, HTTP 403, code 0x80040299): a sprk_invoice create with ownerid = the named team 'Secure Record Owners' (6eabc7f9-13be-f111-a05b-0022482913fc, the role's sole holder after the task 144 cutover) was refused, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=8, MetadataCachePrivilegesCount=7264, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Invoice privilege (Id=315f05b2-7417-43fa-8b47-8d0722bfbaf2) on OTC=10732 for entity 'sprk_invoice' (LocalizedName='Invoice'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.' privilegeCount=8 matches the role's 8 Read privileges, so the reading was current.",
+      "addedBy": "unified-access-control-r2 task 145"
+    }
+  ]
+}

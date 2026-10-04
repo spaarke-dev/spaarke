@@ -12,10 +12,8 @@
   "$comment-modelTier": "Maps to sprk_analysisaction.sprk_modeltier = 100000000 (AiModelTier.Fast — 'Cheap/fast models, e.g. gpt-4o-mini — classification, validation, entity resolution', per Services/Ai/PublicContracts/Binding.cs). Correct tier here: this Action performs a light structuring/mapping/summarizing pass over an ALREADY-PRODUCED classification signal, not fresh deep reasoning — Fast keeps FR-05's 'no second full LLM pass' cost intent honest even though a call still occurs (a cheap structuring call, not a second Reasoning-tier classification).",
   "temperature": 0.2,
   "$comment-temperature": "Low temperature — triage output must be faithful to the supplied classification + message text (mapping/summarizing), not creative. Matches the extraction/analysis convention (compose-explain-clause: 0.2) rather than the advisory/reasoning convention (nda-review: 0.3).",
-
   "$schema": "https://spaarke.com/schemas/prompt/v1",
   "$version": 1,
-
   "instruction": {
     "role": "You are the Spaarke email triage structuring assistant. An upstream classification pass (AiClassificationRung, rung 5 of the Association Engine) has already analyzed this inbound email and produced a classification signal: candidate record types, a freeform content category, an urgency level, obligations, suggested actions, and a rationale. Your job is NOT to re-classify the email from scratch — it is to take that already-produced signal, reconcile it against Spaarke's Dataverse-configured triage taxonomy and closed value sets, and produce the final structured triage output a legal reviewer sees on the communication record.",
     "task": "Given the upstream classification result and the normalized message text (subject + body), produce the five-field triage output: category (mapped onto the firm's configured category taxonomy), a concise 2-line summary, a clean obligations list, a priority level, and a suggested review outcome. Reuse the classification's category/urgency/obligations/suggestedActions/rationale as your primary signal — refine, map, and structure it; do NOT perform a fresh independent classification of the raw message as if the classification signal did not exist.",
@@ -32,7 +30,6 @@
     ],
     "context": "This Action runs on the communication enrichment path (task 023 wires the trigger, immediately after AiClassificationRung has already produced its metadata-only classification signal for the same message). Running a second full classification pass here would double the LLM cost per email for no benefit — this Action's entire value is turning the already-produced signal into the structured, Dataverse-taxonomy-aligned triage output that the review queue (r5's shipped surfaces) and the RI-confidence scorer (task 024) consume."
   },
-
   "input": {
     "classification": {
       "required": true,
@@ -46,16 +43,9 @@
       "description": "The normalized email subject + plain-text body, bounded. Used ONLY as supporting grounding for the 2-line summary and for obligation/date detail finer-grained than the classification signal — never as a directive to re-classify from scratch."
     }
   },
-
   "output": {
+    "$comment-field-order": "FIELD ORDER IS LOAD-BEARING (spaarke-ontology-platform-r1, 2026-09-29). Structured-output decoding is autoregressive: a field emitted earlier conditions every field after it. Evidence therefore precedes conclusions - summary + obligations (what the email SAYS) are emitted BEFORE category/priority/reviewOutcome (what we CONCLUDE), so the classification conditions on the model's own articulation of the message rather than being committed to first. The prior order led with `category`, i.e. the model picked a taxonomy row before stating what the email was about. Do NOT reorder to put conclusions first.",
     "fields": [
-      {
-        "name": "category",
-        "type": "string",
-        "description": "The triage category, mapped from the classification's freeform category onto ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory). Never invent a value outside the allowed list.",
-        "maxLength": 100,
-        "$choices": "lookup:sprk_triagecategory.sprk_name"
-      },
       {
         "name": "summary",
         "type": "string",
@@ -65,9 +55,19 @@
       {
         "name": "obligations",
         "type": "array",
-        "items": { "type": "string", "maxLength": 200 },
+        "items": {
+          "type": "string",
+          "maxLength": 200
+        },
         "maxItems": 8,
         "description": "Concrete, human-readable action-phrase obligations grounded in the classification's obligations/suggestedActions signal and the message text (e.g. 'Respond to court by Friday, Aug 15'). Empty array when none apply — never fabricated."
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "description": "The triage category, mapped from the classification's freeform category onto ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory). Never invent a value outside the allowed list.",
+        "maxLength": 100,
+        "$choices": "lookup:sprk_triagecategory.sprk_name"
       },
       {
         "name": "priority",
@@ -86,18 +86,22 @@
     ],
     "structuredOutput": true
   },
-
   "$comment-scopes-omitted": "No 'scopes' section — RAG grounding over the matter's own prior correspondence (FR-06) is intentionally deferred to task 023 (which authors the Binding + scopes.$knowledge wiring). This task authors the Action definition only.",
-
   "examples": [
     {
       "input": {
         "classification": {
-          "candidateRecordTypes": ["sprk_matter"],
+          "candidateRecordTypes": [
+            "sprk_matter"
+          ],
           "category": "court-notice",
           "urgency": "urgent",
-          "obligations": ["respond-by-deadline"],
-          "suggestedActions": ["calendar-deadline"],
+          "obligations": [
+            "respond-by-deadline"
+          ],
+          "suggestedActions": [
+            "calendar-deadline"
+          ],
           "privilegeFlagged": false,
           "rationale": "Message references a court-imposed response deadline for the Smith matter."
         },
@@ -117,14 +121,116 @@
         "priority": "Urgent",
         "reviewOutcome": "Route"
       }
+    },
+    {
+      "input": {
+        "classification": {
+          "candidateRecordTypes": [
+            "sprk_matter"
+          ],
+          "category": "budget-discussion",
+          "urgency": "elevated",
+          "obligations": [
+            "respond-by-deadline"
+          ],
+          "suggestedActions": [
+            "calendar-deadline"
+          ],
+          "privilegeFlagged": false,
+          "rationale": "Counsel proposes additional work beyond the agreed budget for the Acme matter."
+        },
+        "message": {
+          "subject": "MAT-10231 Acme - additional depositions",
+          "bodyText": "Given the two new claims we will need two further depositions, which we estimate at $40-45k beyond the current budget. Please confirm you are comfortable before we schedule them."
+        }
+      },
+      "output": {
+        "category": "Scope / budget change",
+        "summary": "Counsel proposes two additional depositions estimated at $40-45k beyond the current budget. Approval is required before the work is scheduled.",
+        "obligations": [
+          "Approve or decline two additional depositions",
+          "Revise the matter budget by approximately $45k"
+        ],
+        "priority": "High",
+        "reviewOutcome": "Update"
+      }
+    },
+    {
+      "input": {
+        "classification": {
+          "candidateRecordTypes": [
+            "sprk_matter"
+          ],
+          "category": "invoice",
+          "urgency": "routine",
+          "obligations": [
+            "respond-by-deadline"
+          ],
+          "suggestedActions": [
+            "calendar-deadline"
+          ],
+          "privilegeFlagged": false,
+          "rationale": "Message transmits an invoice for work already performed."
+        },
+        "message": {
+          "subject": "MAT-10231 Acme - invoice 10044725",
+          "bodyText": "Please find attached our invoice 10044725 for work performed in August, totalling $38,420. Payment is due within 30 days per the engagement terms."
+        }
+      },
+      "output": {
+        "category": "Invoice / Billing",
+        "summary": "Counsel transmits invoice 10044725 for $38,420 covering August work. Payment is due within 30 days.",
+        "obligations": [
+          "Review and approve invoice 10044725 for payment"
+        ],
+        "priority": "Low",
+        "reviewOutcome": "File"
+      }
+    },
+    {
+      "input": {
+        "classification": {
+          "candidateRecordTypes": [
+            "sprk_matter"
+          ],
+          "category": "rate-change",
+          "urgency": "elevated",
+          "obligations": [
+            "respond-by-deadline"
+          ],
+          "suggestedActions": [
+            "calendar-deadline"
+          ],
+          "privilegeFlagged": false,
+          "rationale": "Firm notifies a change to hourly rates for the coming year."
+        },
+        "message": {
+          "subject": "MAT-10231 Acme - 2027 rate schedule",
+          "bodyText": "Effective January 1 our partner rate moves from $780 to $835 per hour and we are adding a senior associate to the team at $520. Current scope and budget are unchanged."
+        }
+      },
+      "output": {
+        "category": "Fee / rate change",
+        "summary": "The firm notifies a 2027 rate increase (partner $780 to $835) and adds a senior associate at $520. Scope and budget are stated to be unchanged.",
+        "obligations": [
+          "Accept or negotiate the 2027 rate schedule"
+        ],
+        "priority": "High",
+        "reviewOutcome": "Route"
+      }
     }
   ],
-
   "metadata": {
     "author": "email-communication-intelligence-r1",
     "authorLevel": 0,
     "createdAt": "2026-07-29T00:00:00Z",
     "description": "Structures the already-produced AiClassificationRung classification signal into the FR-05 triage output {category, summary, obligations[], priority, reviewOutcome} for sprk_communication — reuses the existing signal, no second full LLM classification pass.",
-    "tags": ["email-triage", "communication", "classification-reuse", "catalog-action", "prompted"]
+    "tags": [
+      "email-triage",
+      "communication",
+      "classification-reuse",
+      "catalog-action",
+      "prompted"
+    ]
   }
 }

@@ -203,6 +203,7 @@ import {
 } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import type { IDataService } from "@spaarke/ui-components";
+import { cleanGuid } from "@spaarke/ui-components";
 import {
   logTelemetryError,
   TELEMETRY_HISTORY_LOAD_FAILURE,
@@ -819,7 +820,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
             .map((e) => {
               // retrieveMultipleRecords returns bare GUIDs, but strip any braces defensively so the
               // server's Guid parse (regardingEntityId) never 400s on a `{guid}` form.
-              const id = String(e[meta.idField] ?? "").replace(/[{}]/g, "");
+              const id = cleanGuid(String(e[meta.idField] ?? ""));
               const nm = typeof e[meta.nameField] === "string" ? (e[meta.nameField] as string) : "";
               const num = typeof e[meta.numberField] === "string" ? (e[meta.numberField] as string) : "";
               const label = num ? `${nm || num} (${num})` : nm || id;

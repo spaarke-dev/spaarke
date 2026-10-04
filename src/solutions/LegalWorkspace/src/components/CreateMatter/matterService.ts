@@ -142,10 +142,11 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
 export class MatterService {
   private readonly _entityService: EntityCreationService;
 
-  constructor(
-    private readonly _webApi: IWebApi,
-    private readonly _containerId?: string
-  ) {
+  // The `_containerId` constructor parameter was DELETED 2026-09-03 by task 076. It existed only to
+  // (a) stamp `sprk_containerid` on the new matter and (b) name the upload destination — both of
+  // which the server now derives from the matter itself. Nothing supplies a container to this
+  // service any more, so the parameter had no remaining reader.
+  constructor(private readonly _webApi: IWebApi) {
     this._entityService = new EntityCreationService(_webApi, authenticatedFetch, getBffBaseUrl());
   }
 
@@ -179,10 +180,9 @@ export class MatterService {
     if (form.summary && form.summary.trim() !== '') {
       entity['sprk_matterdescription'] = form.summary.trim();
     }
-    // Store the SPE container ID on the matter record
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 DELETED 2026-09-03 by task 076 (harmful write "W1", second half) — the twin of the write in
+    // `Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts`; see that file for
+    // the full reasoning. The client does not choose where a record's content is stored.
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}
     if (form.matterTypeId) {
@@ -235,9 +235,14 @@ export class MatterService {
     }
 
     // ── Step 2: Upload files to SPE via BFF + create document records ─────
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: keyed on the MATTER; the server resolves the container from it. The former
+    // `&& this._containerId` guard is gone — see the twin in
+    // `Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts`.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_matter',
+        matterId,
         uploadedFiles,
         onUploadProgress
       );
@@ -259,7 +264,7 @@ export class MatterService {
           docMatterNavProp,
           uploadResult.uploadedFiles,
           {
-            containerId: this._containerId,
+            // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
             parentRecordName: form.matterName.trim(),
           }
         );
@@ -274,9 +279,13 @@ export class MatterService {
           uploadResult.errors.map((e) => e.fileName).join(', ')
         );
       }
-    } else if (uploadedFiles.length > 0 && !this._containerId) {
-      warnings.push('File upload skipped — no SPE container configured. Files can be added later.');
     }
+    // The former `else if (!this._containerId)` arm — "File upload skipped, no SPE container
+    // configured" — is DELETED with task 076's cutover. The client no longer resolves a container,
+    // so it cannot know one is missing; if none can be derived, the SERVER says so per file and the
+    // failure arrives through `uploadResult.errors` with the server's own explanation (a secure
+    // matter with no container of its own FAILS CLOSED and says which record). Keeping the arm would
+    // have been a client-side verdict on a decision the client no longer participates in.
 
     // ── Step 3: Follow-on actions ─────────────────────────────────────────
     if (followOnActions.assignCounsel) {

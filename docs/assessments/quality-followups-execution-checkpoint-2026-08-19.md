@@ -128,6 +128,7 @@ E-2 documents Azure OpenAI falling back to an API key after persistent MI 401s. 
 - Duplicate lowercase Key Vault alias **`bff-api-client-secret`** (Office add-in deploy) plus an orphaned `Graph-API-ClientSecret`. Any rotation ignoring the alias breaks the add-in.
 - `BaseProxyPlugin.cs:121-124` reads **plaintext secrets from Dataverse columns** — outside Key Vault entirely.
 - Provisioning `design.md:1006` §9.1 states both readings of app-registration tenancy in consecutive sentences; scope the multitenant + consent mechanism explicitly to **Model 1**.
+  > 🔴 **SUPERSEDED 2026-09-28 by owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md) — this bullet is INVERTED.** The multitenant app-registration + admin-consent mechanism belongs to **Model 2**, not Model 1. Under D-12, **Model 1** = the customer's dedicated Dataverse environment and dedicated Azure resources in their own Azure subscription **inside Spaarke's Azure tenant** — Spaarke already owns that tenant, so Model 1 needs **neither H0.5 admin consent nor Azure Lighthouse delegation**. **Model 2** = the same stack in the **customer's own** Azure tenant, and it is Model 2 that requires both. Those two items are the *only* things that differ between the models. The underlying finding (the provisioning design doc states both readings in consecutive sentences) still stands; the recommended scoping does not — **scope it to Model 2.**
 
 ---
 
