@@ -110,6 +110,7 @@ function New-Label([string]$Text) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } default { 'Red' } }
@@ -171,12 +172,15 @@ Write-Host "`n(b) Solution components"
 $solution = @((Invoke-DvGet "solutions?`$select=solutionid,uniquename&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
 if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found" }
 else {
+    $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$Table')?`$select=MetadataId").MetadataId
     $components = [System.Collections.Generic.List[object]]::new()
-    if ($attr) { $components.Add(@{ Id = $attr.MetadataId; Type = 2; Label = "$Table.$Column" }) }
-    if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $RelationshipSchemaName" }) }
-    $inSolution = @((Invoke-DvGet "solutioncomponents?`$select=objectid&`$filter=_solutionid_value eq $($solution.solutionid)").value | ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
+    if ($attr) { $components.Add(@{ Id = $attr.MetadataId; Type = 2; Label = "$Table.$Column"; TableId = $tableId }) }
+    if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $RelationshipSchemaName"; TableId = $tableId }) }
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
     foreach ($c in $components) {
-        if ($inSolution -contains $c.Id.ToString().ToLowerInvariant()) { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
         if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
         if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
         Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false } | Out-Null

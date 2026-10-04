@@ -105,6 +105,8 @@ if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Ap
 if (($Apply -or $Verify) -and $BffApplicationIds.Count -eq 0) {
     throw '-BffApplicationIds is required for -Apply and -Verify: the writer profile must name the BFF application user(s) explicitly.'
 }
+# A single comma-joined string (pwsh -File) is split, never sent as one id.
+$BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants (the BFF uses these exact names: RecordCreatorPerson.Column / TargetEntity / StampedTables) ────────
@@ -163,6 +165,7 @@ function New-Label([string]$Text) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -332,15 +335,18 @@ if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found" }
 else {
     $components = [System.Collections.Generic.List[object]]::new()
     foreach ($t in $Tables) {
-        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column" }) }
+        $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId
+        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId }) }
         $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')?`$select=MetadataId"
-        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)" }) }
+        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; TableId = $tableId }) }
     }
     foreach ($profileId in $readerId, $writerId) { if ($profileId) { $components.Add(@{ Id = $profileId; Type = 70; Label = "field security profile $profileId" }) } }
 
-    $inSolution = @((Invoke-DvGet "solutioncomponents?`$select=objectid&`$filter=_solutionid_value eq $($solution.solutionid)").value | ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
     foreach ($c in $components) {
-        if ($inSolution -contains $c.Id.ToString().ToLowerInvariant()) { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
         if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
         if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
         Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false } | Out-Null
