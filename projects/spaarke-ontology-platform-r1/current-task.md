@@ -11,10 +11,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none active in the main session.** Recently completed: 030 (9b8259d36), 093 (#1282 merged), 091, 092 (PR #1123 open), 089, 021, 006, 002 |
-| **Step** | — |
+| **Task** | **094 (main session)**: PCF deploy procedures verify the real build result, own PR. Worktree C:\wt094, branch fix/pcf-deploy-verify-build |
+| **Step** | 3 of 5 done: (1) scripts/PcfBuildResult.psm1 + scripts/Invoke-PcfBuildProd.ps1 written and proven (8 synthetic cases; VisualHost real build: npm exit 0, script exit 1; SpaarkeGridCustomizer: exit 0); (2) pcf-deploy + dataverse-deploy SKILL.md edited; (3) PCF-DEPLOYMENT-GUIDE.md corrected (it said NEVER use build:prod) |
 | **Status** | orchestrating |
-| **Next Action** | Record agent reports as they arrive. **022**: get an independent code-review/adr-check, then commit. **081**: review branch `ontology/081-cleanup` (C:\wt081), then merge it into this branch. **092**: merge #1123 only after it explains the environment-dependent pdfjs break (Linux/Node20 CI passes; Windows/Node22 fails; VisualHost too) and fixes ScopeConfigEditor. Owner decisions pending: writer privileges into Spaarke Ontology Service + move the app user to the customer BU (BU1 in dev); prototype round-2 review before 051 |
+| **Next Action** | Step 4: delete scripts/Deploy-PCFWebResources.ps1 (deploys UniversalQuickCreate, deleted 2026-06-22, from a nonexistent path) and remove it from Deploy-AllWebResources.ps1 + references in task-execute/script-aware/project-pipeline skills + docs/procedures/production-release.md; apply Get-PcfBuildResult to the PCF step of Build-AllClientComponents.ps1; fix dataverse-deploy line ~213. Step 5: scripts/README.md, .claude/CHANGELOG.md, PR. Then 9.5 review. Found, not in scope: 4 .claude/patterns files point at deleted UniversalQuickCreate source (msal-client, oauth-scopes, token-cache, control-initialization, dataverse-queries) -> own task |
 | **Running in background** | **task-022** (THIS worktree, BFF) · **task-081** (C:\wt081, branch ontology/081-cleanup) · **task-092** (C:\wt092, PR #1123 follow-up) |
 | **Branch / git** | `docs/ontology-platform-design` @ df54bf4ec (master incl. #1120 merged in), 31 ahead / 0 behind, pushed |
 | **Index** | 52 tasks: **25 ✅ · 0 🔄 · 27 🔲**. Drift check clean |
