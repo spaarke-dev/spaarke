@@ -66,31 +66,40 @@ public sealed class DataverseObservationMirror : IObservationMirror
         @"^spe://drive/(?<driveId>[^/]+)/item/(?<itemId>[^/?#]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    /// <summary>Task 146: an Observation mirror row was not written because no owner resolved from its document.</summary>
+    internal static readonly EventId MirrorSkipOwnerRefusedEvent = new(8057, "ObservationMirrorSkipOwnerRefused");
+
     private readonly IGenericEntityService _entityService;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly InsightsMirrorOptions _options;
     private readonly ILogger<DataverseObservationMirror> _logger;
     private readonly Random _random;
 
     public DataverseObservationMirror(
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<InsightsMirrorOptions> options,
         ILogger<DataverseObservationMirror> logger)
-        : this(entityService, options, logger, random: null)
+        : this(entityService, ownership, options, logger, random: null)
     {
     }
 
     /// <summary>
     /// Test-only constructor accepting an injectable <see cref="Random"/> so sampling-rate
     /// behaviour can be asserted deterministically (seeded RNG). Production callers use the
-    /// 3-arg ctor which defaults to <see cref="Random.Shared"/>.
+    /// 4-arg ctor which defaults to <see cref="Random.Shared"/>.
     /// </summary>
     internal DataverseObservationMirror(
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<InsightsMirrorOptions> options,
         ILogger<DataverseObservationMirror> logger,
         Random? random)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
+        // unified-access-control-r2 task 146: the mirror row is an sprk_analysis of a document — owned by the document's
+        // team (the named Secure team for a document of a secure record), never by the application user.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _random = random ?? Random.Shared;
@@ -171,6 +180,25 @@ public sealed class DataverseObservationMirror : IObservationMirror
 
         try
         {
+            // Task 146: owned by its document's team. A refusal skips the row (the §3.5 fire-and-forget contract —
+            // the system of record is the insights index); a fault falls to the non-fatal catch below.
+            var owner = await _ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(entity), ct).ConfigureAwait(false);
+            if (!owner.IsOwned)
+            {
+                _logger.Log(
+                    LogLevel.Warning,
+                    MirrorSkipOwnerRefusedEvent,
+                    "DataverseObservationMirror skipped (no owner for the row: {Reason} — {Code}): observationId={ObservationId} documentId={DocumentId}",
+                    owner.Reason,
+                    owner.RefusalCode,
+                    observation.Id,
+                    documentId.Value);
+                return;
+            }
+
+            entity["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+
             var analysisId = await _entityService.CreateAsync(entity, ct).ConfigureAwait(false);
             _logger.Log(
                 LogLevel.Information,

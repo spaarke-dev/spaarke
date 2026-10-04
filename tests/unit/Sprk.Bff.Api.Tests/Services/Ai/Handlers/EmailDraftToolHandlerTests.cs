@@ -36,7 +36,9 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
     private EmailDraftToolHandler CreateHandler() =>
         new(_dataverse.Object, _emailDraftAi.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            CreateLogger<EmailDraftToolHandler>());
+            CreateLogger<EmailDraftToolHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object);
 
     private static AnalysisTool BuildDraftTool() =>
         BuildAnalysisTool(handlerClass: nameof(EmailDraftToolHandler), name: "SYS-Email Draft");
@@ -258,9 +260,12 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
     // ═════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ExecuteChatAsync_WithRegardingMatter_MapsCommunicationServiceAssociationContract()
+    public async Task ExecuteChatAsync_WithRegardingOrganization_MapsCommunicationServiceAssociationContract()
     {
-        var matterId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        // Task 146 r2: an organization is a relationship, not an ownership parent, so this draft is still created as the
+        // user. A draft regarding a matter/project/work assignment takes the owned (S1) path — the same association
+        // contract on the app-only create, covered in SecureChildOwnershipAiToolTests.
+        var organizationId = Guid.Parse("11111111-2222-3333-4444-555555555555");
         var createdId = Guid.NewGuid();
         SetupCommunicationMetadata();
 
@@ -272,14 +277,14 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
                 """
                 { "LogicalName": "sprk_communication", "ManyToOneRelationships": [
-                    { "ReferencingAttribute": "sprk_regardingmatter", "ReferencingEntityNavigationPropertyName": "sprk_RegardingMatter", "ReferencedEntity": "sprk_matter" }
+                    { "ReferencingAttribute": "sprk_regardingorganization", "ReferencingEntityNavigationPropertyName": "sprk_RegardingOrganization", "ReferencedEntity": "sprk_organization" }
                 ] }
                 """)));
         _dataverse
             .Setup(d => d.GetAsync(
-                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')?$select=EntitySetName")),
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_organization')?$select=EntitySetName")),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_matters" }""")));
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_organizations" }""")));
 
         string? postedBody = null;
         _dataverse
@@ -289,20 +294,21 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
                 $$"""{ "sprk_communicationid": "{{createdId}}" }""")));
 
         var args =
-            $$"""{"subject":"s","body":"b","to":["a@b.example"],"regarding":{"table":"sprk_matter","recordId":"{{matterId}}","name":"Acme MSA Matter"},"source_refs":["f7dc4a00-6b79-f111-ab0e-7ced8ddc4cc6@t2","tables/sprk_matter/records/{{matterId}}"]}""";
+            $$"""{"subject":"s","body":"b","to":["a@b.example"],"regarding":{"table":"sprk_organization","recordId":"{{organizationId}}","name":"Acme Corp"},"source_refs":["f7dc4a00-6b79-f111-ab0e-7ced8ddc4cc6@t2"]}""";
         var ctx = BuildChatInvocationContext(toolArgumentsJson: args);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildDraftTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         using var posted = JsonDocument.Parse(postedBody!);
         var root = posted.RootElement;
-        root.GetProperty("sprk_RegardingMatter@odata.bind").GetString()
-            .Should().Be($"/sprk_matters({matterId:D})",
+        root.GetProperty("sprk_RegardingOrganization@odata.bind").GetString()
+            .Should().Be($"/sprk_organizations({organizationId:D})",
                 "the regarding lookup binds through the metadata-resolved navigation property " +
                 "(Communication-service association contract)");
-        root.GetProperty("sprk_regardingrecordid").GetString().Should().Be(matterId.ToString("D"));
-        root.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme MSA Matter");
+        root.GetProperty("sprk_regardingrecordid").GetString().Should().Be(organizationId.ToString("D"));
+        root.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme Corp");
         root.GetProperty("sprk_associationcount").GetInt32().Should().Be(1);
+        root.TryGetProperty("sprk_SentBy@odata.bind", out _).Should().BeFalse("only an owned draft records its sender");
     }
 
     [Fact]

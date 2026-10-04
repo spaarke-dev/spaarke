@@ -133,13 +133,54 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(
+        Task Patch(CancellationToken ct) => _fieldMappingService.UpdateRecordFieldsAsync(
             input.EntityLogicalName,
             input.RecordId,
             updatePayload,
-            cancellationToken,
+            ct,
             input.ImpersonateSystemUserId);
 
+        // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
+        // secure project) is a reparent — the child's owner is re-derived over every parent it will have
+        // (secure-if-any) BEFORE the PATCH, and reassigned when it moves. A refusal writes nothing and throws
+        // RecordOwnerUnresolvedException (ActionSeam returns it as a typed failure; the node executor fails the node).
+        // The resolver is a singleton; it is resolved from the scope factory because this core's constructor is
+        // frozen (task 031).
+        var parentChanges = ParentChangesOf(input, updatePayload);
+        if (parentChanges.Count == 0)
+        {
+            await Patch(cancellationToken);
+        }
+        else
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
+            var reparent = await ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = input.EntityLogicalName,
+                    RecordId = input.RecordId,
+                    ParentChanges = parentChanges,
+                    CallerSystemUserId = input.ImpersonateSystemUserId,
+                    // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this
+                    // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
+                    // update that impersonates nobody (a playbook node acting for no person) passes no caller and is
+                    // refused such a move.
+                    SecureExitCaller = input.ImpersonateSystemUserId is { } person
+                        ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                            person, scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>())
+                        : null,
+                },
+                Patch,
+                cancellationToken).ConfigureAwait(false);
+            if (reparent.IsRefused)
+            {
+                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
+            }
+        }
+
+        // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
+        // Assigned-To materializer (batch 4 integration — the write, then the restamp, then the materializer).
         await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
 
         // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
@@ -169,6 +210,49 @@ internal sealed class UpdateRecordActionCore
         await scope.ServiceProvider.GetRequiredService<CoreAncestorRestamper>()
             .AfterWriteAsync(entityLogicalName, recordId, writtenKeys, CancellationToken.None)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The parent lookups this update writes, as <c>column → parent</c>, when the target is a child table whose
+    /// owner follows its parents (<see cref="RecordOwnershipResolver.IsReparentableChild"/>). The column is the
+    /// lookup's attribute name, lower-cased (the navigation-property spelling the bind uses differs only in case).
+    /// </summary>
+    /// <remarks>
+    /// Every value the PATCH writes as <c>null</c> is a candidate CLEAR (task 146 verifier item 8): a field mapping can
+    /// clear a lookup (<c>"sprk_Matter@odata.bind": null</c>, or an empty rendered value), which moves the child OUT of
+    /// that parent and must re-derive its owner like a move to another parent. This core cannot tell a cleared lookup
+    /// from a cleared text column, so it passes them all; the resolver reads the row and ignores a null for a column
+    /// that holds no parent.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(
+        UpdateRecordActionInput input, IReadOnlyDictionary<string, object?> payload)
+    {
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        if (!RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
+            return changes;
+
+        foreach (var lookup in input.Lookups ?? [])
+        {
+            if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity)
+                && Guid.TryParse(lookup.RenderedTargetId, out var targetId) && targetId != Guid.Empty)
+            {
+                changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
+            }
+        }
+
+        const string bindSuffix = "@odata.bind";
+        foreach (var (key, value) in payload)
+        {
+            if (value is not null || string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = key.EndsWith(bindSuffix, StringComparison.OrdinalIgnoreCase)
+                ? key[..^bindSuffix.Length]
+                : key;
+            changes.TryAdd(column.ToLowerInvariant(), null);
+        }
+
+        return changes;
     }
 
     // ---------------------------------------------------------------------------

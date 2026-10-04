@@ -78,8 +78,11 @@ public class DataverseDocumentsEndpointsMembershipPublishingTests
     {
         public Site(Guid? resolvedTeam)
         {
-            Ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(resolvedTeam);
+            // c1-r1: POST /api/v1/documents asks ResolveOwnerAsync (the caller is also recorded as the creator person).
+            Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedTeam is { } team
+                    ? RecordOwnerResolution.Owned(team)
+                    : RecordOwnerResolution.Refused(RecordOwnerRefusal.ActingUserUnresolved, "no team"));
             Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
                 .Callback<CreateDocumentRequest, CancellationToken>((r, _) => Written = r)
                 .ReturnsAsync(DocumentId.ToString("D"));

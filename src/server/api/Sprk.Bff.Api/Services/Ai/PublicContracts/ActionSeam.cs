@@ -22,6 +22,7 @@ public sealed class ActionSeam : IActionSeam
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly ICommunicationDataverseService _recordTypes;
     private readonly ILogger<ActionSeam> _logger;
@@ -31,6 +32,7 @@ public sealed class ActionSeam : IActionSeam
         IFieldMappingDataverseService fieldMappingService,
         IServiceScopeFactory scopeFactory,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ICommunicationDataverseService recordTypes,
         ILogger<ActionSeam> logger)
@@ -39,6 +41,8 @@ public sealed class ActionSeam : IActionSeam
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        // Task 146: a task created through the seam is owned by its regarding record's team (TaskActionCore).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         // Task 156, owner round 8 item 2: the sprk_recordtype_ref lookup for the task's ADR-024 regarding pair
         // (TaskActionCore). Unconditionally registered (GraphModule), so no asymmetric registration (§10 F.1).
@@ -95,7 +99,7 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
-        var core = new TaskActionCore(_entityService, _coreAncestors, _identity, _recordTypes, _logger);
+        var core = new TaskActionCore(_entityService, _coreAncestors, _ownership, _identity, _recordTypes, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
                 Subject: request.Subject,
@@ -106,7 +110,8 @@ public sealed class ActionSeam : IActionSeam
                 RegardingObjectType: request.RegardingObjectType,
                 OwnerId: request.OwnerId,
                 ActingUserId: request.ActingUserId,
-                AssignedToContactId: request.AssignedToContactId),
+                AssignedToContactId: request.AssignedToContactId,
+                RequestedBySystemUserId: request.RequestedBySystemUserId), // task 146 c1-r1
             cancellationToken);
 
         return new CreateTaskResult(true, taskId, null);
@@ -148,6 +153,12 @@ public sealed class ActionSeam : IActionSeam
         {
             // FAIL LOUD (FR-C1) surfaced as a typed failure — no PATCH was issued.
             return new UpdateRecordResult(false, Array.Empty<string>(), ex.Message);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
+        {
+            // Task 146: the update re-files a child record whose new owner cannot be resolved — no PATCH was issued.
+            // A typed failure carrying the stable code (a Dataverse fault still propagates).
+            return new UpdateRecordResult(false, Array.Empty<string>(), $"{ex.RefusalCode}: {ex.Message}");
         }
     }
 

@@ -169,7 +169,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(DataverseUserResponse.Ok(200, Json("""{ "EntitySetName": "sprk_matters", "PrimaryIdAttribute": "sprk_matterid" }""")));
         dataverse.Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(204, body: null));
-        var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(), Scopes());
+        var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"sprk_matter","recordId":"{{{matter:D}}}","item":{"{{{Attorney1}}}":"{{{contact:D}}}"}}"""),
@@ -190,7 +191,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(DataverseUserResponse.Ok(200, Json("""{ "EntitySetName": "sprk_matters", "PrimaryIdAttribute": "sprk_matterid" }""")));
         dataverse.Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Fail(403, "0x80040220", "Principal user is missing prvWritesprk_matter"));
-        var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(), Scopes());
+        var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"sprk_matter","recordId":"{{{matter:D}}}","item":{"{{{Attorney1}}}":"x"}}"""),
@@ -216,7 +218,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            new Mock<IGenericEntityService>().Object, Scopes());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_project","item":{"sprk_projectname":"New"}}"""),
@@ -239,7 +242,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            new Mock<IGenericEntityService>().Object, Scopes());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_event","item":{"sprk_eventname":"Hearing"}}"""),
@@ -248,6 +252,60 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         _h.TotalWrites.Should().Be(0, "owner A6: a child entity's assignee gets no root grant");
+    }
+
+    /// <summary>
+    /// Batch 4 integration (task 142 x task 146): since owner round 7 item 3 a root created from chat is created by the
+    /// APPLICATION, owned by the resolver's team (<c>OwnedChildWrite</c>) — that path returns before the run-as-user tail,
+    /// so it runs the Assigned-To materializer itself, after the create committed.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreateRecord_OfARoot_OnTheOwnedPath_MaterializesTheCreatedRecord()
+    {
+        var contact = _h.Contact();
+        Guid? createdId = null;
+        var dataverse = new Mock<IDataverseUserClient>();
+        dataverse.Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_project')?$select=EntitySetName")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, Json(
+                """{ "EntitySetName": "sprk_projects", "PrimaryIdAttribute": "sprk_projectid", "OwnershipType": "UserOwned" }""")));
+        dataverse.Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, Json($$"""{ "UserId": "{{Guid.NewGuid():D}}" }""")));
+        dataverse.Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_project')?$select=LogicalName,Privileges")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, Json(
+                """{ "LogicalName": "sprk_project", "Privileges": [ { "PrivilegeType": "Create", "Name": "prvCreatesprk_project" } ] }""")));
+        dataverse.Setup(d => d.GetAsync(It.Is<string>(p => p.Contains("RetrieveUserSetOfPrivilegesByNames")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, Json("""{ "RolePrivileges": [ { "PrivilegeName": "prvCreatesprk_project" } ] }""")));
+        dataverse.Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_project')/Attributes")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, Json("""{ "value": [] }""")));
+        var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        appOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                "sprk_project", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, id, _, _, _) =>
+            {
+                // The created row names the contact in an "Assigned *" column (what the materializer reads back).
+                createdId = id;
+                _h.Store.Assign(ExternalGrantRootType.Project, id, Attorney1, contact);
+            })
+            .Returns(Task.CompletedTask);
+        var handler = new DataverseCreateRecordHandler(
+            dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), appOnly.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
+
+        var result = await handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_project","item":{"sprk_projectname":"New"}}"""),
+            BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record"),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        createdId.Should().NotBeNull("the application created the root (the owned path)");
+        dataverse.Verify(d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a run-as-user POST would mean the owned path was not taken");
+        _h.Grants.ActiveRowsOf(createdId!.Value, contact).Should().ContainSingle();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

@@ -330,6 +330,24 @@ back afterwards:
 .\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl -Verify    # exit 0 = covered; exit 1 names each gap
 ```
 
+**Extending the set** (a new `child` entry, or a batch such as task 146's 9 → 26 tables, approved by the owner on
+2026-10-02, round 7 item 4) runs in this order, and **before** any code that assigns those tables' rows to the team
+is deployed — Dataverse refuses the team as an owner without `Read`:
+
+1. **Negative control** — for each NEW table, create a probe row owned by the named team (`ownerid@odata.bind` →
+   `/teams(<Secure Record Owners>)`) and record the refusal verbatim (3 polls, ~25 s apart). It must name only that
+   table's `Read` privilege, and its `privilegeCount` must equal the role's current count (not a cached reading).
+2. **Write the evidence** — replace the entry's `VERBATIM REFUSAL PENDING …` text in the file with the date, poll
+   count and refusal, and commit that BEFORE step 3. A table that is NOT refused is removed from the file instead.
+3. **Dry run → `-Apply` → §5.4 strip → `-Verify`** with the script above (expect exit 0 and nothing "outside the
+   file").
+4. **Positive probes** — the same create succeeds on 3 consecutive polls; read back `owningteam`; delete each probe and
+   record the deletion. A control create on a table NOT in the file must still be refused with the new
+   `privilegeCount`.
+
+The exact commands for task 146's 17 tables are in
+`projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §13 (gate G146-1).
+
 The manual equivalent is below. Resolve each entity's `Read` privilege from **entity metadata** rather than
 hard-coding names. The casing follows the schema name (`prvReadsprk_WorkAssignment`, not
 `prvReadsprk_workassignment`), which is easy to get wrong by hand:

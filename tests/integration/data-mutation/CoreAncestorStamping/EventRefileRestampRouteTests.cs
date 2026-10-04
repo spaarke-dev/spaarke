@@ -120,7 +120,33 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
 
             services.RemoveAll<CoreAncestorRestamper>();
             services.AddSingleton(_ => World.Restamper);
+
+            // Batch 4 integration (task 146): a change of regarding is a RE-FILE — authorized as the caller (Write on the
+            // event, AppendTo on the record it is filed to) and owned through the one resolver before the write. Both are
+            // module boundaries here: the caller holds the rights, and the owner double applies the write.
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(new AllowAllAccessDataSource());
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
         });
+    }
+
+    /// <summary>The caller holds every right on every record (the re-file's authorization is not this test's subject).</summary>
+    private sealed class AllowAllAccessDataSource : IAccessDataSource
+    {
+        public Task<AccessSnapshot> GetUserAccessAsync(
+            string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = resourceId,
+                AccessRights = DataverseAccessRightsMapper.FromAccessRightsString(
+                    "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,CreateAccess,DeleteAccess,ShareAccess,AssignAccess"),
+            });
+
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            GetUserAccessAsync(userId, recordId.ToString(), userAccessToken, ct);
     }
 
     /// <summary>The event service: the event exists, and its update writes the pair exactly as the Web API service does.</summary>

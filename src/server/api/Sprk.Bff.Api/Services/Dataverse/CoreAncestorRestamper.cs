@@ -712,16 +712,29 @@ public sealed class CoreAncestorRestamper
     /// <summary>
     /// The <c>sprk_event</c> columns an <see cref="UpdateEventRequest"/> writes that can move a stamp: the regarding pair,
     /// which <c>DataverseWebApiService.UpdateEventAsync</c> writes (id, type and name together) exactly when
-    /// <see cref="UpdateEventRequest.RegardingRecordType"/> has a value. The update never writes a typed source or root
-    /// column, so nothing else it writes can move a stamp (verifier round 2 item 8).
+    /// <see cref="UpdateEventRequest.RegardingRecordType"/> has a value (verifier round 2 item 8) — and, since task 146 r1
+    /// (verifier item 2), the entity-specific regarding LOOKUPS that same update writes
+    /// (<see cref="UpdateEventRequest.RegardingLookupWrites"/>: the new regarding, and a clear of the previous type's), which
+    /// include the event's own root columns. Nothing else the update writes can move a stamp.
     /// </summary>
     public static IReadOnlyList<string> EventColumnsWritten(UpdateEventRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return request.RegardingRecordType.HasValue
-            ? [CoreAncestorResolver.RegardingRecordIdColumn, CoreAncestorResolver.RegardingRecordTypeColumn, "sprk_regardingrecordname"]
-            : [];
+        if (!request.RegardingRecordType.HasValue)
+            return [];
+
+        var columns = new List<string>
+        {
+            CoreAncestorResolver.RegardingRecordIdColumn, CoreAncestorResolver.RegardingRecordTypeColumn, "sprk_regardingrecordname",
+        };
+        foreach (var (recordType, _) in request.RegardingLookupWrites())
+        {
+            if (Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(recordType) is { } lookup)
+                columns.Add(lookup);
+        }
+
+        return columns;
     }
 
     /// <summary>

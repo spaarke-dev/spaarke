@@ -41,14 +41,32 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// matter / project of a record others are filed under, which leaves copies of that root stale. The core-ancestor
 /// re-stamp is a SERVER-owned invariant written app-only (ADR-002 WP-1), and task 156 AC1 requires it IN THE SAME
 /// OPERATION as the re-file. So, once the caller's PATCH has succeeded, this class calls
-/// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp"/> inline. That helper is its ONLY app-only
-/// dependency, and it is narrow by construction: its ONE member re-stamps the copies the write just moved and writes
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp"/> inline. That helper is the re-stamp's ONLY app-only
+/// dependency (the re-file step below is the other, owner round 13 item 7), and it is narrow by construction: its ONE member re-stamps the copies the write just moved and writes
 /// only stamp columns, with values derived from the data (never a value from the caller). It exposes no Dataverse
 /// client and holds no <see cref="IServiceProvider"/>, so nothing can be resolved through it; the app-only client the
 /// re-stamp writes with stays private to <c>CoreAncestorRestamper</c>. The queued path this tool used before
 /// (an enqueue onto <c>CoreAncestorRestampQueue</c>, run by the background job seconds later) is removed; the queue stays
 /// for the storage resolver's stale refusals. Record: the task 156 note (owner round 8 section) and the task 156 POML
 /// execution block.
+/// </para>
+/// <para>
+/// <b>A RE-FILE re-derives the owner (unified-access-control-r2 task 146 r2, verifier item 2).</b> An update that sets or
+/// clears a lookup to a project, matter, work assignment or another ownership parent on a CHILD table moves the row into
+/// or out of that record. Its owner is re-derived through the one
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver.ReparentAsync"/>: the caller's PATCH (still run as
+/// the caller — Dataverse authorizes it) is applied only once the owner is decided, then the owner is assigned in a
+/// separate write and read back — the same re-file every other BFF writer makes. Before anything is decided, the caller
+/// must see the row and hold AppendTo on each record it is moved under, so a refusal never answers questions about
+/// records they cannot see. A row of any other table moved under a SECURE record is refused (it cannot be re-owned here).
+/// The app-only steps are the resolver's reads, the owner assignment and, if that assignment fails, the restore of the
+/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). <b>CLAUDE.md §6.5 PATH B — owner
+/// round 13 item 7 (2026-10-03): "the update tool's re-file step is folded into ADR path B, as round 8 did for 156's
+/// re-stamp."</b> spaarke-ai-architecture-redesign-r1 spec Amendment A-UAC146 now covers this step beside the two CREATE
+/// tools; it supersedes the project-scoped path-A record (task 146 note §12c) for it. The caller's own PATCH stays
+/// user-OBO; F3 on a move out of a secure root is asked AS THE CALLER (task 146 c1).
+/// After whichever path wrote the caller's update (the re-file's PATCH or the plain PATCH), the task 156 re-stamp runs,
+/// then the task 142 Assigned-To materializer (batch 4 integration).
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
@@ -66,6 +84,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp _restamp;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
     private readonly IServiceScopeFactory? _scopes;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
@@ -73,6 +92,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -80,6 +100,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         // AddToolFramework also calls), so this handler's registration gains no asymmetric dependency (§10 F.1).
         _restamp = restamp ?? throw new ArgumentNullException(nameof(restamp));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Task 146 r2: unconditionally registered (MetadataServiceExtensions) — no asymmetric registration (§10 F.1).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _scopes = scopes;
     }
 
@@ -172,6 +194,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, metaResponse, startedAt), stopwatch);
             }
             var entitySetName = GetString(metaResponse.Body!.Value, "EntitySetName");
+            var primaryIdAttribute = GetString(metaResponse.Body!.Value, "PrimaryIdAttribute");
             if (entitySetName is null)
             {
                 return LogOutcome(context, tablename, recordId,
@@ -189,15 +212,27 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
-            // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
-            var response = await _dataverse.PatchAsync(
-                $"{entitySetName}({recordId:D})",
-                mapped.Item!.JsonBody,
-                cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess)
+            // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
+            var refile = await RefileIfFiledAsync(
+                tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
+                .ConfigureAwait(false);
+            if (refile.Result is { } refileResult)
             {
-                // Privilege-denied update surfaces the USER's own access error — never escalates.
-                return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
+                return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
+            }
+
+            if (!refile.Written)
+            {
+                // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
+                var response = await _dataverse.PatchAsync(
+                    $"{entitySetName}({recordId:D})",
+                    mapped.Item!.JsonBody,
+                    cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccess)
+                {
+                    // Privilege-denied update surfaces the USER's own access error — never escalates.
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
+                }
             }
 
             // Task 156, owner round 8 item 1 (§6.5 path B — see the class remarks): the copies this write moved are
@@ -230,7 +265,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     tablename,
                     recordId = recordId.ToString("D"),
                     path = DataverseRecordCitations.RecordPath(tablename, recordId),
-                    columnsUpdated = mapped.Item.Columns,
+                    columnsUpdated = mapped.Item!.Columns,
                     columnCount = mapped.Item.Columns.Count
                 },
                 summary: $"Updated {mapped.Item.Columns.Count} column(s) on record {recordId:D} in '{tablename}' (under the calling user's permissions).",
@@ -260,6 +295,153 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 "[dataverse.update_record] failed decisionId={DecisionId}: {ErrorType}",
                 context.DecisionId, ex.GetType().Name);
             return Error(tool, "dataverse.update_record failed unexpectedly.", ToolErrorCodes.InternalError, startedAt);
+        }
+    }
+
+    // ── re-file (task 146 r2, verifier item 2) ─────────────────────────────────
+
+    /// <summary>What the re-file step decided: a finished tool <c>Result</c> (a refusal or the caller's own error), or
+    /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
+    private readonly record struct RefileStep(ToolResult? Result, bool Written);
+
+    /// <summary>The caller's PATCH was refused by Dataverse inside the re-file — carried out so no owner is assigned.</summary>
+    private sealed class CallerWriteFailedException(DataverseUserResponse response) : Exception("The caller's update was refused.")
+    {
+        public DataverseUserResponse Response { get; } = response;
+    }
+
+    /// <summary>
+    /// Task 146 r2 (verifier item 2). For a CHILD table, an update that sets or clears a lookup to an ownership parent is a
+    /// re-file: the caller must see the row and hold AppendTo on each record it is moved under (asked as the caller, so no
+    /// refusal answers questions about records they cannot see); then <c>ReparentAsync</c> decides the owner, applies the
+    /// caller's own PATCH, assigns the owner separately and reads it back. A refusal writes nothing. For a table outside the
+    /// ownership set (not a root), a row moved under a SECURE record is refused: it cannot be re-owned here. A root's own
+    /// ownership is provisioning's (owner S6), so a root's lookups re-own nothing — as for every generic writer.
+    /// </summary>
+    private async Task<RefileStep> RefileIfFiledAsync(
+        AnalysisTool tool, string tablename, Guid recordId, string entitySetName, string? primaryIdAttribute,
+        DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context, DateTimeOffset startedAt, CancellationToken ct)
+    {
+        var isChild = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(tablename);
+        if (!isChild && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(tablename))
+        {
+            return default; // a root
+        }
+
+        var newParents = item.Lookups
+            .Where(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable))
+            .ToArray();
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var lookup in newParents)
+        {
+            changes[lookup.Column] = new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId);
+        }
+
+        if (isChild)
+        {
+            // A cleared column may be a cleared lookup — the row cannot tell a generic writer which (ReparentAsync reads it).
+            foreach (var column in item.ClearedColumns)
+            {
+                changes.TryAdd(column, null);
+            }
+        }
+
+        if (changes.Count == 0 || (!isChild && newParents.Length == 0))
+        {
+            return default;
+        }
+
+        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        if (me.Failure is { } whoAmIFailure)
+        {
+            return new RefileStep(MapClientError(tool, whoAmIFailure, startedAt), false);
+        }
+
+        var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, newParents, ct)
+            .ConfigureAwait(false);
+        if (appendTo.Denied is { } denied)
+        {
+            return new RefileStep(Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), false);
+        }
+
+        var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
+
+        if (!isChild)
+        {
+            var owner = await _ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                    newParents.Select(l => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(l.RelatedTable, l.RecordId)),
+                    callerOid, me.SystemUserId),
+                ct).ConfigureAwait(false);
+            return owner.IsRefused || owner.IsSecureOwner
+                ? new RefileStep(Error(tool,
+                    $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
+                    (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
+                    owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false)
+                : default;
+        }
+
+        // The caller must see the row before anything is decided about it (their own 404/403 otherwise).
+        var row = await _dataverse.GetAsync(
+            $"{entitySetName}({recordId:D})?$select={primaryIdAttribute ?? tablename + "id"}", ct).ConfigureAwait(false);
+        if (!row.IsSuccess)
+        {
+            return new RefileStep(MapClientError(tool, row, startedAt), false);
+        }
+
+        try
+        {
+            var resolution = await _ownership.ReparentAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                {
+                    EntityLogicalName = tablename,
+                    RecordId = recordId,
+                    ParentChanges = changes,
+                    CallerObjectId = callerOid,
+                    CallerSystemUserId = me.SystemUserId,
+                    // E1: a communication filed under nothing keeps its creator.
+                    WhenUnfiled = string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase)
+                        ? Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator
+                        : Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam,
+                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
+                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
+                    // before anything is written.
+                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                        _ => Task.FromResult<Guid?>(me.SystemUserId),
+                        (record, token) => OwnedChildWrite.RightsOnAsync(
+                            _dataverse,
+                            me.SystemUserId,
+                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                            record.RecordId,
+                            token)),
+                },
+                async token =>
+                {
+                    // PATCH carries If-Match: * (update-only), run AS THE CALLER — Dataverse authorizes the change itself.
+                    var response = await _dataverse.PatchAsync($"{entitySetName}({recordId:D})", item.JsonBody, token)
+                        .ConfigureAwait(false);
+                    if (!response.IsSuccess)
+                        throw new CallerWriteFailedException(response);
+                },
+                ct).ConfigureAwait(false);
+
+            return resolution switch
+            {
+                // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure
+                // endpoint's message and reason code, not an owner refusal.
+                { IsForbidden: true } => new RefileStep(Error(tool,
+                    $"The update was NOT written. {resolution.Reason}",
+                    resolution.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
+                { IsRefused: true } => new RefileStep(Error(tool,
+                    $"The update was NOT written: the record's owner could not be decided — {resolution.Reason} ({resolution.RefusalCode}).",
+                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
+                _ => new RefileStep(null, true),
+            };
+        }
+        catch (CallerWriteFailedException failed)
+        {
+            // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
+            return new RefileStep(MapClientError(tool, failed.Response, startedAt), false);
         }
     }
 

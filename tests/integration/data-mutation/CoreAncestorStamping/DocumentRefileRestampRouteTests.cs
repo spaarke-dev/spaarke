@@ -41,7 +41,9 @@ public class DocumentRefileRestampRouteTests : IClassFixture<DocumentRefileResta
     [Fact(DisplayName = "Task 156 route: PUT /api/v1/documents/{id} re-filing the document to matter B re-stamps the to-do under it in the same request")]
     public async Task Put_RefilingTheDocument_RestampsItsChildren()
     {
-        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+        // Batch 4 integration (task 146): re-filing the document costs AppendTo on the matter it is filed under, asked as
+        // the caller (the token-stated rights answer every record alike).
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,AppendToAccess");
 
         var response = await client.PutAsJsonAsync($"/api/v1/documents/{Document}", new { matterLookup = MatterB });
 
@@ -84,6 +86,11 @@ public sealed class DocumentRefileRestampFixture : DocumentDestroyAuthorizationT
         {
             services.RemoveAll<CoreAncestorRestamper>();
             services.AddSingleton(_ => World.Restamper);
+
+            // Batch 4 integration (task 146): the re-file is owned through the one resolver before the write — a module
+            // boundary here (the double applies the write); the owner decision is not this test's subject.
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
         });
     }
 }

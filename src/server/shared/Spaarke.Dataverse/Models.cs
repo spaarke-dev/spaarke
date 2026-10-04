@@ -21,12 +21,12 @@ public class CreateDocumentRequest
     /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
     /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
     /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
-    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
-    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
-    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
-    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
-    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
-    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para><b>Required in practice, nullable in shape.</b> Since unified-access-control-r2 task 146 (#1034)
+    /// <c>DataverseServiceClientImpl.CreateDocumentAsync</c> REFUSES (throws, before any write) when this is null:
+    /// every caller resolves it, and "null keeps the calling identity" made the BFF application user the owner, in
+    /// the ROOT business unit (measured 2026-09-22, ALL 512 existing rows sat there, unreachable by any child-BU user
+    /// at Deep depth, and readable by every root-BU user — which is how a secure record's documents were never
+    /// isolated). It stays a nullable property so the JSON shape of this shared contract does not change.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
     /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
     /// and so the business unit — that owns the document it creates, including a secure business unit it has no
@@ -59,6 +59,15 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the document (unified-access-control-r2 task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>: this create is app-only, so <c>createdby</c> is the BFF
+    /// application user. Resolved by the BFF from the request's own caller; <c>null</c> for a writer that acts for nobody
+    /// (inbound mail). 🔒 Never bound from a request body, for the same reason as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 /// <summary>
@@ -828,6 +837,21 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// The team that owns a NEW output (unified-access-control-r2 task 146) — the same team as its analysis, resolved by
+    /// the BFF's <c>IRecordOwnershipResolver</c>. Required by <c>CreateAnalysisOutputAsync</c>; never bound from a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the output (task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>; <c>null</c> for a writer that acts for nobody. Never bound from
+    /// a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -953,6 +977,24 @@ public class CreateEventRequest
     public string? RegardingRecordName { get; set; }
 
     /// <summary>
+    /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
+    /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
+    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
+    /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the event (task 146 c1-r1, owner round 13 item 9), bound as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/>: the create is app-only. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
+
+    /// <summary>
     /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
     /// owner decision S1: a BFF-created event is app-only, so its Created By is the application user and cannot say
     /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
@@ -994,6 +1036,44 @@ public class UpdateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>
+    /// The event's regarding type BEFORE this update, as the caller read it. When the update names a DIFFERENT type, that
+    /// type's entity-specific lookup is cleared, so the event stays filed under one regarding — the one this update
+    /// names. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public int? PreviousRegardingRecordType { get; set; }
+
+    /// <summary>
+    /// The entity-specific regarding LOOKUPS this update writes (unified-access-control-r2 task 146 r1, verifier item 2):
+    /// the new regarding (<c>RecordId</c> null when the update names a type with no record — a clear), plus a clear of the
+    /// previous type's lookup when the type changes. Empty when the update does not touch the regarding.
+    /// </summary>
+    /// <remarks>
+    /// The ONE derivation of the lookups: <c>DataverseWebApiService.UpdateEventAsync</c> writes exactly these, and the
+    /// BFF re-derives the event's owner from exactly these (a reparent). Before this, the update wrote only the regarding
+    /// TEXT fields while the owner was re-derived from a lookup that was never written — so an event moved from a secure
+    /// project to an ordinary one was re-owned by the ordinary team while its lookup still named the secure project.
+    /// </remarks>
+    public IReadOnlyList<(int RecordType, Guid? RecordId)> RegardingLookupWrites()
+    {
+        if (RegardingRecordType is not { } type || global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(type) is null)
+            return Array.Empty<(int, Guid?)>();
+
+        var writes = new List<(int RecordType, Guid? RecordId)>
+        {
+            (type, Guid.TryParse(RegardingRecordId, out var id) && id != Guid.Empty ? id : null),
+        };
+
+        if (PreviousRegardingRecordType is { } previous && previous != type
+            && global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(previous) is not null)
+        {
+            writes.Add((previous, null));
+        }
+
+        return writes;
+    }
 }
 
 /// <summary>
@@ -1239,6 +1319,43 @@ public static class RegardingRecordType
         Contact => "sprk_regardingcontact",
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
+        _ => null
+    };
+
+    /// <summary>
+    /// The <c>sprk_event</c> single-valued navigation property for a regarding record type — the CASE-SENSITIVE name a
+    /// Web API <c>@odata.bind</c> must use (the lookup's schema name). Read from live metadata, spaarkedev1 2026-10-02:
+    /// <c>EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships</c> →
+    /// <c>ReferencingEntityNavigationPropertyName</c> (unified-access-control-r2 task 146 r1, verifier item 2).
+    /// </summary>
+    public static string? GetEventNavigationPropertyName(int recordType) => recordType switch
+    {
+        Project => "sprk_RegardingProject",
+        Matter => "sprk_RegardingMatter",
+        Invoice => "sprk_RegardingInvoice",
+        Analysis => "sprk_RegardingAnalysis",
+        Account => "sprk_RegardingAccount",
+        Contact => "sprk_RegardingContact",
+        WorkAssignment => "sprk_RegardingWorkAssignment",
+        Budget => "sprk_RegardingBudget",
+        _ => null
+    };
+
+    /// <summary>
+    /// The Dataverse entity SET for a regarding record type, as live metadata names it (spaarkedev1 2026-10-02,
+    /// <c>EntityDefinitions</c> → <c>EntitySetName</c>). Never derived by appending "s": <c>sprk_analysis</c>'s set is
+    /// <c>sprk_analysises</c>.
+    /// </summary>
+    public static string? GetEntitySetName(int recordType) => recordType switch
+    {
+        Project => "sprk_projects",
+        Matter => "sprk_matters",
+        Invoice => "sprk_invoices",
+        Analysis => "sprk_analysises",
+        Account => "accounts",
+        Contact => "contacts",
+        WorkAssignment => "sprk_workassignments",
+        Budget => "sprk_budgets",
         _ => null
     };
 

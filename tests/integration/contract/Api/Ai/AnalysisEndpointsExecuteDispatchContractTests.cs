@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -10,7 +11,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using FluentAssertions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -164,6 +164,9 @@ public class AnalysisEndpointsExecuteDispatchContractTests
 /// </summary>
 public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDisposable
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     /// <summary>Mirrors the seeded spaarkedev1 document-profile Binding row's sprk_playbook.</summary>
     public static readonly Guid DocumentProfilePlaybookId =
         Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
@@ -241,6 +244,7 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
 
         // Real NotificationService (fire-and-forget completion notification path).
         builder.Services.AddSingleton(Mock.Of<IGenericEntityService>());
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
         builder.Services.AddSingleton<NotificationService>();
 
         // Sibling endpoints in the same MapAnalysisEndpoints group (save/export/get) —

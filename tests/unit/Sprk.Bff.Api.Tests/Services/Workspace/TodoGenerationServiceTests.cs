@@ -47,6 +47,9 @@ public class TodoGenerationServiceTests
     // Rules 1 & 3 actually CREATE to-dos (default is dry-run: query but create nothing).
     private readonly IOptions<TodoGenerationOptions> _eventSourcedEnabledOptions;
 
+    /// <summary>Task 146: the ownership resolver every create asks (one team for every question).</summary>
+    private Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public TodoGenerationServiceTests()
     {
         _dataverseMock = new Mock<IDataverseService>(MockBehavior.Loose);
@@ -116,6 +119,10 @@ public class TodoGenerationServiceTests
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
         svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _builderLoggerMock.Object));
+
+        // Task 146: every generated to-do asks the ownership resolver; these tests pin the payload SHAPE, so the
+        // resolver answers with one team at its module boundary (ownership rules: SecureChildOwnershipTests).
+        svc.SetOwnershipResolverForTest(Ownership);
 
         return svc;
     }

@@ -43,6 +43,10 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly IActionRunner? _actionRunner;
     private readonly ILogger<AppOnlyAnalysisService> _logger;
 
+    // unified-access-control-r2 task 146: the analysis rows this service creates are owned by the analysed document's
+    // team (record-first; the named Secure team for a document of a secure record), never by the application user.
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     // Summary status values (Dataverse OptionSet)
     private const int SummaryStatusPending = 100000001;
     private const int SummaryStatusCompleted = 100000002;
@@ -79,10 +83,12 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IToolHandlerRegistry toolHandlerRegistry,
         INodeService nodeService,
         IPlaybookOrchestrationService playbookOrchestrator,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AppOnlyAnalysisService> logger,
         IActionResolver? actionResolver = null,
         IActionRunner? actionRunner = null)
     {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _documentService = documentService;
         _analysisService = analysisService;
         _speFileOperations = speFileOperations;
@@ -97,6 +103,33 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _actionResolver = actionResolver;
         _actionRunner = actionRunner;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Creates the analysis record OWNED by the analysed document's team (unified-access-control-r2 task 146) — the
+    /// named Secure team for a document of a secure record. Returns <c>null</c> on a REFUSAL (logged): analysis creation
+    /// here is best-effort, so a refusal is a skipped row, never a failed profile (word-add-in-r1 note 080 §6.6). A
+    /// Dataverse fault propagates to the caller's existing best-effort catch, which logs it as a write failure.
+    /// </summary>
+    private async Task<Guid?> TryCreateOwnedAnalysisAsync(
+        Guid documentId, string name, Guid? playbookId, CancellationToken cancellationToken)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }),
+            cancellationToken);
+
+        if (!owner.IsOwned)
+        {
+            _logger.LogWarning(
+                "[OWNERSHIP-REFUSED] Analysis record NOT created for document {DocumentId}: {Reason} ({Code}). "
+                + "The analysis itself continues (task 146).",
+                documentId, owner.Reason, owner.RefusalCode);
+            return null;
+        }
+
+        return await _analysisService.CreateAnalysisAsync(
+            documentId, name, playbookId, owningTeamId: owner.OwningTeamId, ct: cancellationToken);
     }
 
     /// <summary>
@@ -294,15 +327,18 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
+                dataverseAnalysisId = await TryCreateOwnedAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId,
-                    ct: cancellationToken);
+                    cancellationToken);
 
-                _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
-                    dataverseAnalysisId, documentId, playbookId);
+                if (dataverseAnalysisId is not null)
+                {
+                    _logger.LogInformation(
+                        "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+                        dataverseAnalysisId, documentId, playbookId);
+                }
             }
             catch (Exception ex)
             {
@@ -746,6 +782,20 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         {
             try
             {
+                // Task 146: outputs are owned like their analysis (record-first from it). A refusal skips the outputs
+                // — best-effort, never a failed profile; the document update below still runs.
+                var outputOwner = await _ownership.ResolveOwnerAsync(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                    {
+                        TargetEntityLogicalName = "sprk_analysis",
+                        TargetRecordId = dataverseAnalysisId.Value,
+                    },
+                    cancellationToken);
+                if (!outputOwner.IsOwned)
+                {
+                    throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_analysisoutput", outputOwner);
+                }
+
                 var sortOrder = 0;
                 foreach (var (outputTypeName, value) in structuredOutputs)
                 {
@@ -760,7 +810,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                         Value = value,
                         AnalysisId = dataverseAnalysisId.Value,
                         OutputTypeId = null, // Output type lookup optional for Phase 1
-                        SortOrder = sortOrder++
+                        SortOrder = sortOrder++,
+                        OwningTeamId = outputOwner.OwningTeamId,
                     };
 
                     await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
@@ -1364,15 +1415,18 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
+                dataverseAnalysisId = await TryCreateOwnedAnalysisAsync(
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
-                    ct: cancellationToken);
+                    cancellationToken);
 
-                _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for email document {DocumentId}",
-                    dataverseAnalysisId, mainDocumentId);
+                if (dataverseAnalysisId is not null)
+                {
+                    _logger.LogInformation(
+                        "Created Analysis record {AnalysisId} for email document {DocumentId}",
+                        dataverseAnalysisId, mainDocumentId);
+                }
             }
             catch (Exception ex)
             {

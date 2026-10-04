@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
-using Microsoft.AspNetCore.Authentication;
-using System.Net.Http.Headers;
 using Azure.Core;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -322,7 +322,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             TokenCredential credential,
             ILogger<DocumentCheckoutService> logger,
             ConcurrentBag<Guid> deleted)
-            : base(httpClient, speFileStore, configuration, credential, logger)
+            : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger)
         {
             _deleted = deleted;
         }

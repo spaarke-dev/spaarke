@@ -37,7 +37,10 @@ public class CreateTaskNodeExecutorSeamTests
         _executor = new CreateTaskNodeExecutor(
             new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _entityServiceMock.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger<CreateTaskNodeExecutor>.Instance);
     }
 
@@ -105,9 +108,12 @@ public class CreateTaskNodeExecutorSeamTests
         var regarding = captured.GetAttributeValue<EntityReference>("sprk_regardingmatter");
         regarding.LogicalName.Should().Be("sprk_matter");
         regarding.Id.Should().Be(regardingId);
+        // unified-access-control-r2 task 146: a task filed to a record is owned by that record's TEAM (the resolver's
+        // answer), never the supplied user — the person it is for belongs in Assigned To (task 152; owner B2).
         var owner = captured.GetAttributeValue<EntityReference>("ownerid");
-        owner.LogicalName.Should().Be("systemuser");
-        owner.Id.Should().Be(ownerId);
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        owner.Id.Should().NotBe(ownerId);
     }
 
     // ── Degraded success when Dataverse rejects the create (criterion 7) ──────────────────────

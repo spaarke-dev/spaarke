@@ -33,11 +33,14 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     private readonly Mock<IDataverseUserClient> _dataverse = new();
     private readonly HandoffUrlBuilder _handoffUrlBuilder = new(TestDataverseBaseUrl);
 
-    /// <summary>The app-only seam of the creator stamp (task 133) — the module boundary, recorded.</summary>
-    private readonly Mock<Spaarke.Dataverse.IGenericEntityService> _appOnly = new();
+    /// <summary>The app-only seam of the owned (S1) create — strict: a run-as-user create must never reach it
+    /// (task 146 r2; the owned path is covered in SecureChildOwnershipAiToolTests).</summary>
+    private readonly Mock<Spaarke.Dataverse.IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
 
     private DataverseCreateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder, _appOnly.Object);
+        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), _appOnly.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
 
     private static AnalysisTool BuildCreateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record");
@@ -423,6 +426,8 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
 
         // Navigation-property metadata: custom lookup casing differs from the column logical
         // name — the mapper must use ReferencingEntityNavigationPropertyName, never guess.
+        // (task 146 r2: a reference-table lookup — a row filed under a matter/project/work assignment takes the owned
+        // path instead, covered by SecureChildOwnershipAiToolTests.)
         _dataverse
             .Setup(d => d.GetAsync(
                 It.Is<string>(p => p.Contains("ManyToOneRelationships")),
@@ -431,15 +436,15 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
                 {
                   "LogicalName": "sprk_event",
                   "ManyToOneRelationships": [
-                    { "ReferencingAttribute": "sprk_matterid", "ReferencingEntityNavigationPropertyName": "sprk_MatterId", "ReferencedEntity": "sprk_matter" }
+                    { "ReferencingAttribute": "sprk_eventtype_ref", "ReferencingEntityNavigationPropertyName": "sprk_EventType_Ref", "ReferencedEntity": "sprk_eventtype_ref" }
                   ]
                 }
                 """)));
         _dataverse
             .Setup(d => d.GetAsync(
-                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")),
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_eventtype_ref')")),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_matters" }""")));
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_eventtype_refs" }""")));
 
         string? postedBody = null;
         _dataverse
@@ -450,17 +455,17 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
         var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""
             {"tablename":"sprk_event","item":{
               "sprk_name":"Follow up",
-              "sprk_matterid":{"relatedTable":"sprk_matter","name":"Ignored Display Name","recordId":"{{{relatedId:D}}}"}
+              "sprk_eventtype_ref":{"relatedTable":"sprk_eventtype_ref","name":"Ignored Display Name","recordId":"{{{relatedId:D}}}"}
             }}
             """);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
         using var bodyDoc = JsonDocument.Parse(postedBody!);
-        bodyDoc.RootElement.GetProperty("sprk_MatterId@odata.bind").GetString()
-            .Should().Be($"/sprk_matters({relatedId:D})",
+        bodyDoc.RootElement.GetProperty("sprk_EventType_Ref@odata.bind").GetString()
+            .Should().Be($"/sprk_eventtype_refs({relatedId:D})",
                 because: "lookups bind via the metadata-resolved navigation property + related entity set");
-        bodyDoc.RootElement.TryGetProperty("sprk_matterid", out _).Should().BeFalse(
+        bodyDoc.RootElement.TryGetProperty("sprk_eventtype_ref", out _).Should().BeFalse(
             because: "the raw lookup object must not pass through as a column value");
     }
 
@@ -576,34 +581,27 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     }
 
     /// <summary>
-    /// A secure-root row created AS THE USER is stamped APP-ONLY with the row's OWN <c>createdby</c> — the calling user as
-    /// Dataverse recorded them, never a value from the item — on exactly that row.
+    /// Batch 4 integration (task 133 x task 146): task 133's INTERIM shape — a run-as-user create of a secure root followed
+    /// by one app-only <c>sprk_createdbyperson</c> update — is superseded by task 146's create-as-the-app, which stamps the
+    /// column IN THE CREATE PAYLOAD (<c>OwnedChildWrite.CreateAsync</c> → <c>RecordOwnerResolution.StampCreatorOn</c>;
+    /// pinned in <c>SecureChildOwnershipAiToolTests</c>). Exactly one stamp: a create that runs as the user (here: metadata
+    /// that declares no user/team ownership) makes no app-only follow-up write — its <c>createdby</c> is the person.
     /// </summary>
     [Theory]
     [InlineData("sprk_matter", "sprk_matters", "sprk_matterid", "sprk_mattername")]
     [InlineData("sprk_project", "sprk_projects", "sprk_projectid", "sprk_projectname")]
     [InlineData("sprk_workassignment", "sprk_workassignments", "sprk_workassignmentid", "sprk_name")]
-    public async Task ExecuteChatAsync_CreatingASecureRoot_StampsTheCreatorPersonFromTheRowsOwnCreatedBy(
+    public async Task ExecuteChatAsync_ARunAsUserCreateOfASecureRoot_MakesNoInterimAppOnlyStamp(
         string table, string entitySet, string primaryId, string nameColumn)
     {
         var createdId = Guid.NewGuid();
-        var oboCaller = Guid.NewGuid();
         SetupEntityMetadata(table, entitySet, primaryId);
-        SetupCreate(entitySet, primaryId, createdId, oboCaller);
+        SetupCreate(entitySet, primaryId, createdId, Guid.NewGuid());
 
         var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"{{{table}}}","item":{"{{{nameColumn}}}":"New"}}""");
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        _appOnly.Verify(a => a.UpdateAsync(
-                table, createdId,
-                It.Is<Dictionary<string, object>>(f =>
-                    f.Count == 1
-                    && f[Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column] is Microsoft.Xrm.Sdk.EntityReference
-                    && ((Microsoft.Xrm.Sdk.EntityReference)f[Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column]).Id == oboCaller
-                    && ((Microsoft.Xrm.Sdk.EntityReference)f[Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column]).LogicalName == "systemuser"),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
         _appOnly.VerifyNoOtherCalls();
     }
 
@@ -620,31 +618,6 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
 
         result.Success.Should().BeTrue();
         _appOnly.VerifyNoOtherCalls();
-    }
-
-    /// <summary>
-    /// The stamp is non-fatal: if it cannot be written (or the create did not echo <c>createdby</c>), the record the
-    /// user created stands — its <c>createdby</c> is that same person, and a resume reads <c>createdby</c> first.
-    /// </summary>
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ExecuteChatAsync_WhenTheStampCannotBeWritten_TheCreateStillSucceeds(bool createdByEchoed)
-    {
-        var createdId = Guid.NewGuid();
-        SetupEntityMetadata("sprk_matter", "sprk_matters", "sprk_matterid");
-        SetupCreate("sprk_matters", "sprk_matterid", createdId, createdByEchoed ? Guid.NewGuid() : null);
-        _appOnly
-            .Setup(a => a.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Dataverse 400: sprk_createdbyperson does not exist"));
-
-        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_matter","item":{"sprk_mattername":"New"}}""");
-        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
-
-        result.Success.Should().BeTrue();
-        _appOnly.Verify(
-            a => a.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
-            createdByEchoed ? Times.Once() : Times.Never());
     }
 
     /// <summary>

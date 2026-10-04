@@ -95,6 +95,7 @@ public class ArchivalFlowTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 

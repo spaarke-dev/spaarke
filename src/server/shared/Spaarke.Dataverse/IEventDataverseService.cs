@@ -24,7 +24,17 @@ public interface IEventDataverseService
     Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default);
     Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default);
     Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default);
-    Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default);
+    /// <param name="owningTeamId">
+    /// The owner team the caller resolved from the event (unified-access-control-r2 task 146: a log row is content of
+    /// its event, owned like it). <c>null</c> ONLY when the resolver answered "unchanged" (an event that is not
+    /// team-owned) and the row keeps its creator. Required positionally so every caller decides.
+    /// </param>
+    /// <param name="createdByPersonId">
+    /// The person whose change the log records (task 146 c1-r1, owner round 13 item 9) — written as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/> because the create is app-only; <c>null</c> when there is
+    /// no person.
+    /// </param>
+    Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default);
     Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default);
     Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default);
 }

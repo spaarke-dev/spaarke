@@ -1084,6 +1084,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
 /// </summary>
 public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public const string TestTenantId = "tenant-create-on-save-001";
 
     public Mock<ISpeFileOperations> SpeMock { get; } = new(MockBehavior.Loose);
@@ -1229,6 +1232,9 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
+            // Task 146: every create resolves its owner — the resolver at its module boundary.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             services.AddSingleton(dataverseServiceMock.Object);
 
             // ── The point of this fixture: KEEP the real ComposeService; mock ONLY the external

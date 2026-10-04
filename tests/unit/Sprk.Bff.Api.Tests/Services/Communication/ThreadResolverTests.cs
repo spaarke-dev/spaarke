@@ -83,7 +83,7 @@ public class ThreadResolverTests
     }
 
     private ThreadResolver CreateSut(params IThreadKeyStrategy[] strategies)
-        => new(strategies, _entity.Object, NullLogger<ThreadResolver>.Instance);
+        => new(strategies, _entity.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<ThreadResolver>.Instance);
 
     private static ThreadResolutionRequest Request(
         CommunicationType channel = CommunicationType.Email,

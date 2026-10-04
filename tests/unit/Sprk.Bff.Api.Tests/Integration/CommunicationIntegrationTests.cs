@@ -201,6 +201,7 @@ public class CommunicationIntegrationTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>());
     }
 
@@ -1257,6 +1258,7 @@ public class CommunicationIntegrationTests
                 dataverseMock.Object,
                 Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             new GraphMessageToEmlConverter(),
@@ -1268,6 +1270,7 @@ public class CommunicationIntegrationTests
             Mock.Of<ITextExtractor>(),
             Options.Create(new AttachmentMatchOptions { Enabled = false }),
             config,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }
 

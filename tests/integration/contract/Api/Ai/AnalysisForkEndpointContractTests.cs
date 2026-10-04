@@ -135,7 +135,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // No Dataverse writes occurred (401 fires at the auth boundary, before the handler).
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fx.ChatRepo.Created.Should().BeEmpty();
     }
@@ -161,7 +161,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // The existence check runs BEFORE any write, so nothing is orphaned.
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fx.ChatRepo.Created.Should().BeEmpty();
     }
@@ -194,7 +194,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // The Analysis was created then COMPENSATED (deleted) — no dangling anchor.
         _fx.AnalysisServiceMock.Verify(
-            s => s.CreateAnalysisAsync(documentId, "Compensating Fork", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAnalysisAsync(documentId, "Compensating Fork", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _fx.EntityServiceMock.Verify(
             e => e.DeleteAsync("sprk_analysis", AnalysisForkEndpointTestFixture.AnalysisId, It.IsAny<CancellationToken>()),
@@ -213,7 +213,8 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>(),
-        HostContext: null) { OwnerOid = TestSessionOwner.Oid };
+        HostContext: null)
+    { OwnerOid = TestSessionOwner.Oid };
 }
 
 /// <summary>
@@ -223,6 +224,9 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 /// </summary>
 public sealed class AnalysisForkEndpointTestFixture : IAsyncLifetime, IDisposable
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public const string TenantId = "00000000-0000-0000-0000-000000000abc";
     public static readonly Guid AnalysisId = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
 
@@ -267,6 +271,7 @@ public sealed class AnalysisForkEndpointTestFixture : IAsyncLifetime, IDisposabl
         // AddAiAuthorizationFilter dependency — pass-through (fork request carries no documentId
         // argument the filter would gate, so AuthorizeAsync is never invoked).
         builder.Services.AddSingleton(Mock.Of<IAiAuthorizationService>());
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
 
         // ── Fork handler dependency graph ────────────────────────────────────────────────
         builder.Services.AddSingleton<ITenantCache>(_cache);
@@ -334,7 +339,7 @@ public sealed class AnalysisForkEndpointTestFixture : IAsyncLifetime, IDisposabl
     {
         AnalysisServiceMock
             .Setup(s => s.CreateAnalysisAsync(
-                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AnalysisId);
     }
 

@@ -97,6 +97,9 @@ public static class DataverseDocumentsEndpoints
             [FromBody] UpdateDocumentRequest request,
             IDocumentDataverseService dataverseService,
             [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+            Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+            Spaarke.Core.Auth.AuthorizationService authorization,
+            [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -125,7 +128,49 @@ public static class DataverseDocumentsEndpoints
                     });
                 }
 
-                await dataverseService.UpdateDocumentAsync(id, request);
+                // Task 146: an update that FILES the document under a record (a matter, project, parent document, …)
+                // is a reparent — its owner is re-derived over every parent it will have (secure-if-any) BEFORE the
+                // lookup is written, and reassigned when it moves. A refusal writes nothing (409 + reason code); a
+                // Dataverse fault propagates to the 500 below.
+                var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(request);
+                if (parentChanges.Count == 0)
+                {
+                    await dataverseService.UpdateDocumentAsync(id, request);
+                }
+                else
+                {
+                    // r2 (verifier items 7 and 8): filing the document under a record costs AppendTo on THAT record, asked
+                    // AS THE CALLER before anything is resolved or written — the Write filter above covers the document
+                    // only. Without it a caller could pull their document under a secure record they cannot see (and lose
+                    // it to that record's team), and the owner refusal's detail answered questions about such a record.
+                    var denial = await AuthorizeRefileTargetsAsync(authorization, context, Guid.Parse(id), parentChanges, logger);
+                    if (denial is not null)
+                    {
+                        return denial;
+                    }
+
+                    var reparent = await ownershipResolver.ReparentAsync(
+                        new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                        {
+                            EntityLogicalName = "sprk_document",
+                            RecordId = Guid.Parse(id),
+                            ParentChanges = parentChanges,
+                            CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(context.User), out var callerOid)
+                                ? callerOid
+                                : null,
+                            // Owner round 10 item 7 (task 146 c1): replacing a lookup can move the document OUT of a
+                            // secure root — an un-secure. The resolver asks THIS caller's F3 rights (Full Access on the
+                            // root, or the document's creator) before anything is written; a refusal is the unsecure
+                            // endpoint's 403 ProblemDetails.
+                            SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
+                        },
+                        token => dataverseService.UpdateDocumentAsync(id, request, token),
+                        context.RequestAborted);
+                    if (reparent.IsRefused)
+                    {
+                        return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
+                    }
+                }
 
                 // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work
                 // assignment re-stamps every to-do and analysis filed under it, in this same request. Never thrown: a
@@ -545,6 +590,75 @@ public static class DataverseDocumentsEndpoints
         return app;
     }
 
+    /// <summary>The right filing a document under a record costs on that record: AppendTo (the key the record-keyed
+    /// upload, Office save, associate-record and event re-file routes use).</summary>
+    internal const string RefileTargetOperation = "entity.associate_document";
+
+    /// <summary>
+    /// Authorizes a RE-FILE of a document AS THE CALLER on every record the update files it under (task 146 r2, verifier
+    /// items 7 and 8): AppendTo (<see cref="RefileTargetOperation"/>) on each new parent, asked of Dataverse through the
+    /// caller's own rights before the owner is resolved or anything is written. Write on the document itself is the
+    /// route's filter. <c>null</c> when allowed; otherwise a 403 ProblemDetails that names no target and no reason about
+    /// it — a caller without AppendTo learns nothing about the record (the owner refusal's detail is reached only by a
+    /// caller authorized on every target). Fails closed: an unsupported type, an unanswerable question or a fault denies.
+    /// </summary>
+    private static async Task<IResult?> AuthorizeRefileTargetsAsync(
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        HttpContext httpContext,
+        Guid documentId,
+        IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> parentChanges,
+        ILogger logger)
+    {
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var ct = httpContext.RequestAborted;
+
+        foreach (var (column, target) in parentChanges)
+        {
+            if (target is null)
+                continue; // this route's updates only SET lookups (RecordReparent.ParentChangesOf)
+
+            var entitySet = EntityAccessFilter.TryResolveEntitySet(target.LogicalName, out var resolved)
+                ? resolved
+                : string.Equals(target.LogicalName, "sprk_document", StringComparison.OrdinalIgnoreCase)
+                    ? FinanceAuthorizationFilter.DocumentEntitySet
+                    : null;
+
+            string? denyReason;
+            if (entitySet is null || string.IsNullOrEmpty(userId))
+            {
+                denyReason = FinanceAuthorizationFilter.NoTargetReasonCode;
+            }
+            else
+            {
+                try
+                {
+                    var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
+                    denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
+                        ? null
+                        : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogError(ex, "Document re-file authorization faulted on {EntitySet}({RecordId}); denying",
+                        entitySet, target.Id);
+                    denyReason = FinanceAuthorizationFilter.SystemFailureReasonCode;
+                }
+            }
+
+            if (denyReason is not null)
+            {
+                logger.LogWarning(
+                    "Document re-file DENIED: caller may not file document {DocumentId} under {Column} → {Entity}({RecordId}) ({Reason})",
+                    documentId, column, target.LogicalName, target.Id, denyReason);
+                return ProblemDetailsHelper.Forbidden(
+                    denyReason, "You do not have permission to file this document under that record.", httpContext.TraceIdentifier);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// POST /api/v1/documents — creates a document row (app-only, owned by the caller's business-unit default owner
     /// team, task 080) and publishes the owner <see cref="MembershipChangedEvent"/> for it.
@@ -577,12 +691,17 @@ public static class DataverseDocumentsEndpoints
             // user (the caller included) can read it. The body names no record, so the caller's business-unit
             // default owner team decides. OwningTeamId and Id are [JsonIgnore]d on the request, so the body can
             // no longer set either; the owner is decided here, server-side, or the create is refused.
-            var owningTeamId = await ownershipResolver.ResolveOwningTeamAsync(
+            //
+            // Task 146 c1-r1 (owner round 13 item 9): the caller is also recorded as the person who asked
+            // (sprk_createdbyperson) — this create is app-only, so createdby is the application user.
+            var owner = await ownershipResolver.ResolveOwnerAsync(
                 new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
                 {
                     CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
                 },
                 ct);
+            var owningTeamId = owner.IsOwned ? owner.OwningTeamId : null;
 
             if (owningTeamId is null)
             {
@@ -604,6 +723,7 @@ public static class DataverseDocumentsEndpoints
             }
 
             request.OwningTeamId = owningTeamId;
+            request.CreatedByPersonId = owner.CreatedByPerson;
 
             var documentId = await dataverseService.CreateDocumentAsync(request);
 

@@ -520,6 +520,7 @@ public class CoreAncestorStampReconciliationJobTests
         return new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore(
             world.Service,
             world.Resolver,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             lookup,
             NullLogger.Instance);

@@ -163,6 +163,7 @@ public class CommunicationServiceMessageSendTests
             enrichment ?? Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             threadResolver,
             ScopeFactoryFor(idempotency),

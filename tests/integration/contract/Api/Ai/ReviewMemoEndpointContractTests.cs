@@ -111,7 +111,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
+                EntityId: analysisId.ToString()))
+        { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -165,7 +166,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
+                EntityId: analysisId.ToString()))
+        { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -225,7 +227,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
+            HostContext: null)
+        { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -268,7 +271,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: new ChatHostContext(EntityType: "matter", EntityId: Guid.NewGuid().ToString())) { OwnerOid = TestSessionOwner.Oid };
+            HostContext: new ChatHostContext(EntityType: "matter", EntityId: Guid.NewGuid().ToString()))
+        { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -332,7 +336,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
+                EntityId: analysisId.ToString()))
+        { OwnerOid = TestSessionOwner.Oid };
         return sessionId;
     }
 
@@ -409,7 +414,8 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
+            HostContext: null)
+        { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");
@@ -495,6 +501,9 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
 /// </summary>
 public sealed class ReviewMemoEndpointTestFixture : IAsyncLifetime, IDisposable
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public const string TenantId = "00000000-0000-0000-0000-000000000abc";
 
     public Mock<IAnalysisDataverseService> AnalysisServiceMock { get; } = new();
@@ -538,6 +547,7 @@ public sealed class ReviewMemoEndpointTestFixture : IAsyncLifetime, IDisposable
         // AddAiAuthorizationFilter dependency — pass-through (the review-memo request carries no
         // documentId argument the filter would gate; only the oid-claim 401 check is exercised).
         builder.Services.AddSingleton(Mock.Of<IAiAuthorizationService>());
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
 
         // ── review-memo handler dependency graph ─────────────────────────────────────────
         builder.Services.AddSingleton<ITenantCache>(_cache);

@@ -69,7 +69,7 @@ public sealed class ComposeServiceApplyTemplateTests
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     // ── builders (real OOXML — the engine under the service is the REAL 030 engine) ──────────────
 

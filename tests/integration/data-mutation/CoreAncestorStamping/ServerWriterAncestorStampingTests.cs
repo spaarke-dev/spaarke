@@ -115,7 +115,10 @@ public class ServerWriterAncestorStampingTests
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
             entityService.Object,
-            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger.Instance);
 
         var id = await core.CreateAsync(
@@ -144,6 +147,7 @@ public class ServerWriterAncestorStampingTests
         var core = new TaskActionCore(
             entityService.Object,
             CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             recordTypes.Object,
             NullLogger.Instance);
@@ -264,7 +268,8 @@ public class ServerWriterAncestorStampingTests
         var id = await new TaskActionCore(
                 entityService.Object,
                 CoreAncestorResolverFixtures.Inert(),
-                IdentityNormalizationFixtures.NoLinkedContact(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
                 recordTypes.Object,
                 NullLogger.Instance)
             .CreateAsync(
@@ -321,7 +326,8 @@ public class ServerWriterAncestorStampingTests
         var act = () => new TaskActionCore(
                 entityService.Object,
                 coreAncestors,
-                IdentityNormalizationFixtures.NoLinkedContact(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
                 recordTypes.Object,
                 NullLogger.Instance)
             .CreateAsync(
@@ -341,6 +347,7 @@ public class ServerWriterAncestorStampingTests
     private static TaskActionCore TaskCore(Mock<IGenericEntityService> entityService) => new(
         entityService.Object,
         CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+        new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
         Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
         Mock.Of<ICommunicationDataverseService>(),
         NullLogger.Instance);
@@ -351,7 +358,9 @@ public class ServerWriterAncestorStampingTests
         var created = new List<Entity>();
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
-            entityService.Object, CoreAncestorResolverFixtures.Failing(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(), NullLogger.Instance);
+            entityService.Object, CoreAncestorResolverFixtures.Failing(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(), NullLogger.Instance);
 
         var id = await core.CreateAsync(
             new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
@@ -506,6 +515,7 @@ public class ServerWriterAncestorStampingTests
             dataverse.Object,
             MapperWithCoreWritable(coreWritableEntities),
             coreAncestors,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<IncomingAssociationResolver>.Instance);
 
         return (resolver, updates);

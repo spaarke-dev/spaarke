@@ -108,10 +108,11 @@ public class OfficeDocumentPersistence
         string userId,
         CancellationToken cancellationToken,
         Guid? preAssignedDocumentId = null,
-        Guid? owningTeamId = null)
+        Guid? owningTeamId = null,
+        Guid? createdByPersonId = null)
         => CreateDocumentWithSpePointersAsync(
             request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken,
-            preAssignedDocumentId, owningTeamId);
+            preAssignedDocumentId, owningTeamId, createdByPersonId);
 
     /// <summary>
     /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
@@ -131,7 +132,8 @@ public class OfficeDocumentPersistence
         string userId,
         CancellationToken cancellationToken,
         Guid? preAssignedDocumentId = null,
-        Guid? owningTeamId = null)
+        Guid? owningTeamId = null,
+        Guid? createdByPersonId = null)
     {
         // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
         // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
@@ -263,6 +265,8 @@ public class OfficeDocumentPersistence
             // business unit — which is why all 512 pre-existing sprk_document rows are unreachable by any
             // child-BU user at Deep depth. owningbusinessunit derives from the team; it is never set here.
             OwningTeamId = owningTeamId,
+            // Task 146 c1-r1 (owner round 13 item 9): the person who made the save — this create is app-only.
+            CreatedByPersonId = createdByPersonId,
             Description = request.ContentType switch
             {
                 SaveContentType.Email => request.Email?.Subject,

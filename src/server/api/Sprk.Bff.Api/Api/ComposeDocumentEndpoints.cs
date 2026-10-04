@@ -284,6 +284,14 @@ internal static class ComposeDocumentEndpoints
         {
             return BadRequest(ex.Message);
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
+        {
+            // Task 146: no owner could be resolved for the new sprk_document, so no row was written. A refusal with a
+            // stable reason code — not a bare 500.
+            logger.LogWarning(ex, "Compose promote refused: no owner. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                ex.RefusalCode, ex.Reason, "document record", httpContext.TraceIdentifier);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Compose promote: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);

@@ -30,7 +30,8 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     private readonly StampWorld _world = new();
 
     private DataverseUpdateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, _world.AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>());
+        new(_dataverse.Object, _world.AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");
@@ -234,6 +235,17 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
             .Setup(d => d.GetAsync(
                 It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_matters" }""")));
+        // Batch 4 integration (task 146 r2): filing a communication under a matter is a RE-FILE — asked as the caller
+        // (WhoAmI, AppendTo on the matter, the row visible to them), owned through the resolver, which applies this PATCH.
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "UserId": "{{Guid.NewGuid():D}}" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.Contains("RetrievePrincipalAccess")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "AccessRights": "ReadAccess, WriteAccess, AppendToAccess" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_communications({Communication:D})?$select=")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "sprk_communicationid": "{{Communication:D}}" }""")));
         int? restampPatchesWhenTheUserWrote = null;
         _dataverse
             .Setup(d => d.PatchAsync($"sprk_communications({Communication:D})", It.IsAny<string>(), It.IsAny<CancellationToken>()))

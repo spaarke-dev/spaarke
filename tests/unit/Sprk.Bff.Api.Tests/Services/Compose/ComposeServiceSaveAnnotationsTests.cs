@@ -71,7 +71,7 @@ public sealed class ComposeServiceSaveAnnotationsTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private static FileHandleDto ReplacedDriveItem() => new(
         Id: ExistingSpeItemId,

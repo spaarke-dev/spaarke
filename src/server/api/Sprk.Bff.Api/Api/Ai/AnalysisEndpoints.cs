@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Web;
@@ -8,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
@@ -155,7 +155,9 @@ public static class AnalysisEndpoints
     private static async Task<IResult> CreateAnalysis(
         CreateAnalysisRequest request,
         IAnalysisDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AnalysisOrchestrationService> logger,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -183,11 +185,28 @@ public static class AnalysisEndpoints
 
         try
         {
+            // Task 146: the analysis is a child of its document — owned by the document's team (the named Secure team
+            // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
+            var owner = await ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                    with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+                cancellationToken);
+            if (!owner.IsOwned)
+            {
+                logger.LogWarning(
+                    "Refused analysis create for document {DocumentId}: {Code} {Reason}",
+                    request.DocumentId, owner.RefusalCode, owner.Reason);
+                return AnalysisOwnerRefusal(owner);
+            }
+
             // Step 1: Create the sprk_analysis record
             var analysisId = await dataverseService.CreateAnalysisAsync(
                 request.DocumentId,
                 request.Name,
                 playbookId: request.PlaybookId,
+                owningTeamId: owner.OwningTeamId,
+                createdByPersonId: owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded on the app-only create
                 ct: cancellationToken);
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
@@ -1139,6 +1158,7 @@ public static class AnalysisEndpoints
         ChatSessionManager sessionManager,
         IChatDataverseRepository chatRepository,
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         HttpContext httpContext,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
@@ -1200,12 +1220,28 @@ public static class AnalysisEndpoints
         }
         var priorMessageCount = priorSession.Messages?.Count ?? 0;
 
-        // ---- Step 2: create the new Analysis anchor ----
+        // ---- Step 2: create the new Analysis anchor, owned by its document's team (task 146) ----
+        // Resolved first: a refusal leaves NOTHING written (the prior session is untouched) and is a 409.
+        // A Dataverse fault propagates as the request's 5xx — a fault is not a refusal.
+        var owner = await ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            cancellationToken);
+        if (!owner.IsOwned)
+        {
+            logger.LogWarning(
+                "Fork refused: no owner for an analysis of document {DocumentId} ({Code}) (corr={CorrelationId})",
+                request.DocumentId, owner.RefusalCode, correlationId);
+            return AnalysisOwnerRefusal(owner);
+        }
+
         Guid analysisId;
         try
         {
             analysisId = await analysisService.CreateAnalysisAsync(
-                request.DocumentId, request.Name, playbookId: request.PlaybookId, ct: cancellationToken);
+                request.DocumentId, request.Name, playbookId: request.PlaybookId,
+                owningTeamId: owner.OwningTeamId, createdByPersonId: owner.CreatedByPerson, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1316,6 +1352,7 @@ public static class AnalysisEndpoints
         IAnalysisDataverseService analysisService,
         ChatSessionManager sessionManager,
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         HttpContext httpContext,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
@@ -1398,13 +1435,36 @@ public static class AnalysisEndpoints
                 "This session has no associated document; promoting to an Analysis requires a documentId or a regarding target (matter/project).");
         }
 
-        // ---- Step 2: create the new Analysis anchor ----
+        // ---- Step 2: create the new Analysis anchor, owned per task 146 ----
+        // Its parents are its document AND its regarding record: secure-if-any, so an analysis of an ordinary
+        // document filed to a secure matter is the named Secure team's. Resolved before any write; a refusal is a 409
+        // and the session is untouched; a Dataverse fault propagates as the request's 5xx.
+        var owner = await ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+            {
+                documentId is { } docId
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
+                    : null,
+                regarding is not null
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regarding.EntityLogicalName, regarding.RecordId)
+                    : null,
+            }) with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            cancellationToken);
+        if (!owner.IsOwned)
+        {
+            logger.LogWarning(
+                "Promote refused: no owner for session {SessionId}'s analysis ({Code}) (corr={CorrelationId})",
+                request.SessionId, owner.RefusalCode, correlationId);
+            return AnalysisOwnerRefusal(owner);
+        }
+
         Guid analysisId;
         try
         {
             analysisId = await analysisService.CreateAnalysisAsync(
                 documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId,
-                regarding: regarding, ct: cancellationToken);
+                regarding: regarding, owningTeamId: owner.OwningTeamId, createdByPersonId: owner.CreatedByPerson,
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1477,6 +1537,13 @@ public static class AnalysisEndpoints
         type: statusCode == StatusCodes.Status400BadRequest
             ? "https://tools.ietf.org/html/rfc7231#section-6.5.1"
             : "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+
+    /// <summary>
+    /// Task 146: the analysis was refused an owner (its document or regarding record is unreadable, flagged secure but
+    /// not isolated, or its team is missing). Nothing was written. A 409 carrying the stable reason code.
+    /// </summary>
+    private static IResult AnalysisOwnerRefusal(Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal) =>
+        Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(refusal, "analysis");
 
     /// <summary>
     /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014).

@@ -178,6 +178,13 @@ public static class DocumentOperationsEndpoints
                 )
             };
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: the new file version's owner could not be resolved from its document — nothing was written.
+            logger.LogWarning(refused, "Checkout refused for document {DocumentId}: no owner", documentId);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "checkout", correlationId);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Checkout failed for document {DocumentId}", documentId);

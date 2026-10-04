@@ -713,9 +713,12 @@ public static class CommunicationEndpoints
     private static async Task<IResult> ArchiveCommunicationAsync(
         Guid id,
         CommunicationService communicationService,
+        HttpContext httpContext,
         CancellationToken ct)
     {
-        var result = await communicationService.ArchiveExistingAsync(id, ct);
+        // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the archive documents the application creates.
+        var result = await communicationService.ArchiveExistingAsync(
+            id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
         return TypedResults.Ok(result);
     }
 

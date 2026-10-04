@@ -42,6 +42,7 @@ public class TaskActionCoreAssignedToTests
     private TaskActionCore Core(Guid? linkedContact) => new(
         _entities.Object,
         CoreAncestorResolverFixtures.Inert(),
+        new RecordOwnershipResolverDouble(),
         IdentityNormalizationFixtures.WithContact(linkedContact).Object,
         Mock.Of<ICommunicationDataverseService>(),
         _logger);
@@ -95,6 +96,7 @@ public class TaskActionCoreAssignedToTests
             new TemplateEngine(Microsoft.Extensions.Logging.Abstractions.NullLogger<TemplateEngine>.Instance),
             _entities.Object,
             CoreAncestorResolverFixtures.Inert(),
+            new RecordOwnershipResolverDouble(),
             IdentityNormalizationFixtures.WithContact(ActingUsersContact).Object,
             Mock.Of<ICommunicationDataverseService>(),
             Mock.Of<ILogger<CreateTaskNodeExecutor>>());

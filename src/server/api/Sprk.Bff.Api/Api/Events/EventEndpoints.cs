@@ -74,6 +74,7 @@ public static class EventEndpoints
             .Produces<CreateEventResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146: no owner resolvable
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // PUT /api/v1/events/{id} - Update an existing event
@@ -86,6 +87,7 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146: re-file refused
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // POST /api/v1/events/{id}/complete - Mark event as completed
@@ -336,6 +338,7 @@ public static class EventEndpoints
         [FromBody] ApiCreateEventRequest request,
         IEventDataverseService dataverseService,
         IMembershipEventPublisher membershipEventPublisher,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Dataverse.IGenericEntityService genericEntityService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
@@ -386,6 +389,19 @@ public static class EventEndpoints
 
         try
         {
+            // Task 146 (C10 part 2): the create is app-only, so the event is owned by the team the ONE resolver names —
+            // the regarding record's team (the named Secure team for a secure record), else the caller's own business
+            // unit team for an event regarding nothing. A refusal writes nothing and is a 409 with a stable reason
+            // code; a Dataverse fault during resolution falls to the catch below as a 500 (a fault is not a refusal).
+            var owner = await ownership.ResolveOwnerAsync(
+                OwnershipContextFor(request.RegardingRecordType, request.RegardingRecordId, httpContext), ct);
+            if (!owner.IsOwned)
+            {
+                logger.LogWarning(
+                    "Refused event create: no owner resolved ({Code}: {Reason})", owner.RefusalCode, owner.Reason);
+                return OwnerRefusalProblem(owner, "event");
+            }
+
             // UAC-r2 task 152 / owner decision S1: the create is app-only, so Created By is the BFF application user
             // and cannot say who the event is FOR. The acting user's LINKED contact (task 141) is written to
             // sprk_assignedto — never an email match; no link → blank + todo_unassigned.
@@ -395,7 +411,9 @@ public static class EventEndpoints
             var (eventId, createdOn) = await CreateEventInDataverseAsync(
                 dataverseService,
                 request,
+                owner.OwningTeamId!.Value,
                 assignedToContactId,
+                owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded as the app-created event's creator person
                 ct);
 
             var response = new CreateEventResponse(eventId, request.Subject, createdOn);
@@ -405,17 +423,17 @@ public static class EventEndpoints
                 eventId, request.Subject);
 
             // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
-            // (UAC-r2 task 152, ADR-034 A3). The create runs on the app-only IEventDataverseService and sets no owner,
-            // so the owner is read back: today that is the BFF application user, which is not a person — no event is
-            // published, exactly as reconciliation records no junction row for it. (Before task 152 this published
-            // the caller's AAD oid under a comment claiming Dataverse defaulted the owner to the OBO caller; it never
-            // did.) When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns.
+            // (UAC-r2 task 152, ADR-034 A3). The create is app-only; the owner it wrote is the TEAM the resolver named
+            // above (task 146), which the path already holds — so it is passed rather than read back, and the event
+            // names that team. (Before task 152 this published the caller's AAD oid under a comment claiming
+            // Dataverse defaulted the owner to the OBO caller; it never did.) When
+            // MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns.
             _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
                 membershipEventPublisher,
                 genericEntityService,
                 "sprk_event",
                 eventId,
-                knownOwner: null,
+                knownOwner: new Microsoft.Xrm.Sdk.EntityReference("team", owner.OwningTeamId!.Value),
                 httpContext.TraceIdentifier,
                 logger,
                 ct);
@@ -452,6 +470,10 @@ public static class EventEndpoints
         [FromBody] ApiUpdateEventRequest request,
         IEventDataverseService dataverseService,
         [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -506,7 +528,8 @@ public static class EventEndpoints
         try
         {
             // Check if event exists
-            var existing = await GetEventByIdFromDataverseAsync(dataverseService, id, ct);
+            var existingEntity = await dataverseService.GetEventAsync(id, ct);
+            var existing = existingEntity is null ? null : MapEntityToDto(existingEntity);
 
             if (existing is null)
             {
@@ -519,12 +542,91 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
-            await UpdateEventInDataverseAsync(
-                dataverseService,
-                restamper,
-                id,
-                request,
-                ct);
+            // Task 146: a change of regarding is a REPARENT. The owner is re-derived from the event's parents after
+            // the change, BEFORE it is written, and reassigned (separately, read back) when it moves — into a secure
+            // record's named team, or out of it. A refusal writes nothing.
+            //
+            // r1 (verifier item 2): the parent changes are EXACTLY the regarding lookups the PATCH writes
+            // (UpdateEventRequest.RegardingLookupWrites — the new regarding, and a clear of the previous type's lookup),
+            // so the owner can no longer follow a lookup that was never written.
+            var dataverseRequest = ToDataverseUpdate(request, CurrentRegardingRecordType(existingEntity!));
+            var parentChanges = ParentChangesFor(dataverseRequest);
+
+            if (parentChanges.Count > 0)
+            {
+                // r1 (verifier items 1/18): a re-file changes who can READ the event (it moves it into or out of a
+                // secure record's team), so it is authorized AS THE CALLER before anything is resolved or written:
+                // Write on the event, and AppendTo on the record it is filed to. The group is authentication-only.
+                var denial = await AuthorizeRefileAsync(authorization, httpContext, id, request, logger, ct);
+                if (denial is not null)
+                    return denial;
+            }
+
+            // The status log row (content of the event) is owned like the event. Its owner is resolved HERE, before
+            // anything is written, so a refusal is a 409 with nothing changed (verifier item 9 — it used to be resolved
+            // after the update had landed, answering 409 for a write that had already happened). A re-file below
+            // replaces it with the event's new owner.
+            var (statusLogOwner, statusLogPerson) = request.StatusCode.HasValue
+                ? await ResolveEventLogOwnerAsync(ownership, id, httpContext, ct) // throws a refusal BEFORE any write → 409 below
+                : ((Guid?)null, (Guid?)null);
+
+            if (parentChanges.Count > 0)
+            {
+                var oid = CallerResolution.ResolveObjectId(httpContext.User);
+                var reparent = await ownership.ReparentAsync(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                    {
+                        EntityLogicalName = "sprk_event",
+                        RecordId = id,
+                        ParentChanges = parentChanges,
+                        CallerObjectId = Guid.TryParse(oid, out var callerOid) ? callerOid : null,
+                        // Owner round 10 item 7 (task 146 c1): a change of regarding can move the event OUT of a secure
+                        // root — an un-secure, decided by THIS caller's F3 rights before anything is written.
+                        SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext),
+                    },
+                    token => dataverseService.UpdateEventAsync(id, dataverseRequest, token),
+                    ct);
+
+                if (reparent.IsRefused)
+                {
+                    logger.LogWarning(
+                        "Refused event re-file. EventId={EventId} ({Code}: {Reason})",
+                        id, reparent.RefusalCode, reparent.Reason);
+                    return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                        reparent, "event", httpContext.TraceIdentifier);
+                }
+
+                // The event's owner after the re-file IS its log row's owner — no second resolution after the write.
+                // (Unchanged: the re-file touched no ownership parent, so the owner resolved above still holds.)
+                if (reparent.IsOwned)
+                    statusLogOwner = reparent.OwningTeamId;
+            }
+            else
+            {
+                await dataverseService.UpdateEventAsync(id, dataverseRequest, ct);
+            }
+
+            // Task 156 (verifier round 2 item 8): the update writes the event's regarding pair (and, since task 146, the
+            // entity-specific regarding lookups). A pair change moves which source its copy comes from — so the event's
+            // own copy, and the copies of everything filed under it, are re-stamped in this same request, after whichever
+            // path wrote it (the reparent or the plain update). A write that does not touch the regarding reads nothing.
+            // Never thrown: a record that fails is logged and the reconciliation job repairs it; this update stands.
+            await restamper.AfterWriteAsync(
+                "sprk_event", id,
+                Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.EventColumnsWritten(dataverseRequest),
+                CancellationToken.None);
+
+            // If status changed, create Event Log entry — after any reparent, so it is owned like the event now is.
+            if (request.StatusCode.HasValue)
+            {
+                await dataverseService.CreateEventLogAsync(
+                    id,
+                    Spaarke.Dataverse.EventLogAction.Updated,
+                    $"Event status updated to {EventStatusCode.GetDisplayName(request.StatusCode.Value)}",
+                    statusLogOwner,
+                    statusLogPerson,
+                    ct);
+            }
 
             // Fetch updated record to return
             var updated = await GetEventByIdFromDataverseAsync(dataverseService, id, ct);
@@ -537,6 +639,14 @@ public static class EventEndpoints
                 id, updatedDto.Subject);
 
             return TypedResults.Ok(updatedDto);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146 r1 (verifier item 9): the status log row's owner is resolved BEFORE the update, so this refusal
+            // means NOTHING was written — the event update and its log row both — and the client may retry safely.
+            logger.LogWarning(refused, "Refused event update: its status log row has no owner. Nothing written. EventId={EventId}", id);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "event");
         }
         catch (Exception ex)
         {
@@ -561,7 +671,9 @@ public static class EventEndpoints
     private static async Task<IResult> DeleteEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<Program> logger,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         logger.LogInformation("Deleting event (soft delete). EventId={EventId}", id);
@@ -582,11 +694,18 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
-            await SoftDeleteEventAsync(dataverseService, id, ct);
+            await SoftDeleteEventAsync(dataverseService, ownership, id, httpContext, ct);
 
             logger.LogInformation("Event soft deleted successfully. EventId={EventId}", id);
 
             return Results.NoContent();
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: the deletion's log row could not be owned like its event — nothing was written.
+            logger.LogWarning(refused, "Refused event delete: no owner for its log row. EventId={EventId}", id);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "event deletion");
         }
         catch (Exception ex)
         {
@@ -707,9 +826,14 @@ public static class EventEndpoints
     /// </remarks>
     private static async Task SoftDeleteEventAsync(
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Guid id,
+        HttpContext httpContext,
         CancellationToken ct)
     {
+        // Task 146: the log row's owner is resolved BEFORE anything is written, so a refusal changes nothing.
+        var (logOwner, logPerson) = await ResolveEventLogOwnerAsync(ownership, id, httpContext, ct);
+
         // Set statuscode to Deleted (7)
         await dataverseService.UpdateEventStatusAsync(id, EventStatusCode.Deleted, null, ct);
 
@@ -718,7 +842,32 @@ public static class EventEndpoints
             id,
             Spaarke.Dataverse.EventLogAction.Deleted,
             "Event was soft-deleted via API",
+            logOwner,
+            logPerson,
             ct);
+    }
+
+    /// <summary>
+    /// Task 146: an event log row is content of its event — owned like it (the named Secure team's for a secure
+    /// event); <c>Team</c> is <c>null</c> when the event is not team-owned (the row keeps its creator, as the event did).
+    /// c1-r1 (owner round 13 item 9): <c>Person</c> is the caller whose change the row logs, recorded because the create
+    /// is app-only.
+    /// </summary>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException">No owner resolves.</exception>
+    private static async Task<(Guid? Team, Guid? Person)> ResolveEventLogOwnerAsync(
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership, Guid eventId, HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var owner = await ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_event", eventId) with
+            {
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(
+                    CallerResolution.ResolveObjectId(httpContext.User)),
+            },
+            ct);
+        if (owner.IsRefused)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_eventlog", owner);
+        return (owner.IsOwned ? owner.OwningTeamId : null, owner.CreatedByPerson);
     }
 
     /// <summary>
@@ -771,7 +920,9 @@ public static class EventEndpoints
     private static async Task<(Guid Id, DateTime CreatedOn)> CreateEventInDataverseAsync(
         IEventDataverseService dataverseService,
         ApiCreateEventRequest request,
+        Guid owningTeamId,
         Guid? assignedToContactId,
+        Guid? createdByPersonId,
         CancellationToken ct)
     {
         // Map API request to Dataverse request
@@ -786,7 +937,9 @@ public static class EventEndpoints
             RegardingRecordType = request.RegardingRecordType,
             RegardingRecordId = request.RegardingRecordId?.ToString(),
             RegardingRecordName = request.RegardingRecordName,
+            OwningTeamId = owningTeamId, // task 146 — resolved above; the seam refuses without it
             AssignedToContactId = assignedToContactId,
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 (owner round 13 item 9)
         };
 
         // Create the event record
@@ -797,62 +950,179 @@ public static class EventEndpoints
             id,
             Spaarke.Dataverse.EventLogAction.Created,
             "Event created via API",
+            owningTeamId, // task 146 — owned like the event it logs
+            createdByPersonId,
             ct);
 
         return (id, createdOn);
     }
 
     /// <summary>
-    /// Updates an existing event in Dataverse.
+    /// The ownership question for an event filed (or not) to a regarding record (task 146): the regarding record is
+    /// the parent when it is an ownership parent (a contact or an account is a relationship, not a parent); with no
+    /// parent, the caller's own business unit (I-6).
     /// </summary>
-    /// <remarks>
-    /// Only updates fields that are non-null in the request.
-    /// </remarks>
-    private static async Task UpdateEventInDataverseAsync(
-        IEventDataverseService dataverseService,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
-        Guid id,
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextFor(
+        int? regardingRecordType, Guid? regardingRecordId, HttpContext httpContext)
+    {
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
+        var parents = new List<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>();
+        if (regardingRecordType is { } type
+            && Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(type) is { } entity
+            && regardingRecordId is { } recordId && recordId != Guid.Empty)
+        {
+            parents.Add(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(entity, recordId));
+        }
+
+        return new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+        {
+            Parents = parents,
+            CallerObjectId = Guid.TryParse(oid, out var callerOid) ? callerOid : null,
+            // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the event the application creates.
+            RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(oid),
+        };
+    }
+
+    /// <summary>
+    /// The regarding change an update writes, as a reparent's parent changes (task 146): EXACTLY the entity-specific
+    /// lookups the PATCH writes (<see cref="DataverseUpdateEventRequest.RegardingLookupWrites"/>) — the new regarding,
+    /// and a clear of the previous type's lookup. Empty when the update does not touch the regarding.
+    /// </summary>
+    /// <remarks>r1 (verifier item 2): derived from the same request the PATCH is built from, so the owner can only be
+    /// re-derived from lookups that are actually written.</remarks>
+    internal static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesFor(
+        DataverseUpdateEventRequest update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (recordType, recordId) in update.RegardingLookupWrites())
+        {
+            var lookup = Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(recordType)!;
+            changes[lookup] = recordId is { } id
+                && Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(recordType) is { } entity
+                    ? new Microsoft.Xrm.Sdk.EntityReference(entity, id)
+                    : null;
+        }
+
+        return changes;
+    }
+
+    /// <summary>
+    /// The Dataverse update for an API update request. <paramref name="previousRegardingRecordType"/> is the event's
+    /// regarding type before the update (read by the handler), so a type change clears the old type's lookup.
+    /// </summary>
+    internal static DataverseUpdateEventRequest ToDataverseUpdate(
+        ApiUpdateEventRequest request, int? previousRegardingRecordType) => new()
+    {
+        Name = request.Subject,
+        Description = request.Description,
+        EventTypeId = request.EventTypeId,
+        BaseDate = request.ScheduledStart,
+        DueDate = request.DueDate,
+        Priority = request.Priority,
+        StatusCode = request.StatusCode,
+        RegardingRecordType = request.RegardingRecordType,
+        RegardingRecordId = request.RegardingRecordId?.ToString(),
+        RegardingRecordName = request.RegardingRecordName,
+        PreviousRegardingRecordType = previousRegardingRecordType,
+    };
+
+    /// <summary>
+    /// The event's regarding type as it stands: the denormalized <c>sprk_regardingrecordtype</c> when it reads, else the
+    /// ONE entity-specific regarding lookup that is populated (null when none or several are — then no lookup is cleared,
+    /// and the resolver still sees every lookup the row holds, which keeps a secure one secure: fail closed).
+    /// </summary>
+    internal static int? CurrentRegardingRecordType(Spaarke.Dataverse.EventEntity entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        if (entity.RegardingRecordType is { } type)
+            return type;
+
+        var populated = new (int Type, Guid? Id)[]
+            {
+                (Spaarke.Dataverse.RegardingRecordType.Project, entity.RegardingProjectId),
+                (Spaarke.Dataverse.RegardingRecordType.Matter, entity.RegardingMatterId),
+                (Spaarke.Dataverse.RegardingRecordType.Invoice, entity.RegardingInvoiceId),
+                (Spaarke.Dataverse.RegardingRecordType.Analysis, entity.RegardingAnalysisId),
+                (Spaarke.Dataverse.RegardingRecordType.Account, entity.RegardingAccountId),
+                (Spaarke.Dataverse.RegardingRecordType.Contact, entity.RegardingContactId),
+                (Spaarke.Dataverse.RegardingRecordType.WorkAssignment, entity.RegardingWorkAssignmentId),
+                (Spaarke.Dataverse.RegardingRecordType.Budget, entity.RegardingBudgetId),
+            }
+            .Where(x => x.Id is { } id && id != Guid.Empty)
+            .ToArray();
+        return populated.Length == 1 ? populated[0].Type : null;
+    }
+
+    /// <summary>
+    /// Authorizes a RE-FILE of an event AS THE CALLER (task 146 r1, verifier items 1 and 18): Write on the event, and —
+    /// when the update names a record — AppendTo on that record (the right a lookup onto it costs, the same
+    /// <c>entity.associate_document</c> key the record-keyed upload and Office save routes use). A re-file re-derives the
+    /// event's owner (into or out of a secure record's named team), so on this authentication-only group an unchecked
+    /// re-file would let any signed-in user move any event out of a secure record. <c>null</c> when allowed; otherwise
+    /// a 403 ProblemDetails with a reason code. Fails closed: an unanswerable question or a fault denies.
+    /// </summary>
+    private static async Task<IResult?> AuthorizeRefileAsync(
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        HttpContext httpContext,
+        Guid eventId,
         ApiUpdateEventRequest request,
+        ILogger logger,
         CancellationToken ct)
     {
-        // Map API request to Dataverse request
-        var dataverseRequest = new DataverseUpdateEventRequest
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
+        var checks = new List<(string EntitySet, Guid RecordId, string Operation)> { ("sprk_events", eventId, "write") };
+        if (request.RegardingRecordType is { } type && request.RegardingRecordId is { } targetId && targetId != Guid.Empty)
         {
-            Name = request.Subject,
-            Description = request.Description,
-            EventTypeId = request.EventTypeId,
-            BaseDate = request.ScheduledStart,
-            DueDate = request.DueDate,
-            Priority = request.Priority,
-            StatusCode = request.StatusCode,
-            RegardingRecordType = request.RegardingRecordType,
-            RegardingRecordId = request.RegardingRecordId?.ToString(),
-            RegardingRecordName = request.RegardingRecordName
-        };
+            if (Spaarke.Dataverse.RegardingRecordType.GetEntitySetName(type) is not { } targetSet)
+            {
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(
+                    "sdap.access.deny.no_target", "The record the event would be filed to cannot be authorized.",
+                    httpContext.TraceIdentifier);
+            }
 
-        // Update the event record
-        await dataverseService.UpdateEventAsync(id, dataverseRequest, ct);
-
-        // Task 156 (verifier round 2 item 8): the update writes the event's regarding pair and nothing else that files
-        // it. On an event that carries two typed sources, a pair change moves which one its copy comes from — so the
-        // event's own copy, and the copies of everything filed under it, are re-stamped in this same request (the pair
-        // columns are an own-source write to CoreAncestorRestamper). A write that does not touch the pair reads
-        // nothing. Never thrown: a record that fails is logged and the reconciliation job repairs it; this update stands.
-        await restamper.AfterWriteAsync(
-            "sprk_event", id,
-            Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.EventColumnsWritten(dataverseRequest),
-            CancellationToken.None);
-
-        // If status changed, create Event Log entry
-        if (request.StatusCode.HasValue)
-        {
-            await dataverseService.CreateEventLogAsync(
-                id,
-                Spaarke.Dataverse.EventLogAction.Updated,
-                $"Event status updated to {EventStatusCode.GetDisplayName(request.StatusCode.Value)}",
-                ct);
+            checks.Add((targetSet, targetId, RefileTargetOperation));
         }
+
+        foreach (var (entitySet, recordId, operation) in checks)
+        {
+            string? denyReason;
+            try
+            {
+                var snapshot = string.IsNullOrEmpty(userId)
+                    ? null
+                    : await authorization.GetCallerRecordAccessAsync(userId, entitySet, recordId, token, ct);
+                denyReason = snapshot is not null && Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation)
+                    ? null
+                    : "sdap.access.deny.insufficient_rights";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Event re-file authorization faulted on {EntitySet}({RecordId}); denying", entitySet, recordId);
+                denyReason = "sdap.access.error.system_failure";
+            }
+
+            if (denyReason is not null)
+            {
+                logger.LogWarning(
+                    "Event re-file DENIED: caller may not '{Operation}' on {EntitySet}({RecordId}) ({Reason}). EventId={EventId}",
+                    operation, entitySet, recordId, denyReason, eventId);
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(
+                    denyReason, "You do not have permission to file this event under that record.", httpContext.TraceIdentifier);
+            }
+        }
+
+        return null;
     }
+
+    /// <summary>The right a re-file costs on the record the event is filed to: AppendTo (<c>entity.associate_document</c>).</summary>
+    internal const string RefileTargetOperation = "entity.associate_document";
+
+    /// <summary>A 409 ProblemDetails for an owner refusal, carrying the stable reason code (task 146).</summary>
+    private static IResult OwnerRefusalProblem(Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun) =>
+        Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(refusal, noun);
 
     /// <summary>
     /// Creates an updated EventDto by merging existing data with update request.
@@ -900,7 +1170,9 @@ public static class EventEndpoints
     private static async Task<IResult> CompleteEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<Program> logger,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         logger.LogInformation("Completing event. EventId={EventId}", id);
@@ -947,8 +1219,8 @@ public static class EventEndpoints
 
             // Create Event Log entry for the state transition
             await CreateEventLogAsync(
-                dataverseService, id, EventLogAction.Completed,
-                $"Status changed from {previousStatus} to {newStatusDisplay}", logger, ct);
+                dataverseService, ownership, id, EventLogAction.Completed,
+                $"Status changed from {previousStatus} to {newStatusDisplay}", logger, httpContext, ct);
 
             var response = new EventActionResponse(
                 Id: id,
@@ -985,7 +1257,9 @@ public static class EventEndpoints
     private static async Task<IResult> CancelEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<Program> logger,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         logger.LogInformation("Canceling event. EventId={EventId}", id);
@@ -1032,8 +1306,8 @@ public static class EventEndpoints
 
             // Create Event Log entry for the state transition
             await CreateEventLogAsync(
-                dataverseService, id, EventLogAction.Cancelled,
-                $"Status changed from {previousStatus} to {newStatusDisplay}", logger, ct);
+                dataverseService, ownership, id, EventLogAction.Cancelled,
+                $"Status changed from {previousStatus} to {newStatusDisplay}", logger, httpContext, ct);
 
             var response = new EventActionResponse(
                 Id: id,
@@ -1238,10 +1512,12 @@ public static class EventEndpoints
     /// <param name="ct">Cancellation token.</param>
     private static async Task CreateEventLogAsync(
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Guid eventId,
         int action,
         string? description,
         ILogger<Program> logger,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         logger.LogInformation(
@@ -1252,7 +1528,9 @@ public static class EventEndpoints
 
         try
         {
-            await dataverseService.CreateEventLogAsync(eventId, action, description, ct);
+            // Task 146: owned like its event. A refusal is caught below like any other log failure (best-effort).
+            var (logOwner, logPerson) = await ResolveEventLogOwnerAsync(ownership, eventId, httpContext, ct);
+            await dataverseService.CreateEventLogAsync(eventId, action, description, logOwner, logPerson, ct);
         }
         catch (Exception ex)
         {

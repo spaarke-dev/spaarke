@@ -41,6 +41,12 @@ public sealed class IncomingAssociationResolver
     /// <summary>FR-26 core-ancestor derivation for the inbound association write (task 052).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
 
+    /// <summary>
+    /// unified-access-control-r2 task 146: filing an EXISTING communication is a reparent — its owner is re-derived
+    /// from its parents after the change (the named Secure team when one is secure) before the change is written.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
     /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
@@ -70,12 +76,14 @@ public sealed class IncomingAssociationResolver
         IGenericEntityService genericEntityService,
         AssociationStatusMapper statusMapper,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<IncomingAssociationResolver> logger)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _statusMapper = statusMapper;
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
 
         // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
@@ -112,7 +120,67 @@ public sealed class IncomingAssociationResolver
         // unchanged on this path (behavior-preserving).
         var decision = await EvaluateInternalAsync(message, context, communicationId, ct);
 
-        await ApplyDecisionAsync(communicationId, decision, ct);
+        // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
+        await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+    }
+
+    /// <summary>
+    /// Applies a decision evaluated BEFORE the communication was created to the row just created with the owner
+    /// that decision resolved (unified-access-control-r2 task 146 — the inbound and upload-capture paths evaluate
+    /// first so a secure email is owned by the named Secure team from its first write, never exposed in between).
+    /// Writes the same fields <see cref="ResolveAsync"/> does; skips the reparent re-derivation, because the
+    /// caller created the row from these very parents.
+    /// </summary>
+    public Task ApplyToNewRecordAsync(Guid communicationId, AssociationDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, ct);
+    }
+
+    /// <summary>
+    /// The ownership question for a NEW communication that <paramref name="decision"/> will file (task 146): every
+    /// lookup <see cref="ApplyToNewRecordAsync"/> will write is a parent — each regarding the decision writes AND the
+    /// FR-26 core-ancestor stamps derived from them (secure-if-any: an email filed to an intermediate record — an
+    /// invoice, an event, a document — whose ancestor is a secure matter is the named Secure team's even while the
+    /// intermediate itself is not yet re-owned). With none, the communication keeps its creator (E1).
+    /// </summary>
+    /// <remarks>
+    /// r1 (verifier item 4): the stamps used to be derived only when the decision was APPLIED, after the owner had been
+    /// resolved from the regarding writes alone, so they never reached the resolver. The derivation here is the same one
+    /// <see cref="ApplyDecisionAsync"/> writes (<see cref="DeriveCoreAncestorStampsAsync"/>). A derivation failure THROWS
+    /// (NFR-01, fail closed) — the caller treats it as "the parent cannot be determined" (inbound: HELD; upload capture:
+    /// skipped), never as unfiled.
+    /// </remarks>
+    public async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext> OwnershipContextForNewRecordAsync(
+        AssociationDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+
+        // Batch 4 integration (task 156 x task 146): the stamps are classified over the row as it will be written —
+        // its regarding writes, plus the pair id when BuildDecisionFieldsAsync writes a pair (any non-Ambiguous
+        // decision), after the same intermediate withholding. The pair's id is all the classification rule reads, so no
+        // resolver-field read happens here. The parents stay every regarding the decision writes (secure-if-any).
+        var row = new Dictionary<string, object>();
+        foreach (var (fieldName, target) in decision.RegardingWrites)
+        {
+            row[fieldName] = target;
+        }
+
+        if (decision.Status != AssociationStatusCodes.Ambiguous && PrimaryRegarding(row) is { } primary)
+            row[CoreAncestorResolver.RegardingRecordIdColumn] = primary.Reference.Id.ToString("D").ToLowerInvariant();
+
+        WithholdIntermediateTheRowCannotPlace(row);
+
+        var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, row, decision, ct).ConfigureAwait(false);
+        var parents = decision.RegardingWrites.Values
+            .OfType<EntityReference>()
+            .Concat(stamps.Values)
+            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id));
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
+        {
+            WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+        };
     }
 
     /// <summary>
@@ -296,6 +364,65 @@ public sealed class IncomingAssociationResolver
     private async Task ApplyDecisionAsync(
         Guid communicationId,
         AssociationDecision decision,
+        bool ownerAlreadyResolved,
+        CancellationToken ct)
+    {
+        var fields = await BuildDecisionFieldsAsync(communicationId, decision, ct);
+
+        var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesIn(fields);
+        if (ownerAlreadyResolved || parentChanges.Count == 0)
+        {
+            await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
+        }
+        else
+        {
+            // Task 146 — a REPARENT of an existing communication: re-derive its owner from its parents AFTER this
+            // change (additive: the engine never clears a sibling regarding), BEFORE the write, and reassign it
+            // (separately, read back) when it moves — into a secure record's named team, or anywhere else. A refusal
+            // throws before anything is written: this class's existing fail-closed contract (the communication
+            // survives, unassociated — NFR-06).
+            var reparent = await _ownership.ReparentAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                {
+                    EntityLogicalName = "sprk_communication",
+                    RecordId = communicationId,
+                    ParentChanges = parentChanges,
+                    WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+                },
+                token => _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, token),
+                ct);
+
+            if (reparent.IsRefused)
+                throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
+        }
+
+        _logger.LogDebug(
+            "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
+            communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+    }
+
+    /// <summary>
+    /// The fields a decision writes onto a communication that is about to be CREATED with them — the regarding lookups,
+    /// association status, provenance, ADR-024 resolver fields and FR-26 core-ancestor stamps, exactly what
+    /// <see cref="ApplyToNewRecordAsync"/> would write afterwards (task 146 r2, verifier item 9).
+    /// </summary>
+    /// <remarks>
+    /// A communication whose OWNER comes from its filing must be created WITH that filing. Written separately, a failed
+    /// filing write (non-fatal by NFR-06) left a row owned by a secure record's memberless team and filed under nothing —
+    /// a record nobody can see, which no sharee mirror can reach (owner amendment R3). Throws on any failure (a stamp
+    /// derivation, a resolver-field read): the caller refuses in its own contract (inbound: HOLD; upload capture: skip).
+    /// </remarks>
+    public Task<Dictionary<string, object>> BuildNewRecordFieldsAsync(AssociationDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        return BuildDecisionFieldsAsync(Guid.Empty, decision, ct);
+    }
+
+    /// <summary>The fields a decision writes (see <see cref="ApplyDecisionAsync"/>); <paramref name="communicationId"/> is
+    /// log context only (<see cref="Guid.Empty"/> for a row not yet created).</summary>
+    private async Task<Dictionary<string, object>> BuildDecisionFieldsAsync(
+        Guid communicationId,
+        AssociationDecision decision,
         CancellationToken ct)
     {
         var fields = new Dictionary<string, object>();
@@ -348,11 +475,7 @@ public sealed class IncomingAssociationResolver
         // 050/051), not to this engine.
         await ApplyCoreAncestorStampsAsync(communicationId, fields, decision, ct);
 
-        await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
-
-        _logger.LogDebug(
-            "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
-            communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+        return fields;
     }
 
     /// <summary>
@@ -390,13 +513,34 @@ public sealed class IncomingAssociationResolver
         AssociationDecision decision,
         CancellationToken ct)
     {
+        foreach (var (lookupAttribute, stamp) in await DeriveCoreAncestorStampsAsync(communicationId, fields, decision, ct))
+        {
+            fields[lookupAttribute] = stamp;
+        }
+    }
+
+    /// <summary>
+    /// The FR-26 core-ancestor stamps the communication carries, keyed by the stamp's lookup attribute — the fields
+    /// <see cref="ApplyCoreAncestorStampsAsync"/> writes, and (task 146 r1) the extra parents
+    /// <see cref="OwnershipContextForNewRecordAsync"/> resolves the owner over. The stamp source is decided by the one
+    /// classification rule (<see cref="CoreAncestorResolver.ClassifyStampSource"/>) over <paramref name="fields"/>, the
+    /// row exactly as it will be written (task 156 verifier round 1 item 9). A core lookup a rung wrote explicitly is
+    /// never overwritten by a derived stamp. Throws on a derivation failure (NFR-01, fail closed).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, EntityReference>> DeriveCoreAncestorStampsAsync(
+        Guid communicationId,
+        Dictionary<string, object> fields,
+        AssociationDecision decision,
+        CancellationToken ct)
+    {
+        var stamps = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase);
         if (decision.RegardingWrites.Count == 0)
-            return;
+            return stamps;
 
         var filing = CoreAncestorResolver.ClassifyStampSource(
             CommunicationEntity, RowAsWritten(fields), CoreAncestorResolver.PartyRegardingColumnNames(CommunicationEntity));
         if (filing.Kind != StampSourceKind.Source)
-            return; // a direct root (carriers carry no copy), nothing filed, or no single filing (never a guess)
+            return stamps; // a direct root (carriers carry no copy), nothing filed, or no single filing (never a guess)
 
         // Snapshot the lookups the rungs wrote explicitly - these are never overwritten below.
         var explicitLookups = new HashSet<string>(decision.RegardingWrites.Keys, StringComparer.OrdinalIgnoreCase);
@@ -419,8 +563,10 @@ public sealed class IncomingAssociationResolver
             if (explicitLookups.Contains(stamp.LookupAttribute))
                 continue; // a rung asserted this core target directly - its evidence outranks inheritance
 
-            fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
+            stamps[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
         }
+
+        return stamps;
     }
 
     private const string CommunicationEntity = "sprk_communication";
@@ -454,7 +600,10 @@ public sealed class IncomingAssociationResolver
     /// <summary>The communication row exactly as <paramref name="fields"/> will write it (its lookups and its pair id).</summary>
     private static Entity RowAsWritten(Dictionary<string, object> fields)
     {
-        var row = new Entity(CommunicationEntity);
+        // An in-memory projection for the classification rule — never written. Built with an explicit (empty) id: a
+        // one-argument construction of a child table reads as a CREATE to RecordOwnerAssignmentCensusTests (batch 4
+        // integration, task 156 x task 146), and this row is not one.
+        var row = new Entity(CommunicationEntity, Guid.Empty);
         foreach (var (column, value) in fields)
         {
             if (value is EntityReference || (value is string && column == CoreAncestorResolver.RegardingRecordIdColumn))
@@ -539,23 +688,11 @@ public sealed class IncomingAssociationResolver
         // must never be the headline Regarding. When the substantive matters conflict (Ambiguous → not
         // written), leaving the denormalized fields unset is the correct outcome: the record shows no headline
         // Regarding and the review surface resolves the candidates from provenance.
-        EntityReference? primaryRef = null;
-        string? primaryEntityLogicalName = null;
-
-        foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
-        {
-            if (FallbackRegardingFields.Contains(fieldName))
-                continue;
-            if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
-            {
-                primaryRef = entityRef;
-                primaryEntityLogicalName = entityLogicalName;
-                break;
-            }
-        }
-
-        if (primaryRef is null || primaryEntityLogicalName is null)
+        if (PrimaryRegarding(fields) is not { } primary)
             return;
+
+        var primaryRef = primary.Reference;
+        var primaryEntityLogicalName = primary.EntityLogicalName;
 
         try
         {
@@ -628,6 +765,24 @@ public sealed class IncomingAssociationResolver
             // Non-fatal — resolver fields are for display, not critical data
             _logger.LogWarning(ex, "Failed to populate resolver fields for {Entity}", primaryEntityLogicalName);
         }
+    }
+
+    /// <summary>
+    /// The row's primary regarding — the highest-priority SUBSTANTIVE regarding field that is set (the order is
+    /// <see cref="RegardingFieldMap.All"/>; fallback identity fields never headline). The target the pair names;
+    /// shared by <see cref="PopulateResolverFieldsAsync"/> and <see cref="OwnershipContextForNewRecordAsync"/>.
+    /// </summary>
+    private static (EntityReference Reference, string EntityLogicalName)? PrimaryRegarding(Dictionary<string, object> fields)
+    {
+        foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
+        {
+            if (FallbackRegardingFields.Contains(fieldName))
+                continue;
+            if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
+                return (entityRef, entityLogicalName);
+        }
+
+        return null;
     }
 
     /// <summary>

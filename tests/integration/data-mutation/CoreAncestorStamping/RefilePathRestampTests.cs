@@ -45,7 +45,13 @@ public class RefilePathRestampTests
                 RecordId = MatterB.ToString(),
                 RecordType = "sprk_matter",
             },
-            documents, world.Restamper, NullLogger<Program>.Instance, CancellationToken.None);
+            documents, world.Restamper,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe(
+                new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance),
+            new Microsoft.AspNetCore.Http.DefaultHttpContext(),
+            NullLogger<Program>.Instance, CancellationToken.None);
 
         result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status200OK);
         await documents.Received(1).UpdateDocumentAsync(
@@ -58,7 +64,12 @@ public class RefilePathRestampTests
     public async Task UpdateRecordActionCore_RestampsTheCommunicationsChildren()
     {
         var world = CommunicationWorld();
-        var services = new ServiceCollection().AddSingleton(world.Restamper).BuildServiceProvider();
+        // Batch 4 integration (task 146): filing a communication is a reparent — its owner is resolved first (a double
+        // that applies the write), then this re-stamp runs.
+        var services = new ServiceCollection()
+            .AddSingleton(world.Restamper)
+            .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
+            .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             Substitute.For<IFieldMappingDataverseService>(),
             services.GetRequiredService<IServiceScopeFactory>(),
@@ -99,7 +110,7 @@ public class RefilePathRestampTests
         var world = CommunicationWorld();
         var handler = new DataverseUpdateHandler(
             Substitute.For<IFieldMappingDataverseService>(), world.Service, world.Restamper,
-            NullLogger<DataverseUpdateHandler>.Instance);
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<DataverseUpdateHandler>.Instance);
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
