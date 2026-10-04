@@ -147,6 +147,36 @@ No level carries Assign. Collaborate and Full Access carry Share so a Write-hold
 
 ---
 
+## Contact-Side Grant Access — Contacts Granting Colleagues (task 140, owner C4 / Q1 / Q2)
+
+A **contact** holding **Collaborate or Full Access** on a project, matter or work assignment may grant **colleagues of its own organization**, **at or below its own level**, **never organization-wide** — from the external SPA (and its Teams tab). View Only may not. These are the first routes that let a principal that is NOT a Dataverse user mint access, so the authorization is derived entirely from the BFF's own principal model; there is no Dataverse backstop.
+
+**Routes** (on the principal-agnostic `/api/v1/external` group, ADR-028 A3 — a contact can authenticate nowhere else; each carries `ContactGrantorAuthorizationFilter`, and each handler re-runs the same checks):
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/external/contact-grants` | Grant ONE colleague (by `granteeContactId` or `granteeEmail`) on `recordType` + `recordId` at `accessLevel`, optional `expiryDate`. The body is CLOSED: an unknown member (e.g. `organizationId`) is **400**. |
+| `GET` | `/api/v1/external/contact-grants?recordType=…&recordId=…` | The grants the caller issued on that record (active rows). |
+| `POST` | `/api/v1/external/contact-grants/revoke` | Revoke one grant the caller issued (`accessRecordId`). |
+
+**Who may (the filter, in order):** a contact principal (CIAM contact or workforce contact-only) — a workforce **systemuser**, even one carrying a linked contact id, is **403** `sdap.access.contact_grant.use_manage_access` (internal users grant through Manage Access, gated on their own Write). The caller's **effective, post-veto** level on the record (the evaluator's answer on `CallerPrincipal` — owner decision G3 (a)) must be Collaborate or Full Access; View Only and "no access at all" are the same **403** `sdap.access.contact_grant.level_insufficient`. On a **Secure or Limited** record that level comes from the contact's DIRECT grant only (FR-22, task 135's CIAM parity); on a **Restricted** record a contact holds nothing, so it is refused here first, and the grant core's **422** `sdap.access.grant.record_restricted` (task 138) is the second, independent refusal. To grant, the caller must hold an active organization membership (**403** `sdap.access.contact_grant.no_organization`); a membership read that could not be completed is **503** `sdap.access.contact_grant.membership_unreadable`, never "no organization". An unmapped request type is denied by default.
+
+**Who can be granted:** ONE **active** contact holding a **conferring** membership (active junction row, current on both `sprk_startdate`/`sprk_enddate`, active organization — the ONE membership read, `ExternalParticipationService.ReadOrganizationMembershipsAsync`) in an organization the grantor also confers through. Otherwise **422** `sdap.access.contact_grant.grantee_not_in_organization` — including an email that names no active contact: a person who is not yet a colleague in the system is refused, never created, onboarded or added to an organization (owner decision G1 (a); **no route here writes `sprk_contactorganization`** — pinned by `ContactGrantGuardTests`). An email shared by more than one active contact is **409** `sdap.access.contact_grant.grantee_ambiguous`; self-grant is **400**; a No Access list entry is **422** `sdap.access.grant.grantee_denied` and an unverifiable list **503** `sdap.access.grant.no_access_unverifiable` (task 139's entry point, tri-state since 142 r4).
+
+**What is written** — through the ONE grant core (`GrantExternalAccessEndpoint.CreateGrantAsync`) in its **contact-issuer mode**, with the contact's effective level as the REQUIRED ceiling (`GrantCeiling.FromContactGrantorRights`):
+
+- **Capped level** (owner Q1, round 3b): a request above the grantor's level is narrowed and reported (`grantedAccessLevel`, `narrowed`).
+- **Capped expiry** (owner decision G2 (i)): the requested expiry, or today + 90 days, is cut back to the latest date the grantor's own qualifying DATED grant lasts (their direct row, or — on a Standard record — their organization's org-wide row, at the granted level or above), reported as `expiryNarrowed`. A workforce contact whose level rests on an undated standing-grant / organization-expansion term issues the plain default.
+- **Issuer:** the new contact-typed lookup **`sprk_grantedbycontact`** = the grantor; `sprk_grantedby` (systemuser) stays empty. Every write logs `[EXT-CONTACT-GRANT]`.
+- **No proxy change** (owner decision G2 (iii)): a colleague who already holds a row anybody ELSE issued is refused **409** `sdap.access.contact_grant.managed_elsewhere` and the row is left untouched. On the caller's OWN row a higher level raises it, a lower one is **409** `sdap.access.grant.would_lower_existing`, and an earlier expiry never shortens it.
+- **No cascade** (owner decision G2 (ii)): an issued row stands on its own if the grantor later loses access; it stays visible and revocable in Manage Access ("Granted by {contact} (external contact)").
+- **Revoke** deactivates only the caller's own rows on that grant; a missing row and somebody else's row are the same **404** `sdap.access.contact_grant.not_found`; the caller must still hold Collaborate or Full Access on the record. A fault is a ProblemDetails with a message (`sdap.access.contact_grant.revoke_failed`), never a bare 500.
+- **An internal user changing a contact-issued row takes it over:** when `/grant` (or the Assigned-To rule) changes the level or expiry of such a row, `sprk_grantedbycontact` is cleared and `sprk_grantedby` set, so the contact can no longer revoke a decision somebody else made.
+
+**Deploy order.** The BFF selects `sprk_grantedbycontact` on every grant-row read, so `scripts/Deploy-ExternalRecordAccessContactGrantor.ps1` (dry run / `-Apply` / `-Verify`; field-secured, writable only by the BFF) must have run in an environment BEFORE a BFF or TrackingFieldTrio (v1.0.35) carrying task 140 is deployed there.
+
+---
+
 ## Troubleshooting
 
 | Issue | Cause | Solution |

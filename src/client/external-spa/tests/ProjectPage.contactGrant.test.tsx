@@ -10,15 +10,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { AccessLevel, ApiError } from '../../types';
+import { AccessLevel, ApiError } from '../src/types';
 
 // ── Network seams ────────────────────────────────────────────────────────────
 const grantAccessAsContact = vi.fn();
 const listContactGrants = vi.fn();
 const revokeContactGrant = vi.fn();
 
-vi.mock('../../auth/bff-client', async () => {
-  const actual = await vi.importActual<typeof import('../../auth/bff-client')>('../../auth/bff-client');
+vi.mock('../src/auth/bff-client', async () => {
+  const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return {
     ...actual,
     grantAccessAsContact: (...args: unknown[]) => grantAccessAsContact(...args),
@@ -27,8 +27,8 @@ vi.mock('../../auth/bff-client', async () => {
   };
 });
 
-vi.mock('../../api/web-api-client', async () => {
-  const actual = await vi.importActual<typeof import('../../api/web-api-client')>('../../api/web-api-client');
+vi.mock('../src/api/web-api-client', async () => {
+  const actual = await vi.importActual<typeof import('../src/api/web-api-client')>('../src/api/web-api-client');
   return {
     ...actual,
     getProjectById: vi.fn().mockResolvedValue({
@@ -45,7 +45,7 @@ vi.mock('../../api/web-api-client', async () => {
 
 // The caller's level for the project, as /me reports it (the hook's data source — useAccessLevel itself runs for real).
 let meLevel = 'Collaborate';
-vi.mock('../../hooks/useExternalContext', () => ({
+vi.mock('../src/hooks/useExternalContext', () => ({
   useExternalContext: () => ({
     context: {
       contactId: 'c-grantor',
@@ -58,12 +58,12 @@ vi.mock('../../hooks/useExternalContext', () => ({
 }));
 
 // Tabs this test is not about.
-vi.mock('../../components/DocumentLibrary', () => ({ DocumentLibrary: () => null }));
-vi.mock('../../components/EventsCalendar', () => ({ EventsCalendar: () => null }));
-vi.mock('../../components/SmartTodo', () => ({ SmartTodo: () => null }));
+vi.mock('../src/components/DocumentLibrary', () => ({ DocumentLibrary: () => null }));
+vi.mock('../src/components/EventsCalendar', () => ({ EventsCalendar: () => null }));
+vi.mock('../src/components/SmartTodo', () => ({ SmartTodo: () => null }));
 
-import { ProjectPage } from '../ProjectPage';
-import { canInvite, grantableLevels } from '../../hooks/useAccessLevel';
+import { ProjectPage } from '../src/pages/ProjectPage';
+import { canInvite, grantableLevels } from '../src/hooks/useAccessLevel';
 
 async function openContactsTab(level: string): Promise<void> {
   meLevel = level;
@@ -264,13 +264,13 @@ describe('Issued grants list', () => {
 
 describe('No call to the internal Manage Access group', () => {
   it('no source file in the external SPA names /api/v1/external-access', () => {
-    const root = path.resolve(__dirname, '../..');
+    const root = path.resolve(__dirname, '../src');
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          if (entry.name !== '__tests__') walk(full);
+          walk(full);
         } else if (
           /\.(ts|tsx)$/.test(entry.name) &&
           fs.readFileSync(full, 'utf8').includes('/api/v1/external-access')

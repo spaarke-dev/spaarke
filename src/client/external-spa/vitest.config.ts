@@ -8,8 +8,8 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      include: ['src/**/*.test.{ts,tsx}'],
-      setupFiles: ['src/test/setup.ts'],
+      include: ['tests/**/*.test.{ts,tsx}'],
+      setupFiles: ['tests/setup.ts'],
       // src/config.ts refuses to load without these (it fails fast on a build that skipped token substitution). Test
       // values only — no test reaches the network: every BFF call goes through a mocked seam.
       env: {

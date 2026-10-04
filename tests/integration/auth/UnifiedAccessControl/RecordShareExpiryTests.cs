@@ -64,13 +64,18 @@ public class RecordShareExpiryTests
     /// Every column Dataverse exposes on <c>sprk_externalrecordaccess</c> (live metadata, task 016). A
     /// <c>$select</c> naming anything else is a 400 — the fake reproduces that rather than tolerating it.
     /// </summary>
+    /// <remarks>
+    /// Task 140 added <c>_sprk_grantedbycontact_value</c> (the contact-typed grant issuer, created by
+    /// <c>scripts/Deploy-ExternalRecordAccessContactGrantor.ps1</c>). This list going red when it was first selected is
+    /// exactly the deploy-order hazard that script documents: the column must exist before a BFF that reads it.
+    /// </remarks>
     private static readonly HashSet<string> LiveColumns = new(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_externalrecordaccessid", "sprk_name", "sprk_accesslevel", "sprk_expiresdate",
         "sprk_granteddate", "statecode", "statuscode",
         "_sprk_contact_value", "_sprk_organization_value", "_sprk_project_value",
         "_sprk_matter_value", "_sprk_workassignment_value", "_sprk_invoice_value",
-        "_sprk_grantedby_value", "_sprk_recordtype_value",
+        "_sprk_grantedby_value", "_sprk_grantedbycontact_value", "_sprk_recordtype_value",
         "createdon", "modifiedon", "ownerid"
     };
 

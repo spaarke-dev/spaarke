@@ -4,7 +4,7 @@
     <title>NEW FEATURE — contact-side Grant Access: a Collaborate/Full Access contact grants colleagues of their own organization, capped at their own level, from the external SPA</title>
     <phase>Register-driven (authored 2026-09-30, session 27; grant-model group; C4 owner decision)</phase>
     <gate>after-135-136-138-139-141-013</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New access-minting write path reachable by CIAM tokens; new routes, new endpoint filter, new Dataverse column, external SPA wiring; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -253,7 +253,34 @@ Fixes:
 - Provenance display was coordinated with 064/066.
 - The org-membership owner question was added.</notes>
 
-  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor (opus); code-review and adr-check at Step 9.5; every new guard seeded and restored.</protocol>
+    <outcome date="2026-10-04" branch="task/uac-r2-140-x1" base="integ/uac-r2-batch4 @ 6b685f0d4" status="code-complete; operator schema gate G-140-1 (Deploy-ExternalRecordAccessContactGrantor.ps1 -Apply then -Verify) and the criterion-20 manual live gate G-140-2 are pending (main session). Merge gate: the BFF selects sprk_grantedbycontact on every grant read, so it must not deploy where G-140-1 has not passed.">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md.
+      - Owner decisions applied: C4, Q1 (3b), Q2, round 3 G1 (a) (no new persons, no membership writes), G2 (i) expiry cap at the
+        grantor's dated access, (ii) no cascade, (iii) managed_elsewhere; G3 (a) effective post-veto level; round 13 item 4
+        (Unverifiable No Access = 503 fault). Escalation triggers 1, 2, 3, 6 answered by round 3; 4, 4a, 5 did not fire.
+      - Routes on /api/v1/external (ADR-028 A3): POST /contact-grants, GET /contact-grants, POST /contact-grants/revoke, each with
+        ContactGrantorAuthorizationFilter (contact principal; Collaborate/Full on the record; active organization to grant;
+        default-deny), handlers re-validate. Writes through the ONE core in contact-issuer mode with GrantCeiling.FromContactGrantorRights.
+      - Core extension (optional trailing ContactGrantIssuer): issuer stamp sprk_grantedbycontact (sprk_grantedby empty), expiry cap,
+        managed_elsewhere, never lower / never shorten own row, race collapse over own rows only; default mode: a systemuser CHANGING
+        a contact-issued row takes it over (contact stamp cleared). /grant and /invite-and-grant behaviour otherwise unchanged.
+      - Membership eligibility reuses task 109's ReadOrganizationMembershipsAsync (conferring = statecode 0 + start/end dates current +
+        active organization; faults reported) — no extension needed.
+      - Schema: scripts/Deploy-ExternalRecordAccessContactGrantor.ps1 (dry run / -Apply / -Verify; FLS writable only by the BFF);
+        dry run on spaarkedev1 recorded; entity-schema.md updated.
+      - SPA: Invite User for Collaborate + Full; levels at or below the caller; server messages verbatim; issued-grants list with
+        Revoke; dead management-group calls removed. vitest + eslint made runnable (fixed 10 pre-existing rules-of-hooks errors).
+      - Manage Access: "Granted by {contact} (external contact)"; TrackingFieldTrio v1.0.35 (5 locations + build:prod bundle).
+      - Placement: BFF; no new DI registration, package or job. Publish +0.03 MB (46.00 to 46.03 MB, Compress-Archive, 212 = 212
+        files). No vulnerable BFF package.
+      - Tests: ContactGrantAuthorizationTests + ContactGrantRouteTests (host), ContactGrantGuardTests, RouteAuthorizationGuardTests
+        census 122 to 123, SPA vitest 12, modal jest 2; RecordShareExpiryTests' live-column list gained the new column (the
+        deploy-order hazard, by design). 22 BFF + 6 SPA + 1 modal seeded violations each went red.
+    </outcome>
+  </execution>
   <ui-tests>
     <test name="A Full Access contact grants a colleague in their own organization">
       <steps>

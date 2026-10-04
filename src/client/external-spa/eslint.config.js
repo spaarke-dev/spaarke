@@ -6,7 +6,7 @@
  * shared library's flat config (src/client/shared/Spaarke.UI.Components/eslint.config.js) — typescript-eslint
  * recommended + react-hooks — so both packages lint the same way.
  *
- * Linting is scoped to `.ts` / `.tsx` under `src/`. Noisy stylistic rules are warnings (as in the shared library), so the
+ * Linting covers `.ts` / `.tsx` under `src/` and `tests/`. Noisy stylistic rules are warnings (as in the shared library), so the
  * gate fails on real errors — e.g. a hook called conditionally — not on style.
  */
 
@@ -57,10 +57,18 @@ export default tseslint.config(
   },
 
   {
-    files: ['src/**/__tests__/**/*.{ts,tsx}', 'src/**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    // Tests live in tests/ (outside src/, so the SPA's source-scanning ArchTests — e.g.
+    // ExternalSpaGridViewSelectorGuardTests — see only shipped code).
+    files: ['tests/**/*.{ts,tsx}'],
     languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
       globals: {
+        ...globals.browser,
         ...globals.node,
+      },
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
       },
     },
     rules: {
