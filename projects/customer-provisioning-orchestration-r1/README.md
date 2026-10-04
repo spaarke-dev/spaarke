@@ -20,7 +20,7 @@
 
 > **Last Updated**: 2026-08-16
 > **Status**: Ready for Implementation (task-execute)
-> **Portfolio**: (register via `/devops-project-register` at task-execution start)
+> **Portfolio**: [Project #438](https://github.com/spaarke-dev/spaarke/issues/438) · Parent Epic [#432 IMPLEMENTATION](https://github.com/spaarke-dev/spaarke/issues/432) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Start 2026-06-15
 
 ## Overview
 
