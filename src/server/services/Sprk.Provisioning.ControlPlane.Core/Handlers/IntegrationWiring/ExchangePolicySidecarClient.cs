@@ -22,8 +22,8 @@
 //   400 invalid body / missing token · 401 bad shared secret · 404 unknown route
 //   503 sidecar missing a setting · other 5xx server error
 //
-// RETRY (DS-1b §3): apply retries ONCE after SidecarTransientRetryDelay on HTTP 5xx or wire
-// Failure (transient Exchange throttling); everything else is terminal here and the run-level
+// RETRY (DS-1b §3): apply retries ONCE after SidecarTransientRetryDelay on HTTP 5xx (except 503,
+// "sidecar not configured") or wire Failure (transient Exchange throttling); everything else is terminal here and the run-level
 // reconciler re-enqueues. The read route never retries (H13 classifies its failure Resumable).
 //
 // LOUD-FAIL: every condition that could become an unauthenticated call or a swallowed error
@@ -136,7 +136,8 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
             var sent = await SendAsync(ApplyPath, wire, headers, request.CorrelationId, cancellationToken).ConfigureAwait(false);
             ApplyAttempt result = sent.Failure is not null
                 ? ApplyAttempt.Terminal(new ExchangePolicyApplyOutcome.Failure(sent.Failure))
-                : sent.Status >= 500
+                // 503 = the sidecar is missing a setting: deterministic, so not retried (code review S5).
+                : sent.Status >= 500 && sent.Status != 503
                     ? ApplyAttempt.Retry($"HTTP {sent.Status} from sidecar: {Truncate(sent.Body, 400)}")
                     : sent.Status == 200
                         ? MapApplyResponse(sent.Body, request.CorrelationId)
@@ -423,6 +424,9 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
 
     private readonly record struct Headers(string Secret, string Token, string? Failure)
     {
+        /// <summary>Never prints the secret or the token (code review W10).</summary>
+        public override string ToString() => Failure is null ? "Headers { Secret = ***, Token = *** }" : $"Headers {{ Failure = {Failure} }}";
+
         public static Headers Ok(string secret, string token) => new(secret, token, null);
         public static Headers Fail(string diagnostic) => new(string.Empty, string.Empty, diagnostic);
     }

@@ -101,7 +101,7 @@
     out-of-band before the Worker can pass EnvVarValuesOptions validation.
 
 .PARAMETER SidecarSharedSecret
-    Optional value for Sidecar-Shared-Secret (the X-Sidecar-Auth per-boot
+    Optional value for Sidecar-Shared-Secret (the X-Sidecar-Auth
     shared secret). If unset, a random GUID is GENERATED and seeded -- both
     the Worker and the sidecar container resolve this same KV secret, so a
     generated value is self-consistent without operator follow-up.

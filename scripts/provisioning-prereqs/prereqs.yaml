@@ -31,9 +31,12 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 5
+manifest_version: 6
 last_updated: 2026-10-02
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 6 (2026-10-04, customer-provisioning-orchestration-r1 T251): PRQ-E-15 ADDED (Exchange admin app +
+# narrowed Exchange role, one-time per tenant); PRQ-C-08 reworded — the group now scopes H14a's Exchange RBAC for
+# Applications role assignments (owner D26), not an ApplicationAccessPolicy.
 # manifest_version 4 (2026-10-02, customer-provisioning-orchestration-r1 T245c + T225a): PRQ-C-08 ADDED (Exchange
 # ApplicationAccessPolicy scope group, owner decision D14); PRQ-E-05 rescoped once_per_env -> once_per_customer
 # and pointed at the stamp's own BFF (an H2a postcondition); PRQ-E-06 / PRQ-E-10 / PRQ-C-02 no longer name the
@@ -401,6 +404,18 @@ prereqs:
     remediation: '`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost.'
     related_findings: [T108-*, queue-recreate-runbook]
 
+  - id: PRQ-E-15
+    name: Exchange admin app — `Spaarke Exchange Admin` with a federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`, and the narrowed Exchange role `Spaarke App RBAC Admin` (T251)
+    scope: once_per_env
+    frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
+    owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4).
+    check_recipe:
+      cli: az ad app list --display-name "Spaarke Exchange Admin" --query "[0].appId" -o tsv
+      expect: 'the client id set as exchangeAdminAppId in platform-controlplane-{env}.bicepparam; its federated credential names the L2 Worker UAMI principal id (`az ad app federated-credential list --id <appId>`), and in Exchange `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` lists `Spaarke App RBAC Admin`, `View-Only Recipients` and four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments'
+    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role.'
+    related_findings: [T251-G30, D24, D25, D26]
+
   - id: PRQ-E-14
     name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b)
     scope: once_per_env
@@ -525,11 +540,11 @@ prereqs:
     related_findings: [F13]
 
   - id: PRQ-C-08
-    name: Exchange mail-enabled security group scoping the Spaarke ApplicationAccessPolicy
+    name: Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (H14a)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (its id is an intake value — exchangePolicyScopeGroupId)
     owner: Exchange Online admin of the stamp's tenant (the customer's for Model 2; Spaarke's for Model 1)
-    consequence_of_absence: "POST /api/runs refuses the run (400 h14a-missing-policy-scope-group-id). With a wrong id, H14a's New-ApplicationAccessPolicy fails and the BFF app + UAMI get 403 on every Mail.* call (trap T4)."
+    consequence_of_absence: "POST /api/runs refuses the run (400 h14a-missing-policy-scope-group-id). With a wrong id, H14a cannot scope the stamp identity's Exchange mailbox roles and fails; the stamp's Mail.* calls 403 (trap T4). Only DIRECT members count — nested groups are not honoured."
     check_recipe:
       cli: |
         pwsh -NoProfile -Command "Connect-ExchangeOnline -ShowBanner:\$false; (Get-DistributionGroup -Identity '{exchangePolicyScopeGroupId}').RecipientTypeDetails"

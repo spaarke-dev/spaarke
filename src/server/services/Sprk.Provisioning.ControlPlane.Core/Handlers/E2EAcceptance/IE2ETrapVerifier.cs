@@ -17,8 +17,8 @@
 //     - T1 keyVaultReferenceIdentity (ARM read against App Service both slots)
 //     - T2 Dataverse App User (Web API systemusers filter)
 //     - T3 Graph appRoleAssignments parity (Graph REST /servicePrincipals/{id}/appRoleAssignments)
-//     - T4 Exchange ApplicationAccessPolicy count (pwsh Exchange Online — same
-//       shell-out surface as H14a's IExchangePolicyApplier)
+//     - T4 the stamp identity's group-scoped Exchange mailbox roles (read through
+//       the H14a sidecar's read-only route — task 251)
 //     - T5 slot MI KV RBAC OR UAMI structural (ARM read)
 //     - T6 SPE confidential-client creation audit (KV secret + Graph audit log
 //       sampling as a proxy for "creation was app-only")
@@ -60,8 +60,8 @@ public interface IE2ETrapVerifier
 /// <param name="TenantId">Explicit tenantId (§4D I1 no-hardcoded-tenant — probes MUST use this scope).</param>
 /// <param name="SubscriptionId">Customer subscription id (ADR-027 D4) — probes scope to this subscription.</param>
 /// <param name="DataverseUrl">Target Dataverse environment URL for T2 systemusers filter.</param>
-/// <param name="BffAppRegId">BFF app-reg id (H3 output) — expected T2/T4 principal.</param>
-/// <param name="UamiClientId">UAMI client id (H2a output) — expected T1/T3/T4 principal.</param>
+/// <param name="BffAppRegId">BFF app-reg id (H3 output) — expected T2 principal.</param>
+/// <param name="UamiClientId">UAMI client id (H2a output) — expected T1/T3/T4 principal (T4: the only identity H14a grants Exchange mailbox roles).</param>
 /// <param name="KeyVaultName">Customer KV name for T1 ref probe.</param>
 /// <param name="AppServiceName">BFF App Service name for the T1/T5/T7 ARM probes.</param>
 /// <param name="ResourceGroupName">App Service resource group for the T1/T5/T7 ARM probes.</param>
@@ -87,6 +87,10 @@ public interface IE2ETrapVerifier
 /// The customer's SPE container (H8 output, <c>InterStepState.SpeContainerId</c>). T6 passes only when the
 /// owning app's app-only listing of <paramref name="ContainerTypeId"/> includes it (task 248). OPTIONAL
 /// TRAILING FIELD (same additive pattern); empty → T6 InfraFault.
+/// </param>
+/// <param name="ExchangeScopeGroupId">
+/// The run's intake <c>exchangePolicyScopeGroupId</c> — the group H14a scopes the stamp identity's Exchange
+/// mailbox roles to (task 251). T4 judges every assignment against it. OPTIONAL TRAILING FIELD; empty → T4 InfraFault.
 /// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,

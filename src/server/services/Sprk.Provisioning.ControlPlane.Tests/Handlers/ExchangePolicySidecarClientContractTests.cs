@@ -134,7 +134,8 @@ public sealed class ExchangePolicySidecarClientContractTests
     [InlineData(HttpStatusCode.Unauthorized, 1, "X-Sidecar-Auth")]
     [InlineData(HttpStatusCode.BadRequest, 1, "rejected the request")]
     [InlineData(HttpStatusCode.NotFound, 1, "does not serve this route")]
-    [InlineData(HttpStatusCode.ServiceUnavailable, 2, "HTTP 503")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, 1, "not configured")]
+    [InlineData(HttpStatusCode.InternalServerError, 2, "HTTP 500")]
     public async Task Apply_HttpStatus_MapsToFailure_RetryingOnlyServerErrors(HttpStatusCode status, int expectedCalls, string diagnosticFragment)
     {
         var handler = new CapturingHandler { ResponseFactory = _ => new HttpResponseMessage(status) { Content = new StringContent("{\"outcome\":\"Failure\"}") } };

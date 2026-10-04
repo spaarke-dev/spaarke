@@ -922,7 +922,7 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 |---|---|---|
 | `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
-| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group scoping the Exchange ApplicationAccessPolicy (email address or object id). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
+| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
 
@@ -1358,7 +1358,7 @@ RUN PLAN
     H12b      playbook consumers seed
     H12c      agents seed
     H13       acceptance gate (all traps clear + invariants pass + cost envelope)
-    H14       Exchange ApplicationAccessPolicy verification (T4)
+    H14       Exchange mailbox roles scoped to the customer's group (T4)
 
   Estimated wall-clock: 42 min (no lead-time gates surfaced by H0)
   Estimated cost impact: +$412/mo (Model 1 marginal, within envelope)
@@ -2070,8 +2070,8 @@ Template shape:
 
 - T1 (keyVaultReferenceIdentity == UAMI): ✅
 - T2 (Dataverse App User for MI): ✅
-- T3 (UAMI Graph app-role parity, 14/14): ✅
-- T4 (Exchange ApplicationAccessPolicy, 2 entries): ✅
+- T3 (UAMI Graph app-role parity: the Entra-granted roles, no mailbox role in Entra): ✅
+- T4 (stamp identity's Exchange mailbox roles, all in the customer's group): ✅
 - T5 (both slot MIs KV RBAC): ✅ (structurally impossible post-Phase C UAMI)
 - T6 (SPE owning app, app-only via the Worker UAMI's FIC — the run's container is listed): ✅
 - T7 (both BFF slots carry Customer__Id == customerId): ✅

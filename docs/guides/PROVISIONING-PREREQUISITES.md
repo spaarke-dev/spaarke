@@ -5,6 +5,11 @@
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
 >
+> **v6 (2026-10-04, `customer-provisioning-orchestration-r1` T251)**: `PRQ-E-15` **added** — the Exchange admin app
+> (`Spaarke Exchange Admin`, federated credential trusting the L2 Worker UAMI, no secret or certificate) and its narrowed
+> Exchange role; one-time per tenant. `PRQ-C-08` reworded: the group now scopes H14a's Exchange RBAC for Applications
+> role assignments, not an ApplicationAccessPolicy.
+>
 > **v5 (2026-10-02, `customer-provisioning-orchestration-r1` T225b)**: `PRQ-E-14` **added** — the registry schema on
 > the admin environment, including the new `sprk_credentialmode` column. Every new stamp is secret-free by default
 > since T225b, so H4 always records the A38a marker; without the column H4 fails after writing the vault. The column
@@ -16,7 +21,7 @@
 > `PRQ-E-10` and `PRQ-C-02` no longer name the retired stack (PRQ-C-02's pins live in `modules/openai.bicep`).
 >
 > **v3 addendum (2026-10-01, `customer-provisioning-orchestration-r1` T245c)**: `PRQ-C-08` **added** — the
-> Exchange mail-enabled security group that scopes H14a's ApplicationAccessPolicy. The Exchange admin of the
+> Exchange mail-enabled security group that scopes H14a's Exchange mailbox roles (RBAC for Applications since T251). The Exchange admin of the
 > stamp's tenant creates it before the run (owner decision 2026-10-01: its membership is the customer's access
 > decision, so L2 never creates it); its id is the required intake value `exchangePolicyScopeGroupId`.
 >
@@ -68,7 +73,7 @@ Prereqs are grouped by **scope**:
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
-| `once_per_env` | 11 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_env` | 12 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
 | `once_per_customer` | 10 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
 | **Total** | **34** (32 active) | Authoritative count: `validate.ps1` over the YAML |
 
@@ -147,6 +152,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
+| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4) |
 | PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault |
 
 ### Once-per-customer (10)
@@ -160,7 +166,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
-| PRQ-C-08 | Exchange mail-enabled security group scoping the Spaarke ApplicationAccessPolicy — its id is the intake value `exchangePolicyScopeGroupId` (T245c) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
+| PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
 | PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 

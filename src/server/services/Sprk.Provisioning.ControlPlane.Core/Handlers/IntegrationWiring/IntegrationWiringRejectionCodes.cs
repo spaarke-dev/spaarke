@@ -3,7 +3,7 @@
 //
 // Machine-stable rejection codes + gate identifiers emitted by
 // H14IntegrationWiringHandler + its 3 sub-handlers (task 073, wave C4 Batch
-// 3F). T4 silent-fail trap owner (Exchange ApplicationAccessPolicy drift).
+// 3F). T4 silent-fail trap owner (Exchange role-assignment drift — RBAC for Applications since task 251).
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-19 (H14
@@ -74,7 +74,7 @@ public static class H14Rejections
     public const string RunDeletedDuringWiring = "h14-run-deleted-during-wiring";
 }
 
-/// <summary>Machine-stable rejection codes for H14a (Exchange ApplicationAccessPolicy).</summary>
+/// <summary>Machine-stable rejection codes for H14a (Exchange mailbox access — RBAC for Applications).</summary>
 public static class H14aRejections
 {
     /// <summary>Run parameter <c>exchangePolicyScopeGroupId</c> missing — the customer's mail-enabled security group H14a scopes the Exchange roles to.</summary>
@@ -140,7 +140,7 @@ public static class H14cRejections
 /// </summary>
 public static class H14Gates
 {
-    /// <summary>T4 gate — flips to Verified once Get-ApplicationAccessPolicy confirms both expected AppIds present with no drift.</summary>
+    /// <summary>T4 gate — flips to Verified once H14a has read back every group-scoped mailbox role with no drift. (Value kept for run-record compatibility.)</summary>
     public const string ExchangePolicyApplied = "h14a-exchange-policy-applied";
 
     /// <summary>Flips to Verified once all configured Graph webhook subscriptions are created/renewed.</summary>

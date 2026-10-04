@@ -88,6 +88,9 @@
 
 .PARAMETER ExchangeAccessToken
     An Exchange Online token for 'Spaarke Exchange Admin' (check 5 only). Without it check 5 is WARN.
+    CAUTION: it travels on the curl command line run through Kudu /api/command, so it is visible to
+    that container's process list and possibly Kudu's logs. Use only a freshly minted token (they
+    expire within the hour) against a test app and group, and never paste it into a shared log.
 
 .PARAMETER SkipChecks
     Comma-separated list of check names to skip. Valid names:

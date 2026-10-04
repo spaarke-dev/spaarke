@@ -7,6 +7,22 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — provisioning: Exchange sidecar holds no credential; H14a on RBAC for Applications (T251, D24–D26)
+
+`customer-provisioning-orchestration-r1` T251 (gap G30, owner decisions D24, D25, D26).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Exchange mailbox access — RBAC for Applications,
+  sidecar holds no credential" — H14a grants only the stamp's managed identity the four `Application Mail.*` /
+  `MailboxSettings.Read` roles scoped to the customer's group (never ApplicationAccessPolicy, never the BFF app); never a
+  mailbox role in Entra (H10 grants `GetEntraGranted()`, T3 fails otherwise); the Worker signs in as
+  `Spaarke Exchange Admin` via its UAMI's federated credential and passes the token to the sidecar (no secret,
+  certificate or Entra directory role on that app; narrowed Exchange role); a `sitecontainers` variable names an app
+  setting, never a literal.
+- **`.claude/skills/provision-environment/SKILL.md`**: `exchangePolicyScopeGroupId` row (direct members only), the H14
+  plan line and the T3/T4 report lines reworded for RBAC for Applications.
+- **`.claude/agent-memory/researcher/`**: two findings files (EXO identity, RBAC-for-Applications design) moved from
+  the project folder the agent wrote them to, and indexed.
+
 ###### 2026-10-03 — provisioning: L2 signs in as the SPE owning app with MI-FIC, not a certificate (T248, D16)
 
 `customer-provisioning-orchestration-r1` T248 (gap G28, owner decision D16).

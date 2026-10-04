@@ -94,7 +94,7 @@ public static class H13Rejections
     /// <summary>T3 SILENT-FAIL TRAP — UAMI service principal's Graph appRoleAssignments do NOT match the full <c>GraphAppRoles.cs</c> catalog (14 roles).</summary>
     public const string TrapT3Failed = "h13-trap-T3-graph-app-role-parity";
 
-    /// <summary>T4 SILENT-FAIL TRAP — Exchange <c>Get-ApplicationAccessPolicy</c> does NOT return the expected 2 entries (BFF app-reg + UAMI) matching the run's expected AppIds.</summary>
+    /// <summary>T4 SILENT-FAIL TRAP — the stamp identity is missing a group-scoped Exchange mailbox role, or holds one outside the customer's group (RBAC for Applications, task 251). Value kept for run-record compatibility.</summary>
     public const string TrapT4Failed = "h13-trap-T4-exchange-policy-count";
 
     /// <summary>T5 SILENT-FAIL TRAP — Neither both-slot System-Assigned MI KV RBAC NOR post-Phase-C UAMI-only structural state is present on the App Service.</summary>

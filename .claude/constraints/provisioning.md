@@ -139,6 +139,14 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - The BFF's `SpeAdminGraphService` still signs in to owning apps with E-1 Key Vault client secrets until T250 — until then, no secret-based `sprk_specontainertypeconfig` row for a Model 1 container type.
 - Never delete `rg-spaarke-shared-prod` or the `Microsoft.Syntex/accounts` billing account in it (`dc4749c2-ca04-4b38-b6c2-e38dc3eec72b`): a standard container type's billing binding is permanent.
 
+## Exchange mailbox access — RBAC for Applications, sidecar holds no credential (BINDING, task 251 / owner D24–D26)
+
+- H14a grants the stamp's **managed identity only** the Exchange application roles for the Graph mailbox permissions (`IGraphAppRolesRegistry.GetExchangeScoped()` → `Application Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`), **scoped to the customer's mail-enabled security group** (intake `exchangePolicyScopeGroupId`). Never ApplicationAccessPolicy (Microsoft: legacy; capped per tenant). Never grant the BFF app registration — RBAC for Applications *grants* access, so adding an identity widens what it reaches.
+- Exchange adds role assignments to Entra app permissions. **NEVER** grant a mailbox role (`Mail.*`, `MailboxSettings.*`, `Calendars.*`, `Contacts.*`) to a stamp identity in Entra — H10 grants only `GetEntraGranted()`, and H13 T3 fails when a mailbox role is present in Entra. A new mailbox permission goes into `ExchangeScopedValues`, not into H10.
+- The sidecar holds **no credential** and reads no Key Vault: the Worker signs in as `Spaarke Exchange Admin` through its UAMI's federated credential (`ExchangeAdminTokenSource` → `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential`) and sends the Exchange Online token in `X-Exchange-Access-Token`; the sidecar runs `Connect-ExchangeOnline -AccessToken`. Never give that app a secret or a certificate. Never give it an Entra directory role (Exchange Administrator made its Exchange writes fail, 2026-10-04). Its Exchange permission is the narrowed role `Spaarke App RBAC Admin` plus `-Delegating` assignments for exactly the four application roles. Widening it is an owner decision.
+- A `sitecontainers` environment variable's `value` is the **name of a Worker app setting**, never a literal (Microsoft's contract — a literal arrives empty; G30). The sidecar binds its port even when a setting is missing, so it can never hold the Worker at 503.
+- One-time per tenant: deployment guide §4.2.1 / prerequisite `PRQ-E-15`.
+
 ## Handler idempotency + drift-detection
 
 - Every handler MUST be idempotent. Second run of the same handler against the same customer resources produces the same end state (assuming no external drift).

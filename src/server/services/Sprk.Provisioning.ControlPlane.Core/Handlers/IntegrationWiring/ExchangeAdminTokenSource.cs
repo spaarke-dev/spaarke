@@ -76,6 +76,10 @@ public sealed class ExchangeAdminTokenSource
             var token = await credential.GetTokenAsync(new TokenRequestContext(ExchangeOnlineScope), cancellationToken).ConfigureAwait(false);
             return new ExchangeTokenResult.Success(token.Token);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (AuthenticationFailedException ex)
         {
             return new ExchangeTokenResult.Failure(
@@ -83,6 +87,12 @@ public sealed class ExchangeAdminTokenSource
                 "federated identity credential names this Worker's managed identity (issuer = the managed identity's tenant, " +
                 "audience api://AzureADTokenExchange) and that the app holds Exchange.ManageAsApp. Transient sign-in faults " +
                 "surface the same way; a retry may succeed.");
+        }
+        catch (Exception ex)
+        {
+            // Callers promise not to throw for sign-in problems (code review S6).
+            return new ExchangeTokenResult.Failure(
+                $"Unexpected {ex.GetType().Name} signing in to Exchange Online as app {appId} in tenant {tenantId}: {ex.Message}");
         }
     }
 

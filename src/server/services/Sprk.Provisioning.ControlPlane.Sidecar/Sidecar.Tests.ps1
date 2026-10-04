@@ -34,16 +34,104 @@ Describe 'Get-ExchangeConnectParameters' {
     }
 }
 
-# Beyond the task's test scope: these two rules decide Drift (H14a's T4 silent-fail trap).
-Describe 'Assignment matching' {
-    It 'matches an assignment to the app by any of its Exchange identities' {
-        $sp = [pscustomobject]@{ Identity = 'sp-1'; Name = 'sp-1'; ObjectId = 'oid'; AppId = 'app' }
-        Test-AssigneeIs ([pscustomobject]@{ RoleAssignee = 'sp-1' }) $sp | Should -BeTrue
-        Test-AssigneeIs ([pscustomobject]@{ RoleAssignee = 'someone-else' }) $sp | Should -BeFalse
+# Beyond the task's test scope (code review W5): the apply logic decides H14a's T4 outcome —
+# Drift must create nothing, and success must be proven by read-back. Exchange creates these
+# cmdlets only after Connect-ExchangeOnline, so empty global stubs stand in for Pester to mock.
+Describe 'Invoke-MailboxAccessApply' {
+    BeforeAll {
+        function global:Get-Recipient { [CmdletBinding()] param($Filter) }
+        function global:Get-Group { [CmdletBinding()] param($Identity) }
+        function global:Get-ServicePrincipal { [CmdletBinding()] param($Identity) }
+        function global:New-ServicePrincipal { [CmdletBinding()] param($AppId, $ObjectId, $DisplayName) }
+        function global:Get-ManagementRoleAssignment { [CmdletBinding()] param($Identity, $RoleAssignee, $Role) }
+        function global:New-ManagementRoleAssignment { [CmdletBinding()] param($Name, $App, $Role, $RecipientGroupScope) }
+        $script:App = '11111111-2222-3333-4444-555555555555'
+        $script:Oid = '99999999-8888-7777-6666-555555555555'
+        $script:Request = [pscustomobject]@{
+            tenantId = 't'; appId = $script:App; servicePrincipalObjectId = $script:Oid; displayName = 'stamp'
+            scopeGroupId = '77777777-8888-9999-0000-111111111111'; correlationId = 'run-1'
+            assignments = @([pscustomobject]@{ name = 'Spaarke-acme-MailSend'; role = 'Application Mail.Send' },
+                            [pscustomobject]@{ name = 'Spaarke-acme-MailRead'; role = 'Application Mail.Read' })
+        }
+        function script:Assignment($Name, $Role, $Scope = 'CN=grp') {
+            [pscustomobject]@{ Name = $Name; Role = $Role; RoleAssignee = $script:Oid; RecipientGroupScope = $Scope }
+        }
     }
-    It 'treats an unscoped assignment as out of scope' {
-        $g = [pscustomobject]@{ Identity = 'grp'; Name = 'grp'; DistinguishedName = 'CN=grp' }
-        Test-AssignmentInScope ([pscustomobject]@{ RecipientGroupScope = 'CN=grp' }) $g | Should -BeTrue
-        Test-AssignmentInScope ([pscustomobject]@{ RecipientGroupScope = '' }) $g | Should -BeFalse
+    BeforeEach {
+        $global:T251Held = @()
+        $global:T251SpExists = $true
+        Mock -ModuleName SidecarCore Get-Recipient { @([pscustomobject]@{ DistinguishedName = 'CN=grp' }) }
+        Mock -ModuleName SidecarCore Get-Group { [pscustomobject]@{ DistinguishedName = 'CN=grp'; Guid = 'g'; ExternalDirectoryObjectId = 'e'; RecipientTypeDetails = 'MailUniversalSecurityGroup' } }
+        Mock -ModuleName SidecarCore Get-ServicePrincipal { if ($global:T251SpExists) { [pscustomobject]@{ ObjectId = $script:Oid; AppId = $script:App; Identity = $script:Oid } } }
+        Mock -ModuleName SidecarCore New-ServicePrincipal { $global:T251SpExists = $true; [pscustomobject]@{ ObjectId = $script:Oid; AppId = $script:App; Identity = $script:Oid } }
+        Mock -ModuleName SidecarCore Get-ManagementRoleAssignment -ParameterFilter { $RoleAssignee } { $global:T251Held }
+        Mock -ModuleName SidecarCore Get-ManagementRoleAssignment -ParameterFilter { $Identity } { $global:T251Held | Where-Object Name -eq $Identity }
+        Mock -ModuleName SidecarCore New-ManagementRoleAssignment { $global:T251Held += Assignment $Name $Role $RecipientGroupScope }
+    }
+
+    It 'registers the identity and creates every missing assignment in scope' {
+        $global:T251SpExists = $false
+
+        $r = Invoke-MailboxAccessApply -Request $script:Request
+
+        $r.outcome | Should -Be 'Success'
+        $r.createdCount | Should -Be 2
+        Should -Invoke -ModuleName SidecarCore New-ServicePrincipal -Times 1 -Exactly
+        Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 2 -Exactly -ParameterFilter { $RecipientGroupScope -eq 'CN=grp' }
+    }
+
+    It 'is AlreadyCompliant and changes nothing when everything is in place' {
+        $global:T251Held = @((Assignment 'Spaarke-acme-MailSend' 'Application Mail.Send'), (Assignment 'Spaarke-acme-MailRead' 'Application Mail.Read'))
+
+        (Invoke-MailboxAccessApply -Request $script:Request).outcome | Should -Be 'AlreadyCompliant'
+        Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 0 -Exactly
+    }
+
+    It 'is Drift, creating nothing, when a named assignment has another scope' {
+        $global:T251Held = @(Assignment 'Spaarke-acme-MailSend' 'Application Mail.Send' 'CN=other-customer')
+        $global:T251SpExists = $true
+
+        $r = Invoke-MailboxAccessApply -Request $script:Request
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*CN=other-customer*'
+        Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 0 -Exactly
+        Should -Invoke -ModuleName SidecarCore New-ServicePrincipal -Times 0 -Exactly
+    }
+
+    It 'is Drift when the identity holds any other application role' {
+        $global:T251Held = @(Assignment 'manual-grant' 'Application Exchange Full Access' '')
+
+        $r = Invoke-MailboxAccessApply -Request $script:Request
+
+        $r.outcome | Should -Be 'Drift'
+        ($r.conflicts -join ' ') | Should -BeLike '*Application Exchange Full Access*'
+        Should -Invoke -ModuleName SidecarCore New-ManagementRoleAssignment -Times 0 -Exactly
+    }
+
+    It 'fails when the scope group cannot be found' {
+        Mock -ModuleName SidecarCore Get-Recipient { @() }
+        Mock -ModuleName SidecarCore Get-Group { }
+
+        (Invoke-MailboxAccessApply -Request $script:Request).outcome | Should -Be 'Failure'
+        Should -Invoke -ModuleName SidecarCore New-ServicePrincipal -Times 0 -Exactly
+    }
+
+    It 'fails when the read-back does not show an assignment in scope' {
+        Mock -ModuleName SidecarCore New-ManagementRoleAssignment { }
+
+        $r = Invoke-MailboxAccessApply -Request $script:Request
+
+        $r.outcome | Should -Be 'Failure'
+        $r.diagnostic | Should -BeLike '*Read-back*'
+    }
+}
+
+Describe 'Request validation' {
+    It 'refuses a role outside the allow-list' {
+        $body = [pscustomobject]@{ tenantId = 't'; appId = '11111111-2222-3333-4444-555555555555'; servicePrincipalObjectId = '99999999-8888-7777-6666-555555555555'
+                                   scopeGroupId = 'group@contoso.com'; correlationId = 'c'
+                                   assignments = @([pscustomobject]@{ name = 'x'; role = 'Application Exchange Full Access' }) }
+        (Test-ApplyRequest -Body $body) -join ' ' | Should -BeLike '*not one the sidecar may grant*'
     }
 }

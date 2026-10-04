@@ -19,6 +19,11 @@
       POST /read-mailbox-access    (H13 T4; read-only; same headers)
         Body: { tenantId, organization?, appId, scopeGroupId, roles: [..], correlationId }
         200:  { outcome: Success|Failure, servicePrincipalRegistered, assignments: [..], diagnostic }
+              assignments = EVERY "Application *" role the app holds (not only `roles`), each
+              marked inExpectedScope; an unknown scope group is outcome Failure.
+
+    One request at a time: an apply and a T4 read queue behind each other's Exchange connect
+    (seconds). timeoutSeconds is advisory — the Worker's HttpClient.Timeout is the bound.
 
       400 invalid body / no Exchange token . 401 bad X-Sidecar-Auth . 404 unknown route
       503 the sidecar is missing a setting (named in the diagnostic).
@@ -84,12 +89,17 @@ $settings = Get-SidecarSettings -Environment ([Environment]::GetEnvironmentVaria
 if ($settings.Missing.Count -gt 0) {
     Write-JsonLog -Level ERROR -Message 'Sidecar is missing settings -- binding anyway; every request will be refused until they are set.' -Fields @{ missing = $settings.Missing }
 }
-Import-Module ExchangeOnlineManagement
 
+# Bind FIRST, then load the Exchange module: nothing may stop the port from binding (G30).
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add($settings.ListenPrefix)
 try { $listener.Start() }
 catch { Write-JsonLog -Level ERROR -Message 'HttpListener.Start() failed' -Fields @{ error = $_.Exception.Message; prefix = $settings.ListenPrefix }; exit 1 }
+try { Import-Module ExchangeOnlineManagement -ErrorAction Stop }
+catch {
+    $settings.Missing = @($settings.Missing) + "ExchangeOnlineManagement module ($($_.Exception.Message))"
+    Write-JsonLog -Level ERROR -Message 'ExchangeOnlineManagement failed to load -- every request will be refused.' -Fields @{ error = $_.Exception.Message }
+}
 Write-JsonLog -Level INFO -Message 'Sidecar listening' -Fields @{ prefix = $settings.ListenPrefix; degraded = ($settings.Missing.Count -gt 0) }
 
 while ($listener.IsListening) {
@@ -126,23 +136,20 @@ while ($listener.IsListening) {
             Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = 'X-Exchange-Access-Token header is required (the sidecar holds no Exchange credential).' }
             continue
         }
+        # Validate BEFORE reading any field (StrictMode: a missing property would throw -> 500).
+        $errors = if ($route -eq 'POST /apply-mailbox-access') { Test-ApplyRequest -Body $body } else { Test-ReadRequest -Body $body }
+        if ($errors.Count -gt 0) { Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = ($errors -join '; ') }; continue }
         $organization = if ($body.PSObject.Properties['organization'] -and $body.organization) { [string]$body.organization } else { [string]$body.tenantId }
 
         if ($route -eq 'POST /apply-mailbox-access') {
-            $errors = Test-ApplyRequest -Body $body
-            if ($errors.Count -gt 0) { Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = ($errors -join '; ') }; continue }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /apply-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId; scopeGroupId = $body.scopeGroupId; assignmentCount = @($body.assignments).Count }
             try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Invoke-MailboxAccessApply -Request $body } }
             catch { $result = @{ outcome = 'Failure'; createdCount = 0; assignments = @(); conflicts = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /apply-mailbox-access' -Fields @{ outcome = $result.outcome; createdCount = $result.createdCount }
         }
         else {
-            if (-not ($body.PSObject.Properties['appId'] -and $body.appId) -or -not ($body.PSObject.Properties['roles'] -and @($body.roles).Count -gt 0)) {
-                Write-JsonResponse $response 400 -CorrelationId $correlationId @{ outcome = 'Failure'; diagnostic = 'appId and roles are required.' }; continue
-            }
-            $scopeGroupId = if ($body.PSObject.Properties['scopeGroupId']) { [string]$body.scopeGroupId } else { '' }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Received /read-mailbox-access' -Fields @{ tenantId = $body.tenantId; appId = $body.appId }
-            try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Get-MailboxAccessState -AppId ([string]$body.appId) -ScopeGroupId $scopeGroupId -Roles @($body.roles) } }
+            try { $result = Invoke-WithExchange -Token $token -Organization $organization -Operation { Get-MailboxAccessState -AppId ([string]$body.appId) -ScopeGroupId ([string]$body.scopeGroupId) } }
             catch { $result = @{ outcome = 'Failure'; servicePrincipalRegistered = $false; assignments = @(); diagnostic = "Exchange call failed: $($_.Exception.Message)" } }
             Write-JsonLog -Level INFO -CorrelationId $correlationId -Message 'Completed /read-mailbox-access' -Fields @{ outcome = $result.outcome; assignmentCount = @($result.assignments).Count }
         }

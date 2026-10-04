@@ -162,6 +162,7 @@ Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline t
 - **Azure subscription vCPU quota** — verify per SKU per region
 - **Dataverse environment-creation rate** — ~4/hour per tenant typical (`pac admin quota`)
 - **SPE container type + owning app** — one-time per container type, not per customer: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) (owning app with a federated credential trusting the L2 Worker UAMI — no certificate, no secret; `Spaarke Model 1` exists since 2026-10-03). H0's `SpeOwnerCredential` check refuses the run until it is in place; there is no 24 h wait
+- **Exchange admin app** — one-time per tenant, not per customer: §4.2.1 (`Spaarke Exchange Admin`, a federated credential trusting the L2 Worker UAMI — no certificate, no secret — plus a narrowed Exchange role). H14a and H13 T4 report "not configured" until it is in place
 - **Customer admin consent (Model 2)** — one-time customer action captured by H0.5
 
 ### 2.5 Preflight naming collision check
@@ -340,10 +341,12 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 | `ControlPlaneIdentity__PrincipalObjectId` | Object id of L2's own UAMI (one setting since task 249; it replaced `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId`). H4 grants it **Key Vault Secrets Officer** on each customer vault before writing it — never the stamp's BFF UAMI, which only reads its vault. H2a sends it as `customer.bicep`'s `controlPlaneUamiPrincipalId` on **Model 1** stamps (Website Contributor on the stamp BFF). **Rollout**: deploy `platform-controlplane` (which sets the new name) FIRST, then the Worker code built from task 249 straight away (`Deploy-ControlPlane.ps1` deploys code only) — each Worker version refuses to start without the name it reads, so the Worker is down between the two steps; queued Service Bus messages wait. (The old name only ever existed on the project branch, since T245b.) | H4, H2a |
 | `KvSecretsPopulationOptions__RequireSecretFreeIdentity` | `true` — every new stamp is secret-free: H4 omits `BFF-API-ClientSecret` and `Dataverse-ClientSecret` (BINDING credential-lifecycle rule; no sentinel). The code default is also `true` (T225b, G21). | H4 |
 | `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId` and `OwnerAppId` (the container type's **owning** app) — nothing else. L2 signs in as the owning app through the Worker UAMI's federated identity credential on that app (MI-FIC, task 248 / owner D16): the UAMI's token for `api://AzureADTokenExchange` is the client assertion. No certificate or secret is stored; the former `OwnerCert*` settings and `SPE-OwnerCert-Pfx` no longer exist. The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run (`spe-owner-not-configured`) until the topology runbook has set up a container type + owning app and its entry is added. Dev: `Spaarke Model 1` `fb3817a8-…` → `Spaarke SPE Model 1 Owner` `bfac7f6e-…`. | H0 (SpeOwnerCredential), H8, H13 (T6) |
+| `IntegrationWiring__ExchangeAdminAppId` | Client id of `Spaarke Exchange Admin` (§4.2.1). The Worker signs in as it through its UAMI's federated credential and sends the Exchange Online token to the H14a sidecar with each request — the sidecar holds no credential (task 251, owner D24). Empty: the Worker boots; H14a / H13 T4 fail with "ExchangeAdminAppId is not configured". Dev: `46670ee2-…`. | H14a, H13 (T4) |
+| `IntegrationWiring__SidecarSharedSecret{VaultName,SubscriptionId,Name}` | Where the Worker reads the Worker↔sidecar shared secret (`Sidecar-Shared-Secret` in the platform vault). The sidecar gets the same secret through the `ExchangeSidecar__SharedSecret` Key Vault reference setting: a sitecontainer variable must **name** an app setting, never hold a literal (Microsoft's `sitecontainers` contract — G30). | H14a, H13 (T4) |
 | `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
 
-Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`)
-and `speContainerTypeOwners` (array; threaded from `platform-controlplane.bicep`). T225b removed `vendorKeysKeyVaultName`
+Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`),
+`speContainerTypeOwners` (array) and `exchangeAdminAppId` (both threaded from `platform-controlplane.bicep`). T225b removed `vendorKeysKeyVaultName`
 (owner D18: no Spaarke-shared vendor key remains in the customer catalog).
 
 Artifact versions in idempotency keys (`bicepVer`, `indexVer`, `secretsVer`) are computed by L2 from the artifact each
@@ -360,7 +363,7 @@ same rules for batch mode.
 |---|---|---|
 | `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`) |
 | `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
-| `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group scoping the Exchange ApplicationAccessPolicy — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
+| `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one non-blank (`h14b-no-webhook-targets-configured`) |
 | `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox` | `local@domain.tld` (`intake-communication-default-mailbox-invalid`) |
 
@@ -377,6 +380,40 @@ same rules for batch mode.
 | `POST /api/runs/{id}/cancel` | Cancel a run |
 | `POST /api/onboarding/consent-callback` | (BFF endpoint) H0.5 consent capture |
 | `POST /api/runs/{id}/clear-quarantine` | Clear `Quarantined` state (reason required, audit-logged) |
+
+#### 4.2.1 Exchange admin app (one-time per tenant — task 251)
+
+H14a grants each stamp's managed identity the Exchange **"Application Mail.\*" roles, scoped to the customer's mail-enabled
+security group** (Exchange *RBAC for Applications*, owner D26 — it replaced ApplicationAccessPolicy, which Microsoft calls
+legacy and caps at a few hundred policies per tenant). L2 does that through its Exchange sidecar, signed in as
+**`Spaarke Exchange Admin`**. Set it up once per tenant (Spaarke's, for Model 1):
+
+1. **Entra (Global Admin)**: single-tenant app `Spaarke Exchange Admin` — **no secret, no certificate**; a federated
+   identity credential with issuer `https://login.microsoftonline.com/{tenant}/v2.0`, subject = the L2 Worker UAMI's
+   principal id, audience `api://AzureADTokenExchange`; the Office 365 Exchange Online application permission
+   `Exchange.ManageAsApp`, admin-consented. Do **not** give it an Entra directory role — the Exchange Administrator role
+   made its Exchange writes fail in the 2026-10-04 test.
+2. **Exchange (an Organization Management admin, `Connect-ExchangeOnline`)**:
+   - `Enable-OrganizationCustomization` if `(Get-OrganizationConfig).IsDehydrated` is true — once per tenant, **cannot be
+     undone**, and took ~1 h to apply on Spaarke's tenant. Without it Exchange refuses every role assignment.
+   - `New-ServicePrincipal -AppId <admin app id> -ObjectId <its Entra service-principal object id> -DisplayName 'Spaarke Exchange Admin'`.
+   - Role **`Spaarke App RBAC Admin`**: `New-ManagementRole -Parent 'Role Management'`, then remove every entry except
+     `Get/New/Set/Remove-ServicePrincipal`, `Get/New/Set/Remove-ManagementScope`,
+     `Get/New/Set/Remove-ManagementRoleAssignment`, `Get-ManagementRole`, `Test-ServicePrincipalAuthorization`.
+   - Assign it to the app (`New-ManagementRoleAssignment -App <app id> -Role 'Spaarke App RBAC Admin'`), plus
+     `View-Only Recipients`, plus `-Delegating` assignments for exactly `Application Mail.Read`, `Application Mail.ReadWrite`,
+     `Application Mail.Send` and `Application MailboxSettings.Read`. The delegating assignments are what limit it: tested
+     2026-10-04, it is refused when it tries to grant itself Exchange Full Access, Role Management or Mail Recipients.
+3. **Platform parameter** `exchangeAdminAppId` = the app's client id (`platform-controlplane-{env}.bicepparam`).
+
+Residual risk, stated plainly: an identity that can create application role assignments can grant any app — itself
+included — the four mailbox roles organization-wide (the scope is optional). Only the L2 Worker can obtain its token;
+audit `New-ManagementRoleAssignment` in the unified audit log.
+
+> **Status (2026-10-04)**: the identity, sign-in, connect and escalation refusals are verified live. App-only *writes*
+> (`New-ServicePrincipal`, `New-ManagementRoleAssignment`) were refused with "doesn't have write permission to target DC"
+> during the hour after `Enable-OrganizationCustomization`; see
+> `projects/customer-provisioning-orchestration-r1/notes/t251-exchange-sidecar-design.md` §7 for the current result.
 
 ### 4.3 L3 operator skill — `/provision-environment` (Phase D)
 
@@ -430,7 +467,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
 | **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
-| **H14** | Post-deploy integrations | (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | `Get-ApplicationAccessPolicy` returns 2 with both principals | `integrations-{customerId}-{integrationVer}` |
+| **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
 
@@ -853,10 +890,12 @@ r3-era gates (all must pass — run in CI and recorded in the manifest):
 - BFF app-reg
 - UAMI (post-Phase-C)
 
-Then syncs Graph app-role parity from `GraphAppRoles.cs` constant onto UAMI SP.
+Then grants the Entra Graph app roles from `GraphAppRoles.cs` onto the UAMI SP — **except** the four mailbox roles
+(`Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`), which H14a grants through Exchange scoped to the
+customer's group. Exchange adds the two sources together, so an Entra mailbox grant would reach every mailbox in the tenant.
 
 **T2 verification**: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1.
-**T3 verification**: UAMI SP `appRoleAssignments` includes all 14 role IDs from `GraphAppRoles.cs`.
+**T3 verification**: UAMI SP `appRoleAssignments` holds the 11 Entra-granted roles and **none** of the 4 mailbox roles.
 
 **H11** provisions users per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow.
 
@@ -876,7 +915,7 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 Three DAG-parallel sub-steps:
 
-- **(a) 2 Exchange `ApplicationAccessPolicy`** — BFF app-reg + UAMI. Action-and-verify semantics: on 0 or 1 create; on 2+ verify AppIds match else fail with drift diagnostic (**T4 verification**).
+- **(a) Exchange mailbox access (RBAC for Applications, task 251)** — the stamp UAMI only (the BFF app registration does no app-only mail; granting it would widen its reach). Through the Worker's sidecar: register the UAMI in Exchange (`New-ServicePrincipal`), then one assignment per mailbox role, named `{prefix}-{customerId}-{Role}`, scoped to the intake group. Get-before-set: any existing assignment that differs → Drift, nothing changed (**T4**). Grants take effect in 30 min – 2 h (Microsoft).
 - **(b) Graph webhook subscriptions** — per Communication/Email module; HMAC signing keys from H4.
 - **(c) Dataverse service-endpoint webhooks** — fire with correct HMAC.
 
@@ -932,7 +971,7 @@ Seven known-issue guardrails baked into handler post-conditions. Each has been d
 | **T1** | App Service `keyVaultReferenceIdentity` not set to UAMI → KV references fail post-swap | H4 | ARM read `keyVaultReferenceIdentity == UAMI-resource-id` |
 | **T2** | Dataverse App User for UAMI not registered → BFF loses Dataverse access post-swap | H10 | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 |
 | **T3** | UAMI SP missing Graph app-role → Graph calls fail with 403 | H10 | UAMI SP `appRoleAssignments` includes all 14 IDs from `GraphAppRoles.cs` |
-| **T4** | Missing Exchange `ApplicationAccessPolicy` → Mail.* calls 403 despite Graph permission grant | H14(a) | `Get-ApplicationAccessPolicy` returns 2 entries with both principals |
+| **T4** | Stamp identity missing its group-scoped Exchange mailbox roles (Mail.* calls 403), or holding one outside the group (reaches other customers' mailboxes) | H14(a) | H13 reads the identity's assignments via the sidecar: every `Application Mail.*` role in scope, none outside |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
 | **T6** | SPE container work uses a delegated token → 403 "public client not allowed" | H8 | H13 lists `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}` app-only as the owning app (through the Worker UAMI's federated credential) and passes only if the run's container (H8 output) is in the list. Container absent or a delegated-token refusal → Failed; other refusals / 404 / errors → InfraFault |
 | **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1) | H4b (writes both slots) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238) |
@@ -1061,7 +1100,7 @@ pac admin create-environment `
 .\scripts\seed-data\Seed-PlaybookConsumers.ps1 -EnvironmentUrl "<dv-org-url>"
 
 # Phase 9 — post-deploy integrations
-.\scripts\Set-ApplicationAccessPolicy.ps1     # for both BFF app-reg AND UAMI (T4)
+# H14a runs only inside the L2 Worker (its sidecar signs in as 'Spaarke Exchange Admin') — no manual script (task 251).
 # Graph webhook subscriptions per Communication module — see COMMUNICATION-DEPLOYMENT-GUIDE.md
 
 # Phase 10 — acceptance gate
@@ -1081,11 +1120,11 @@ az webapp config show --name spaarke-bff-{customer}-{env} --resource-group rg-sp
 # T2 — UAMI registered as Dataverse App User
 pac admin application list --environment <dv-org-url>
 
-# T3 — Graph app-role parity (15 roles per GraphAppRoles.cs — 14 populated 2026-08-17 + 1 User.Invite.All added 2026-08-20 by task 144)
-az ad sp show --id <uami-principal-id> --query "appRoleAssignments"
+# T3 — Graph app-role parity: the 11 Entra-granted roles, and none of Mail.Read / Mail.ReadWrite / Mail.Send / MailboxSettings.Read
+az rest --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<uami-principal-id>/appRoleAssignments"
 
-# T4 — Exchange ApplicationAccessPolicy (2 entries)
-Get-ApplicationAccessPolicy | Where-Object { $_.AppId -in @($bffAppId, $uamiAppId) }
+# T4 — the stamp identity's Exchange mailbox roles, all limited to the customer's group (Organization Management admin)
+Get-ManagementRoleAssignment | Where-Object { $_.RoleAssignee -eq '<uami-principal-id>' } | Select Name, Role, RecipientGroupScope
 
 # T6 — the run's container is listed for its container type, app-only as the owning app
 # Performed by H13 (the owning app is reachable only through the L2 Worker UAMI's federated credential);

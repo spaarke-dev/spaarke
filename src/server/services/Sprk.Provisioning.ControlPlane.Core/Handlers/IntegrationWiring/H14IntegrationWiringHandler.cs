@@ -8,8 +8,9 @@
 //
 // PURPOSE:
 //   Wires the customer environment into 3 external systems in parallel per
-//   spec.md FR-19: (a) 2 Exchange ApplicationAccessPolicy entries (BFF
-//   app-reg + UAMI, T4 action-and-verify); (b) Graph webhook subscriptions
+//   spec.md FR-19: (a) Exchange mailbox access — the stamp UAMI's group-scoped
+//   "Application Mail.*" roles (RBAC for Applications, task 251; T4
+//   action-and-verify); (b) Graph webhook subscriptions
 //   per Communication/Email module (HMAC signing key from H4); (c) Dataverse
 //   service-endpoint webhook (same HMAC signing key). S2S consent sub-step
 //   (d) is explicitly NOT included per r3 task 060 — see
@@ -103,7 +104,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4; KV read scoping).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the mail-enabled security group id scoping the Exchange ApplicationAccessPolicy.</summary>
+    /// <summary>Non-secret parameter key carrying the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to.</summary>
     public const string ExchangePolicyScopeGroupIdParameterKey = "exchangePolicyScopeGroupId";
 
     /// <summary>Non-secret parameter key carrying the Graph resource path for the Communication module subscription (optional; at least one of Communication/Email required).</summary>

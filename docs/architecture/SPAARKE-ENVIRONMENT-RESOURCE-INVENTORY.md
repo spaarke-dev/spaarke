@@ -199,6 +199,22 @@ permanent, capped at 25 per tenant and cannot be deleted; creating one is delega
 (topology doc §8 Q1). Under Model 1 that number is the ceiling on Model 1 customers — confirm before it becomes
 load-bearing.
 
+## Exchange mailbox access (H14a — RBAC for Applications, task 251)
+
+The stamp's managed identity reaches only the customer's mailboxes: H14a grants it the Exchange application roles for
+the Graph mailbox permissions, scoped to the customer's mail-enabled security group. H10 never grants those
+permissions in Entra (Exchange adds the two together). Owner decisions D24–D26.
+
+| Resource | Deployment | Naming | Created by | Status vs target |
+|---|---|---|---|---|
+| Exchange admin app `Spaarke Exchange Admin` (single-tenant; `Exchange.ManageAsApp`) | **Shared** (one per tenant L2 provisions into) | appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7` (Spaarke tenant) | Operator, once — deployment guide §4.2.1 / `PRQ-E-15` | ✅ 2026-10-04 — **no secret, no certificate, no Entra directory role** |
+| Its federated identity credential trusting the L2 Worker UAMI | **Shared** (one per control-plane environment) | `sprk-controlplane-dev-uami-assertion` — subject `38f7693f-…` | Operator, once | ✅ 2026-10-04 (verified: token `appidacr` 2, `Exchange.ManageAsApp`) |
+| Exchange org customization (`Enable-OrganizationCustomization`) | **Shared** (tenant-wide, irreversible) | — | Operator, once per tenant | ✅ Spaarke tenant 2026-10-04 (owner-approved) |
+| Exchange role `Spaarke App RBAC Admin` (Role Management child, 14 cmdlets) + the admin app's assignments (that role, `View-Only Recipients`, `-Delegating` for the four application roles) | **Shared** | assignments `sprk-exoadmin-*` | Operator, once per tenant | ✅ 2026-10-04 — refuses self-grants of wider roles (tested) |
+| Platform parameter `exchangeAdminAppId` → Worker `IntegrationWiring__ExchangeAdminAppId` | **Shared** | `platform-controlplane-{env}.bicepparam` | `platform-controlplane.bicep` | ✅ dev (T251) |
+| Customer scope group (mail-enabled security group; direct members only) | Dedicated | intake `exchangePolicyScopeGroupId` | The tenant's Exchange admin, before the run — `PRQ-C-08` | per customer |
+| Stamp identity's Exchange service principal + four role assignments `{prefix}-{customerId}-{MailRead, MailReadWrite, MailSend, MailboxSettingsRead}`, each scoped to the scope group | Dedicated | prefix `IntegrationWiring:ExchangeAssignmentNamePrefix` (default `Spaarke`) | **H14a** through the Worker's sidecar; **H13 T4** verifies | 🔄 T251 — see the design note §7 for the live status of app-only registration |
+
 ---
 
 # M365 (Shared packages)
