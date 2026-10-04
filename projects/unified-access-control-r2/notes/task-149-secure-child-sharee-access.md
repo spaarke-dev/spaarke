@@ -38,8 +38,9 @@ One component, `Services/Access/SecureChildShareSynchronizer.cs`, over the one P
    was already right / already absent, so repeating a request completes it). Some children not updated → **500
    `sdap.access.user_share.children_incomplete`** with `childrenInScope`, `childrenUpdated`, `childrenNotUpdated`,
    `childrenHeld` and the root outcome; the root write stands (an unshare is never rolled back).
-2. **Secure provisioning** (Step 8, after the container is recorded) — best effort, logged; normally a no-op today
-   (task 148 re-owns existing children, then calls the same synchronizer).
+2. **Secure provisioning** (Step 8, on EVERY successful path: after a new container is recorded, and on the
+   kept-container path of task 133 b2 — §15) — best effort, logged; normally a no-op today (task 148 re-owns existing
+   children, then calls the same synchronizer).
 3. **`SecureChildShareReconciliationJob`** — every two minutes, every secure child in the environment. This is the
    mechanism for new and re-filed children (about thirty BFF writer sites plus the client writers of task 147) and for
    out-of-the-box MDA Share/Unshare of a secure root. Owner round 11 item 2 accepted it as the mechanism (≤ 2 minutes,
@@ -624,3 +625,68 @@ up to 2 minutes. The No Access guard still applies to every child grant either w
   **22/22 passed** in 1.2 minutes (the name filter matches 22 cases). This is contention, not this change.
 - **POML:** parses as well-formed XML.
 - **Client:** no client file changed in r4. **Publish size:** not measured (main session). No package or csproj change.
+
+## 15. Fix round f1 (2026-10-04) — the kept-container provisioning path did not fan out
+
+Branch `task/uac-r2-149-f1`, base `6b685f0d4` (`integ/uac-r2-batch4`, after the 132 / 142 integration merges).
+
+### 15.1 The item and its disposition
+
+| # | Item | Disposition |
+|---|---|---|
+| 1 | **Integration residual (found merging 132, 2026-10-04).** `ProvisionProjectEndpoint` ran Step 8 (`SecureChildShareSynchronizer.SyncRootAsync`) only after Steps 6 + 7 created and recorded a NEW container. A record that keeps its OWN container (task 133 b2, `keptContainerId`) returned 200 from an earlier branch, so its Secure-team-owned children missed the shares Step 5.5 had just written until the next reconcile tick (≤ 2 minutes; owner round 11 item 2 accepted that window for MDA Share/Unshare and for NEW or RE-FILED children, not for a BFF root-share write). | **CLOSED.** Confirmed from code: the handler has exactly two successful returns — the kept-container `return TypedResults.Ok(…)` and the new-container one after Step 7; the resume path (`resume = true`) never sets `keptContainerId` (`!resume &&` guards the classification), so it always ends in the new-container path. Step 8 is now ONE private helper, `FanOutToSecureChildrenAsync` (same body as before: `SyncRootAsync(root.LogicalName, recordId)`, never fails the provisioning, warns on an incomplete fan-out for the scheduled reconcile), called on BOTH paths, after the Step 5.6 eviction and before the 200. Every successful provisioning now fans out exactly once. |
+
+### 15.2 Tests (`tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs`)
+
+- `Provisioning_FansTheNewSharesOutToTheSecureChildren_WhetherTheContainerIsKeptOrCreated` — theory, 6 cases
+  (project / matter / work assignment × container kept / created). A Secure-team-owned `sprk_document` filed under the
+  root gets exactly one share, to the creator, never with `ShareAccess`; the response's `speContainerId` and the count
+  of created containers prove the case ran the path it names (kept: the record's own container, none created; created:
+  the provisioned container, one created).
+- `Provisioning_WhenTheChildFanOutCannotComplete_StillSucceeds_AndLogsTheIncompleteChildren` — theory, 2 cases (kept /
+  created). The child table faults: provisioning still answers 200 with the right container, the synchronizer WAS asked
+  on that path (`sprk_document` queried), the `secure children are not all in line` warning names the record, and no
+  child share is written.
+- The existing `Provisioning_FansTheNewSharesOutToTheRecordsSecureChildren` (new-container path, project) is unchanged
+  and green.
+
+**Seed-and-bite** (each restored from a byte copy, file touched, `SEED` absent afterwards, git clean on `src/`):
+
+| Seed | Change | Result |
+|---|---|---|
+| A | the kept-path `FanOutToSecureChildrenAsync` call commented out (the pre-fix behaviour) | **4 failures** — the 3 kept cases of the 6-case theory + the kept case of the incomplete theory; 73 others green |
+| B | the new-container-path call commented out | **5 failures** — the existing project test, the 3 created cases, the created incomplete case |
+| C | the helper's incomplete warning suppressed (`if (false && …)`) | **2 failures** — both incomplete cases |
+
+### 15.3 Test results (2026-10-04)
+
+- **Affected suites** (`SecureProjectShareTests`, `ProvisionRecordedContainerTests`, `ProvisionProjectIdempotencyTests`,
+  `ProvisionAssignCascadeChildOwnerTests`, `SecureChildShare*`): **219/219** (8 of them new), before and after the commit
+  (the pre-commit `dotnet format` changed nothing).
+- **Full BFF unit suite** (`dotnet test tests/unit/Sprk.Bff.Api.Tests`): **15,479 = 15,425 passed + 54 skipped
+  (pre-existing), 0 failed** (16 m 47 s).
+- **ArchTests** (`dotnet test tests/Spaarke.ArchTests`): **595/595**.
+- **Integration:** `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **428 = 403 passed + 25
+  skipped, 0 failed**.
+- **Publish size (CLAUDE.md §10, measured here, not deferred):** both sides from FRESH trees (`git archive` of the base
+  `6b685f0d4` and of the fix commit `813c929fe`, `src` + `config` + root props) at short paths (`C:\tmp\w149m`,
+  `C:\tmp\w149b`), `dotnet publish -c Release`, **212 files on each side**, zipped with PowerShell `Compress-Archive
+  -CompressionLevel Optimal` (the `Deploy-BffApi.ps1` method), incl. PDBs: base **46.00 MB**, branch **46.00 MB**,
+  delta **−4 bytes**. No package or csproj change, so no new CVE surface.
+- **Client:** no client file changed.
+
+### 15.4 Placement, escalations, gates
+
+- **Placement (CLAUDE.md §10/§11):** no new service, DI registration, endpoint, option, job, column, PCF or package. One
+  new PRIVATE static helper inside the existing endpoint, extracted from the existing Step 8 so both successful paths
+  call the same code (existing = Step 8's block; extension = call it from the kept path too, rather than a second
+  copy that could drift; cost of doing nothing = a secure record provisioned with its own kept container leaves its
+  secure children without the creator's and colleagues' shares until the next reconcile tick — an under-share no owner
+  decision accepted). No Dataverse plugin (ADR-002); fail closed unchanged (ADR-003): the synchronizer's own rules
+  decide every child write.
+- **Escalations:** none fired; none open.
+- **Live writes:** none. G149-1 / G149-2 (§8) are unchanged and need no new row: neither has a provisioning fan-out
+  step, because live a record being provisioned normally has no Secure-team-owned children yet (task 148 re-owns
+  existing ones and runs the same synchronizer itself), so Step 8 is a no-op there on either path. The behaviour this
+  round fixes is pinned in-process by the 8 cases above, which seed such a child on each path.
+- **`.claude/**` edits needed:** none.
