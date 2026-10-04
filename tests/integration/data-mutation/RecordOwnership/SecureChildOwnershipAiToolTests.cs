@@ -71,7 +71,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) => _appCreates.Add((t, id, f)))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) =>
+            {
+                _appCreates.Add((t, id, f));
+                MaterializeInShareWorld(t, id, f);
+            })
             .Returns(Task.CompletedTask);
     }
 
@@ -732,6 +736,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public HashSet<string> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public HashSet<Guid> InvisibleRows { get; } = new();
+
+        /// <summary>Task 147 r1: the owning team a row read as the caller reports (<c>_owningteam_value</c>).</summary>
+        public Dictionary<Guid, Guid> OwningTeamOf { get; } = new();
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
@@ -817,9 +824,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
             // A row read as the caller: "{set}({id})?$select=…".
             var rowId = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
-            return InvisibleRows.Contains(rowId)
-                ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found.")
-                : Ok(new { id = rowId });
+            if (InvisibleRows.Contains(rowId))
+                return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found.");
+            var rowBody = new Dictionary<string, object?> { ["id"] = rowId };
+            if (OwningTeamOf.TryGetValue(rowId, out var owningTeam))
+                rowBody["_owningteam_value"] = owningTeam.ToString("D");
+            return Ok(rowBody);
         }
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>

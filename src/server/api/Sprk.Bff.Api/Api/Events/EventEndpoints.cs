@@ -101,11 +101,12 @@ public static class EventEndpoints
                 Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
                 Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
                 [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer shares,
                 HttpContext httpContext,
                 ILogger<Program> logger,
                 CancellationToken ct) =>
                 Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
-                    "sprk_event", id, body, user, ownership, restamper, httpContext, logger, ct))
+                    "sprk_event", id, body, user, ownership, restamper, shares, httpContext, logger, ct))
             .WithName("RefileEvent")
             .WithSummary("Re-file an event as the caller")
             .WithDescription("Applies the caller's own update of an event's lookups (as the caller). The caller needs AppendTo " +

@@ -234,8 +234,66 @@ public sealed class SecureChildShareSynchronizer
         return RunAsync(new RowRef(rootLogicalName.ToLowerInvariant(), rootId), ct);
     }
 
+    /// <summary>
+    /// Task 147 r1: whether <paramref name="teamId"/> is this environment's Secure Record owner team (the browser re-file
+    /// route asks before it takes the mirror off a row it moved out). An ambiguous or absent team answers no; a Dataverse
+    /// fault propagates.
+    /// </summary>
+    public async Task<bool> IsSecureOwnerTeamAsync(Guid teamId, CancellationToken ct) =>
+        teamId != Guid.Empty
+        && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
+
     /// <summary>Brings EVERY secure child in the environment into line — the scheduled reconcile.</summary>
     public Task<SecureChildShareSyncResult> ReconcileAllAsync(CancellationToken ct) => RunAsync(scope: null, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): mirrors ONE child — the row a browser writer just
+    /// created or re-filed through the BFF — inline, so the people the secure record is shared with see it at once rather
+    /// than at the next two-minute reconcile (owner round 11 item 2 remains the backstop). The same mirror the scheduled
+    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Share or Assign, a No Access
+    /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
+    /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
+    /// </summary>
+    public async Task<SecureChildShareSyncResult> SyncChildAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
+        if (!SecureChildLineage.Children.TryGetValue(childLogicalName.Trim(), out var table))
+            throw new ArgumentOutOfRangeException(nameof(childLogicalName), childLogicalName, "Not a secure-child table.");
+
+        Guid secureTeamId;
+        try
+        {
+            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+            if (team.Refusal is { } refusal)
+                return SecureChildShareSyncResult.Failed(refusal);
+            if (team.TeamId is not { } id)
+                return SecureChildShareSyncResult.NotApplicable("this environment has no Secure Record owner team, so no record is secure");
+            secureTeamId = id;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] The Secure Record owner team could not be read; {Table} {Id} was not mirrored.",
+                table.LogicalName, childId);
+            return SecureChildShareSyncResult.Failed("the Secure Record owner team could not be read");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        try
+        {
+            if (!await run.LoadSecureChildAsync(table, childId).ConfigureAwait(false))
+            {
+                return SecureChildShareSyncResult.NotApplicable(
+                    $"{table.LogicalName} {childId:D} is not owned by the Secure Record owner team, so it is not mirrored");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] {Table} {Id} could not be read; it was not mirrored.", table.LogicalName, childId);
+            return SecureChildShareSyncResult.Failed("the record could not be read");
+        }
+
+        return await run.SynchronizeAsync(scope: null).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that a pass has just re-owned OUT of the
@@ -621,6 +679,30 @@ public sealed class SecureChildShareSynchronizer
                     _secureChildren[row.Ref] = row;
                 }
             }
+        }
+
+        /// <summary>
+        /// Task 147 r1: ONE row, read with its lineage lookups and owner. True (and loaded as the run's only secure child)
+        /// when it is Secure-team-owned; false when it is not, or does not exist. A fault propagates.
+        /// </summary>
+        public async Task<bool> LoadSecureChildAsync(SecureChildLineage.Table table, Guid id)
+        {
+            var query = new QueryExpression(table.LogicalName)
+            {
+                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, id);
+            var entity = (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (entity is null)
+                return false;
+
+            var row = ToRow(table, entity);
+            if (row.OwningTeam != _secureTeamId)
+                return false;
+
+            _secureChildren[row.Ref] = row;
+            return true;
         }
 
         /// <summary>

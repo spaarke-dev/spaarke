@@ -82,11 +82,12 @@ public static class CommunicationEndpoints
                 Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
                 Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer shares,
                 HttpContext httpContext,
                 ILogger<Program> logger,
                 CancellationToken ct) =>
                 ChildRecordEndpoints.UpdateAsync(
-                    "sprk_communication", id, body, user, ownership, restamper, httpContext, logger, ct))
+                    "sprk_communication", id, body, user, ownership, restamper, shares, httpContext, logger, ct))
             .WithName("RefileCommunication")
             .WithDescription("Re-file a communication (its regarding links) as the caller; the owner follows the records it is filed under")
             .Produces(StatusCodes.Status204NoContent)

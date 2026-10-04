@@ -5,9 +5,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -25,6 +29,64 @@ public sealed partial class SecureChildOwnershipAiToolTests
 {
     private static readonly Guid Event = Guid.Parse("a2470000-0000-4000-8000-000000000001");
     private static readonly Guid Todo = Guid.Parse("a2470000-0000-4000-8000-000000000003");
+    private static readonly Guid Sharee = Guid.Parse("a2470000-0000-4000-8000-0000000000b1");
+
+    /// <summary>Collaborate on the record, as a Manage Access share writes it (Read|Write|Append|AppendTo, no Share).</summary>
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
+
+    /// <summary>
+    /// The REAL task 149 synchronizer's world (the same team / business-unit ids as <see cref="Directory"/>): the secure
+    /// matter, shared with <see cref="Sharee"/>; every row the application creates lands here as written, and every owner
+    /// assignment the resolver makes is mirrored here, so the route's inline mirror is asserted end to end.
+    /// </summary>
+    private SecureChildShareWorld? _shareWorldField;
+    private readonly FakeRecordShareTable _shareTable = new();
+
+    private SecureChildShareWorld ShareWorld
+    {
+        get
+        {
+            if (_shareWorldField is null)
+            {
+                _shareWorldField = SecureChildShareWorld.Standard()
+                    .SecureRoot("sprk_matter", SecureMatter)
+                    .OrdinaryRoot("sprk_matter", OrdinaryMatter);
+                _shareTable.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
+                _world.OnAssign = (entity, id, team) =>
+                    _shareWorldField.MoveOwner(entity, id, DataversePrincipalRef.Team(team));
+            }
+
+            return _shareWorldField;
+        }
+    }
+
+    /// <summary>The app-only create, as Dataverse would store it: the owner bind and every lookup bind as columns.</summary>
+    private void MaterializeInShareWorld(string table, Guid id, Dictionary<string, object?> fields)
+    {
+        if (!SecureChildLineage.IsChild(table))
+            return;
+
+        var columns = new List<(string Column, object Value)>();
+        foreach (var (key, value) in fields)
+        {
+            if (!key.EndsWith("@odata.bind", StringComparison.Ordinal))
+                continue;
+            var path = value is JsonElement { ValueKind: JsonValueKind.String } element ? element.GetString() : value as string;
+            if (path is null)
+                continue;
+            var set = path.TrimStart('/')[..path.TrimStart('/').IndexOf('(')];
+            var target = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
+            var navigation = key[..^"@odata.bind".Length];
+            if (navigation == "ownerid")
+                columns.Add(("owningteam", new Microsoft.Xrm.Sdk.EntityReference("team", target)));
+            else if (set != "systemusers")
+                columns.Add((navigation.ToLowerInvariant(), new Microsoft.Xrm.Sdk.EntityReference(set.TrimEnd('s'), target)));
+        }
+
+        ShareWorld.Add(table, id, columns.ToArray());
+    }
+
+    private SecureChildShareSynchronizer Shares() => ShareWorld.Synchronizer(_shareTable);
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -42,6 +104,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var (table, id, fields) = _appCreates.Should().ContainSingle().Subject;
         table.Should().Be("sprk_todo");
         Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        _shareTable.MaskOf("sprk_todo", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the secure matter's sharee sees the new to-do at once (task 149's mirror, run inline by the route)");
         Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})",
             "the server rebuilt the bind from the lookup's own metadata");
         fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind")
@@ -59,7 +123,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         });
 
         Status(result).Should().Be(StatusCodes.Status201Created);
-        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam);
+        var created = _appCreates.Should().ContainSingle().Subject;
+        Owner(created.Fields).Should().Be(Directory.ChildTeam);
+        _shareTable.WriteLog.Should().BeEmpty("an ordinary record's child is never mirrored or shared");
     }
 
     [Fact]
@@ -73,9 +139,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         });
 
         Status(result).Should().Be(StatusCodes.Status201Created);
-        var (table, _, fields) = _appCreates.Should().ContainSingle().Subject;
+        var (table, memoId, fields) = _appCreates.Should().ContainSingle().Subject;
         table.Should().Be("sprk_memo");
         Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        _shareTable.MaskOf("sprk_memo", memoId, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
         fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind", "task 147 r1 added sprk_memo to the stamped child tables");
     }
 
@@ -193,6 +260,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     public async Task ChildRefile_AToDoMovedUnderASecureMatter_IsPatchedAsTheCaller_ThenOwnedByTheNamedTeam()
     {
         _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        // The share world holds the row as the caller's PATCH leaves it: filed under the secure matter (its owner follows
+        // the resolver's assignment through OnAssign).
+        ShareWorld.OrdinaryChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         var result = await RefileChild("sprk_todo", Todo, new()
         {
@@ -203,6 +273,34 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Status(result).Should().Be(StatusCodes.Status204NoContent);
         _user.Patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_todos({Todo:D})");
         _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "a child moved under a secure record is shared with its sharees in the same request");
+    }
+
+    [Fact]
+    public async Task ChildRefile_AToDoMovedOutOfASecureMatter_ByAFullAccessHolder_ReturnsToTheBusinessUnitTeam_AndLosesTheMirror()
+    {
+        // AC3: re-parenting OUT of every secure record restores the new parent's business-unit team and takes the mirrored
+        // shares off (owner round 22: only a row that WAS isolated carries the mirror).
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[Todo] = Directory.SecureNamedTeam;
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", OrdinaryMatter));
+
+        var result = await RefileChild("sprk_todo", Todo, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent);
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the secure record's sharees no longer reach a child that left it");
     }
 
     [Fact]
@@ -286,24 +384,28 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
 
+        ShareWorld.UserOwnedChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
         var result = await ChildRecordEndpoints.UpdateAsync(
             "sprk_event", Event, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
-            _user, _world.Resolver(), Restamper(), HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
+            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status204NoContent);
         _world.Assignments.Should().Equal(("sprk_event", Event, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_event", Event, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private Task<IResult> CreateChild(string table, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), _user, _world.Resolver(), _appOnly.Object, Restamper(), HttpContextOfCaller(),
+            table, Payload(payload), _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
-            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), HttpContextOfCaller(),
+            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private static CoreAncestorRestamper Restamper() =>

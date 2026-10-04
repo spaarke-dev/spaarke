@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 
@@ -119,6 +120,7 @@ public static class ChildRecordEndpoints
         IRecordOwnershipResolver ownership,
         IFieldMappingDataverseService appOnly,
         [FromServices] CoreAncestorRestamper restamper,
+        [FromServices] SecureChildShareSynchronizer shares,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -166,6 +168,11 @@ public static class ChildRecordEndpoints
                 "the stamp job completes it within one cycle", entity, id, restamp.Failures.Count);
         }
 
+        // Task 149's mirror, inline (task 147 r1): a child created under a secure record is shared with the record's
+        // sharees now, not at the next two-minute reconcile. The create stands either way; a mirror that did not finish is
+        // completed by SecureChildShareReconciliationJob (owner round 11 item 2).
+        await MirrorAsync(shares, entity, id, logger).ConfigureAwait(false);
+
         logger.LogInformation("[CHILD-RECORD] created {Entity} {Id} (G5, team-owned)", entity, id);
         return Results.Created($"/api/v1/child-records/{entity}/{id:D}", new { id });
     }
@@ -178,13 +185,14 @@ public static class ChildRecordEndpoints
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
         [FromServices] CoreAncestorRestamper restamper,
+        [FromServices] SecureChildShareSynchronizer shares,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         return RefileTables.Contains(entity)
-            ? UpdateAsync(entity, id, body, user, ownership, restamper, httpContext, logger, ct)
+            ? UpdateAsync(entity, id, body, user, ownership, restamper, shares, httpContext, logger, ct)
             : Task.FromResult(Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode,
                 $"'{table}' records are not re-filed here."));
     }
@@ -200,6 +208,7 @@ public static class ChildRecordEndpoints
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
         CoreAncestorRestamper restamper,
+        SecureChildShareSynchronizer shares,
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
@@ -214,7 +223,8 @@ public static class ChildRecordEndpoints
             return Problem(StatusCodes.Status500InternalServerError, "child_record.metadata", $"Table '{entity}' has no entity set.");
 
         // The caller must be able to READ the row; a row they cannot read and a row that does not exist get the same 404.
-        var row = await user.GetAsync($"{entitySet}({id:D})?$select={primaryId}", ct).ConfigureAwait(false);
+        // Its owning team rides along: a row that was isolated and is moved out loses its mirrored shares below.
+        var row = await user.GetAsync($"{entitySet}({id:D})?$select={primaryId},_owningteam_value", ct).ConfigureAwait(false);
         if (!row.IsSuccess)
         {
             return row.StatusCode is StatusCodes.Status403Forbidden or StatusCodes.Status404NotFound
@@ -273,7 +283,64 @@ public static class ChildRecordEndpoints
                 "the stamp job completes it within one cycle", entity, id, restamp.Failures.Count);
         }
 
+        if (outcome.Written)
+        {
+            // Task 149's mirror, inline (task 147 r1): moved under a secure record → shared with its sharees now; moved OUT
+            // of every secure record (it was isolated and is not now) → its mirrored shares go now (owner round 22: only a
+            // row that WAS isolated carries the mirror). Never thrown; the two-minute job completes what does not finish.
+            var mirrored = await MirrorAsync(shares, entity, id, logger).ConfigureAwait(false);
+            if (mirrored == SecureChildShareSyncStatus.NotApplicable
+                && GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
+                && await IsSecureOwnerTeamAsync(shares, beforeTeam).ConfigureAwait(false))
+            {
+                var removal = await shares.RemoveMirrorAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
+                if (!removal.IsComplete)
+                {
+                    logger.LogWarning(
+                        "[CHILD-RECORD] {Entity} {Id} left its secure record, but its mirrored shares were not all removed " +
+                        "({Status}: {Detail}); the reconcile job reports it", entity, id, removal.Status, removal.Detail);
+                }
+            }
+        }
+
         return Results.NoContent();
+    }
+
+    /// <summary>Task 149's mirror for one child; logs (never throws) when it did not finish.</summary>
+    private static async Task<SecureChildShareSyncStatus> MirrorAsync(
+        SecureChildShareSynchronizer shares, string entity, Guid id, ILogger logger)
+    {
+        try
+        {
+            var result = await shares.SyncChildAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
+            if (result.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
+            {
+                logger.LogWarning(
+                    "[CHILD-RECORD] {Entity} {Id}: the secure record's sharees were not mirrored ({Status}: {Detail}); the " +
+                    "two-minute reconcile completes it", entity, id, result.Status, result.Detail);
+            }
+
+            return result.Status;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[CHILD-RECORD] {Entity} {Id}: the share mirror faulted; the two-minute reconcile completes it",
+                entity, id);
+            return SecureChildShareSyncStatus.Failed;
+        }
+    }
+
+    /// <summary>Whether <paramref name="teamId"/> is the Secure Record owner team (unknown = no: nothing is removed).</summary>
+    private static async Task<bool> IsSecureOwnerTeamAsync(SecureChildShareSynchronizer shares, Guid teamId)
+    {
+        try
+        {
+            return await shares.IsSecureOwnerTeamAsync(teamId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static Guid? CallerObjectId(HttpContext httpContext) =>
