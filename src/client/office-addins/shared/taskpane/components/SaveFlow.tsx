@@ -53,6 +53,8 @@ import { cleanGuid } from '../utils/cleanGuid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+// Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
+import { stripDocumentExtension } from '../utils/documentFileName';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
 function isBrowserTestMode(): boolean {
@@ -61,16 +63,6 @@ function isBrowserTestMode(): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Task 020 (FR-06): strips a trailing `.docx`/`.doc` extension (case-insensitive) from a display name,
- * for deriving the default Document Name from the filename-shaped `itemName` prop. A value with no such
- * extension (e.g. Word's "Untitled Document" fallback) is returned unchanged — this is normalization,
- * not a requirement that an extension be present.
- */
-function stripDocumentExtension(name: string): string {
-  return name.replace(/\.docx?$/i, '');
 }
 
 /**

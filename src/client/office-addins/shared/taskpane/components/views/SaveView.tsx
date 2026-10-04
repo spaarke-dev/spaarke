@@ -4,7 +4,7 @@ import { SaveFlow } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
-import type { DocumentIdentityState } from '../../services/documentIdentityService';
+import { writeIdentityStampAfterSave, type DocumentIdentityState } from '../../services/documentIdentityService';
 
 const useStyles = makeStyles({
   container: {
@@ -260,6 +260,20 @@ export const SaveView: React.FC<SaveViewProps> = ({
     }
   }, [hostAdapter]);
 
+  // Task 089 (UAT-9): after EVERY successful pane save — create or version, first save or "Save version" — mark
+  // the open document with the id it was saved as, so its next save (pane or ribbon, now or after reopening the
+  // file) resolves it instead of colliding with its own record. The server stamps only the stored copy (task 014).
+  // Capability-gated and non-fatal inside `writeIdentityStampAfterSave`; never delays the caller's onComplete.
+  const handleComplete = useCallback(
+    (documentId: string, documentUrl: string) => {
+      if (hostAdapter) {
+        void writeIdentityStampAfterSave(hostAdapter, documentId);
+      }
+      onComplete?.(documentId, documentUrl);
+    },
+    [hostAdapter, onComplete]
+  );
+
   // Loading state
   if (isLoading) {
     return (
@@ -322,7 +336,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(documentUrl !== undefined ? { documentUrl } : {})}
         {...(canGetDocumentContent ? { captureDocumentContent } : {})}
         {...(apiBaseUrl !== undefined ? { apiBaseUrl } : {})}
-        {...(onComplete ? { onComplete } : {})}
+        onComplete={handleComplete}
         {...(onSaved ? { onSaved } : {})}
         {...(onQuickCreate ? { onQuickCreate } : {})}
         {...(onNavigate ? { onNavigate } : {})}

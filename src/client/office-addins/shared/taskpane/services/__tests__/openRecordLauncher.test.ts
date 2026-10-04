@@ -12,6 +12,7 @@
 
 import {
   buildOpenRecordUrl,
+  buildOpenSpaarkeUrl,
   configuredSpaarkeAppName,
   openFileUrl,
   openRecord,
@@ -247,5 +248,32 @@ describe('openUrlInBrowserWindow (task 086 / FR-15 — the Word Send Email choic
     const opener = jest.fn();
     openUrlInBrowserWindow('https://example.test/', opener);
     expect(opener).toHaveBeenCalledWith('https://example.test/');
+  });
+});
+
+describe('buildOpenSpaarkeUrl — the Word ribbon "Open Spaarke" (task 089, UAT-10)', () => {
+  it('opens Matter Management on the Workspace (the Console) with the default build setting', () => {
+    expect(buildOpenSpaarkeUrl('https://spaarkedev1.crm.dynamics.com', 'sprk_MatterManagement')).toBe(
+      'https://spaarkedev1.crm.dynamics.com/main.aspx?appname=sprk_MatterManagement&pagetype=webresource&webresourceName=sprk_spaarkeai'
+    );
+  });
+
+  it('encodes the app name and drops a trailing slash on the org URL', () => {
+    expect(buildOpenSpaarkeUrl('https://org.crm.dynamics.com/', 'my app&x=1')).toBe(
+      'https://org.crm.dynamics.com/main.aspx?appname=my%20app%26x%3D1&pagetype=webresource&webresourceName=sprk_spaarkeai'
+    );
+  });
+
+  it('is null — never a guessed link — without ORG_URL, without an app name, or for a non-https org URL', () => {
+    expect(buildOpenSpaarkeUrl(undefined, 'sprk_MatterManagement')).toBeNull();
+    expect(buildOpenSpaarkeUrl('', 'sprk_MatterManagement')).toBeNull();
+    expect(buildOpenSpaarkeUrl('https://org.crm.dynamics.com', '  ')).toBeNull();
+    expect(buildOpenSpaarkeUrl('http://org.crm.dynamics.com', 'sprk_MatterManagement')).toBeNull();
+    expect(buildOpenSpaarkeUrl('not a url', 'sprk_MatterManagement')).toBeNull();
+  });
+
+  it('carries nothing but the three settings-derived query values (no token, secret or BFF URL)', () => {
+    const url = new URL(buildOpenSpaarkeUrl('https://org.crm.dynamics.com', 'sprk_MatterManagement')!);
+    expect([...url.searchParams.keys()]).toEqual(['appname', 'pagetype', 'webresourceName']);
   });
 });

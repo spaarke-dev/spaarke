@@ -350,6 +350,29 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             if (payload.TriggerAiProcessing)
             {
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
+
+                // Task 093 (spaarkeai-word-add-in-r1, #1084 follow-on, found 2026-10-03): THIS job's work ends here. The
+                // follow-on AI work (profiling, and optionally RAG indexing / Insights ingest) runs on its own
+                // ADR-004 jobs and persists its OWN outcome on the DOCUMENT (sprk_filesummarystatus,
+                // sprk_searchindexed) via AppOnlyDocumentAnalysisJobHandler / RagIndexingJobHandler — never on
+                // this sprk_processingjob row. Before this fix nothing ever closed the row once this branch was
+                // taken (the only code that used to, ProfileSummaryWorker.CompleteJobAsync, is orphaned: it
+                // listens on the legacy "office-profile" queue, and this method has queued to "sdap-jobs" via
+                // JobSubmissionService since 2026-01-28 — see notes/093-job-row-and-telemetry.md §1). The row
+                // therefore read Running/FileUploaded/70 forever for every save with AI processing on, which is
+                // every real save (ribbon Quick Save always sends TriggerAiProcessing:true; the pane's default
+                // processing options also evaluate true). Marking it Completed here, with a stage that names
+                // what was handed on, makes ADR-017's "persist the final outcome" true at the ROW level. This
+                // does NOT touch sprk_result (task 060's save-time view, the pane's own outcome) — the update
+                // below carries the same five columns as the "no AI" branch, nothing more — so the pane's
+                // behaviour is byte-for-byte unchanged (constraint: do not change what the pane reads).
+                await UpdateJobStatusAsync(
+                    message.JobId,
+                    JobStatus.Completed,
+                    "AiAnalysisQueued",
+                    100,
+                    cancellationToken,
+                    documentId);
             }
             else
             {

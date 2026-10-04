@@ -3,7 +3,7 @@
   <metadata>
     <title>Two server defects found diagnosing UAT-9: a saved document's job row never reaches a terminal state, and `using var activity = Activity.Current` (20 sites) ends the request's own trace span early</title>
     <phase>6 UAT round 3 (2026-10-03)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF `.cs` in `Workers/Office` and the shared `Infrastructure/Graph`, adds a guard test.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,4 +111,34 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    (A) Root cause traced before any change (notes/093-job-row-and-telemetry.md §1): `QueueNextStageAsync` has
+    queued to `sdap-jobs`/`AppOnlyDocumentAnalysisJobHandler` since commit `2f3dcbfac` (2026-01-28) and never
+    writes a terminal status to `sprk_processingjob`; the only code that ever did (`ProfileSummaryWorker`) is
+    orphaned — it listens on the legacy `"office-profile"` queue, which nothing has sent to since that same
+    commit. Every real save's `TriggerAiProcessing` evaluates true (ribbon hardcodes it; the pane's default
+    options also evaluate true), so every real save has been stuck Running/FileUploaded/70 forever for nine
+    months. The three 10-02 midday rows that closed were this project's own prior-task verification calls
+    (060/068 live checks), not owner UAT — timestamps match to the minute, and 068 §9 reused the same document
+    060 saved specifically to test Generate Profile as a separate step, which only makes sense if the original
+    save suppressed its own AI processing.
+    Fix: `UploadFinalizationWorker` (the preferred owner per the constraint) marks the row Completed with stage
+    "AiAnalysisQueued" right after queuing the follow-on AI work — profiling/indexing already persist their own
+    outcome on the DOCUMENT, so threading the Office job id into the shared AI handler was not warranted; the
+    escalation trigger (a consumer relying on non-terminal) does not fire, since the pane reads `sprk_result`
+    (already terminal at save time, task 060), never the raw pipeline columns, as its authoritative answer.
+    (B) All 20 `using var activity = Activity.Current;` sites fixed by dropping `using` (tags stay on the
+    ambient span; disposal removed). New ArchTests structural guard (`ActivityCurrentDisposalGuardTests`) bans
+    the pattern repo-wide; seeded-reverted and confirmed red naming the exact file:line, then green.
+    Tests: 2 new behavioral tests added to the existing `UploadFinalizationOwnerTeamTests` class (terminal
+    Completed-with-stage; terminal Failed), 1 new Activity-lifetime test, 1 new ArchTests guard (3 facts).
+    Gates: BFF build clean; BFF Office+Graph test scope 1008/0/9(pre-existing skips); ArchTests 349/349 (incl.
+    the 3 new); `dotnet format --verify-no-changes` clean; no vulnerable packages (no package changed).
+    Not done / left open: live deploy check (no deploy authorization this session — left open per the AC's own
+    fallback); deleting the orphaned `ProfileSummaryWorker`/`IndexingWorkerHostedService` (filed for the owner,
+    separate scope). Publish-size measurement owed to the main session (this worktree is not a fresh-master
+    baseline per CLAUDE.md §10).
+    Full trace, code citations, and the gate table: notes/093-job-row-and-telemetry.md.
+  </notes>
 </task>

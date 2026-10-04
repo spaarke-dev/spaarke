@@ -47,6 +47,7 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: true,
   canGetDocumentUrl: true,
   canReadDocumentStamp: true,
+  canWriteDocumentStamp: true,
   canSaveAsPdf: true,
   canSaveAsEml: false,
   canInsertLink: true,
@@ -68,6 +69,7 @@ const OUTLOOK_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: false,
   canGetDocumentUrl: false,
   canReadDocumentStamp: false,
+  canWriteDocumentStamp: false,
   canProvideDocumentName: false,
   canOpenBrowserWindow: true,
   canSuggestRelatedRecords: true,
@@ -87,6 +89,7 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     getDocumentContent: jest.fn().mockResolvedValue(new ArrayBuffer(0)),
     getDocumentUrl: jest.fn().mockResolvedValue('https://contoso.sharepoint.com/Brief.docx'),
     readDocumentStamp: jest.fn().mockResolvedValue(null),
+    writeDocumentStamp: jest.fn().mockResolvedValue('written'),
     getCapabilities: () => WORD_CAPABILITIES,
     initialize: jest.fn().mockResolvedValue(undefined),
     isInitialized: () => true,
@@ -335,7 +338,7 @@ describe('SaveView', () => {
   });
 
   describe('optional prop passthrough', () => {
-    it('forwards onComplete, onSaved, onQuickCreate, onNavigate, allowedEntityTypes, resolvedDocumentId, documentIdentity and onRetryDocumentIdentity when supplied', async () => {
+    it('forwards (onComplete through its stamp-writing wrapper) onSaved, onQuickCreate, onNavigate, allowedEntityTypes, resolvedDocumentId, documentIdentity and onRetryDocumentIdentity when supplied', async () => {
       const onComplete = jest.fn();
       const onSaved = jest.fn();
       const onQuickCreate = jest.fn();
@@ -358,7 +361,9 @@ describe('SaveView', () => {
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      expect(props.onComplete).toBe(onComplete);
+      // Task 089: onComplete is wrapped (it also writes the identity stamp) — it must still reach the caller's.
+      (props.onComplete as (id: string, url: string) => void)('doc-1', 'https://x/doc.docx');
+      expect(onComplete).toHaveBeenCalledWith('doc-1', 'https://x/doc.docx');
       expect(props.onSaved).toBe(onSaved);
       expect(props.onQuickCreate).toBe(onQuickCreate);
       expect(props.onNavigate).toBe(onNavigate);
@@ -375,7 +380,8 @@ describe('SaveView', () => {
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      expect('onComplete' in props).toBe(false);
+      // Task 089: onComplete is always supplied — SaveView itself acts on a completed save (the identity stamp).
+      expect(typeof props.onComplete).toBe('function');
       expect('onSaved' in props).toBe(false);
       expect('onQuickCreate' in props).toBe(false);
       expect('onNavigate' in props).toBe(false);

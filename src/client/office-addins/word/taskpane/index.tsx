@@ -6,13 +6,11 @@ import type { IHostAdapter } from '@shared/adapters';
 import { WordAdapter } from '@shared/adapters/WordAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with word/manifest.json's "version" field
-// (task 011 / FR-05: the unified JSON manifest is now the versioning source
-// of truth, mirroring outlook/taskpane/index.tsx's convention; the retained
-// word-manifest.xml's 4-part <Version> is kept in step but is not this
-// constant's source — XML requires 4-part, the unified manifest requires
-// SemVer-style 1-3 part).
-const APP_VERSION = '1.0.9';
+// Version information. Task 089 (round-3 note §5): this used to be a hand-maintained literal ('1.0.9') that had
+// drifted from the app package the admin actually uploads (1.1.0). It is now the unified package's version,
+// injected at build time by webpack.config.js (`UNIFIED_PACKAGE.VERSION` → `process.env.ADDIN_PACKAGE_VERSION`).
+// 'unknown' only outside a webpack build (e.g. a unit test importing this entry point).
+const APP_VERSION = process.env.ADDIN_PACKAGE_VERSION || 'unknown';
 const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection

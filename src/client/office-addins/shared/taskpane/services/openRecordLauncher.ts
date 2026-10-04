@@ -126,6 +126,37 @@ export function buildOpenRecordUrl(
   return `${orgUrl}/main.aspx?${appParam}etn=${entityType}&id=${canonicalRecordId}&pagetype=entityrecord&navbar=off`;
 }
 
+/** The Console's web resource — Matter Management's "Work → Workspace" page (`notes/042-uat-round3-2026-10-03.md` §3a). */
+export const SPAARKE_CONSOLE_WEB_RESOURCE = 'sprk_spaarkeai';
+
+/**
+ * Task 089 (UAT-10): the URL the Word ribbon's "Open Spaarke" opens — the Spaarke app at its Workspace (the
+ * Console): `{orgUrl}/main.aspx?appname={appName}&pagetype=webresource&webresourceName=sprk_spaarkeai`.
+ *
+ * Built from the build settings only (`ORG_URL`, `SPAARKE_APP_NAME` — the same reader every record link uses,
+ * {@link configuredSpaarkeAppName}); every query value is URL-encoded; no token, secret or BFF URL is ever part
+ * of it. `null` when either setting is blank or `orgUrl` is not an absolute https URL — the command then says it
+ * is not set up rather than opening a guessed or broken link (the pane's own ORG_URL rule, and §3a: "never a guess").
+ */
+export function buildOpenSpaarkeUrl(orgUrl: string | undefined, appName: string): string | null {
+  const org = (orgUrl ?? '').trim().replace(/\/+$/, '');
+  const app = appName.trim();
+  if (!org || !app) {
+    return null;
+  }
+  try {
+    if (new URL(org).protocol !== 'https:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return (
+    `${org}/main.aspx?appname=${encodeURIComponent(app)}` +
+    `&pagetype=webresource&webresourceName=${encodeURIComponent(SPAARKE_CONSOLE_WEB_RESOURCE)}`
+  );
+}
+
 /**
  * Default opener: `Office.context.ui.openBrowserWindow` — the mechanism Spike-2 selected. Never
  * `window.open` / the Office Dialog API for this path. Injectable so tests can assert the call
