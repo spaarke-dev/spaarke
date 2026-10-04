@@ -525,7 +525,7 @@ writer (`MSCRMCallerID: 3121bf1b-…`) settled it. Every probe row was deleted; 
 | Probe (create `sprk_signal` as the writer) | Result |
 |---|---|
 | Baseline: no lookup, no owner | 204 |
-| `sprk_Matter` → BU1 matter / → root matter | **204 / 204**. AppendTo at Basic is NOT a blocker (review F2 refuted). Nav property is `sprk_Matter` |
+| `sprk_Matter` → BU1 matter / → root matter | **204 / 204**. Nav property is `sprk_Matter`. ⚠️ **Not** because "AppendTo at Basic is no blocker": AppendTo is Basic on BOTH tables, yet the writer holds FULL rights (incl. Assign/Share) on all matters and only Read on communications (second review, `RetrievePrincipalAccess`). The grant behind matter access is **under investigation** (2026-10-04). A communication lookup fails (403 AppendTo, task 030 F26) |
 | `ownerid` → **BU1 default team** | **403 `0x80040299`** "Read Privilege Check For Owner failed": that team holds no role with Read on `sprk_signal` |
 | `ownerid` → root default team | 204, but useless: BU1 users read Signals at Parent:Child BU depth, and root is above them |
 | **owner = writer, `owningbusinessunit` → BU1** | **204; stored owner = writer, owningbu = BU1** |
@@ -535,3 +535,33 @@ grouping matter's BU on create. Console User's Parent:Child BU read then shows t
 BU (and the BUs below it). This works because spaarkedev1 has
 **`EnableOwnershipAcrossBusinessUnits = true`**: an **environment dependency**. Provisioning must enable it for
 every new environment, and the writer verifies the stored owning BU after each create and refuses on mismatch.
+
+### 9.2 Correction: `RetrieveUserPrivileges` is NOT the effective set for team-inherited roles (2026-10-04)
+
+§9 called `RetrieveUserPrivileges` "the effective set". **It is not, for roles a user inherits through a team.** The
+three root-default-team roles have `isinherited = 1` ("Direct User (Basic) access level and Team privileges"). The
+member's *own* copy of each privilege is reported at **Basic**, while the **team's** copy, which reaches the
+member through team membership, can be **Deep**. That only shows in `teams(<id>)/RetrieveTeamPrivileges()` or in
+`RetrievePrincipalAccess`. **Method from now on: effective = `RetrieveUserPrivileges` ∪ `RetrieveTeamPrivileges`
+for every team, confirmed with `RetrievePrincipalAccess` on a real row.**
+
+**Ledger re-verified with the corrected method:** user source and root-team source together hold **no Write or
+Delete on `sprk_decisionrecord`, and no Write on `sprk_policy` / `sprk_policyversion`**. Append-only stands, and the
+live 403 `0x80040220` on update and delete (§9) was already enforcement-level proof.
+
+**What the corrected method reveals (investigation 2026-10-04, read-only):** the root default team `Spaarke` holds
+**`Spaarke Office Add In User`**, which grants Read, Write, Append, AppendTo, Create, Share and Assign on
+`sprk_matter` at **Deep** (no Delete). Deep from the root covers **every matter in every BU**, including
+`Secure Record`. Every root-BU principal is in that team: about 150, mostly app users, including the writer,
+`# mi-bff-api-dev`, `# spaarke-bff-api-prod` and the control-plane UAMI. The team also gives Deep Write on
+`sprk_signal` and Deep Create on `sprk_decisionrecord`.
+- **Known and accepted for dev:** `spaarkeai-word-add-in-r1/notes/role-grant-gap-2026-09-21.md` §8.1 flagged it;
+  `unified-access-control-r2/notes/session27-owner-decisions-and-research.md` owner round 5 (2026-10-02) accepts
+  root-BU membership as a dev artifact; for production, app users belong in a customer child BU (**issue #1094,
+  open**).
+- **Consequences for this project:**
+  1. The writer is **not** least-privileged in practice. Through the team it can Write, Assign and Share any
+     matter.
+  2. Task 030's matter lookup works **only** because of this team grant (`Spaarke Ontology Service` has Read
+     on matter, not AppendTo), and communication lookups fail (F26). The writer depends on an over-grant that is
+     slated to change.
