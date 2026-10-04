@@ -4,7 +4,7 @@
     <title>PCF deploy procedures verify the real build result, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes build/deploy procedure or test code; quality gates apply.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -50,6 +50,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-04 from the task 093b report, under the owner fix-now rule.</notes>
+
+  <completion>COMPLETED 2026-10-04 (main session). PR #1286 (fix/pcf-deploy-verify-build), MUST MERGE AFTER #1123. scripts/PcfBuildResult.psm1 (rule from output, ANSI stripped; same as nightly workflow #1285) + scripts/Invoke-PcfBuildProd.ps1. pcf-deploy, dataverse-deploy, task-execute, project-pipeline, script-aware skills and .claude/commands/dataverse-deploy.md use it; no procedure suggests pac pcf push. PCF-DEPLOYMENT-GUIDE.md AP-1 contradiction fixed. MatterHeader/RecordHeader pack.ps1 and Build-AllClientComponents.ps1 judge the build from output. Deploy-PCFWebResources.ps1 deleted (pushed the deleted UniversalQuickCreate from a nonexistent path). Proven: VisualHost real failing build npm exit 0 -&gt; script 1; SpaarkeGridCustomizer pass -&gt; 0; fake builds in PS 5.1 and 7 with spaces/brackets. Independent review pass-with-findings, all mandatory fixed (incl. my own broken working-folder edit). Finding: Build-AllClientComponents PCF step FAILS on a clean checkout (TS5083: 18 of 19 PCF tsconfigs extend ./node_modules/pcf-scripts/tsconfig_base.json); release Phase 1 had been passing on a failed build. Fix routed to task 092 / PR #1123, hence the merge order.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
