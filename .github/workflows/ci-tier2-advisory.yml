@@ -207,7 +207,8 @@ jobs:
   # Job 3 — full-unit-tests (Debug only — spec MUST §125 forbids Release until
   # after 7-day soak per CICD-075).
   #
-  # TIMEOUT: 30 min (was 6, raised 2026-08-24 by unified-access-control-r2).
+  # TIMEOUT HISTORY: 6 -> 30 min (2026-08-24, unified-access-control-r2) -> sharded, 40 min
+  # per shard (2026-10-05, see SHARDED below). The 30-min reasoning is kept as history.
   # The old 6 was authored against a "<3 min" budget the suite has long outgrown
   # and was structurally unreachable: on windows-latest the overhead BEFORE a
   # single test runs is ~4m23s (measured, run 32744675143 → Checkout w/
@@ -277,7 +278,7 @@ jobs:
           - shard: api-insights-integration
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
           - shard: api-seam
-            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.'
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
           - shard: rest
             filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
@@ -367,7 +368,32 @@ jobs:
           function Write-Verdict([string]$v) {
             "verdict=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             New-Item -ItemType Directory -Force -Path ./TestResults/verdict | Out-Null
-            Set-Content -Path "./TestResults/verdict/verdict-${{ matrix.shard }}.txt" -Value $v -NoNewline
+            Set-Content -Path "./TestResults/verdict/verdict-${{ matrix.configuration }}-${{ matrix.shard }}.txt" -Value $v -NoNewline
+          }
+          # Pass 1 must itself be sound, whatever the retry says: a test host that
+          # crashed or aborted (no test marked Failed) and a shard whose filter matched
+          # no test at all (a namespace typo exits 0) are both failures, never green.
+          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
+          $p1 = @(Get-ChildItem -Path ./TestResults/tier2/pass1 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
+          $p1Count = 0; $p1Aborted = @()
+          foreach ($t in $p1) {
+            $x = [xml](Get-Content $t.FullName -Raw)
+            $n = New-Object System.Xml.XmlNamespaceManager $x.NameTable; $n.AddNamespace("x", $nsUri)
+            $p1Count += $x.SelectNodes("//x:UnitTestResult", $n).Count
+            $summaryOutcome = $x.SelectSingleNode("//x:ResultSummary", $n).GetAttribute("outcome")
+            $runErrors = @($x.SelectNodes("//x:RunInfos/x:RunInfo[@outcome='Error']/x:Text", $n) | Where-Object { $_.InnerText -match 'abort|crash' })
+            if ($summaryOutcome -in @('Error', 'Aborted', 'Timeout') -or $runErrors.Count -gt 0) { $p1Aborted += $t.Name }
+          }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Shard **${{ matrix.shard }}**: $p1Count test result(s) in pass 1."
+          if ($p1Count -eq 0) {
+            Write-Host "::warning::Pass 1 ran no test at all — the shard filter matched nothing (namespace typo?) or dotnet test crashed"
+            Write-Verdict "fail"
+            exit 0
+          }
+          if ($p1Aborted.Count -gt 0) {
+            Write-Host "::warning::Pass 1 test run aborted or crashed in: $($p1Aborted -join ', ')"
+            Write-Verdict "fail"
+            exit 0
           }
           if ("${{ steps.classify.outputs.retry_needed }}" -ne "true") {
             if ("${{ steps.tests.outcome }}" -eq "success") {
@@ -385,7 +411,6 @@ jobs:
             Write-Verdict "fail"
             exit 0
           }
-          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
           $stillFailing = @()
           $executed = New-Object System.Collections.Generic.List[string]
           foreach ($t in $trx) {
@@ -423,7 +448,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: tier2-unit-verdict-${{ matrix.shard }}
+          name: tier2-unit-verdict-${{ matrix.configuration }}-${{ matrix.shard }}
           path: ./TestResults/verdict/
           if-no-files-found: ignore
 
@@ -455,18 +480,38 @@ jobs:
         shell: bash
         run: |
           # KEEP IN SYNC with the `shard` list in full-unit-tests-shard's matrix.
+          if [ "${{ needs.full-unit-tests-shard.result }}" = "cancelled" ]; then
+            echo "::warning::the shard job was cancelled — no verdict"
+            echo "result=cancelled" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Expected = every configuration x shard of the matrix. A verdict file outside
+          # this set means the matrix gained a shard this list lacks: fail, never skip it.
+          expected=""
+          for config in Debug; do
+            for shard in api-office api-insights-integration api-seam rest; do
+              expected="$expected verdict-$config-$shard.txt"
+            done
+          done
           result=pass
-          for shard in api-office api-insights-integration api-seam rest; do
-            f="./verdicts/verdict-$shard.txt"
+          for name in $expected; do
+            f="./verdicts/$name"
             if [ ! -f "$f" ]; then
-              echo "::warning::shard '$shard' reported no verdict (cancelled or crashed)"
+              echo "::warning::$name missing (shard cancelled or crashed)"
               result=fail
             elif [ "$(cat "$f")" != "pass" ]; then
-              echo "::warning::shard '$shard' verdict: $(cat "$f")"
+              echo "::warning::$name: $(cat "$f")"
               result=fail
             else
-              echo "shard '$shard': pass"
+              echo "$name: pass"
             fi
+          done
+          for f in ./verdicts/verdict-*.txt; do
+            [ -e "$f" ] || continue
+            case " $expected " in
+              *" $(basename "$f") "*) ;;
+              *) echo "::warning::$(basename "$f") is not in this job's shard list — update it to match the matrix"; result=fail ;;
+            esac
           done
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
@@ -787,6 +832,7 @@ jobs:
             // failure, not a pass, so an infrastructure fault is never read as green).
             function fmt(name, result, outputResult) {
               if (outputResult === 'skip') return `- ⏭️ **${name}**: pending (CICD-044 follow-up)`;
+              if (outputResult === 'cancelled') return `- ⚪ **${name}**: cancelled`;
               if (result === 'skipped') return `- ⏭️ **${name}**: skipped`;
               if (result === 'cancelled') return `- ⚪ **${name}**: cancelled`;
               if (outputResult === 'pass') return `- ✅ **${name}**: pass`;
@@ -817,7 +863,7 @@ jobs:
             comment += '### How to investigate\n\n';
             comment += '- View per-job logs in the [Actions tab](../actions).\n';
             comment += '- Run locally: `dotnet test`, `dotnet format whitespace --verify-no-changes`, `npx prettier --check`, `npx eslint .`.\n';
-            comment += '- Tier 2 budget: **p95 ≤ 8 min** (spec NFR-02). If consistently over budget, file an issue tagged `ci-tier2-budget`.\n\n';
+            comment += '- Tier 2 budget: **p95 ≤ 8 min** per job (spec NFR-02); the full unit-test run is split into 4 parallel shards of ~11–15 min each and is the known exception. If consistently over budget, file an issue tagged `ci-tier2-budget`.\n\n';
             comment += '_Generated by `.github/workflows/ci-tier2-advisory.yml`._\n';
 
             // ----------------------------------------------------------------
