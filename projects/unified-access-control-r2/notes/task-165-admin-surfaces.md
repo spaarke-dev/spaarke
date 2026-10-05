@@ -14,8 +14,15 @@
 > authorization on every container, item, column, custom-property, permission, recycle-bin, list, search and bulk
 > route; app-only container-type routes guarded; app-identity check narrowed for Model 1), **round 25 item 5**
 > (per-config dashboard storage; `SpeDashboardSyncService` migrated to `IScheduledJob`), the two unproven guards'
-> tests + seeds, the widened body-marker guard, and the publish-size measurement. Still open: only the manual live
-> gates (§9, §11.16 — the backfill `-Apply` among them).
+> tests + seeds, the widened body-marker guard, and the publish-size measurement. **Follow-up round f2** (branch
+> `task/uac-r2-165-f2`, **§12**) closes **owner round 35 items 1-5** — every container-creation path stamps (the L2 H8
+> handler, `New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1`, `Create-NewContainerType.ps1`; ONE constant per
+> side; guard over `src/` and `scripts/`), an UNBOUND container is reachable by no admin route (logged `reason unbound`;
+> backfill `-Bind` + `-Verify` listing every unbound container; the pre-deploy / onboarding gate in the onboarding guide),
+> `sprk_keyvaultsecretname` allow-listed (`spe-owning-app-`; 400 / 409 / read guards; `-Verify` script), security alerts
+> and secure score platform-operator-only, container-type permission/consumer reads under the every-config rule — plus the
+> verifier's items 4, 5 (the two unbitten guards) and 7 (the business-unit list projected). Still open: only the manual
+> live gates (§9, §11.16, §12.9 — the backfill `-Apply` / `-Bind` and the dev config rename among them).
 
 ---
 
@@ -35,8 +42,12 @@
 | amendment | `containertypes/{typeId}/register` app-only token to a caller-chosen host | host must be `{tenant}-admin.sharepoint.com`, https, default port, no user info | done |
 | amendment | environment routes without business-unit scoping | the `/api/spe` group's `SpeAdminTenantScopeFilter` applies the environment rule to the routes marked `SpeAdminEnvironmentOperation` (GET-by-id = Read; POST / PUT / DELETE = Write); list trimmed in-handler; config POST/PUT environment link judged by `DecideConfigWriteAsync` (owner round 16 item 4, option (a); round 20 item 4: no second filter class) | done — fix rounds r1 + r2, §10 |
 | trigger 5 | `POST /api/spe/search/items` — three `SearchItemsTests` | tests seed an in-scope config through `FakeDataverseTables`; not-found asserts the uniform 404; no real outbound Dataverse call (owner round 16 item 5) | done — fix round r1, §10 |
-| round 20 item 1 | `POST /api/spe/containers`; secure-record provisioning | every BFF creation path stamps `spaarkeBusinessUnitId` (custom property), reads it back, removes the container if it did not land; backfill script (dry run / `-Apply` / `-Verify`) for existing containers | done — f1, §11.2 (backfill `-Apply` = manual gate §11.16 (h)) |
-| round 20 item 2 | 31 container routes, 4 list/search routes, bulk delete/permissions/status | `SpeAdminTenantScopeFilter` per-container rule (own unit or descendant; unbound → root only; unreadable → 503; one 404); list trims; per-item check in the bulk job; status bound to its starter | done — f1, §11.3 |
+| round 20 item 1 + round 35 item 1 | every container-creation path: BFF admin plane, secure-record provisioning, L2 H8, `New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1`, `Create-NewContainerType.ps1` | each stamps `spaarkeBusinessUnitId`, reads it back, removes the container if it did not land; ONE constant per side; guard over `src/` + `scripts/`; backfill (dry run / `-Apply` / `-Verify` / `-Bind`) for existing containers | done — f1 §11.2 (BFF), f2 §12.2 (the rest); backfill = manual gate §12.9 (a) |
+| round 20 item 2 + round 35 item 2 | 31 container routes, 4 list/search routes, bulk delete/permissions/status | `SpeAdminTenantScopeFilter` per-container rule (own unit or descendant; **unbound / malformed → nobody**, logged with its reason; unreadable → 503; one 404); list trims; per-item check in the bulk job; status bound to its starter | done — f1 §11.3, f2 §12.3 |
+| round 35 item 3 | every configId route; `POST`/`PUT /api/spe/configs`; the vault reads | `sprk_keyvaultsecretname` must start `spe-owning-app-`: 400 on write, 409 at the filter, refused before any cache and before the vault; `Test-SpeConfigSecretNames.ps1 -Verify` | done — f2 §12.4; dev config rename = manual gate §12.9 (b) |
+| round 35 item 4 | `GET /api/spe/security/alerts`, `GET …/score` | platform-operator-only (filter, the environment-write check) | done — f2 §12.5 |
+| round 35 item 5 | `GET /containertypes/{typeId}/permissions`, `GET …/consumers` | the every-config rule, reads included | done — f2 §12.6 |
+| verifier f1 item 7 | `GET /api/spe/businessunits` | projected onto the caller's reach | done — f2 §12.7 |
 | round 20 item 3 | `POST`/`PUT /api/spe/configs`; app-only `/containertypes/{typeId}/…` routes | only per-customer identity (consuming app + its secret) exclusive; type routes: type = config's, writes need every config of the type | done — f1, §11.3-11.4 |
 | round 25 item 5 | `GET /api/spe/dashboard/metrics`, `POST …/refresh` | per-config storage; `SpeDashboardSyncService` → `IScheduledJob` | done — f1, §11.5 |
 
@@ -1055,3 +1066,377 @@ tests cover it.
   **403** `spe.admin.deny.container_binding_server_owned`.
 - **(k) Dashboard** (read-only): as a root admin `GET $BFF/api/spe/dashboard/metrics` → `storageUsedInBytesByConfig` and
   `unattributedContainerCount` present after the first scheduled run (or `POST …/refresh`).
+
+---
+
+## 12. Follow-up round f2 — owner round 35 items 1-5 and the verifier's items 2-7, 13-15 (2026-10-04)
+
+### 12.0 How the round reached the branch
+
+- Branch **`task/uac-r2-165-f2`** from `task/uac-r2-165-f1` @ `206470948` (the name was free). No push, PR or merge.
+- No `NOTE-FROM-MAIN.md` in the worktree. Binding inputs: owner/main-session rounds 1-35 read from
+  `work/unified-access-control-r2` (round 35 answers this task's five open questions) and the POML `<amendments>`.
+- `.claude/**`: no edit needed (no `.claude` file names the stamp, the container-type marks or the secret column).
+- 167 still not landed on this branch: amendment 3 — no waiver / ledger / GovernedFiles edits; ledger input in §12.10.
+
+### 12.1 Read-only live facts (dev, 2026-10-04)
+
+| Fact | Value |
+|---|---|
+| Live configs' `sprk_keyvaultsecretname` (the source of the pinned prefix) | `c3a25b9a…` "Spaarke PAYGO 1" → **`spe-owning-app-secret`**; `68f9a952…` "Spaarke SPE Model 1 Owner" → the literal **`"null"`**. The SPE admin app's own placeholder is `spe-owning-app-secret`; `config/spaarke-resources.yaml` and `HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md` name the same secret. |
+| The BFF's dev Key Vault (`spaarke-bff-dev` app setting `KeyVaultUri`) | `spaarke-spekvcert` — **19 secrets** (names listed only, no value read): `AzureOpenAI-ApiKey`, `Communication-WebhookClientState`, `Communication-WebhookSigningKey`, `DATAVERSE-URL`, `MANAGED-IDENTITY-CLIENT-ID`, `Redis-ConnectionString`, `SPE-ContainerTypeId`, `SPRK-DEV-DATAVERSE-URL`, `SPRK-MANAGED-IDENTITY-CLIENT-ID`, `UAMI-ClientId`, `ai-openai-endpoint`, `ai-openai-key`, `ai-search-endpoint`, `application-insights-key`, `bff-api-tenant-id`, `communication-trackingfooter-signingkey`, `footer-hmac-key`, `office-addin-client-id`, `spe-owning-app-secret`. Before this round any config could name any of them. |
+| Prefix chosen | **`spe-owning-app-`** — admits exactly `spe-owning-app-secret` in both vaults (`spaarke-spekvcert`, `sprk-prod-kv`). A shorter `spe-` would also admit `SPE-ContainerTypeId` (Key Vault names are case-insensitive). |
+| `scripts/Test-SpeConfigSecretNames.ps1 -Verify` (read-only, run on dev) | Configs 2, conforming 1, **NOT conforming 1**: `68f9a952…` (`'null'`) → exit **1**. Rename = manual gate §12.9 (b). |
+| `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Verify` (read-only, run on dev with the new code) | exit **1**; "Containers still UNBOUND (5)": the 3 underivable (`API Test 2025-09-30 14:43:59`, `Full Flow Test 2025-09-30 14:51:26`, `Test New Container 8-20-2026` — "needs -Bind"), and the 2 derivable-unstamped (`Spaarke Inc` → Spaarke Demo, `Spaarke Dev Container 2` → Spaarke root); `SKIPPED-CONFIG 68f9a952…` (its secret name `null`). |
+| Backfill `-Bind` (dry run, read-only) | invalid input (`'b!x=not-a-guid'`, a unit outside the hierarchy, `'novalue='`) → exit **2** before any container is read; a valid `-Bind` for an underivable container → `PLAN … [operator -Bind]`; a `-Bind` that disagrees with the records → `BIND-CONFLICT … Not written`; a `-Bind` for a container no config lists → `BIND-UNUSED`. |
+
+### 12.2 Round 35 item 1 — EVERY container-creation path stamps (verifier items 2 and 13)
+
+**ONE constant on each side.** C#: `src/server/shared/Contracts/SpeContainerBusinessUnitBinding.cs`
+(`internal const PropertyName = "spaarkeBusinessUnitId"`), compiled into BOTH the BFF and
+`Sprk.Provisioning.ControlPlane.Core` with `<Compile Include … Link>` — L2 may not reference the BFF, and a
+`Spaarke.Core` reference would drag `Spaarke.Dataverse` into the L2 publish; `SpeContainerBusinessUnitStamp.PropertyName`
+now refers to it. PowerShell: `$SpeContainerStampProperty` in `scripts/common/SpeContainerBinding.ps1`, with
+`Get-SpeContainerBinding`, `Set-SpeContainerStamp` and **`Invoke-SpeContainerBindOrRemove`** (stamp → single-container
+read-back → `DELETE` the container if the stamp did not land, for any reason; throws, saying whether it was removed).
+
+| Creation path | Owner it stamps | Change |
+|---|---|---|
+| BFF admin plane `POST /api/spe/containers` | config's unit / creating admin's | unchanged (f1) |
+| BFF secure-record provisioning | Secure Record unit | unchanged (f1) |
+| **L2 H8** `GraphContainerTypeProvisioner` (root container) | the new environment's **root** business unit | H8 now depends on **H3 and H5** (`DagAdvancer`); before anything is created it requires `InterStepState.DataverseEnvUrl` and reads the root unit (`IDataverseRootBusinessUnitReader`, same query/token idiom as H10; none / two / fault → Resumable, nothing created); after the app-only verification it calls `ISpeContainerTypeProvisioner.BindRootContainerAsync` (PATCH body-root stamp, read-back, DELETE on failure). Bind failure → QuarantineRequired (`spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`), the container id is never handed to H7, no KV write. Bound **after** verification on purpose: an SPE container may be unaddressable for up to 24h, and binding earlier would delete healthy containers during that documented window. Recorded for that project in `projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md` (with one pre-existing H8 resume defect observed, not changed). |
+| **`scripts/New-BusinessUnitContainer.ps1`** (the documented onboarding step) | `-BusinessUnitId` (validated as a GUID before anything) | bind-or-remove after the create; `sprk_containerid` is written only for a bound container |
+| **`scripts/Provision-Customer.ps1`** step 10 | the root business unit | the owner is resolved FIRST (no Dataverse URL / token / unique root → nothing created; it used to create first and only then discover it could not record it); a root unit that already has its container → no-op (it used to create a second, unused container); bind-or-remove; then `sprk_containerid` |
+| **`scripts/Create-NewContainerType.ps1 -CreateTestContainer`** (a fourth path, found by the guard) | new required `-TestContainerBusinessUnitId` | refused before anything is created without it; bind-or-remove after the create |
+
+**Guard** (`Spaarke.ArchTests/SpeAdminContainerBindingGuardTests`, rewritten): every `FileStorage.Containers.PostAsync(`
+in ALL of `src/` binds in its method or is a listed deferred binder whose step is verified (H8: verify → bind → KV write →
+complete); every script under `scripts/` that POSTs to the containers collection calls `Invoke-SpeContainerBindOrRemove`
+after the create in the same function (or top-level script) and dot-sources the module; the literal appears in exactly
+one `.cs` file under `src/` and one script under `scripts/`, and they are equal; the backfill uses the module's constant;
+each analyser bites on seeded snippets (PS: bound / unbound / a GET is not a create / no module).
+
+**Manual behaviour check of the PowerShell function** (the repo runs no pwsh in CI; a throwaway local fake Graph,
+`scratchpad/f2/fakegraph.py`, never committed): `ok` → BOUND, no DELETE; stamp not read back → DELETE, "it was removed";
+PATCH 500 → DELETE; PATCH and DELETE both 500 → "could NOT be removed … UNBOUND … -Bind"; a non-GUID unit → no PATCH,
+DELETE. The PATCH body is the BFF's shape: `{"spaarkeBusinessUnitId":{"value":"<unit>","isSearchable":false}}`.
+
+**Docs:** the onboarding guide (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`: H8 row, DAG, §7.5, the interim runbook's
+`New-BusinessUnitContainer.ps1` call — whose `-CustomerId` parameter never existed — and the new **Phase 5b binding
+gate** and **Phase 5c secret-name gate**), `HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md` (its manual curl recipe now
+binds or removes), the topology doc, `scripts/README.md`, and §11.2 of this note (its "no other path" claim corrected).
+
+### 12.3 Round 35 item 2 — an UNBOUND container is reachable by NO admin route (amends round 20 item 2)
+
+- `SpeAdminTenantScope.ClassifyContainer` (new; `DecideContainer` delegates to it) names the refusal —
+  `absent` / `other_type` / **`unbound`** / `malformed` / `out_of_scope` — and refuses unbound and malformed containers
+  for EVERY caller; `SpeAdminCallerScope.CanReach` likewise. The caller still sees ONE 404; the reason is logged
+  (`… refused through config … — reason unbound.`), and a list leaves an unbound container out with a warning.
+- Every consumer of the rule follows: the 31 container routes (filter), the lists and searches (trim), the bulk job
+  (per item). The custom-property route's "stamping an unbound container" now never reaches the handler (404).
+- **Search totals (scope discovered, D12 amended):** Graph's total is forwarded only to a platform operator from whose page
+  nothing was removed AND only when there is no further page — a later page may hold unbound or another environment's
+  containers, which no admin reaches. Container search never had a Graph total (the collection reports none).
+- **Dashboard (decision D18):** the aggregate `unattributedContainerCount` / storage stays in a platform operator's full
+  view: it names no container (no id, no name), reaches none, and is the alarm that a backfill / `-Bind` is owed.
+- **Backfill:** `-Bind '<containerId>=<businessUnitId>'` (repeatable; split at the last `=`; validated against the
+  hierarchy before any container is read; records win — a disagreeing `-Bind` is `BIND-CONFLICT`; never overwrites; unused
+  → `BIND-UNUSED`); `-Verify` lists every still-unbound container ("Containers still UNBOUND (n)") and exits 1 on any, on a
+  mismatch, an unreadable binding, a skipped config, a bind conflict or an unused bind.
+- **Gate:** written into the onboarding guide (Phase 5b) and the topology doc — `-Apply` then `-Verify` exit 0 in every
+  environment BEFORE 165's BFF is deployed there, and in every environment already using a container type before a further
+  environment is onboarded onto it. Manual gate §12.9 (a).
+
+### 12.4 Round 35 item 3 — `sprk_keyvaultsecretname` is allow-listed (verifier items 3, 14)
+
+`Services/SpeAdmin/SpeConfigSecretNamePolicy` (static): `RequiredPrefix = "spe-owning-app-"`, then Key Vault's own rule
+(letters, digits, hyphens; 127 in all), case-insensitive, never trimmed; reason code
+**`spe.admin.deny.config_secret_name_not_allowed`**; `EnsureAllowed` throws `SpeConfigSecretNameNotAllowedException`
+(message led by the code, so a handler's `Explain` carries it).
+
+- **POST / PUT** `/api/spe/configs` → **400** with that `errorCode` (after the existing format check; PUT whenever the
+  field is sent — an unchanged re-send of a pre-rule name is refused too, so saving forces the rename).
+- **Every configId route that uses the config's credential** → **409** with that code, from the existing
+  `SpeAdminTenantScopeFilter` (the secret name rides the same single config read as the business unit) — judged only AFTER
+  the scope, so another customer's config is still the uniform 404; before the container rule and any handler, so nothing
+  is read with it. Exempt (marker `SpeAdminConfigCredentialUnused`): GET / PUT / DELETE `/configs/{configId}` and
+  `GET /audit` — so a misconfigured config can be seen, corrected and deleted. A census test pins exactly those four.
+- **At read** the vault is never called with a non-conforming name: `GetClientForConfigAsync` (before its client cache),
+  `GetClientForOwningAppAsync` (before the OBO client cache), `SpeAdminTokenProvider.AcquireOwningAppTokenAsync` (before the
+  token cache), and both services' vault reads (the register path, `FetchOwningAppSecretAsync` and the startup validation
+  reach the vault only through them). The dashboard job reports such a config as a failed concern carrying the code.
+- **`scripts/Test-SpeConfigSecretNames.ps1`** (read-only; `-Verify` exits 1 on any non-conforming config, active or
+  inactive — the BFF does not filter by state). Its prefix is pinned equal to the C# constant by an ArchTest.
+- `sprk_consumingappkvsecret` is stored but never read by the BFF (grep: only `ConfigEndpoints` / `SpeAdminTenantScope`
+  identity comparisons) — nothing to allow-list until something resolves it, and then it must go through the policy.
+
+### 12.5 Round 35 item 4 — security alerts and secure score are platform-operator-only (verifier items 3, 14)
+
+The `/api/spe/security` group carries `RequireSpeAdminPlatformOperator()`; the filter refuses every caller whose own unit
+is not the root with ONE 403 **`spe.admin.deny.platform_operator_required`**, FIRST — before the config is even read, so
+naming one's own config or a nonexistent one gets the same answer. The check is `RequirePlatformOperatorAsync`, now ALSO
+the environment write rule's (that rule used to go through the environment reach, which also read the config table;
+writes depend only on the caller's unit and the hierarchy, as its tests already said). Scope fault → 503. A census test
+pins exactly the two routes.
+
+### 12.6 Round 35 item 5 — the container-type permission and consumer READS get the every-config rule (item 6)
+
+The read/write split is gone: `SpeAdminContainerTypeOperation` → the marker `SpeAdminContainerTypeScope`
+(`.WithSpeAdminContainerTypeScope()` on all six app-only type routes); `DecideContainerTypeAccessAsync` lost its `write`
+flag — the type must be the config's own AND every config carrying it reachable. `ALeafAdmin_ReadingItsOwnSharedContainerType_ReachesTheHandler`
+is replaced by `ALeafAdmin_ReadingAContainerTypeSharedWithAnotherCustomer_Is403_AndNothingIsSent` plus
+`AnAdminWhoReachesEveryConfigOfTheType_ReadsItsPermissionsAndConsumers` (a root admin; a leaf admin whose type no other
+customer carries).
+
+### 12.7 Verifier items 4, 5 and 7
+
+- **Item 4 (V4):** `SpeAdminPerContainerScopeTests.SearchItems_AHitThatNamesNoContainer_IsDropped_EvenForARootAdmin` —
+  a hit with neither `containerId` nor `parentReference.driveId`; seed B20 (the verifier's V4) RED.
+- **Item 5 (V6):** `BulkOperationContainerTypeTests.Delete_/Grant_OnAContainerWhoseTypeGraphDoesNotReport_IsRefused_EvenInTheCallersOwnUnit`
+  — bound to the caller's own unit, so only the "type reported and equal" clause can refuse; seed B22 (V6) RED. The bulk
+  refusal is now logged with its reason (`type_not_reported` among them).
+- **Item 7:** `GET /api/spe/businessunits` is projected onto the caller's reach (own unit + descendants, from the token;
+  a platform operator sees all; unresolvable → `[]`; hierarchy fault → the shared 503). The SpeAdminApp's picker comment
+  "(all BUs)" (`BuContextPicker.tsx`) is now stale wording only — the list it shows is exactly what POST/PUT accept; no
+  client change was needed or made.
+
+### 12.8 Tests added / changed this round — one-line justifications (test-scope criterion)
+
+All through the real host unless stated; no `Mock<HttpMessageHandler>`, no DI-registration test, no constructor
+null-check test (ADR-038).
+
+- `SpeAdminPerContainerScopeTests`: root-unit admin on an unbound container 404 on all 29 active routes and both
+  recycle-bin routes (round 35 item 2); the log names `reason unbound` / `reason absent` while the 404s are identical;
+  malformed 404 for leaf AND root; root list leaves unbound out; search drops a container-less hit (item 4) and reports
+  Graph's total only with no further page; the custom-property stamp on an unbound container is the 404; the type-read
+  refusing counterpart + the every-config positive (item 6). Fixture: `RecordingLoggerProvider` (the reason is only
+  observable in the log).
+- `BulkOperationContainerTypeTests`: unbound/malformed by ROOT refused (delete + grant); type not reported refused (item 5).
+- `SpeAdminConfigSecretNameTests` (new, 19 incl. rows): 409 on six credential routes with no handler/Graph call; unit-less
+  409; another customer's still 404; conforming config served; the four exempt routes usable; census of the exemption;
+  POST 400 (five names), PUT 400, conforming (any case) created.
+- `SpeConfigSecretNameReadGuardTests` (new; real `SpeAdminGraphService` / `SpeAdminTokenProvider`, the vault substituted at
+  the `SecretClient` class boundary): each read guard refuses with zero vault calls — before the client cache, the OBO
+  client cache, the token cache, and in both vault reads (register, `FetchOwningAppSecretAsync`, startup validation).
+- `SpeConfigSecretNamePolicyTests` (new, domain): allowed / refused names (incl. path and query characters), the 127 limit,
+  the exception's code.
+- `SpeAdminOperatorRouteAndBusinessUnitScopeTests` (new): security routes 403 for leaf (own and nonexistent config, nothing
+  read), 403 for an unresolvable caller, root reaches the handler, 503 on a scope fault, census; business-unit list for
+  leaf / root / unresolvable / fault.
+- `SpeAdminDashboardScopeTests`: a non-conforming config is a failed concern carrying the code; others still counted.
+- `ContainerBindingRuleTests` (domain): root reaches no unbound/malformed container; `ClassifyContainer` reasons.
+- Seeds updated to conforming names: `SpeAdminPerContainerScopeTests`, `SpeAdminDashboardScopeTests`,
+  `SpeAdminBulkPerContainerTests`, `SpeAdminEnvironmentScopeTests`, `SpeAdminConfigAndBulkTenantScopeTests` (its consuming
+  secret too, so naming it as one's own secret still reaches the identity rule), `SearchItemsTests`.
+- L2: `H8SpeContainerTypeHandlerTests` AC1 + AC23-AC29, AC22 asserts no bind; `GraphContainerTypeProvisionerBindTests`
+  (new, real `GraphServiceClient` over a hand-written fake transport — the project's pattern); `DagAdvancerTests` (H8 waits
+  for H5).
+- ArchTests: `SpeAdminContainerBindingGuardTests` rewritten (§12.2), incl. the secret-prefix agreement.
+
+### 12.9 Manual gates (main session; dev; live writes only with the owner's approval)
+
+- **(a) Container binding gate — BLOCKS deploying this branch's BFF to an environment.** From the repo root, `az login`
+  as an operator who can read Dataverse and the vault:
+  1. `pwsh -File scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName sprk-prod-kv` (dry run; expect §12.1's plan);
+  2. `… -Apply -MaxWritesPerRun 1` (sample), then `… -Apply` (stamps `Spaarke Inc` → Spaarke Demo, `Spaarke Dev Container 2` → Spaarke);
+  3. the three underivable test containers: decide the owner (or delete them) — e.g. `… -Bind 'b!DcvTfUkibESq94RyGJFs-UhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy=06fbf21c-1872-f011-b4cb-7c1e52671ad0','b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy=06fbf21c-1872-f011-b4cb-7c1e52671ad0','b!c8YRuu4xIUeN9wgIynL2y0PsOov3osVDvGM3TRxZDy7RXoLluiTER4gojqVY3YZ6=06fbf21c-1872-f011-b4cb-7c1e52671ad0' -Apply` (root unit `06fbf21c…` = "Spaarke");
+  4. after (b): `… -Verify` → **exit 0** (it stays 1 while config `68f9a952…` cannot be listed);
+  5. undo: `… -RevertManifest <manifest.csv> -Apply`.
+  The same gate in every further environment, and before onboarding an environment onto a type another already uses.
+- **(b) Config secret-name rename (dev config `68f9a952…`, stored `"null"`).** Either store owning app `bfac7f6e…`'s client
+  secret under a conforming name and point the config at it —
+  `az keyvault secret set --vault-name spaarke-spekvcert --name spe-owning-app-model1-owner --value <secret from the app owner>`
+  (and the same in `sprk-prod-kv` for the backfill), then
+  `$t = az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv; Invoke-RestMethod -Method Patch -Uri "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_specontainertypeconfigs(68f9a952-44bf-f111-a05b-3833c5e9614d)" -Headers @{ Authorization = "Bearer $t"; 'Content-Type' = 'application/json' } -Body '{"sprk_keyvaultsecretname":"spe-owning-app-model1-owner"}'`
+  — or delete the config if it belongs to the control plane only. Then
+  `pwsh -File scripts/Test-SpeConfigSecretNames.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify` → **exit 0**.
+- **(c) Probes after deploy (read-only unless stated):** as a Business Unit 1 (leaf) SPE admin —
+  `GET $BFF/api/spe/security/alerts?configId=c3a25b9a-…` → **403** `spe.admin.deny.platform_operator_required`;
+  `GET $BFF/api/spe/containertypes/8a6ce34c-6055-4681-8f87-2f4f9f921c06/permissions?configId=c3a25b9a-…` → **403**
+  `spe.admin.deny.container_type_shared` only if another unreachable config carries the type, else served;
+  `GET $BFF/api/spe/businessunits` → Business Unit 1 and its descendants only; as a root admin, an unbound container
+  (`GET …/containers/b!c8YR…?configId=c3a25b9a-…` before (a) step 3) → **404**, and App Insights shows
+  `reason unbound`; `GET …/containers?configId=68f9a952-…` → **409** `spe.admin.deny.config_secret_name_not_allowed` until (b).
+- **(d) H8 bind (L2)** — verified on the next real L2 provisioning run: the run's T6 gate evidence carries
+  `owningBusinessUnitId` = the new environment's root unit, and `GET …/containers/{root}?$select=customProperties`
+  shows the stamp.
+- Still open from f1: §11.16 (i) deleted-container binding read, (k) dashboard per-config fields.
+
+### 12.10 Route authorization ledger input (task 167; still not landed — amendment 3, no waiver edits)
+
+| Route key | Mechanism now | Deny test |
+|---|---|---|
+| `GET /api/spe/security/alerts`, `GET /api/spe/security/score` | filter: platform-operator mark (`RequireSpeAdminPlatformOperator`), before the configId rule | `Sprk.Bff.Api.Tests.Auth.SpeAdmin.SpeAdminOperatorRouteAndBusinessUnitScopeTests.ALeafAdmin_OnTheSecurityRoutes_GetsOne403_WhateverConfigItNames_AndNothingIsRead` |
+| `GET /api/spe/containertypes/{typeId}/permissions`, `GET …/consumers` | filter: container-type rule, every config of the type reachable (reads too) | `…SpeAdminPerContainerScopeTests.ALeafAdmin_ReadingAContainerTypeSharedWithAnotherCustomer_Is403_AndNothingIsSent` |
+| `GET /api/spe/businessunits` | handler projection onto the caller's reach (list precedent) | `…SpeAdminOperatorRouteAndBusinessUnitScopeTests.TheBusinessUnitList_ForALeafAdmin_HoldsOnlyItsOwnUnitAndItsDescendants` |
+| every configId route except the four exempt | filter: secret-name rule (409) | `…SpeAdminConfigSecretNameTests.ACredentialRoute_OnAConfigWhoseSecretNameIsNotAllowed_Is409_BeforeAnyHandlerOrGraphCall` |
+| the 31 container routes, lists, bulk | filter / trim / job: unbound reaches nobody | `…SpeAdminPerContainerScopeTests.ARootAdmin_OnAnUnboundContainer_GetsTheUniform404_AndTheHandlerNeverRuns` |
+
+No route was added, renamed or deleted this round.
+
+### 12.11 Placement (CLAUDE.md §10) and new surface (CLAUDE.md §11)
+
+**Placement: in the BFF**, on existing surfaces — the existing `/api/spe` group filter `SpeAdminTenantScopeFilter`, the
+existing `SpeAdminTenantScope`, `SpeAdminGraphService`, `SpeAdminTokenProvider`, `BulkOperationService`, and the existing
+config / security / business-unit / search endpoints. **In L2** (`customer-provisioning-orchestration-r1`'s control
+plane) for H8 — the handler that creates the container, extending its existing provisioner seam. **In `scripts/`** for
+the operator paths. No new endpoint, filter class, policy, BFF DI registration, option, package, Dataverse column, job
+or plugin (ADR-002). One new L2 DI registration (the root-unit reader, typed HttpClient — the H10 pattern). No AI type
+touched (ADR-013).
+
+| New | Existing (grep evidence) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `src/server/shared/Contracts/SpeContainerBusinessUnitBinding.cs` (source-linked `internal const`) | `SpeContainerBusinessUnitStamp.PropertyName` (BFF only); grep `spaarkeBusinessUnitId` in `src/server/services`: none | L2 cannot reference the BFF or `Spaarke.Core` (which pulls `Spaarke.Dataverse`); a linked file is ONE literal compiled into both (round 35 item 1 "ONE constant on each side") | two literals drift; H8 stamps a name the BFF never reads — every L2-provisioned root container unreachable |
+| `SpeConfigSecretNamePolicy` + `SpeConfigSecretNameNotAllowedException` | `ConfigEndpoints.ValidateKeyVaultSecretName` / `KeyVaultSecretNameRegex` (private, format only) | the format check is kept; the rule must be shared by the endpoints, the filter, two services and the job — a private endpoint helper cannot be | a config names `AzureOpenAI-ApiKey` (or any of the vault's 19 secrets) and the BFF reads it app-only (B8, B11-B17) |
+| `SpeContainerRefusal` enum + `ClassifyContainer` + `RefusalReason` | `DecideContainer` (collapses every refusal) | `DecideContainer` now delegates; one rule | round 35 item 2's "log reason unbound" is impossible (B4) |
+| `SpeAdminScopeDecision.SecretNameNotAllowed` | the enum's refusal members | one member | the filter cannot tell 409 from 404 (B8) |
+| markers `SpeAdminPlatformOperatorOnly`, `SpeAdminConfigCredentialUnused`; `SpeAdminContainerTypeScope` (REPLACES the enum `SpeAdminContainerTypeOperation`); extensions `RequireSpeAdminPlatformOperator`, `WithSpeAdminConfigCredentialUnused`, `WithSpeAdminContainerTypeScope()` | `SpeAdminEnvironmentOperation` + `WithSpeAdminEnvironmentScope` (same file, same endpoint-metadata pattern) | same pattern; the type enum's Read/Write split is removed, not added to | leaf admins read the tenant's security data (B5); a misconfigured config could not be repaired through the app (B9) |
+| filter `RequirePlatformOperatorAsync`, `ConfigSecretNameNotAllowed`, code `platform_operator_required` | the environment write rule (now shares the check) | the env write rule refactored onto it ("the same check", round 35 item 4) | two copies of "own unit is the root" |
+| `ConfigEndpoints.SecretNameNotAllowed` (400 helper with `errorCode`) | `ValidationProblem` (no `errorCode`) | sibling helper | the 400 carries no machine code |
+| test seams `SpeAdminGraphService.UseOwningAppClientForConfig`, `SpeAdminTokenProvider.UseTokenForConfig` | `UseClientForConfig` (f1 precedent) | same pattern | the cache-front guards cannot be proven (B15, B16) |
+| L2 `IDataverseRootBusinessUnitReader` + `DataverseWebApiRootBusinessUnitReader` (+ `AddHttpClient` in the Worker) | H10's private `DataverseWebApiAppUserCreator.FindRootBusinessUnitIdAsync` | making H8 depend on H10's app-user creator couples two handlers' collaborators for one GET; same query + token idiom | H8 cannot know the owner → its root container unbound (L2, L3) |
+| L2 `ISpeContainerTypeProvisioner.BindRootContainerAsync` + `SpeContainerBindRequest` / `SpeContainerBindOutcome`; `GraphContainerTypeProvisioner.BindNewContainerAsync` | the provisioner seam (same T6 identity) | extends the existing seam, no second Graph collaborator | H8 containers unstamped (round 35 item 1; L4-L7) |
+| L2 rejection codes (5); DAG `H8 ← {H3, H5}` | `SpeContainerTypeRejectionCodes`; `DagAdvancer.HandlerDependencies` | members / one dependency | H8 runs before the environment exists (L1) |
+| `scripts/common/SpeContainerBinding.ps1` | the backfill's private `Read-ContainerBinding` / `Write-ContainerStamp` (moved here) | one module for four scripts | each script spells its own name and PATCH (A1-A4) |
+| `scripts/Test-SpeConfigSecretNames.ps1` | none reads config secret-name conformance (grep `sprk_keyvaultsecretname` in `scripts/`: the backfill only) | the backfill is about containers, not configs; round 35 item 3 asks for "a -Verify script" | non-conforming live configs found only by a 409 in production (A8 pins its prefix) |
+| backfill `-Bind`; `Create-NewContainerType.ps1 -TestContainerBusinessUnitId` | the scripts | parameters added | underivable containers cannot be bound (round 35 item 2); the test container cannot be stamped |
+| test fixture `RecordingLoggerProvider` | none in the host fixtures | fixture extension | the refusal reason (log only) is unobservable (B4) |
+
+**Complexity (CLAUDE.md §11.5):** `SpeAdminTenantScopeFilter` grew by the platform-operator and secret-name branches — one
+responsibility (decide whether this admin may act on what the request names); `SpeAdminTenantScope` grew by
+`ClassifyContainer` (the per-container rule, now with its reason) — both stay cohesive. H8's handler grew by two steps of
+its own orchestration.
+
+**Publish size / CVE:** §12.14. No `PackageReference` changed (BFF or L2).
+
+### 12.12 Seeding proofs (on the final code; `scratchpad/f2/seed165f2.py` + `seed-ps.py`, session scratchpad)
+
+Each seed: ONE exact single-occurrence replacement (anchors pre-checked: every count was 1), the named classes run
+(BFF: every `Auth.SpeAdmin` / `Domain.SpeAdmin` / `SearchItemsTests` class; ArchTests: `SpeAdminContainerBindingGuardTests`;
+L2: H8 / bind / DAG), the source restored from a byte copy, MD5-checked and touched. **All 37 RED; none failed to compile
+(no `error CS` in any run); every file restored** (`git status` showed no `src/`, `tests/` or `scripts/` change afterwards).
+Verdict counts include theory rows.
+
+| # | Seed | Failed | RED |
+|---|---|---|---|
+| B1 | a root-unit admin reaches an UNBOUND container again (ClassifyContainer) | 37 | `BulkOperationContainerTypeTests.Delete_OfAnUnboundOrMalformedContainer_ByARootAdmin_IsRefused_AndNoDeleteIsSent`, `BulkOperationContainerTypeTests.Grant_OnAnUnboundContainer_ByARootAdmin_IsRefused_AndNoPermissionIsPosted`, `ContainerBindingRuleTests.ClassifyContainer_NamesEveryRefusalReason_TheCallerSeesOne404ForAll`, `SpeAdminPerContainerScopeTests.ARootAdmin_OnAnUnboundContainer_GetsTheUniform404_AndTheHandlerNeverRuns`, `SpeAdminPerContainerScopeTests.ARootAdmin_OnAnUnboundDeletedContainer_GetsTheUniform404`, `SpeAdminPerContainerScopeTests.AnUnboundContainer_IsRefusedWithReasonUnbound_InTheLog_WhileTheCallerSeesTheUniform404`, `SpeAdminPerContainerScopeTests.ContainerList_ForARootAdmin_HoldsEveryBoundContainer_ButNoUnboundOne`, `SpeAdminPerContainerScopeTests.CustomProperties_StampingAnUnboundContainer_IsTheUniform404_ForARootAdminToo_AndNothingIsPatched` |
+| B2 | a root-unit admin reaches a MALFORMED-stamp container | 3 | `BulkOperationContainerTypeTests.Delete_OfAnUnboundOrMalformedContainer_ByARootAdmin_IsRefused_AndNoDeleteIsSent`, `ContainerBindingRuleTests.ClassifyContainer_NamesEveryRefusalReason_TheCallerSeesOne404ForAll`, `SpeAdminPerContainerScopeTests.AContainerWithAMalformedStamp_IsTheUniform404_ForEveryCaller` |
+| B3 | CanReach: a platform operator reaches any binding | 3 | `ContainerBindingRuleTests.ARootAdmin_ReachesEveryBoundUnit_ButNoUnboundOrMalformedContainer_AndNoUnitItDoesNotKnow`, `ContainerBindingRuleTests.ClassifyContainer_NamesEveryRefusalReason_TheCallerSeesOne404ForAll`, `SpeAdminPerContainerScopeTests.ARootAdmin_OnAContainerBoundToAUnitThisEnvironmentDoesNotKnow_GetsTheUniform404` |
+| B4 | the refusal log no longer names reason 'unbound' | 2 | `ContainerBindingRuleTests.ClassifyContainer_NamesEveryRefusalReason_TheCallerSeesOne404ForAll`, `SpeAdminPerContainerScopeTests.AnUnboundContainer_IsRefusedWithReasonUnbound_InTheLog_WhileTheCallerSeesTheUniform404` |
+| B5 | the security group loses its platform-operator mark | 7 | `SpeAdminOperatorRouteAndBusinessUnitScopeTests.ACallerWithNoResolvableBusinessUnit_GetsTheSame403`, `SpeAdminOperatorRouteAndBusinessUnitScopeTests.ALeafAdmin_OnTheSecurityRoutes_GetsOne403_WhateverConfigItNames_AndNothingIsRead`, `SpeAdminOperatorRouteAndBusinessUnitScopeTests.ExactlyTheTwoSecurityRoutes_ArePlatformOperatorOnly` |
+| B6 | the platform-operator check admits any resolvable admin | 11 | `SpeAdminEnvironmentScopeTests.Write_ByALeafAdmin_IsOne403_AndNothingIsReadOrWritten`, `SpeAdminOperatorRouteAndBusinessUnitScopeTests.ALeafAdmin_OnTheSecurityRoutes_GetsOne403_WhateverConfigItNames_AndNothingIsRead` |
+| B7 | the container-type rule skips GET (reads) | 5 | `SpeAdminPerContainerScopeTests.ALeafAdmin_ReadingAContainerTypeSharedWithAnotherCustomer_Is403_AndNothingIsSent`, `SpeAdminPerContainerScopeTests.ATypeRouteNamingATypeThatIsNotTheConfigsOwn_IsTheUniformTypeNotFound`, `SpeAdminPerContainerScopeTests.ATypeRoute_WhenTheScopeCannotBeRead_Is503_AndNothingIsSent` |
+| B8 | the filter's secret-name check never fires | 7 | `SpeAdminConfigSecretNameTests.ACredentialRoute_OnAConfigWhoseSecretNameIsNotAllowed_Is409_BeforeAnyHandlerOrGraphCall`, `SpeAdminConfigSecretNameTests.AUnitLessConfig_WhoseSecretNameIsNotAllowed_Is409Too` |
+| B9 | the credential-unused exemption is ignored | 1 | `SpeAdminConfigSecretNameTests.TheConfigRecordRoutesAndTheAuditLog_StayUsable_SoTheConfigCanBeSeenCorrectedAndDeleted` |
+| B10 | the secret-name check runs BEFORE the scope (state oracle) | 2 | `SearchItemsTests.SearchItems_WithToken_ValidConfigIdNotFound_IsTheUniform404_SameAsAnOutOfScopeConfig`, `SpeAdminConfigSecretNameTests.AnotherCustomersConfig_WhoseSecretNameIsNotAllowed_IsStillTheUniform404` |
+| B11 | POST /configs accepts any secret name | 5 | `SpeAdminConfigSecretNameTests.Post_WithASecretNameOutsideThePrefix_Is400_WithTheRulesCode_AndNothingIsCreated` |
+| B12 | PUT /configs accepts any secret name | 1 | `SpeAdminConfigSecretNameTests.Put_WithASecretNameOutsideThePrefix_Is400_AndNothingIsWritten` |
+| B13 | GetClientForConfigAsync: no guard before the client cache | 4 | `SpeAdminDashboardScopeTests.Refresh_AConfigWhoseSecretNameIsNotAllowed_IsAFailedConcernCarryingTheRulesReasonCode`, `SpeConfigSecretNameReadGuardTests.GetClientForConfigAsync_RefusesANonConformingName_WithoutReadingTheVault_EvenWithACachedClient` |
+| B14 | the graph service's vault read: no guard (register path) | 1 | `SpeConfigSecretNameReadGuardTests.RegisterContainerTypeAsync_RefusesANonConformingName_BeforeTheVault` |
+| B15 | GetClientForOwningAppAsync: no guard before the OBO client cache | 1 | `SpeConfigSecretNameReadGuardTests.GetClientForOwningAppAsync_RefusesANonConformingOwningAppSecret_EvenWithACachedOboClient` |
+| B16 | token provider: no guard before the token cache | 1 | `SpeConfigSecretNameReadGuardTests.AcquireOwningAppTokenAsync_RefusesANonConformingOwningAppSecret_EvenWithACachedToken` |
+| B17 | token provider's vault read: no guard | 1 | `SpeConfigSecretNameReadGuardTests.TheTokenProvidersVaultRead_RefusesANonConformingName_OnEveryPathThatReachesIt` |
+| B18 | the business-unit list is not projected | 1 | `SpeAdminOperatorRouteAndBusinessUnitScopeTests.TheBusinessUnitList_ForALeafAdmin_HoldsOnlyItsOwnUnitAndItsDescendants` |
+| B19 | a hierarchy fault on the business-unit list is not the 503 | 1 | `SpeAdminOperatorRouteAndBusinessUnitScopeTests.TheBusinessUnitList_WhenTheHierarchyCannotBeRead_Is503_NeverTheWholeTable` |
+| B20 | V4: search keeps hits that name no container | 1 | `SpeAdminPerContainerScopeTests.SearchItems_AHitThatNamesNoContainer_IsDropped_EvenForARootAdmin` |
+| B21 | search forwards Graph's total although a further page exists | 1 | `SpeAdminPerContainerScopeTests.SearchItems_ForARootAdmin_ReportsGraphsTotal_OnlyWhenThereIsNoFurtherPage` |
+| B22 | V6: bulk no longer requires the type to be REPORTED | 2 | `BulkOperationContainerTypeTests.Delete_OfAContainerWhoseTypeGraphDoesNotReport_IsRefused_EvenInTheCallersOwnUnit`, `BulkOperationContainerTypeTests.Grant_OnAContainerWhoseTypeGraphDoesNotReport_IsRefused_EvenInTheCallersOwnUnit` |
+| A1 | New-BusinessUnitContainer.ps1 creates without binding | 1 | `Every SPE container a script creates is bound to its business unit, or removed` |
+| A2 | Provision-Customer.ps1 no longer dot-sources the binding module | 1 | `Every SPE container a script creates is bound to its business unit, or removed` |
+| A3 | Create-NewContainerType.ps1 creates its test container without binding | 1 | `Every SPE container a script creates is bound to its business unit, or removed` |
+| A4 | the backfill spells the property name again | 2 | `The backfill script stamps the property the BFF reads, from the sources the BFF writes`, `The stamp's property name is ONE constant in C# and ONE in PowerShell, and they agree` |
+| A5 | the BFF spells the property name again | 1 | `The stamp's property name is ONE constant in C# and ONE in PowerShell, and they agree` |
+| A6 | H8 no longer calls the bind step | 1 | `The L2 H8 root container is bound by the handler after verification, before the KV write and the H7 handoff` |
+| A7 | the BFF admin-plane create no longer binds | 1 | `Every SPE container created anywhere in src/ is bound to its business unit` |
+| A8 | the secret-name -Verify script checks another prefix | 1 | `The secret-name -Verify script checks the prefix the BFF enforces` |
+| L1 | the DAG no longer makes H8 wait for H5 | 1 | `DagAdvancerTests.ComputeReadyHandlers_AfterH3_UnlocksH9_ButH8WaitsForH5` |
+| L2 | H8 proceeds without the environment URL | 1 | `H8SpeContainerTypeHandlerTests.AC24_MissingDataverseEnvUrl_FailsResumable_BeforeAnythingIsCreated` |
+| L3 | H8 proceeds when the environment reports no root unit | 1 | `H8SpeContainerTypeHandlerTests.AC25_AnEnvironmentWithNoRootBusinessUnit_FailsResumable_AndCreatesNothing` |
+| L4 | H8 ignores a bind failure | 2 | `H8SpeContainerTypeHandlerTests.AC27_ABindFailure_IsQuarantined_AndTheContainerIsNeverHandedToH7` |
+| L5 | H8 binds to no unit | 2 | `H8SpeContainerTypeHandlerTests.AC1_HappyPath_AllSeamsGreen_SucceedsAndAdvancesState`, `H8SpeContainerTypeHandlerTests.AC23_TheRootContainer_IsBoundToTheEnvironmentsRootBusinessUnit_AfterVerification_BeforeTheKvWrite` |
+| L6 | the provisioner does not remove an unbound container | 6 | `GraphContainerTypeProvisionerBindTests.AStampThatDoesNotReadBack_RemovesTheContainer`, `GraphContainerTypeProvisionerBindTests.AStampWriteThatFails_RemovesTheContainer`, `GraphContainerTypeProvisionerBindTests.NoOwner_WritesNoStamp_AndRemovesTheContainer`, `GraphContainerTypeProvisionerBindTests.WhenTheRemovalAlsoFails_TheOutcomeSaysTheContainerIsLeftUnbound` |
+| L7 | the provisioner does not read the stamp back | 3 | `GraphContainerTypeProvisionerBindTests.AStampThatDoesNotReadBack_RemovesTheContainer` |
+
+**PowerShell `Invoke-SpeContainerBindOrRemove`** (no pwsh runs in CI, so these two were seeded against the throwaway
+local fake Graph, `fakegraph.py`, and the same restore/MD5 discipline): **P1** the DELETE removed → no DELETE is sent in
+any failure scenario and the "PATCH and DELETE both fail" case falsely reports "it was removed" — RED against the
+unseeded run (which sends DELETE in all four failure scenarios and reports "could NOT be removed" when it cannot);
+**P2** the read-back skipped → a stamp that does not read back is reported BOUND — RED.
+
+Seeds that also reddened neighbours, recorded because they show reach: B6 (the shared platform-operator check) also
+reddened the environment-write tests; B10 (secret check before scope) also reddened `SearchItemsTests.…ValidConfigIdNotFound…`
+(its out-of-scope config has no secret name, so the oracle would have shown); B3 (`CanReach` admits every operator) also
+reddened `ARootAdmin_OnAContainerBoundToAUnitThisEnvironmentDoesNotKnow`.
+
+### 12.13 Suites (once, at the end, after every seed was restored)
+
+Run 2026-10-04 21:12-21:43 on `1cf7603a1` (every later commit touches only this note and the POML), sequentially, each
+suite in full, on a machine other sessions were also using.
+
+| Suite | Result |
+|---|---|
+| affected, during development (`Auth.SpeAdmin`, `Domain.SpeAdmin`, `SearchItemsTests`, ArchTests `SpeAdmin*`) | green before seeding: 809 / 0 (BFF classes) and 154 / 0 (ArchTests `SpeAdmin*` / `WorkloadPlacement*` / `RouteAuthorization*`) |
+| full BFF unit suite `tests/unit/Sprk.Bff.Api.Tests` | **14,728 passed / 0 failed / 54 skipped (14,782)** — 20 m 1 s. No contention failure this time (f1 had 8 timeouts that passed isolated). +74 vs f1's 14,708 total. |
+| NetArchTest `tests/Spaarke.ArchTests` | **360 passed / 0 failed / 0 skipped** (f1: 355; +5 = the guard's new facts) |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | **104 passed / 0 failed / 0 skipped** |
+| `tests/integration/Spe.Integration.Tests` (full) | **403 passed / 0 failed / 25 skipped (428)** |
+| L2 `src/server/services/Sprk.Provisioning.ControlPlane.Tests` (full — this round changes L2) | **1,583 passed / 0 failed / 1 skipped (1,584)** |
+
+Code review / adr-check at this round's close (FULL rigor, self-review against the changed files): ADR-001 (no new
+route) ✓ · ADR-002 (no plugin) ✓ · ADR-003 (every new decision fails closed: an unbound container reaches nobody; a scope
+fault on the security routes, the business-unit list and the platform check is 503; the secret-name rule refuses before
+any read; H8 creates nothing without an owner and removes what it cannot bind — seeds B6, B19, L2, L3, L6) ✓ · ADR-007
+(Graph types stay in `SpeAdminGraphService` / the L2 provisioner) ✓ · ADR-008 (the platform-operator, secret-name and
+type decisions are the one group filter's; only the list projections are in-handler, the list precedent) ✓ · ADR-010
+(no BFF registration; one L2 typed-HttpClient registration for a two-implementation seam) ✓ · ADR-019 (ProblemDetails,
+machine codes: `platform_operator_required`, `config_secret_name_not_allowed`) ✓ · ADR-028 (L2 reader uses
+`DefaultAzureCredential` with an explicit tenant, the H10 idiom) ✓ · ADR-038 (no banned pattern; the vault substituted at
+the `SecretClient` class boundary, Graph at WireMock / a hand-written transport) ✓. No §6.5 path needed.
+
+### 12.14 Publish size and CVE (CLAUDE.md §10, hazards 1-4)
+
+Each side exported with `git archive` into a SHORT path, `dotnet restore` + `dotnet publish -c Release --no-restore` exactly
+as `scripts/Deploy-BffApi.ps1`, zipped with PowerShell **`Compress-Archive`** (Optimal) over `deploy/api-publish/*`, PDBs
+included:
+
+| Side | Commit | Path | Zip | Files | MSB3030 |
+|---|---|---|---|---|---|
+| fresh `origin/master` (fetched 2026-10-04 21:44) | `c2ef1857b` | `C:\wt165m` | **45.65 MB** (47,871,652 B) | 212 | 0 |
+| task base (`task/uac-r2-165-f1`) | `206470948` | `C:\wt165p` | **45.70 MB** (47,915,064 B) | 212 | 0 |
+| this branch | `1cf7603a1` | `C:\wt165b` | **45.70 MB** (47,919,707 B) | 212 | 0 |
+
+This round's own contribution (branch − base): **+4,643 B (+0.00 MB)**. Branch vs fresh master: **+0.05 MB** (+48,055 B);
+`c2ef1857b` is NOT an ancestor of this branch (merge-base `b8026dfa8`), so that figure also carries master's own drift
+since the work branch's base. Ceiling 60 MB. Equal file counts, no MSB3030 — all three publishes complete. The three export
+directories (this round's and the f1 executor's `C:\wt165m/p/b`, verifier item 12) were removed afterwards.
+`dotnet list … package --vulnerable --include-transitive` (BFF): **no vulnerable packages**; no `PackageReference` changed in
+the BFF or L2 (the only csproj changes are the two `<Compile … Link>` items).
+
+**Conflict check:** `git merge-tree` of this branch into `work/unified-access-control-r2` @ `a908c5954` — clean. Open PRs
+(22) touching a changed path: the dependabot package bumps #876-#881, #883, #947 (`Sprk.Bff.Api.csproj` /
+`Sprk.Provisioning.ControlPlane.Core.csproj` version lines — this round adds a separate `<ItemGroup>`) and #1286
+(`scripts/README.md`, another section) — line-disjoint.
+
+### 12.15 Decisions (this round)
+
+- **D18 — the dashboard's unattributed AGGREGATE stays in a platform operator's full view** (round 35 item 2 is about
+  reaching containers; the aggregate names none and is the backfill alarm).
+- **D19 — H8 binds after verification**, not at creation inside `ProvisionAsync` (the 24h addressability window); the
+  bind is still before anything durable consumes the container (KV write, H7 handoff, CompletedPhase).
+- **D20 — the secret-name rule is enforced in four layers** (POST/PUT 400; filter 409 on credential routes; the
+  cache-front guards; the vault reads) and each is proven alone (§12.12) — the filter cannot cover the background job, and
+  the vault-read guard cannot cover a cached client.
+- **D21 — the config record routes and the audit log are exempt** from the 409 (they never use the credential) so a
+  misconfigured config can be repaired through the product; every other configId route gets the rule by default.
+- **D22 — `-Verify` of the secret-name script fails on inactive configs too**: the BFF resolves a config by id
+  regardless of its state.
+- **D23 — search totals** (amends D12): Graph's total only for a complete result (no further page).
+- **D24 — `Provision-Customer.ps1` step 10 resolves the owner before creating** and is a no-op when the root unit already
+  has its container (both were orphan-container defects of the old order).
+
+### 12.16 Not closed
+
+Only the manual live gates of §12.9 (live writes: the backfill `-Apply` / `-Bind`, the dev config rename, the
+post-deploy probes, the next real H8 run) and f1's §11.16 (i)/(k). One H8 behaviour outside this task is recorded for
+customer-provisioning-orchestration-r1 (resume after the 24h wait re-provisions) with its complete fix — it predates
+task 165 and is that project's handler logic.
