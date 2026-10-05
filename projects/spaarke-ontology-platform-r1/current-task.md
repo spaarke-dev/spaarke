@@ -1,9 +1,8 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-04, pre-restart handoff (main session; machine restart requested by the owner)
+> **Last Updated**: 2026-10-05 ~02:30 UTC, after the restart (main session)
 > **Recovery**: read "Quick Recovery" first. This is the MAIN SESSION's orchestrator view. Tasks run as subagents;
-> per-task detail lives in each POML's `<completion>` element and in `notes/`. **All subagents were stopped for the
-> restart; none is running.** Sub-agents never edit this file.
+> per-task detail lives in each POML's `<completion>` element and in `notes/`. Sub-agents never edit this file.
 
 ---
 
@@ -11,10 +10,11 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No main-session task in progress. Three tasks were stopped mid-flight for the restart: **022** (rework done, WIP-committed, needs re-review + a clean full suite), **081** (WIP on its own branch), **092** (WIP on PR #1123's branch). |
-| **Status** | Orchestrating. Index: **54 tasks: 27 ✅ · 1 🔄 (022) · 26 🔲** (081 is 🔲 in the index but has WIP on its branch; 092 is ✅ in the index because its PR exists, but PR #1123 still needs the follow-up below). Run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1` first; it was clean at handoff. |
-| **Next Action** | In order: **(1)** Resume **092** (C:\wt092, WIP pushed at `e81d65e64`): the 18-PCF tsconfig `extends` fix IS committed and removed every TS5083 on a root-only install, BUT the aggregate root build (`Build-AllClientComponents.ps1 -Component PCF`, i.e. all 18 PCFs in one `pcf-scripts build` process) then **runs out of memory**. Decide how the release build's PCF step should build PCFs (per-PCF via `Invoke-PcfBuildProd.ps1` is the obvious candidate) — #1286 stays blocked until that step passes. Also still to do: read the finished VisualHost isolated-install check, spot-check CommunicationAttachments, rewrite PR #1123's body, dispatch the nightly workflow on the branch and quote all 18 jobs' log markers. **(2)** Re-review **022** (independent code-review + adr-check, as for 030), then one UNCONTENDED full BFF suite; then mark 022 ✅. **(3)** Finish **081** (C:\wt081, `ontology/081-cleanup` @ `89b5230f9`): code is complete; see `notes/081-progress.md` for the three remaining items (one clean SpaarkeAi run, independent review, then merge into this branch) and the **three user-visible changes** to call out. **(4)** Next ontology task after that: **031** (nightly evaluator) — its POML carries the 022 gate + no-silent-failure constraints. |
-| **Branch / git** | `docs/ontology-platform-design` pushed and in sync (last: `3828ccff2` wip(022)). Master was merged in twice today. |
+| **Task** | No main-session task. Four agents were dispatched after the restart (2026-10-05): **022 rework round 2**, **081 rework**, **094 per-PCF release build** (PR #1286), **096** (new: Json.Schema.Net race in AI tool-schema validation, own PR). |
+| **Status** | Machine healthy after the restart (27 dotnet procs, 12.6 GB free). **Both independent reviews FAILED with real findings:** 022 round 2 (13 findings, F3 decided: an `exists`-clause template token only when the clause pins the field to one value) and 081 (13 findings + escalation; decisions in `notes/081-progress.md`). Nightly PCF run dispatched on #1123's branch: run `37254845131`. |
+| **Next Action** | As each agent reports: **022** → re-run an independent review, then ONE full BFF suite on a quiet machine, then ✅. **081** → write the agent's record into `notes/081-progress.md`, independent re-review, one clean SpaarkeAi/UI.Components jest run, merge into this branch. **094** → apply its `.claude/CHANGELOG.md` text (main session only), confirm per-PCF verification numbers. **092** → quote all 18 jobs of run `37254845131` by log marker, rewrite PR #1123's body. **096** → record PR, mark ✅. Then **031** (nightly evaluator). |
+| **Decision this session** | The release build's PCF step builds **each PCF in production mode** (as the nightly workflow does), in #1286. The aggregate root build never worked: TS5083, then out of memory, and it was dev mode. |
+| **Branch / git** | `docs/ontology-platform-design` pushed and in sync. 12 commits behind master at restart. |
 
 ### Before running ANY full test suite
 The machine was starved: ~300 `dotnet` processes, **248 of them VS Code C# Dev Kit build hosts** (`visualstudio-projectsystem-buildhost`, >6 h old), ~4 GB free of 61.6 GB. Every full BFF suite today crashed or timed out on unrelated tests. **After the restart, check `Get-Process dotnet | Measure-Object` before trusting any suite result.**

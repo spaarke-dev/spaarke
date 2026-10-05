@@ -111,6 +111,7 @@
 | ✅ 093 | [CI: nightly advisory PCF build:prod, own PR](093-ci-nightly-pcf-build-prod-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1282](https://github.com/spaarke-dev/spaarke/pull/1282) + fix [PR #1285](https://github.com/spaarke-dev/spaarke/pull/1285) **merged**. Nightly PCF build check now reports real results (10 fail / 8 pass on master, matching the logs) |
 | ✅ 094 | [PCF deploy procedures verify the real build result, own PR](094-pcf-deploy-build-verification-own-pr.poml) | FULL | **opus**/high | — | I2 | [PR #1286](https://github.com/spaarke-dev/spaarke/pull/1286). **Merge after #1123** (release PCF build fails on clean checkout until #1123 fixes 18 tsconfig extends) |
 | ✅ 095 | [Flaky email-attachment regex timeout, own PR](095-flaky-email-attachment-regex-timeout-own-pr.poml) | FULL | sonnet/high | — | I2 | [PR #1287](https://github.com/spaarke-dev/spaarke/pull/1287). Test now exercises production code (it tested a private copy without the catch); production unchanged |
+| 🔄 096 | [Json.Schema.Net concurrent Evaluate race in AI tool-schema validation, own PR](096-json-schema-net-metaschema-race-own-pr.poml) | FULL | **opus**/high | — | I2 | Found by 022's second review: `MetaSchemas.Draft202012.Evaluate` unlocked at `AnalysisToolService.cs:527` + `ToolHandlerToAIFunctionAdapter.cs:919` can pass malformed tool schemas under concurrency |
 
 ### Phase 9 — Wrap-up
 

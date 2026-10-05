@@ -4,7 +4,28 @@
 > into `docs/ontology-platform-design`). Recorded by the main session from the agent's stop report, because the
 > agent was stopped before writing its own notes.
 
-## Status: code complete; three things left before 081 is ✅
+## 2026-10-05: independent review FAILED; rework dispatched
+
+The independent review (code-review + adr-check, opus) of `89b5230f9` returned **FAIL**. The rework agent's record
+replaces this section when it reports.
+
+| # | Sev | Finding | Coordinator decision |
+|---|---|---|---|
+| F1 | High | AC-1 false: ~16 frame-walks remain, incl. `DailyBriefingApp.tsx:300-318` (the POML's FIRST named target, and buggy: a cross-origin parent throws inside the `??` chain so `top` is never tried) | Converge all; list any that cannot, with evidence |
+| F2 | High | `WorkspaceLayoutWidget` stopped writing `window.Xrm`; `WorkspaceGrid.tsx` (5 handlers) + `ActionCardHandlers.ts:86` read only `window.Xrm` → Summarize Files / Playbook Library can silently no-op in embedded LegalWorkspace | Convert readers to `getXrm()`; no global write; fix the embedded-mode contract doc |
+| F3 | High | 28–29 days → "this month"; 13 days → "last week" | Fix bucketing + boundary tests |
+| F4 | High | DateOnly `sprk_duedate` through an elapsed-time formatter: today → "Due: 14 hours ago" in US zones | Day-granular due label via `parseDueDate` + the existing due-label helper; never hours |
+| F5 | Medium | Clock skew → "in 3 seconds"; FR-07 relies on "just now" | \|diff\| < 60 s → "just now", both directions |
+| F6 | Medium | AC-4 false: `FeedItemCard.deriveUrgencyTier` 3/10; `EventDueDateCard` day 3 amber vs most-urgent in SmartTodo | Converge onto the canonical tier source |
+| F7 | Medium | The audit's U5 (inline local-midnight day-diff) copies untouched (7 sites) | Migrate to `daysBetweenLocalMidnight` |
+| F8 | Medium | Shared `EmptyState` enlarges compact sites; `ActivityFeed/EmptyState.tsx` missed | `size: 'compact'`; migrate ActivityFeed |
+| F9 | Medium | No tests for `relativeTime.ts` / `EmptyState.tsx`; two mocks hide the real code | Tests + boundary mocks |
+| F10–F13 | Low | Untrue header comment; `navigator.language` mixes languages ("Modified vor 5 Minuten"); unrelated lockfile churn; misleading `@deprecated` | Comment fixed; **locale param, default `'en'`** (UI strings are English); revert churn; fix comment |
+| Esc. | — | The deleted LegalWorkspace formatter was compact on purpose ("5m ago") to fit the feed's right column | Shared formatter gains a compact style, used where the replaced copy was compact |
+
+**User-visible change #3 above ("relative times follow the browser language") is withdrawn** by the F11 decision.
+
+## Status at the 2026-10-04 restart: code complete; three things left before 081 is ✅
 
 1. One **clean, uncontended** SpaarkeAi jest run. Pristine baseline (isolated): 18 failed / 121 suites. Two "after"
    runs under heavy load: 24 and 36 failed, all `Exceeded timeout of 5000ms`, none touching edited files. A clean
