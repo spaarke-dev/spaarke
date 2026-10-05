@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9).</parallel-reason>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9). AMENDED in round f2-v1 (main-session round 43 item 2, binding): Infrastructure/HealthChecks/MemoizedHealthCheck.cs gains the evaluation bound (the same file f2 added); no other src/ file changes in f2-v1 (note section 19.6).</parallel-reason>
     <deps>none</deps>
     <tags>testing, security, auth, archtest, bff-api</tags>
     <estimated-effort>2-3 days</estimated-effort>
@@ -1019,6 +1019,48 @@ The route counts in the background come from a Python approximation of the scann
       PUBLISH SIZE: base 263024620 45.65 MB (47,870,406 bytes) vs branch 265a178d6 45.65 MB (47,872,621 bytes) = +2,215
       bytes, Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
     </outcome>
+    <outcome date="2026-10-05" branch="task/uac-r2-167-f2-v1" base="700c3960d" result="completed; nothing open" round="fix f2-v1 (the f2 verifier's items 1-17 + main-session round 43)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 19.
+      ITEM 1 (closed): the policy catalog is OrdinalIgnoreCase for registrations and lookups, as AuthorizationOptions resolves
+      names (verified by reflection on 10.0.1 and pinned at runtime by PolicyAndRateLimitNamesResolveAsTheGuardAssumes); a
+      re-cased re-registration (literal, const alias, AuthorizationBuilder) is a second registration, so nothing naming the
+      policy is sign-in. ITEM 2 (closed): every statement of a policy-builder lambda must be add-only (AuthenticationSchemes
+      assignment, Requirements.Add, chains of the framework add-only members not shadowed by a BFF extension), the builder
+      parameter may appear nowhere else, and PendingRequirements / .Succeed( are refused. ITEM 3 (closed, for EVERY
+      ProofTest): the file must be compiled by a CI-run BFF test project (ProofTestProjects, pinned by
+      TheProofTestProjectsAreRunByCi; Compile items evaluated with MSBuild semantics) and the method must be a plain unskipped
+      xUnit Fact/Theory, public, non-generic, in public non-abstract types, outside #if, with no Skip call and no early
+      return; the 13 ProofTests referenced on integ/uac-r2-batch4 all pass (checked read-only). ITEMS 4 + 5 / ROUND 43 ITEM 1
+      (closed, option A, all 16 anonymous routes): ExplicitlyAnonymousRoutes pins every control each route carries
+      (rate-limit policy, RequireWebhookSignature, IsDevelopment-only mapping), EveryExplicitlyAnonymousRouteCarriesItsPinnedControl
+      reads them from code and requires the waiver text to agree; RateLimitPoliciesAreAppliedOnlyOnAScannedChain refuses
+      EnableRateLimiting / DisableRateLimiting in any form, wrappers and method groups. ITEM 6 (closed): presence evidence is
+      tied to the asserted request (its client, its request message, or a table read of the same verb and path); untraceable
+      responses need evidence for every request. ITEM 7 / ROUND 43 ITEM 2 (closed): MemoizedHealthCheck bounds the shared
+      evaluation at CatalogHealthChecks.EvaluationTimeout (15 s, on a worker, TimeProvider) - a hang becomes a shared fault
+      re-evaluated after the 30 s window - and each catalog registration carries the same HealthCheckRegistration.Timeout.
+      ITEMS 8-14: verified; item 11's observation closed (an AdminOnlyRoutes route is listed only in a group of its own file).
+      FOUND AND CLOSED (note 19.2): AuthorizationBuilder AddDefaultPolicy / AddFallbackPolicy were invisible to the catalog and
+      the fallback pin; NothingButAnAuthenticatedUserSatisfiesSignIn refuses pipeline-stage replacement, ASP.NET Core
+      IAuthorizationService implementations, direct IAuthorizationHandler, handlers over non-BFF requirements,
+      PendingRequirements and any other Succeed call.
+      SEEDING: f2v1-1..f2v1-9 on real source or the real data file (note 19.5), each failing exactly the named rule(s), each
+      restored and touched; the verifier's exact seeds for items 1-6 each fail.
+      TESTS: Guard 76/76; CatalogHealthMemoContractTests 10/10 (five runs green); ArchTests 407/407;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed of 428; BFF unit suite
+      14231 passed / 0 failed / 54 skipped of 14285 (no contention failures this run).
+      PUBLISH SIZE: base 700c3960d 45.65 MB (47,872,599 bytes) vs branch 8c6d49718 45.66 MB (47,873,044 bytes) = +445 bytes,
+      Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
+    </outcome>
+    <justification-of-src-change round="f2-v1">
+      Main-session round 43 item 2 (binding). No NEW surface: the existing MemoizedHealthCheck.State gains an
+      EvaluationTimeout constructor argument and property; CatalogHealthChecks gains the EvaluationTimeout constant beside
+      MemoTtl; the existing AddCatalogCheck registration passes it as HealthCheckRegistration.Timeout. No new type, endpoint,
+      service, DI registration, option, job, column, package, PCF or Dataverse plugin (ADR-002). COST OF DOING NOTHING: a hung
+      Dataverse read kept the shared evaluation unfinished forever - every /healthz/catalog caller waited until its own
+      client gave up and the memo never re-evaluated. ADR-009 path C and ADR-010 unchanged. Fail closed (ADR-003): a timeout
+      is the registration's failure status. Publish size measured (note 19.8).
+    </justification-of-src-change>
     <justification-of-src-change round="f2">
       Main-session round 34 item 7 (binding). NEW SURFACE: MemoizedHealthCheck (internal sealed IHealthCheck decorator) and
       CatalogHealthChecks.AddCatalogCheck (internal static registration helper), Infrastructure/HealthChecks/MemoizedHealthCheck.cs.

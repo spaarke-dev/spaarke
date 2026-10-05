@@ -1134,3 +1134,176 @@ publish-size measurement was a local build.
 ### 18.12 `.claude/` edits for the main session
 
 None new in f2. §17.8's `bff-deploy` skill text still stands (verify route registration with a bearer).
+
+## 19. Fix round f2-v1 (2026-10-05) — branch `task/uac-r2-167-f2-v1`
+
+Base `700c3960d` (`task/uac-r2-167-f2`). Binding inputs: the f2 verifier's items 1-17 and main-session round 43 (item 1:
+every AnonymousByDesign control enforced by the build, option A; item 2: the memoized health check time-bounded).
+**Every item is closed; nothing is owed, deferred or left for the owner.** No live write (no Dataverse, Azure, Entra or SPE
+call). Commits: `eba821b9b` (items 1-7 + round 43), `f6164f302` (memo test robustness), `d0aad8060` (item 11 observation),
+`8c6d49718` (found while closing item 1: AddDefaultPolicy / AddFallbackPolicy), `d87b5fc6a` (the development-only control
+on a typed, unreassigned host environment), and the docs commit.
+
+### 19.1 Per item
+
+| # | Item | Disposition | Where |
+|---|---|---|---|
+| 1, 15 | MEDIUM — a policy re-registered under another letter case passed (`PolicyCatalogOf` keyed names ordinally; ASP.NET Core resolves them case-insensitively) | **Closed.** The catalog's `Named` dictionary is `StringComparer.OrdinalIgnoreCase` for registrations AND lookups, so `AddPolicy("systemadmin", permissive)` is a second registration of SystemAdmin → ambiguous → nothing naming it is sign-in (the message names both spellings and says the last registration wins). The premise is pinned at runtime by `PolicyAndRateLimitNamesResolveAsTheGuardAssumes` (a real `AuthorizationOptions`: `GetPolicy("SystemAdmin")` after `AddPolicy("systemadmin", …)` answers the later, permissive policy; and a real `RateLimiterOptions`: rate-limit names are ORDINAL and a duplicate name throws — so the rate-limit pins stay exact). Controls in `SignInVerdict_NegativeControl_ConditionalCallsAndAliasesAreNotSignIn`: lower-case, upper-case, a re-cased `const` alias, and the AuthorizationBuilder form each fail; a route naming the policy in another case reaches the one registration (positive). Verified the framework fact by reflection on `Microsoft.AspNetCore.Authorization` 10.0.1 (policy map `OrdinalIgnoreCaseComparer`) and `Microsoft.AspNetCore.RateLimiting` 10.0.1 (`OrdinalCaseSensitiveComparer`). Seeded on real source (f2v1-1). | `RouteAuthorizationGuardTests.cs` "SIGN-IN IS VERIFIED" |
+| 2, 15 | LOW-MEDIUM — a call AFTER `RequireAuthenticatedUser()` could undo it (`Strip(p)`, `p.RequireAuthenticatedUser().Strip()`) | **Closed.** `PolicyBuilderRequiresAuthenticatedUser` now requires EVERY statement of the builder lambda to be one that can only add: `p.AuthenticationSchemes = …;` (the only settable member that cannot drop a requirement), `p.Requirements.Add(…);`, or a chain whose every member is a framework add-only member (`AddOnlyPolicyBuilderMembers`: RequireAuthenticatedUser/Claim/Role/UserName/Assertion, AddRequirements, AddAuthenticationSchemes) not shadowed by a BFF/shared extension method of the same name; the parameter may appear ONLY at those statement heads (never an argument, alias, right-hand side or nested-lambda capture); and the text may not touch `PendingRequirements` or call `.Succeed(`. Controls: 12 negative bodies (the verifier's seed, a qualified helper, the extension on the chain and as a statement, before the call, `Combine`, an alias, a capture in an assertion lambda, a right-hand side, a non-scheme member assignment, a `return`) + the shadowing extension; the real shapes stay positive. Seeded on real source — the verifier's `Strip(p)` seed (f2v1-2a), the extension-on-chain seed (f2v1-2b). | same |
+| 3, 16 | LOW-MEDIUM — the absence-proof rule accepted a ProofTest that never runs (`[Fact(Skip=…)]`, no test attribute, a file no csproj compiles) | **Closed, for EVERY ProofTest** (deny tests of fixed routes too, not only absence pins). `ProofTestViolations` now also requires: (1) the file is COMPILED by one of `ProofTestProjects` (Sprk.Bff.Api.Tests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Spaarke.ArchTests — each pinned as run by CI by `TheProofTestProjectsAreRunByCi`), evaluated from the projects' own `Compile` items with MSBuild's semantics (SDK default glob minus bin/obj/dot-folders unless disabled; Include/Exclude/Remove in document order; Directory.Build.props first and .targets last; a conditional or property-driven Include adds nothing, a conditional or property-driven Remove removes; a non-normalized path fails); (2) the method is a plain xUnit `[Fact]`/`[Theory]` (custom and Skippable attributes refused — they can skip at runtime) with no `Skip =` on any attribute (an `[InlineData(…, Skip = …)]` row included); (3) it is one public, non-generic method of public, non-abstract types, outside every `#if` region, whose body calls no Skip API and has no `return` outside a nested lambda or local function. Control `ProofTest_NegativeControl_OnlyARunnableCompiledTestProves` (the verifier's three seeds end to end through the ledger, eight relatives, five project-evaluation cases, and the live-route deny-test path). Checked read-only against every ProofTest referenced on `integ/uac-r2-batch4` (13: the 5 absence proofs of §18.2 and 8 deny tests named in the 163/164 notes) — **all pass**. Seeded on real source — the verifier's exact S-79 seed in all three forms, plus the runnable positive (f2v1-3). | `RouteAuthorizationGuardTests.cs` "A PROOF TEST MUST RUN" |
+| 4, 17 | LOW — `[EnableRateLimiting("health-probe")]` on the `/healthz/dataverse` handler spread the looser policy unseen | **Closed.** New rule `RateLimitPoliciesAreAppliedOnlyOnAScannedChain`: any `EnableRateLimiting` / `DisableRateLimiting` identifier (attribute, attribute class, metadata object, fluent call) in BFF + shared code is refused outright, the way `[AllowAnonymous]` is; a `.RequireRateLimiting(…)` call must be on a route or group chain the scanner reads (a wrapper extension or a static call is refused), and must be a call (not a method group). Combined with item 5's pin, the seed now fails twice. Seeded on real source — the verifier's exact seed (f2v1-4: 2 failed). | `RouteAuthorizationGuardTests.cs` "EVERY EXPLICITLY ANONYMOUS ROUTE…" |
+| 5 + round 43 item 1 | LOW — the AnonymousByDesign mandatory control was waiver TEXT for 13 of the 16 anonymous routes | **Closed (option A, all 16).** `ExplicitlyAnonymousRoutes` now pins, per route, EVERY control it carries: `RateLimitControl("policy")`, `WebhookSignatureControl()`, `DevelopmentOnlyControl()` (§19.3 lists them). `EveryExplicitlyAnonymousRouteCarriesItsPinnedControl` reads each from code — exactly one plain-literal `RequireRateLimiting` on the effective chain equal to the pin; `RequireWebhookSignature` on the chain; the registration inside the then-branch of `if (<env>.IsDevelopment())` with `<env>` an `IWebHostEnvironment`/`IHostEnvironment` parameter (or a `WebApplication[Builder]` parameter's `.Environment`) that the method never reassigns, and no BFF `IsDevelopment` extension — and fails when a control is removed, swapped (a looser policy is a different policy), added unpinned, doubled, unreadable, or applied in a form the guard cannot see; a route with NO pinned control fails; and the route's waiver text must name exactly the pinned controls (a different policy named, the control unnamed, or an unpinned kind named all fail). `HealthProbeRoutes` and the health-probe lines must agree. Waiver texts updated: consent-callback now names `RequireRateLimiting("anonymous")` as its mandatory control (HMAC stays its authenticity check), the two Graph webhooks also name `RequireRateLimiting("webhook-graph")`, the two Pending routes name their rate limit; line references refreshed. Control `AnonymousControls_NegativeControl_EachChangedOrUnseenControlFails` (each kind removed, swapped, doubled, unreadable, by attribute / metadata / wrapper / DisableRateLimiting, a raw signature filter, six dev-only variants, an IsDevelopment extension, the pin itself, three waiver disagreements, the probe-set disagreement; four positives). Seeded on real source (f2v1-5a..d). | same; Ledger `ExplicitlyAnonymousRoutes`, the AnonymousByDesign waivers |
+| 6 | LOW — the presence rule exempted a whole method on ANY signed-in evidence in its body | **Closed.** Evidence is tied to the request whose response is asserted: the request inside the asserting statement, or the one last assigned to the response variable it reads; when that cannot be traced (a lambda parameter, a collection, a helper) EVERY request the method sends needs its own evidence. A request counts as signed in when its client is built by a signed-in factory or given a bearer (by the method or by class setup), its request message is given a bearer, or a client made inline is a signed-in factory's; otherwise only an endpoint-table read of the SAME verb and path text (`AssertMapped`, or `Maps(…).Should().BeTrue()`) proves presence. Controls: the verifier's seed and four relatives fail (an unused signed-in client, a signed-in request to another route, a table read of another path or verb, an unasserted `Maps`), plus an anonymous client made inline and an untraceable response over an anonymous client; five tied positives. Over this branch's test tree the rule is green; over `integ/uac-r2-batch4`'s tree (read-only) it flags only the 5 tests 167 f1/f2 already rewrote (integ predates them) and §18.5's two `SurvivingSiblings_AreStillRouted_401WithoutABearer` — nothing new. Seeded on real source (f2v1-6). | `RouteAuthorizationGuardTests.cs` "NO TEST PROVES A ROUTE EXISTS…" |
+| 7 + round 43 item 2 | LOW — `MemoizedHealthCheck` had no upper time bound; a hang held every caller | **Closed, both ways round 43 allows.** The shared evaluation runs on a worker (`Task.Run`, so a check that blocks synchronously is bounded too), on a token cancelled at `CatalogHealthChecks.EvaluationTimeout` (15 s, measured on the injected `TimeProvider`), and is awaited with `WaitAsync(bound, TimeProvider)`: at the bound the memo completes with a `FailureStatus` result ("did not complete within 15 s"), shared and re-evaluated like any fault — for no longer than the 30 s window — so a hang is never a stuck memo. The abandoned evaluation's scope and token source are disposed when it does finish (its late fault observed). Each catalog registration also carries `HealthCheckRegistration.Timeout` = the same bound, so the health-check service stops each caller's wait. Tests (FakeTimeProvider): `AHungEvaluation_EndsAtTheBound_AsASharedTimeoutFault_AndIsReEvaluatedAfterTheWindow` (pending one tick short of the bound; fault at the bound; the inner token cancelled; the same fault shared to 30 s − 1 tick; re-evaluated at 30 s), `ACheckThatBlocksSynchronously_IsBoundedToo`, the registration pin (`Timeout` = the bound; a plain `AddCheck` has none). Seeded (f2v1-7a/b/c). | `MemoizedHealthCheck.cs`; `CatalogHealthMemoContractTests.cs` |
+| 8-14 | Verifier's verified-closed items and runs | **Verified, not open** — re-run in full on the f2-v1 state (§19.8). Item 11's "Minor" observation is closed too (§19.2). | — |
+
+### 19.2 Found while closing — each with its one-line justification (test scope beyond the listed behaviours)
+
+- **AuthorizationBuilder `AddDefaultPolicy` / `AddFallbackPolicy`** (criterion 12 "registered exactly once" + the fallback pin):
+  both register a named policy AND replace the default / fallback slot, and the guard read neither — verified the methods
+  exist on `AuthorizationBuilder` 10.0.1. A permissive `AddDefaultPolicy` made every bare `RequireAuthorization()` public
+  (seed f2v1-9b names 379 routes); `AddFallbackPolicy` replaced the pinned fallback (seed f2v1-9a). Both are now
+  catalogued (named registration + slot), and the fallback pin counts `AddFallbackPolicy` as a second, non-pinned setting.
+- **`NothingButAnAuthenticatedUserSatisfiesSignIn`** (criterion 12 "sign-in PROVEN"): the proof that a policy calls
+  `RequireAuthenticatedUser()` holds only if nothing else can succeed `DenyAnonymousAuthorizationRequirement` (whose handler
+  never fails it). Refused repo-wide: a pipeline-stage replacement (policy provider, evaluator, handler provider, context
+  factory, middleware result handler, `DefaultAuthorizationService`, a fresh `AuthorizationOptions`), an implementation or
+  registration of ASP.NET Core's `IAuthorizationService` (Spaarke.Core.Auth's own same-named interface is told apart by
+  qualifier and imports), a direct `IAuthorizationHandler`, an `AuthorizationHandler<T>` over a requirement type not declared
+  in BFF/shared code, any `PendingRequirements`, and any `.Succeed(…)` other than `context.Succeed(requirement)` inside an
+  `AuthorizationHandler<T>.HandleRequirementAsync`. Control `SignInSatisfaction_NegativeControl_EachBypassFails` (ten bypasses,
+  five positives). Seeded on real source (f2v1-2c: a SystemAdmin assertion that succeeds the pending requirements — 4 failed).
+- **Item 11's observation** (the AdminOnlyRoutes group's `File` was not checked): a route is now listed only in a group of the
+  file that registers it — the mechanism pin fails otherwise, and the ledger takes admin credit only from such a group.
+  Controls added; seeded on the real data file (f2v1-8).
+- **`TheProofTestProjectsAreRunByCi`**: without it, `ProofTestProjects` could name a project nothing runs.
+
+### 19.3 The sixteen explicitly anonymous routes and their pinned controls
+
+| Route | Controls (read from code) |
+|---|---|
+| `GET /healthz`, `GET /healthz/catalog`, `GET /ping` | `RequireRateLimiting("health-probe")` |
+| `GET /healthz/dataverse`, `/healthz/dataverse/crud`, `/healthz/dataverse/doc/{id}` (Pending 166), `GET /status`, `GET /api/config/client`, `GET /api/config`, `GET /api/office/health`, `POST /api/registration/demo-request`, `POST /api/onboarding/consent-callback` | `RequireRateLimiting("anonymous")` |
+| `POST /api/office/save-debug` | `IsDevelopment()`-only mapping (`if (env.IsDevelopment())`, `env` an `IWebHostEnvironment` parameter) |
+| `POST /api/compose/webhooks/spe-doc-changed`, `POST /api/communications/incoming-webhook` | `RequireWebhookSignature` + `RequireRateLimiting("webhook-graph")` |
+| `POST /api/communications/acs/eventgrid` (Pending UNOWNED-NEW) | `RequireRateLimiting("webhook-graph")` |
+
+### 19.4 For the main session at integration
+
+- **ProofTests must run.** Every `ResolvedBy`/`ProofTest` row recorded at integration (§18.2's absence proofs and the sweep
+  tasks' deny tests) must name a plain, unskipped `[Fact]`/`[Theory]` in a file a CI-run BFF test project compiles. All 13
+  ProofTests referenced on `integ/uac-r2-batch4` today pass (checked read-only).
+- **Anonymous routes.** A sibling that removes or gates an anonymous route deletes its `ExplicitlyAnonymousRoutes` line (as
+  since f1); one that CHANGES a control (a policy, the signature, the development-only mapping) changes the line's controls
+  and the waiver text in the same diff — the pin now reads both.
+- **AdminOnlyRoutes groups are per file.** A sibling group (task 165's planned record-matching group, §18.4) lists only
+  routes its own file registers.
+- **Presence rule.** Unchanged for integration: §18.5's two `SurvivingSiblings_AreStillRouted_401WithoutABearer` tests still
+  need the replacement given there; nothing else on `integ/uac-r2-batch4` trips the tied rule once 167's rewritten tests merge.
+
+### 19.5 Seeding proofs (f2-v1) — each on REAL source or the real data file, run, captured, restored with `git checkout` and touched
+
+| # | Rule | Seeded | Result |
+|---|---|---|---|
+| f2v1-1 | Item 1 — the verifier's exact seed | `AuthorizationModule.cs`: `options.AddPolicy("systemadmin", p => p.RequireAssertion(_ => true));` after SystemAdmin | **3 failed / 76**: `EveryRequireAuthorizationForm…` — 'policy 'SystemAdmin' is registered 2 times ("SystemAdmin" at AuthorizationModule.cs:366, "systemadmin" at :383) — ASP.NET Core resolves policy names case-insensitively and the LAST registration wins'; `NoRouteIsAnonymousByOmission` names the SystemAdmin routes; the r2 control on the real catalog. (f2: ArchTests 399/399 green.) |
+| f2v1-2a | Item 2 — the verifier's exact seed | SystemAdmin: `p.RequireAuthenticatedUser(); Strip(p); …` + `private static void Strip(AuthorizationPolicyBuilder b) { b.Requirements.Clear(); b.RequireAssertion(_ => true); }` | **3 failed**: 'none of the policies "SystemAdmin" calls RequireAuthenticatedUser()…' + the SystemAdmin routes + the real-catalog control. |
+| f2v1-2b | Item 2 — the extension-on-chain variant | `p.RequireAuthenticatedUser().Strip();` + `private static AuthorizationPolicyBuilder Strip(this AuthorizationPolicyBuilder b)` | **3 failed**, the same three. |
+| f2v1-2c | §19.2 — an assertion that succeeds the pending requirements | SystemAdmin's assertion: `foreach (var pending in context.PendingRequirements.ToList()) context.Succeed(pending);` | **4 failed**: the three above + `NothingButAnAuthenticatedUserSatisfiesSignIn` ("reads PendingRequirements…", "'.Succeed(pending)' — only `context.Succeed(requirement)` …"). |
+| f2v1-3a | Item 3 — the verifier's exact seed | `GET /api/communications/{id:guid}/status` (S-79) deleted from `CommunicationEndpoints.cs`, its waiver deleted, S-79 `ResolvedBy = "161"`, ProofTest = a seeded `tests/integration/regression/SeedS79AbsenceTests.cs` method: bearer GET, `Be(HttpStatusCode.NotFound)`, `[Fact(Skip = "never runs")]` | **1 failed**: 'S-79 …: ProofTest … never runs — an attribute sets Skip, so xUnit reports it skipped …'. (f2: 68/68 green.) |
+| f2v1-3b | Item 3 | the same method with no test attribute | **1 failed**: '… never runs — it carries no [Fact] or [Theory] attribute, so xUnit never runs it'. |
+| f2v1-3 positive | Item 3 | the same method with a plain `[Fact]` | **76/76 green** (route deleted, waiver deleted, ResolvedBy + a runnable absence proof). |
+| f2v1-3c | Item 3 | the file moved to `tests/zz/`, ProofTest re-pointed | **1 failed**: '… never runs — no CI-run test project compiles 'tests/zz/SeedS79AbsenceTests.cs' (checked …) — an uncompiled test pins nothing'. |
+| f2v1-4 | Item 4 — the verifier's exact seed | `/healthz/dataverse`: `.RequireRateLimiting("anonymous")` removed, `[Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("health-probe")]` on `TestDataverseConnectionAsync` | **2 failed**: `RateLimitPoliciesAreAppliedOnlyOnAScannedChain` ("EndpointMappingExtensions.cs:501: 'EnableRateLimiting' — …") and `EveryExplicitlyAnonymousRouteCarriesItsPinnedControl` ("its pinned control RequireRateLimiting("anonymous") is not on the route …"). (f2: 399/399 green.) |
+| f2v1-5a | Item 5 — the verifier's exact seed | `/healthz/dataverse`: `.RequireRateLimiting("anonymous")` removed, nothing in its place | **1 failed**: the pin ("… is not on the route …"). (f2: green.) |
+| f2v1-5b | Item 5 — swapped for a looser policy | `/healthz/dataverse` on `RequireRateLimiting("webhook-graph")` (600/min) | **1 failed**: the pin, twice — the pinned control missing and "it carries RequireRateLimiting("webhook-graph"), which ExplicitlyAnonymousRoutes does not pin". |
+| f2v1-5c | Item 5 — the other two kinds | `RequireWebhookSignature(…)` removed from the mail webhook; save-debug's condition widened to `env.IsDevelopment() \|\| DateTime.UtcNow.Year > 0` | **1 failed**: the pin names both ("… IsDevelopment() is not on the route", "… RequireWebhookSignature is not on the route"). |
+| f2v1-5d | Round 43 — waiver text and pin disagree | `/status` waiver text names `RequireRateLimiting("health-probe")` | **1 failed**: "its waiver does not name its pinned control RequireRateLimiting("anonymous")" + "its waiver names RequireRateLimiting("health-probe"), which is not the rate-limit policy pinned for it". |
+| f2v1-5e | Item 5 — a development-only look-alike | `MapSaveEndpoints`: `env = new AlwaysDevelopmentEnvironment();` before `if (env.IsDevelopment())` | **1 failed**: the pin — "'env' is not an IWebHostEnvironment / IHostEnvironment parameter … that the method leaves unassigned — the guard cannot verify the mapping is development-only" + "its pinned control IsDevelopment() is not on the route". |
+| f2v1-5f | Round 43 — a control applied in a form the guard cannot see (signature kind) | the Compose webhook: `.RequireWebhookSignature(…)` moved into a wrapper extension `.Signed()` declared in the same file | **1 failed**: the pin — "its pinned control RequireWebhookSignature is not on the route — … applied in a form the guard cannot read (… a wrapper extension)". |
+| f2v1-6 | Item 6 — the verifier's exact seed | `ScopePersonasEndpointTests`: a test with an unused `new HttpClient()` given a bearer, an anonymous `_client.GetAsync("/api/ai/scopes/personas")` and `NotBe(NotFound)` | **1 failed** naming exactly `ScopePersonasEndpointTests.cs:47 SeedPersonas_…`. Variant: `EndpointTable.AssertMapped` of `/api/ai/scopes/actions` instead → **1 failed**; the same with `/api/ai/scopes/personas` (the asserted path) → **green**. (f2: green on the seed.) |
+| f2v1-7a | Item 7 — no bound | `run.WaitAsync(bound, _time)` → `run` | **2 failed / 10**: the hang test and the synchronous-block test, each at its 30 s safety net (`TimeoutException`). |
+| f2v1-7b | Item 7 — no registration timeout | the `EvaluationTimeout` argument removed from the `HealthCheckRegistration` | **1 failed**: "Expected 15s because 'ai-catalog-reconciliation': the health-check service stops each caller's wait at the same bound … but found -1ms". |
+| f2v1-7c | Item 7 — no worker | `Task.Run(() => RunInnerAsync(…))` → `RunInnerAsync(…)` | the synchronous-block test HANGS: `--blame-hang-timeout 90s` aborts the run naming `ACheckThatBlocksSynchronously_IsBoundedToo`. |
+| f2v1-8 | Item 11 observation | real `AdminOnlyRoutes`: `GET /api/admin/jobs` moved from the JobsEndpoints.cs group into the MembershipAdminEndpoints.cs group | **1 failed**: "GET /api/admin/jobs is registered in Api/Admin/JobsEndpoints.cs but listed in the Api/Admin/MembershipAdminEndpoints.cs group …". |
+| f2v1-9a | §19.2 | `AuthorizationModule.cs`: `services.AddAuthorizationBuilder().AddFallbackPolicy("open", p => p.RequireAssertion(_ => true));` | **1 failed**: the fallback pin — "set 2 times …", "FallbackPolicy = AddFallbackPolicy(…) — it must be exactly …", "nothing applies it UNCONDITIONALLY …". |
+| f2v1-9b | §19.2 | the same with `AddDefaultPolicy("open", permissive)` | **5 failed**: bare `RequireAuthorization()` unproven ("… the override at AuthorizationModule.cs:385 does not call RequireAuthenticatedUser()"), `NoRouteIsAnonymousByOmission` naming 379 routes, and three controls that run on the real catalog. |
+
+After the last restore `git status` was clean (a hang dump the f2v1-7c run wrote under `tests/unit/Sprk.Bff.Api.Tests/TestResults/`
+was deleted). The inline-fixture controls listed in §19.1-19.2 run on every build.
+
+### 19.6 Placement and justification (CLAUDE.md §10 / §11)
+
+- **No new BFF surface.** `MemoizedHealthCheck.cs` (existing, f2) gains an evaluation bound: `State` takes a second
+  constructor argument and exposes `EvaluationTimeout`; `CatalogHealthChecks.EvaluationTimeout` (15 s) is a constant
+  beside `MemoTtl`, and the existing registration passes it as `HealthCheckRegistration.Timeout`. No new type, endpoint,
+  service, DI registration, option, job, column, package, PCF or Dataverse plugin (ADR-002). *Cost of doing nothing*
+  (round 43 item 2): a hung Dataverse read kept the memo's in-flight evaluation unfinished forever, so every
+  `/healthz/catalog` caller waited until its own client gave up and the memo never re-evaluated. ADR-009 (path C, the
+  metadata L1 exception documented on the class) and ADR-010 (no DI registration) unchanged. Fail closed (ADR-003): a
+  timeout is reported as the registration's failure status, never as healthy.
+- **Tests** are all on KEEP paths: the guard (`tests/Spaarke.ArchTests`, ADR-038 A1) and the contract memo tests. ADR-038 bans:
+  none (no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor null-check test; `FakeTimeProvider` drives the bound;
+  the only real-time waits are 30 s safety nets on signals the test itself controls, never a timing assumption).
+  `PolicyAndRateLimitNamesResolveAsTheGuardAssumes` exercises the framework only to pin the premise the guard's comparers
+  rest on (one-line justification: if the framework's comparers changed, the guard's case handling would be wrong silently).
+- **Publish size** (CLAUDE.md §10 item 4): +445 bytes (§19.8).
+- **CVE**: no package reference changed, so the vulnerable-package set is unchanged.
+
+### 19.7 /conflict-check (round f2-v1)
+
+Open PRs: **25 checked, none** touches `RouteAuthorizationGuardTests*.cs`, `MemoizedHealthCheck.cs` or
+`CatalogHealthMemoContractTests.cs` (`gh pr list`, file filter). `MemoizedHealthCheck.cs` and the guard's partial files do
+not exist on master or on `integ/uac-r2-batch4` (167 has not merged), so there is no textual overlap; the integration notes
+are §19.4.
+
+### 19.8 Step 9.5 quality gates and test runs (FULL — `src/`, `tests/**`, auth)
+
+**Code review** (coverage-first; none Critical):
+- *Warning (low)* — the presence rule traces a response variable to its LAST assignment before the assertion by text; a
+  response reassigned through a helper (or a tuple deconstruction) is untraceable, and the rule then demands evidence for
+  every request in the method (fail closed — a false failure at worst, never a false pass).
+- *Warning (low)* — `NothingButAnAuthenticatedUserSatisfiesSignIn` refuses every `.Succeed(` outside the handler shape,
+  so an unrelated future API named `Succeed` (a result type) would fail the build with a clear message; none exists in BFF or
+  shared code today.
+- *Suggestion* — `RunnableTestProblem` refuses a `return` anywhere in the proof's own body (outside nested lambdas and local
+  functions), including a harmless trailing one; the real proofs have none (checked on `integ/uac-r2-batch4`).
+- *Suggestion* — `ProjectCompiles` models MSBuild items for one path (default glob, Include/Exclude/Remove in order,
+  Directory.Build.props/targets); it does not evaluate MSBuild properties or imports beyond those — anything it cannot read
+  fails closed (an Include adds nothing, a Remove removes).
+- Complexity (CLAUDE.md §11.5): the guard's rules file grows by ~1,850 lines in five cohesive sections (anonymous-control pin
+  + rate-limit forms, runnable proofs + project evaluation, sign-in satisfaction, policy-lambda add-only rule, tied presence
+  evidence), about half of it controls and fixtures; each section has one reason to change. `MemoizedHealthCheck.cs` stays one
+  file with one reason to change (+~60 lines).
+- ADR-038 bans: none in anything added. AI-smell scan: no single-implementation interface, no log-and-rethrow, no null check
+  on a non-nullable.
+
+**ADR check**: ADR-003 ✓ (every new rule fails closed; a timeout is a failure status) · ADR-008 ✓ (authorization still on
+endpoint metadata + filters; the new rules only refuse mechanisms that would bypass it) · ADR-009 ✓ (the memo's metadata L1
+exception unchanged, path C) · ADR-010 ✓ (no DI registration added) · ADR-036 / ADR-052 ✓ (the bounded evaluation is a
+per-probe worker, not a timer or a `BackgroundService`) · ADR-038 ✓ (KEEP paths; a control for every rule; `FakeTimeProvider`)
+· ADR-002 ✓ (no plugin). No violation; no §6.5 escalation needed.
+
+**Test runs** (final state; the full suites run sequentially 2026-10-05 09:56-10:24Z, ArchTests re-run after `d87b5fc6a`):
+
+| Suite | Result |
+|---|---|
+| Affected: `RouteAuthorizationGuardTests` | **76 / 76 passed** (68 + 8 new: `PolicyAndRateLimitNamesResolveAsTheGuardAssumes`, `NothingButAnAuthenticatedUserSatisfiesSignIn`, `SignInSatisfaction_NegativeControl_EachBypassFails`, `ProofTest_NegativeControl_OnlyARunnableCompiledTestProves`, `TheProofTestProjectsAreRunByCi`, `RateLimitPoliciesAreAppliedOnlyOnAScannedChain`, `EveryExplicitlyAnonymousRouteCarriesItsPinnedControl`, `AnonymousControls_NegativeControl_EachChangedOrUnseenControlFails`) |
+| Affected: `CatalogHealthMemoContractTests` | **10 / 10 passed** (8 + 2 new), five consecutive runs green |
+| `tests/Spaarke.ArchTests` (NetArchTest, full) | **407 / 407 passed**, 0 skipped (39 s) |
+| `Sprk.Bff.Api.IntegrationTests` (full) | **104 / 104 passed** (7 s) |
+| `Spe.Integration.Tests` (full) | **403 passed, 25 skipped, 0 failed** of 428 (7 m 30 s) — the 25 are the suite's own live-environment skips |
+| `Sprk.Bff.Api.Tests` (BFF unit, full, TRX) | **14,231 passed, 0 failed, 54 skipped** of 14,285 (19 m 16 s; 14,283 at f2 + the 2 new memo tests). No contention failures this run. |
+
+**Publish size** (CLAUDE.md §10 item 4, measured): fresh source exports (`git archive` of `src/server`, `config/` and the root
+build files) of the base `700c3960d` and of this branch's `8c6d49718` (the last commit before the measurement; `d87b5fc6a`
+changes only `tests/`) to short paths (`C:\w167v1b`, `C:\w167v1h`), `dotnet publish -c Release` from the project directory,
+zipped with PowerShell `Compress-Archive` (Optimal) over `deploy\api-publish\*` (the `Deploy-BffApi.ps1` method), PDBs
+included: base **45.65 MB** (47,872,599 bytes, 212 files, 4 PDBs) vs branch **45.66 MB** (47,873,044 bytes, 212 files, 4 PDBs)
+= **+445 bytes**. Equal file counts on both sides. The directories were removed afterwards.
+
+Test scope beyond the listed behaviours: §19.2 (each with its one-line justification) and the framework premise test (§19.6).
+No test calls Dataverse or Azure; the publish-size measurement was a local build.
+
+### 19.9 `.claude/` edits for the main session
+
+None new in f2-v1. §17.8's `bff-deploy` skill text still stands.
