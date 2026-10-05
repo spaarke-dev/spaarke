@@ -4538,18 +4538,26 @@ public partial class RouteAuthorizationGuardTests
                 return false;
             }
 
+            // <env> is an IWebHostEnvironment / IHostEnvironment parameter of the enclosing method, or `<p>.Environment` with
+            // <p> a WebApplication / WebApplicationBuilder parameter — and the parameter is never reassigned in the method.
             var env = Regex.Replace(m.Groups["env"].Value, @"\s+", string.Empty);
             var method = unit.MethodAt(at);
-            var parameter = method?.Params.FirstOrDefault(p => p.Name == env);
-            if ((parameter is not null && HostEnvironmentType.IsMatch(Regex.Replace(parameter.Type, @"\s+", string.Empty)))
-                || env.EndsWith(".Environment", StringComparison.Ordinal))
+            var property = Regex.Match(env, @"^(?<p>[A-Za-z_]\w*)\.Environment$");
+            var name = property.Success ? property.Groups["p"].Value : env;
+            var parameter = method?.Params.FirstOrDefault(p => p.Name == name);
+            var type = parameter is null ? string.Empty : Regex.Replace(parameter.Type, @"\s+", string.Empty);
+            var typed = property.Success
+                ? Regex.IsMatch(type, @"^(?:global::)?(?:Microsoft\.AspNetCore\.Builder\.)?WebApplication(?:Builder)?$")
+                : HostEnvironmentType.IsMatch(type);
+            if (typed && method is not null && !Regex.IsMatch(method.Body, $@"(?<![\w.]){Regex.Escape(name)}\s*=(?![=>])"))
             {
                 return true;
             }
 
             problems.Add($"{route.Key} at {route.File}:{route.Line} sits under `{Squash(header)}`, but '{env}' is not an "
-                         + "IWebHostEnvironment / IHostEnvironment parameter of the enclosing method or an .Environment property — "
-                         + "the guard cannot verify the mapping is development-only");
+                         + "IWebHostEnvironment / IHostEnvironment parameter (or a WebApplication[Builder] parameter's .Environment) "
+                         + "of the enclosing method that the method leaves unassigned — the guard cannot verify the mapping is "
+                         + "development-only");
             return false;
         }
 
@@ -4832,7 +4840,7 @@ public partial class RouteAuthorizationGuardTests
 
         // POSITIVE: the pinned shapes; the `.Environment` property form; `else if`; a block nested inside the dev block.
         Assert.Empty(Violations(Module()));
-        Assert.Empty(Violations(Module(debugOpen: "        if (app.Environment.IsDevelopment())\n        {\n", environment: "int unused")));
+        Assert.Empty(Violations(Module(debugOpen: "        if (host.Environment.IsDevelopment())\n        {\n", environment: "WebApplication host")));
         Assert.Empty(Violations(Module(debugOpen: "        if (Flag) { }\n        else if (env.IsDevelopment())\n        {\n")));
         Assert.Empty(Violations(Module(debugOpen: "        if (env.IsDevelopment())\n        {\n        if (Flag)\n        {\n",
             debugClose: "        }\n        }\n")));
@@ -4887,6 +4895,8 @@ public partial class RouteAuthorizationGuardTests
                      ("        if (env.IsDevelopment()) { }\n        else\n        {\n", "        }\n", "IWebHostEnvironment env"),
                      ("        if (env.IsDevelopment()) { }\n", string.Empty, "IWebHostEnvironment env"),
                      ("        if (env.IsDevelopment())\n        {\n", "        }\n", "AppSettings env"),
+                     ("        env = AlwaysDevelopment.Instance;\n        if (env.IsDevelopment())\n        {\n", "        }\n", "IWebHostEnvironment env"),
+                     ("        if (settings.Environment.IsDevelopment())\n        {\n", "        }\n", "AppSettings settings"),
                  })
         {
             Assert.Contains(Violations(Module(debugOpen: open, debugClose: close, environment: environment)),
