@@ -263,7 +263,7 @@ foreach ($entry in $Bind) {
 }
 if ($bindErrors.Count -gt 0) {
     $script:LogWriter.Dispose()
-    Write-Host 'The -Bind input is invalid — nothing was read or written:' -ForegroundColor Red
+    Write-Host 'The -Bind input is invalid — no container was read and nothing was written:' -ForegroundColor Red
     $bindErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     exit 2
 }

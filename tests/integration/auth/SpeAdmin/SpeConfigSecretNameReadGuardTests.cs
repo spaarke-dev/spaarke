@@ -73,26 +73,44 @@ public sealed class SpeConfigSecretNameReadGuardTests
     }
 
     [Fact]
-    public async Task GetClientForOwningAppAsync_RefusesANonConformingOwningAppSecret_BeforeTheOboCacheAndTheVault()
+    public async Task GetClientForOwningAppAsync_RefusesANonConformingOwningAppSecret_EvenWithACachedOboClient()
     {
         var provider = new SpeAdminTokenProvider(_vault.Object, NullLogger<SpeAdminTokenProvider>.Instance);
         var service = CreateGraphService(provider);
+        service.UseOwningAppClientForConfig(ConfigId, "user-token", NewGraphClient());
 
         var act = () => service.GetClientForOwningAppAsync(Config("AzureOpenAI-ApiKey"), userAccessToken: "user-token");
+
+        await act.Should().ThrowAsync<SpeConfigSecretNameNotAllowedException>(
+            "a client cached for the config under an earlier name is never served for a name outside the allow-list");
+        VaultWasNeverRead();
+    }
+
+    [Fact]
+    public async Task AcquireOwningAppTokenAsync_RefusesANonConformingOwningAppSecret_EvenWithACachedToken()
+    {
+        var provider = new SpeAdminTokenProvider(_vault.Object, NullLogger<SpeAdminTokenProvider>.Instance);
+        provider.UseTokenForConfig(ConfigId, "user-token", "cached-obo-token");
+
+        var act = () => provider.AcquireOwningAppTokenAsync(Config("AzureOpenAI-ApiKey"), "user-token");
 
         await act.Should().ThrowAsync<SpeConfigSecretNameNotAllowedException>();
         VaultWasNeverRead();
     }
 
     [Fact]
-    public async Task TheTokenProvider_RefusesANonConformingOwningAppSecret_WithoutReadingTheVault()
+    public async Task TheTokenProvidersVaultRead_RefusesANonConformingName_OnEveryPathThatReachesIt()
     {
         var provider = new SpeAdminTokenProvider(_vault.Object, NullLogger<SpeAdminTokenProvider>.Instance);
 
-        await ((Func<Task>)(() => provider.AcquireOwningAppTokenAsync(Config("AzureOpenAI-ApiKey"), "user-token")))
-            .Should().ThrowAsync<SpeConfigSecretNameNotAllowedException>();
         await ((Func<Task>)(() => provider.FetchOwningAppSecretAsync(Config("Communication-WebhookSigningKey"))))
             .Should().ThrowAsync<SpeConfigSecretNameNotAllowedException>();
+
+        // The startup validation reaches the vault read with no guard of its own: the read's own refusal is recorded as
+        // that config's failure, with the reason code.
+        var failures = await provider.ValidateOwningAppSecretsAsync(new[] { Config("redis-connection-string") });
+        failures.Should().ContainSingle().Which.Error.Should().Contain(SpeConfigSecretNamePolicy.NotAllowedReasonCode);
+
         VaultWasNeverRead();
     }
 

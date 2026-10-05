@@ -2839,6 +2839,19 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// TEST SEAM (task 165, round 35 item 3): places an owning-app OBO client in the cache exactly as
+    /// <see cref="GetClientForOwningAppAsync"/> holds one after an exchange, so a test can prove the secret-name rule
+    /// refuses BEFORE a cached client is reused. Never called by production code.
+    /// </summary>
+    internal void UseOwningAppClientForConfig(Guid configId, string userAccessToken, GraphServiceClient client)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        var tokenHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(userAccessToken));
+        _oboClientCache[$"{configId}:{Convert.ToHexString(tokenHash).ToLowerInvariant()}"] =
+            new CachedClient(client, DateTimeOffset.MaxValue);
+    }
+
+    /// <summary>
     /// Replaces all custom properties on an SPE container with the supplied list.
     ///
     /// Uses the Graph PATCH endpoint:
@@ -5937,9 +5950,8 @@ public sealed class SpeAdminGraphService
             string.Join(", ", applicationPermissions));
 
         // 1. Acquire a SharePoint-scoped access token using the config's app registration credentials.
-        //    The scope must target the SharePoint admin host (not graph.microsoft.com). The secret name is judged first
-        //    (task 165, round 35 item 3) — a non-conforming one is refused before the vault is called.
-        Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.EnsureAllowed(config.SecretKeyVaultName, config.ConfigId);
+        //    The scope must target the SharePoint admin host (not graph.microsoft.com). FetchKeyVaultSecretAsync refuses a
+        //    secret name outside the allow-list before the vault is called (task 165, round 35 item 3).
         var clientSecret = await FetchKeyVaultSecretAsync(config.SecretKeyVaultName, ct);
         var credential = new ClientSecretCredential(config.TenantId, config.ClientId, clientSecret);
 
@@ -6021,9 +6033,10 @@ public sealed class SpeAdminGraphService
     // =========================================================================
 
     /// <summary>
-    /// Fetches a client secret from Azure Key Vault by secret name. Its callers refuse a name outside
-    /// <see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy"/> with the config id first; this last line
-    /// refuses one too, so no path can reach the vault with it (task 165, round 35 item 3).
+    /// Fetches a client secret from Azure Key Vault by secret name — after refusing a name outside
+    /// <see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy"/> (task 165, round 35 item 3), so no path
+    /// reaches the vault with one (<see cref="RegisterContainerTypeAsync"/> relies on this line alone;
+    /// <see cref="GetClientForConfigAsync"/> also refuses before its client cache).
     /// </summary>
     private async Task<string> FetchKeyVaultSecretAsync(string secretName, CancellationToken ct)
     {

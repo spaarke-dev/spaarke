@@ -195,7 +195,7 @@ public sealed class SpeAdminTokenProvider
                 $"Config '{config.ConfigId}' does not have an owning app secret name.");
         }
 
-        SpeConfigSecretNamePolicy.EnsureAllowed(config.OwningAppSecretName, config.ConfigId);
+        // FetchKeyVaultSecretAsync refuses a name outside the allow-list before the vault (task 165, round 35 item 3).
         return await FetchKeyVaultSecretAsync(config.OwningAppSecretName, ct);
     }
 
@@ -376,4 +376,12 @@ public sealed class SpeAdminTokenProvider
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
+
+    /// <summary>
+    /// TEST SEAM (task 165, round 35 item 3): places an OBO token in the cache exactly as
+    /// <see cref="AcquireOwningAppTokenAsync"/> holds one after an exchange, so a test can prove the secret-name rule
+    /// refuses BEFORE a cached token is reused. Never called by production code.
+    /// </summary>
+    internal void UseTokenForConfig(Guid configId, string userAccessToken, string accessToken) =>
+        _oboTokenCache[$"{configId}:{HashToken(userAccessToken)}"] = new CachedToken(accessToken, DateTimeOffset.MaxValue);
 }
