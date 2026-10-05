@@ -619,6 +619,51 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
+    public async Task EventFiling_ATransientFailureMovingTheToDo_IsCompletedByTheSecondPass()
+    {
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000016");
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        ShareWorld.OrdinaryChild("sprk_todo", todoOfEvent, ("sprk_regardingevent", "sprk_event", Event));
+        // The first re-own of the to-do is refused; the fault has cleared by the second.
+        var writes = 0;
+        ShareWorld.RefusingOwnerWritesOf(todoOfEvent);
+        ShareWorld.Sequence = () =>
+        {
+            if (++writes == 2)
+                ShareWorld.ClearOwnerWriteFaults();
+            return writes;
+        };
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.OwnerWrites.Where(w => w.Id == todoOfEvent).Should().HaveCount(2, "one pass, then the one retry");
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task EventFiling_WhenTheToDoCannotBeMoved_TheReFileStands_AndTheToDoIsLeftAsItWas()
+    {
+        // ADR-003: the pass never fails the re-file it follows, and never guesses — after the retry the to-do is reported
+        // (an ERROR) and left as it was; the two-minute recent-changes pass moves it in (it sees the event's modification).
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000017");
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        ShareWorld.OrdinaryChild("sprk_todo", todoOfEvent, ("sprk_regardingevent", "sprk_event", Event));
+        ShareWorld.RefusingOwnerWritesOf(todoOfEvent);
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().Equal(("sprk_event", Event, Directory.SecureNamedTeam));
+        ShareWorld.OwnerWrites.Where(w => w.Id == todoOfEvent).Should().HaveCount(Sprk.Bff.Api.Services.Access.SecureChildReconciler.RefileChildPassAttempts);
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam));
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task EventFiling_MovedOutOfASecureMatter_ByAFullAccessHolder_ReleasesTheToDoFiledUnderIt_AndTakesItsMirrorOff()
     {
         // The release rides the event's own F3 (Full Access on the matter left): the to-do was isolated only through it.

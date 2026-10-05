@@ -10,7 +10,7 @@
  *   typed-lookup fetch (there is no typed lookup to null). Plain `unlinkRegarding`
  *   only nulled a typed lookup, which silently no-oped for a denorm-only primary.
  */
-import { clearPrimaryRegarding } from '../ConnectionsWriteHandler';
+import { _resetNavPropCacheForTests, clearPrimaryRegarding, unlinkRegarding } from '../ConnectionsWriteHandler';
 import { derivePrimaryReview, ASSOCIATION_STATUS_RESOLVED_VALUE } from '../provenance';
 
 const GUID = '11111111-1111-1111-1111-111111111111';
@@ -98,6 +98,51 @@ describe('clearPrimaryRegarding (item 2 — delete a confirmed denorm-only prima
     );
     expect(res.success).toBe(true);
     expect(updateRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe('unlink / clear name the host REGARDING lookup (UAC-r2 task 147 r1c, owner round 36)', () => {
+  // The communications family's re-file route takes only the filing: a lookup that merely references the same table (a
+  // sender contact) is not the association and would be refused.
+  const NAV_PROPS = {
+    ok: true,
+    json: async () => ({
+      value: [
+        {
+          ReferencingAttribute: 'sprk_fromcontact',
+          ReferencingEntityNavigationPropertyName: 'sprk_FromContact',
+          ReferencedEntity: 'contact',
+        },
+        {
+          ReferencingAttribute: 'sprk_regardingcontact',
+          ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
+          ReferencedEntity: 'contact',
+        },
+      ],
+    }),
+  };
+
+  beforeEach(() => _resetNavPropCacheForTests());
+
+  it('unlinkRegarding nulls the regarding lookup, not the first lookup to the same table', async () => {
+    const refile = jest.fn().mockResolvedValue({});
+    const fetchImpl = jest.fn().mockResolvedValue(NAV_PROPS) as unknown as typeof fetch;
+
+    const res = await unlinkRegarding(ctx(refile), 'contact', fetchImpl);
+
+    expect(res.success).toBe(true);
+    expect(refile).toHaveBeenCalledWith('sprk_communication', GUID, { 'sprk_RegardingContact@odata.bind': null });
+  });
+
+  it('clearPrimaryRegarding nulls the regarding lookup of the primary, not another lookup to its table', async () => {
+    const refile = jest.fn().mockResolvedValue({});
+    const fetchImpl = jest.fn().mockResolvedValue(NAV_PROPS) as unknown as typeof fetch;
+
+    await clearPrimaryRegarding(ctx(refile), 'contact', fetchImpl);
+
+    const payload = refile.mock.calls[0][2] as Record<string, unknown>;
+    expect(payload).toHaveProperty(['sprk_RegardingContact@odata.bind'], null);
+    expect(payload).not.toHaveProperty(['sprk_FromContact@odata.bind']);
   });
 });
 

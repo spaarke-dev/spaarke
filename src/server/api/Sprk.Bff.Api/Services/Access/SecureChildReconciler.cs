@@ -453,11 +453,21 @@ public sealed class SecureChildReconciler
         var mayRelease = before == true && !now;
         var anchor = new RecordOwnershipParent(table, childId);
         SecureChildReconcileReport? report = null;
-        for (var attempt = 1; attempt <= RefileChildPassAttempts; attempt++)
+        try
         {
-            report = await ReconcileBelowAsync(anchor, now, mayRelease, ct).ConfigureAwait(false);
-            if (report.IsComplete)
-                return report;
+            for (var attempt = 1; attempt <= RefileChildPassAttempts; attempt++)
+            {
+                report = await ReconcileBelowAsync(anchor, now, mayRelease, ct).ConfigureAwait(false);
+                if (report.IsComplete)
+                    return report;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Never thrown: the re-file it follows has landed. Every row the pass had not moved is as it was.
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the pass over the records filed " +
+                "under it faulted; every row it had not moved was left as it was.", table, childId);
+            return report;
         }
 
         _logger.LogError(
