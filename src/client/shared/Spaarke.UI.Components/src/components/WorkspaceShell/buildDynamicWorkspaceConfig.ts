@@ -333,19 +333,8 @@ export function buildDynamicWorkspaceConfig(
       // registration `defaultHeight` regardless of the row's actual height.
       //
       // Semantics: row-height wins over section-defaultHeight (operator intent
-      // > registration hint). Overrides any registration.defaultHeight — EXCEPT
-      // for `contentSizing: 'clamped'` sections, where FR-02 (below, and test
-      // (h)) requires the row ceiling and the section's own `defaultHeight` to
-      // COEXIST: the row wrapper gets the rowHeight-derived ceiling (applied
-      // further below via `rowHeightStyle`), while the section's own inner-card
-      // style keeps using its registration `defaultHeight` so the clamped
-      // viewport size the widget was authored against is preserved. (Task 092,
-      // 2026-10-04: commit 803c77ace1, 2026-07-03, made this branch
-      // unconditional on `jsonRow.rowHeight` the day after FR-02/test (h) were
-      // introduced — 8aad2037c1, 2026-07-02 — a real regression, not a stale
-      // test: pre-803c77ace1 the clamped section correctly kept its own
-      // defaultHeight-derived style independent of the row.)
-      if (jsonRow.rowHeight && registration.contentSizing !== 'clamped') {
+      // > registration hint). Overrides any registration.defaultHeight.
+      if (jsonRow.rowHeight) {
         // Force `flex: 1` on the widget root chain to fill, but ALSO set the
         // outer card's explicit height so the whole subtree has a determinate
         // parent height. Factory-supplied maxHeight/height wins if present.
