@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-       NOTE: Spaarke.DailyBriefing.Components and Spaarke.LegalWorkspace are intentionally excluded —
+    1. Shared libraries (8 packages in src/client/shared/ -- Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
+       NOTE: Spaarke.DailyBriefing.Components and Spaarke.LegalWorkspace are intentionally excluded --
        they're source-only libs (tsc --noEmit) with @spaarke peerDependencies; type-check happens via
        the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
@@ -13,7 +13,7 @@
     4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
     5. External SPA (src/client/external-spa/)
 
-    Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed —
+    Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed --
     see the in-line "Install dependencies" comment for the trigger logic) followed by
     `npm run build`. Shared libraries must build first because downstream components depend on them.
 
@@ -79,7 +79,7 @@ if ($Component) {
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF build result from output (pcf-scripts exits 0 on failure)
 
-# Shared libraries (build order matters — downstream deps must come after their dependencies)
+# Shared libraries (build order matters -- downstream deps must come after their dependencies)
 #
 # Spaarke.DailyBriefing.Components is now INCLUDED (standalone build restored 2026-07-08 by
 # spaarke-daily-update-service-r5, superseding PR #506). Its `@spaarke/*` deps are declared as
@@ -92,11 +92,11 @@ Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF bui
 # spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
 # populated src/index.ts as a RE-EXPORT barrel of files that stay under src/solutions/LegalWorkspace/src/.
 # Its `@spaarke/*` deps are peerDependencies and `npm run build` is `tsc --noEmit`; standalone
-# type-check fails with TS2307 "Cannot find module '@spaarke/*'" — verified in task 020. Type-check
+# type-check fails with TS2307 "Cannot find module '@spaarke/*'" -- verified in task 020. Type-check
 # is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
-    @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep → builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry → fresh-master SpaarkeAi builds failed on the unbuilt lib).
+    @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep -> builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry -> fresh-master SpaarkeAi builds failed on the unbuilt lib).
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
     @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # type-only, no @spaarke/* deps (auth dep dropped 2026-10-03, reuse audit C-14)
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
@@ -111,10 +111,10 @@ $SharedLibs = @(
     # installed and built hides this.
     @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }    # depends on UI.Components (source + node_modules)
     @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" } # depends on UI.Components (dist)
-    @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) → MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above — its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
+    @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) -> MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above -- its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
     @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
-    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets — re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
+    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets -- re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
 )
 
 # Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.
@@ -210,7 +210,7 @@ function Invoke-ComponentBuild {
             #      a sibling file: dep), re-run install so symlinks get created.
             #      [2026-06-28 fix: prior "skip if node_modules exists" optimization
             #      left stale state when package.json gained a new `file:..` ref
-            #      between branches — SpaarkeAi missed daily-briefing-components.]
+            #      between branches -- SpaarkeAi missed daily-briefing-components.]
             #   3. Otherwise skip install entirely and build directly.
             #   4. Tracked separately: scheduled regeneration of locks once we have
             #      bandwidth to deploy-verify the transitive upgrades. Until then,
@@ -229,7 +229,7 @@ function Invoke-ComponentBuild {
             }
             elseif ((Test-Path $packageJsonPath) -and (Get-Item $packageJsonPath).LastWriteTime -gt (Get-Item $nodeModulesPath).LastWriteTime) {
                 $needsInstall = $true
-                Write-Host "        installing (package.json newer than node_modules — sibling-dep drift)..." -ForegroundColor DarkGray
+                Write-Host "        installing (package.json newer than node_modules -- sibling-dep drift)..." -ForegroundColor DarkGray
             }
             if ($needsInstall) {
                 # Localize $ErrorActionPreference inside the script block so

@@ -35,8 +35,20 @@ Same rule as `.github/workflows/pcf-build-prod-nightly.yml`, PR #1285):
 - `docs/guides/PCF-DEPLOYMENT-GUIDE.md` said **"NEVER use `npm run build:prod` — pcf-scripts only has `build`"**,
   the AP-1 error `pcf-deploy` was corrected for in May. Corrected, plus a troubleshooting row for "build succeeded
   but the deployed control is unchanged".
-- `src/client/pcf/{MatterHeader,RecordHeader}/Solution/pack.ps1` (which rebuild before packing) and
-  `scripts/Build-AllClientComponents.ps1` (PCF step) judge the build with the module.
+- `src/client/pcf/{MatterHeader,RecordHeader}/Solution/pack.ps1` (which rebuild before packing) judge the build with
+  the module.
+- `scripts/Build-AllClientComponents.ps1` Step 4 (the release build's PCF step, run by `Deploy-Release.ps1` Phase 1)
+  now builds **each PCF on its own in production mode**, mirroring the nightly workflow: every git-tracked
+  `src/client/pcf/<name>/package.json` with a `build:prod` script gets `npm install` + `npm run build:prod`, is judged
+  by the module, and is its own summary row (`PCF/<name>`); zero PCFs discovered is a FAILED row. It used to run ONE
+  aggregate dev-mode `npm run build` at `src/client/pcf`, which never worked from a clean checkout (TS5083, then out of
+  memory) and whose `out/` nothing consumed. Step 1 now builds `Spaarke.Events.Components` and
+  `Spaarke.SmartTodo.Components` AFTER `Spaarke.UI.Components` (both depend on it; before, a clean checkout failed
+  Step 1 and never reached Step 4). `ThemeEnforcer` gained the `build:prod` script every other PCF has. The script is
+  now ASCII-only, so Windows PowerShell 5.1 parses it too (12 non-ASCII dashes/arrows in a BOM-less file gave 10 parse
+  errors). Verified with #1123 merged: 14/14 shared libs + 19/19 PCFs pass.
+- `master-deploy` SKILL.md: F-2's "until diagnosed" follow-up was stale (F-2 itself records the 2026-06-11 fix); now
+  points at the 2026-10-05 clean-checkout fixes as well.
 - `scripts/Deploy-PCFWebResources.ps1` **deleted** and dropped from `Deploy-AllWebResources.ps1`: it only ever pushed
   `UniversalQuickCreate`, deleted 2026-06-22 by `pcf-orphan-cleanup-r1`, from a hard-coded path that no longer exists.
 
