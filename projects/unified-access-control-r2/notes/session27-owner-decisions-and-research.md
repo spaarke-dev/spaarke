@@ -572,6 +572,24 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - the allow-list regex anchored with `\z` (not `$`), with a trailing-newline test;
    - the H5/H8 root-business-unit read, checked in live gate (d).
 
+## Round 42 (2026-10-05). BINDING. Main-session decisions under round 15. Task 140, from its verification.
+
+1. **The race between a contact's write and an internal take-over is closed (option A).**
+   - The contact-mode grant PATCH and the contact revoke's deactivation both send the row's ETag as `If-Match`, using the ETag from the read that checked "issuer == caller".
+   - A 412 means the row changed in between. The answer is then 409 `managed_elsewhere`, with the existing copy, and the row is re-read for the response. There is no blind retry.
+   - Option (B), re-read only, narrows the window but does not close it. Option (C) accepts a known hole.
+   - Tests: a take-over between the check and the write, on both the grant and the revoke path. Seeded.
+2. **The reconciliation job (R1) and a contact-issued row with no expiry: the contact's cap applies (neither A, B nor C).**
+   - A contact-issued grant may never outlive the issuing contact's own access (task 140's rule: capped at its level and its own expiry).
+   - So when R1 writes are on and it finds a contact-issued row with a null expiry:
+     - It re-stamps the expiry to the EARLIER of +90 days and the issuing contact's own active grant expiry on that record.
+     - If the issuing contact no longer holds an active grant there, it deactivates the row.
+     - It keeps the contact as issuer, because no internal person acted.
+     - It reports each such row.
+   - Option (A), skip, leaves an open-ended contact grant. Option (B), take over with no person to stamp, invents an issuer.
+   - Correct the three places that say the job only DEACTIVATES grant rows.
+   - Tests and seeds per case: re-stamped to +90, capped by the contact's expiry, issuer contact gone.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
