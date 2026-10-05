@@ -551,6 +551,27 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
 3. **`sdap.provision.principal_share_failed` copy accepted as recommended** (owner round 27's stance: adjust in UAT). In the wizard: "{name} was not given access to this project. You can share it with them later from Manage Access." The ribbon uses the same sentence with {record}, and round 29's two sentences are generalized to {record}. Each is pinned verbatim.
    - An empty or unresolvable name falls back to "Someone" (finding: `personName("")` produced an empty name). Never an empty name, never silent.
 
+## Round 41 (2026-10-05). BINDING. Main-session decisions under round 15. Task 165, from its verification of `task/uac-r2-165-f2`.
+
+1. **Round 35 item 1 includes H8's replication-pending path, and task 165 fixes it.** It is not handed to another project.
+   - Today, on that path, a container is created and then never stamped and never removed.
+   - It must be stamped and read back before anything durable consumes the container (Key Vault write, H7 hand-off, `CompletedPhase`), or removed.
+   - The H8 code lives in this repository, and round 35 assigned it to 165.
+   - Correct the guide and the note D19 to match the code.
+2. **Unbound containers leave every dashboard view (option b, D18).** That includes the platform operator's aggregate `unattributedContainerCount` and storage.
+   - Under Model 1, the root admin of ANY environment is that environment's platform operator. An aggregate over unbound containers of a shared type therefore counts other customers' containers.
+   - The alarm is the backfill's `-Verify`, which lists every unbound container to the operator who runs it, plus the pre-deploy/onboarding gate (round 35 item 2).
+3. **The three dev test containers whose owner cannot be derived** (`b!DcvT…`, `b!rAta…`, `b!c8YR…`) are BOUND to the root unit `06fbf21c` ("Spaarke") with `-Bind`, as a manual live step.
+   - Binding is reversible and deleting is not, so nothing is deleted.
+4. **Dev config `68f9a952` stores `null` as its secret name.** Its owning app's secret is stored under a conforming name (for example `spe-owning-app-model1-owner`), and the config is PATCHed to that name.
+   - Deliver a script (dry run / `-Apply` / `-Verify`) and a manual gate. Never delete the config.
+   - If the read-only investigation proves the config is used only by the control plane, say so in the note with the evidence, and still make it conforming.
+5. **The verifier's LOW items are closed in the same round:**
+   - a test that bites for the platform-operator `TotalCount` guard;
+   - the creation guard's two holes: a URI held in a variable, and the other seeded shape;
+   - the allow-list regex anchored with `\z` (not `$`), with a trailing-newline test;
+   - the H5/H8 root-business-unit read, checked in live gate (d).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
