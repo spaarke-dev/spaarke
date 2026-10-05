@@ -139,11 +139,11 @@ export interface LayoutJsonRow {
    * `contentSizing`.
    *
    * Spec: FR-02 (spaarke-dataset-grid-framework-r2). Applied by the framework as
-   * `maxHeight` + `overflow: hidden` on the row wrapper. When both `rowHeight`
-   * (row-level) AND `contentSizing: 'clamped'` (section-level) are set, the row's
-   * ceiling wins — the row wrapper's `maxHeight` provides the constraint and the
-   * section's own `defaultHeight` still applies to its inner card, but the row's
-   * `overflow: hidden` prevents any over-constraint on the outer wrapper.
+   * `maxHeight` + `overflow: hidden` on the row wrapper, and each section card in
+   * the row receives the row height literally (height/minHeight/maxHeight),
+   * overriding the registration `defaultHeight` whatever its `contentSizing`
+   * (R2 UAT §5.6, 803c77ace1). A factory-supplied `style.height`/`style.maxHeight`
+   * still wins over the row height.
    *
    * Omitted `rowHeight` preserves current behavior (row grows to fit sections;
    * sections apply their own `contentSizing` per FR-01).

@@ -182,7 +182,12 @@ describe('todoScoring.ts remains untouched (locked composite formula)', () => {
       repoRoot,
       'src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts'
     );
-    const contents = fs.readFileSync(lockedFilePath, 'utf8');
+    // Normalize CRLF → LF before hashing: the repo stores the file LF (i/lf), but a Windows
+    // checkout with core.autocrlf=true materializes it CRLF. Hashing raw bytes made the pin
+    // depend on the checkout (the CRLF hash passed on Windows and failed on a Linux/LF CI
+    // checkout, #1290). The pin below is the hash of the LF content — identical to
+    // `git show HEAD:<path> | sha256sum` — so it holds on every platform.
+    const contents = fs.readFileSync(lockedFilePath, 'utf8').replace(/\r\n/g, '\n');
     const hash = crypto.createHash('sha256').update(contents).digest('hex');
     // Captured via `sha256sum` immediately before task 011 made any edits.
     //
@@ -195,6 +200,10 @@ describe('todoScoring.ts remains untouched (locked composite formula)', () => {
     // (priority 0.50 / effort 0.20 inverted / urgency 0.30) and every scoring/label function below
     // are byte-for-byte unchanged; only the date-parsing primitive's SOURCE moved. New hash computed
     // via `sha256sum` immediately after that edit, reviewed in the same change.
-    expect(hash).toBe('0d71adc88d9235efb47a1a321ebe919c9eb4da7954c01c47e298ab124b081691');
+    //
+    // Re-pinned 2026-10-04 (#1290) to the LF-normalized hash of the SAME content (master
+    // c2ef1857b7, unchanged since b5b0c0ce08). The previous value 0d71adc8… was the CRLF
+    // working-copy hash of these exact bytes; no formula or file content changed.
+    expect(hash).toBe('1bc56f8672b6cb85b22004f21078db8a0d5b1c8bdfb9d90a353f0c726f048079');
   });
 });

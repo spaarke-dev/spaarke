@@ -76,6 +76,9 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   title: {
+    // Rendered as an <h2> (heading semantics, like Fluent's DialogTitle) — reset the
+    // user-agent heading margin so the header geometry is unchanged.
+    margin: 0,
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase400,
     lineHeight: tokens.lineHeightBase400,
@@ -205,9 +208,14 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                 </Tooltip>
               </div>
             )}
-            <span className={styles.title} title={title} id={titleId}>
+            {/* An <h2>, not a <span>: the title is the dialog's heading. Fluent's
+                DialogTitle (which this custom header replaces) and the self-chromed
+                EmailComposer header both rendered an h2, so screen-reader heading
+                navigation found the modal title; a span silently dropped that
+                (WCAG 2.1 1.3.1, spec NFR-02). It also stays the aria-labelledby target. */}
+            <h2 className={styles.title} title={title} id={titleId}>
               {title}
-            </span>
+            </h2>
           </div>
           <div className={styles.headerRight}>
             {headerActions}

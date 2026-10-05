@@ -206,11 +206,13 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
  *   (g) A row WITH `rowHeight: '80vh'` produces a `WorkspaceRowConfig` where
  *       `maxHeight === '80vh'` and `overflow === 'hidden'`.
  *   (h) When a row has `rowHeight` set AND a section in the row has
- *       `contentSizing: 'clamped'`, BOTH constraints coexist: the row wrapper
- *       carries the `maxHeight`/`overflow: 'hidden'` ceiling, and the section
- *       still applies its own `defaultHeight` on the inner card style. This is
- *       the "row's ceiling wins for the outer wrapper" contract — the row's
- *       overflow prevents any over-constraint from the section's inner style.
+ *       `contentSizing: 'clamped'`, the row wins: the row wrapper carries the
+ *       `maxHeight`/`overflow: 'hidden'` ceiling AND the section card receives
+ *       the row height literally (height/minHeight/maxHeight = rowHeight),
+ *       overriding the registration `defaultHeight`. Since 803c77ace1 (R2 UAT
+ *       §5.6) — the original "section keeps its own 480px maxHeight" contract
+ *       left the DataGrid inside stuck at `defaultHeight` regardless of the
+ *       row's actual height.
  *   (i) A row that overflows its column template (more sections than slots)
  *       propagates `rowHeight` to every auto-appended overflow row.
  *
@@ -269,8 +271,9 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
   it('(h) row rowHeight + section contentSizing:"clamped" — row ceiling coexists with section defaultHeight (row wins on outer wrapper)', () => {
     // Section is clamped with defaultHeight 480px; row imposes a 100vh ceiling.
     // Expected: WorkspaceRowConfig carries maxHeight:100vh + overflow:hidden
-    // (row wrapper wins). The section still carries its own maxHeight:480px on
-    // the inner card style — but the row's overflow:hidden prevents over-constraint.
+    // (row wrapper wins), AND the section card receives the row height literally,
+    // overriding its registration defaultHeight (803c77ace1, R2 UAT §5.6 — "row-height
+    // wins over section-defaultHeight (operator intent > registration hint)").
     const registry = [
       makeRegistration('clamped-section', {
         defaultHeight: '480px',
@@ -285,13 +288,15 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
     expect(config.rows![0].maxHeight).toBe('100vh');
     expect(config.rows![0].overflow).toBe('hidden');
 
-    // Section still gets its own maxHeight (per FR-01 clamped behavior);
-    // the row wrapper's overflow:hidden ensures the section's inner style
-    // does not over-constrain the outer wrapper.
+    // The section card is sized to the row height (not its 480px defaultHeight),
+    // so the subtree has a determinate parent height the DataGrid can fill.
     const section = config.sections[0];
-    expect(section.style?.maxHeight).toBe('480px');
+    expect(section.style?.height).toBe('100vh');
+    expect(section.style?.minHeight).toBe('100vh');
+    expect(section.style?.maxHeight).toBe('100vh');
     expect(section.style?.overflow).toBe('hidden');
     expect(section.style?.display).toBe('flex');
+    expect(section.style?.flexDirection).toBe('column');
   });
 
   it('(i) row overflow (more sections than slots) — rowHeight propagates to every auto-appended overflow row', () => {

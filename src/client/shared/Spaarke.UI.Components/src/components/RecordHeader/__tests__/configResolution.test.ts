@@ -1039,10 +1039,16 @@ describe('resolveHeaderConfig', () => {
      * `console.warn`, `React` and `toolbarLaunchDefaults` while *documenting
      * that it does not use them*. Task 030's guard suite hit the same
      * false-positive and solved it by scanning import lines only.
+     *
+     * Split on `\r?\n`, not `'\n'`: on a CRLF checkout (Windows, core.autocrlf)
+     * every line would keep a trailing `\r`, and because `.` does not match `\r`
+     * the `//.*$` strip below would then never reach end-of-string — no line
+     * comment would be removed and the scans would false-positive on the JSDoc
+     * mentions above.
      */
     const codeOnly = source
       .replace(/\/\*[\s\S]*?\*\//g, '')
-      .split('\n')
+      .split(/\r?\n/)
       .map(line => line.replace(/\/\/.*$/, ''))
       .join('\n');
 

@@ -32,6 +32,67 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function () { /* noop in jsdom */ };
 }
 
+// Layout visibility for Tabster (Fluent v9's focus manager) — #1290.
+//
+// jsdom has no layout: `HTMLElement.offsetParent` is always null and
+// `document.body.getBoundingClientRect()` is 0×0. Tabster treats both as
+// "invisible" (FocusableAPI.isVisible → isDisplayNone / zero-size body), so in
+// jsdom it finds NO focusable element anywhere. Consequence for every Fluent
+// `Dialog` (incl. SprkModal and all its presets):
+//   1. DialogSurface's `useFocusFirstElement` finds nothing and falls back to
+//      focusing the surface itself, before Tabster has processed the surface's
+//      `data-tabster` modalizer attribute (that happens in a MutationObserver
+//      callback);
+//   2. Tabster therefore never activates the dialog's modalizer (it only
+//      auto-activates a new modalizer when focus is strictly INSIDE it);
+//   3. 250 ms later Tabster's debounced `_hiddenUpdate` sets
+//      `aria-hidden="true"` on every inactive modalizer — i.e. on the open
+//      dialog — and every `getByRole` inside it stops matching.
+// Tests passed only if they finished their queries inside that 250 ms window,
+// so they failed under full-suite CPU load (ConversationView forward/emailInFlow,
+// templatePicker, RecordNavigationModalShell, AccessGrantModal). In a browser
+// layout exists, focus lands on the first focusable inside the surface, and the
+// modalizer activates. These two shims give Tabster the same answer a browser
+// would, using computed `display` only — no fake geometry for anything else.
+if (typeof HTMLElement !== 'undefined') {
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+    configurable: true,
+    get() {
+      // CSSOM View: null when the element (or an ancestor) is not rendered
+      // (display:none), is <body>/<html>, is detached, or is position:fixed;
+      // otherwise the nearest positioned ancestor (or <body>).
+      const doc = this.ownerDocument;
+      if (!doc || !this.isConnected || this === doc.body || this === doc.documentElement) {
+        return null;
+      }
+      const view = doc.defaultView;
+      for (let el = this; el && el !== doc.documentElement; el = el.parentElement) {
+        if (el.hidden || view.getComputedStyle(el).display === 'none') {
+          return null;
+        }
+      }
+      if (view.getComputedStyle(this).position === 'fixed') {
+        return null;
+      }
+      for (let el = this.parentElement; el && el !== doc.body; el = el.parentElement) {
+        if (view.getComputedStyle(el).position !== 'static') {
+          return el;
+        }
+      }
+      return doc.body;
+    },
+  });
+}
+if (typeof HTMLBodyElement !== 'undefined') {
+  // A rendered <body> spans the viewport; jsdom reports 0×0, which Tabster
+  // reads as "this document is in a hidden iframe".
+  HTMLBodyElement.prototype.getBoundingClientRect = function () {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, width, height, toJSON() { return this; } };
+  };
+}
+
 // ResizeObserver — jsdom does not implement this. Fluent v9 components
 // (MessageBar/useMessageBarReflow, Drawer, ScrollPosition) construct one in
 // layout effects. Without this polyfill, render throws "ResizeObserver is
