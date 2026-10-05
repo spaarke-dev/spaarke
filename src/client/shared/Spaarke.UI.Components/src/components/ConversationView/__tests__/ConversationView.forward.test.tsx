@@ -273,7 +273,9 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     // SendEmailDialog uses modalType="alert" (no light dismiss) → role="alertdialog".
     const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
 
-    // Forward mode header (EmailComposer renders "Forward" for mode === 'forward').
+    // Forward mode header: SendEmailDialog derives the title "Forward" for mode === 'forward'
+    // and the SprkModal shell renders it as the dialog's h2 heading (afe23d7d0f moved the
+    // title from EmailComposer's own h2 into the shell).
     expect(within(dialog).getByRole('heading', { name: 'Forward' })).toBeInTheDocument();
 
     // Subject prefilled via deriveForwardState → dedupSubjectPrefix(..,'Fwd:').
@@ -287,6 +289,11 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     // Attachment prefilled — the source attachment rides the forward (FR-08),
     // defaulted to included (deriveForwardState → selected:true). It renders in
     // the composer's attachment list, and its per-item "Attach" toggle is on.
+    // Since 05e9c3d381 (composer UAT round 9) the Attachments section is DEFAULT COLLAPSED —
+    // its header shows a live count, and the rows render only once it is expanded.
+    const attachmentsToggle = within(dialog).getByRole('button', { name: /^Attachments \(1\)/ });
+    expect(attachmentsToggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(attachmentsToggle);
     expect(within(dialog).getByText('contract.pdf')).toBeInTheDocument();
     expect(within(dialog).getByRole('checkbox', { name: 'Attach contract.pdf as a file' })).toBeChecked();
 

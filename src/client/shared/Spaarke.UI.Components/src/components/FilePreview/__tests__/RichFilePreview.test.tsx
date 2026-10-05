@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RichFilePreview, type IRichFilePreviewProps } from '../RichFilePreview';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
@@ -234,7 +234,13 @@ describe('RichFilePreview', () => {
       const props = defaultProps({ navigationTotal: 3, currentIndex: 1, onNavigate });
       renderWithProviders(<RichFilePreview {...props} />);
       const div = document.createElement('div');
-      div.contentEditable = 'true';
+      // jsdom (26.x) implements neither the `contentEditable` IDL attribute nor the
+      // computed `isContentEditable` getter, so `div.contentEditable = 'true'` was only
+      // an inert expando and the guard read `undefined`. Set the real content attribute
+      // (what an editor such as Lexical renders) and supply the value a browser
+      // computes from it, which is what the guard reads.
+      div.setAttribute('contenteditable', 'true');
+      Object.defineProperty(div, 'isContentEditable', { configurable: true, get: () => true });
       document.body.appendChild(div);
       div.focus();
       act(() => {
@@ -260,8 +266,11 @@ describe('RichFilePreview', () => {
     it('renders Tags section with the documentType chip', () => {
       const props = defaultProps({ documentType: 'NDA' });
       renderWithProviders(<RichFilePreview {...props} />);
-      expect(screen.getByText('Tags')).toBeInTheDocument();
-      expect(screen.getByText('NDA')).toBeInTheDocument();
+      // Scope to the Tags region: the documentType value ALSO renders in the Details
+      // pane's "Type" row, so an unscoped getByText('NDA') matches twice.
+      const tagsRegion = screen.getByRole('region', { name: 'Tags' });
+      expect(tagsRegion).toBeInTheDocument();
+      expect(within(tagsRegion).getByText('NDA')).toBeInTheDocument();
     });
 
     it('renders Details with formatted date + size + created-by', () => {

@@ -22,7 +22,9 @@ describe('surfaceLaunchRegistry (surface-launch-mechanism §3)', () => {
     expect(e).toBeDefined();
     expect(e!.kind).toBe('wizard');
     expect(e!.surface).toBe('sprk_createeventwizard');
-    expect(e!.preset).toEqual({ sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID });
+    // 63ae17cf47 (D-013-03): the preset carries the subtype's fixed display NAME alongside
+    // the GUID so the wizard's event-type lookup renders "Task" instead of a blank label.
+    expect(e!.preset).toEqual({ sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID, sprk_eventtype_ref_name: 'Task' });
     // The exact GUID is a contract with the Dataverse Event subtype row.
     expect(EVENT_SUBTYPE_TASK_GUID).toBe('124f5fc9-98ff-f011-8406-7c1e525abd8b');
   });
@@ -47,16 +49,19 @@ describe('surfaceLaunchRegistry (surface-launch-mechanism §3)', () => {
     // 2026-07-22 — pre-existing, this legacy duplicate test had drifted) + nda-review
     // (ai-advanced-capabilities-nda-r1 task 022 — the "Review an NDA" card's surface entry;
     // see the canonical surfaceHandoff/__tests__/surfaceLaunchRegistry.test.ts for the
-    // dedicated resolution assertion).
+    // dedicated resolution assertion) + daily-briefing / smart-todo (0e9ec28b63,
+    // spaarkeai-assistant-enhancements-r4 task 022 FR-06 — workspace-tab layout launches).
     expect(Object.keys(SURFACE_LAUNCH_REGISTRY).sort()).toEqual([
       'create-matter',
       'create-project',
       'create-task',
       'create-todo',
       'create-work-assignment',
+      'daily-briefing',
       'find-similar',
       'list-tasks',
       'nda-review',
+      'smart-todo',
       'summarize-files',
     ]);
   });

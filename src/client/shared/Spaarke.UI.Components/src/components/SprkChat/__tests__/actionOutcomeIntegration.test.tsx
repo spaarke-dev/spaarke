@@ -168,6 +168,16 @@ function setupFetchRouter() {
   });
 }
 
+/**
+ * Per-test timeout for these end-to-end SSE tests (#1290). Each test drives the REAL SprkChat
+ * tree through `userEvent.type`, which dispatches keydown/keypress/beforeinput/input/keyup and a
+ * React re-render per character: the 41-character message in the first test costs ~1.0 s of a
+ * ~1.3 s test when the file runs alone. Under a full parallel `jest` run (one worker per core)
+ * that same work runs 3-4x slower and crossed jest's 5 s default, failing with a timeout and no
+ * assertion error. The operation is legitimately slow, not hung — a real hang still fails here.
+ */
+const SSE_INTEGRATION_TEST_TIMEOUT_MS = 15_000;
+
 describe('SprkChat - action_outcome Integration (task 044c)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -212,120 +222,132 @@ describe('SprkChat - action_outcome Integration (task 044c)', () => {
   // OutcomeCard with the record link chip + the Undo next-step chip.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('sseFlow_ActionOutcomeEvent_RendersOutcomeCardWithRecordLinkAndUndoChip', async () => {
-    const user = await renderChatWithSession();
+  it(
+    'sseFlow_ActionOutcomeEvent_RendersOutcomeCardWithRecordLinkAndUndoChip',
+    async () => {
+      const user = await renderChatWithSession();
 
-    // Exact server wire shape (ChatSseActionOutcomeData, Api/Ai/ChatEndpoints.cs;
-    // emitted by SideEffectGateAIFunction.cs ~line 490 — camelCase per
-    // JsonNamingPolicy.CamelCase).
-    const sseEvents = [
-      {
-        type: 'action_outcome',
-        content: null,
-        data: {
-          actionName: 'sprk_create_todo',
-          status: 'succeeded',
-          userSummary: 'Follow-up task "Review NDA" was created.',
-          linkUrl: 'https://org.crm.dynamics.com/main.aspx?etn=sprk_todo&id=abc-123&pagetype=entityrecord',
-          linkLabel: 'Open record',
-          nextSteps: ['Undo'],
-          ledgerOutputKey: 'binding-42@t1',
+      // Exact server wire shape (ChatSseActionOutcomeData, Api/Ai/ChatEndpoints.cs;
+      // emitted by SideEffectGateAIFunction.cs ~line 490 — camelCase per
+      // JsonNamingPolicy.CamelCase).
+      const sseEvents = [
+        {
+          type: 'action_outcome',
+          content: null,
+          data: {
+            actionName: 'sprk_create_todo',
+            status: 'succeeded',
+            userSummary: 'Follow-up task "Review NDA" was created.',
+            linkUrl: 'https://org.crm.dynamics.com/main.aspx?etn=sprk_todo&id=abc-123&pagetype=entityrecord',
+            linkLabel: 'Open record',
+            nextSteps: ['Undo'],
+            ledgerOutputKey: 'binding-42@t1',
+          },
         },
-      },
-      {
-        type: 'token',
-        content: 'ACTION EXECUTED: Follow-up task "Review NDA" was created. An Undo affordance is available.',
-      },
-      { type: 'done', content: null },
-    ];
+        {
+          type: 'token',
+          content: 'ACTION EXECUTED: Follow-up task "Review NDA" was created. An Undo affordance is available.',
+        },
+        { type: 'done', content: null },
+      ];
 
-    await sendMessageAndStream(user, 'Create a follow-up task to review the NDA', sseEvents);
+      await sendMessageAndStream(user, 'Create a follow-up task to review the NDA', sseEvents);
 
-    // The OutcomeCard component (OutcomeCard.tsx) renders its root with this testid.
-    // Before task 044c this NEVER appears for the auto-execute leg — only the plain
-    // grounded-text token content would render.
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('outcome-card')).toBeInTheDocument();
-      },
-      { timeout: 3000 }
-    );
+      // The OutcomeCard component (OutcomeCard.tsx) renders its root with this testid.
+      // Before task 044c this NEVER appears for the auto-execute leg — only the plain
+      // grounded-text token content would render.
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('outcome-card')).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
 
-    // User-facing summary rendered verbatim.
-    expect(screen.getByText('Follow-up task "Review NDA" was created.')).toBeInTheDocument();
+      // User-facing summary rendered verbatim.
+      expect(screen.getByText('Follow-up task "Review NDA" was created.')).toBeInTheDocument();
 
-    // Record chip: the server-composed link renders as a primary button labeled
-    // with the server's linkLabel.
-    const recordButton = screen.getByRole('button', { name: /open record/i });
-    expect(recordButton).toBeInTheDocument();
+      // Record chip: the server-composed link renders as a primary button labeled
+      // with the server's linkLabel.
+      const recordButton = screen.getByRole('button', { name: /open record/i });
+      expect(recordButton).toBeInTheDocument();
 
-    // Undo chip: the declared next-step affordance chip.
-    expect(screen.getByTestId('outcome-card-chips')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /undo/i })).toBeInTheDocument();
-  });
+      // Undo chip: the declared next-step affordance chip.
+      expect(screen.getByTestId('outcome-card-chips')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /undo/i })).toBeInTheDocument();
+    },
+    SSE_INTEGRATION_TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 2: a failed auto-execute outcome still renders the card (status
   // tolerant reader) without a link, and without fabricating an Undo chip.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('sseFlow_ActionOutcomeFailedNoLink_RendersCardWithoutLinkOrChips', async () => {
-    const user = await renderChatWithSession();
+  it(
+    'sseFlow_ActionOutcomeFailedNoLink_RendersCardWithoutLinkOrChips',
+    async () => {
+      const user = await renderChatWithSession();
 
-    const sseEvents = [
-      {
-        type: 'action_outcome',
-        content: null,
-        data: {
-          actionName: 'sprk_create_todo',
-          status: 'failed',
-          userSummary: 'The follow-up task could not be created.',
-          linkUrl: null,
-          linkLabel: null,
-          nextSteps: [],
-          ledgerOutputKey: 'binding-9@t2',
+      const sseEvents = [
+        {
+          type: 'action_outcome',
+          content: null,
+          data: {
+            actionName: 'sprk_create_todo',
+            status: 'failed',
+            userSummary: 'The follow-up task could not be created.',
+            linkUrl: null,
+            linkLabel: null,
+            nextSteps: [],
+            ledgerOutputKey: 'binding-9@t2',
+          },
         },
-      },
-      { type: 'done', content: null },
-    ];
+        { type: 'done', content: null },
+      ];
 
-    await sendMessageAndStream(user, 'Create a follow-up task', sseEvents);
+      await sendMessageAndStream(user, 'Create a follow-up task', sseEvents);
 
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('outcome-card')).toBeInTheDocument();
-      },
-      { timeout: 3000 }
-    );
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('outcome-card')).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
 
-    expect(screen.getByText('The follow-up task could not be created.')).toBeInTheDocument();
-    expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /open record/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('outcome-card-chips')).not.toBeInTheDocument();
-  });
+      expect(screen.getByText('The follow-up task could not be created.')).toBeInTheDocument();
+      expect(screen.getByText('Failed')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /open record/i })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('outcome-card-chips')).not.toBeInTheDocument();
+    },
+    SSE_INTEGRATION_TEST_TIMEOUT_MS
+  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: non-regression — an ordinary token/done stream with NO
   // action_outcome frame must not render an OutcomeCard.
   // ─────────────────────────────────────────────────────────────────────
 
-  it('sseFlow_NoActionOutcomeEvent_NoOutcomeCardRendered', async () => {
-    const user = await renderChatWithSession();
+  it(
+    'sseFlow_NoActionOutcomeEvent_NoOutcomeCardRendered',
+    async () => {
+      const user = await renderChatWithSession();
 
-    const sseEvents = [
-      { type: 'token', content: 'Just a normal grounded answer.' },
-      { type: 'done', content: null },
-    ];
+      const sseEvents = [
+        { type: 'token', content: 'Just a normal grounded answer.' },
+        { type: 'done', content: null },
+      ];
 
-    await sendMessageAndStream(user, 'A normal question', sseEvents);
+      await sendMessageAndStream(user, 'A normal question', sseEvents);
 
-    await waitFor(
-      () => {
-        expect(screen.getByText('Just a normal grounded answer.')).toBeInTheDocument();
-      },
-      { timeout: 3000 }
-    );
+      await waitFor(
+        () => {
+          expect(screen.getByText('Just a normal grounded answer.')).toBeInTheDocument();
+        },
+        { timeout: 3000 }
+      );
 
-    expect(screen.queryByTestId('outcome-card')).not.toBeInTheDocument();
-  });
+      expect(screen.queryByTestId('outcome-card')).not.toBeInTheDocument();
+    },
+    SSE_INTEGRATION_TEST_TIMEOUT_MS
+  );
 });

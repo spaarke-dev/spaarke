@@ -25,6 +25,9 @@ describe('SprkModal family — a11y + dismiss semantics (NFR-02)', () => {
     );
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
+    // The title is the dialog's accessible name AND a heading (Fluent DialogTitle parity).
+    expect(dialog).toHaveAccessibleName('A11y');
+    expect(screen.getByRole('heading', { level: 2, name: 'A11y' })).toBeInTheDocument();
     const close = screen.getByRole('button', { name: /^close$/i });
     const maximize = screen.getByRole('button', { name: /maximize dialog/i });
     close.focus();

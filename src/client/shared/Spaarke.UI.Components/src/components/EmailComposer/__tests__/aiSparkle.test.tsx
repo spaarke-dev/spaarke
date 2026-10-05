@@ -32,6 +32,19 @@ function renderComposer(overrides: Partial<IEmailComposerProps>) {
   return { ref, ...utils };
 }
 
+/**
+ * Wait until the rich-text editor has committed its seeded `initialBody`. Lexical applies the
+ * initial HTML in an update that commits on a microtask AFTER render and, because `$insertNodes`
+ * selects the inserted content, moves focus into the editor. Opening the sparkle Popover before
+ * that commit lets the late editor focus land OUTSIDE the trapFocus Popover, which Fluent treats
+ * as a focus-out dismissal — so the "+" menu never appears. A user cannot click before the editor
+ * has initialized; the test must not either (#1290: this only surfaced once jsdom stopped hiding
+ * every focusable from Tabster, i.e. once the Popover could actually receive focus).
+ */
+async function waitForEditorText(text: string) {
+  await screen.findByText(text);
+}
+
 /** Open the sparkle Popover, then open the "+" quick-responses menu. */
 async function openQuickResponses() {
   fireEvent.click(screen.getByRole('button', { name: /draft with ai/i }));
@@ -53,6 +66,7 @@ describe('EmailComposer — compose AI sparkle (Wave E / R5 redesign)', () => {
       onDraftWithAi,
     });
 
+    await waitForEditorText('original');
     await openQuickResponses();
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Summarize the thread' }));
 
@@ -95,6 +109,7 @@ describe('EmailComposer — compose AI sparkle (Wave E / R5 redesign)', () => {
     const onDraftWithAi = jest.fn().mockResolvedValue(DRAFTED);
     renderComposer({ initialBody: '<p>original</p>', initialBodyFormat: 'HTML', onDraftWithAi });
 
+    await waitForEditorText('original');
     await openQuickResponses();
 
     // The popover is now purely whole-draft: every quick action is always present (concise/
@@ -110,6 +125,7 @@ describe('EmailComposer — compose AI sparkle (Wave E / R5 redesign)', () => {
     const onDraftWithAi = jest.fn().mockResolvedValue(DRAFTED);
     renderComposer({ initialBody: '<p>original</p>', initialBodyFormat: 'HTML', onDraftWithAi });
 
+    await waitForEditorText('original');
     await openQuickResponses();
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Make it concise' }));
 
