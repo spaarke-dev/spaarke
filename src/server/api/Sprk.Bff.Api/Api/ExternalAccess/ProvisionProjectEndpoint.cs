@@ -3360,6 +3360,10 @@ public static class ProvisionProjectEndpoint
     /// Task 132 x task 133 (batch 4 integration): each cascaded child the compensation tried to put back on its own owner
     /// is an owner change — evicted once, whatever its read-back said (a PATCH that reports failure can have committed).
     /// A child read as already on its owner, gone, or unreadable before any write was not written: nothing to evict.
+    /// <para>The children an Assign cascades to (<c>sharepointdocumentlocation</c>, <c>sharepointdocument</c>) are held by
+    /// no access cache (<c>AssignCascadeChildOwners.IsReownedByCascade</c>), so for them the hook builds no pattern and
+    /// touches Redis not at all (task 132 integration residual) — the call stays because the HOOK, not each writer, decides
+    /// what an owner change can have made stale.</para>
     /// </summary>
     private static async Task EvictRestoredChildrenAsync(
         IMembershipCacheInvalidator accessCacheInvalidator, CascadeRestoreReport children, string traceId)

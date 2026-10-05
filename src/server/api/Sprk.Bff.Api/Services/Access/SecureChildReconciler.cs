@@ -269,14 +269,20 @@ public sealed class SecureChildReconciler
     private readonly DataverseWebApiClient _webApi;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SecureChildReconciler> _logger;
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
 
+    /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
+    /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
+    /// is evicted through task 132's ONE owner-change hook. It is optional so this service's test compositions keep
+    /// compiling. The host registers the hook unconditionally, with its Null-Object.</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
         SecureChildShareSynchronizer shares,
         DataverseWebApiClient webApi,
         IConfiguration configuration,
-        ILogger<SecureChildReconciler> logger)
+        ILogger<SecureChildReconciler> logger,
+        Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null)
     {
         _dataverse = dataverse;
         _ownership = ownership;
@@ -284,6 +290,8 @@ public sealed class SecureChildReconciler
         _webApi = webApi;
         _configuration = configuration;
         _logger = logger;
+        _accessCacheInvalidator = accessCacheInvalidator ?? new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance);
     }
 
     /// <summary>
@@ -1140,7 +1148,40 @@ public sealed class SecureChildReconciler
                     table, id, teamId);
             }
 
+            await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
             return await ReadBackAsync(table, id, DataversePrincipalRef.Team(teamId), writeFault).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Batch-4 integration, 148 × 132: an owner write on a child of the pass stales the access caches exactly as a root's
+        /// re-own does. This evicts through the ONE hook (<see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>)
+        /// once per write ATTEMPT, whatever its read-back says, because a write that reports failure can have committed. It
+        /// runs on <see cref="CancellationToken.None"/>, so a disconnected caller cannot leave the clean-up half done. It
+        /// never fails the pass: the hook does not throw by contract, and a fault anyway is logged and swallowed. The TTLs are
+        /// the backstop.
+        /// </summary>
+        private async Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet = null)
+        {
+            var set = entitySet
+                ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null);
+            if (set is null)
+            {
+                Log.LogError("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-owned, but its entity set is not known, so its cached " +
+                             "access snapshot was not evicted (the TTL backstop applies).", table, id);
+                return;
+            }
+
+            try
+            {
+                await _owner._accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+                    table, set, id, $"secure-child-reconcile:{_root.EntityLogicalName}:{_root.RecordId:D}", CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] Evicting the caches after re-owning {Table} {Id} failed; the TTLs " +
+                                   "are the backstop.", table, id);
+            }
         }
 
         /// <summary>
@@ -1184,6 +1225,7 @@ public sealed class SecureChildReconciler
                     table, id, Describe(owner));
             }
 
+            await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
             return await ReadBackAsync(table, id, owner, writeFault).ConfigureAwait(false);
         }
 
@@ -1339,6 +1381,14 @@ public sealed class SecureChildReconciler
                     read with { Children = new[] { child with { Owner = DataversePrincipalRef.Team(target) } } },
                     Log, _ct).ConfigureAwait(false);
                 var result = placed.Children.Single();
+                if (result.Outcome is CascadeChildRestoreOutcome.Restored or CascadeChildRestoreOutcome.Refused
+                    or CascadeChildRestoreOutcome.NotApplied or CascadeChildRestoreOutcome.Unverified)
+                {
+                    // A write was attempted (the same rule as provisioning's EvictRestoredChildrenAsync). For these tables the
+                    // hook builds no pattern; the call stays because the HOOK decides what an owner change made stale.
+                    await EvictOwnerChangeAsync(result.Child.LogicalName, result.Child.Id, result.Child.EntitySet).ConfigureAwait(false);
+                }
+
                 if (result.IsBack)
                 {
                     Count(child.LogicalName, result.Outcome == CascadeChildRestoreOutcome.AlreadyOwned ? AlreadyCorrect : Changed);

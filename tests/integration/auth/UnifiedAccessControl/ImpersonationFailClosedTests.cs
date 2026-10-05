@@ -40,7 +40,9 @@ public class ImpersonationFailClosedTests
                 // any request — so the MI branch's lazily-constructed DefaultAzureCredential is never used.
                 ["Graph:ManagedIdentity:Enabled"] = "true"
             }).Build(),
-            NullLogger<DataverseWebApiService>.Instance);
+            NullLogger<DataverseWebApiService>.Instance,
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
 
     /// <summary>
     /// The load-bearing guard (the top of DataverseWebApiService.RetrieveMultipleImpersonatedAsync): an empty caller systemuserid MUST

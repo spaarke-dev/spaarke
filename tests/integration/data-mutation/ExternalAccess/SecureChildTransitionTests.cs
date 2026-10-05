@@ -526,8 +526,106 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await JsonOf(response)).GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete);
         _fixture.IsSecureOf(rootId).Should().BeTrue("precondition: the pass stopped before the flag was cleared");
-        recorder.OwnerChanges.Should().Equal(("sprk_project", "sprk_projects", rootId));
+        recorder.OwnerChanges.Where(c => c.RecordId == rootId).Should().Equal(new[] { ("sprk_project", "sprk_projects", rootId) },
+            "the record's own owner change is evicted exactly once");
+        recorder.OwnerChanges.Should().Contain(("sprk_document", "sprk_documents", family.DocDirect),
+            "148 × 132: the refused child re-own was ATTEMPTED, and a write that reports failure can have committed");
         _fixture.ChildWorld.ClearOwnerWriteFaults();
+    }
+
+    // ── Batch-4 integration, 148 × 132: every child OWNER change is evicted through the ONE hook ───────────────────────
+
+    /// <summary>A host whose owner-change hook is <paramref name="recorder"/> (the module boundary), signed in.</summary>
+    private HttpClient ClientRecording(OwnerChangeRecorder recorder, out IDisposable host)
+    {
+        var factory = _fixture.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IMembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(recorder);
+        }));
+        host = factory;
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "provision-test-token");
+        return client;
+    }
+
+    private static (string, string, Guid) Evicted(string table, Guid id) =>
+        (table, Sprk.Bff.Api.Services.Access.SecureChildLineage.Children[table].EntitySet, id);
+
+    [Fact(DisplayName = "148×132: provisioning's child pass evicts every child it re-owns into isolation")]
+    public async Task Provisioning_EvictsEveryChildItReowns()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var family = SeedFamily("sprk_project", rootId, childrenIsolated: false);
+        var recorder = new OwnerChangeRecorder();
+        var client = ClientRecording(recorder, out var host);
+        using var _ = host;
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        recorder.OwnerChanges.Should().Contain(family.Children().Select(c => Evicted(c.Table, c.Id)),
+            "each child the pass moved onto the Secure team changed owner");
+        recorder.OwnerChanges.Should().Contain(("sprk_project", "sprk_projects", rootId), "the record's own move is evicted too");
+    }
+
+    [Fact(DisplayName = "148×132: the unsecure's Step 3.5 evicts every child it re-owns out of isolation")]
+    public async Task Unsecure_EvictsEveryChildItReowns()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        var family = SeedFamily("sprk_project", rootId, childrenIsolated: true);
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Creator), RecordShareLevels.CollaborateRights);
+        var recorder = new OwnerChangeRecorder();
+        var client = ClientRecording(recorder, out var host);
+        using var _ = host;
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        recorder.OwnerChanges.Should().Contain(family.Children().Select(c => Evicted(c.Table, c.Id)),
+            "each child the pass moved off the Secure team changed owner");
+    }
+
+    [Fact(DisplayName = "148×132: the unsecure-completion branch evicts the stranded child it re-owns")]
+    public async Task UnsecureCompletion_EvictsTheStrandedChildItReowns()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId, isSecure: false);
+        _fixture.UseChildWorldForRoots();
+        var stranded = Guid.NewGuid();
+        _fixture.ChildWorld.SecureChild("sprk_event", stranded, ("sprk_regardingproject", "sprk_project", rootId));
+        var recorder = new OwnerChangeRecorder();
+        var client = ClientRecording(recorder, out var host);
+        using var _ = host;
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ChildWorld.OwnerOf("sprk_event", stranded).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        recorder.OwnerChanges.Should().Equal(new[] { Evicted("sprk_event", stranded) },
+            "the stranded child is the only owner change: the record itself was already ordinary");
+    }
+
+    [Fact(DisplayName = "148×132: SecureChildReconciliationJob evicts every child it re-owns, and a report-only run evicts nothing")]
+    public async Task TheSweep_EvictsEveryChildItReowns_AndAReportOnlyRunEvictsNothing()
+    {
+        var recorder = new OwnerChangeRecorder();
+        var sweep = new SweepHarness(world: null, shares: null, webApi: null, accessCacheInvalidator: recorder);
+        var root = Guid.NewGuid();
+        var (c1, c2) = (Guid.NewGuid(), Guid.NewGuid());
+        sweep.World.SecureRoot("sprk_workassignment", root)
+            .OrdinaryChild("sprk_document", c1, ("sprk_workassignment", "sprk_workassignment", root))
+            .OrdinaryChild("sprk_event", c2, ("sprk_regardingworkassignment", "sprk_workassignment", root));
+
+        (await sweep.RunAsync(writesEnabled: null)).GetProperty("wouldChange").GetInt32().Should().Be(2);
+        recorder.OwnerChanges.Should().BeEmpty("report-only writes no owner, so nothing is stale");
+
+        (await sweep.RunAsync(writesEnabled: "true")).GetProperty("changed").GetInt32().Should().Be(2);
+        recorder.OwnerChanges.Should().BeEquivalentTo(new[] { Evicted("sprk_document", c1), Evicted("sprk_event", c2) });
     }
 
     /// <summary>Records every owner-change eviction (the hook at its module boundary).</summary>
@@ -545,6 +643,9 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             OwnerChanges.Enqueue((entityLogicalName, entitySetName, recordId));
             return Task.CompletedTask;
         }
+
+        public Task InvalidateRecordShareChangeAsync(string entitySetName, Guid recordId, string? correlationId, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     /// <summary>
@@ -1482,13 +1583,15 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         }
 
         public SweepHarness(
-            Func<SecureChildShareWorld>? world, IDataverseRecordShareService? shares, DataverseWebApiClient? webApi)
+            Func<SecureChildShareWorld>? world, IDataverseRecordShareService? shares, DataverseWebApiClient? webApi,
+            IMembershipCacheInvalidator? accessCacheInvalidator = null)
         {
             var own = SecureChildShareWorld.Standard();
             _world = world ?? (() => own);
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(_world).Object);
-            services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(_world, shares ?? Shares, webApi!));
+            services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(_world, shares ?? Shares, webApi!,
+                accessCacheInvalidator: accessCacheInvalidator));
             // Task 147: the job's recent-changes pass finds the records above changed rows through the synchronizer.
             services.AddScoped(_ => SecureChildShareWorld.SynchronizerOver(_world, shares ?? Shares));
             _provider = services.BuildServiceProvider();

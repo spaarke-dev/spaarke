@@ -885,6 +885,12 @@ public sealed class SpyMembershipCacheInvalidator : IMembershipCacheInvalidator
         string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
         => Task.CompletedTask;
 
+    /// <inheritdoc />
+    /// <remarks>The share-change eviction DataverseWebApiService's share writes trigger (task 132); no Phase 2 path shares, so it is not recorded.</remarks>
+    public Task InvalidateRecordShareChangeAsync(
+        string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        => Task.CompletedTask;
+
     /// <summary>Reset between tests.</summary>
     public void Reset() => _invocations.Clear();
 }

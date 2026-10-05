@@ -79,7 +79,7 @@ public partial class RouteAuthorizationGuardTests
 
     /// <summary>"file method: writes Type.EnvironmentName" for every call to an <c>EnvironmentName</c> setter of a type the
     /// scanned assemblies do not define themselves (a DTO's own <c>EnvironmentName</c> property is not the host's).</summary>
-    private static List<string> EnvironmentNameWriteViolations(IEnumerable<CompiledIl.Use> uses, IReadOnlySet<string> scannedAssemblies)
+    private static List<string> EnvironmentNameWriteViolations(IEnumerable<IlCallScan.FileUse> uses, IReadOnlySet<string> scannedAssemblies)
         => uses.Where(u => u.Target is { Member: "set_EnvironmentName" } t && !scannedAssemblies.Contains(t.Assembly))
             .Select(u => $"{u.File} {u.Method}: writes {u.Target!.Type}.EnvironmentName — IsDevelopment() then answers whatever was written")
             .ToList();
@@ -89,7 +89,7 @@ public partial class RouteAuthorizationGuardTests
     {
         var assemblies = ServerProductionAssemblies();
         var scanned = assemblies.Select(a => a.Assembly).ToHashSet(StringComparer.Ordinal);
-        var violations = assemblies.SelectMany(a => EnvironmentNameWriteViolations(CompiledIl.Uses(a.Path), scanned)).ToList();
+        var violations = assemblies.SelectMany(a => EnvironmentNameWriteViolations(IlCallScan.FileUses(a.Path), scanned)).ToList();
         Assert.True(
             violations.Count == 0,
             "A development-only route is development-only only while nothing rewrites the environment name IsDevelopment() reads. "
@@ -100,7 +100,7 @@ public partial class RouteAuthorizationGuardTests
         Assert.Contains(assemblies, a => a.Assembly == "Sprk.Bff.Api");
         Assert.Contains(assemblies, a => a.Assembly == "Sprk.Provisioning.ControlPlane.Worker");
         Assert.True(assemblies.Count >= 7, $"only {assemblies.Count} production assemblies were scanned: {string.Join(", ", assemblies.Select(a => a.Assembly))}");
-        Assert.Contains(CompiledIl.Uses(assemblies.Single(a => a.Assembly == "Sprk.Bff.Api").Path),
+        Assert.Contains(IlCallScan.FileUses(assemblies.Single(a => a.Assembly == "Sprk.Bff.Api").Path),
             u => u.Target is { Member: "get_EnvironmentName", Type: "Microsoft.Extensions.Hosting.IHostEnvironment" });
     }
 
@@ -120,7 +120,7 @@ public partial class RouteAuthorizationGuardTests
     public void EnvironmentNameWrite_NegativeControl_EachCompiledWriteFails()
     {
         var self = typeof(RouteAuthorizationGuardTests).Assembly;
-        var uses = CompiledIl.Uses(self.Location);
+        var uses = IlCallScan.FileUses(self.Location);
         var fixture = typeof(EnvironmentWriteFixtures).FullName!;
         var scanned = new HashSet<string>(StringComparer.Ordinal) { self.GetName().Name! };
         List<string> Of(string member) => EnvironmentNameWriteViolations(uses.Where(u => u.Method == $"{fixture}::{member}"), scanned);

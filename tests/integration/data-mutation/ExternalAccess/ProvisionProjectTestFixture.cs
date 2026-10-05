@@ -763,7 +763,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             // the platform-cascade rows through this fixture's DataverseWebApiClient double, as in production.
             services.RemoveAll<SecureChildReconciler>();
             services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
-                () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>()));
+                () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>(),
+                // Batch-4 integration, 148 × 132: the child owner-change eviction, through the host's hook as in production.
+                accessCacheInvalidator: sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>()));
 
             // Round 26 item 3 (batch-4 integration): the Make Secure file relocator — the test's, when it supplies one.
             services.RemoveAll<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>();
