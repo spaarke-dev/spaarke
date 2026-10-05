@@ -1,5 +1,66 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-05 (checkpoint #14, by context-handoff before /compact). Supersedes #13. Read the Quick Recovery table first.
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|---|---|
+| **Task** | Batch 4 + route-sweep INTEGRATION (`integ/uac-r2-batch4` in `C:\wt4i`), then PR, deploy and live gates; then batch 5 |
+| **Step** | The last lane merge: the agent `sweepmerge` (Agent tool; resume it with SendMessage) is merging 165 under round 65 and adding the generic ledger credit `ProvenByTest` |
+| **Status** | in-progress. No workflows are running. Every lane has been verified. The integ tip pushed is `4af3717ac`; `sweepmerge` commits locally and does not push |
+| **Next Action** | (1) When `sweepmerge` reports: review it, then `git -C C:/wt4i push origin integ/uac-r2-batch4`. (2) Merge origin/master into integ again (re-check SPE Admin's managed-identity area). (3) Run the full suites. (4) Measure publish size (fresh short-path worktrees for master and integ, Compress-Archive Optimal, equal file counts) and run the CVE check. (5) Open the PR integ → master (§6.5 blocks; known limits from each task note; deleted-route evidence; ADR-009 path C for 132; ADR-034 A4). (6) Merge it on Router green. (7) Do the dev live steps and deploy (list below). (8) Do the live gates. Then batch 5. |
+
+**Session rules (memory):**
+- Keep the session cwd as uppercase `C:/code_files/spaarke`. A bare `cd` elsewhere resets it, so use `git -C` and absolute paths.
+- Pin Opus on agents.
+- Owner rounds 56 and 59:
+  - Fix real runtime, maintainability and performance defects.
+  - Record as known limits: adversarial guard bypasses, rare edges that fail closed, minor seeds.
+  - No over-engineering, but required and promised functionality is built fully. Reuse beats new.
+  - At most one more fix round per lane.
+
+### Task status (updated in this checkpoint)
+- **25 tasks are 🔄 [wip] "INTEGRATED, completes at live gates":** 132, 133, 137, 140, 142, 143, 146–150, 156–169. They become ✅ only when their live gates pass on dev.
+- **Batch 5:** dispositions are applied per round 59.
+- The drift check is clean (167/167).
+
+### Integration contents
+- **On integ:** 132-r1/132-g, 133, 137, 140, 142, 143, 146–150, 156–164, 166–169, plus master `b4b58a361`. Make Secure file relocation and its job backstop are wired. 158's walk covers every level, with If-Match. 167's ledger is in (117 census; UNOWNED-NEW is 0). There is one IL reader. Child owner changes evict.
+- **Merging:** 165. Round 65 retires the secret-name allow-list where master `bb8ba7251` removed the vault reads. Round 62 binds the operator marker to the App Service.
+- **Last full suites (at 4af3717ac):** unit 17412/0/54, ArchTests 779, Integration 87, Spe 350/25, L2 1567/1.
+
+### Dev live steps
+- **Done 2026-10-05:**
+  - child-record creator column on 22 tables;
+  - document→analysis cascade;
+  - 166 relocation columns (field-secured; profile grants come with gate 23).
+- **Remaining (each run dry run → -Apply → -Verify):**
+  - 142 ledger, with 158's `sprk_subjectteam`;
+  - 140 G-140-1, with `sprk_grantedbycontactid` and its backfill;
+  - 150 FLS lock;
+  - 144 default-team migration, then the 150 ribbon (round 60 order);
+  - 165 container backfill, `-Bind` for the 3 dev containers, and marker dev only;
+  - 166 gate 23 pointer FLS (WITH the deploy) and the legacy migration;
+  - 168 forms and grids, with SpaarkeGridCustomizer v1.1.1 BEFORE the grid script;
+  - 147 G147-2/3/4/6;
+  - G-11 ribbon;
+  - BFF deploy from a fresh worktree;
+  - external SPA, then BFF, in 157's order;
+  - each task's live gates (test user `uac.child.user@demo.spaarke.com`; Session A needs a CIAM sign-in);
+  - tell word-add-in-r1 once 161 is deployed.
+
+### Elsewhere
+- **Master:** #1297 merged.
+- **#1293** (fix for #1290) is a DRAFT. Rebase it once #1123 merges, and keep only its unique parts. The owner chose "grid fills the row".
+- **Issues:** #1290, #1303–1307, #1310.
+
+### Batch 5 (after batch 4 ships), per `notes/batch5-scope-review-2026-10-05.md`
+- **Build order:** 154 (reuse the existing picker) → 113, 114, 105, 101 → 064 → 153 and 067 → 099 → 036 (after the batch-4 deploy; read set plus per-record write checks) → 090.
+- **Owner decisions owed when they start:** 114's licence proxy, and 036's ADR-034 amendment.
+
+---
+
 > **Last Updated**: 2026-10-05 (checkpoint #13, refreshed by context-handoff). Supersedes #12. Read the Quick Recovery table first.
 > **Refresh:** the integration branch has advanced LOCALLY, unpushed, to `15d98dd52`: 158 is merged and the 158 × 140 If-Match fix is done. `sweepmerge` is continuing with 158's round 61 walk (check it is in), then 165, 167 and 132.
 

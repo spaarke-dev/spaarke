@@ -4,7 +4,7 @@
     <title>Assigned-To auto-grants: a server-side function materializes every "Assigned *" contact/organization as a removable Collaborate grant (or a POA share for a linked systemuser), with a sticky operator-removal marker, form-save + BFF-write triggers and a reconciliation job</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C9 owner round 2, item 5 + Q5)</phase>
     <gate>blocked — requires 141 (user↔contact link), 138, 139 (grant model; shared files) and 143 (No Access write-time check) merged; escalation triggers (a), (b), (c), (d), (e) and (g) need owner answers before their branches are implemented</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs on the grant/share write side; new Dataverse table; changes what confers access on every plane; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>Admin surfaces (route sweep, 9 routes): put the record-matching admin routes behind the existing "SystemAdmin" policy, and make the SPE admin tenant-scope boundary actually run on /api/spe/configs CRUD and /api/spe/bulk/delete + /bulk/permissions (route param named "id", configId carried in the body, unscoped business unit and unscoped app identity on create/update, fail-open scope lookup)</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live BFF routes (tags bff-api, auth, security). Closes an operator job any signed-in user can trigger, and a cross-business-unit read, rewrite and delete of SPE container-type configs, a cross-business-unit config create that borrows another unit's container type or app identity, and a cross-business-unit bulk container delete and owner grant.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>NEW FEATURE — contact-side Grant Access: a Collaborate/Full Access contact grants colleagues of their own organization, capped at their own level, from the external SPA</title>
     <phase>Register-driven (authored 2026-09-30, session 27; grant-model group; C4 owner decision)</phase>
     <gate>after-135-136-138-139-141-013</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New access-minting write path reachable by CIAM tokens; new routes, new endpoint filter, new Dataverse column, external SPA wiring; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>

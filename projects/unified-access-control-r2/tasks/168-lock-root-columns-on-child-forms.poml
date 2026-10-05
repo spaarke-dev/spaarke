@@ -4,7 +4,7 @@
     <title>Lock the four sprk_regarding{core} root columns on the to-do, event, communication and analysis forms (owner round 8 item 3), so a filing picker that writes the ADR-024 pair is the only form input that sets a root</title>
     <phase>Session 27 — UAC defect remediation (owner round 8, 2026-10-03)</phase>
     <gate>startable after 156 is merged into work/unified-access-control-r2 (this task edits the I-1 registry row and the task 156 note in the form 156 left them, and it closes 156's verifier round 2 item 9)</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>The four columns are the access edge for child records (the core-ancestor stamp, FR-26), and they decide which container a child's files go to (tasks 155 and 156). The task changes live form definitions on four tables and the CREATE-mode staging web resource that writes those columns. It also modifies tests (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
