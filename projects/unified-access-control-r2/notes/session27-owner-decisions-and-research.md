@@ -751,6 +751,25 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
      - (c) never release: that strands a re-filed subtree.
 2. **The side pane's partial-save rollback is fixed at integration.** When the filing saves and the other fields fail, rollback reverts only the fields that failed, never the persisted filing. Test it.
 
+## Round 52 (2026-10-05). BINDING. Main-session decisions under round 15. Task 167, from its re-verification of `task/uac-r2-167-f2-v1`. The same principle as round 48: verify BEHAVIOUR against the real application wherever a guard claims behaviour. Source-text heuristics remain only with exactly stated limits.
+
+1. **Sign-in is proven at run time.** This replaces trust in the `.Succeed(` text heuristic.
+   - A test builds the REAL BFF authorization services (the real `Program` DI, as the existing real-Program tests do).
+   - It evaluates an anonymous `ClaimsPrincipal` against EVERY registered policy, and every policy that endpoints reference, through the real `IAuthorizationService`. Every one must fail, except the pinned AnonymousByDesign routes, which use no policy.
+   - This catches shadowed lambdas, reflection and any custom handler, whatever its shape.
+   - Seed it with the verifier's handler that succeeds every requirement.
+   - Keep the text rule as a fast first check, and state its limits.
+2. **The IsDevelopment-only control is proven at run time.**
+   - The real app boots with `EnvironmentName = Production`, and the test asserts from `EndpointDataSource` that no development-only route (the anonymous save-debug route and every other) is mapped.
+   - Add an IL-scan ban on any write to `IHostEnvironment.EnvironmentName` / `IWebHostEnvironment.EnvironmentName` in `src/server/**`.
+   - Seed both.
+3. **Retired-route absence is judged at run time** (refines round 34 item 4).
+   - A ledger entry whose route key is absent passes only when `ResolvedBy` is set AND the route is absent from the booted real app's `EndpointDataSource` (method plus pattern), checked by the guard itself.
+   - `ProofTest` stays as the named regression test, but the guard no longer trusts its text. Unreachable assertions therefore cannot satisfy it.
+   - Seed: a deleted route re-mapped turns the guard red.
+4. **Presence evidence:** an `Authorization = null` assignment never counts as a bearer. Better still, presence is judged at run time from `EndpointDataSource` where the rule allows it. State the remaining heuristic's limits exactly.
+5. Note 19.2 and the guard headers state exactly what is enforced at run time and what by text.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
