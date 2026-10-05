@@ -13,7 +13,10 @@
  *   creator person.
  * - Re-files — the caller's own update, with the owner re-derived and assigned: `PATCH /api/v1/child-records/{table}/{id}`
  *   for a to-do, memo, invoice, report card or analysis; `PATCH /api/v1/events/{id}/filing` for an event;
- *   `PATCH /api/communications/{id}/filing` for a communication (round 28: re-files go through their families).
+ *   `PATCH /api/communications/{id}/filing` for a communication (round 28: re-files go through their families). The two
+ *   family routes take ONLY the filing — the `sprk_regarding…` lookups and the ADR-024 resolver fields (owner round 36);
+ *   every other column of an event or a communication stays the caller's own `Xrm.WebApi` update
+ *   ({@link splitFilingPayload}).
  *
  * The client never sets the owner and never shares a child (WP-2). A refusal is surfaced with the server's
  * ProblemDetails message ({@link ChildRecordWriteError}); nothing is left user-owned.
@@ -45,6 +48,37 @@ const REFILE_ROUTES: Readonly<Record<string, (id: string) => string>> = {
   sprk_event: id => `/api/v1/events/${id}/filing`,
   sprk_communication: id => `/api/communications/${id}/filing`,
 };
+
+/**
+ * The tables whose BFF re-file route takes ONLY the filing (owner round 36): the event's and the communication's family
+ * routes. Lower-case logical names.
+ */
+export const FILING_ONLY_REFILE_TABLES: ReadonlySet<string> = new Set(['sprk_event', 'sprk_communication']);
+
+/**
+ * True when a Web API payload key is part of a row's FILING: a `sprk_regarding…` lookup (its `@odata.bind`) or one of the
+ * ADR-024 resolver fields (`sprk_regardingrecordtype`/`…id`/`…name`/`…url`/`…number`). Navigation properties carry the
+ * schema-name casing (`sprk_RegardingMatter@odata.bind`), so the comparison ignores case. The server applies the same
+ * rule (`ChildRecordEndpoints.IsFilingColumn`).
+ */
+export function isFilingKey(key: string): boolean {
+  const name = (key ?? '').endsWith('@odata.bind') ? key.slice(0, -'@odata.bind'.length) : (key ?? '');
+  const lower = name.toLowerCase();
+  return lower.startsWith('sprk_regarding') && lower.length > 'sprk_regarding'.length;
+}
+
+/** Splits a Web API payload into its filing keys ({@link isFilingKey}) and everything else. */
+export function splitFilingPayload(payload: Record<string, unknown>): {
+  filing: Record<string, unknown>;
+  rest: Record<string, unknown>;
+} {
+  const filing: Record<string, unknown> = {};
+  const rest: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload ?? {})) {
+    (isFilingKey(key) ? filing : rest)[key] = value;
+  }
+  return { filing, rest };
+}
 
 /**
  * Every CHILD table whose owner follows what it is filed under — the server's ownership parents
@@ -171,7 +205,8 @@ export async function createChildRecordViaBff(
 /**
  * Updates (re-files) a child record through the BFF: the caller's own update, with the owner re-derived when it changes
  * what the row is filed under. Rejects with a {@link ChildRecordWriteError} carrying the server's message — nothing was
- * written.
+ * written. For a {@link FILING_ONLY_REFILE_TABLES} table, `payload` must name only the filing (the server answers 400
+ * otherwise); {@link withBffChildWrites} splits a mixed update for its callers.
  */
 export async function updateChildRecordViaBff(
   authenticatedFetch: AuthenticatedFetch,
@@ -192,6 +227,27 @@ export async function updateChildRecordViaBff(
   });
   if (!response.ok) {
     throw await failureOf(response, 'The record could not be updated');
+  }
+}
+
+/**
+ * An event's or a communication's update through the seam (owner round 36): the filing through its family route FIRST —
+ * a refusal there writes nothing at all — then every other column as the caller's own update through `inner`.
+ */
+async function updateFilingThenRest(
+  authenticatedFetch: AuthenticatedFetch,
+  bffBaseUrl: string,
+  inner: IDataService,
+  entityName: string,
+  id: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  const { filing, rest } = splitFilingPayload(data);
+  if (Object.keys(filing).length > 0) {
+    await updateChildRecordViaBff(authenticatedFetch, bffBaseUrl, entityName, id, filing);
+  }
+  if (Object.keys(rest).length > 0) {
+    await inner.updateRecord(entityName, id, rest);
   }
 }
 
@@ -246,9 +302,11 @@ export function withBffChildWrites(
     updateRecord: (entityName, id, data) =>
       !isBffChildRefileTable(entityName)
         ? inner.updateRecord(entityName, id, data)
-        : configured
-          ? updateChildRecordViaBff(authenticatedFetch!, bffBaseUrl!, entityName, id, data)
-          : notConfigured(entityName),
+        : !configured
+          ? notConfigured(entityName)
+          : FILING_ONLY_REFILE_TABLES.has((entityName ?? '').toLowerCase())
+            ? updateFilingThenRest(authenticatedFetch!, bffBaseUrl!, inner, entityName, id, data)
+            : updateChildRecordViaBff(authenticatedFetch!, bffBaseUrl!, entityName, id, data),
     deleteRecord: (entityName, id) => inner.deleteRecord(entityName, id),
   };
   Object.defineProperty(service, BFF_CHILD_WRITES, { value: true, enumerable: false });

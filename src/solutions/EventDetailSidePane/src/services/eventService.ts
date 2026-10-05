@@ -7,6 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
+import { isFilingKey } from "@spaarke/ui-components";
 import { refileEventThroughBff } from "./childRecordWrites";
 import {
   IEventRecord,
@@ -352,8 +353,10 @@ export async function saveEvent(
   try {
     const normalizedId = eventId.replace(/[{}]/g, "");
 
-    // Split payload into scalar fields and lookup bindings.
-    // Lookups use @odata.bind which can require separate handling.
+    // Split the payload into the event's FILING (its `sprk_regarding…` lookups and regarding fields) and everything
+    // else. UAC-r2 task 147 r1c (owner round 36): the filing goes through the BFF's ONE event re-file route, which takes
+    // nothing else; every other field — scalars and the other lookups (completed by, approved by, …) — stays the caller's
+    // own Xrm.WebApi update.
     const scalarPayload: Record<string, unknown> = {};
     const lookupPayload: Record<string, unknown> = {};
     const savedFieldNames: string[] = [];
@@ -362,7 +365,7 @@ export async function saveEvent(
       const val = value === undefined ? null : value;
       savedFieldNames.push(field);
 
-      if (field.endsWith("@odata.bind")) {
+      if (isFilingKey(field)) {
         lookupPayload[field] = val;
       } else {
         scalarPayload[field] = val;
@@ -374,30 +377,32 @@ export async function saveEvent(
       savedFieldNames
     );
 
-    // Save scalar fields first (statuscode, dates, text, choice)
+    // Save the other fields first (statuscode, dates, text, choice, the non-filing lookups) — the caller's own update.
     if (Object.keys(scalarPayload).length > 0) {
-      console.log("[EventService] Scalar payload:", JSON.stringify(scalarPayload, null, 2));
+      console.log("[EventService] Field payload:", JSON.stringify(scalarPayload, null, 2));
       await webApi.updateRecord(EVENT_ENTITY, normalizedId, scalarPayload);
-      console.log("[EventService] Scalar fields saved");
+      console.log("[EventService] Fields saved");
     }
 
-    // Save lookup bindings separately — through the BFF (UAC-r2 task 147 r1, owner round 28 item 1): a change to what
-    // the event is filed under is a re-file, so its owner is re-derived (the Secure Record Owners team under a secure
-    // record) and F3 applies to a move out of one. The scalar fields above stay the caller's own Xrm.WebApi update.
+    // Save the filing separately — through the BFF (UAC-r2 task 147, owner rounds 28 and 36): a change to what the event
+    // is filed under is a re-file, so its owner is re-derived (the Secure Record Owners team under a secure record), F3
+    // applies to a move out of one, and what is filed under the event follows it.
     if (Object.keys(lookupPayload).length > 0) {
-      console.log("[EventService] Lookup payload:", JSON.stringify(lookupPayload, null, 2));
+      console.log("[EventService] Filing payload:", JSON.stringify(lookupPayload, null, 2));
       try {
         await refileEventThroughBff(normalizedId, lookupPayload);
-        console.log("[EventService] Lookup fields saved");
+        console.log("[EventService] Filing saved");
       } catch (lookupError) {
         const lookupMsg = lookupError instanceof Error
           ? lookupError.message
           : (typeof lookupError === "object" ? JSON.stringify(lookupError) : String(lookupError));
-        console.error("[EventService] Lookup save failed:", lookupMsg);
-        // Scalar fields already saved — report partial success
+        console.error("[EventService] Filing save failed:", lookupMsg);
+        // The other fields are already saved — report partial success
         return {
           success: false,
-          error: `Scalar fields saved but lookup update failed: ${lookupMsg}`,
+          error: Object.keys(scalarPayload).length > 0
+            ? `The other changes were saved, but what the event is filed under was not: ${lookupMsg}`
+            : lookupMsg,
           savedFields: Object.keys(scalarPayload),
         };
       }

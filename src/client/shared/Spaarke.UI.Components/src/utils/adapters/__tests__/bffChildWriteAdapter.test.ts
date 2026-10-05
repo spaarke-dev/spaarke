@@ -10,6 +10,9 @@ import {
   BFF_CHILD_CREATE_TABLES,
   ChildRecordWriteError,
   createChildRecordViaBff,
+  FILING_ONLY_REFILE_TABLES,
+  isFilingKey,
+  splitFilingPayload,
   updateChildRecordViaBff,
   withBffChildWrites,
 } from '../bffChildWriteAdapter';
@@ -208,6 +211,106 @@ describe('BFF child-record writes (task 147 r1)', () => {
         'A record this to-do is filed under was not found.'
       );
       expect(inner.createRecord).not.toHaveBeenCalled();
+    });
+
+    // Task 147 r1c (owner round 36): the event's and the communication's family routes take ONLY the filing.
+    it.each(['sprk_event', 'sprk_communication'])(
+      'splits a %s update — the filing to its family route FIRST, every other column to the inner (Xrm) service',
+      async table => {
+        const inner = innerService();
+        const fetchFn = jest.fn().mockResolvedValue(fakeResponse(204));
+        const service = withBffChildWrites(inner, fetchFn, BFF);
+
+        await service.updateRecord(table, ID, {
+          'sprk_RegardingMatter@odata.bind': `/sprk_matters(${ID})`,
+          sprk_regardingrecordid: ID,
+          statuscode: 2,
+          'sprk_CompletedBy@odata.bind': `/systemusers(${ID})`,
+        });
+
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(fetchFn.mock.calls[0][1].body)).toEqual({
+          'sprk_RegardingMatter@odata.bind': `/sprk_matters(${ID})`,
+          sprk_regardingrecordid: ID,
+        });
+        expect(inner.updateRecord).toHaveBeenCalledWith(table, ID, {
+          statuscode: 2,
+          'sprk_CompletedBy@odata.bind': `/systemusers(${ID})`,
+        });
+        expect(fetchFn.mock.invocationCallOrder[0]).toBeLessThan(inner.updateRecord.mock.invocationCallOrder[0]);
+      }
+    );
+
+    it('an event update with no filing never calls the BFF; a filing-only one never calls the inner service', async () => {
+      const inner = innerService();
+      const fetchFn = jest.fn().mockResolvedValue(fakeResponse(204));
+      const service = withBffChildWrites(inner, fetchFn, BFF);
+
+      await service.updateRecord('sprk_event', ID, { statuscode: 3 });
+      expect(fetchFn).not.toHaveBeenCalled();
+      expect(inner.updateRecord).toHaveBeenCalledTimes(1);
+
+      await service.updateRecord('sprk_event', ID, { 'sprk_RegardingProject@odata.bind': null });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(inner.updateRecord).toHaveBeenCalledTimes(1);
+    });
+
+    it('a refused event re-file writes nothing else either', async () => {
+      const inner = innerService();
+      const fetchFn = jest.fn().mockResolvedValue(json(403, { detail: 'You cannot move this event.' }));
+      const service = withBffChildWrites(inner, fetchFn, BFF);
+
+      await expect(
+        service.updateRecord('sprk_event', ID, { 'sprk_RegardingMatter@odata.bind': null, statuscode: 2 })
+      ).rejects.toThrow('You cannot move this event.');
+      expect(inner.updateRecord).not.toHaveBeenCalled();
+    });
+
+    it('a to-do update is NOT split — its route is the general child-record re-file', async () => {
+      const inner = innerService();
+      const fetchFn = jest.fn().mockResolvedValue(fakeResponse(204));
+      const service = withBffChildWrites(inner, fetchFn, BFF);
+
+      await service.updateRecord('sprk_todo', ID, { 'sprk_RegardingMatter@odata.bind': null, sprk_name: 'y' });
+
+      expect(JSON.parse(fetchFn.mock.calls[0][1].body)).toEqual({
+        'sprk_RegardingMatter@odata.bind': null,
+        sprk_name: 'y',
+      });
+      expect(inner.updateRecord).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the filing (owner round 36)', () => {
+    it.each([
+      ['sprk_RegardingMatter@odata.bind', true],
+      ['sprk_regardingmatter', true],
+      ['sprk_RegardingRecordType@odata.bind', true],
+      ['sprk_regardingrecordid', true],
+      ['sprk_regardingrecordname', true],
+      ['sprk_regardingrecordurl', true],
+      ['sprk_regardingrecordnumber', true],
+      ['sprk_regarding', false],
+      ['sprk_name', false],
+      ['statuscode', false],
+      ['sprk_CompletedBy@odata.bind', false],
+      ['ownerid@odata.bind', false],
+      ['@odata.etag', false],
+    ])('%s is filing: %s', (key, filing) => {
+      expect(isFilingKey(key)).toBe(filing);
+    });
+
+    it('splits a payload into the filing and the rest', () => {
+      expect(
+        splitFilingPayload({ 'sprk_RegardingEvent@odata.bind': null, sprk_regardingrecordid: null, sprk_name: 'x' })
+      ).toEqual({
+        filing: { 'sprk_RegardingEvent@odata.bind': null, sprk_regardingrecordid: null },
+        rest: { sprk_name: 'x' },
+      });
+    });
+
+    it('lists the two filing-only tables', () => {
+      expect([...FILING_ONLY_REFILE_TABLES].sort()).toEqual(['sprk_communication', 'sprk_event']);
     });
   });
 });

@@ -175,6 +175,19 @@ export async function discoverHostNavProps(
   }
 }
 
+/**
+ * The host's REGARDING lookup to `targetEntity` (its column named `sprk_regarding…`) — never another lookup that happens
+ * to reference the same table (a sender, a participant). UAC-r2 task 147 r1c (owner round 36): the communications
+ * family's re-file route takes only the filing, so an unlink must name the regarding lookup itself.
+ */
+function regardingNavPropFor(navProps: INavPropEntry[], targetEntity: string): INavPropEntry | undefined {
+  return navProps.find(
+    n =>
+      n.referencedEntity?.toLowerCase() === targetEntity &&
+      (n.columnName ?? '').toLowerCase().startsWith('sprk_regarding')
+  );
+}
+
 /** Reset the nav-prop cache. Test-only. @internal */
 export function _resetNavPropCacheForTests(): void {
   for (const k of Object.keys(_navPropCache)) {
@@ -326,7 +339,7 @@ export async function unlinkRegarding(
 
   const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
   const target = entityType.toLowerCase();
-  const navProp = navProps.find(n => n.referencedEntity?.toLowerCase() === target);
+  const navProp = regardingNavPropFor(navProps, target);
   if (!navProp) {
     return {
       success: false,
@@ -371,13 +384,15 @@ export async function clearPrimaryRegarding(
     return { success: true }; // Nothing to clear without a persisted record.
   }
 
+  // The filing (through the BFF re-file) — the communications family's route takes ONLY the regarding lookups and the
+  // resolver fields (UAC-r2 task 147 r1c, owner round 36). The association status is a plain column: the caller's own
+  // update, after the filing is cleared.
   const payload: Record<string, unknown> = {
     sprk_regardingrecordid: null,
     sprk_regardingrecordname: null,
     sprk_regardingrecordnumber: null,
     sprk_regardingrecordurl: null,
     'sprk_RegardingRecordType@odata.bind': null,
-    sprk_associationstatus: null,
   };
 
   // Also null the entity-specific typed lookup when the primary is a real typed
@@ -385,18 +400,29 @@ export async function clearPrimaryRegarding(
   const target = entityType.trim().toLowerCase();
   if (target) {
     const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
-    const navProp = navProps.find(n => n.referencedEntity?.toLowerCase() === target);
+    const navProp = regardingNavPropFor(navProps, target);
     if (navProp) {
       payload[`${navProp.navPropName}@odata.bind`] = null;
     }
   }
 
   try {
-    // UAC-r2 task 147 r1: clearing the primary is a re-file OUT of it — through the BFF.
+    // UAC-r2 task 147 r1: clearing the primary is a re-file OUT of it — through the BFF. A refusal writes nothing.
     await writeRegarding(ctx, cleanId, payload);
-    return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'clear primary failed' };
+  }
+
+  try {
+    await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, { sprk_associationstatus: null });
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        'The primary association was removed, but the review status could not be reset: ' +
+        (err instanceof Error ? err.message : 'status update failed'),
+    };
   }
 }
 

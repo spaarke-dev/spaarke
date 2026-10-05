@@ -7,8 +7,10 @@
  *
  * - creates go to `POST /api/v1/child-records/{table}` — the BFF checks the caller's rights and creates the row owned by
  *   the team the ownership rule names (the Secure Record Owners team under a secure record);
- * - a change to the event's LOOKUPS (what it is filed under) goes to `PATCH /api/v1/events/{id}/filing` — the caller's own
- *   update, with the owner re-derived and assigned (round 28: "re-files go through the existing families").
+ * - a change to what the event is FILED under (its `sprk_regarding…` lookups and regarding fields) goes to
+ *   `PATCH /api/v1/events/{id}/filing` — the caller's own update, with the owner re-derived and assigned (round 28:
+ *   "re-files go through the existing families"; round 36: that route takes only the filing — every other field stays
+ *   the caller's own Xrm.WebApi update).
  *
  * The pane did not bootstrap MSAL before; it does so lazily, on the first such write (`initAuth` coalesces a duplicate
  * init for the same client id).
@@ -53,7 +55,7 @@ export function childCreateFailure(err: unknown, noun: string): string {
   return err instanceof Error && err.message ? err.message : `The ${noun} could not be created. Nothing was saved.`;
 }
 
-/** Re-files the event (its `@odata.bind` lookups) through the BFF. Rejects with the server's message. */
+/** Re-files the event (its filing keys only — see `isFilingKey`) through the BFF. Rejects with the server's message. */
 export async function refileEventThroughBff(eventId: string, payload: Record<string, unknown>): Promise<void> {
   const bffBaseUrl = await ensureBffBaseUrl();
   await updateChildRecordViaBff(authenticatedFetch, bffBaseUrl, 'sprk_event', eventId, payload);

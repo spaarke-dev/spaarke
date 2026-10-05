@@ -64,6 +64,9 @@ export {
   BFF_CHILD_CREATE_TABLES,
   OWNERSHIP_CHILD_TABLES,
   isOwnershipChildTable,
+  FILING_ONLY_REFILE_TABLES,
+  isFilingKey,
+  splitFilingPayload,
 } from './bffChildWriteAdapter';
 export type { NavigateFunction, DialogRenderer, DialogCloser } from './bffNavigationServiceAdapter';
 
