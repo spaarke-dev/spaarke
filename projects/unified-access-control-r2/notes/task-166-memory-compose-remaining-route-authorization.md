@@ -1602,6 +1602,309 @@ Read-only cross-check after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_
 
 - **Live writes (by design, main session):** gates 23a, 23, 24, 25 (§21.11) and §20.11's others. Nothing was written live;
   this round's live access was read-only (Dataverse metadata and SQL counts, §21.4.3 / §21.5.1).
-- **🔔 One decision requested** (found, not one of the 11 items): SPE version history of a relocated file — complete fix
-  proposed in §21.12.
+- ~~**🔔 One decision requested** (found, not one of the 11 items): SPE version history of a relocated file — complete fix
+  proposed in §21.12.~~ — decided by owner round 45 item 1 and built in f1-v2 (§22.3).
+- Nothing else is owed by task 166.
+
+# f1-v2 (2026-10-05): owner round 45 built; the f1-v1 verification's F-A – F-E closed
+
+> **Branch**: `task/uac-r2-166-f1-v2` from `task/uac-r2-166-f1-v1` @ `992a242a1` (baseSha).
+> **Inputs (BINDING)**: rounds 1–48 on `work/unified-access-control-r2` (`notes/session27-owner-decisions-and-research.md`).
+> **Round 45 is this verification's answer** (and the decision §21.12 asked for): item 1 (a moved file keeps its version
+> history — replay, original authorship recorded, `versions-truncated` stated), item 2 (one copy per in-subtree row,
+> ratified), item 3 (an unlinked `sprk_communicationattachment` row is classified by its communication's subtree — F-B),
+> item 4 (a repeat call deletes the source by the WITNESS recorded at verification; a source edited after the move is
+> `source-changed-after-move` and closed by the relocator's own re-entry — F-A), item 5 (F-C guard tests, the two F-D
+> client shapes, the F-E gate name; the ADR-010 integration note).
+> **Outcome**: every item is closed in code, tests, scripts and docs, each new check seeded. What is left is LIVE writes
+> only — the schema script (now two columns, secured from creation), the FLS script (now four columns) and the migration,
+> each dry run / `-Apply` / `-Verify`, exact commands in §22.11. No decision is requested.
+> `NOTE-FROM-MAIN.md`: none in the worktree.
+
+## 22.1 Binding inputs as applied
+
+| Decision | Implemented |
+|---|---|
+| Round 45 item 1 — replay the source's prior versions into the copy through the BFF identity, oldest first, current content last; list with the existing `SpeFileStore.ListFileVersionsAsync`; ONE new app-only facade method `DownloadFileVersionAsync`; each upload's size checked; a failed replay deletes the copy and leaves the row and the source untouched; the ORIGINAL author, date and size of each replayed version recorded against the new version id; `GET /api/documents/{id}/versions` reports them; `versions-truncated` with counts when the target's version limit is lower; tests and seeds (order, failure, mapping, truncation) | §22.3 |
+| Round 45 item 2 — each in-subtree row gets its OWN copy (as built; ratified) | unchanged (§21.4.3); the note states it |
+| Round 45 item 3 — an unlinked attachment row: inside the secure record's subtree → re-key it to the copy or report it pending; outside → keep the source; undecidable → pending | §22.5 |
+| Round 45 item 4 — the ledger records the source's size and quickXorHash at verification; a repeat call deletes the source only if it still matches; edited after the move → `source-changed-after-move` with the row id, not deleted, closed by the relocator's own re-entry (re-copy, verify, re-point), never by a manual step | §22.4 |
+| Round 45 item 5 — V6 / F-C real tests; the two F-D shapes; F-E (gate 23a); the ADR010 integration note | §22.6, §22.7, §22.2 item 5, §22.12 |
+
+## 22.2 The verifier's 16 items — what changed per item
+
+| # | Item | Closure |
+|---|---|---|
+| 1 | **F-A** — a source-pending entry whose document was edited after the move never settled (probe Q1) | The ledger entry records the source's WITNESS when the copy is verified (`RelocationWitness`: size, quickXorHash, current version id); a repeat call compares the SOURCE with that witness — never with the document's current file — and deletes it when it matches (§22.4). Probe Q1 is the test `ARepeatCall_DeletesTheSourceByItsWitness_ThoughTheDocumentWasEditedSinceTheMove` (first delete fails, the copy is edited to a new size and hash, then two more calls: complete, source gone); case (2) is `ASourceKeptForAnotherRecord_ThenReleased_IsDeletedByItsWitness_ThoughTheDocumentWasEdited`. A source that WAS edited is re-copied (round 45 item 4). Seeded (S1, S2, S2b, S15) |
+| 2 | **F-B** — every unlinked attachment row kept the source whatever its communication's subtree | `ReadSourceReferencesAsync` reads each attachment row's `sprk_communication`; `RecordContainerResolver.DeriveCommunicationContainersAsync` (the communication pipeline's own answer — the same one a document linked to that communication derives) classifies it: inside → re-keyed to the current file (`sprk_graphdriveid` / `sprk_graphitemid`), a failed re-key pending; outside → kept; no communication / undecidable → pending. f1-v1's `ACommunicationsOwnAttachmentRecord_KeepsTheSource_ForThatCommunication` (which pinned the defect) is replaced by three tests (§22.5). Seeded (S10, S11, S11b) |
+| 3 | **F-C** — V6 / V8 / V5 had no test | `MoveAlong_UnderTheLegacyMigration_NeverCopiesARowWhoseFileIsNotVerifiablyItsOwn` (V6), `WhenTheRelocationLockCannotBeTaken_NothingMoves_FailClosed` (V8: the lock store faults), `UnderTheStrictRuleInForce_ARelocatedFileOnlyTheInterimRuleWouldRefuse_IsServed_AndTheRunIsClean` (V5). Each seeded alone in its build: red (S12, S13, S14) |
+| 4 | **F-D** — the getControl(...).getAttribute().setValue shape and an aliased-import constant evaded the guard and p4a | Both detectors gain: setValue through `getControl` / `controls.get` (literal and through a name); `Reflect.set` / `defineProperty`; and ALIASES of a column-holding name, to a fixpoint — import / export rename (`F as G`), re-binding (`const G = F`, `const G = cols.F`), destructuring rename (`const { F: G } = …`) — across client source files for the guard. The FLS script's detector moved to `scripts/common/Find-ClientPointerWrite.ps1` (dot-sourced by p4a) and the guard's NEW test `TheFlsScriptsDetector_AgreesWithTheGuard_OnEveryCase` runs THAT file through pwsh over all 55 cases (34 write, 21 read) — the committed form of the f1-v1 harness, which had not been committed. Seeded: the verifier's two shapes as client files (G1 control, G2 aliased import: both red), the PS detector (P1 control template, P2 aliases: parity red), the C# detector (C1, C2: red) (§22.7) |
+| 5 | **F-E** — the DEPLOY ORDER text said gate 23b | `Set-DocumentRelocationSchema.ps1` names gate 23a (task note §21.11 / §22.11) |
+| 6 | Verified MET — F1 / round 37 item 3 | Unchanged |
+| 7 | Verified MET — F4 / round 37 item 1 | Unchanged; the re-copy (§22.4) re-keys and re-indexes through the same ledger steps (the replaced copy is an old item of the ledger) |
+| 8 | Verified MET — F2 (except F-A, F-B) | F-A and F-B closed (items 1, 2) |
+| 9 | Seed V3 (no behavioural effect) | Not a finding; unchanged |
+| 10 | The verifier's integration runs; the load flake `DeletePin_Authenticated_Returns204AndEmitsCounter` | Recorded. This round's runs: §22.10 |
+| 11 | Hygiene | Holds: the POML parses as XML; no `NOTE-FROM-MAIN.md`; no `.claude/`, `TASK-INDEX.md` or `current-task.md` change; no live write; no live access at all this round |
+| 12 | ADR010 1:1-interface ceiling (informational) | Round 45 item 5's integration note, §22.12 |
+| 13 | Criterion — round 26 item 3 / round 40 item 1, every post-flag failure closable by retry or job | **Met.** A source-pending entry now settles on the repeat call whatever the document became (witness), and an edited source is closed by the relocator's own re-copy. What still needs a person is unchanged and stated: a ledger the BFF cannot read, a document whose container cannot be derived, a file not verifiably the row's own, an attachment row whose communication's filing cannot be derived (round 45 item 3: pending), and an entry without a witness (only a hand-written ledger lacks one; the column is BFF-written and secured from creation) |
+| 14 | Criterion — round 37 item 2 split for attachment rows | **Met** (item 2) |
+| 15 | Criterion — seeding | **Met**: 23 server seeds in 12 builds, 6 client/script seeds; every seed red with a test no other seed of its build turns red (§22.9) |
+| 16 | Criterion — §21.2 item 11 "every statically writable shape" | **Met for the enumerated shapes, and the claim is corrected**: the guard's remarks now LIST the shapes it detects; a key built at run time (concatenation, a loop over names, a value returned by another module's function) is not statically detectable and the field-level security lock is the control for it (§22.7) |
+
+## 22.3 Round 45 item 1 — a moved file keeps its version history
+
+- **The replay.** `ReadHistoryAsync` lists the source's versions app-only (`SpeFileStore.ListFileVersionsAsync`, now
+  `virtual`, and now following `@odata.nextLink` so a long history is never cut at one page), orders them oldest first
+  (by version number, else by date), and makes one step per version: every PRIOR version through the ONE new app-only
+  facade method `SpeFileStore.DownloadFileVersionAsync` (→ `DriveItemOperations.DownloadFileVersionAsync`, the app-only
+  twin of `DownloadFileVersionAsUserAsync`; not on `ISpeFileOperations` — no route reads a version app-only), the current
+  content last through the existing current download. `MoveAsync` writes the first step with `Rename` (creating the copy)
+  and every later one with `Replace` to the name Graph gave the copy (each a new version of THE SAME item); every upload
+  must land on the copy's own item id and with the listed size, and the final content is verified against the source as
+  before. Any failure — a version that cannot be downloaded, a size mismatch, an upload on another item, a fault
+  mid-replay — deletes the partial copy (and a stray item) and leaves the row and the source untouched (Failed / FileMissing,
+  retried).
+- **Original authorship.** After the replay the copy's versions are listed and matched to the replayed steps newest to
+  newest; the record (`RelocatedVersionHistory.Map`: the copy's item id and, per NEW version id, the original author's
+  display name, Entra object id or application id, date, size, source item and source version) is written to the NEW
+  column `sprk_document.sprk_relocatedversions` in the SAME Dataverse update as the re-point, the re-keyed own columns and
+  the ledger. A second move reads the record of the item it moves, so a version replayed twice keeps its FIRST original
+  author (`ASecondMove_KeepsTheFirstOriginalAuthorship`).
+- **The record is not the ledger column, deliberately.** "The relocation ledger records each replayed version's original
+  author …" (round 45) is implemented as the relocation's record on the row in TWO columns: `sprk_relocationpending` holds
+  what a move still OWES and is cleared when settled (gate 24's read-only cross-check counts rows where it is not null) and
+  is 4000 characters; the version record is permanent and as long as the history (Multiple lines of text, 1,048,576; a
+  longer one keeps its newest versions and states the rest in `versions-truncated`). Folding it into the ledger would break
+  both properties.
+- **The routes.** `GET /api/documents/{id}/versions` reports each replayed version's ORIGINAL author and date
+  (`RelocatedVersionHistory.WithOriginalAuthorshipAsync`, after the per-document gate, presentation only: an unreadable
+  record leaves Graph's values and is logged). `VersionInfoDto` gains `LastModifiedBy` (Graph's display name for every
+  version; the ids stay server-side, `[JsonIgnore]`). The external version list
+  (`GET /api/v1/external/projects/{id}/documents/{documentId}/versions`) reports the original DATES too; its
+  `createdByName` stays null — an external participant has never been shown who wrote a version, and showing internal
+  authors to external contacts is a disclosure decision of its own, not a side effect of a move ("the history a user sees
+  is unchanged" holds on both surfaces). Version LABELS are the copy's (`1.0` … `N.0`): a source with gaps in its labels
+  shows contiguous ones after a move; the count, order, dates, authors and sizes are the source's.
+- **`versions-truncated`.** When the copy keeps fewer versions than were replayed (the target container's version limit
+  dropped the oldest), the outcome carries `VersionsTruncated(documentId, item, replayed, kept, unrecordedAuthors)` — a
+  STATED outcome: the move is complete (no retry could change the limit), the batch result and the migration report
+  (`versionsTruncated`, `versionsTruncatedRows`) list it with counts, the driver script prints it.
+- **Tests**: `Relocate_ReplaysTheSourcesHistory_OldestFirst_TheCurrentContentLast` (exact step order, one copy, sizes),
+  `Relocate_RecordsEachReplayedVersionsOriginalAuthorAndDate_InTheSameUpdateAsThePointer`,
+  `Relocate_WhenAReplayedVersionCannotBeRead_DeletesTheCopy_AndLeavesTheRowAndTheSource`,
+  `Relocate_WhenAReplayedVersionIsWrittenWithTheWrongSize_DeletesTheCopy_AndFails`,
+  `Relocate_WhenTheTargetKeepsFewerVersions_StatesVersionsTruncated_WithCounts_AndIsComplete`,
+  `ASecondMove_KeepsTheFirstOriginalAuthorship`, `TheVersionRecord_IsReportedOnlyForTheItemItDescribes_AndAnUnreadableOneChangesNothing`,
+  `WithoutTheVersionRecordColumn_NothingIsMoved_FailClosed`, the job's `TheReport_StatesATruncatedHistory_WithCounts_WithoutBlockingTheRun`,
+  the route's `ListVersions_OfAMovedFile_ReportsTheOriginalAuthorAndDate_OfEachReplayedVersion` (auth suite) and the external
+  `DocumentVersions_OfAMovedFile_ReportTheOriginalDates_AndNoAuthor_ToAnExternalParticipant`.
+- **Costs (as round 45 accepted them):** each prior version is one more download and upload, so a Make Secure request's
+  duration grows with the history it carries; each version obeys the existing 250 MB single-request bound (a larger one
+  fails the move, reported).
+
+## 22.4 Round 45 item 4 / F-A — the witness, and the re-copy of an edited source
+
+- **The witness.** `MoveAsync` records, in the ledger entry it writes with the re-point, `witness = { size, quickXorHash,
+  version }` of the item the row moves away from — exactly the facts its copy was verified against, plus the current
+  version id from the replay's listing. A witness must be PROVABLE (a size and a hash or a version), else the move fails
+  before a byte moves.
+- **The rule** (`CompareWithWitnessAsync` / `Compare`): the same size AND — when both carry one — the same quickXorHash;
+  otherwise the same current version id (SharePoint mints a new version for every content change; the versions are listed
+  only when a hash is missing). Matches → the source is deleted (when no row references it). Changed → `source-changed-after-move`.
+  Unknown (the version list cannot be read) → pending, retried, never deleted. No witness → `source-unverifiable`, never
+  deleted or copied (only a hand-written ledger lacks one). The first settle after a move uses the same rule (the
+  just-recorded witness), so "verified moments ago" is no longer a special case.
+- **The re-copy** (`RecopyChangedSourcesAsync`, the relocator's own re-entry; on the call that finds the change — the
+  repeat call, or the move's own settle when a save raced the move): a NEW copy in the document's CURRENT container of the
+  document's current file WITH its history (its recorded originals), plus each edited source's versions written after its
+  witness version, oldest first; verified; the row re-pointed (the replaced copy becomes an old item of the ledger with its
+  own witness; each edited source's witness becomes its current state); settled at once — the edited source and the
+  replaced copy are deleted against their new witnesses, references re-keyed, the index re-keyed. Nothing either file held
+  is lost. Reported `SourceChangedAfterMove(documentId, source, carriedVersions, newItem, editIsCurrent)` — stated, with the
+  row id; one the re-copy could not close yet (a fault) is ALSO a `source-changed-after-move: …` pending line, retried.
+- **Whose edit becomes current.** The old file stayed writable by the OLD container's audience (SPE permissions are
+  container-wide), so carrying its post-move edits blindly would let a person who lost access with the move change the
+  (now secure) document. Every edit is carried (nothing is lost; its author is in the version record), but the last one
+  becomes the CURRENT content only when its author may write the document NOW — Dataverse's own answer for that person,
+  `IAccessDataSource.GetUserAccessAsync(authorObjectId, documentId)` (RetrievePrincipalAccess, app-only for the named
+  principal; the EXISTING registered service). Otherwise — no Write, an app-only write, an answer that cannot be had
+  (ADR-003) — the edits go into the history before the document's own current content, which stays current
+  (`EditIsCurrent = false`). This is the round-45 re-copy made safe, not a new path: the re-copy, verify and re-point are
+  as decided; only which content ends current is decided fail-closed.
+- **Tests**: probe Q1 and case (2) above; `ASourceEditedAfterTheMove_IsReportedWithTheRowId_AndReCopiedWithItsEdits_ThenDeleted`
+  (editor may write: the edit is current, the history shows the edit and the original with their original authors),
+  `AnEditAtTheOldLocation_ByAPersonWhoMayNotWriteTheDocument_IsKeptInItsHistory_ButNeverBecomesCurrent`,
+  `AnEditAtTheOldLocation_WhoseAuthorsRightCannotBeRead_IsNeverMadeCurrent`, `ASourceEditedWhileItIsBeingMoved_IsReCopiedOnTheSameCall`,
+  `ASourceEditedAfterTheMove_WhoseReCopyFails_IsPending_NeverDeleted_AndARepeatCallClosesIt`,
+  `ALedgerEntryWithoutAWitness_NeverDeletesOrCopiesItsSource` (replaces the byte-identity test of f1-v1),
+  `AWitnessWithoutAHash_IsMatchedByTheSourcesVersion_AndTheSourceIsDeleted`, `TheWitnessRule_SizeAndHash_ElseSizeAndVersion`
+  (replaces `TheRepeatCallsDeletionTest_NeedsTheSameSizeAndHash_BothPresent`; `IsByteIdentical` is deleted — the current
+  file is no longer a delete criterion).
+
+## 22.5 Round 45 item 3 / F-B — attachment rows by their communication's subtree
+
+`SettleSourceAsync` now treats an unlinked `sprk_communicationattachment` row as the document rows are treated (round 37
+item 2): `DeriveCommunicationContainersAsync(communication)` → inside (the derivation allows the drive the document's file
+now lives in) → the row is re-keyed to that file in place, so no secure bytes stay in the shared container; outside → it
+keeps the source (listed `sprk_communicationattachment:{id}`); no communication or an undecidable derivation (an
+unreadable communication, an ambiguous or refused resolution) → pending, never "outside". A row linked to ANOTHER
+document goes the same way (round 45: "not linked to the document"). Tests:
+`MakeSecure_AnUnlinkedAttachmentRowOfACommunicationInsideTheSubtree_IsReKeyedToTheCopy_AndTheSourceIsDeleted`,
+`ACommunicationsOwnAttachmentRecord_OutsideTheSubtree_KeepsTheSource_ForThatCommunication`,
+`AnUnlinkedAttachmentRowWhoseCommunicationsSubtreeIsUndecidable_IsPending_AndKeepsTheSource` (2 cases). The f1-v1 dev
+read (1 unlinked row with an item, 0 sharing a document's item) means no live row changes behaviour today.
+
+## 22.6 F-C — the three guards now proven
+
+| Guard | Test | Seed |
+|---|---|---|
+| V6 — a move-along applies the relocation's legitimacy rule | `MoveAlong_UnderTheLegacyMigration_NeverCopiesARowWhoseFileIsNotVerifiablyItsOwn` (the other row's creator did not upload the file: SourceUnverified, one copy only, the row and the source untouched, listed for an administrator) | S12 `verified = true` → red |
+| V8 — a lock that cannot be taken is held | `WhenTheRelocationLockCannotBeTaken_NothingMoves_FailClosed` (the lock store faults: Failed, nothing downloaded, uploaded or written) | S13 catch returns `true` → red |
+| V5 — `relocatedButRefused` asks the rule IN FORCE | `UnderTheStrictRuleInForce_ARelocatedFileOnlyTheInterimRuleWouldRefuse_IsServed_AndTheRunIsClean` (strict in force; a copy written by another application: interim refuses, strict serves → 0, clean) beside the existing interim-in-force test | S14 "always interim" → red |
+
+## 22.7 F-D — the client pointer-write guard: two more shapes, aliases, and one detector run by both
+
+- **Columns**: `sprk_graphdriveid`, `sprk_graphitemid`, `sprk_relocationpending` and now `sprk_relocatedversions`.
+- **New shapes**: form setValue through `getControl(…)` / `controls.get(…)` `.getAttribute().setValue` (also `?.`);
+  `Reflect.set(obj, "…", v)` / `defineProperty(obj, "…", …)`; both literal and through a name.
+- **Aliases** of a column-holding name, to a fixpoint: `import { F as G }` / `export { F as G }`, `const G = F` /
+  `const G = cols.F`, `const { F: G } = …`. Across client SOURCE files the guard computes the closure globally (an exported
+  constant renamed on import in another file is caught: the verifier's `import { POINTER_ITEM_COL as COL } from './cols';
+  p[COL] = v`); a committed bundle's names count only inside that bundle, as before.
+- **One detector, two runners.** The templates are identical in `ClientDocumentPointerWriteGuardTests` and the new
+  `scripts/common/Find-ClientPointerWrite.ps1`, which `Set-DocumentPointerFieldSecurity.ps1` dot-sources for p4a.
+  `TheFlsScriptsDetector_AgreesWithTheGuard_OnEveryCase` runs the PowerShell file through `pwsh` over every write and read
+  case (55) and fails on any disagreement — f1-v1's 34-case harness was a manual run, never committed, which is how the
+  two shapes were missed by both. (`pwsh` is on every CI runner; a machine without it fails the test with an install hint.)
+- **The claim, corrected.** The guard's remarks now enumerate the shapes; "every statically writable shape" is withdrawn:
+  a key computed at run time is not statically detectable, and the field-level security lock (gate 23) is the control for
+  it. The repo scan is green.
+
+## 22.8 Placement (CLAUDE.md §10) and component justification (§11)
+
+**Placement: in BFF**, in the existing types. ADR-002: no plugin. ADR-003: every new decision fails closed (a witness that
+cannot be compared keeps the source; an entry without a witness never deletes or copies; an undecidable attachment row is
+pending; an edit's author whose right cannot be read does not make it current; a partial replay is deleted; the version
+record must exist for a move). ADR-007: one new app-only Graph facade method, DTO-only. ADR-010: no new interface (the
+ceiling is unchanged; §22.12). ADR-013: no AI type in the relocator. ADR-038: no `Mock<HttpMessageHandler>`, no DI or
+ctor-null tests. No package, endpoint, option, job, PCF or plugin.
+
+- **`SpeFileStore.DownloadFileVersionAsync` + `DriveItemOperations.DownloadFileVersionAsync`** — Existing: the OBO twin
+  `DownloadFileVersionAsUserAsync` (needs a user; a relocation runs as the BFF identity, also from the job); Extension:
+  round 45 names exactly this ONE facade method; Cost of nothing: no prior version can be copied, the history is lost.
+- **Column `sprk_document.sprk_relocatedversions` + `RelocatedVersionHistory`** (a static parser/projection class, no DI
+  registration) — Existing: `sprk_relocationpending` (cleared when settled, 4000 chars, counted by gate 24's check),
+  `sprk_fileversion` (check-out tracking keyed `vN`, a separate non-atomic write); Extension: neither can hold a permanent
+  per-version record written atomically with the re-point; Cost of nothing: every replayed version reads "the BFF, at the
+  move" — round 45 item 1 forbids it.
+- **`RecordContainerResolver.DeriveCommunicationContainersAsync`** — Existing: `DeriveDocumentContainersAsync` resolves a
+  communication only as a document link; Extension: it reuses the same `ResolveForRecordWithFixedFallbackAsync` answer;
+  Cost of nothing: round 45 item 3 cannot be decided (F-B stays open).
+- **Relocator members** (`ReadHistoryAsync`, `RecordReplayAsync`, `RecopyChangedSourcesAsync`, `MayWriteAsync`,
+  `CompareWithWitnessAsync` / `Compare`, `RelocationWitness`, `OldestFirst`) and one constructor dependency — the EXISTING,
+  unconditionally registered Scoped `IAccessDataSource` (type activation; no registration change). Extensions of the ONE
+  relocation service (round 26 item 3).
+- **Outcome / report vocabulary**: `SourceChangedAfterMove`, `VersionsTruncated` (records; on the outcome, the batch
+  result, the job report and the driver script) — round 45's stated outcomes.
+- **`VersionInfoDto.LastModifiedBy`** (+ two `[JsonIgnore]` ids) — the projection round 45 says the route reports; an
+  optional positional parameter, so every existing construction compiles unchanged.
+- **`scripts/common/Find-ClientPointerWrite.ps1`** — Existing: the detector inline in the FLS script; Extension: moved
+  verbatim-plus-shapes so CI can run the very function p4a runs; Cost of nothing: the two detectors drift unseen (F-D).
+
+## 22.9 Seeding (2026-10-05; restored from byte copies, files touched; no `SEED-166V2` marker remains)
+
+Targeted set: relocator, migration job, facade, RAG trim, pointer check, attach, version-route auth, external contract
+(270–271 tests). Every seed bit; within each build every seed turned red at least one test no other seed of that build did.
+
+| Build | Seed | What it breaks | Red |
+|---|---|---|---|
+| A (19 red) | S1 | the witness replaced by the document's CURRENT file (f1-v1's rule) | `ARepeatCall_DeletesTheSourceByItsWitness_…`, `ASourceKeptForAnotherRecord_ThenReleased_…`, `AWitnessWithoutAHash_…`, `ALedgerEntryWithoutAWitness_…` |
+| A | S3 | no replay (the current content only) | `Relocate_ReplaysTheSourcesHistory_…`, `…RecordsEachReplayedVersions…`, both truncation tests, `ASecondMove_…`, `…CannotBeRead…`, `…WrongSize…` |
+| A | S10 | attachment rows always kept (F-B as found) | `MakeSecure_AnUnlinkedAttachmentRowOfACommunicationInsideTheSubtree_…`, the undecidable theory (2) |
+| A | S12 / S13 / S14 | V6 / V8 / V5 (§22.6) | their three tests |
+| A | S9 | the internal route reports Graph's authorship | `ListVersions_OfAMovedFile_ReportsTheOriginalAuthorAndDate_…` |
+| B (8 red) | S4 | the version record not written | `…RecordsEachReplayedVersions…`, `ASecondMove_…`, `ASourceEditedAfterTheMove_IsReported…`, truncation |
+| B | S5 | a partial copy left behind | `…CannotBeRead_DeletesTheCopy…` |
+| B | S6 | upload size not checked | `…WrittenWithTheWrongSize…` |
+| B | S11 / S11b | no communication / undecidable treated as outside | the undecidable theory (False / True) |
+| C (3 red) | S2 (+S2b) | no re-copy of an edited source | `ASourceEditedAfterTheMove_IsReported…` |
+| C | S7 | truncation not stated | both truncation tests |
+| D (3 red) | S8 | a second move ignores the first record | `ASecondMove_KeepsTheFirstOriginalAuthorship` |
+| D | S2b | no re-copy after the move's own settle | `ASourceEditedWhileItIsBeingMoved_IsReCopiedOnTheSameCall` |
+| E (25 red) | S15 | no witness recorded | every move that deletes a source (25) |
+| F (2 red) | S16 | a closed edit not reported | `ASourceEditedAfterTheMove_IsReported…`, `…WhileItIsBeingMoved…` |
+| G (2 red) | S17 | an edit always current | `AnEditAtTheOldLocation_ByAPersonWhoMayNotWrite…`, `…WhoseAuthorsRightCannotBeRead…` |
+| H (2 red) | S18 | an edit never current | `ASourceEditedAfterTheMove_IsReported…`, `…WhileItIsBeingMoved…` |
+| I (1 red) | S19 | an access fault read as a right | `AnEditAtTheOldLocation_WhoseAuthorsRightCannotBeRead_IsNeverMadeCurrent` |
+| J/K/L (1 red each) | S20 / S21 | the external route: Graph's dates / authors shown | `DocumentVersions_OfAMovedFile_ReportTheOriginalDates_AndNoAuthor_…` (each alone) |
+| G1 / G2 | — | the verifier's two shapes as client files (`src/client/zzseed166v2/seed1.js` control setValue; `cols.ts` + `use.ts` aliased import) | `NoClientWritesADocumentPointer` red, naming `getControl("sprk_graphitemid").getAttribute().setValue` / `[COL] =` |
+| P1 / P2 | — | `Find-ClientPointerWrite.ps1`: control template removed / aliases not followed | `TheFlsScriptsDetector_AgreesWithTheGuard_OnEveryCase` red, listing 3 / 6 disagreeing write cases |
+| C1 / C2 | — | the C# detector: control template removed / aliases not followed | 3 + 6 write cases, the alias fact, the parity test |
+
+## 22.10 Gates (this round, final code)
+
+| Gate | Result |
+|---|---|
+| Affected tests | the targeted set above: **271 passed, 0 failed**; `ClientDocumentPointerWriteGuardTests` **60 passed** (34 write + 21 read cases, 5 facts) |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **14,675 total: 14,621 passed, 54 skipped, 0 failed** (17 m 48 s; +24 cases vs f1-v1's 14,651) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **406 passed, 0 failed** (f1-v1: 383; +23 guard cases) |
+| Sprk.Bff.Api.IntegrationTests (full) | **104 passed, 0 failed** |
+| Spe.Integration.Tests (full) | **405 total: 380 passed, 25 skipped (environment-gated `SkippableFact`s), 0 failed** |
+| `dotnet list package --vulnerable --include-transitive` | `Sprk.Bff.Api` has no vulnerable packages |
+| Formatting | the pre-commit `dotnet format` ran on every staged `.cs` file; every changed `.cs` file is CRLF |
+| Publish size (CLAUDE.md §10) | base `992a242a1` **45.737 MB** (47,959,073 bytes) vs branch `dad6ade5c` **45.765 MB** (47,988,510 bytes) = **+0.028 MB** (+29,437 bytes); 212/212 files; both from FRESH short-path trees (`git archive` into `C:\wt166v2m` / `C:\wt166v2b`, removed afterwards), `dotnet publish -c Release`, PowerShell `Compress-Archive -CompressionLevel Optimal`, PDBs included. No package. |
+| PowerShell | the three changed scripts and `common/Find-ClientPointerWrite.ps1` parse with 0 errors; the parity test runs the detector |
+| Client builds | none needed: no client source changed (the guard and the FLS script scan clients) |
+
+## 22.11 Manual live gates — f1-v2 (main session, dev; supersedes §21.11 where they differ)
+
+20–22 as §20.11 (deploy the BFF — it carries this round; allowed workspaces; redeploy the clients; census).
+**23a Relocation record (two columns, secured from creation)**: `pwsh scripts/Set-DocumentRelocationSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com`
+(dry run: WOULD create `sprk_relocationpending` 4000 and `sprk_relocatedversions` 1,048,576, both field-secured) → the same
+with `-Apply` → the same with `-Verify` (exit 0: both exist, Memo, secured, travel with SpaarkeCore).
+**23 Field security — run IMMEDIATELY after 23a**: `pwsh scripts/Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+(dry run: p4a OK — the scan now uses `scripts/common/Find-ClientPointerWrite.ps1`; p7 OK for four columns) →
+`-ClientNoLongerWritesPointers -Apply` (the two relocation columns are already secured: it grants the reader / writer
+profiles on them; it secures and grants the two pointer columns) → `-Verify` (exit 0). Until 23 has granted the writer
+profile, a BFF application user WITHOUT System Administrator cannot write the relocation columns, so every relocation fails
+closed (reported Failed, retried) — Make Secure and gate 24 come after 23.
+**24 Legacy migration** — as §21.11; each move now also replays the file's versions (one download and upload per version)
+and records their original authorship; the report also counts `sourceChangedAfterMove` and `versionsTruncated` (stated;
+neither blocks `-Verify`). Read-only cross-checks after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_document WHERE
+sprk_relocationpending IS NOT NULL` (only sources kept for another record may remain) and, on two relocated documents,
+`GET /api/documents/{id}/versions` lists the same count, dates and authors as before the move.
+**25 Strict rule ON** — as §21.11. 26–27 as §20.11.
+
+## 22.12 Found, decisions recorded, integration notes, `.claude`
+
+- **Decision recorded (made within round 45 item 4, fail closed):** which content ends CURRENT after a re-copy — the last
+  post-move edit only when its author may write the document now; otherwise the document's own content (§22.4). Every
+  edit is carried either way. Reason: the old file stayed writable by the old container's audience.
+- **Decision recorded:** the external version list keeps `createdByName` null (§22.3).
+- **Residual (degraded environments only):** where two `sprk_document` rows of different records share ONE item (possible
+  only while the unique key `sprk_graphitemid_uk` is not Active; it is Active on spaarkedev1), edits the OTHER record's
+  users make to the kept source after this document's move, once that record releases the source, are carried into this
+  document's HISTORY (never current unless their author may write this document). Before the move both records already
+  served that one item to both audiences.
+- **Residual (pre-existing to field security, unchanged):** if the BFF application user ever loses the writer profile on
+  the relocation columns, Dataverse returns them MASKED (empty) rather than refusing the read, so an owed ledger entry would
+  read as none. Controls: the FLS script's `-Verify` (p3) and gate 24's read-only cross-check above.
+- **Integration notes — task 150's lane:** `DocumentContainerRelocator` gains a constructor dependency, the existing
+  Scoped `IAccessDataSource` (type activation — nothing to change for a DI caller; a test that `new`s the relocator passes
+  one). `DocumentRelocationBatchResult` gains `SourceChangedAfterMove` and `VersionsTruncated` (stated; `Complete` is
+  unchanged in meaning); add them to the Make Secure `files_incomplete` / success report. A Make Secure request now replays
+  each file's history — its duration grows with the history it carries.
+- **Integration note — round 45 item 5:** `IRelocatedFileIndexing` (f1-v1) holds the last free slot under
+  `ADR010_DITests`' 1:1-interface ceiling (158). This round adds NO interface. At integration, register it without a 1:1
+  interface if ADR-010 allows; otherwise record the ceiling change in the PR's ADR block.
+- **Integration note — shared test fixture:** `ExternalAccessContractFixture` now exposes its `IDataverseService` mock as
+  `DataverseServiceMock` (was a local); a branch that edits the same lines merges textually.
+- **Task 167's guard:** no route added, deleted or re-gated; the two version routes changed only their projection.
+- **`.claude` edit (main session only):** none new; §12's `bff-deploy/SKILL.md:50` edit still stands.
+
+## 22.13 Not closed
+
+- **Live writes (by design, main session):** gates 23a, 23, 24, 25 (§22.11) and §20.11's others. Nothing was written
+  live, and this round made no live access at all.
 - Nothing else is owed by task 166.
