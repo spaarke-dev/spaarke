@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 5 (1, 2, 4, 5, 6) — a focused Save tab: no icon in the lookup placeholder, "+ New" shows only the create form, selecting a record collapses the search, the name is edited in the Document header, and the post-save view is the confirmation + profile with refresh</title>
     <phase>6 UAT round 5 (2026-10-05)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx` (`RelatedToPicker.tsx`, `SaveFlow.tsx`, the Document header, the profile section) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

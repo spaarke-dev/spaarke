@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -21,15 +21,22 @@ import type { MatterTypeChoice } from '../services/matterTypeLookupService';
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
- * Layout (UAT round 4, task 095 — no "Related to" label):
+ * Layout (UAT round 4, task 095 — no "Related to" label; round 5, task 099 — no icon in the placeholder):
  *   [ Matter ] [ Project ] [ Invoice ]                      [ + New ]  ← left pills, "+ New" right
- *   [ 🔍 Look up related Matter...                       ] [ 🔍 ]     ← lookup box + search icon button
+ *   [ Look up related Matter...                          ] [ 🔍 ]     ← lookup box (text only) + search icon button
  *   ┌ recommended auto-match cards ──────────────────────────────┐
  *   │ LITG-763955 : Litigation matter · Matter · 100% match  [✓]  │  ← blue check; green ✓ + × on select
  *   └────────────────────────────────────────────────────────────┘
  *
- * Selecting only turns the card's check GREEN (with a small × to clear) — the search row
- * and other cards stay. Single-select chips (gray except selected=blue, default Matter).
+ * Round 5 (task 099, owner 2026-10-05):
+ *   - Selecting a record COLLAPSES the picker to just the selected record (green check + ×): the pills, lookup
+ *     box, results and "+ New" are hidden. The × clears the selection and the picker comes back as it was (the
+ *     query and results are component state, so they are still in hand — no new request).
+ *   - "+ New" shows ONLY the create form (and the pills); `onCreatingChange` tells the host so it can hide the
+ *     rest of its form until the record exists (or the create is cancelled).
+ *   - Focus follows the user's action (ADR-021): into the name box on "+ New" / Cancel, onto the selected
+ *     record on select / create, back into the lookup box on ×.
+ * Single-select chips (gray except selected=blue, default Matter).
  * Host-agnostic: selecting only *chooses*; the regarding is written at save. Fluent v9.
  *
  * Task 084 (#1037, "pickable equals savable"): a record whose `canFile === false` (the caller can read
@@ -157,6 +164,11 @@ export interface RelatedToPickerProps {
   matterTypesError?: string | null;
   /** Re-fetches the matter-type list (the Retry action). Absent → no Retry button is rendered. */
   onRetryMatterTypes?: () => void;
+  /**
+   * Task 099: reports whether the "+ New" create form is open. The host hides the sections that only make sense
+   * once a record exists (document name, profile, Save) while it is. Called with `false` on unmount.
+   */
+  onCreatingChange?: (creating: boolean) => void;
   disabled?: boolean;
 }
 
@@ -192,6 +204,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   matterTypesLoading = false,
   matterTypesError = null,
   onRetryMatterTypes,
+  onCreatingChange,
   disabled = false,
 }) => {
   const styles = useStyles();
@@ -213,11 +226,37 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [selectedMatterTypeId, setSelectedMatterTypeId] = useState('');
   const [matterTypeError, setMatterTypeError] = useState<string | null>(null);
 
-  const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
+  // Task 099: focus follows the user's action. The flag is set by the picker's own handlers (never by a
+  // selection the host restores), and consumed by the first render in which the target control exists.
+  // Callback refs (Fluent v9's ref typing in this package resolves to `Ref<never>`; a callback ref is accepted).
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const selectedBtnRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterRef = useRef<'input' | 'selected' | null>(null);
+  useEffect(() => {
+    const target = focusAfterRef.current;
+    if (!target) return;
+    const el = target === 'selected' ? selectedBtnRef.current : inputRef.current;
+    if (el) {
+      focusAfterRef.current = null;
+      el.focus();
+    }
+  });
 
-  // Prepend the selected record as a card only when it isn't already shown in either list.
-  const selectedShown =
-    value !== null && (typeMatches.some(c => sameRecord(c, value)) || searchResults.some(r => sameRecord(r, value)));
+  useEffect(() => {
+    onCreatingChange?.(showCreate);
+    return () => onCreatingChange?.(false);
+  }, [showCreate, onCreatingChange]);
+
+  const selectRecord = (rec: EntitySearchResult) => {
+    focusAfterRef.current = 'selected';
+    onChange(rec);
+  };
+  const clearSelection = () => {
+    focusAfterRef.current = 'input';
+    onChange(null);
+  };
+
+  const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
 
   // Task 084: a selection the save would refuse never stands. The picker itself never selects a
   // `canFile === false` record, but a selection can arrive from elsewhere — e.g. SaveFlow restoring the
@@ -268,6 +307,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         selectedType === 'Matter' ? selectedMatterTypeId : undefined
       );
       if (result) {
+        focusAfterRef.current = 'selected';
         onChange(result.record);
         setShowCreate(false);
         setNewName('');
@@ -362,17 +402,20 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           {selected ? (
             <div className={styles.checkWrap}>
               <Button
+                ref={el => {
+                  selectedBtnRef.current = el;
+                }}
                 className={styles.greenCheckBtn}
                 appearance="primary"
                 icon={<CheckmarkRegular />}
-                onClick={() => onChange(null)}
+                onClick={clearSelection}
                 disabled={disabled}
                 aria-label="Selected — click to clear"
               />
               <button
                 type="button"
                 className={styles.clearX}
-                onClick={() => onChange(null)}
+                onClick={clearSelection}
                 disabled={disabled}
                 aria-label="Clear selection"
               >
@@ -384,7 +427,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
               className={styles.ctrlBtn}
               appearance="primary"
               icon={<CheckmarkRegular />}
-              onClick={() => onChange(rec)}
+              onClick={() => selectRecord(rec)}
               disabled={disabled}
               aria-label="Select this record"
             />
@@ -393,6 +436,22 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
       </Card>
     );
   };
+
+  // Task 099 (owner item 4): once a record is selected the picker collapses to JUST that record (with its ×) —
+  // no pills, lookup box, results or "+ New". The × (clearSelection) brings it all back, with the previous
+  // query and results still in state. A non-blocking create warning still shows (the record was just created).
+  if (value !== null && !showCreate) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.cards}>{renderCard(value, { keyPrefix: 'sel:' })}</div>
+        {createWarning && (
+          <Text size={200} className={styles.fieldWarning} role="status">
+            {createWarning}
+          </Text>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={styles.root}>
@@ -426,6 +485,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             className={styles.newBtn}
             icon={<AddRegular />}
             onClick={() => {
+              focusAfterRef.current = 'input';
               setShowCreate(true);
               setCreateError(null);
               setCreateWarning(null);
@@ -441,6 +501,9 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           the input becomes the new-record name, the search icon becomes Create + Cancel. */}
       <div className={styles.searchRow}>
         <Input
+          ref={el => {
+            inputRef.current = el;
+          }}
           value={showCreate ? newName : query}
           onChange={(_, d) => (showCreate ? setNewName(d.value) : setQuery(d.value))}
           onKeyDown={e => {
@@ -448,7 +511,6 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           }}
           placeholder={showCreate ? `New ${selectedType} name` : `Look up related ${selectedType}...`}
           disabled={disabled || (showCreate && creating)}
-          {...(showCreate ? {} : { contentBefore: <SearchRegular /> })}
           style={{ flexGrow: 1 }}
           aria-label={showCreate ? `New ${selectedType} name` : `Search ${selectedType} records`}
         />
@@ -469,6 +531,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             <Button
               appearance="subtle"
               onClick={() => {
+                focusAfterRef.current = 'input';
                 setShowCreate(false);
                 setNewName('');
                 setCreateError(null);
@@ -564,7 +627,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           with a Retry that re-runs the same query. Reuses the Matter Type load-failure's own
           message+Retry pattern (styles.matterTypeErrorRow / styles.fieldError) rather than inventing a
           second one. */}
-      {searchError && (
+      {!showCreate && searchError && (
         <div className={styles.matterTypeErrorRow}>
           <Text size={200} className={styles.fieldError} role="alert">
             {searchError}
@@ -575,25 +638,26 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         </div>
       )}
 
-      {searchResults.length > 0 && (
+      {!showCreate && searchResults.length > 0 && (
         <div className={styles.cards}>{searchResults.map(r => renderCard(r, { keyPrefix: 's:' }))}</div>
       )}
 
-      {/* Recommended auto-match cards. */}
-      <div className={styles.cards}>
-        {value && !selectedShown && renderCard(value, { keyPrefix: 'sel:' })}
-        {candidatesLoading ? (
-          <div className={styles.cardRow}>
-            <Spinner size="tiny" /> <Text size={200}>Finding matches…</Text>
-          </div>
-        ) : typeMatches.length > 0 ? (
-          typeMatches.map(c => renderCard(c, { confidence: c.confidence }))
-        ) : (
-          <Text size={200} className={styles.emptyNote}>
-            No suggested {selectedType} matches — search above or create a new record.
-          </Text>
-        )}
-      </div>
+      {/* Recommended auto-match cards — hidden while the create form is open (task 099: only the form shows). */}
+      {!showCreate && (
+        <div className={styles.cards}>
+          {candidatesLoading ? (
+            <div className={styles.cardRow}>
+              <Spinner size="tiny" /> <Text size={200}>Finding matches…</Text>
+            </div>
+          ) : typeMatches.length > 0 ? (
+            typeMatches.map(c => renderCard(c, { confidence: c.confidence }))
+          ) : (
+            <Text size={200} className={styles.emptyNote}>
+              No suggested {selectedType} matches — search above or create a new record.
+            </Text>
+          )}
+        </div>
+      )}
     </div>
   );
 };

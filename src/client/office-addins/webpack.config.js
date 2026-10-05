@@ -227,6 +227,12 @@ module.exports = async (env, options) => {
         // wrapper's import closure (22 files) has no Xrm/host dependency; its third-party imports
         // (react, Fluent v9, lexical) resolve from THIS package's node_modules — see the first rule
         // under `module.rules`.
+        // Task 099 (ADR-012 amended 2026-10-05 / ADR-044): the ONE shared `cleanGuid` (`utils/guid.ts` — a pure
+        // module, zero imports), by exact alias — replaces this package's former local copy.
+        '@spaarke/ui-components/guid$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/utils/guid.ts'
+        ),
         '@spaarke/ui-components/send-email-pane$': path.resolve(
           __dirname,
           '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'

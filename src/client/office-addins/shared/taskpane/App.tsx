@@ -45,7 +45,7 @@ import {
   type SendEmailRelatedRecordInput,
 } from './services/sendEmailService';
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
-import { cleanGuid } from './utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from './utils/errorMessages';
 
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its

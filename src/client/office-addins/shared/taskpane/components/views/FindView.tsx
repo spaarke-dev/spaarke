@@ -13,7 +13,7 @@ import {
 } from '@fluentui/react-components';
 import { DocumentSearchRegular } from '@fluentui/react-icons';
 import { apiClient, ApiClientError, authService } from '@shared/services';
-import { cleanGuid } from '../../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { useDocumentProfile } from '../../hooks/useDocumentProfile';
 import { deriveRecordSearchSeed, useFindRecordMatches } from '../../hooks/useFindRecordMatches';

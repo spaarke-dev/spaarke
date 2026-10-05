@@ -318,6 +318,8 @@ shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
 shared/adapters/__tests__/WordAdapter.documentChangeDetection.test.ts
 shared/taskpane/components/views/__tests__/SaveView.documentChangeDetection.test.tsx
 shared/taskpane/components/__tests__/RelatedToPicker.layout.test.tsx
+# Task 099 (UAT round 5): Document header owns the name; "+ New" hides the rest; focus when the locked name goes away.
+shared/taskpane/components/__tests__/SaveFlow.round5.test.tsx
 shared/taskpane/services/__tests__/taskPaneWidthService.test.ts
 # --- Word Email tab from the shared compose engine; no sharing links (task 096, UAT round 4 items 6-8) --------
 # Pins: the Email tab renders the REAL shared `EmailComposer` via its new pane wrapper `SendEmailPane`

@@ -60,6 +60,8 @@ module.exports = {
     // Task 096: the Email tab renders the REAL shared compose engine through its `SendEmailPane` wrapper (same
     // exact alias as webpack.config.js) — tests exercise the shared component itself, never a copy. Its bare
     // imports (react, Fluent, lexical) resolve from this package's node_modules via `modulePaths` below.
+    // Task 099: the shared `cleanGuid` (ADR-044), exact alias — same as webpack.config.js; replaces the local copy.
+    '^@spaarke/ui-components/guid$': '<rootDir>/../shared/Spaarke.UI.Components/src/utils/guid.ts',
     '^@spaarke/ui-components/send-email-pane$':
       '<rootDir>/../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
