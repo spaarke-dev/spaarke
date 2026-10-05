@@ -789,6 +789,25 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - The ribbon's "who owns it cannot be told" table uses a fetch mock that returns a real Promise, so each case runs the guard it names: record-echo, null answer, and the others. Seeds C2 and C4 bite.
    - The ownership-held and role-held Full Access cases run DIFFERENT fixture paths, so a fake can tell them apart.
 
+## Round 54 (2026-10-05). BINDING. Main-session decisions under round 15. Task 166 relocation, from its second re-verification of `task/uac-r2-166-f1-v2`.
+
+1. **A post-move edit becomes current only if its author may still write (option a, ratified and tightened).**
+   - Every post-move edit is carried into the history.
+   - The LAST edit becomes current only when its author holds Write on the document NOW.
+   - **That Write check is read FRESH, never from the 60-second `CachedAccessDataSource`.** A Write answer cached just before Make Secure must not make a non-writer's edit current.
+   - An app-only, unknown or faulted answer means "not current" (fail closed).
+   - Test: a stale cached Write answer cannot make an edit current. Seeded.
+2. **The relocation lock lasts as long as the move.**
+   - A move now replays every prior version, so a fixed 10-minute TTL can expire mid-move.
+   - The lock is RENEWED while the relocation runs (a heartbeat with a bounded renewal interval). A move whose renewal fails stops before its next destructive step (re-point or source delete) and reports `lock-lost`. It never continues unlocked.
+   - Test: a second relocator cannot start a move while the first still holds a renewed lock. Seeded.
+3. **No intermediate edit is dropped.**
+   - When the witness has no version id, or an id is not numeric, the relocator does NOT fall back to "current only". It orders the post-move versions by their timestamps.
+   - If the order cannot be decided, it reports `history-undecidable` for that file and leaves the row and the source untouched (retried). It never silently carries only the latest.
+4. **Every fail-closed branch gets a test that bites:** Sk, Sq, Si, Sm, Sj and Sw; the version-list paging (Sd: a long history is never cut at one page); and the Unknown → never-delete witness branch.
+   - Note §22's "each new check seeded" / "every seed bit" claims are corrected to what is true.
+   - The test header comment that still says "unless it is byte-identical" (F-3) is corrected.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
