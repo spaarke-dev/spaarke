@@ -946,6 +946,21 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - **Why:** the ribbon is the tool that finishes those rows. Gating it on their absence would require settling them by hand first, which is a circular order.
    - **Docs that follow this answer:** the README, guide §7d.1, `Set-AccessRibbon.ps1` help and note §9 G-11. Updated at integration.
 
+## Round 61 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 158, from its final verification (`task/uac-r2-158-h`, ready to merge).
+
+1. **A No Access entry on a secure parent reaches EVERY secure record filed below it, at any depth (option b, transitive).** This is class (a), security.
+   - Example: a work assignment filed under a project that is filed under the matter. Projects and work assignments can be filed under each other (task 158), so chains deeper than one level exist. A one-level reach leaves a walled person's direct share on the grandchild.
+   - **The same rule at share time:** `CheckRecordAndSecureParentsAsync` checks EVERY secure ancestor's list, not only the direct parent's. This is round 39 item 2, read as "every secure parent" up the chain.
+   - **Implementation:**
+     - The ONE existing walk (`SecureRootInheritance.ReadSecureParentsAsync` upward and `ListFiledRootsAsync` downward) iterates level by level.
+     - It is cycle-safe (a visited set) and bounded by a small maximum depth. Reaching the bound reports `children-incomplete` / Unverifiable, which fails closed.
+     - No second walk, no new service.
+   - **Flapping:** a record is enforced once per run (the existing reached set), so the job does not flap.
+   - **Tests:** a grandchild direct share removed by the matter's entry; a grandchild share refused at share time; a cycle; the depth bound.
+   - **Done at integration** as part of the 158 merge, not as another lane round.
+2. **Interpretation xxxiv is ratified (option a):** N5 for filed records requires the entry author's Write on BOTH the walled parent and each filed record. An entry never strips access on a record its author cannot change.
+3. **Known limits** (class e/f): the verifier's surviving seeds V01, V07, V08 and V09, and the two LOW items. They are recorded in 158's note, and the 5-minute job covers each one.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
