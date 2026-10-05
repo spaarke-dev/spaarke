@@ -850,6 +850,24 @@ The owner, verbatim: "it is important that we address issues that impact the qua
 4. **Process.** Verifiers classify each finding (a)–(f) and lead with (a)–(c). Fixers fix (a)–(c) and record (d)–(f) as known limits, without building new machinery for them.
 5. **Batch 5:** scope review before starting (owner, 2026-10-05). For each of the 29 tasks: what it delivers, its risk if dropped, and keep / merge / cut. The owner decides.
 
+## Round 57 (2026-10-05). BINDING. Main-session decisions under owner round 56. Task 165, from its final re-verification of `task/uac-r2-165-f2-v2`.
+
+1. **Only dev carries the operator marker for now (option c).**
+   - Spaarke's production operator environment does not exist yet: `spaarke-bff-prod` / "demo" is stopped.
+   - When it is stood up, the marker is added in the same change that stands it up (registry key, `.bicepparam`, the guard's list, the App Service setting).
+   - Until then, every other environment refuses the 8 routes. This is the smallest fail-closed choice.
+2. **D38 accepted (option a).** The DELEGATED container-type routes stay outside the marker.
+   - Graph authorizes them with the caller's OWN token, and the BFF lends no identity, so the caller's SharePoint Embedded administrator role is the boundary.
+   - Gating them would only remove legitimate screens.
+3. **Fixed in 165's final round** (owner round 56: class a or b):
+   - **The deploy script's marker parse fails open.** `[bool]"false"` is true. `Deploy-BffApi.ps1` accepts only a JSON boolean and fails on any other type. The registry ArchTest rejects string values.
+   - **Security fail-closed branches with no biting test.** These get tests (seeds VB5, VB6, VB7 and VL7 must turn red):
+     - the container-type rule's Unverifiable → 503 path;
+     - the scope read-fault path;
+     - the 5000-row truncation path;
+     - `QuarantineClearedSince`'s time clause.
+4. **Known limit** (class d, no fix): the creation guard does not see a `System.Net.WebClient` upload written by deliberately unusual script code.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
