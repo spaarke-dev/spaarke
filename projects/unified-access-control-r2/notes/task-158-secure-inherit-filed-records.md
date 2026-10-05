@@ -4,7 +4,8 @@
 > intents) + `work/unified-access-control-r2`, base **`c8a964cb69a82f9a2e697d12535f097b9227055f`**.
 > **Fix round r1** (§14): `task/uac-r2-158-r1` = 158 + `task/uac-r2-142-r6` (merge `5d041a627`, the `sprk_assignedaccess`
 > ledger round 30 extends) + `a58cbd8ee`; stopped by a machine restart (WIP `c5decdbeb`); completed on
-> **`task/uac-r2-158-r1c`** (base `c5decdbeb`).
+> **`task/uac-r2-158-r1c`** (base `c5decdbeb`). **Fix round r1c-v1** (§15): `task/uac-r2-158-r1c-v1` from
+> `task/uac-r2-158-r1c` (`25b7ac3dd`) — the verification's 17 items.
 > Status: **code complete, not deployed.** Live steps are manual gates for the main session (§10).
 > Binding owner decisions: round 6 items 1, 2, 4 and the item-4 clarification; round 3b / round 10 item 7 (F3, via task
 > 146-c1's `SecureDesignationRemoval`); round 7 item 3 (G5 chat create); round 8 item 1 + round 13 item 7 (§6.5 path B
@@ -119,11 +120,22 @@ task 142's `sprk_assignedaccess` ledger (no new table): one row per (filed recor
 `inherited:{parentTable}:{parentId}`, subject `sprk_subjectsystemuser` or the new `sprk_subjectteam`, the mask written in
 `sprk_grantedlevel` (a raise records the level it raised from as `raised-from-mask:N`); a principal that already held the
 mirror is `CoveredByExisting` (direct access). Before the mirror: (a) an inherited share removed or narrowed on the filed
-record outside the BFF → `Declined` (`/unshare-user` on the filed record marks it `Declined` through 142's marker);
+record outside the BFF → `Declined` (`/unshare-user` on the filed record marks it `Declined` through 142's marker) —
+**unless (r1c-v1) the person is on the filed record's No Access list**: then task 143's enforcer removed it, a known
+cause, so the row waits (`Skipped`, `removed-by-no-access`) and the share is passed on again once the wall is lifted
+(task 142's criterion 9); an unverifiable list decides nothing (nothing re-added, nothing recorded, reported);
 (b) a row whose parent is isolated and no longer shares the principal is ended by the reverse rule — a `Declined` row ends
-too ("never re-added WHILE the parent share persists"); a parent that cannot be read is reported. (c) the add-only mirror,
-never re-adding a declined principal. (d) the provenance of what it wrote. An unreadable provenance gives nobody anything;
-an unwritable one is reported.
+too ("never re-added WHILE the parent share persists"), and is taken out of the declined set at once, so a principal a
+NEW parent passes on (the record was re-filed) is given in the same pass; a parent that cannot be read is reported.
+(c) the add-only mirror, never re-adding a declined principal, **with write-ahead provenance (r1c-v1, verifier item 1)**:
+each share's row is written BEFORE the share — `Shared`, reason `share-pending` (plus `;raised-from-mask:N`), the mask
+about to be written — and a row that cannot be written (a fault, or a concurrent pass created it first: the store answers
+`null` and writes nothing over it) writes NO share. (d) each share written and read back has its row confirmed (the
+marker dropped); a principal that already held the mirror is recorded — inherited when a live row of another parent says
+so, `CoveredByExisting` only when NO live row says the share was passed on (the rows are re-read after the shares were
+read, so a concurrent pass's row for any share this pass saw is in that read). A row whose share never landed is written
+again by the next pass, never read as a removal. An unreadable provenance gives nobody anything; an unwritable one writes
+nothing and is reported.
 
 **The reverse rule** (`EndInheritedSourceAsync`, A4's rules): `Declined` ends (the operator's removal stands);
 `Adopted` / `CoveredByExisting` are direct → kept; a `Shared` share is removed ONLY when (1) the record's current secure
@@ -135,6 +147,13 @@ record's own children brought into line. Triggers: `/unshare-user` on a SECURE p
 ledger rows sourced from it — failures = `children_incomplete`); the job, (b) above for the records it lists and
 `ReconcileUnvisitedProvenanceAsync` for records re-filed away from the parent; `/unsecure-project` of the filed record
 itself ends every row on it before its shares are revoked (Step 3.6).
+r1c-v1: (1) compares masks — a parent carrying the person at a LOWER level than the share does not justify it
+(`AccessRemoved`, never `KeptOtherSource`), and when the record's current parents still pass part of it on, the
+`/unshare-user` fan-out gives that part back in the same call (the mirror's own pass; reported as `filedRecordsNotUpdated`
+when it cannot be given); a row recorded ahead of a share that never landed ends with nothing removed
+(`assignment-ended`); the record's LAST reader is kept with its row LIVE (`Shared`, reason `kept-last-reader`) — the share
+is still the one the parent passed on, so every later pass tries again and removes it once someone else can open the
+record (an ended row would later have been read as direct access).
 
 ## 5. The way back — `/unsecure-project` (owner round 6 item 4 + clarification)
 
@@ -185,9 +204,20 @@ itself ends every row on it before its shares are revoked (Step 3.6).
 | xiv | A record **re-filed away** from a secure parent keeps what it passed on until that parent's unshare (BFF or out of band) | Re-filing is not an unshare; never lower existing access (A4). The job reaches it through the parent's own ledger rows |
 | xv | The reverse rule decides "still justified by another parent" on the **intersection** with task 149's rule for untrusted parents: a read parent that no longer carries the person ends it; every read parent carrying it while another cannot be trusted holds it (reported) | Owner round 11 item 4 (intersection) + 149's "a principal its known roots do not share is revoked; held children are only narrowed". The first round kept everything when any parent could not be trusted (fail-open on removal) |
 | xvi | The unsecure of a filed record ends its inherited rows FIRST (Step 3.6) and stops (children_incomplete, retryable) if it cannot | A row left `Shared` after Step 4's revoke reads, at a later re-secure, as an operator's removal |
-| xvii | Inherited rows are left out of task 142's ledger-roots scan (`IsAssignedToScanRow`) | They are not Assigned-To rows (no contact / organization subject — the materializer already ignores them); counting them would truncate and fail 142's job in a large environment |
+| xvii | Inherited rows are left out of task 142's ledger-roots scan (its OData filter — the one statement of the predicate since r1c-v1, pinned by `AssignedAccessStoreODataTests`) | They are not Assigned-To rows (no contact / organization subject — the materializer already ignores them); counting them would truncate and fail 142's job in a large environment |
 | xviii | A stranded isolated create (creator not shared AND the row not deletable) is named to the user (chat error / Office warning) | Never "shared to you" for a row only an administrator can open; the job shares it to `sprk_createdbyperson` |
 | xix | A share on a matter / project whose flag is EMPTY lists the records filed under it and reports each (unverifiable → `children_incomplete`, `filedRecordsNotUpdated`); a share on an ORDINARY one reads nothing filed under it | Round 17 item 3 (an empty flag is never "not secure"); the first round short-circuited both as "not secure" |
+
+**r1c-v1 interpretations (owner-reversible; each applies round 30 / ADR-003 to a case the rounds do not name):**
+
+| # | Decision | Why / alternative |
+|---|---|---|
+| xx | **Write-ahead provenance**: an inherited share's row is written (`share-pending`) BEFORE the share; a share is never written without its row | Verifier item 1 (CONFIRMED): share-then-row let a fault or a share/job race leave the rule's share with no row, and the next pass recorded it as DIRECT (`CoveredByExisting`) — the parent's unshare then never removed it. Alternative "never infer direct from AlreadyCovered without a pre-share read" needs the same pre-share record, so it IS write-ahead. The intent is a reason marker on a `Shared` row, not a new choice option: no schema change, and 142's operator markers (`MarkShareRemovedAsync` → Declined, `MarkShareAdoptedAsync` → Adopted) already treat it exactly as the share it is |
+| xxi | A create that loses the alternate-key race answers `null` and writes NOTHING over the row (store), and the pass is incomplete (retried) | The loser decided on a read that did not see the row; overwriting it was the second half of verifier item 1's race (a `CoveredByExisting` written over the winner's `Shared`) |
+| xxii | The record's last reader (S5) is kept with its row LIVE (`Shared`, `kept-last-reader`), retried every pass | An ended row left the parent's share on the record with no live provenance, so a later re-share recorded it as direct — the same misclassification as item 1 by another path; and "kept as the last reader" is a condition at the time, not a permanent exemption |
+| xxiii | A share task 143's enforcer removed (the person on the FILED record's own No Access list) is `Skipped` / `removed-by-no-access`, not `Declined`; passed on again once the wall is lifted | Task 142's criterion 9 for the same ledger (the enforcer's removal is a known cause, restored once lifted); round 30's Declined is "an operator's removal". The wall checked is the record's own list — the one 143 enforces on that record; a wall on a parent removes the parent's share, which the reverse rule follows |
+| xxiv | A raise over an operator's own (`Adopted`) share is recorded (write-ahead), the operator's level as the level it raised from | Before r1c-v1 the raise went unrecorded and `KeptAdopted` kept it for good after the parent's unshare (over-retention); now the unshare takes back only the raise (A4: never lower what was there before) |
+| xxv | When the parent's unshare removes a share the record's CURRENT parents still pass on in part, that part is given back in the same call (`PassUnshareOnAsync` re-runs the mirror's own pass for that record), reported when it cannot be | Verifier item 3: the alternative — narrowing in place — would leave the rule's narrowed share without live rows (read as direct later); revoke-then-mirror keeps provenance exact, and R3/R4 rule out leaving the person without the remaining parent's share until the job |
 
 ## 7. Placement (CLAUDE.md §10) and component justification (§11)
 
@@ -571,6 +601,17 @@ Writes, so pending.
   (3.5) and the share sweep (4); 150's unsecure F3 gate runs before Step 1 — no overlap. `ProvisionProjectEndpoint`'s
   creator check before Step 4.1 is now `CheckCreatorWallsAsync` on BOTH the forward and the resume path: keep it BEFORE
   150's `EnsureSecureFlagAsync` (the flag write) when merging 150's text.
+- **r1c-v1 — task 142** (`AssignedAccessStore`, `AssignedAccessTestDoubles`): `CreateInheritedLedgerAsync` now answers
+  `Guid?` (`null` = lost the alternate-key race, nothing written); `ScanLedgerRootsAsync` lost its in-memory
+  `.Where(IsAssignedToScanRow)` and `IsAssignedToScanRow` is gone (the fake keeps the predicate inline); two reason
+  constants (`SharePending`, `KeptLastReader`'s doc). The fake gains `BeforeInheritedCreate`, `InheritedCreateConflicts`,
+  `SeedInheritedRow`, `FailLedgerUpdates`; `GrantPolicyTestDoubles.SeamNoAccessListReader.Lift`. If 142 lands a later
+  round first, re-apply on top. `InternalShareEndpoints.ChildrenIncompleteAfterUnshareAsync` gains the give-back sentence
+  and counts `filed.NotRegiven` into `filedRecordsNotUpdated` (142's / 149's code around it unchanged).
+- **r1c-v1 — task 149** (`SecureChildShareSynchronizer.SyncInheritedRootAsync`): one optional parameter (`recordIntent`)
+  and the write-ahead call before each grant/raise; nothing else in 149's passes changes.
+- **r1c-v1 — task 140 (round 42)**: E-158-v1-2's complete fix uses the `If-Match` support round 42 adds to the grant
+  writes; when 140 merges, the ledger updates can adopt it (escalated, §15.1).
 - `.claude/` edits needed: **none**.
 
 ## 14. Fix round r1 (rounds 30, 31, owner round 32 and the first verification) — item by item
@@ -605,3 +646,144 @@ the base; r1c verified both, kept them, and finished the round.
 | 22 | AC8 not met | Met: every new branch seeded (§9, r1c table); the full BFF unit suite and NetArchTest re-run (§8) |
 | 23 | AC9 manual live gate | Pending for the main session, as expected (§10: 158-0 schema BEFORE the deploy; 158-a, 158-b after) |
 | 24 | The verifier's question | Answered by round 31 item 1 (yes) and implemented (item 6) |
+
+## 15. Fix round r1c-v1 (the verification of `task/uac-r2-158-r1c`) — item by item
+
+Branch `task/uac-r2-158-r1c-v1` from `task/uac-r2-158-r1c` (`25b7ac3dd`). Binding: rounds 30, 31, owner round 32, round 39
+(the second verification), round 3 S5 / A4; the standing directive (round 15). No owner question was needed; the
+interpretations this round adds are §6 xx–xxv (owner-reversible). **Correction of r1c's own claim:** §9 r1c said "every
+guard bites". It did not: the verifier's V18 (the delete read-back), W13 (the reverse rule's mask comparison), W03 (the
+decline-set removal) and W28 (the scan's in-memory filter) bit nothing. Each is closed below.
+
+| # | Verifier item | Outcome |
+|---|---|---|
+| 1 | MEDIUM, CONFIRMED: after a provenance-write fault (or a share/job race) the retry recorded the inherited share as DIRECT (`CoveredByExisting`) — the run said success and the parent's unshare never removed it | **Fixed — write-ahead provenance (§4, §6 xx–xxii).** `SyncInheritedRootAsync` gains a `recordIntent` hook called right BEFORE each grant/raise; `SecureRootInheritance.RecordIntentAsync` writes one `Shared` row per isolated parent with reason `share-pending` (+ `;raised-from-mask:N`) and the mask about to be written, and answers `false` — the share is then NOT written — when a row cannot be written or a concurrent pass created it first. Step (d) confirms each written share's row (marker dropped); a principal that already held the mirror is `CoveredByExisting` only when NO live row says the share was passed on (the rows are re-read after the shares were read). A recorded share that never landed is written again (never read as a removal); the reverse rule ends such a row with nothing removed (`assignment-ended`). **Race, both halves:** `AssignedAccessStore.CreateInheritedLedgerAsync` answers `null` on a 409/412 whose row reads back and writes NOTHING over it (before: it UPDATED the winner's row with the loser's write); every caller treats `null` as "not recorded" (pass incomplete, retried). **The same misclassification by a second path, closed:** a share kept as the record's last reader (S5) ended its row, so a later re-share recorded the parent's share as direct — its row now stays live (`Shared`, `kept-last-reader`), is retried each pass and removed once someone else can open the record (§6 xxii). The verifier's probe is now the regression test `AProvenanceWriteFault_NeverLeavesAShareThatLooksDirect_SoTheParentsUnshareStillRemovesIt`; the race is pinned at both layers (`ARowAConcurrentPassRecordsFirst_…`, `ADirectAccessRecordThatLosesTheRace_…`, and the store's `AnInheritedRowCreate_ThatLosesTheRaceToTheKey_…`). Seeds V01–V12 |
+| 2 | LOW-MEDIUM: the delete READ-BACK in `CompleteIsolatedCreateAsync` was unpinned (V18) | **Pinned.** `SecureChildShareWorld.DeletesIgnored` (a delete that answers success while the row survives — the "accepted, not applied" shape task 133 models for revokes). `ChatCreate_WhenTheCompensationDeleteAnswersSuccessButTheRowSurvives_SaysSo_NeverNotCreated` and its Office twin: the row is named as existing (never "removed again / NOT created"), stays secure and team-owned, and the job later shares it. Seed V15 (= the verifier's V18, `removed = true`) bites both |
+| 3 | LOW-MEDIUM: the mask comparison in `StillJustifiedByParentsAsync` was unpinned (W13) — a parent carrying LESS counted as full justification (over-retention) | **Pinned and completed.** `UnsharingFromTheMatter_LeavesExactlyWhatAnotherParentPassesOnAtALowerLevel`: re-filed from the matter (Collaborate) to a project sharing View Only — the matter's unshare takes its share back and the colleague ends with EXACTLY the project's View Only, in the same call. That last part is new: the `/unshare-user` fan-out now gives back what the record's current parents still pass on (the mirror's own pass, `PassUnshareOnAsync` → `SecureIfFiledUnderSecureCoreAsync`, sharee-only), so the person is never left without the remaining parent's share until the job (R3/R4); a give-back that fails or cannot be decided is reported (`InheritedUnsharePass.NotRegiven` → `filedRecordsNotUpdated`, its own sentence in the unshare copy). Seeds V16 (any comparison), **V16b** (= W13 exactly: absence still refuses, a lower mask justifies), V17–V21 |
+| 4 | LOW: `declinedRows.Remove(row.Id)` in step (b) "has no observable effect" (W03) | **Proven wrong and pinned.** The statement is live for a row whose parent the record was RE-FILED AWAY from: the decline is from the old parent, the mirror runs over the NEW parents, so without the removal the new parent's share waits a whole job cycle. `TheJob_EndsADeclineFromAParentTheRecordWasReFiledAwayFrom_AndGivesTheNewParentsShareInTheSameRun`. Seed V22 bites |
+| 5 | LOW: `ScanLedgerRootsAsync`'s in-memory `.Where(IsAssignedToScanRow)` duplicated the OData filter; the store's OData strings were exercised only by the live gate (W28) | **Fixed both halves.** The duplicate is removed (the OData filter is the one statement of the predicate; the fake keeps its own emulation). New `tests/integration/auth/UnifiedAccessControl/AssignedAccessStoreODataTests.cs` drives the PRODUCTION store over an in-memory `sprk_assignedaccesses` table behind `DataverseWebApiClient`'s virtual methods that EVALUATES the `$filter` it is sent as Dataverse does (case-insensitive; SQL three-valued logic — a comparison or `startswith` against an empty column is unknown, which is exactly why the scan says `eq null or not startswith(…)`), projects the `$select`, and answers 412 on a duplicate `sprk_ledgerkey` — the precedent is 142's `GrantTable`, which interprets the production filter. Six tests: the scan (inherited rows out in any casing; a null-source row kept; Revoked / deactivated out), the inherited read of a record (the team subject read through `_sprk_subjectteam_value`; malformed / other-record / deactivated rows out), the by-parent read, the race (412 → `null`, nothing written), a 412 with no row → throws, the create payload (team bind, key, mask). Seeds V23–V29 |
+| 6 | LOW: publish size not measured | **Measured** (CLAUDE.md §10 item 4, the full convention): `dotnet publish -c Release` (the project's framework-dependent linux-x64), `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, **PDBs included**, each from a FRESH detached short-path worktree (`C:\wt158m`, `C:\wt158a`, `C:\wt158r`, `C:\wt158h`), 212 files on every side, no MSB3030: `origin/master` `293fcd4c8` **45.65 MB**; task 158's own base `c8a964cb6` **45.94 MB**; this round's base `25b7ac3dd` **46.12 MB**; this round's head **46.13 MB**. Task 158 in all (incl. the 142-r6 ledger it merged) **+0.19 MB**; this round **+0.01 MB** (5,545 bytes); the UAC-r2 lane vs master **+0.47 MB** — far from the ≥+5 MB escalation and the 60 MB ceiling. The four worktrees were removed afterwards. `dotnet list package --vulnerable --include-transitive`: none (no package or project file changed) |
+| 7 | LOW: the stranded-create copy promised a self-heal that may not come (provisioning refused the creator — e.g. walled between the plan and the provisioning) | **Fixed.** `SecureRootInheritResult.CompletesAutomatically` (`false` when provisioning REFUSED: every job run refuses again). The chat create error, the Office warning, the Office removed-refusal and the chat re-file error promise a retry only when it can come; after a refusal they say an administrator must review it (the Office removed copy names the refusal instead of "try again in a few minutes"); the CRITICAL log says the same. The create paths' "secured but incomplete" copy keeps its promise — every provisioning refusal comes BEFORE the creator's share, so a record shared to its creator can only be left incomplete by a fault (checked: no 4xx after the share step). Tests: chat / Office (×2) / re-file, each branch both ways (the fault cases now assert the promise; the refusal cases its absence). Seeds V30–V35 |
+| 8–13 | VERIFIED items (CRITICAL item 5 fix, round 31 items 1/2, round 30 main paths, items 7–13 of r1c) | Unchanged in substance; every test of those classes still passes (the provenance tests now run over write-ahead rows) |
+| 14 | The verifier's suites | Re-run here in full (below) |
+| 15 | Round 30 not met after a provenance fault / race | Met: item 1 |
+| 16 | AC8 not met (V18, W13 unbitten) | Met: items 2, 3 (and 4, 5); this round's 36 seeds below, all bitten |
+| 17 | AC9 manual live gate | Pending for the main session, as expected — §10, now with the write-ahead expectations below |
+
+### 15.1 Found while fixing (not in the verifier's list)
+
+**Fixed here:**
+- **A share task 143's enforcer removed was recorded as an operator's removal.** Step (a) read any vanished inherited
+  share as `Declined` ("never re-added while the parent's share persists"), so a colleague walled off the filed record
+  and later un-walled stayed without the parent's share for good. Task 142's criterion 9 already settles the same case on
+  the same ledger (the enforcer's removal is a known cause, restored once lifted). Now: the person on the record's own No
+  Access list → `Skipped` / `removed-by-no-access`, passed on again once the wall is lifted; a list that cannot be checked
+  decides nothing (reported). `AShareTheNoAccessEnforcerRemoved_IsPassedOnAgainOnceTheWallIsLifted_…`,
+  `AnInheritedShareRemovedWhileTheNoAccessListCannotBeChecked_…`; seeds V13, V14 (§6 xxiii).
+- **A raise over an operator's own (Adopted) share went unrecorded** and was kept for good after the parent's unshare
+  (`KeptAdopted`). Write-ahead records it, the operator's level as the level raised from; the unshare takes back only the
+  raise. `ARaiseOverAnOperatorsOwnShare_IsRecorded_…`; seed V08 (§6 xxiv).
+
+**Not closed here — escalated with the complete fix (they cross into task 142's invariant owner):**
+
+- **E-158-v1-1 — the Assigned-To rule and the inheritance count each other's OBSERVATIONS as justification.** On a filed
+  secure work assignment where the colleague holds the matter's inherited share, task 142's materializer finds that share
+  covering its Collaborate target and records `CoveredByExisting` (it writes nothing). The matter's unshare then reaches
+  `EndInheritedSourceAsync`, which keeps the share as "also direct" because an Assigned-To row names the user (any of
+  Shared / Adopted / CoveredByExisting) → `KeptOtherField`. When the assignment later ends, 142 ends its covered row
+  without touching the share ("nothing of ours to remove"). The colleague keeps the matter's level on the filed record
+  with neither the matter nor the assignment justifying it — an over-retention round 30 forbids. The reverse direction
+  is a transient under-grant: 142 removes its own unmodified share while a 158 row recorded `CoveredByExisting` over it;
+  the matter's mirror re-grants at the next pass (≤ 5 min) — R3/R4 say minutes, but "immediate on save".
+  **Complete fix (one change on each side, plus a reason value):** (1) 158's reverse rule counts an Assigned-To row as
+  independent justification only when 142 WROTE or an operator ADOPTED the access (`Shared` / `Adopted`), never
+  `CoveredByExisting`; (2) when 158 then removes the share, each 142 `CoveredByExisting` row naming that user whose
+  coverage is gone is set `Skipped` with a new reason `covering-share-ended` (a known cause — never 142's
+  `removed-out-of-band` → `Declined`) and 142's materializer runs for the record at once (L1), so on a secure record the
+  assignee is SUGGESTED (owner A3) rather than silently dropped; (3) symmetrically, 142's `EndAssignmentAsync`, after it
+  removes its own share on a filed secure root, calls the inheritance's sharee-only pass for that record (the parent's
+  mirror re-given at once, provenance via write-ahead). Tests: both directions over the two real rules; seeds per change.
+  Why not done here: (2) and (3) change task 142's materializer — its known-cause set and its end-of-assignment path — and
+  add a ledger reason that rule must honour; that is a decision for the owner of both rules (the main session), not a
+  silent edit from 158.
+- **E-158-v1-2 — an operator's `/unshare-user` on a filed record can be undone by a pass running at the same moment.**
+  The route revokes the share and THEN writes `Declined` (task 142's marker); a pass that read the row before the marker
+  and the share after the revoke re-adds the share (now write-ahead: its `share-pending` update lands over nothing yet
+  declined), and the marker then lands on a row whose share is back — the next pass reads `Declined` and leaves the
+  share in place. The same window exists for task 142's own auto-shares. **Complete fix:** the operator routes write the
+  marker BEFORE the revoke (write-ahead, the shape of this round's fix), and every ledger update a pass makes sends the
+  row's ETag as `If-Match` from the read it decided on (the round-42 mechanism), so a marker that lands between a pass's
+  read and its write fails that write (412) and the pass re-decides. Needs `If-Match` on `DataverseWebApiClient`
+  updates (task 140 is adding it for grant rows on its own branch — round 42) and the marker reorder in
+  `InternalShareEndpoints` (task 142's code): a cross-task change for the integration lane.
+
+### 15.2 Tests (KEEP paths, ADR-038)
+
+New this round (29 methods): `SecureRootInheritanceRound31Tests` +16 (write-ahead ×5, race ×2, last reader ×2, Adopted
+raise, item 3 ×3, item 4, walls ×2 — 57 cases in the class), `SecureRootInheritanceWriterTests` +7 (items 2 ×2, 7 ×5 — and
+three existing tests now assert the promise they make on a fault), `AssignedAccessStoreODataTests` 6 (new class, in
+`tests/integration/auth/UnifiedAccessControl`, 142's KEEP path). Test doubles: `FakeAssignedAccessStore` emulates the
+production conflict path (answers `null`, never throws on a duplicate) with a `BeforeInheritedCreate` hook (a concurrent
+pass) and `FailLedgerUpdates`; `SeamNoAccessListReader.Lift`; `SecureChildShareWorld.DeletesIgnored`. No banned pattern
+(no HTTP double: the Web API double overrides the client's virtual methods, as 142's `GrantTable` does).
+
+| Suite (this worktree, once, at the end, on `651cf79b3` — later commits change docs only) | Result |
+|---|---|
+| The 158 classes + the store test + 142's ledger / job / marker classes + the share / mirror classes (the seed filter) | **508 / 508** |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **Passed 15353 / Failed 0 / Skipped 54** (Total 15407, 20 m 18 s) — r1c's 15324 + the 29 new |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **373 / 373** |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | **104 / 104** |
+| `tests/integration/Spe.Integration.Tests` | **403 passed / 25 skipped / 0 failed** (Total 428) |
+
+No contention failures this time (the suites ran sequentially, after the seed batch). All four projects build with analyzers
+on: 0 errors (the 5 warnings in `Spe.Integration.Tests` are in that project's own existing files).
+
+### 15.3 Seeds (harness `seeds158v1.py`: one guard removed per run with a runtime-false condition — or the pre-fix behaviour restored — build, the 158 classes + the store test + 142's job/marker classes + the share/mirror classes (508 tests); the file restored byte-identical from memory and touched; `git status -- src` clean after the batch)
+
+| Seed | Guard removed | Result | Red (first; +n more) | Restored |
+|---|---|---|---|---|
+| V01 | item 1: a share is written although its record could not be written | bit | `AProvenanceWriteFault_NeverLeavesAShareThatLooksDirect_SoTheParentsUnshareStillRemovesIt` (+1) | byte-identical |
+| V02 | item 1: no write-ahead record (the share is written first, as before r1c-v1) | bit | `AConfirmationFault_LeavesTheShareOnRecordAsPassedOn_SoTheNextRunConfirmsIt_AndTheUnshareRemovesIt` (+33) | byte-identical |
+| V03 | item 1: a recorded share that never landed is read as a removal | bit | `ARecordedShareThatNeverLanded_IsWrittenAgainByTheNextRun_NeverReadAsARemoval` (+2) | byte-identical |
+| V04 | item 1: the reverse rule reads a never-landed share as modified | bit | `UnsharingFromTheMatter_EndsARecordedShareThatNeverLanded_RemovingNothing` | byte-identical |
+| V05 | item 1 (S5 path): a kept last reader shared again is not confirmed | bit | `AShareKeptAsTheLastReader_ThatTheMatterSharesAgain_IsStillPassedOn_NeverRecordedAsDirect` | byte-identical |
+| V06 | item 1 (S5 path): the last reader's row is ended (as before r1c-v1) | bit | `AShareKeptAsTheLastReader_IsRemovedOnceSomeoneElseCanOpenTheRecord` (+1) | byte-identical |
+| V07 | item 1: the prior level is not read after the write-ahead marker | bit | `ARaiseOverAnOperatorsOwnShare_IsRecorded_SoTheParentsUnshareTakesBackOnlyTheRaise` (+1) | byte-identical |
+| V08 | item 1: a raise over an operator's own (Adopted) share goes unrecorded | bit | `ARaiseOverAnOperatorsOwnShare_IsRecorded_SoTheParentsUnshareTakesBackOnlyTheRaise` | byte-identical |
+| V09 | item 1 (race): a write-ahead record that lost the race still lets the share be written | bit | `ARowAConcurrentPassRecordsFirst_IsNeverOverwritten_AndNoShareIsWrittenOnTheStaleDecision` | byte-identical |
+| V10 | item 1 (race): a covered-by-existing record that lost the race is not reported | bit | `ADirectAccessRecordThatLosesTheRace_NeverOverwritesTheShareAConcurrentPassRecordedAsPassedOn` | byte-identical |
+| V11 | item 1 (race): the store's conflict path writes over the winner's row (as before r1c-v1) | bit | `AnInheritedRowCreate_ThatLosesTheRaceToTheKey_AnswersNull_AndWritesNothingOverTheRowThatWon` | byte-identical |
+| V12 | item 1: a 412 with no row behind it is read as a lost race | bit | `AnInheritedRowCreate_RefusedWithoutARowToReadBack_Throws` | byte-identical |
+| V13 | a share the No Access enforcer removed is recorded Declined | bit | `AShareTheNoAccessEnforcerRemoved_IsPassedOnAgainOnceTheWallIsLifted_NeverReadAsAnOperatorsRemoval` | byte-identical |
+| V14 | an unverifiable No Access list decides the removal anyway | bit | `AnInheritedShareRemovedWhileTheNoAccessListCannotBeChecked_IsNeitherReAddedNorRecorded_AndTheRunFails` | byte-identical |
+| V15 | item 2 (verifier V18): the delete is not read back | bit | `ChatCreate_WhenTheCompensationDeleteAnswersSuccessButTheRowSurvives_SaysSo_NeverNotCreated` (+1) | byte-identical |
+| V16 | item 3 (verifier W13): a parent carrying LESS counts as justifying the whole share | bit | `AConfirmationFault_LeavesTheShareOnRecordAsPassedOn_SoTheNextRunConfirmsIt_AndTheUnshareRemovesIt` (+19) | byte-identical |
+| V16b | item 3 (verifier W13, exact): only a parent that does not carry the person at all counts as not justifying | bit | `UnsharingFromTheMatter_LeavesExactlyWhatAnotherParentPassesOnAtALowerLevel` (+2) | byte-identical |
+| V17 | item 3: what the remaining parents pass on is not given back | bit | `UnsharingFromTheMatter_LeavesExactlyWhatAnotherParentPassesOnAtALowerLevel` (+2) | byte-identical |
+| V18 | item 3: a give-back whose write failed is not reported | bit | `UnsharingFromTheMatter_WhenWhatAnotherParentPassesOnCannotBeGivenBack_ReportsIt` | byte-identical |
+| V19 | item 3: a give-back that could not be decided is not reported | bit | `UnsharingFromTheMatter_WhenWhatTheRemainingParentsPassOnCannotBeDecided_ReportsIt` | byte-identical |
+| V20 | item 3: the unshare route does not count records not given back | bit | `UnsharingFromTheMatter_WhenWhatAnotherParentPassesOnCannotBeGivenBack_ReportsIt` (+1) | byte-identical |
+| V21 | item 3: a give-back failure counted as a share not removed | bit | `UnsharingFromTheMatter_WhenWhatAnotherParentPassesOnCannotBeGivenBack_ReportsIt` (+1) | byte-identical |
+| V22 | item 4 (verifier W03): an ended decline still withholds the principal in the same pass | bit | `TheJob_EndsADeclineFromAParentTheRecordWasReFiledAwayFrom_AndGivesTheNewParentsShareInTheSameRun` | byte-identical |
+| V23 | item 5: the Assigned-To scan counts inherited rows | bit | `TheAssignedToScan_LeavesInheritedShareRowsOut_AndKeepsAnAssignedToRowWithOrWithoutASourceField` | byte-identical |
+| V24 | item 5: the Assigned-To scan drops rows with no source field | bit | `TheAssignedToScan_LeavesInheritedShareRowsOut_AndKeepsAnAssignedToRowWithOrWithoutASourceField` | byte-identical |
+| V25 | item 5: the inherited read does not select the team | bit | `AnInheritedRowCreate_BindsTheRecordAndATeamSubject_AndReadsBackAsThatTeamWithTheMaskWritten` (+2) | byte-identical |
+| V26 | item 5: a malformed inherited row is returned | bit | `TheInheritedLedgerOfARecord_IsItsInheritedRowsOnly_WithTheTeamTheyWerePassedOnTo` | byte-identical |
+| V27 | item 5: the by-parent read returns other parents' rows | bit | `TheInheritedLedgerOfAParent_IsEveryLiveRowPassedOnFromIt_OnAnyRecord` | byte-identical |
+| V28 | item 5: the by-parent read returns deactivated rows | bit | `TheInheritedLedgerOfAParent_IsEveryLiveRowPassedOnFromIt_OnAnyRecord` | byte-identical |
+| V29 | item 5: a team principal is bound as a user | bit | `AnInheritedRowCreate_BindsTheRecordAndATeamSubject_AndReadsBackAsThatTeamWithTheMaskWritten` | byte-identical |
+| V30 | item 7: a refusal still promises a self-heal | bit | `ChatCreate_WhenTheCreatorIsWalledOffAfterThePlan_AndTheRowCannotBeRemoved_PromisesNoSelfHeal` (+3) | byte-identical |
+| V31 | item 7: a fault no longer promises the retry it gets | bit | `ChatCreate_WhenTheCreatorCannotBeSharedNorTheRowRemoved_SaysSo_AndTheJobSharesItToTheCreator` (+3) | byte-identical |
+| V32 | item 7: chat's stranded copy ignores the refusal | bit | `ChatCreate_WhenTheCreatorIsWalledOffAfterThePlan_AndTheRowCannotBeRemoved_PromisesNoSelfHeal` | byte-identical |
+| V33 | item 7: Office's stranded warning ignores the refusal | bit | `OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_AndTheProjectCannotBeRemoved_PromisesNoSelfHeal` | byte-identical |
+| V34 | item 7: Office's removed copy suggests a retry after a refusal | bit | `OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_TheProjectIsRemoved_AndNoRetryIsSuggested` | byte-identical |
+| V35 | item 7: the re-file copy promises a retry after a refusal | bit | `ChatUpdate_WhenTheCreatorIsWalledOffAfterThePreCheck_PromisesNoAutomaticRetry` | byte-identical |
+
+**36 seeds, 36 bit, 0 not bitten; every file restored byte-identical and touched; `git status -- src` clean after the batch.**
+
+### 15.4 Live gates (main session) — what changes
+
+Gate 158-0 (the ledger schema, BEFORE the deploy) is unchanged: write-ahead needs no new column or option (the marker is a
+`sprk_reason` value on a `Shared` row). Gate 158-a, additionally: each inherited-share row on the new work assignment
+reads `sprk_state` 100000001 with `sprk_reason` **empty** (confirmed) — a row still reading `share-pending` after the
+job's next run means a share whose write never landed (the run reports it). Gate 158-b unchanged.
