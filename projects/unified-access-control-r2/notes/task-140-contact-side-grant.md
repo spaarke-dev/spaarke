@@ -14,7 +14,7 @@ grants); round 13 item 4 (tri-state No Access — an Unverifiable answer fails c
 | Contact principal only; a workforce SYSTEMUSER (even with a linked contact id) → 403 `sdap.access.contact_grant.use_manage_access` | `ContactGrantorAuthorizationFilter.EvaluateGrantorAsync/EvaluateRevokerAsync` via `CallerPrincipal.IsContactPrincipal` (= `SystemUserId is null && ContactId != Empty`; the principal KIND decides, no plane branching — ADR-028 A3) |
 | Grantor holds Collaborate/Full Access (effective post-veto level — G3 (a)); View Only and "no access" are one 403 `level_insufficient` | `CallerPrincipal.RightsOn(rootType, id)` → `ContactGrantorAuthorizationFilter.GrantingLevel` (task 139's `GrantCeilingFor`, View Only excluded) |
 | Grantor has ≥1 active organization (403 `no_organization`); membership fault → 503 `membership_unreadable` | the ONE membership read `ExternalParticipationService.ReadOrganizationMembershipsAsync` (task 109 — CONFERRING set = statecode 0 + `sprk_startdate`/`sprk_enddate` current + active organization; `Unreadable` on any fault). **No extension was needed**: task 109 already made the reader date-bounded and fault-distinguishing, which is exactly what the POML asked `QueryActiveOrgIdsAsync` to become (that method was renamed by 109). |
-| ONE active grantee in a shared conferring organization (422 `grantee_not_in_organization`); email shared by >1 active contact → 409 `grantee_ambiguous`; self → 400 `self_grant`; lookup fault → 503 | `ContactGrantEndpoints.ResolveGranteeAsync` over task 141's `IContactIdentityStore` (`GetContactAsync` / `FindActiveContactsByEmailAsync`, two rows) + the membership read |
+| ONE active grantee in a shared conferring organization, resolved STRICTLY within the grantor's organizations (POML step 4; r-final §11): by id → one 422 `grantee_not_in_organization` worded "This person" for unknown / inactive / other-organization ids (no stored email echoed, the same reads for every id); by email → `ExternalParticipationService.FindConferringMembersByEmailAsync` (the junction rows of the grantor's organizations whose expanded contact is active and uses the email), >1 COLLEAGUE → 409 `grantee_ambiguous`, an outsider is never counted; self → 400 `self_grant`; read fault → 503 | `ContactGrantEndpoints.ResolveGranteeByIdAsync` (task 141's `IContactIdentityStore.GetContactAsync` + the membership read) / `ResolveGranteeByEmailAsync` |
 | G1 (a): a person who is not yet an active contact of the grantor's organization is refused (422, the recommended message); **no route writes `sprk_contactorganization`, creates a contact or onboards** | `ResolveGranteeAsync`; pinned by `ContactGrantGuardTests` (source) + `AssertNoMembershipWrites` (behaviour) |
 | No organization-grantee field; unknown body member → 400 (end-to-end) | `[JsonUnmappedMemberHandling(Disallow)]` on `ContactGrantRequest` / `ContactGrantRevokeRequest`; `ContactGrantRouteTests` through the host |
 | Cap at the grantor's level (Q1, 3b) — REQUIRED ceiling through the ONE core (WP-1) | `GrantCeiling.FromContactGrantorRights` (new named factory) → `GrantExternalAccessEndpoint.CreateGrantAsync(..., contactIssuer)` |
@@ -39,7 +39,8 @@ grants); round 13 item 4 (tri-state No Access — an Unverifiable answer fails c
    internal user's decision — proxy revocation in reverse. The core (default mode) now clears the contact issuer and stamps
    `sprk_grantedby` when it CHANGES such a row; a no-op re-grant leaves it. /grant and /invite-and-grant behaviour on rows with no
    contact issuer is byte-identical (their suites unchanged and green). The Assigned-To rule raising a lower contact-issued row
-   takes it over the same way.
+   takes it over the same way. **Session 27 round 34 item 3 (BINDING) extends it to every internal writer OUTSIDE the core**:
+   `POST set-record-share-expiry` takes each contact-issued share over inside its one transaction (r-final §11, item 2).
 2. **Race collapse.** The post-create duplicate collapse, in contact-issuer mode, converges only over the caller's own rows, so a
    row another issuer raced onto the same key is never deactivated by a contact's write.
 3. **Assigned-To ledger.** Contact grants/revokes do NOT call `MarkGrantAdoptedAsync` / `MarkGrantRevokedAsync`: those mark an
@@ -62,9 +63,9 @@ grants); round 13 item 4 (tri-state No Access — an Unverifiable answer fails c
 6. **External SPA had no test runner.** Added vitest 2 + Testing Library + jsdom (devDeps only), `vitest.config.ts` (reuses
    `vite.config.ts`), `tests/setup.ts` (ResizeObserver no-op, cleanup) — required by the AC "asserted by rendering
    ProjectPage's Contacts tab".
-7. `tsc --noEmit` on the external SPA reports 6 PRE-EXISTING type errors in files this task did not touch (`mocks/mock-data.ts`
-   ×3, `OutsideCounselDashboard.tsx` ×2, shared `EntityCreationService.ts` ×1). The package's build is `vite build` (no tsc) and is
-   green. Recorded, not part of this task's surface.
+7. `tsc --noEmit` on the external SPA reported 6 PRE-EXISTING type errors (`mocks/mock-data.ts` ×3, `OutsideCounselDashboard.tsx`
+   ×2, shared `EntityCreationService.ts` ×1). **Fixed in r-final (§11, item 8)** rather than recorded (round-15 directive);
+   `npm run typecheck` added so the gate is runnable; `tsc --noEmit` now exits 0.
 
 ## 2. Escalation triggers
 

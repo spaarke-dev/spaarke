@@ -231,7 +231,7 @@ A contact with **Collaborate or Full Access** on a project sees **Invite User** 
 
 | Step | What happens |
 |---|---|
-| Invite User → email + level | `grantAccessAsContact({ recordType, recordId, granteeEmail, accessLevel })` → `POST /api/v1/external/contact-grants`. Only levels at or below the caller's are offered. |
+| Invite User → email + level | `grantAccessAsContact({ recordType, recordId, granteeEmail, accessLevel })` → `POST /api/v1/external/contact-grants`. Only levels at or below the caller's are offered. The email is matched among the active colleagues of the caller's own organizations ONLY — nobody outside them is counted or disclosed. |
 | Success | "Access granted": the level written and the expiry. A **narrowed** notice when the server capped the level at the caller's own; an expiry notice when it cut the date back to the caller's own grant. |
 | Refusal | The server's ProblemDetails `detail` is shown **verbatim** (`problemMessage(err, fallback)` in `bff-client.ts`) — e.g. "… is not yet a member of your organization in this system; ask the record's team to add them", "… already has access … granted by someone else …". |
 | Access you granted | `listContactGrants(recordType, recordId)`; **Revoke** → `revokeContactGrant(accessRecordId)`. If the colleague still has access somebody else gave, the list says so. |
@@ -248,6 +248,7 @@ The external SPA never calls the internal Manage Access group (`/api/v1/external
 npm install --legacy-peer-deps --no-audit --no-fund
 npm test        # vitest + Testing Library (jsdom) — renders ProjectPage's Contacts tab
 npm run lint    # eslint flat config (eslint.config.js), mirrors @spaarke/ui-components
+npm run typecheck  # tsc --noEmit over src (and the shared-library source it imports)
 npm run build
 ```
 

@@ -14,6 +14,9 @@
  * This loose ambient declaration exists solely to satisfy the type-checker.
  */
 declare module '@spaarke/sdap-client' {
+  // DriveItem: EntityCreationService began importing it as a TYPE (the per-file upload result); the shim had not
+  // followed, so `tsc --noEmit` failed on the shared source (unified-access-control-r2 task 140, verifier item 8).
+  export type DriveItem = any;
   export type IndexFileRequest = any;
   export type IndexFileResult = any;
   export class SdapApiClient {

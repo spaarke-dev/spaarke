@@ -105,9 +105,13 @@ internal static class GrantPolicyTestDoubles
         /// <summary>Task 140: contacts whose membership read THROWS.</summary>
         public ConcurrentDictionary<Guid, bool> ThrowingMembershipContacts { get; } = new();
 
+        /// <summary>Task 140 r-final: every contact whose membership read ran, in order.</summary>
+        public ConcurrentQueue<Guid> MembershipReads { get; } = new();
+
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
             Guid contactId, CancellationToken ct = default)
         {
+            MembershipReads.Enqueue(contactId);
             if (MembershipsUnreadable || UnreadableMembershipContacts.ContainsKey(contactId))
                 return Task.FromResult(ActiveOrgMemberships.Failed);
 

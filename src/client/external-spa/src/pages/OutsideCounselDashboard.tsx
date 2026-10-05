@@ -266,6 +266,7 @@ interface UpcomingItem {
   id: string;
   name: string;
   projectName: string;
+  projectId: string;
   dueDate: string | null | undefined;
 }
 
@@ -727,6 +728,20 @@ export const OutsideCounselDashboard: React.FC = () => {
     });
   }, [context, projectDetails]);
 
+  // An event names its project by id only; the name comes from the same rows "My Projects" shows (task 140 verifier
+  // item 8: this read `_sprk_projectid_value`, a column sprk_event does not have, so every item said "Unknown Project").
+  const projectNameById = React.useMemo(
+    () => new Map(projectRows.map(row => [row.projectId, row.name])),
+    [projectRows]
+  );
+  const withProjectName = React.useCallback(
+    <T extends { projectId: string; projectName: string }>(item: T): T => ({
+      ...item,
+      projectName: projectNameById.get(item.projectId) ?? 'Unknown Project',
+    }),
+    [projectNameById]
+  );
+
   // Fetch events for activity + upcoming
   useEffect(() => {
     if (!context || context.projects.length === 0) return;
@@ -741,7 +756,8 @@ export const OutsideCounselDashboard: React.FC = () => {
             // Events only — the legacy event-as-todo toggle was removed in R3 task 007.
             // To-dos are queried separately via `getProjectTodos` per task 008.
             getEvents(p.projectId, {
-              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_projectid_value,createdon',
+              // sprk_event's project lookup is sprk_regardingproject (it has no sprk_projectid) — see getEvents.
+              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_regardingproject_value,createdon',
               $orderby: 'createdon desc',
               $top: 20,
             }).then(evts => evts.map(e => ({ ...e, _resolvedProjectId: p.projectId })))
@@ -758,7 +774,8 @@ export const OutsideCounselDashboard: React.FC = () => {
           sorted.slice(0, 10).map(e => ({
             id: e.sprk_eventid,
             name: e.sprk_name,
-            projectName: e._sprk_projectid_value ?? 'Unknown Project',
+            // Resolved to the project's NAME at render (projectNameById) — the event carries only the project's id.
+            projectName: '',
             projectId: e._resolvedProjectId,
             relativeDate: formatRelativeDate(e.createdon),
           }))
@@ -774,7 +791,8 @@ export const OutsideCounselDashboard: React.FC = () => {
             .map(e => ({
               id: e.sprk_eventid,
               name: e.sprk_name,
-              projectName: e._sprk_projectid_value ?? 'Unknown Project',
+              projectName: '',
+              projectId: e._resolvedProjectId,
               dueDate: e.sprk_duedate,
             }))
         );
@@ -880,8 +898,12 @@ export const OutsideCounselDashboard: React.FC = () => {
 
       {/* Row 1: Recent Activity + Upcoming (2-column) */}
       <div className={styles.twoColGrid}>
-        <RecentActivitySection items={recentActivity} isLoading={activityLoading} onItemClick={handleProjectClick} />
-        <UpcomingSection items={upcomingItems} isLoading={upcomingLoading} />
+        <RecentActivitySection
+          items={recentActivity.map(withProjectName)}
+          isLoading={activityLoading}
+          onItemClick={handleProjectClick}
+        />
+        <UpcomingSection items={upcomingItems.map(withProjectName)} isLoading={upcomingLoading} />
       </div>
 
       {/* Row 2: My Projects */}

@@ -268,27 +268,21 @@ public static class ContactGrantEndpoints
             lookup = ContactLookup.Failed;
         }
 
-        if (lookup.Status != LookupStatus.Read)
+        // The membership read runs for EVERY id — one naming no contact, an inactive contact, another organization's
+        // contact or a colleague — so the work done, like the answer, does not tell the caller whether the id names a
+        // contact (no existence oracle; task 140 verifier r1 item 4).
+        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, contactId, logger, ct);
+
+        if (lookup.Status != LookupStatus.Read || memberships.Unreadable)
             return (Guid.Empty, UnnamedGranteeLabel, ColleagueUnverifiable(httpContext, "this person"));
 
         var contact = lookup.Rows.FirstOrDefault(r => r.ContactId == contactId && r.IsActive);
-        if (contact is null)
+        if (contact is null || !memberships.ConferringOrganizationIds.Intersect(grantor.OrganizationIds).Any())
         {
             logger.LogWarning(
-                "[EXT-CONTACT-GRANT] Refused: grantee {GranteeContactId} named by grantor {GrantorContactId} is not an active contact.",
-                contactId, grantor.ContactId);
-            return (Guid.Empty, UnnamedGranteeLabel, NotInOrganization(httpContext, UnnamedGranteeLabel));
-        }
-
-        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, contactId, logger, ct);
-        if (memberships.Unreadable)
-            return (Guid.Empty, UnnamedGranteeLabel, ColleagueUnverifiable(httpContext, "this person"));
-
-        if (!memberships.ConferringOrganizationIds.Intersect(grantor.OrganizationIds).Any())
-        {
-            logger.LogWarning(
-                "[EXT-CONTACT-GRANT] Refused: contact {GranteeContactId} shares no active organization with grantor {GrantorContactId}.",
-                contactId, grantor.ContactId);
+                "[EXT-CONTACT-GRANT] Refused: grantee {GranteeContactId} named by grantor {GrantorContactId} is {Why}.",
+                contactId, grantor.ContactId,
+                contact is null ? "not an active contact" : "in no active organization the grantor confers through");
             return (Guid.Empty, UnnamedGranteeLabel, NotInOrganization(httpContext, UnnamedGranteeLabel));
         }
 

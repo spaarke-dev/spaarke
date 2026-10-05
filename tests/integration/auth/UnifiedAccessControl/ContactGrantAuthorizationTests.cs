@@ -642,14 +642,20 @@ public class ContactGrantAuthorizationTests
             _participations.ContactOrganizations[target] = new[] { FirmA };
         }
 
+        var unknownId = Guid.Parse("c1400000-0000-0000-0000-0000000000ff");
         var named = await Grant(Request(ExternalAccessLevel.ViewOnly, grantee: target), Ciam(ExternalAccessLevel.Collaborate));
-        var unknown = await Grant(Request(ExternalAccessLevel.ViewOnly, grantee: Guid.Parse("c1400000-0000-0000-0000-0000000000ff")),
-            Ciam(ExternalAccessLevel.Collaborate));
+        var unknown = await Grant(Request(ExternalAccessLevel.ViewOnly, grantee: unknownId), Ciam(ExternalAccessLevel.Collaborate));
 
         Problem(named).Should().Be((422, ContactGrantEndpoints.GranteeNotInOrganizationReasonCode));
         Problem(unknown).Should().Be(Problem(named));
         Detail(named).Should().Be(Detail(unknown), "the caller cannot tell whether the id names a contact");
         Detail(named).Should().NotContain(secret).And.Contain(ContactGrantEndpoints.UnnamedGranteeLabel);
+
+        // ...nor from the work done: the same reads run for the contact the GUID names and for an id that names nobody.
+        _identities.Reads.Count(r => r == "contact").Should().Be(2, "one contact lookup per request");
+        _participations.MembershipReads.Count(id => id == target).Should().Be(1);
+        _participations.MembershipReads.Count(id => id == unknownId).Should().Be(1,
+            "the membership read runs for an id that names no contact too, not only for one that exists");
         AssertNothingWritten();
     }
 
