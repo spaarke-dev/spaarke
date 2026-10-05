@@ -91,4 +91,24 @@
              ContinueOnError="false" />
   </Target>
 
+  <!--
+    unified-access-control-r2 task 132, main-session round 55 item 3: PoaShareClientSingletonGuardTests C8
+    (NoCompiledSrcServerAssemblyCarriesAnUnsafeAccessor) reads the compiled custom-attribute table of EVERY project under
+    src/server, so each must be built. The ProjectReferences above build the BFF and its shared libraries; the target
+    above builds the L2 Core and Api; this one builds the rest of src/server — the L2 Worker and the L2 test project —
+    the same way (separate graph, outputs in each project's own bin/, no ProjectReference, so no `Program` collision).
+    It also lets CosmosProvisioningSecretGuardTests load the Worker, which its loader already scans when built.
+    A NEW src/server project not built by any of these fails C8 loudly, naming the project: add it here.
+  -->
+  <Target Name="BuildServerProjectsForCompiledScans" AfterTargets="BuildL2ForCosmosGuard">
+    <ItemGroup>
+      <_ServerProjectForScan Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Worker\Sprk.Provisioning.ControlPlane.Worker.csproj" />
+      <_ServerProjectForScan Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Tests\Sprk.Provisioning.ControlPlane.Tests.csproj" />
+    </ItemGroup>
+    <MSBuild Projects="@(_ServerProjectForScan)"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration)"
+             ContinueOnError="false" />
+  </Target>
+
 </Project>

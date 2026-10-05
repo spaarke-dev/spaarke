@@ -112,40 +112,45 @@ public class PoaShareClientSingletonGuardTests
     // go red).
 
     // =============================================================================================
-    // Task 132 (batch 4 integration residual) — every share WRITE goes through the seam that evicts
+    // Task 132 — the share-write eviction, and the guards kept behind it as defence in depth
     // ---------------------------------------------------------------------------------------------
     // A POA grant / rights change / revoke changes who can read a record exactly as an owner change does, so the access
-    // caches must be evicted after it. The eviction lives in the ONE seam (DataverseRecordShareService calls
-    // IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync after each of its three writes, returned or thrown —
-    // AccessCacheInvalidationTests.Shares proves it per write). That covers a share write only if it reaches POA through the
-    // seam. WHAT THIS GUARD ENFORCES — exactly the rules below, and nothing beyond them (owner round 48 (c)): every compiled
-    // call path to the client's POA writes, a ban on UnsafeAccessor, and a ban on choosing or invoking a method by reflection.
+    // caches must be evicted after it. WHERE THE EVICTION LIVES (main-session round 55): in the write itself.
+    // DataverseWebApiService.GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync send through one private method that,
+    // on every path, notifies the client's IRecordShareWriteObserver — in the BFF, IMembershipCacheInvalidator, whose
+    // default member runs InvalidateRecordShareChangeAsync. So every call of those three methods evicts, whoever makes it
+    // and however (directly, through the seam, a delegate, reflection, a late binder, an expression tree); the behaviour
+    // tests prove it (AccessCacheInvalidationTests.Shares: every write x every principal kind x each outcome, cancellation,
+    // an observer that throws, exactly one eviction per write and after it, the BFF's own composition, and the verifier's
+    // seeds V and M — a late-bound call and a token-resolved call run by a LINQ provider).
+    //
+    // WHAT THE RULES BELOW CHECK — exactly these, nothing beyond them. Eviction does not depend on C1, C2, T1 or the
+    // per-writer rule (they keep task 060's single seam); C3 checks the client's notification structurally; C4-C6, T2-T5
+    // reject a POA write that would go around DataverseWebApiService when its action is named by a constant, metadata,
+    // constant data or configuration; C7 and C8 / T6 ban the APIs listed.
     //
     // COMPILED — an IL scan (IlCallScan) of every assembly the BFF runs from src/ and every src/ assembly that can name
     // DataverseWebApiService. The set is derived from the csproj graph, and each member must load
-    // (EveryBffOrClientReachingProjectIsScanned), so a new project cannot fall outside it unnoticed.
-    //   C1. A reference to the concrete client's GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync from ANY type
-    //       but the seam (the client included), through any receiver expression — a field,
-    //       `sp.GetRequiredService<DataverseWebApiService>()` (task 132 verifier seed S5), a cast, an indexer — inside a
-    //       lambda, local function or async method, as a method group, or as an expression tree's method handle.
-    //       (EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams)
-    //   C2. A FOURTH POA write on the client, which C1 would not know by name: the client methods that load a POA action
-    //       name are pinned to exactly those three (TheClientsPoaWritesAreExactlyTheThreeTheGuardNames).
-    //   C3. A write ON the seam that does not evict — on any path. (a) The seam references the client's writes only from
-    //       the three methods the interface map binds to IDataverseRecordShareService's Grant/Modify/RevokeAccessAsync,
-    //       compared by METADATA identity (so a same-name overload that writes — task 132 f1-v1c verifier seed N2 — is
-    //       outside them), each its own write (TheSeamWritesPoaOnlyFromItsThreeInterfaceMethods). (b) In each of the three,
-    //       EVERY path through the compiled body (IlPathScan: the async state machine, its exceptions, suspensions and
-    //       resumptions, every finally) that makes the client write first awaits it, then calls the seam's EVICTION with the
-    //       SAME entitySetName and recordId, and awaits that, before the method completes — returned, thrown or cancelled
-    //       (EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord; seed N1, a team-only early return that wrote with no
-    //       eviction, is exactly a path this rejects). (c) What counts as the eviction is found in the IL, not named: a seam
-    //       method the writes call that, on every path, calls IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync
+    // (EveryBffOrClientReachingProjectIsScanned), so a new project cannot fall outside it unnoticed. C8 alone scans more:
+    // every src/server project's compiled assembly.
+    //   C1. Task 060's single seam: no reference to the concrete client's GrantAccessAsync / ModifyAccessAsync /
+    //       RevokeAccessAsync from ANY type but DataverseRecordShareService (the client included), through any receiver
+    //       expression — a field, `sp.GetRequiredService<DataverseWebApiService>()` (seed S5), a cast, an indexer — inside
+    //       a lambda, local function or async method, as a method group, or as an expression tree's method handle
+    //       (EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams).
+    //   C2. The client methods that load a POA action name are exactly those three, so C1 knows every POA write the
+    //       client has by name (TheClientsPoaWritesAreExactlyTheThreeTheGuardNames).
+    //   C3. The client's notification, structurally. (a) The client methods the three writes reach (transitively, through
+    //       calls to the client's own methods) that make an HTTP send are its share-write senders; every path through
+    //       each (IlPathScan: the async state machine, its exceptions, suspensions and resumptions, every finally) that
+    //       makes the send awaits it and then calls the notification with the method's own entitySetName and recordId,
+    //       and awaits that, before the method completes — returned, thrown or cancelled
+    //       (EveryPathThroughEachClientShareWriteSenderNotifiesThatRecord; seed N1's shape, a branch that sends with no
+    //       notification, is a path this rejects). (b) What counts as the notification is found in the IL, not named: the
+    //       observer's OnRecordShareWrittenAsync itself, or a client method a sender calls that, on every path, calls it
     //       with its own entitySetName and recordId and awaits it — and one must exist
-    //       (TheSeamsWritesCallAnEvictionThatInvalidatesThatRecordOnEveryPath). A renamed helper is followed; a helper with
-    //       a path that skips the invalidation is no eviction. What the invalidator then evicts for those arguments is the
-    //       behaviour tests' (AccessCacheInvalidationTests.Shares: every write x every principal kind x each outcome, over
-    //       the production seam and client).
+    //       (TheClientsNotificationCallsTheObserverForThatRecordOnEveryPath). What the observer then evicts is the
+    //       behaviour tests'.
     //   C4. A POA action name loaded as a string constant anywhere but the client — an SDK OrganizationRequest by name, a
     //       hand-built POST or $batch, a name the compiler folded from constant pieces, in any letter case — and a POA write
     //       method's name loaded as a constant (reflection, nameof, a `dynamic` call's binder name)
@@ -153,48 +158,48 @@ public class PoaShareClientSingletonGuardTests
     //   C5. The SDK's GrantAccessRequest / ModifyAccessRequest / RevokeAccessRequest, however they are imported (a global
     //       using defeats the text rule T2) (NoCompiledCodeUsesTheSdkPoaMessages).
     //   C6. A POA action name carried by METADATA rather than a load — a type, member, enum value or parameter NAMED as one
-    //       (`enum PoaAction { GrantAccess }` + `action.ToString()`: f1-v1c verifier observation), and a POA action or write
-    //       name in a const field, a default parameter value, a custom attribute argument, an embedded resource, or constant
-    //       DATA — a UTF-8 literal (`"…"u8`) or a byte / char array initializer, an RVA field's bytes
-    //       (NoCompiledMetadataOutsideTheClientNamesAPoaAction).
-    //   C7. No method CHOSEN or INVOKED by reflection, and no code the compiled scan cannot read — on ANY type, so on the
-    //       Dataverse service types and on any Type obtained from them, however obtained (typeof, GetType() on the client,
-    //       a type parameter, a type found by enumeration): no method or member lookup on Type / TypeInfo / IReflect, their
-    //       extension spellings or a Module (by name, signature or metadata token), no property or event accessor method,
-    //       no name-based Expression.Call, no MethodBase.Invoke, InvokeMember, Delegate / MethodInfo.CreateDelegate,
-    //       MethodInvoker / ConstructorInvoker, method function pointer, compiled expression tree or `dynamic` member access,
-    //       no System.Reflection.Emit, no assembly loaded at run time (NoCompiledCodeChoosesOrInvokesAMethodByReflection;
-    //       task 132 f1-v1c-v1 verifier seed R chose RevokeAccessAsync by its SIGNATURE and invoked it — owner round 48 (b)).
-    //       Not banned, because none of it reaches a method: reading properties, fields and attributes, a type's name,
-    //       constructing by type, embedded resources, an expression tree a LINQ provider translates.
-    //   C8. No [UnsafeAccessor] / [UnsafeAccessorType] in the compiled metadata of the scan set, however the attribute was
-    //       spelled or aliased, generated code included (NoCompiledCodeCarriesAnUnsafeAccessor; verifier seed U: an
-    //       UnsafeAccessor extern that IS the client's RevokeAccessAsync, a call C1 cannot see — owner round 48 (a)).
+    //       (`enum PoaAction { GrantAccess }` + `action.ToString()`), and a POA action or write name in a const field, a
+    //       default parameter value, a custom attribute argument, an embedded resource, or constant DATA — a UTF-8 literal
+    //       (`"…"u8`) or a byte / char array initializer, an RVA field's bytes (NoCompiledMetadataOutsideTheClientNamesAPoaAction).
+    //   C7. No reference to the reflection APIs ReflectiveMethodAccess LISTS — and only those: the method and member
+    //       lookups on Type / TypeInfo / IReflect and their extension spellings, Module.ResolveMethod / ResolveMember /
+    //       GetMethod(s), property and event accessor-method lookups, the name-based Expression.Call,
+    //       RuntimeMethodHandle.FromIntPtr / GetFunctionPointer, MethodBase.Invoke, InvokeMember, Delegate /
+    //       MethodInfo.CreateDelegate, MethodInvoker / ConstructorInvoker, Marshal.GetDelegateForFunctionPointer,
+    //       LambdaExpression.Compile / CompileToMethod, the C# run-time binder (`dynamic`), System.Reflection.Emit, the
+    //       assembly loaders and Activator's by-assembly-name factories (NoCompiledCodeReferencesTheListedReflectionApis).
+    //       It does NOT ban choosing or invoking a method by reflection in general: a late binder (Microsoft.VisualBasic
+    //       Interaction.CallByName, seed V), a method resolved from a handle or metadata token
+    //       (ModuleHandle.ResolveMethodHandle + MethodBase.GetMethodFromHandle) run by a LINQ provider that compiles the
+    //       tree internally (seed M), and other APIs not on the list pass it. Such a call to the three share writes still
+    //       evicts (the client's own notification; behaviour tests V and M).
+    //   C8. No [UnsafeAccessor] / [UnsafeAccessorType] in the custom-attribute table of ANY src/server project's compiled
+    //       assembly — whatever the source spelled (an alias, a Unicode escape), generated code included
+    //       (NoCompiledSrcServerAssemblyCarriesAnUnsafeAccessor; round 55 item 3, after verifier seed U5).
     // TEXT — every src/server .cs file, compiled into the BFF or not:
-    //   T1. A `.XAccessAsync(` call whose receiver is not an identifier the file declares ONLY as
+    //   T1. Task 060's single seam: a `.XAccessAsync(` call whose receiver is not an identifier the file declares ONLY as
     //       IDataverseRecordShareService: an expression receiver (S5), a `var`, `dynamic` or undeclared name, a name the
     //       file also declares as another type (seed S6). Conservative — it may flag a legal call; C1 is the precise rule.
-    //       (EveryPoaShareWriteGoesThroughTheEvictingSeam; per named writer: EachNamedShareWriterWritesOnlyThroughTheSeam)
+    //       (EveryPoaShareWriteGoesThroughTheSingleSeam; per named writer: EachNamedShareWriterWritesOnlyThroughTheSeam)
     //   T2. The SDK messages (NoServerFileSendsSdkPoaMessages). T3. A second POA payload (task 060's
     //       PoaActionPayloadsAreBuiltInExactlyOnePlace, above). T4. A POA write method named as a string
     //       (NoServerFileNamesTheClientsPoaWritesAsAString).
     //   T5. A POA action or write name in the configuration the BFF is deployed with — src/server configuration files and
     //       the Bicep / ARM under infra/ and infrastructure/bicep/ (NoDeployedConfigurationNamesAPoaAction).
-    //   T6. UnsafeAccessor named in any .cs / .csproj / .props / .targets file under src/server — the projects outside the
-    //       compiled scan set included — or in the Directory.Build files above it (NoServerSourceNamesUnsafeAccessor).
+    //   T6. The text `UnsafeAccessor` in any .cs / .csproj / .props / .targets file under src/server, or in the
+    //       Directory.Build files above it, outside a whole-line comment (NoServerSourceNamesUnsafeAccessor). It reads the
+    //       text as written: a spelling text does not show (a Unicode escape in the identifier) is C8's to catch.
     //
-    // NOT ENFORCED — the build proves nothing about these; they are review's to catch: a POA write by any route that uses
-    // none of the mechanisms above — above all a raw HTTP call whose action URL exists only at RUN time (assembled from
-    // pieces none of which is the action name — fragments joined by a call, an enum value's name plus a runtime suffix,
-    // single characters, a decoding — or read from a LIVE store no file in this repository holds: an App Service setting
-    // set by hand, Key Vault, Dataverse, an HTTP response); native code; code outside the scan set (it cannot name the
-    // client and does not run in the BFF). Not this guard's job: POA writes made OUTSIDE the BFF (MDA sharing, flows,
-    // operator scripts) — their staleness is bounded by the caches' TTLs (caching-architecture.md, owner R3/R4).
-    // Every rule above has a control that was seen to fail.
+    // NOT ENFORCED — the build proves nothing about these (task 132 notes, "Known limits"): a POA write that does not go
+    // through the three share writes — a raw HTTP call whose action URL exists only at run time, including one assembled
+    // from the client's private members reached by reflection (its generic POST helper, request builder or HttpClient), or
+    // code that replaces the client's observer by reflection; native code; code outside the scan set for C1-C7. POA writes
+    // made OUTSIDE the BFF (MDA sharing, flows, operator scripts) are bounded by the caches' TTLs (caching-architecture.md,
+    // owner R3/R4). Every rule above has a control that was seen to fail.
     // =============================================================================================
 
-    /// <summary>The seam — the one file allowed to call the concrete client's POA writes.</summary>
-    private const string EvictingSeam = "src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs";
+    /// <summary>The seam (task 060) — the one file allowed to call the concrete client's POA writes.</summary>
+    private const string SingleSeam = "src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs";
 
     /// <summary>The concrete client's three POA write methods.</summary>
     private static readonly HashSet<string> PoaWriteMethodNames = new(StringComparer.Ordinal)
@@ -359,7 +364,7 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             unloadable.Count == 0,
             "a project the BFF runs, or that can name DataverseWebApiService, is not loadable by the compiled POA-write scan, "
-            + "so a share write in it that skips the access-cache eviction (task 132) would pass unseen. Add a "
+            + "so a POA write in it that goes around the seam or the client (task 060 / 132) would pass unseen. Add a "
             + "ProjectReference to it in tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", unloadable)}");
     }
@@ -402,7 +407,7 @@ public class PoaShareClientSingletonGuardTests
             .OrderBy(s => s, StringComparer.Ordinal)
             .ToList();
 
-    [Fact(DisplayName = "Task 132: only the evicting seam references the concrete client's POA writes (compiled)")]
+    [Fact(DisplayName = "Task 060 / 132: only the seam references the concrete client's POA writes (compiled)")]
     public void EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams()
     {
         var references = ScannedPoaReferences.Value;
@@ -422,9 +427,10 @@ public class PoaShareClientSingletonGuardTests
 
         Assert.True(
             bypasses.Count == 0,
-            "a compiled call to DataverseWebApiService's POA writes outside DataverseRecordShareService skips the "
-            + "access-cache eviction (task 132): the sharee's impersonated root set and every snapshot of the record stay "
-            + "stale for their TTLs — an unshare that keeps access. Inject IDataverseRecordShareService."
+            "a compiled call to DataverseWebApiService's POA writes outside DataverseRecordShareService bypasses task 060's "
+            + "single POA seam — the one entry point every writer injects and every writer's test substitutes (ADR-010). "
+            + "(The access-cache eviction is the client's own and still runs — task 132 round 55.) Inject "
+            + "IDataverseRecordShareService."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", bypasses)}");
     }
 
@@ -449,167 +455,168 @@ public class PoaShareClientSingletonGuardTests
 
         Assert.True(
             senders.Count == PoaWriteMethodNames.Count && senders.All(PoaWriteMethodNames.Contains),
-            "the client methods that send a POA action must be exactly GrantAccessAsync / ModifyAccessAsync / "
-            + "RevokeAccessAsync: the compiled rule above recognises a client POA write BY THOSE NAMES, so a fourth would be "
-            + "a write any type could call without the seam's eviction (task 132). Expose it through "
-            + "IDataverseRecordShareService (which evicts) and add its name to PoaWriteMethodNames — a review decision."
+            "the client methods that name a POA action must be exactly GrantAccessAsync / ModifyAccessAsync / "
+            + "RevokeAccessAsync: the single-seam rule above recognises a client POA write BY THOSE NAMES, so a fourth would "
+            + "be one any type could call around the seam (task 060). Send it through the client's notifying share-write "
+            + "sender (task 132 round 55), expose it through IDataverseRecordShareService and add its name to "
+            + "PoaWriteMethodNames — a review decision."
             + $"{Environment.NewLine}  found: {string.Join(", ", senders)}");
     }
 
-    // ── C3. the seam's writes: only its three interface methods, and every path through each evicts ──────
+    // ── C3. the client's share-write senders: every path that sends notifies the observer for that record ──────
 
-    /// <summary>The seam's write methods, by the interface member each implements — never by name.</summary>
-    private static readonly string[] SeamWriteNames =
-    {
-        nameof(IDataverseRecordShareService.GrantAccessAsync),
-        nameof(IDataverseRecordShareService.ModifyAccessAsync),
-        nameof(IDataverseRecordShareService.RevokeAccessAsync),
-    };
-
-    /// <summary>The key both a write and its eviction carry: the record whose caches the write stales.</summary>
+    /// <summary>The key both a send and its notification carry: the record whose caches the write stales.</summary>
     private static readonly string[] ShareKey = { "entitySetName", "recordId" };
 
-    /// <summary>
-    /// The seam method the interface map binds to <see cref="IDataverseRecordShareService"/>'s write of that name — the
-    /// method every caller of the seam actually runs. A same-named overload on the seam is not it (task 132 seed N2).
-    /// </summary>
-    internal static MethodInfo SeamWriteMethod(string write)
-    {
-        var map = typeof(DataverseRecordShareService).GetInterfaceMap(typeof(IDataverseRecordShareService));
-        var slot = Enumerable.Range(0, map.InterfaceMethods.Length).Single(i => map.InterfaceMethods[i].Name == write);
-        return map.TargetMethods[slot];
-    }
+    /// <summary>An HTTP send: <c>Send</c> / <c>SendAsync</c> on <see cref="HttpMessageInvoker"/> (and so <see cref="HttpClient"/>).</summary>
+    internal static bool IsAnHttpSend(MethodBase target) =>
+        target.Name is "Send" or "SendAsync"
+        && target.DeclaringType is { } declaring
+        && typeof(HttpMessageInvoker).IsAssignableFrom(declaring);
+
+    /// <summary>The observer call the notification must make: <see cref="IRecordShareWriteObserver.OnRecordShareWrittenAsync"/>.</summary>
+    internal static bool IsTheObserverCall(MethodBase target) =>
+        target.DeclaringType == typeof(IRecordShareWriteObserver)
+        && target.Name == nameof(IRecordShareWriteObserver.OnRecordShareWrittenAsync);
+
+    /// <summary>The client's three public POA writes, by the names C1 / C2 pin (compile-checked through <c>nameof</c>).</summary>
+    private static IReadOnlyList<MethodInfo> ClientPoaWrites() =>
+        PoaWriteMethodNames
+            .Select(name => typeof(DataverseWebApiService).GetMethod(name, BindingFlags.Public | BindingFlags.Instance)
+                            ?? throw new InvalidOperationException($"DataverseWebApiService.{name} is not a public instance method."))
+            .ToList();
 
     /// <summary>
-    /// The seam's eviction, found in the IL rather than named: every method declared on the seam that the three writes'
-    /// compiled bodies call (the writes themselves excepted), with what the every-path analysis found in it. A renamed or
-    /// replaced helper is followed; a seam method that does not invalidate its record on every path — a logging helper, or
-    /// an eviction helper with a path that skips the invalidation — does not count as the eviction.
+    /// The client's share-write SENDERS, found in the IL rather than named: every method of
+    /// <see cref="DataverseWebApiService"/> the three POA writes reach — themselves included, then transitively through calls
+    /// to the client's own methods — whose compiled body makes an HTTP send (<see cref="IsAnHttpSend"/>). A helper that only
+    /// builds the request, or a token, is reached but sends nothing, so it is not one.
     /// </summary>
-    internal static IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> SeamEvictionCandidates()
+    internal static IReadOnlyList<MethodInfo> ClientShareWriteSenders()
     {
-        var writes = SeamWriteNames.Select(SeamWriteMethod).ToList();
-        return IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseRecordShareService)))
-            .Where(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod) is { } source
-                        && writes.Any(w => w.HasSameMetadataDefinitionAs(source)))
-            .Select(r => r.Target)
+        var references = IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseWebApiService)))
+            .Select(r => (Source: IlCallScan.SourceMethod(r.Caller, r.CallerMethod), r.Target))
+            .Where(r => r.Source is not null)
+            .ToList();
+
+        var reached = new List<MethodBase>();
+        var pending = new Stack<MethodBase>(ClientPoaWrites());
+        while (pending.Count > 0)
+        {
+            var method = pending.Pop();
+            if (reached.Any(m => m.HasSameMetadataDefinitionAs(method)))
+            {
+                continue;
+            }
+
+            reached.Add(method);
+            foreach (var callee in references
+                         .Where(r => r.Source!.HasSameMetadataDefinitionAs(method)
+                                     && r.Target.DeclaringType == typeof(DataverseWebApiService))
+                         .Select(r => r.Target))
+            {
+                pending.Push(callee);
+            }
+        }
+
+        return reached
             .OfType<MethodInfo>()
-            .Where(t => t.DeclaringType == typeof(DataverseRecordShareService) && !writes.Any(w => w.HasSameMetadataDefinitionAs(t)))
-            .DistinctBy(t => t.MetadataToken)
-            .Select(t => (t, ShareKey.All(k => t.GetParameters().Any(p => p.Name == k))
-                ? IlPathScan.Analyse(t, EvictionHelperRule)
-                : new IlPathScan.Result(new[] { "takes no entitySetName / recordId to invalidate" }, Array.Empty<int>(), Array.Empty<int>())))
+            .Where(m => references.Any(r => r.Source!.HasSameMetadataDefinitionAs(m) && IsAnHttpSend(r.Target)))
             .ToList();
     }
 
-    /// <summary>Whether <paramref name="target"/> is one of <paramref name="candidates"/> that invalidates its record on every path.</summary>
-    internal static bool IsAnEviction(IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> candidates, MethodBase target) =>
-        candidates.Any(c => c.Result.Violations.Count == 0
-                            && c.Result.DischargingCalls.Count > 0
-                            && c.Method.HasSameMetadataDefinitionAs(target));
+    /// <summary>
+    /// The client's notification, found in the IL rather than named: every method declared on the client that a sender
+    /// calls (the senders excepted), with what the every-path analysis found in it. A renamed or replaced helper is
+    /// followed; a client method that does not call the observer for its own record on every path — a logging helper, or a
+    /// notification with a path that skips the observer — does not count as the notification.
+    /// </summary>
+    internal static IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> ClientNotificationCandidates(IReadOnlyList<MethodInfo> senders) =>
+        IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseWebApiService)))
+            .Where(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod) is { } source
+                        && senders.Any(s => s.HasSameMetadataDefinitionAs(source)))
+            .Select(r => r.Target)
+            .OfType<MethodInfo>()
+            .Where(t => t.DeclaringType == typeof(DataverseWebApiService) && !senders.Any(s => s.HasSameMetadataDefinitionAs(t)))
+            .DistinctBy(t => t.MetadataToken)
+            .Select(t => (t, ShareKey.All(k => t.GetParameters().Any(p => p.Name == k))
+                ? IlPathScan.Analyse(t, NotificationRule)
+                : new IlPathScan.Result(new[] { "takes no entitySetName / recordId to notify for" }, Array.Empty<int>(), Array.Empty<int>())))
+            .ToList();
 
-    /// <summary>C3 (b): a client POA write opens the obligation; an eviction of the same record discharges it.</summary>
-    internal static IlPathScan.Rule SeamWriteRule(Func<MethodBase, bool> isEviction) => new()
+    /// <summary>Whether <paramref name="target"/> is the observer call itself, or one of <paramref name="candidates"/> that makes it on every path.</summary>
+    internal static bool IsANotification(IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> candidates, MethodBase target) =>
+        IsTheObserverCall(target)
+        || candidates.Any(c => c.Result.Violations.Count == 0
+                               && c.Result.DischargingCalls.Count > 0
+                               && c.Method.HasSameMetadataDefinitionAs(target));
+
+    /// <summary>C3 (a): an HTTP send opens the obligation, keyed by the sender's own record; a notification of that record discharges it.</summary>
+    internal static IlPathScan.Rule SenderRule(Func<MethodBase, bool> isNotification) => new()
     {
-        Opens = IsTheClientsPoaWrite,
-        Discharges = isEviction,
+        Opens = IsAnHttpSend,
+        Discharges = isNotification,
         KeyParameters = ShareKey,
-        Opening = "the POA write",
-        Discharge = "the eviction",
+        OpeningKeysFromSource = true,
+        Opening = "the share write's send",
+        Discharge = "the notification",
     };
 
-    /// <summary>C3 (c): a seam method counts as the eviction when it owes, from entry, the invalidator's share-change eviction of its own record — and pays it on every path.</summary>
-    internal static readonly IlPathScan.Rule EvictionHelperRule = new()
+    /// <summary>C3 (b): a client method counts as the notification when it owes, from entry, the observer call for its own record — and makes it on every path.</summary>
+    internal static readonly IlPathScan.Rule NotificationRule = new()
     {
         Opens = _ => false,
-        Discharges = target => target.DeclaringType == typeof(IMembershipCacheInvalidator)
-                               && target.Name == nameof(IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync),
+        Discharges = IsTheObserverCall,
         KeyParameters = ShareKey,
         OwedAtEntry = true,
         Opening = "the helper",
-        Discharge = "the invalidation",
+        Discharge = "the observer call",
     };
-
-    /// <summary>
-    /// The seam's writes that are NOT one of <paramref name="allowed"/> calling its own same-named client write, as
-    /// <c>"{seam method(signature)} → {client write}"</c>. Methods are compared by metadata identity, so an overload that
-    /// shares a pinned method's name is reported; an async state machine counts as its method; a lambda or local function
-    /// counts as itself (never as the method that holds it).
-    /// </summary>
-    internal static IReadOnlyList<string> SeamWritesOutside(
-        IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> references,
-        IReadOnlyCollection<MethodInfo> allowed) =>
-        references
-            .Where(r => IsTheClientsPoaWrite(r.Target))
-            .Select(r => (Source: IlCallScan.SourceMethod(r.Caller, r.CallerMethod), r.Caller, r.CallerMethod, r.Target))
-            .Where(w => w.Source is null
-                        || w.Source.Name != w.Target.Name
-                        || !allowed.Any(a => a.HasSameMetadataDefinitionAs(w.Source)))
-            .Select(w => $"{(w.Source is null ? $"{w.Caller.Name}.{w.CallerMethod.Name}" : Signature(w.Source))} → {w.Target.Name}")
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(s => s, StringComparer.Ordinal)
-            .ToList();
 
     private static string Signature(MethodBase method) =>
         $"{method.Name}({string.Join(", ", method.GetParameters().Select(p => p.ParameterType.Name))})";
 
-    [Fact(DisplayName = "Task 132: the seam writes POA only from its three interface methods, each its own write")]
-    public void TheSeamWritesPoaOnlyFromItsThreeInterfaceMethods()
+    [Fact(DisplayName = "Task 132: every path through each of the client's share-write senders notifies the observer for that record")]
+    public void EveryPathThroughEachClientShareWriteSenderNotifiesThatRecord()
     {
-        var writeMethods = SeamWriteNames.Select(SeamWriteMethod).ToList();
-        var references = IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseRecordShareService))).ToList();
+        var senders = ClientShareWriteSenders();
+        Assert.True(senders.Count > 0, "precondition: the three POA writes reach a client method that makes the HTTP send");
 
-        // Vacuity: each of the three is seen writing.
-        var writers = references
-            .Where(r => IsTheClientsPoaWrite(r.Target))
-            .Select(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod))
-            .ToList();
+        var candidates = ClientNotificationCandidates(senders);
+        var violations = new List<string>();
+        foreach (var sender in senders)
+        {
+            if (!ShareKey.All(k => sender.GetParameters().Any(p => p.Name == k)))
+            {
+                violations.Add($"{Signature(sender)}: makes a share write's send but takes no entitySetName / recordId to notify for");
+                continue;
+            }
+
+            var result = IlPathScan.Analyse(sender, SenderRule(target => IsANotification(candidates, target)));
+            Assert.True(result.OpeningCalls.Count > 0, $"precondition: the path analysis reaches {Signature(sender)}'s send");
+            violations.AddRange(result.Violations.Select(v => $"{Signature(sender)}: {v}"));
+        }
+
         Assert.True(
-            writeMethods.All(m => writers.Any(w => w is not null && m.HasSameMetadataDefinitionAs(w))),
-            "precondition: the compiled scan sees each of the seam's three interface methods write");
-
-        var outside = SeamWritesOutside(references, writeMethods);
-
-        Assert.True(
-            outside.Count == 0,
-            "the seam may write POA only from the three methods that implement IDataverseRecordShareService's "
-            + "Grant/Modify/RevokeAccessAsync — the three whose every path the rule below proves evicts. A write from any other "
-            + "seam method (an overload, a helper, a lambda) is a write no rule follows to its eviction (task 132): make it "
-            + "through one of the three."
-            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", outside)}");
+            violations.Count == 0,
+            "a path through the client's share-write sender makes the send and is not followed — after the send completes, "
+            + "with the same entitySetName and recordId, awaited — by the observer notification, before the method returns, "
+            + "throws or is cancelled (task 132 round 55). On that path the access caches stay stale for their TTLs: an "
+            + "unshare that keeps access. Keep the send inside the try whose finally notifies."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", violations)}"
+            + $"{Environment.NewLine}  the client methods the senders call: {Describe(candidates)}");
     }
 
-    [Theory(DisplayName = "Task 132: every path through each seam write awaits the write, then evicts that record and awaits it")]
-    [InlineData(nameof(IDataverseRecordShareService.GrantAccessAsync))]
-    [InlineData(nameof(IDataverseRecordShareService.ModifyAccessAsync))]
-    [InlineData(nameof(IDataverseRecordShareService.RevokeAccessAsync))]
-    public void EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord(string write)
+    [Fact(DisplayName = "Task 132: the client's notification calls the observer for that record on every path and awaits it")]
+    public void TheClientsNotificationCallsTheObserverForThatRecordOnEveryPath()
     {
-        var candidates = SeamEvictionCandidates();
-        var result = IlPathScan.Analyse(SeamWriteMethod(write), SeamWriteRule(target => IsAnEviction(candidates, target)));
-
-        Assert.True(result.OpeningCalls.Count > 0, $"precondition: the path analysis reaches {write}'s client write");
-        Assert.True(
-            result.Violations.Count == 0,
-            $"DataverseRecordShareService.{write} has a path on which the POA write is not followed — after it completes, with "
-            + "the same entitySetName and recordId, awaited — by a call to a seam method that invalidates that record on every "
-            + "path, before the method returns, throws or is cancelled (task 132). On that path the sharee's root set and every "
-            + "snapshot of the record stay stale for their TTLs: an unshare that keeps access. Keep the write inside the try "
-            + "whose finally evicts."
-            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", result.Violations)}"
-            + $"{Environment.NewLine}  the seam methods the writes call: {Describe(candidates)}");
-    }
-
-    [Fact(DisplayName = "Task 132: the seam's writes call an eviction that invalidates that record on every path and awaits it")]
-    public void TheSeamsWritesCallAnEvictionThatInvalidatesThatRecordOnEveryPath()
-    {
-        var candidates = SeamEvictionCandidates();
+        var candidates = ClientNotificationCandidates(ClientShareWriteSenders());
 
         Assert.True(
-            candidates.Any(c => IsAnEviction(candidates, c.Method)),
-            "none of the seam methods the three writes call invalidates, on every path, the record it is given — "
-            + "IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync with its own entitySetName and recordId, awaited "
-            + "(task 132): every share write would leave the record's access caches stale."
+            candidates.Any(c => c.Result.Violations.Count == 0 && c.Result.DischargingCalls.Count > 0),
+            "none of the client methods the share-write senders call notifies, on every path, the observer of the record it is "
+            + "given — IRecordShareWriteObserver.OnRecordShareWrittenAsync with its own entitySetName and recordId, awaited "
+            + "(task 132 round 55): share writes would leave the record's access caches stale."
             + $"{Environment.NewLine}  {Describe(candidates)}");
     }
 
@@ -620,8 +627,8 @@ public class PoaShareClientSingletonGuardTests
                 Environment.NewLine + "  ",
                 candidates.Select(c => $"{Signature(c.Method)}: "
                                        + (c.Result.Violations.Count == 0 && c.Result.DischargingCalls.Count > 0
-                                           ? "invalidates on every path"
-                                           : string.Join("; ", c.Result.Violations.DefaultIfEmpty("never invalidates")))));
+                                           ? "notifies on every path"
+                                           : string.Join("; ", c.Result.Violations.DefaultIfEmpty("never notifies")))));
 
     // ── C4. POA actions and write methods named as constants ─────────────────────────────────────
 
@@ -655,8 +662,9 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             offenders.Count == 0,
             "naming a POA action (GrantAccess / ModifyAccess / RevokeAccess) or a client POA write method as a constant "
-            + "outside the client is how a write reaches Dataverse without the seam — an SDK OrganizationRequest by name, a "
-            + "hand-built POST, a reflective call — and without the access-cache eviction (task 132). Call "
+            + "outside the client is how a write reaches Dataverse without DataverseWebApiService — an SDK OrganizationRequest "
+            + "by name, a hand-built POST — and so without its share-write notification and the access-cache eviction "
+            + "behind it (task 132). Call "
             + "IDataverseRecordShareService. (The rule reads constants, not intent: a log line that names an action as a "
             + "word, or a nameof of an unrelated member that shares a write method's name, is flagged too — reword or "
             + "rename it.)"
@@ -682,7 +690,8 @@ public class PoaShareClientSingletonGuardTests
 
         Assert.True(
             offenders.Count == 0,
-            "an SDK POA message bypasses the one seam — and with it the access-cache eviction (task 132) and the payload "
+            "an SDK POA message bypasses DataverseWebApiService — and with it the share-write notification and access-cache "
+            + "eviction (task 132) and the payload "
             + "consolidation (task 060). Use IDataverseRecordShareService."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
@@ -841,19 +850,23 @@ public class PoaShareClientSingletonGuardTests
             offenders.Count == 0,
             "a POA action named by metadata — a type, member, enum value or parameter of that name, or a const, default "
             + "value, attribute argument or embedded resource holding it — reaches a raw POST or an SDK request through "
-            + "ToString(), reflection or a resource read with no constant loaded, and without the seam's access-cache "
-            + "eviction (task 132). Call IDataverseRecordShareService; rename or reword the rest."
+            + "ToString(), reflection or a resource read with no constant loaded — around DataverseWebApiService and its "
+            + "share-write notification (task 132). Call IDataverseRecordShareService; rename or reword the rest."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
-    // ── C7. no method chosen or invoked by reflection, and no code the compiled scan cannot read ──────
+    // ── C7. no reference to the reflection APIs ReflectiveMethodAccess lists ──────────────────────
     //
-    // C1 reads the method tokens the COMPILER resolved. A method the code chooses at RUN time has no such token: task 132
-    // f1-v1c-v1 verifier seed R found the client's RevokeAccessAsync by its signature (`typeof(DataverseWebApiService)
-    // .GetMethods().First(x => <4 parameters, the third a DataversePrincipalRef, returns Task>)`) and invoked it — no name,
-    // no constant, all 622 ArchTests green. Owner round 48 (b): close the CLASS. The rule bans the mechanism — choosing a
-    // method by reflection, invoking one reflectively, or bringing in code the scan cannot read — on ANY type, so where the
-    // Type came from (typeof, GetType() on the client, a type parameter, a type found by enumeration) does not matter.
+    // C1 reads the method tokens the COMPILER resolved; a method the code chooses at RUN time has none. Task 132 f1-v1c-v1
+    // verifier seed R found the client's RevokeAccessAsync by its signature (`typeof(DataverseWebApiService).GetMethods()
+    // .First(x => <4 parameters, the third a DataversePrincipalRef, returns Task>)`) and invoked it. Owner round 48 (b)
+    // banned the reflection APIs that seed and its siblings use — on ANY type, so where the Type came from does not matter.
+    // This rule bans exactly the APIs listed below and NOTHING more: it is not "no method chosen or invoked by reflection".
+    // A late binder (seed V: Microsoft.VisualBasic Interaction.CallByName) and a method resolved from a handle or metadata
+    // token and run by a LINQ provider (seed M: ModuleHandle.ResolveMethodHandle + MethodBase.GetMethodFromHandle +
+    // EnumerableQuery) pass it, as do other APIs not on the list. Since round 55 that no longer matters for the eviction —
+    // a call of the client's share writes notifies however it was chosen (AccessCacheInvalidationTests.Shares runs seeds V
+    // and M) — so the rule is defence in depth, and its gaps are task 132's recorded known limits (owner round 56, class d).
 
     private const string ChoosesAMethod = "chooses a method by reflection";
     private const string InvokesReflectively = "invokes reflectively";
@@ -890,7 +903,9 @@ public class PoaShareClientSingletonGuardTests
 
     /// <summary>
     /// What a reference to <paramref name="target"/> does, when it is one of the reflection APIs C7 bans; otherwise
-    /// <c>null</c>. Banned: (1) CHOOSING a method — a method or member lookup on <see cref="Type"/> / <c>TypeInfo</c> /
+    /// <c>null</c>. The list is exactly what is banned — other ways to choose or invoke a method (a late binder; a method
+    /// resolved from a handle or token, run by a LINQ provider) are not on it.
+    /// Banned: (1) CHOOSING a method — a method or member lookup on <see cref="Type"/> / <c>TypeInfo</c> /
     /// <see cref="IReflect"/> (<see cref="TypeMethodLookups"/>), its extension spellings, a <see cref="Module"/> lookup by
     /// name or metadata token, a property's or event's accessor methods, a name-based <c>Expression.Call</c>, a function
     /// pointer turned back into a handle; (2) INVOKING reflectively — <c>MethodBase.Invoke</c> (methods and constructors),
@@ -959,20 +974,19 @@ public class PoaShareClientSingletonGuardTests
             .Where(r => ReflectiveMethodAccess(r.Target) is not null)
             .ToList());
 
-    [Fact(DisplayName = "Task 132: no compiled code chooses or invokes a method by reflection, or runs code the scan cannot read")]
-    public void NoCompiledCodeChoosesOrInvokesAMethodByReflection()
+    [Fact(DisplayName = "Task 132: no compiled code references the reflection APIs the guard lists (C7)")]
+    public void NoCompiledCodeReferencesTheListedReflectionApis()
     {
         var offenders = CompiledReflectiveMethodAccess(ScannedReflectiveReferences.Value);
 
         Assert.True(
             offenders.Count == 0,
-            "a method chosen by reflection (by name, signature, attribute or position), invoked reflectively, or run from code "
-            + "the compiled scan cannot read (emitted IL, an assembly loaded at run time) has no method token for the compiled "
-            + "rules to read — task 132 verifier seed R reached DataverseWebApiService.RevokeAccessAsync by its signature, without "
-            + "the seam's access-cache eviction. Owner round 48 (b) bans the mechanism in every assembly the BFF runs, on any type "
-            + "(so on the Dataverse service types and on any Type obtained from them, however obtained). Call the method "
-            + "directly; share through IDataverseRecordShareService. A genuine need for reflection is a review decision: name the "
-            + "site and the type it reflects over here, and that type must not be a Dataverse service type."
+            "a reflection API on C7's list — a method or member lookup, a reflective invocation, emitted IL or an assembly "
+            + "loaded at run time — has no method token for the compiled rules to read (task 132 verifier seed R reached "
+            + "DataverseWebApiService.RevokeAccessAsync by its signature). Owner round 48 (b) bans these APIs in every assembly "
+            + "the BFF runs, on any type. Call the method directly; share through IDataverseRecordShareService. A genuine need "
+            + "for one is a review decision: name the site and the type it reflects over here, and that type must not be a "
+            + "Dataverse service type."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
@@ -980,99 +994,202 @@ public class PoaShareClientSingletonGuardTests
     //
     // Task 132 f1-v1c-v1 verifier seed U: `[UnsafeAccessor(UnsafeAccessorKind.Method)] private static extern Task
     // RevokeAccessAsync(DataverseWebApiService client, …)` called unqualified IS the client's write — a compiled route whose
-    // call target is declared on the probe type (C1 misses it), with no string and no reflection; it reached Dataverse with no
-    // eviction. Spaarke has no legitimate use for UnsafeAccessor: it reaches private members regardless of visibility. Owner
-    // round 48 (a): none anywhere in src/server — in the compiled metadata of the scan set (generated code included, however
-    // the attribute was spelled or aliased) and in the text of every source and MSBuild file under src/server.
+    // call target is declared on the probe type (C1 misses it), with no string and no reflection. Spaarke has no legitimate
+    // use for UnsafeAccessor: it reaches private members regardless of visibility. Owner round 48 (a): none anywhere in
+    // src/server. Round 55 item 3 (after verifier seed U5, a Unicode-escaped attribute in the L2 Worker that the text rule
+    // could not read): C8 reads the COMPILED custom-attribute table of every src/server project's assembly, so the source
+    // spelling does not matter. T6 still reads the text, as written.
 
-    /// <summary><c>[UnsafeAccessor]</c> and its companions (<c>[UnsafeAccessorType]</c>, .NET 10).</summary>
-    internal static bool IsUnsafeAccessorAttribute(Type attributeType) =>
-        attributeType.Namespace == "System.Runtime.CompilerServices"
-        && attributeType.Name.StartsWith("UnsafeAccessor", StringComparison.Ordinal);
+    /// <summary><c>[UnsafeAccessor]</c> and its companions (<c>[UnsafeAccessorType]</c>, .NET 10), by namespace and name.</summary>
+    internal static bool IsUnsafeAccessorAttribute(string? attributeNamespace, string attributeName) =>
+        attributeNamespace == "System.Runtime.CompilerServices"
+        && attributeName.StartsWith("UnsafeAccessor", StringComparison.Ordinal);
 
     /// <summary>
-    /// Every place in <paramref name="types"/> and <paramref name="assemblies"/> that carries an UnsafeAccessor attribute: a
-    /// type, a member (an <c>extern</c> accessor method above all), a parameter, a return value, a generic parameter, the
-    /// assembly or a module.
+    /// Every custom attribute in the compiled assembly at <paramref name="path"/> whose type is an UnsafeAccessor attribute,
+    /// as <c>"{where}: [{attribute}]"</c>. Read from the assembly's custom-attribute TABLE (System.Reflection.Metadata, no
+    /// load): every row is seen — on a type, member, parameter, return value, generic parameter, the assembly or a module —
+    /// whatever the source spelled (an alias, a Unicode escape) and generated code included, without resolving the
+    /// assembly's dependencies.
     /// </summary>
-    internal static IReadOnlyList<string> CompiledUnsafeAccessors(IEnumerable<Type> types, IEnumerable<Assembly> assemblies)
+    internal static IReadOnlyList<string> UnsafeAccessorsIn(string path)
     {
+        using var stream = File.OpenRead(path);
+        using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+        var md = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
         var found = new List<string>();
-
-        void Check(string where, IEnumerable<CustomAttributeData> attributes)
+        foreach (var handle in md.CustomAttributes)
         {
-            foreach (var attribute in attributes.Where(a => IsUnsafeAccessorAttribute(a.AttributeType)))
+            var attribute = md.GetCustomAttribute(handle);
+            var (ns, name) = AttributeTypeName(md, attribute.Constructor);
+            if (name is not null && IsUnsafeAccessorAttribute(ns, name))
             {
-                found.Add($"{where}: [{attribute.AttributeType.Name}]");
-            }
-        }
-
-        void CheckGenericParameters(string where, IEnumerable<Type> parameters)
-        {
-            foreach (var parameter in parameters)
-            {
-                Check($"{where}<{parameter.Name}>", parameter.CustomAttributes);
-            }
-        }
-
-        foreach (var type in types)
-        {
-            Check(type.FullName!, type.CustomAttributes);
-            if (type.IsGenericTypeDefinition)
-            {
-                CheckGenericParameters(type.FullName!, type.GetGenericArguments());
-            }
-
-            foreach (var member in type.GetMembers(DeclaredMembers).Where(m => m.MemberType != MemberTypes.NestedType))
-            {
-                var where = $"{type.FullName}.{member.Name}";
-                Check(where, member.CustomAttributes);
-                if (member is not MethodBase method)
-                {
-                    continue;
-                }
-
-                foreach (var parameter in method.GetParameters())
-                {
-                    Check($"{where}({parameter.Name})", parameter.CustomAttributes);
-                }
-
-                if (method is MethodInfo withReturn)
-                {
-                    Check($"{where} (return)", withReturn.ReturnParameter.CustomAttributes);
-                }
-
-                if (method.IsGenericMethodDefinition)
-                {
-                    CheckGenericParameters(where, method.GetGenericArguments());
-                }
-            }
-        }
-
-        foreach (var assembly in assemblies)
-        {
-            var name = assembly.GetName().Name!;
-            Check(name, assembly.CustomAttributes);
-            foreach (var module in assembly.GetModules())
-            {
-                Check($"{name} module {module.Name}", module.CustomAttributes);
+                found.Add($"{MetadataOwner(md, attribute.Parent)}: [{name}]");
             }
         }
 
         return found.Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
     }
 
-    [Fact(DisplayName = "Task 132: no compiled code the BFF runs, or that can name the client, carries an UnsafeAccessor")]
-    public void NoCompiledCodeCarriesAnUnsafeAccessor()
+    /// <summary>C8's findings for one control type (and its nested types), read from this test assembly's own DLL.</summary>
+    internal static IReadOnlyList<string> UnsafeAccessorsOn(Type control) =>
+        UnsafeAccessorsIn(typeof(PoaShareClientSingletonGuardTests).Assembly.Location)
+            .Where(found => found.StartsWith(control.FullName + ".", StringComparison.Ordinal)
+                            || found.StartsWith(control.FullName + "+", StringComparison.Ordinal)
+                            || found.StartsWith(control.FullName + "<", StringComparison.Ordinal)
+                            || found.StartsWith(control.FullName + ":", StringComparison.Ordinal))
+            .ToList();
+
+    /// <summary>The namespace and name of the type whose constructor an attribute row names (null name: a generic attribute's type spec).</summary>
+    private static (string? Namespace, string? Name) AttributeTypeName(
+        System.Reflection.Metadata.MetadataReader md, System.Reflection.Metadata.EntityHandle constructor)
     {
-        var offenders = CompiledUnsafeAccessors(ScannedTypes.Value, ScannedAssemblies.Value);
+        var type = constructor.Kind switch
+        {
+            System.Reflection.Metadata.HandleKind.MemberReference =>
+                md.GetMemberReference((System.Reflection.Metadata.MemberReferenceHandle)constructor).Parent,
+            System.Reflection.Metadata.HandleKind.MethodDefinition =>
+                md.GetMethodDefinition((System.Reflection.Metadata.MethodDefinitionHandle)constructor).GetDeclaringType(),
+            _ => throw new InvalidOperationException($"An attribute constructor of kind {constructor.Kind} — the scan would under-report."),
+        };
+
+        switch (type.Kind)
+        {
+            case System.Reflection.Metadata.HandleKind.TypeReference:
+                var reference = md.GetTypeReference((System.Reflection.Metadata.TypeReferenceHandle)type);
+                return (md.GetString(reference.Namespace), md.GetString(reference.Name));
+            case System.Reflection.Metadata.HandleKind.TypeDefinition:
+                var definition = md.GetTypeDefinition((System.Reflection.Metadata.TypeDefinitionHandle)type);
+                return (md.GetString(definition.Namespace), md.GetString(definition.Name));
+            default:
+                return (null, null); // a TypeSpecification: a generic attribute type, which no UnsafeAccessor attribute is
+        }
+    }
+
+    /// <summary>What an attribute row is attached to, in reflection's spelling (<c>Ns.Type.Member(parameter)</c>).</summary>
+    private static string MetadataOwner(System.Reflection.Metadata.MetadataReader md, System.Reflection.Metadata.EntityHandle parent)
+    {
+        string TypeName(System.Reflection.Metadata.TypeDefinitionHandle handle)
+        {
+            var type = md.GetTypeDefinition(handle);
+            var declaring = type.GetDeclaringType();
+            return declaring.IsNil
+                ? (md.GetString(type.Namespace) is { Length: > 0 } ns ? $"{ns}.{md.GetString(type.Name)}" : md.GetString(type.Name))
+                : $"{TypeName(declaring)}+{md.GetString(type.Name)}";
+        }
+
+        string MethodName(System.Reflection.Metadata.MethodDefinitionHandle handle)
+        {
+            var method = md.GetMethodDefinition(handle);
+            return $"{TypeName(method.GetDeclaringType())}.{md.GetString(method.Name)}";
+        }
+
+        switch (parent.Kind)
+        {
+            case System.Reflection.Metadata.HandleKind.TypeDefinition:
+                return TypeName((System.Reflection.Metadata.TypeDefinitionHandle)parent);
+            case System.Reflection.Metadata.HandleKind.MethodDefinition:
+                return MethodName((System.Reflection.Metadata.MethodDefinitionHandle)parent);
+            case System.Reflection.Metadata.HandleKind.FieldDefinition:
+                var field = md.GetFieldDefinition((System.Reflection.Metadata.FieldDefinitionHandle)parent);
+                return $"{TypeName(field.GetDeclaringType())}.{md.GetString(field.Name)}";
+            case System.Reflection.Metadata.HandleKind.Parameter:
+                var parameterHandle = (System.Reflection.Metadata.ParameterHandle)parent;
+                var parameter = md.GetParameter(parameterHandle);
+                var owner = md.MethodDefinitions.First(m => md.GetMethodDefinition(m).GetParameters().Contains(parameterHandle));
+                return parameter.SequenceNumber == 0
+                    ? $"{MethodName(owner)} (return)"
+                    : $"{MethodName(owner)}({md.GetString(parameter.Name)})";
+            case System.Reflection.Metadata.HandleKind.PropertyDefinition:
+                var propertyHandle = (System.Reflection.Metadata.PropertyDefinitionHandle)parent;
+                var propertyType = md.TypeDefinitions.First(t => md.GetTypeDefinition(t).GetProperties().Contains(propertyHandle));
+                return $"{TypeName(propertyType)}.{md.GetString(md.GetPropertyDefinition(propertyHandle).Name)}";
+            case System.Reflection.Metadata.HandleKind.EventDefinition:
+                var eventHandle = (System.Reflection.Metadata.EventDefinitionHandle)parent;
+                var eventType = md.TypeDefinitions.First(t => md.GetTypeDefinition(t).GetEvents().Contains(eventHandle));
+                return $"{TypeName(eventType)}.{md.GetString(md.GetEventDefinition(eventHandle).Name)}";
+            case System.Reflection.Metadata.HandleKind.GenericParameter:
+                var generic = md.GetGenericParameter((System.Reflection.Metadata.GenericParameterHandle)parent);
+                var genericOwner = generic.Parent.Kind == System.Reflection.Metadata.HandleKind.TypeDefinition
+                    ? TypeName((System.Reflection.Metadata.TypeDefinitionHandle)generic.Parent)
+                    : MethodName((System.Reflection.Metadata.MethodDefinitionHandle)generic.Parent);
+                return $"{genericOwner}<{md.GetString(generic.Name)}>";
+            case System.Reflection.Metadata.HandleKind.AssemblyDefinition:
+                return "(assembly)";
+            case System.Reflection.Metadata.HandleKind.ModuleDefinition:
+                return "(module)";
+            default:
+                return $"({parent.Kind})";
+        }
+    }
+
+    /// <summary>
+    /// The compiled assembly of EVERY project under <c>src/server</c> (round 55 item 3), as (csproj path, the DLL or null
+    /// when it is not built): the newest <c>{its assembly name}.dll</c> under its own <c>bin/{this test's
+    /// configuration}/{its target framework}/</c>, a runtime-identifier folder included (the Web SDK projects build to
+    /// <c>linux-x64/</c>), reference assemblies and publish output excluded. The projects the ArchTests do not reference
+    /// are built by the <c>BuildServerProjectsForCompiledScans</c> target in <c>Spaarke.ArchTests.csproj</c>.
+    /// </summary>
+    internal static IReadOnlyList<(string Project, string? Assembly)> ServerProjectAssemblies()
+    {
+        var sep = Path.DirectorySeparatorChar;
+        var configuration = typeof(PoaShareClientSingletonGuardTests).Assembly
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+
+        return Directory.EnumerateFiles(Path.Combine(SourceScan.RepoRoot, "src", "server"), "*.csproj", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{sep}bin{sep}", StringComparison.Ordinal)
+                        && !f.Contains($"{sep}obj{sep}", StringComparison.Ordinal)
+                        && !f.Contains($"{sep}node_modules{sep}", StringComparison.Ordinal))
+            .Select(project =>
+            {
+                var xml = XDocument.Load(project);
+                string? Property(string name) =>
+                    xml.Descendants().FirstOrDefault(e => e.Name.LocalName == name)?.Value.Trim() is { Length: > 0 } value ? value : null;
+
+                var output = Path.Combine(Path.GetDirectoryName(project)!, "bin", configuration, Property("TargetFramework") ?? "net10.0");
+                var dll = Directory.Exists(output)
+                    ? Directory.EnumerateFiles(output, (Property("AssemblyName") ?? Path.GetFileNameWithoutExtension(project)) + ".dll", SearchOption.AllDirectories)
+                        .Where(f => !Path.GetRelativePath(output, f).Split(sep).Any(part => part is "ref" or "refint" or "publish"))
+                        .OrderByDescending(File.GetLastWriteTimeUtc)
+                        .FirstOrDefault()
+                    : null;
+                return (Project: RelativePath(project), Assembly: dll);
+            })
+            .OrderBy(p => p.Project, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    [Fact(DisplayName = "Task 132: no src/server project's compiled assembly carries an UnsafeAccessor (C8)")]
+    public void NoCompiledSrcServerAssemblyCarriesAnUnsafeAccessor()
+    {
+        var assemblies = ServerProjectAssemblies();
+        Assert.True(
+            new[]
+            {
+                "src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj",
+                "src/server/shared/Spaarke.Dataverse/Spaarke.Dataverse.csproj",
+                "src/server/services/Sprk.Provisioning.ControlPlane.Worker/Sprk.Provisioning.ControlPlane.Worker.csproj",
+            }.All(p => assemblies.Any(a => a.Project == p)),
+            "precondition: the walk finds the BFF, the client's project and a project outside the IL scan set");
+
+        var unbuilt = assemblies.Where(a => a.Assembly is null).Select(a => a.Project).ToList();
+        Assert.True(
+            unbuilt.Count == 0,
+            "a src/server project has no compiled assembly for the UnsafeAccessor scan to read, so an accessor in it would pass "
+            + "unseen (round 55 item 3). Build it from the BuildServerProjectsForCompiledScans target in "
+            + "tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", unbuilt)}");
+
+        var offenders = assemblies
+            .SelectMany(a => UnsafeAccessorsIn(a.Assembly!).Select(found => $"{Path.GetFileName(a.Assembly)}: {found}"))
+            .ToList();
 
         Assert.True(
             offenders.Count == 0,
             "an [UnsafeAccessor] extern reaches a member regardless of its visibility, through a call whose target is declared "
             + "on the accessor's own type — task 132 verifier seed U called DataverseWebApiService.RevokeAccessAsync that way, "
-            + "around the seam and its access-cache eviction, with every other rule green. Spaarke has no legitimate use for it "
-            + "(owner round 48 (a)): call the member directly, or expose what you need."
+            + "around the seam, with every other rule green. Spaarke has no legitimate use for it (owner round 48 (a)): call the "
+            + "member directly, or expose what you need."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
@@ -1103,8 +1220,9 @@ public class PoaShareClientSingletonGuardTests
 
     /// <summary>
     /// Whether a file's text names UnsafeAccessor (the attribute, its kind enum, its type companion, an alias's target)
-    /// outside a whole-line <c>//</c> comment (doc comments included). Conservative: a block comment, an XML comment or a
-    /// string that names it is flagged too — reword it.
+    /// outside a whole-line <c>//</c> comment (doc comments included). It reads the text as written: a spelling the text does
+    /// not show (a Unicode escape in the identifier, task 132 seed U5) is C8's to catch, in the compiled assembly.
+    /// Conservative: a block comment, an XML comment or a string that names it is flagged too — reword it.
     /// </summary>
     internal static bool NamesUnsafeAccessor(string text) =>
         text.Split('\n').Any(line =>
@@ -1133,8 +1251,7 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             offenders.Count == 0,
             "UnsafeAccessor is banned anywhere in src/server (owner round 48 (a); task 132 verifier seed U): it reaches private "
-            + "members regardless of visibility, which is how a POA write can skip the evicting seam. Call the member "
-            + "directly, or expose what you need."
+            + "members regardless of visibility. Call the member directly, or expose what you need."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
@@ -1189,12 +1306,12 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             offenders.Count == 0,
             "a POA action (or a POA write method) named in configuration is an action name the code reads at run time and "
-            + "can POST or invoke by reflection — without the seam's access-cache eviction (task 132). Share through "
+            + "can POST around DataverseWebApiService — and so without its share-write notification (task 132). Share through "
             + "IDataverseRecordShareService; do not configure a POA action."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
-    /// <summary>Negative and positive controls for the compiled detectors (C1, C4, C5) and the pins' mapping (C2, C3).</summary>
+    /// <summary>Negative and positive controls for the compiled detectors (C1, C4, C5, C7, C8).</summary>
     [Fact(DisplayName = "Task 132: the compiled detectors flag every bypass shape and pass the seam")]
     public void CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam()
     {
@@ -1233,37 +1350,18 @@ public class PoaShareClientSingletonGuardTests
             },
             CompiledPoaNameLoads(IlCallScan.StringLoads(IlCallScan.WithNested(nameControl))));
 
-        // C3 (a)'s pin, by metadata identity: the bound method passes; a same-name overload (task 132 seed N2) and a lambda
-        // inside a pinned-name method are both reported; an async method's state machine maps back to its method.
-        var pinControl = IlCallScan.WithNested(typeof(PoaSeamPinControl)).ToList();
-        var bound = typeof(PoaSeamPinControl).GetMethod(
-            nameof(PoaSeamPinControl.RevokeAccessAsync),
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            new[] { typeof(string), typeof(Guid), typeof(DataversePrincipalRef), typeof(CancellationToken) })!;
-        var granting = typeof(PoaSeamPinControl).GetMethod(nameof(PoaSeamPinControl.GrantAccessAsync), BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var outside = SeamWritesOutside(IlCallScan.MethodReferences(pinControl), new[] { bound, granting });
-        Assert.Equal(2, outside.Count);
-        Assert.Contains("RevokeAccessAsync(String, Guid, DataversePrincipalRef, Boolean, CancellationToken) → RevokeAccessAsync", outside);
-        Assert.Contains(outside, w => w.EndsWith("→ GrantAccessAsync", StringComparison.Ordinal) && !w.StartsWith("GrantAccessAsync(", StringComparison.Ordinal));
-        Assert.Equal(
-            new[] { bound.Name },
-            IlCallScan.MethodReferences(pinControl)
-                .Where(r => IsTheClientsPoaWrite(r.Target))
-                .Select(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod))
-                .Where(m => m is not null && m.HasSameMetadataDefinitionAs(bound))
-                .Select(m => m!.Name)
-                .Distinct());
-
         // C8 — task 132 f1-v1c-v1 verifier seed U, verbatim: an [UnsafeAccessor] extern that IS the client's write. Every
         // rule before C8 passes it — C1 sees a call to the control's own extern, C4 / C6 see no POA word — which is the
-        // finding; C8 flags the attribute however it is used (a method accessor, a field accessor, [UnsafeAccessorType]).
+        // finding; C8 flags the attribute in the compiled custom-attribute table however it is used (a method accessor, a
+        // field accessor, [UnsafeAccessorType] on a parameter) — read here from THIS assembly's own DLL, as C8 reads every
+        // src/server project's.
         var seedU = IlCallScan.WithNested(typeof(PoaBypassControl_UnsafeAccessor)).ToList();
         Assert.Empty(CompiledPoaWriteBypasses(IlCallScan.MethodReferences(seedU)));
         Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(seedU)));
         Assert.Empty(CompiledPoaMetadata(seedU, Array.Empty<Assembly>()));
         Assert.Equal(
             new[] { $"{typeof(PoaBypassControl_UnsafeAccessor).FullName}.RevokeAccessAsync: [UnsafeAccessorAttribute]" },
-            CompiledUnsafeAccessors(seedU, Array.Empty<Assembly>()));
+            UnsafeAccessorsOn(typeof(PoaBypassControl_UnsafeAccessor)));
         Assert.Equal(
             new[]
             {
@@ -1271,7 +1369,7 @@ public class PoaShareClientSingletonGuardTests
                 $"{typeof(PoaBypassControl_UnsafeAccessorOtherShapes).FullName}.DisposeByTypeName(target): [UnsafeAccessorTypeAttribute]",
                 $"{typeof(PoaBypassControl_UnsafeAccessorOtherShapes).FullName}.DisposeByTypeName: [UnsafeAccessorAttribute]",
             },
-            CompiledUnsafeAccessors(IlCallScan.WithNested(typeof(PoaBypassControl_UnsafeAccessorOtherShapes)), Array.Empty<Assembly>()));
+            UnsafeAccessorsOn(typeof(PoaBypassControl_UnsafeAccessorOtherShapes)));
 
         // C7 — task 132 f1-v1c-v1 verifier seed R, verbatim: the client's write chosen by its signature and invoked. C1, C4
         // and C6 pass it (no token for the write, no name, no constant); C7 flags the lookup and the invocation.
@@ -1317,7 +1415,7 @@ public class PoaShareClientSingletonGuardTests
         // ... and the reflection the BFF does use, which reaches no method, is not.
         var permitted = IlCallScan.WithNested(typeof(PoaReflectionPermittedControl)).ToList();
         Assert.Empty(CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(permitted)));
-        Assert.Empty(CompiledUnsafeAccessors(permitted, Array.Empty<Assembly>()));
+        Assert.Empty(UnsafeAccessorsOn(typeof(PoaReflectionPermittedControl)));
 
         // The sanctioned shape — every write through the seam's interface — is none of these.
         var sanctioned = IlCallScan.WithNested(typeof(PoaWriteThroughSeamControl)).ToList();
@@ -1326,66 +1424,68 @@ public class PoaShareClientSingletonGuardTests
         Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(sanctioned)));
         Assert.Empty(CompiledPoaMetadata(sanctioned, Array.Empty<Assembly>()));
         Assert.Empty(CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(sanctioned)));
-        Assert.Empty(CompiledUnsafeAccessors(sanctioned, Array.Empty<Assembly>()));
+        Assert.Empty(UnsafeAccessorsOn(typeof(PoaWriteThroughSeamControl)));
     }
 
     /// <summary>
-    /// Negative and positive controls for C3 (b) and (c)'s path analysis: each shape below writes and then evicts on every
-    /// path, or has one path that does not — task 132 seed N1 (a team-only early return) among them.
+    /// Negative and positive controls for C3's path analysis: each shape below sends and then notifies on every path, or has
+    /// one path that does not — task 132 seed N1's shape (a team-only early return) among them.
     /// </summary>
-    [Fact(DisplayName = "Task 132: the path analysis flags every non-evicting write shape and passes the evicting ones")]
-    public void PathAnalysis_FlagsEveryNonEvictingShape_AndPassesTheEvictingOnes()
+    [Fact(DisplayName = "Task 132: the path analysis flags every send shape that can skip the notification and passes the rest")]
+    public void PathAnalysis_FlagsEveryNonNotifyingShape_AndPassesTheNotifyingOnes()
     {
         const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic;
-        var controls = typeof(PoaEvictionPathControls);
-        var evict = controls.GetMethod(nameof(PoaEvictionPathControls.EvictAsync), Any)!;
-        var invalidate = controls.GetMethod(nameof(PoaEvictionPathControls.InvalidateAsync), Any)!;
-        var writeRule = SeamWriteRule(target => target.HasSameMetadataDefinitionAs(evict));
+        var controls = typeof(PoaShareWriteSenderControls);
+        var notify = controls.GetMethod(nameof(PoaShareWriteSenderControls.NotifyAsync), Any)!;
+        var observe = controls.GetMethod(nameof(PoaShareWriteSenderControls.ObserveAsync), Any)!;
+        var senderRule = SenderRule(target => target.HasSameMetadataDefinitionAs(notify));
         var helperRule = new IlPathScan.Rule
         {
             Opens = _ => false,
-            Discharges = target => target.HasSameMetadataDefinitionAs(invalidate),
+            Discharges = target => target.HasSameMetadataDefinitionAs(observe),
             KeyParameters = ShareKey,
             OwedAtEntry = true,
             Opening = "the helper",
-            Discharge = "the invalidation",
+            Discharge = "the observer call",
         };
 
         IReadOnlyList<string> Violations(string method, IlPathScan.Rule rule) =>
             IlPathScan.Analyse(controls.GetMethod(method, Any)!, rule).Violations;
 
-        // Evict on every path: the seam's own shape, a caught failure that returns inside the try, a real finally (using).
-        foreach (var evicting in new[]
+        // Notify on every path: the client's own shape, a caught failure that returns inside the try, a real finally (using).
+        foreach (var notifying in new[]
                  {
-                     nameof(PoaEvictionPathControls.Canonical),
-                     nameof(PoaEvictionPathControls.CatchAndReturnInsideTheTry),
-                     nameof(PoaEvictionPathControls.UnderAUsing),
+                     nameof(PoaShareWriteSenderControls.Canonical),
+                     nameof(PoaShareWriteSenderControls.CatchAndReturnInsideTheTry),
+                     nameof(PoaShareWriteSenderControls.UnderAUsing),
                  })
         {
-            var result = IlPathScan.Analyse(controls.GetMethod(evicting, Any)!, writeRule);
-            Assert.True(result.Violations.Count == 0, $"{evicting}: {string.Join("; ", result.Violations)}");
+            var result = IlPathScan.Analyse(controls.GetMethod(notifying, Any)!, senderRule);
+            Assert.True(result.Violations.Count == 0, $"{notifying}: {string.Join("; ", result.Violations)}");
             Assert.NotEmpty(result.OpeningCalls);
             Assert.NotEmpty(result.DischargingCalls);
         }
 
-        Assert.Empty(Violations(nameof(PoaEvictionPathControls.HelperCanonical), helperRule));
+        Assert.Empty(Violations(nameof(PoaShareWriteSenderControls.HelperCanonical), helperRule));
 
-        // A path that writes and does not evict, each named by what it does wrong.
+        // A path that sends and does not notify, each named by what it does wrong.
+        const string Owes = "completes without the notification the share write's send owes";
+        const string OtherRecord = "the notification is given (entitySetName, ?) where the share write's send was given (entitySetName, recordId)";
         var expected = new (string Method, IlPathScan.Rule Rule, string Reason)[]
         {
-            (nameof(PoaEvictionPathControls.EarlyReturnForTeams), writeRule, "completes without the eviction the POA write owes"),
-            (nameof(PoaEvictionPathControls.ConditionalEviction), writeRule, "completes without the eviction the POA write owes"),
-            (nameof(PoaEvictionPathControls.EvictsBeforeWriting), writeRule, "completes without the eviction the POA write owes"),
-            (nameof(PoaEvictionPathControls.SwallowsTheFailureAndReturns), writeRule, "completes without the eviction the POA write owes"),
-            (nameof(PoaEvictionPathControls.WriteNotAwaited), writeRule, "the eviction runs before the POA write's task has completed"),
-            (nameof(PoaEvictionPathControls.EvictionNotAwaited), writeRule, "completes without awaiting the eviction"),
-            (nameof(PoaEvictionPathControls.EvictsAnotherRecord), writeRule, "the eviction is given (entitySetName, ?) where the POA write was given (entitySetName, recordId)"),
-            (nameof(PoaEvictionPathControls.ReassignsTheRecordFirst), writeRule, "the eviction is given (entitySetName, ?) where the POA write was given (entitySetName, recordId)"),
-            (nameof(PoaEvictionPathControls.PassThrough), writeRule, "completes with the POA write's task neither awaited nor followed by the eviction"),
-            (nameof(PoaEvictionPathControls.TwoWrites), writeRule, "a second call to the POA write while the eviction of the first is still owed"),
-            (nameof(PoaEvictionPathControls.HelperSkipsAnEntitySet), helperRule, "completes without the invalidation the helper owes"),
-            (nameof(PoaEvictionPathControls.HelperNotAwaited), helperRule, "completes without awaiting the invalidation"),
-            (nameof(PoaEvictionPathControls.HelperOtherRecord), helperRule, "the invalidation is given (entitySetName, ?) where the helper was given (entitySetName, recordId)"),
+            (nameof(PoaShareWriteSenderControls.EarlyReturnForTeams), senderRule, Owes),
+            (nameof(PoaShareWriteSenderControls.ConditionalNotification), senderRule, Owes),
+            (nameof(PoaShareWriteSenderControls.NotifiesBeforeSending), senderRule, Owes),
+            (nameof(PoaShareWriteSenderControls.SwallowsTheFailureAndReturns), senderRule, Owes),
+            (nameof(PoaShareWriteSenderControls.SendNotAwaited), senderRule, "the notification runs before the share write's send's task has completed"),
+            (nameof(PoaShareWriteSenderControls.NotificationNotAwaited), senderRule, "completes without awaiting the notification"),
+            (nameof(PoaShareWriteSenderControls.NotifiesAnotherRecord), senderRule, OtherRecord),
+            (nameof(PoaShareWriteSenderControls.ReassignsTheRecordFirst), senderRule, OtherRecord),
+            (nameof(PoaShareWriteSenderControls.PassThrough), senderRule, "completes with the share write's send's task neither awaited nor followed by the notification"),
+            (nameof(PoaShareWriteSenderControls.TwoSends), senderRule, "a second call to the share write's send while the notification of the first is still owed"),
+            (nameof(PoaShareWriteSenderControls.HelperSkipsAnEntitySet), helperRule, "completes without the observer call the helper owes"),
+            (nameof(PoaShareWriteSenderControls.HelperNotAwaited), helperRule, "completes without awaiting the observer call"),
+            (nameof(PoaShareWriteSenderControls.HelperOtherRecord), helperRule, "the observer call is given (entitySetName, ?) where the helper was given (entitySetName, recordId)"),
         };
 
         foreach (var (method, rule, reason) in expected)
@@ -1548,12 +1648,12 @@ public class PoaShareClientSingletonGuardTests
         return PoaWriteNamedAsString.IsMatch(code);
     }
 
-    [Fact(DisplayName = "Task 132: every POA share write in src/server goes through the evicting seam")]
-    public void EveryPoaShareWriteGoesThroughTheEvictingSeam()
+    [Fact(DisplayName = "Task 060 / 132: every POA share write in src/server goes through the single seam")]
+    public void EveryPoaShareWriteGoesThroughTheSingleSeam()
     {
         var offenders = SourceScan.ServerSourceFiles()
             .Select(file => (Path: RelativePath(file), Text: File.ReadAllText(file)))
-            .Where(f => f.Path != EvictingSeam && f.Path != CanonicalClient)
+            .Where(f => f.Path != SingleSeam && f.Path != CanonicalClient)
             .SelectMany(f => PoaWriteCalls(f.Text)
                 .Where(c => !c.ThroughSeam)
                 .Select(c => $"{f.Path}: {c.Receiver}.{c.Method}(…)"))
@@ -1562,9 +1662,9 @@ public class PoaShareClientSingletonGuardTests
 
         Assert.True(
             offenders.Count == 0,
-            "a POA share write that does not provably go through IDataverseRecordShareService skips the access-cache "
-            + "eviction (task 132): the sharee's impersonated root set and every snapshot of the record stay stale for their "
-            + "TTLs — an unshare that keeps access. Call it on an identifier declared as IDataverseRecordShareService."
+            "a POA share write that does not provably go through IDataverseRecordShareService bypasses task 060's single "
+            + "POA seam, the entry point every writer injects and every writer's test substitutes (the access-cache eviction "
+            + "is the client's own since task 132 round 55). Call it on an identifier declared as IDataverseRecordShareService."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
@@ -1573,7 +1673,7 @@ public class PoaShareClientSingletonGuardTests
     /// the resume error paths all live there), each still VISIBLE to the rule above — at least one write found, every
     /// one through the seam. A refactor that hid a writer from the detector would otherwise pass the rule vacuously.
     /// </summary>
-    [Theory(DisplayName = "Task 132: each named share-writing path writes POA only through the evicting seam")]
+    [Theory(DisplayName = "Task 060 / 132: each named share-writing path writes POA only through the single seam")]
     [InlineData("src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs")]
     [InlineData("src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs")]
     [InlineData("src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs")]
@@ -1590,7 +1690,7 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             calls.All(c => c.ThroughSeam),
             $"{path}: {string.Join(", ", calls.Where(c => !c.ThroughSeam).Select(c => $"{c.Receiver}.{c.Method}"))} "
-            + "does not go through IDataverseRecordShareService, so it skips the share-change eviction (task 132).");
+            + "does not go through IDataverseRecordShareService, task 060's single POA seam.");
     }
 
     [Fact(DisplayName = "Task 132: no server file sends the SDK's GrantAccess/ModifyAccess/RevokeAccess messages")]
@@ -1603,7 +1703,8 @@ public class PoaShareClientSingletonGuardTests
 
         Assert.True(
             offenders.Count == 0,
-            "an SDK POA message bypasses the one seam — and with it the access-cache eviction (task 132) and the payload "
+            "an SDK POA message bypasses DataverseWebApiService — and with it the share-write notification and access-cache "
+            + "eviction (task 132) and the payload "
             + "consolidation (task 060). Use IDataverseRecordShareService."
             + $"{Environment.NewLine}  {string.Join(", ", offenders)}");
     }
@@ -1613,7 +1714,7 @@ public class PoaShareClientSingletonGuardTests
     {
         var offenders = SourceScan.ServerSourceFiles()
             .Select(file => (Path: RelativePath(file), Text: File.ReadAllText(file)))
-            .Where(f => f.Path != EvictingSeam && f.Path != CanonicalClient && NamesAPoaWriteAsAString(f.Text))
+            .Where(f => f.Path != SingleSeam && f.Path != CanonicalClient && NamesAPoaWriteAsAString(f.Text))
             .Select(f => f.Path)
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
@@ -1621,8 +1722,8 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(
             offenders.Count == 0,
             "naming GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync as a string is how a reflective call reaches "
-            + "the concrete client's POA writes without a call the compiled scan can see — and without the access-cache "
-            + "eviction (task 132). Call IDataverseRecordShareService."
+            + "the concrete client's POA writes without a call the compiled scan can see, around task 060's single seam. "
+            + "Call IDataverseRecordShareService."
             + $"{Environment.NewLine}  {string.Join(", ", offenders)}");
     }
 

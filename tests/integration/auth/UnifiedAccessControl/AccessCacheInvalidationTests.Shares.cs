@@ -1,9 +1,13 @@
 using System.Collections.Concurrent;
+using System.Linq.Expressions;
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spaarke.Dataverse;
@@ -19,20 +23,16 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <summary>
 /// unified-access-control-r2 task 132 — the two batch 4 integration residuals.
 /// <list type="number">
-/// <item><b>Share-only changes evict like owner changes.</b> A POA grant, rights change or revoke changes who can read a
-/// record, so the ONE POA seam (<see cref="DataverseRecordShareService"/>) calls
-/// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/> after every write — returned or thrown, not
-/// bound to the caller's token, never failing the write. Every share writer (InternalShareEndpoints share/unshare,
-/// provisioning's creator share and its restore, the resume error paths, SecureChildShareSynchronizer's fan-out, …)
-/// reaches Dataverse only through that seam; <c>PoaShareClientSingletonGuardTests</c> pins that per writer, and enforces
-/// exactly three things over the BFF's assemblies (owner round 48): every compiled call path to the client's POA writes,
-/// no <c>[UnsafeAccessor]</c>, and no method chosen or invoked by reflection (nor code the scan cannot read) — a route
-/// outside those (a raw HTTP call whose action URL exists only at run time) is review's. Inside the seam, that guard
-/// proves STRUCTURALLY (an IL path analysis) that every path through each of the three writes awaits the write, then
-/// calls the eviction helper with the same record and awaits it, and that the helper calls the invalidator with that
-/// record on every path.
-/// The cases below prove what that eviction DOES — the record's root sets and snapshots gone — for every write, every
-/// principal kind and each outcome, over the production seam and client.</item>
+/// <item><b>Share-only changes evict like owner changes — and the eviction is a property of the WRITE</b> (main-session
+/// round 55). A POA grant, rights change or revoke changes who can read a record, so <see cref="DataverseWebApiService"/>
+/// notifies its <see cref="IRecordShareWriteObserver"/> after every share write it makes — returned, refused or cancelled,
+/// on <see cref="CancellationToken.None"/>, never failing the write — and the BFF's observer is the
+/// <see cref="IMembershipCacheInvalidator"/>, whose default member runs
+/// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>. The cases below run the PRODUCTION client and
+/// the PRODUCTION invalidator: every write, every principal kind and each outcome; a write reached WITHOUT the seam — by a
+/// late binder choosing the method from a run-time name, and by a method resolved from its metadata token and run by a
+/// LINQ provider's compiled tree (the verifier's seeds V and M); exactly one eviction per write, after the write, through
+/// the seam or not; and an observer that throws.</item>
 /// <item><b>No eviction for a type no cache holds.</b> The children an Assign cascade re-owns
 /// (<c>sharepointdocumentlocation</c>, <c>sharepointdocument</c>) are cached by no access cache, so the owner-change hook
 /// builds no pattern for them and touches Redis not at all — while a root's eviction is unchanged.</item>
@@ -40,10 +40,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// </summary>
 /// <remarks>
 /// Same instruments as the rest of this class: the production readers write the entries into one
-/// <see cref="InMemoryRedisKeyspace"/>; the production invalidator scans it. The seam runs over the production
-/// <see cref="DataverseWebApiService"/> against an in-memory server standing in for the Dataverse Web API (ADR-038 §7's
-/// named replacement for B1 — no transport double; the request builder, the auth header and the status handling are the
-/// production code).
+/// <see cref="InMemoryRedisKeyspace"/>; the production invalidator scans it. The client runs against an in-memory server
+/// standing in for the Dataverse Web API (ADR-038 §7's named replacement for B1 — no transport double; the request
+/// builder, the auth header and the status handling are the production code).
 /// </remarks>
 public sealed partial class AccessCacheInvalidationTests
 {
@@ -121,14 +120,14 @@ public sealed partial class AccessCacheInvalidationTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
-    // Residual 1 — the POA seam evicts after every write: returned, refused, or cancelled by the caller
+    // Residual 1 — the CLIENT notifies after every share write: returned, refused, or cancelled by the caller
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// The seam's input dimensions that a write path could branch on and the cases must therefore cover: each write, for
-    /// EVERY principal kind the seam is parameterized by (a team share is what PlaybookSharingService writes; task 132
-    /// verifier seed N1 was a team-only path with no eviction, which user-only cases could not see), and — where the
-    /// outcome matters — Dataverse accepting or refusing it. Derived from the enum, so a new kind gets its cases.
+    /// The input dimensions a write path could branch on, which the cases must therefore cover: each write, for EVERY
+    /// principal kind the client is parameterized by (a team share is what PlaybookSharingService writes; task 132 verifier
+    /// seed N1 was a team-only path with no eviction, which user-only cases could not see), and — where the outcome
+    /// matters — Dataverse accepting or refusing it. Derived from the enum, so a new kind gets its cases.
     /// </summary>
     public static TheoryData<string, DataversePrincipalKind, bool> EveryWriteEveryPrincipalEveryOutcome()
     {
@@ -163,34 +162,27 @@ public sealed partial class AccessCacheInvalidationTests
     private static readonly string[] ShareWrites = { "grant", "modify", "revoke" };
 
     /// <summary>
-    /// Every write of the PRODUCTION POA seam evicts that record — a grant (InternalShareEndpoints share, provisioning's
-    /// share-first creator grant, the resume error paths' unconfirmed grant, the child fan-out's grant, a playbook's team
-    /// share), a rights change (a level change, the creator-share restore to its old mask) and a revoke (unshare, the
-    /// restore that removes an issued share, the fan-out's removal, a playbook team's unshare) — for a user and for a team
-    /// principal, and the write's own outcome is what the caller sees: a refused write still throws, AFTER the eviction,
-    /// because a write that reports failure can have committed.
+    /// Every share write of the PRODUCTION client — called directly, with no seam in front of it — evicts that record: a
+    /// grant (InternalShareEndpoints share, provisioning's share-first creator grant, the resume error paths' unconfirmed
+    /// grant, the child fan-out's grant, a playbook's team share), a rights change (a level change, the creator-share
+    /// restore to its old mask) and a revoke (unshare, the restore that removes an issued share, the fan-out's removal, a
+    /// playbook team's unshare) — for a user and for a team principal. The write's own outcome is what the caller sees: a
+    /// refused write still throws, AFTER the eviction, because a write that reports failure can have committed.
     /// </summary>
     [Theory]
     [MemberData(nameof(EveryWriteEveryPrincipalEveryOutcome))]
-    public async Task PoaSeam_EveryShareWrite_EvictsThatRecord_AndTheWritesOwnOutcomeStands(
+    public async Task PoaClient_EveryShareWrite_EvictsThatRecord_AndTheWritesOwnOutcomeStands(
         string write, DataversePrincipalKind principal, bool dataverseRefuses)
     {
         var world = new AccessCacheWorld();
         var record = AccessCacheWorld.Project;
-        await world.WarmUserAsync(UserV, TenantA);
-        await world.WarmSnapshotAsync(OidV, "sprk_projects", record, TenantA);
-        await world.WarmSnapshotAsync(OidU, "sprk_projects", record, TenantB);
+        var expectedGone = await WarmTheRecordAsync(world, record);
         var before = world.Keyspace.Keys.ToHashSet();
-        var expectedGone = before.Where(k =>
-                (k.Contains($":{ImpersonatedRootSetSource.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
-                || k.Contains($":{CachedAccessDataSource.RecordAccessResource}:", StringComparison.Ordinal))
-            .ToHashSet();
-        expectedGone.Should().HaveCount(1 + 2, "precondition: the colleague's project root set and two snapshots of the record");
 
         await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: dataverseRefuses);
-        var seam = dataverse.Seam(world.Keyspace.Invalidator());
+        var client = dataverse.Client(world.Keyspace.Invalidator());
 
-        var act = () => RunShareWriteAsync(seam, write, principal, record, CancellationToken.None);
+        var act = () => RunShareWriteAsync(client, write, principal, record, CancellationToken.None);
 
         if (dataverseRefuses)
         {
@@ -202,18 +194,23 @@ public sealed partial class AccessCacheInvalidationTests
         }
 
         dataverse.Writes.Should().ContainSingle("precondition: the POA action reached Dataverse")
-            .Which.Body.Should().Contain($"{principal.ToEntitySet()}(", $"precondition: the {write} was for a {principal} principal");
+            .Which.Should().Match<(string Request, string Body)>(w =>
+                w.Request.EndsWith("/" + ActionOf(write), StringComparison.Ordinal)
+                && w.Body.Contains($"{principal.ToEntitySet()}(", StringComparison.Ordinal)
+                && w.Body.Contains($"sprk_projects({record})", StringComparison.Ordinal),
+                $"precondition: the {write} for a {principal} addressed the record");
         world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(expectedGone),
             $"the {write} for a {principal} (refused={dataverseRefuses}) may have changed who can read the record; its root sets and snapshots are gone");
     }
 
     /// <summary>
-    /// A caller that goes away mid-write still leaves the caches clean — for every write and principal kind: the eviction
-    /// is not bound to the request's token (CancellationToken.None), and the caller's cancellation still propagates.
+    /// A caller that goes away mid-write still leaves the caches clean — for every write and principal kind: the
+    /// notification is not bound to the request's token (CancellationToken.None), and the caller's cancellation still
+    /// propagates.
     /// </summary>
     [Theory]
     [MemberData(nameof(EveryWriteEveryPrincipal))]
-    public async Task PoaSeam_WhenTheCallerCancels_TheEvictionStillRuns_AndTheCancellationPropagates(
+    public async Task PoaClient_WhenTheCallerCancels_TheEvictionStillRuns_AndTheCancellationPropagates(
         string write, DataversePrincipalKind principal)
     {
         var world = new AccessCacheWorld();
@@ -225,37 +222,37 @@ public sealed partial class AccessCacheInvalidationTests
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 
-        var act = () => RunShareWriteAsync(dataverse.Seam(world.Keyspace.Invalidator()), write, principal, record, cancelled.Token);
+        var act = () => RunShareWriteAsync(dataverse.Client(world.Keyspace.Invalidator()), write, principal, record, cancelled.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         world.Keyspace.Keys.Should().BeEmpty($"the eviction ran with CancellationToken.None after the cancelled {write} for a {principal}");
     }
 
     /// <summary>
-    /// The SEAM's own guard: an invalidator that throws (the hook's contract is never to, so this is the defect case the
-    /// seam's catch exists for) never changes the write's outcome — for every write and principal kind. A write that
-    /// succeeded completes normally, a write Dataverse refused still surfaces ITS failure (not the eviction's), and the
-    /// seam logs the eviction failure it swallowed. A seam that stopped catching fails this test with the double's
-    /// exception.
+    /// The CLIENT's own guard: an observer that throws (the invalidator's contract is never to, so this is the defect case
+    /// the client's catch exists for) never changes the write's outcome — for every write and principal kind. A write that
+    /// succeeded completes normally, a write Dataverse refused still surfaces ITS failure (not the observer's), the observer
+    /// was told exactly once, and the client logs the failure it swallowed. A client that stopped catching fails this test
+    /// with the double's exception.
     /// </summary>
     [Theory]
     [MemberData(nameof(EveryWriteEveryPrincipalEveryOutcome))]
-    public async Task PoaSeam_WhenEvictionThrows_TheSeamCatchesAndLogs_AndTheWritesOwnOutcomeStands(
+    public async Task PoaClient_WhenTheObserverThrows_TheClientCatchesAndLogs_AndTheWritesOwnOutcomeStands(
         string write, DataversePrincipalKind principal, bool dataverseRefuses)
     {
         var logs = new ProvisionProjectTestFixture.LogCapture();
         using var loggers = new LoggerFactory(new[] { logs });
-        var invalidator = new ThrowingInvalidator();
+        var observer = new ThrowingInvalidator();
 
         await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: dataverseRefuses);
-        var seam = dataverse.Seam(invalidator, loggers.CreateLogger<DataverseRecordShareService>());
+        var client = dataverse.Client(observer, loggers.CreateLogger<DataverseWebApiService>());
 
-        var act = () => RunShareWriteAsync(seam, write, principal, AccessCacheWorld.Project, CancellationToken.None);
+        var act = () => RunShareWriteAsync(client, write, principal, AccessCacheWorld.Project, CancellationToken.None);
 
         if (dataverseRefuses)
         {
             (await act.Should().ThrowAsync<HttpRequestException>(
-                    "the write's own failure is what the caller sees, not the eviction's"))
+                    "the write's own failure is what the caller sees, not the observer's"))
                 .Which.Should().NotBeSameAs(ThrowingInvalidator.Fault);
         }
         else
@@ -264,19 +261,19 @@ public sealed partial class AccessCacheInvalidationTests
         }
 
         dataverse.Writes.Should().ContainSingle("precondition: the POA action reached Dataverse");
-        invalidator.ShareChangeCalls.Should().Be(1, "precondition: the seam attempted the eviction once, after the write");
+        observer.ShareChangeCalls.Should().Be(1, "the client told the observer once, after the write");
         logs.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning
-            && e.Message.Contains("[ACCESS-EVICT] The share-change eviction for", StringComparison.Ordinal)
-            && e.Message.Contains($"({write})", StringComparison.Ordinal),
-            "the seam's catch logs the eviction failure it swallowed");
+            && e.Message.Contains("[ACCESS-EVICT] The share-write observer threw after the", StringComparison.Ordinal)
+            && e.Message.Contains($"after the {WriteOf(write)} on sprk_projects", StringComparison.Ordinal),
+            "the client's catch logs the observer failure it swallowed");
     }
 
     /// <summary>
-    /// The production invalidator's own resilience under the seam: when Redis fails mid-scan the invalidator logs and
-    /// returns (its "never throws" contract), so the share write completes normally and the seam has nothing to catch.
+    /// The production invalidator's own resilience under the client: when Redis fails mid-scan the invalidator logs and
+    /// returns (its "never throws" contract), so the share write completes normally and the client has nothing to catch.
     /// </summary>
     [Fact]
-    public async Task PoaSeam_WhenRedisFails_TheInvalidatorLogsAndReturns_AndTheShareWriteSucceeds()
+    public async Task PoaClient_WhenRedisFails_TheInvalidatorLogsAndReturns_AndTheShareWriteSucceeds()
     {
         var world = new AccessCacheWorld();
         await world.WarmSnapshotAsync(OidV, "sprk_projects", AccessCacheWorld.Project, TenantA);
@@ -285,11 +282,11 @@ public sealed partial class AccessCacheInvalidationTests
         using var loggers = new LoggerFactory(new[] { logs });
 
         await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: false);
-        var seam = dataverse.Seam(
+        var client = dataverse.Client(
             world.Keyspace.Invalidator(logger: loggers.CreateLogger<MembershipCacheInvalidator>()),
-            loggers.CreateLogger<DataverseRecordShareService>());
+            loggers.CreateLogger<DataverseWebApiService>());
 
-        var act = () => RunShareWriteAsync(seam, "grant", DataversePrincipalKind.SystemUser, AccessCacheWorld.Project, CancellationToken.None);
+        var act = () => RunShareWriteAsync(client, "grant", DataversePrincipalKind.SystemUser, AccessCacheWorld.Project, CancellationToken.None);
 
         await act.Should().NotThrowAsync("the share has already been written; the TTL is the backstop");
         dataverse.Writes.Should().ContainSingle();
@@ -297,8 +294,140 @@ public sealed partial class AccessCacheInvalidationTests
         logs.Entries.Should().Contain(e => e.Level == LogLevel.Warning
             && e.Message.Contains("[ACCESS-EVICT] Eviction of pattern", StringComparison.Ordinal),
             "the invalidator logged the Redis failure itself");
-        logs.Entries.Should().NotContain(e => e.Message.Contains("[ACCESS-EVICT] The share-change eviction for", StringComparison.Ordinal),
-            "the invalidator did not throw, so the seam's catch had nothing to log");
+        logs.Entries.Should().NotContain(e => e.Message.Contains("[ACCESS-EVICT] The share-write observer threw", StringComparison.Ordinal),
+            "the invalidator did not throw, so the client's catch had nothing to log");
+    }
+
+    /// <summary>The two routes a share write takes in the BFF: through the seam every writer injects, or the client itself.</summary>
+    public static TheoryData<string, string> EveryWriteEveryRoute()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var write in ShareWrites)
+        {
+            data.Add(write, "seam");
+            data.Add(write, "client");
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Exactly ONE eviction per write, made AFTER the write reached Dataverse (main-session round 55): the seam no longer
+    /// evicts on its own, so a write through it is evicted once — by the client — exactly like a write straight to the
+    /// client, with the record the write addressed and the write's name as its correlation id. A seam that still evicted
+    /// would make it two; an eviction before the write would let a read in between re-cache the old access.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EveryWriteEveryRoute))]
+    public async Task ShareWrite_ThroughTheSeamOrStraightToTheClient_IsEvictedExactlyOnce_AfterTheWrite(string write, string route)
+    {
+        await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: false);
+        var observer = new CountingInvalidator(writesSoFar: () => dataverse.Writes.Count);
+        var client = dataverse.Client(observer);
+        var record = AccessCacheWorld.Project;
+
+        await (route == "seam"
+            ? RunShareWriteAsync(new DataverseRecordShareService(client), write, DataversePrincipalKind.SystemUser, record, CancellationToken.None)
+            : RunShareWriteAsync(client, write, DataversePrincipalKind.SystemUser, record, CancellationToken.None));
+
+        dataverse.Writes.Should().ContainSingle("precondition: one POA action reached Dataverse");
+        observer.ShareChanges.Should().Equal(new (string, Guid, string?, int)[] { ("sprk_projects", record, $"share:{write}", 1) },
+            $"one {write} through the {route} is one eviction of that record, made once the write had reached Dataverse");
+    }
+
+    /// <summary>
+    /// The BFF's OWN composition wires it: the <see cref="DataverseWebApiService"/> the BFF's container builds notifies the
+    /// container's <see cref="IMembershipCacheInvalidator"/> after a share write. A registration that dropped the observer,
+    /// or put anything else in its place, fails here. The caller's token is already cancelled, so the write stops before a
+    /// token or a request — and the notification still runs (it is not bound to the caller's token).
+    /// </summary>
+    [Fact]
+    public async Task TheBffsComposedClient_NotifiesTheContainersInvalidator_AfterAShareWrite()
+    {
+        var registered = new CountingInvalidator(writesSoFar: () => 0);
+        using var host = _fixture.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IMembershipCacheInvalidator>();
+            services.AddSingleton<IMembershipCacheInvalidator>(registered);
+        }));
+        var client = host.Services.GetRequiredService<DataverseWebApiService>();
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        var act = () => client.RevokeAccessAsync("sprk_projects", AccessCacheWorld.Project, DataversePrincipalRef.User(UserU), cancelled.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("precondition: the cancelled write sent nothing");
+        registered.ShareChanges.Should().Equal(
+            new (string, Guid, string?, int)[] { ("sprk_projects", AccessCacheWorld.Project, "share:revoke", 0) },
+            "the composed client's observer is the invalidator the container holds");
+    }
+
+    /// <summary>
+    /// Task 132 verifier seed V, as a behaviour test: the client's revoke chosen and invoked by the Visual Basic LATE BINDER
+    /// from a name built at run time — no seam, no method token, no constant. The write still evicts that record, because
+    /// the eviction is the write's own.
+    /// </summary>
+    [Fact]
+    public async Task ShareWrite_InvokedByALateBinderFromARunTimeName_StillEvictsThatRecord()
+    {
+        var world = new AccessCacheWorld();
+        var record = AccessCacheWorld.Project;
+        var expectedGone = await WarmTheRecordAsync(world, record);
+        var before = world.Keyspace.Keys.ToHashSet();
+        await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: false);
+        var client = dataverse.Client(world.Keyspace.Invalidator());
+
+        var write = (Task)Microsoft.VisualBasic.Interaction.CallByName(
+            client,
+            string.Concat("Revoke", "AccessAsync"),
+            Microsoft.VisualBasic.CallType.Method,
+            "sprk_projects",
+            record,
+            DataversePrincipalRef.User(UserU),
+            CancellationToken.None)!;
+        await write;
+
+        dataverse.Writes.Should().ContainSingle("precondition: the late-bound call reached Dataverse")
+            .Which.Request.Should().EndWith("/RevokeAccess");
+        world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(expectedGone),
+            "a share write the late binder chose at run time evicts exactly like a direct one");
+    }
+
+    /// <summary>
+    /// Task 132 verifier seed M, as a behaviour test: the client's revoke resolved from its METADATA TOKEN
+    /// (<c>ModuleHandle.ResolveMethodHandle</c> + <c>MethodBase.GetMethodFromHandle</c>), put into a hand-built
+    /// <c>Expression.Call</c>, and run by a LINQ provider (<c>EnumerableQuery</c> compiles and invokes the tree internally) —
+    /// no seam, no name. The write still evicts that record.
+    /// </summary>
+    [Fact]
+    public async Task ShareWrite_ResolvedFromItsMetadataTokenAndRunByALinqProvider_StillEvictsThatRecord()
+    {
+        var world = new AccessCacheWorld();
+        var record = AccessCacheWorld.Project;
+        var expectedGone = await WarmTheRecordAsync(world, record);
+        var before = world.Keyspace.Keys.ToHashSet();
+        await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: false);
+        DataverseWebApiService client = dataverse.Client(world.Keyspace.Invalidator());
+
+        var token = ((Func<string, Guid, DataversePrincipalRef, CancellationToken, Task>)client.RevokeAccessAsync).Method.MetadataToken;
+        var method = (MethodInfo)MethodBase.GetMethodFromHandle(
+            typeof(DataverseWebApiService).Module.ModuleHandle.ResolveMethodHandle(token))!;
+        var receiver = Expression.Parameter(typeof(DataverseWebApiService), "client");
+        var call = Expression.Call(
+            receiver,
+            method,
+            Expression.Constant("sprk_projects"),
+            Expression.Constant(record),
+            Expression.Constant(DataversePrincipalRef.User(UserU)),
+            Expression.Constant(CancellationToken.None));
+        var lambda = Expression.Lambda<Func<DataverseWebApiService, Task>>(call, receiver);
+
+        await new[] { client }.AsQueryable().Select(lambda).First();
+
+        dataverse.Writes.Should().ContainSingle("precondition: the token-resolved call reached Dataverse")
+            .Which.Request.Should().EndWith("/RevokeAccess");
+        world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(expectedGone),
+            "a share write resolved from its token and run by a LINQ provider evicts exactly like a direct one");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -373,27 +502,73 @@ public sealed partial class AccessCacheInvalidationTests
 
     private static readonly Guid TeamT = Guid.Parse("13200000-0000-0000-0000-0000000009a1");
 
-    private static Task RunShareWriteAsync(
-        IDataverseRecordShareService seam, string write, DataversePrincipalKind kind, Guid record, CancellationToken ct)
+    /// <summary>
+    /// Caches what a share write on <paramref name="record"/> must evict — a colleague's project root set (tenant A) and two
+    /// users' snapshots of the record (tenants A and B) — and returns exactly those keys; everything else warmed (the
+    /// colleague's identity and membership) must stay.
+    /// </summary>
+    private static async Task<HashSet<string>> WarmTheRecordAsync(AccessCacheWorld world, Guid record)
     {
-        var principal = kind switch
-        {
-            DataversePrincipalKind.SystemUser => DataversePrincipalRef.User(UserU),
-            DataversePrincipalKind.Team => DataversePrincipalRef.Team(TeamT),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Add a principal for the new kind."),
-        };
-        return write switch
-        {
-            "grant" => seam.GrantAccessAsync("sprk_projects", record, principal, "ReadAccess", ct),
-            "modify" => seam.ModifyAccessAsync("sprk_projects", record, principal, "ReadAccess,WriteAccess", ct),
-            "revoke" => seam.RevokeAccessAsync("sprk_projects", record, principal, ct),
-            _ => throw new ArgumentOutOfRangeException(nameof(write), write, "Unknown share write."),
-        };
+        await world.WarmUserAsync(UserV, TenantA);
+        await world.WarmSnapshotAsync(OidV, "sprk_projects", record, TenantA);
+        await world.WarmSnapshotAsync(OidU, "sprk_projects", record, TenantB);
+        var expectedGone = world.Keyspace.Keys.Where(k =>
+                (k.Contains($":{ImpersonatedRootSetSource.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
+                || k.Contains($":{CachedAccessDataSource.RecordAccessResource}:", StringComparison.Ordinal))
+            .ToHashSet();
+        expectedGone.Should().HaveCount(1 + 2, "precondition: the colleague's project root set and two snapshots of the record");
+        return expectedGone;
     }
 
+    private static string ActionOf(string write) => write switch
+    {
+        "grant" => "GrantAccess",
+        "modify" => "ModifyAccess",
+        "revoke" => "RevokeAccess",
+        _ => throw new ArgumentOutOfRangeException(nameof(write), write, "Unknown share write."),
+    };
+
+    private static RecordShareWrite WriteOf(string write) => write switch
+    {
+        "grant" => RecordShareWrite.Grant,
+        "modify" => RecordShareWrite.Modify,
+        "revoke" => RecordShareWrite.Revoke,
+        _ => throw new ArgumentOutOfRangeException(nameof(write), write, "Unknown share write."),
+    };
+
+    private static DataversePrincipalRef PrincipalOf(DataversePrincipalKind kind) => kind switch
+    {
+        DataversePrincipalKind.SystemUser => DataversePrincipalRef.User(UserU),
+        DataversePrincipalKind.Team => DataversePrincipalRef.Team(TeamT),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Add a principal for the new kind."),
+    };
+
+    /// <summary>One share write straight to the production client.</summary>
+    private static Task RunShareWriteAsync(
+        DataverseWebApiService client, string write, DataversePrincipalKind kind, Guid record, CancellationToken ct) =>
+        write switch
+        {
+            "grant" => client.GrantAccessAsync("sprk_projects", record, PrincipalOf(kind), "ReadAccess", ct),
+            "modify" => client.ModifyAccessAsync("sprk_projects", record, PrincipalOf(kind), "ReadAccess,WriteAccess", ct),
+            "revoke" => client.RevokeAccessAsync("sprk_projects", record, PrincipalOf(kind), ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(write), write, "Unknown share write."),
+        };
+
+    /// <summary>One share write through the seam the BFF's writers inject.</summary>
+    private static Task RunShareWriteAsync(
+        IDataverseRecordShareService seam, string write, DataversePrincipalKind kind, Guid record, CancellationToken ct) =>
+        write switch
+        {
+            "grant" => seam.GrantAccessAsync("sprk_projects", record, PrincipalOf(kind), "ReadAccess", ct),
+            "modify" => seam.ModifyAccessAsync("sprk_projects", record, PrincipalOf(kind), "ReadAccess,WriteAccess", ct),
+            "revoke" => seam.RevokeAccessAsync("sprk_projects", record, PrincipalOf(kind), ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(write), write, "Unknown share write."),
+        };
+
     /// <summary>
-    /// An invalidator with a defect: every hook throws. The hook's contract is never to throw; this stands in for the
-    /// defect the seam's own catch guards against.
+    /// An invalidator with a defect: every hook throws. The invalidator's contract is never to throw; this stands in for
+    /// the defect the client's own catch guards against. (An <see cref="IMembershipCacheInvalidator"/>, so — like the
+    /// production one — it is the client's observer through the interface's default member.)
     /// </summary>
     private sealed class ThrowingInvalidator : IMembershipCacheInvalidator
     {
@@ -420,8 +595,34 @@ public sealed partial class AccessCacheInvalidationTests
     }
 
     /// <summary>
-    /// The Dataverse Web API's three POA actions over an in-memory server: 204 for each, or 500 when told to refuse. The
-    /// PRODUCTION seam runs over the PRODUCTION <see cref="DataverseWebApiService"/> pointed at it.
+    /// An invalidator that records each share-change eviction it is asked for — with how many writes had reached Dataverse
+    /// at that moment — and evicts nothing.
+    /// </summary>
+    private sealed class CountingInvalidator(Func<int> writesSoFar) : IMembershipCacheInvalidator
+    {
+        private readonly ConcurrentQueue<(string EntitySet, Guid Record, string? CorrelationId, int WritesSoFar)> _shareChanges = new();
+
+        public IReadOnlyList<(string EntitySet, Guid Record, string? CorrelationId, int WritesSoFar)> ShareChanges => _shareChanges.ToArray();
+
+        public Task PublishInvalidationAsync(Guid personId, string entityLogicalName, string? correlationId, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public Task InvalidateUserAccessAsync(Guid systemUserId, string? correlationId, CancellationToken ct) => Task.CompletedTask;
+
+        public Task InvalidateRecordOwnerChangeAsync(
+            string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public Task InvalidateRecordShareChangeAsync(string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        {
+            _shareChanges.Enqueue((entitySetName, recordId, correlationId, writesSoFar()));
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// The Dataverse Web API over an in-memory server: 204 for every POST, or 500 for every POST when told to refuse. The
+    /// PRODUCTION <see cref="DataverseWebApiService"/> is pointed at it.
     /// </summary>
     private sealed class PoaDataverse : IAsyncDisposable
     {
@@ -458,13 +659,12 @@ public sealed partial class AccessCacheInvalidationTests
             return fake;
         }
 
-        /// <summary>The production POA seam over the production client, evicting through <paramref name="invalidator"/>.</summary>
-        public IDataverseRecordShareService Seam(
-            IMembershipCacheInvalidator invalidator, ILogger<DataverseRecordShareService>? logger = null)
-            => new DataverseRecordShareService(
-                new ServerBackedDataverse(new HttpClient(_app.GetTestServer().CreateHandler())),
-                invalidator,
-                logger ?? NullLogger<DataverseRecordShareService>.Instance);
+        /// <summary>The production client, notifying <paramref name="observer"/> after each share write.</summary>
+        public DataverseWebApiService Client(IRecordShareWriteObserver observer, ILogger<DataverseWebApiService>? logger = null)
+            => new ServerBackedDataverse(
+                new HttpClient(_app.GetTestServer().CreateHandler()),
+                observer,
+                logger ?? NullLogger<DataverseWebApiService>.Instance);
 
         public async ValueTask DisposeAsync()
         {
@@ -473,13 +673,15 @@ public sealed partial class AccessCacheInvalidationTests
         }
 
         /// <summary>The production client through its test constructor (a static credential; task 104's seam).</summary>
-        private sealed class ServerBackedDataverse(HttpClient client) : DataverseWebApiService(
+        private sealed class ServerBackedDataverse(
+            HttpClient client, IRecordShareWriteObserver observer, ILogger<DataverseWebApiService> logger) : DataverseWebApiService(
             client,
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Dataverse:ServiceUrl"] = ServiceUrl,
             }).Build(),
-            NullLogger<DataverseWebApiService>.Instance,
+            logger,
+            observer,
             confidentialClients: null,
             credential: new StaticTokenCredential());
     }

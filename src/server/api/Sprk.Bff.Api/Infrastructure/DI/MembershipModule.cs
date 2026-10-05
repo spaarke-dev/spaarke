@@ -230,6 +230,13 @@ public static class MembershipModule
                 sp.GetRequiredService<NullMembershipCacheInvalidator>());
         }
 
+        // unified-access-control-r2 task 132 (main-session round 55): the invalidator chosen above — real, or the Null peer
+        // with the in-memory cache — is ALSO the share-write observer DataverseWebApiService notifies after every POA share
+        // write (GraphModule passes it to the client's constructor). Unconditional, so the client always has one (ADR-032
+        // symmetric; bff-extensions.md §F.1): the eviction is a property of the write, not of the caller.
+        services.AddSingleton<Spaarke.Dataverse.IRecordShareWriteObserver>(sp =>
+            sp.GetRequiredService<IMembershipCacheInvalidator>());
+
         // Task 084: Subscription consumer (consumer side).
         // Options bound from "Membership:JunctionUpdater" section (distinct
         // from "Membership:EventPublisher" so the publisher + consumer

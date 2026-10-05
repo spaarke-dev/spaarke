@@ -381,6 +381,8 @@ public class DataverseRecordShareWireTests
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
         }).Build(),
         NullLogger<DataverseWebApiService>.Instance,
+        new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+            NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance),
         confidentialClients: null,
         credential: new StaticTokenCredential());
 

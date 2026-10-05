@@ -7,16 +7,18 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// The compiled PATH counterpart of <see cref="IlCallScan"/>: whether every path through one method's compiled body that
-/// makes an OPENING call (a POA share write) goes on, before the method completes, to make the DISCHARGING call (the
-/// access-cache eviction) — only after the opening call's task has completed, with the same key arguments, and awaiting
+/// makes an OPENING call (a POA share write's send) goes on, before the method completes, to make the DISCHARGING call (the
+/// share-write notification) — only after the opening call's task has completed, with the same key arguments, and awaiting
 /// the discharge's own task.
 /// </summary>
 /// <remarks>
-/// <para><b>Why a path analysis.</b> A reference scan answers "which methods call the client's writes"; it cannot answer
-/// "does every path from that call reach the eviction". Task 132 verifier seed N1 — an early
-/// <c>if (principal.Kind == Team) { await _dataverse.GrantAccessAsync(…); return; }</c> inside the seam's own
-/// <c>GrantAccessAsync</c>, before its <c>try</c> — referenced the client's write from exactly the method the reference pin
-/// allowed, and wrote a team share with no eviction. Only the paths through the body can tell those apart.</para>
+/// <para><b>Why a path analysis.</b> A reference scan answers "which methods make the send"; it cannot answer "does every
+/// path from that send reach the notification". Task 132 verifier seed N1 — an early
+/// <c>if (principal.Kind == Team) { await _dataverse.GrantAccessAsync(…); return; }</c> before the <c>try</c> whose
+/// <c>finally</c> evicted — wrote a team share with no eviction from exactly the method a reference pin allowed. Only the
+/// paths through the body can tell those apart. (Round 55 moved the notification into the client's own share-write
+/// sender; the guard now analyses that method, with the opening keyed by its own parameters —
+/// <see cref="Rule.OpeningKeysFromSource"/>.)</para>
 ///
 /// <para><b>The model.</b> An abstract interpretation of the body's IL, explored path by path to a fixed point:</para>
 /// <list type="bullet">
@@ -70,9 +72,16 @@ internal static class IlPathScan
 
         /// <summary>
         /// The obligation is owed from entry, keyed by the analysed method's OWN parameters of those names — for a method
-        /// whose whole job is the discharge (the seam's eviction helper).
+        /// whose whole job is the discharge (the client's notification helper).
         /// </summary>
         public bool OwedAtEntry { get; init; }
+
+        /// <summary>
+        /// An opening call is keyed by the analysed method's OWN parameters of the <see cref="KeyParameters"/> names, not by
+        /// the opening target's — for an opening that carries no such parameter (an HTTP send whose request the method
+        /// built for that record).
+        /// </summary>
+        public bool OpeningKeysFromSource { get; init; }
 
         /// <summary>What the opening side is called in a violation ("the POA write").</summary>
         public string Opening { get; init; } = "the write";
@@ -216,7 +225,7 @@ internal static class IlPathScan
                 _stateLocal = local;
             }
 
-            if (rule.OwedAtEntry)
+            if (rule.OwedAtEntry || rule.OpeningKeysFromSource)
             {
                 var missing = rule.KeyParameters.Where(k => !_sourceParameters.Contains(k)).ToList();
                 if (missing.Count > 0)
@@ -500,7 +509,9 @@ internal static class IlPathScan
                     return Array.Empty<State>();
                 }
 
-                var keys = KeyValues(target, parameters, hasReceiver, args);
+                var keys = _rule.OpeningKeysFromSource
+                    ? _rule.KeyParameters.Select(k => (V)new Param(k)).ToImmutableList()
+                    : KeyValues(target, parameters, hasReceiver, args);
                 var awaitable = target is MethodInfo m && IsAwaitable(m.ReturnType);
                 normal = rest with { Phase = awaitable ? Phase.Issued : Phase.Owed, Keys = keys, OpenedAt = ins.Offset };
                 result = awaitable ? new Awaited(Opening: true, Stage: 0) : Unknown.Value;

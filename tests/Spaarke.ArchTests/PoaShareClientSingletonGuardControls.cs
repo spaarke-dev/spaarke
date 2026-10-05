@@ -118,10 +118,9 @@ internal static class PoaBypassControl_ReflectionBySignature
 }
 
 /// <summary>
-/// C7's other shapes — never executed, only scanned. Every way, short of the ones above, that compiled code can choose
-/// a method by reflection, invoke one reflectively, or run code the compiled scan cannot read. The Type each starts from
-/// is deliberately NOT a Dataverse service type, or is obtained without naming one: the rule bans the mechanism, so where
-/// the Type came from does not matter.
+/// C7's other shapes — never executed, only scanned. One use of each API on C7's list (C7 bans exactly these, not every
+/// way to choose or invoke a method by reflection). The Type each starts from is deliberately NOT a Dataverse service type,
+/// or is obtained without naming one: the rule bans the API, so where the Type came from does not matter.
 /// </summary>
 internal static class PoaBypassControl_Reflection
 {
@@ -198,58 +197,43 @@ internal static class PoaWriteThroughSeamControl
     }
 }
 
-/// <summary>
-/// C3 (a)'s pin controls — never executed, only scanned: the method a pin binds, a same-name overload that writes (task
-/// 132 seed N2), and a write inside a lambda held by a pinned-name method.
-/// </summary>
-internal sealed class PoaSeamPinControl
-{
-    private readonly DataverseWebApiService _client = null!;
-
-    internal async Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct) =>
-        await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
-
-    internal Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, bool quiet, CancellationToken ct) =>
-        _client.RevokeAccessAsync(entitySetName, recordId, principal, ct);
-
-    internal Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string rights, CancellationToken ct) =>
-        Task.Run(() => _client.GrantAccessAsync(entitySetName, recordId, principal, rights, ct), ct);
-}
 
 /// <summary>
-/// C3 (b) / (c) path-analysis controls — never executed, only analysed. The first three write and then evict on EVERY
-/// path; each of the rest has one path that does not, named by what it does wrong. <c>EvictAsync</c> stands in for the
-/// seam's eviction helper and <c>InvalidateAsync</c> for the invalidator the helper calls.
+/// C3 path-analysis controls — never executed, only analysed. The first three send and then notify on EVERY path; each of
+/// the rest has one path that does not, named by what it does wrong. <c>NotifyAsync</c> stands in for the client's
+/// notification and <c>ObserveAsync</c> for the observer call the notification makes. (Task 132 seed N1's shape — a team
+/// branch that sends and returns before the <c>try</c> — is <see cref="EarlyReturnForTeams"/>.)
 /// </summary>
-internal sealed class PoaEvictionPathControls
+internal sealed class PoaShareWriteSenderControls
 {
-    private readonly DataverseWebApiService _client = null!;
+    private readonly HttpClient _http = null!;
 
-    internal Task EvictAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
+    internal Task NotifyAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
 
-    internal Task InvalidateAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
+    internal Task ObserveAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
 
-    // ── every path evicts ──
+    // ── every path notifies ──
 
-    internal async Task Canonical(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task Canonical(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
-    internal async Task CatchAndReturnInsideTheTry(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task CatchAndReturnInsideTheTry(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
             try
             {
-                await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+                await _http.SendAsync(request, ct).ConfigureAwait(false);
             }
             catch (HttpRequestException)
             {
@@ -258,20 +242,20 @@ internal sealed class PoaEvictionPathControls
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
-    internal async Task UnderAUsing(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task UnderAUsing(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         using var scope = new MemoryStream();
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
 
         await scope.FlushAsync(ct).ConfigureAwait(false);
@@ -281,132 +265,134 @@ internal sealed class PoaEvictionPathControls
     {
         try
         {
-            await InvalidateAsync(entitySetName, recordId).ConfigureAwait(false);
+            await ObserveAsync(entitySetName, recordId).ConfigureAwait(false);
         }
         catch (InvalidOperationException)
         {
-            // the seam's helper logs here
+            // the client's notification logs here
         }
     }
 
-    // ── a path writes and does not evict ──
+    // ── a path sends and does not notify ──
 
-    /// <summary>Task 132 seed N1: a team share written before the try, returned from with no eviction.</summary>
-    internal async Task EarlyReturnForTeams(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    /// <summary>Task 132 seed N1's shape: a team share sent before the try, returned from with no notification.</summary>
+    internal async Task EarlyReturnForTeams(
+        string entitySetName, Guid recordId, DataversePrincipalRef principal, HttpRequestMessage request, CancellationToken ct)
     {
         if (principal.Kind == DataversePrincipalKind.Team)
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
             return;
         }
 
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
-    internal async Task ConditionalEviction(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task ConditionalNotification(
+        string entitySetName, Guid recordId, DataversePrincipalRef principal, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
             if (principal.Kind == DataversePrincipalKind.SystemUser)
             {
-                await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+                await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
             }
         }
     }
 
-    internal async Task EvictsBeforeWriting(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task NotifiesBeforeSending(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
-        await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
-        await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+        await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
+        await _http.SendAsync(request, ct).ConfigureAwait(false);
     }
 
-    internal async Task SwallowsTheFailureAndReturns(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task SwallowsTheFailureAndReturns(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         catch (HttpRequestException)
         {
             return;
         }
 
-        await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+        await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
     }
 
-    internal async Task WriteNotAwaited(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task SendNotAwaited(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            _ = _client.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+            _ = _http.SendAsync(request, ct);
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
-    internal async Task EvictionNotAwaited(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task NotificationNotAwaited(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
-            _ = EvictAsync(entitySetName, recordId);
+            _ = NotifyAsync(entitySetName, recordId);
         }
     }
 
-    internal async Task EvictsAnotherRecord(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task NotifiesAnotherRecord(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
-            await EvictAsync(entitySetName, Guid.Empty).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, Guid.Empty).ConfigureAwait(false);
         }
     }
 
-    internal async Task ReassignsTheRecordFirst(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task ReassignsTheRecordFirst(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct)
     {
         try
         {
-            await _client.RevokeAccessAsync(entitySetName, recordId, principal, ct).ConfigureAwait(false);
+            await _http.SendAsync(request, ct).ConfigureAwait(false);
         }
         finally
         {
             recordId = Guid.NewGuid();
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
-    internal Task PassThrough(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct) =>
-        _client.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+    internal Task<HttpResponseMessage> PassThrough(string entitySetName, Guid recordId, HttpRequestMessage request, CancellationToken ct) =>
+        _http.SendAsync(request, ct);
 
-    internal async Task TwoWrites(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct)
+    internal async Task TwoSends(string entitySetName, Guid recordId, HttpRequestMessage first, HttpRequestMessage second, CancellationToken ct)
     {
         try
         {
-            await _client.GrantAccessAsync(entitySetName, recordId, principal, "ReadAccess", ct).ConfigureAwait(false);
-            await _client.ModifyAccessAsync(entitySetName, recordId, principal, "ReadAccess,WriteAccess", ct).ConfigureAwait(false);
+            await _http.SendAsync(first, ct).ConfigureAwait(false);
+            await _http.SendAsync(second, ct).ConfigureAwait(false);
         }
         finally
         {
-            await EvictAsync(entitySetName, recordId).ConfigureAwait(false);
+            await NotifyAsync(entitySetName, recordId).ConfigureAwait(false);
         }
     }
 
@@ -417,17 +403,17 @@ internal sealed class PoaEvictionPathControls
             return;
         }
 
-        await InvalidateAsync(entitySetName, recordId).ConfigureAwait(false);
+        await ObserveAsync(entitySetName, recordId).ConfigureAwait(false);
     }
 
     internal Task HelperNotAwaited(string entitySetName, Guid recordId)
     {
-        _ = InvalidateAsync(entitySetName, recordId);
+        _ = ObserveAsync(entitySetName, recordId);
         return Task.CompletedTask;
     }
 
     internal async Task HelperOtherRecord(string entitySetName, Guid recordId) =>
-        await InvalidateAsync(entitySetName, Guid.Empty).ConfigureAwait(false);
+        await ObserveAsync(entitySetName, Guid.Empty).ConfigureAwait(false);
 }
 
 /// <summary>

@@ -26,6 +26,11 @@ namespace Spaarke.Dataverse;
 /// communication-query / health capability all resolve to <see cref="DataverseServiceClientImpl"/>
 /// (SDK) — the former implementations of those surfaces here were runtime-dead and were removed.
 /// See <c>docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md</c>.</para>
+///
+/// <para><b>Every POA share write notifies</b> (unified-access-control-r2 task 132, main-session round 55): GrantAccessAsync,
+/// ModifyAccessAsync and RevokeAccessAsync send through one private method that, on every path, tells the
+/// <see cref="IRecordShareWriteObserver"/> passed to the constructor which record it wrote — in the BFF, the access-cache
+/// invalidator. It is a property of the write, so it holds for every caller and every way of invoking it.</para>
 /// </remarks>
 public class DataverseWebApiService : IEventDataverseService, IFieldMappingDataverseService
 {
@@ -33,9 +38,15 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<DataverseWebApiService> _logger;
+    private readonly IRecordShareWriteObserver _shareWriteObserver;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
+    /// <param name="shareWriteObserver">
+    /// Told after every POA share write this client makes (unified-access-control-r2 task 132, round 55) — in the BFF,
+    /// its access-cache invalidator. Required, with no default, so no host gets a client whose share writes silently
+    /// tell nobody; a host with no access cache passes one that does nothing. See <see cref="IRecordShareWriteObserver"/>.
+    /// </param>
     /// <param name="confidentialClients">
     /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY in the
     /// managed-identity-disabled branch, where it replaces an inline <c>ClientSecretCredential</c>.
@@ -46,8 +57,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
+        IRecordShareWriteObserver shareWriteObserver,
         IConfidentialClientProvider? confidentialClients = null)
-        : this(httpClient, configuration, logger, confidentialClients, credential: null)
+        : this(httpClient, configuration, logger, shareWriteObserver, confidentialClients, credential: null)
     {
     }
 
@@ -64,11 +76,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
+        IRecordShareWriteObserver shareWriteObserver,
         IConfidentialClientProvider? confidentialClients,
         TokenCredential? credential)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _shareWriteObserver = shareWriteObserver ?? throw new ArgumentNullException(nameof(shareWriteObserver));
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
         if (string.IsNullOrEmpty(dataverseUrl))
@@ -1184,11 +1198,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-    {
-        var response = await SendPostAsJsonAsync(
-            "GrantAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
-        response.EnsureSuccessStatusCode();
-    }
+        => await SendShareWriteAsync(
+            "GrantAccess", RecordShareWrite.Grant, entitySetName, recordId,
+            PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
 
     /// <summary>
     /// Replaces the rights of a principal's EXISTING POA share on a record — the OOB <c>ModifyAccess</c> action,
@@ -1207,11 +1219,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-    {
-        var response = await SendPostAsJsonAsync(
-            "ModifyAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
-        response.EnsureSuccessStatusCode();
-    }
+        => await SendShareWriteAsync(
+            "ModifyAccess", RecordShareWrite.Modify, entitySetName, recordId,
+            PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
 
     /// <summary>
     /// The <c>Target</c> + <c>PrincipalAccess</c> body that GrantAccess and ModifyAccess both take — built once, so
@@ -1254,8 +1264,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid recordId,
         DataversePrincipalRef principal,
         CancellationToken ct = default)
-    {
-        var payload = new Dictionary<string, object>
+        => await SendShareWriteAsync(
+            "RevokeAccess", RecordShareWrite.Revoke, entitySetName, recordId,
+            RevokePayload(entitySetName, recordId, principal), ct);
+
+    /// <summary>The <c>Target</c> + <c>Revokee</c> body RevokeAccess takes — the same key shape as a grant's.</summary>
+    private static Dictionary<string, object> RevokePayload(string entitySetName, Guid recordId, DataversePrincipalRef principal)
+        => new()
         {
             ["Target"] = new Dictionary<string, object>
             {
@@ -1267,8 +1282,58 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             },
         };
 
-        var response = await SendPostAsJsonAsync("RevokeAccess", payload, ct);
-        response.EnsureSuccessStatusCode();
+    /// <summary>
+    /// Sends one POA share write and then, on EVERY path (returned, refused, thrown, cancelled), tells the
+    /// <see cref="IRecordShareWriteObserver"/> which record it addressed. GrantAccessAsync, ModifyAccessAsync and
+    /// RevokeAccessAsync all send through it.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 132, main-session round 55. The access-cache eviction a share write needs used to be
+    /// made by a caller-side seam, so it held only for callers that went through the seam. Here it is a property of the
+    /// write: any call of the three share writes notifies — whoever made it and however (directly, through a delegate,
+    /// reflection, a late binder, an expression tree). What lies outside it is a request that does not go through those
+    /// methods: a raw HTTP call, including one assembled from this class's private members by reflection (its generic POST
+    /// helper, request builder or <see cref="HttpClient"/>) — task 132's notes record that as a known limit.
+    /// </remarks>
+    private async Task SendShareWriteAsync(
+        string action,
+        RecordShareWrite write,
+        string entitySetName,
+        Guid recordId,
+        Dictionary<string, object> payload,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, action, ct);
+            request.Content = JsonContent.Create(payload);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            // A write that reports failure, or whose caller went away, can still have committed: notify on every path.
+            await NotifyShareWrittenAsync(entitySetName, recordId, write);
+        }
+    }
+
+    /// <summary>
+    /// Tells the observer about one share write. Never throws — the write's own outcome (its return or its exception) is
+    /// what the caller sees — and is not bound to the caller's token: the write may already have committed, and a caller
+    /// that went away must not leave the clean-up undone.
+    /// </summary>
+    private async Task NotifyShareWrittenAsync(string entitySetName, Guid recordId, RecordShareWrite write)
+    {
+        try
+        {
+            await _shareWriteObserver.OnRecordShareWrittenAsync(entitySetName, recordId, write, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ACCESS-EVICT] The share-write observer threw after the {Write} on {EntitySet} {RecordId}; the share " +
+                "write's own outcome stands and the cached entries lapse on their TTLs.", write, entitySetName, recordId);
+        }
     }
 
     /// <summary>

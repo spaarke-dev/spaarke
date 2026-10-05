@@ -33,6 +33,8 @@
 //            .claude/adr/ADR-032-bff-nullobject-kill-switch.md;
 //            .claude/patterns/api/resilience.md.
 
+using Spaarke.Dataverse;
+
 namespace Sprk.Bff.Api.Services.Ai.Membership;
 
 /// <summary>
@@ -56,8 +58,14 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// invalidation is inert + returns. Endpoints unconditionally inject <c>IMembershipCacheInvalidator</c>;
 /// minimal-API param inference resolves cleanly in every config state.
 /// </para>
+/// <para>
+/// <b>It is also the share-write observer</b> (task 132, main-session round 55): the BFF registers this interface, real or
+/// Null, as the <see cref="IRecordShareWriteObserver"/> that <see cref="DataverseWebApiService"/> notifies after every POA
+/// share write it makes; the default member at the end forwards each notification to
+/// <see cref="InvalidateRecordShareChangeAsync"/>. That is the ONE share-write eviction path.
+/// </para>
 /// </remarks>
-public interface IMembershipCacheInvalidator
+public interface IMembershipCacheInvalidator : IRecordShareWriteObserver
 {
     /// <summary>
     /// Publish a <see cref="MembershipCacheInvalidationMessage"/> to the
@@ -143,7 +151,7 @@ public interface IMembershipCacheInvalidator
         CancellationToken ct);
 
     /// <summary>
-    /// 🔴 <b>THE hook every BFF write of a POA SHARE calls</b> — a grant, a rights change or a revoke on a record, for a
+    /// 🔴 <b>THE eviction every POA SHARE write triggers</b> — a grant, a rights change or a revoke on a record, for a
     /// user or a team (task 132 integration residual: share-only changes stale the access caches exactly as owner
     /// changes do). Evicts, under EVERY tenant segment: every user's impersonated root-set entry for the record's root
     /// type (the set is answered by an impersonated query, which sees shares; a TEAM share changes every member's set,
@@ -151,24 +159,22 @@ public interface IMembershipCacheInvalidator
     /// document-scoped for a <c>sprk_documents</c> record).
     /// </summary>
     /// <remarks>
-    /// <para><b>Who calls it</b>: the ONE POA seam, <c>DataverseRecordShareService</c>, after every
-    /// <c>GrantAccessAsync</c> / <c>ModifyAccessAsync</c> / <c>RevokeAccessAsync</c> — whether the write succeeded or
-    /// threw (a write that reports failure can have committed). Every share writer reaches POA through that seam, so each
-    /// is covered: <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and
+    /// <para><b>Who calls it</b>: <see cref="DataverseWebApiService"/> itself, after EVERY POA share write it makes —
+    /// <c>GrantAccessAsync</c>, <c>ModifyAccessAsync</c> or <c>RevokeAccessAsync</c>, whether the write succeeded, threw or
+    /// was cancelled (a write that reports failure can have committed) — through <see cref="IRecordShareWriteObserver"/>,
+    /// which this interface implements by forwarding here (main-session round 55: the eviction is a property of the write,
+    /// not of a caller-side seam). So every share writer is covered, however it reaches the client and however the write
+    /// is invoked: <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and
     /// error paths included), <c>UnsecureProjectEndpoint</c>'s revocations, <c>SecureChildShareSynchronizer</c>'s child
-    /// fan-out, the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing.
-    /// <c>PoaShareClientSingletonGuardTests</c> enforces that much — exactly these three things, and nothing beyond them
-    /// (owner round 48): (1) every COMPILED call path to the concrete client's POA writes — an IL scan of every <c>src</c>
-    /// assembly the BFF runs, or that can name the client, rejects any reference to those writes outside the seam (whatever
-    /// the receiver expression), the SDK's POA messages, and a POA action or write name carried by a string constant,
-    /// metadata, constant data or the deployed configuration, and pins the client's write methods; inside the seam, an IL
-    /// path analysis proves every path through each of its three writes awaits the write and then this hook's call for the
-    /// same record; (2) a ban on <c>[UnsafeAccessor]</c> anywhere in <c>src/server</c> (compiled metadata and source); (3) a
-    /// ban on choosing or invoking a method by reflection — on any type, so on the Dataverse service types and on any Type
-    /// obtained from them — and on running code the scan cannot read (emitted IL, an assembly loaded at run time). A POA
-    /// write by a route outside those three — above all a raw HTTP call whose action URL exists only at run time, or native
-    /// code — is not proven by the build; it is review's to catch. The exact list is on
-    /// <c>DataverseRecordShareService</c>.</para>
+    /// fan-out, the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing — and a write
+    /// reached by reflection, a late binder or an expression tree (task 132's behaviour tests run those). Exactly one
+    /// eviction per write: <c>DataverseRecordShareService</c>, the seam the writers inject, no longer evicts.</para>
+    /// <para><b>What lies outside it</b>: a POA write that does not go through a method of
+    /// <see cref="DataverseWebApiService"/> — a raw HTTP call (including one sent with the client's own HttpClient or
+    /// credential lifted out of it by reflection), or an SDK request. <c>PoaShareClientSingletonGuardTests</c> rejects
+    /// such a write when its action name is a string constant, metadata, constant data or deployed configuration, and the
+    /// SDK's POA messages by type; one whose action name exists only at run time, or native code, is review's to catch.
+    /// POA writes made outside the BFF (MDA sharing, flows, scripts) are bounded by the caches' TTLs.</para>
     /// <para>Membership resolution is NOT evicted: it is computed from lookup columns and ownership only — a share is
     /// not a membership term.</para>
     /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>
@@ -182,4 +188,23 @@ public interface IMembershipCacheInvalidator
         Guid recordId,
         string? correlationId,
         CancellationToken ct);
+
+    /// <summary>
+    /// The notification <see cref="DataverseWebApiService"/> sends after every POA share write, forwarded to
+    /// <see cref="InvalidateRecordShareChangeAsync"/> for that record (task 132, main-session round 55). A default member,
+    /// so every implementation — the real invalidator, the Null peer, a test double — is the observer with no code of its
+    /// own, and what a share write evicts is always this interface's share-change eviction.
+    /// </summary>
+    Task IRecordShareWriteObserver.OnRecordShareWrittenAsync(
+        string entitySetName, Guid recordId, RecordShareWrite write, CancellationToken ct)
+        => InvalidateRecordShareChangeAsync(
+            entitySetName,
+            recordId,
+            write switch
+            {
+                RecordShareWrite.Grant => "share:grant",
+                RecordShareWrite.Modify => "share:modify",
+                _ => "share:revoke",
+            },
+            ct);
 }
