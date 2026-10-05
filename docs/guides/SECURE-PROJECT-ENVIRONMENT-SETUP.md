@@ -587,7 +587,9 @@ it shares to the person who created the record — its `createdby` user when tha
 person the BFF recorded in `sprk_createdbyperson` (§7b; an Office quick-created record's `createdby` is the BFF app user)
 — never to the caller instead, then creates and records the container. A record owned by the team **with** a container
 recorded is provisioned: 409, nothing written — unless its existing related records still need securing, which the call
-then completes (200 `childrenOnly`, task 148 §7c).
+then completes (200 `childrenOnly`, task 148 §7c). **Through the form's Make Secure command** (`transition:
+"make-secure"`, task 150 round 40) the resume instead follows the forward Make Secure rules: the CALLER is shared (and
+proven) and the creator beside them, so the same command finishes a Make Secure that failed after its first write (§7d.1).
 
 **A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
 `65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
@@ -662,6 +664,8 @@ row created before task 150) is provisioned exactly like an unflagged one.
 **Calling provisioning as an administrator** (the resume path): `POST {bff}/api/v1/external-access/provision-project`
 with body `{ "recordType": "project" | "matter" | "workassignment", "recordId": "<guid>" }` and a user token for the BFF
 API. The caller must hold Write on the record (the delegation filter); a System Administrator does through their role.
+Without a `transition` the resume shares to the record's creator only (F8: the administrator is not added to its access
+list); the form's Make Secure command (`transition: "make-secure"`) shares to its caller as well (§7d.1).
 
 ---
 
@@ -903,10 +907,12 @@ default team), then step 4's `-Verify` and step 5. The standing assertion fails 
 
 Users secure and unsecure an existing project, matter or work assignment from the main form's **Access** flyout (task
 142's ONE group, ONE ribbon source `infrastructure/dataverse/ribbon/AccessRibbons/`, ONE command script
-`sprk_/scripts/access_ribbon.js` 1.2.0) — never by editing the field, which no form shows and FLS locks.
+`sprk_/scripts/access_ribbon.js` 1.3.0) — never by editing the field, which no form shows and FLS locks.
 
-- **Make Secure** — shown on a record that is NOT secure, to a caller with Write. It confirms with the owner-authored
-  copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
+- **Make Secure** — shown on a record that is NOT secure, and on one flagged secure whose secure transition did not
+  finish (round 40 item 1: no container recorded, or still owned by a user — a PROVISIONED secure record is owned by the
+  Secure Record owner team and records its own container, and hides it), to a caller with Write. It confirms with the
+  owner-authored copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
   token — any other value is refused 400, and so is a Make Secure request naming `sharePrincipalIds`): the server holds
   that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and the access afterwards is
   exactly what the confirmation says: the record is shared to the caller (as on every forward run) and to **the person
@@ -915,7 +921,15 @@ Users secure and unsecure an existing project, matter or work assignment from th
   `creatorState: column-missing`; a disabled creator is not shared to). A creator on the record's No Access list is not
   shared to (No Access wins, owner N6), and neither is one whose No Access check or share fails — each is NAMED in the
   response's `skippedPrincipals` (`principal_no_access`, `principal_no_access_unverifiable`, `principal_share_failed`)
-  and the ribbon shows a per-person warning (never silent, round 33 item 5); the caller adds them through Manage Access.
+  and the ribbon shows a per-person warning (never silent, round 33 item 5; a person whose name cannot be read is
+  "Someone", round 40 item 3); the caller adds them through Manage Access. The caller keeps access on BOTH paths
+  (round 40 item 2): when the call finishes an earlier run that stopped after the owner move, the caller is shared and
+  the creator beside them exactly as on the forward path, and a caller who already holds a higher level (Full Access)
+  keeps it — never narrowed. **A Make Secure that fails after its first write can always be finished from the same
+  command** (round 40 item 1): a failure the server answers as "the same caller may call again" offers that call in place
+  (a confirm dialog with the server's message, Make Secure / Cancel), and the command stays offered on the unfinished
+  record; the per-code closure table is task 150's note §23.2. An administrator who finishes a record through Make
+  Secure is shared to like any caller; the API call without the transition (§7, F8) finishes it without adding them.
   Task 148's transition carries the existing children; round 26 item 3's relocation moves the files (task 166's
   `DocumentContainerRelocator`, wired into this path at integration). **Release rule (acceptance (b)): Make Secure is
   imported only into an environment whose BFF carries task 148's transition AND the wired file relocation, in the same
@@ -924,10 +938,10 @@ Users secure and unsecure an existing project, matter or work assignment from th
 - **Remove Secure** — shown on a secure record, to a caller with Write. It confirms first (round 33 item 2: "Remove the
   secure designation from this {record}?"), then calls `/unsecure-project`; the SERVER decides who may (F3: Full Access
   holders and the creator) and the refusal shows the endpoint's message.
-- Both read `sprk_issecure` with `Xrm.WebApi.retrieveRecord` (every user's reader-profile Read, step 3); a failed or
-  masked read hides BOTH.
+- Both read `sprk_issecure` — with `sprk_containerid` and `_owninguser_value`, in ONE `Xrm.WebApi.retrieveRecord` —
+  (every user's reader-profile Read, step 3); a failed or masked read hides BOTH.
 
-Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.2.0, `assignedaccess_postsave.js`,
+Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.3.0, `assignedaccess_postsave.js`,
 `bff_auth.js`) → `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150
 POML ui-tests on the three forms.
 

@@ -34,7 +34,7 @@
     -SecureTransitionDeployed only when the target environment's BFF carries both. Without it Make Secure is withheld
     (and -Verify FAILS if it is present), while Update Access and Remove Secure ship.
 
-    Order (README "Deployment"): the BFF first, then the web resources (sprk_/scripts/access_ribbon.js 1.2.0,
+    Order (README "Deployment"): the BFF first, then the web resources (sprk_/scripts/access_ribbon.js 1.3.0,
     assignedaccess_postsave.js, bff_auth.js), then this script.
 
 .PARAMETER EnvironmentUrl

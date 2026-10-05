@@ -1,5 +1,5 @@
 /**
- * `sprk_access_ribbon.js` 1.2.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
+ * `sprk_access_ribbon.js` 1.3.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -21,7 +21,11 @@
  *    the server's, (c));
  *  - never silent (round 33 items 1 and 5): a success whose `skippedPrincipals` names someone the record was not shared
  *    with (on Make Secure, its creator) shows a per-person warning from ONE constant — an unknown reason code the generic
- *    one, and logged.
+ *    one, and logged; a person who cannot be named is "Someone" (round 40 item 3), never an empty name;
+ *  - round 40 item 1 (acceptance (e) amended — Make Secure hidden on a PROVISIONED secure record): Make Secure is offered
+ *    again on a record flagged secure whose transition did not finish (no container recorded, or owned by a user), from
+ *    the same one read; and a Make Secure failure after the flag write that the server answers as "the same caller may
+ *    call again" offers the call in place (confirm dialog, the server's message, Make Secure / Cancel).
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -88,7 +92,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.2.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.3.0'); // the real script ran
   return { ribbon, retrieveRecord, openConfirmDialog, openAlertDialog, addGlobalNotification, authenticatedFetch };
 }
 
@@ -115,6 +119,19 @@ function canManage(entityName: string, can: boolean): void {
     can ? 'true' : 'false'
   );
 }
+
+/** The ONE read the secure-state rules make (round 40 item 1: the flag, the container, the owning user). */
+const SECURE_STATE_SELECT = '?$select=sprk_issecure,sprk_containerid,_owninguser_value';
+
+/** A PROVISIONED secure record: owned by the Secure Record owner TEAM (no owning user), its own container recorded. */
+const PROVISIONED = { sprk_issecure: true, sprk_containerid: 'b!its-own-container', _owninguser_value: null };
+
+/** An ordinary record a user owns, no container of its own. */
+const NOT_SECURE = {
+  sprk_issecure: false,
+  sprk_containerid: null,
+  _owninguser_value: 'eeeeeeee-1111-2222-3333-444444444444',
+};
 
 const response = (status: number, body: unknown) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
@@ -195,33 +212,43 @@ describe('enable rules — acceptance (e) and (f)', () => {
     async entityName => {
       const { ribbon, retrieveRecord } = load();
       canManage(entityName, true);
-      retrieveRecord.mockResolvedValue({ sprk_issecure: false });
+      retrieveRecord.mockResolvedValue(NOT_SECURE);
 
       expect(await ribbon.canMakeSecure(form(entityName))).toBe(true);
       expect(await ribbon.canRemoveSecure(form(entityName))).toBe(false);
-      expect(retrieveRecord).toHaveBeenCalledWith(entityName, RECORD_ID, '?$select=sprk_issecure');
+      expect(retrieveRecord).toHaveBeenCalledWith(entityName, RECORD_ID, SECURE_STATE_SELECT);
+      expect(retrieveRecord).toHaveBeenCalledTimes(1); // both rules share the ONE read
     }
   );
 
   it.each(Object.keys(RECORD_TYPES))(
-    'on a secure %s, a caller who may manage access sees Remove Secure and not Make Secure',
+    'on a PROVISIONED secure %s, a caller who may manage access sees Remove Secure and not Make Secure',
     async entityName => {
       const { ribbon, retrieveRecord } = load();
       canManage(entityName, true);
-      retrieveRecord.mockResolvedValue({ sprk_issecure: true });
+      retrieveRecord.mockResolvedValue(PROVISIONED);
 
       expect(await ribbon.canMakeSecure(form(entityName))).toBe(false);
       expect(await ribbon.canRemoveSecure(form(entityName))).toBe(true);
     }
   );
 
-  it.each([true, false])('a Read-only caller sees neither command (record secure: %s)', async secure => {
+  it.each([PROVISIONED, NOT_SECURE])('a Read-only caller sees neither command (%o)', async row => {
     const { ribbon, retrieveRecord } = load();
     canManage('sprk_workassignment', false);
-    retrieveRecord.mockResolvedValue({ sprk_issecure: secure });
+    retrieveRecord.mockResolvedValue(row);
 
     expect(await ribbon.canMakeSecure(form('sprk_workassignment'))).toBe(false);
     expect(await ribbon.canRemoveSecure(form('sprk_workassignment'))).toBe(false);
+  });
+
+  it('a Read-only caller sees neither command on an UNFINISHED secure record either', async () => {
+    const { ribbon, retrieveRecord } = load();
+    canManage('sprk_matter', false);
+    retrieveRecord.mockResolvedValue({ sprk_issecure: true, sprk_containerid: null, _owninguser_value: null });
+
+    expect(await ribbon.canMakeSecure(form('sprk_matter'))).toBe(false);
+    expect(await ribbon.canRemoveSecure(form('sprk_matter'))).toBe(false);
   });
 
   it('a FAILED read of sprk_issecure hides both commands', async () => {
@@ -262,6 +289,172 @@ describe('enable rules — acceptance (e) and (f)', () => {
 
     expect(ribbon.isAccessMenuVisible(form('sprk_project'))).toBe(true);
     expect(retrieveRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe('round 40 item 1 — Make Secure is offered again on a secure transition that did not finish', () => {
+  it.each(Object.keys(RECORD_TYPES))(
+    'a %s flagged secure with NO container recorded (a failure before Step 7): Make Secure AND Remove Secure',
+    async entityName => {
+      const { ribbon, retrieveRecord } = load();
+      canManage(entityName, true);
+      // Owned by the Secure Record owner team (the move landed), no container yet: container_creation_failed and others.
+      retrieveRecord.mockResolvedValue({ sprk_issecure: true, sprk_containerid: null, _owninguser_value: null });
+
+      expect(await ribbon.canMakeSecure(form(entityName))).toBe(true);
+      expect(await ribbon.canRemoveSecure(form(entityName))).toBe(true);
+      expect(retrieveRecord).toHaveBeenCalledTimes(1); // the SAME one read
+    }
+  );
+
+  it.each([
+    ['empty string', ''],
+    ['whitespace', '   '],
+    ['absent', undefined],
+  ])('a container value that is %s counts as none recorded', async (_shape, containerId) => {
+    const { ribbon, retrieveRecord } = load();
+    canManage('sprk_project', true);
+    retrieveRecord.mockResolvedValue({ sprk_issecure: true, sprk_containerid: containerId, _owninguser_value: null });
+
+    expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(true);
+  });
+
+  it('a record flagged secure that a USER still owns (the move never landed, or was undone) — even with its own container recorded: Make Secure', async () => {
+    const { ribbon, retrieveRecord } = load();
+    canManage('sprk_matter', true);
+    // Re-securing after Remove Secure keeps the record's own container and gives it a user owner; a failure before the
+    // owner move leaves exactly this.
+    retrieveRecord.mockResolvedValue({
+      sprk_issecure: true,
+      sprk_containerid: 'b!its-own-container',
+      _owninguser_value: 'eeeeeeee-1111-2222-3333-444444444444',
+    });
+
+    expect(await ribbon.canMakeSecure(form('sprk_matter'))).toBe(true);
+    expect(await ribbon.canRemoveSecure(form('sprk_matter'))).toBe(true);
+  });
+
+  it('a PROVISIONED record (team-owned, its own container recorded): Make Secure stays hidden', async () => {
+    const { ribbon, retrieveRecord } = load();
+    canManage('sprk_workassignment', true);
+    retrieveRecord.mockResolvedValue(PROVISIONED);
+
+    expect(await ribbon.canMakeSecure(form('sprk_workassignment'))).toBe(false);
+  });
+
+  it('an unreadable flag hides Make Secure on that shape too (the existing fail-closed rule)', async () => {
+    const { ribbon, retrieveRecord } = load();
+    canManage('sprk_project', true);
+    retrieveRecord.mockResolvedValue({ sprk_issecure: null, sprk_containerid: null, _owninguser_value: null });
+
+    expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(false);
+    expect(await ribbon.canRemoveSecure(form('sprk_project'))).toBe(false);
+  });
+});
+
+/** Round 40 item 1: the Make Secure failures after the flag write that the server answers "the same caller may call again". */
+const RETRY_IN_PLACE = [
+  'sdap.provision.secure_flag_not_set',
+  'sdap.provision.shared_container_not_cleared',
+  'sdap.provision.creator_share_failed',
+  'sdap.provision.owner_assignment_unverified',
+  'sdap.provision.container_creation_failed',
+  'sdap.provision.container_not_recorded',
+  'sdap.provision.children_incomplete',
+  'sdap.provision.files_incomplete',
+];
+
+describe('round 40 item 1 — a retryable Make Secure failure offers the same call again, in place', () => {
+  it('the list is ONE frozen constant, exactly these codes', () => {
+    const { ribbon } = load();
+
+    expect(Object.isFrozen(ribbon.MAKE_SECURE_RETRY_IN_PLACE)).toBe(true);
+    expect([...ribbon.MAKE_SECURE_RETRY_IN_PLACE]).toEqual(RETRY_IN_PLACE);
+  });
+
+  it.each(RETRY_IN_PLACE)(
+    '%s: a confirm dialog with the server message and Make Secure / Cancel; Make Secure repeats the call',
+    async reasonCode => {
+      const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, addGlobalNotification } = load();
+      const detail = `The server's own words for ${reasonCode}. The same caller may call again.`;
+      openConfirmDialog
+        .mockResolvedValueOnce({ confirmed: true }) // the owner round 27 confirmation
+        .mockResolvedValueOnce({ confirmed: true }); // the retry
+      authenticatedFetch
+        .mockResolvedValueOnce(response(500, { detail, reasonCode }))
+        .mockResolvedValueOnce(response(200, { recordType: 'matter' }));
+      const matter = form('sprk_matter');
+
+      await ribbon.makeSecure(matter);
+      await settle();
+
+      expect(openConfirmDialog).toHaveBeenCalledTimes(2);
+      expect(openConfirmDialog.mock.calls[1][0]).toEqual({
+        title: 'Make Secure',
+        text: detail,
+        confirmButtonLabel: 'Make Secure',
+        cancelButtonLabel: 'Cancel',
+      });
+      expect(authenticatedFetch).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(authenticatedFetch.mock.calls[1][1].body)).toEqual({
+        recordType: 'matter',
+        recordId: RECORD_ID,
+        transition: 'make-secure',
+      });
+      expect(openAlertDialog).not.toHaveBeenCalled();
+      expect(addGlobalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'This matter is now secure.' })
+      );
+      expect(matter.data.refresh).toHaveBeenCalledTimes(2); // re-read after each call
+    }
+  );
+
+  it('Cancel on the retry calls nothing more and shows nothing else', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog } = load();
+    openConfirmDialog.mockResolvedValueOnce({ confirmed: true }).mockResolvedValueOnce({ confirmed: false });
+    authenticatedFetch.mockResolvedValue(
+      response(500, { detail: 'children remain', reasonCode: 'sdap.provision.children_incomplete' })
+    );
+
+    await ribbon.makeSecure(form('sprk_project'));
+    await settle();
+
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(openAlertDialog).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'sdap.provision.creator_share_failed_resumable',
+    'sdap.provision.cascade_children_not_restored',
+    'sdap.provision.owner_assignment_failed',
+    'sdap.provision.owner_assignment_not_applied',
+    'sdap.provision.not_record_creator',
+  ])('%s (an administrator acts first, or not retryable): the alert, no retry offered', async reasonCode => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog } = load();
+    openConfirmDialog.mockResolvedValueOnce({ confirmed: true });
+    authenticatedFetch.mockResolvedValue(response(500, { detail: 'an administrator acts first', reasonCode }));
+
+    await ribbon.makeSecure(form('sprk_workassignment'));
+    await settle();
+
+    expect(openConfirmDialog).toHaveBeenCalledTimes(1); // the owner copy only
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Make Secure', text: 'an administrator acts first' });
+  });
+
+  it('Remove Secure never offers a retry in place (the list is Make Secure’s)', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog } = load();
+    openConfirmDialog.mockResolvedValueOnce({ confirmed: true });
+    authenticatedFetch.mockResolvedValue(
+      response(500, { detail: 'partial', reasonCode: 'sdap.provision.children_incomplete' })
+    );
+
+    await ribbon.removeSecure(form('sprk_matter'));
+    await settle();
+
+    expect(openConfirmDialog).toHaveBeenCalledTimes(1);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Remove Secure', text: 'partial' });
   });
 });
 
@@ -327,7 +520,7 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
 
   it("a refusal shows the endpoint's ProblemDetails message, and the form is re-read", async () => {
     const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, addGlobalNotification } = load();
-    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    openConfirmDialog.mockResolvedValueOnce({ confirmed: true });
     const detail =
       'Only the person who created this project can secure it this way, and you did not create it. Nothing was changed.';
     authenticatedFetch.mockResolvedValue(response(403, { detail, reasonCode: 'sdap.provision.not_record_creator' }));
@@ -416,7 +609,7 @@ describe('Make Secure — the people it was NOT shared with are named (round 33 
     }
   );
 
-  it('every skipped person is listed; a name that cannot be read shows the id; each reason has its own words', async () => {
+  it('every skipped person is listed; a name that cannot be read is "Someone"; each reason has its own words', async () => {
     const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
     openConfirmDialog.mockResolvedValue({ confirmed: true });
     const unchecked = 'dddddddd-1111-2222-3333-444444444444';
@@ -437,10 +630,48 @@ describe('Make Secure — the people it was NOT shared with are named (round 33 
     expect(openAlertDialog.mock.calls[0][0]).toEqual({
       title: 'Make Secure',
       text: [
-        SKIPPED.shareFailed(CREATOR_ID, 'work assignment'),
+        SKIPPED.shareFailed('Someone', 'work assignment'),
         SKIPPED.unverifiable('Sam Ortiz', 'work assignment'),
       ].join('\n\n'),
     });
+  });
+
+  it.each([
+    ['an empty id (no read is made)', '', undefined],
+    ['an id whose user reads back with an empty name', CREATOR_ID, ''],
+    ['an id whose user reads back with no name', CREATOR_ID, null],
+  ])('round 40 item 3 — %s: "Someone", never an empty name', async (_case, systemUserId, fullname) => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    retrieveRecord.mockResolvedValue({ fullname });
+    authenticatedFetch.mockResolvedValue(
+      response(200, {
+        skippedPrincipals: [{ systemUserId, reasonCode: 'sdap.provision.principal_share_failed', message: 'x' }],
+      })
+    );
+
+    await ribbon.makeSecure(form('sprk_project'));
+    await settle();
+
+    expect(openAlertDialog).toHaveBeenCalledWith({
+      title: 'Make Secure',
+      text: SKIPPED.shareFailed('Someone', 'project'),
+    });
+    if (!systemUserId) {
+      expect(retrieveRecord).not.toHaveBeenCalled();
+    }
+  });
+
+  it('round 40 item 3 — the fallback is ONE constant, and describeSkippedPrincipal never fills an empty name', () => {
+    const { ribbon } = load();
+
+    expect(ribbon.UNNAMED_PERSON).toBe('Someone');
+    expect(ribbon.describeSkippedPrincipal('sdap.provision.principal_no_access', '', 'sprk_matter')).toBe(
+      SKIPPED.noAccess('Someone', 'matter')
+    );
+    expect(
+      ribbon.describeSkippedPrincipal('sdap.provision.principal_no_access_unverifiable', '  ', 'sprk_matter')
+    ).toBe(SKIPPED.unverifiable('Someone', 'matter'));
   });
 
   it('a reason code the script does not know: the generic warning, and the code logged — never dropped', async () => {
@@ -551,7 +782,7 @@ describe('Remove Secure — the server decides who may (F3), the client shows it
     const { ribbon, authenticatedFetch, retrieveRecord, openConfirmDialog } = load();
     openConfirmDialog.mockResolvedValue({ confirmed: true });
     canManage('sprk_matter', true);
-    retrieveRecord.mockResolvedValueOnce({ sprk_issecure: true }).mockResolvedValueOnce({ sprk_issecure: false });
+    retrieveRecord.mockResolvedValueOnce(PROVISIONED).mockResolvedValueOnce(NOT_SECURE);
     authenticatedFetch.mockResolvedValue(response(200, {}));
     const matter = form('sprk_matter');
 

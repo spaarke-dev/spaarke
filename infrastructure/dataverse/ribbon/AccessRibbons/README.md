@@ -29,8 +29,13 @@ arrives with 166's merge, so pass `-SecureTransitionDeployed` only for a BFF bui
 rule by design — the ribbon has no reliable runtime signal of the BFF's build, and a missing command is the safe default.
 
 **Who may use them.** Both commands are enabled only for a caller with Write (the cached can-manage-access verdict — the
-same rule as Update Access). Make Secure needs the record NOT secure, Remove Secure needs it secure; `sprk_issecure` is
-read with `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) read hides both. Who may REMOVE the designation is
+same rule as Update Access). Make Secure needs the record NOT secure — or flagged secure with a transition that did not
+finish (round 40 item 1: no container recorded, or owned by a user; a PROVISIONED record is owned by the Secure Record
+owner team and records its own container, and hides it) — and Remove Secure needs it secure; `sprk_issecure`,
+`sprk_containerid` and `_owninguser_value` are read in ONE `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty)
+flag hides both. A Make Secure failure after the flag write that the server answers as "the same caller may call
+again" (`MAKE_SECURE_RETRY_IN_PLACE`) offers that call in place: a confirm dialog with the server's message, Make
+Secure / Cancel (round 40 item 1). Who may REMOVE the designation is
 the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
 ProblemDetails message. Make Secure confirms first with the owner-authored copy (owner round 27, the
 `MAKE_SECURE_CONFIRMATION` constant in the script) and sends `transition: "make-secure"` (exactly; it names no
@@ -38,7 +43,8 @@ colleagues), which the server holds to the Write gate (round 33 item 1; the crea
 create-then-secure path) while sharing the record to its creator too. If the server could not share it to someone it
 names in `skippedPrincipals` — the creator on the record's No Access list, that list unverifiable, or the share itself
 failed — the script shows a per-person warning after the success notification (`SKIPPED_PRINCIPAL_COPY`; an unknown
-reason gets the generic warning and is logged — never silent, round 33 item 5). Remove Secure confirms first too (round
+reason gets the generic warning and is logged — never silent, round 33 item 5; a person whose name cannot be read is
+"Someone", round 40 item 3). Remove Secure confirms first too (round
 33 item 2, `REMOVE_SECURE_CONFIRMATION`). Cancel calls nothing.
 
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
@@ -97,7 +103,8 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    matter — Push Updates, Create Project, Create Event, Create To Do, Upload Documents, Summarize Files, Find Similar,
    Playbook Library; work assignment — Create To Do, Dark Mode.
 4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150
-   and the wired relocation for `-SecureTransitionDeployed`, and the web resources must be `access_ribbon.js` 1.2.0):
+   and the wired relocation for `-SecureTransitionDeployed`, and the web resources must be `access_ribbon.js` 1.3.0 —
+   task 150 round 40: Make Secure offered on an unfinished secure transition, and its in-place retry):
    ```powershell
    pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
@@ -114,7 +121,9 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    the wired file relocation.
    Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
-   user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state.
+   user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state (Make
+   Secure also on a record flagged secure whose transition did not finish — no container recorded, or user-owned;
+   hidden on a PROVISIONED one: acceptance (e) as amended by round 40).
 7. **Form libraries** (task 142's post-save call, separate from the ribbon): on the three main forms, register
    `sprk_/scripts/bff_auth.js` FIRST, then `sprk_/scripts/assignedaccess_postsave.js`, with OnLoad handler
    `Spaarke.AssignedAccess.onLoad` (pass execution context).

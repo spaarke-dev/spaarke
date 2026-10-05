@@ -41,8 +41,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// carries the id instead (ADR-003).
 /// </param>
 /// <param name="SharedToCreatorSystemUserId">
-/// The creating user the record was explicitly shared to (task 061). Because the owner team has no members, this share
-/// is what makes the record reachable at all — a successful response always carries it.
+/// The creating user the record was explicitly shared to (task 061) — on Make Secure, the caller (task 150). Because the
+/// owner team has no members, this share is what makes the record reachable at all — a successful response always carries
+/// it.
 /// </param>
 /// <param name="AdditionalPrincipalsShared">
 /// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort). On Make Secure
@@ -55,7 +56,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// True when this call FINISHED an earlier run that stopped after the owner move (task 133): the record was already
 /// owned by the owner team with no container recorded. <c>SharedToCreatorSystemUserId</c> is then the person who created
 /// the record — its <c>createdby</c> user, or for an app-created record the BFF-recorded <c>sprk_createdbyperson</c>
-/// (owner round 7 item 2) — not necessarily the caller. Additive to the JSON contract.
+/// (owner round 7 item 2) — not necessarily the caller. On Make Secure (<c>transition: "make-secure"</c>, task 150 round
+/// 40) it is the caller, as on the forward path, and the record's creator is counted in
+/// <c>AdditionalPrincipalsShared</c> (or named in <c>SkippedPrincipals</c>). Additive to the JSON contract.
 /// </param>
 /// <param name="SkippedPrincipals">
 /// Task 143 (owner N6): named colleagues who were NOT shared to, each with a reason — on the record's No Access list

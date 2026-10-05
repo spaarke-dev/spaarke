@@ -10,13 +10,18 @@
  *   (Spaarke.Access.Ribbon.isAccessMenuVisible).
  * - "Update Access" - re-applies the Assigned-To rule (task 142) AND the record's No Access entries (task 143) to this
  *   record now, in ONE BFF call: POST /api/v1/external-access/assigned-access/sync. Shows both outcomes, then refreshes.
- * - "Make Secure" (task 150, UX amendment; owner round 27 copy) - on a record that is NOT secure, for a caller with
+ * - "Make Secure" (task 150, UX amendment; owner round 27 copy) - on a record that is NOT secure, or whose secure
+ *   transition did not finish (round 40 item 1: flagged but not provisioned - see "Secure state" below), for a caller with
  *   Write: confirms with the owner-authored copy (MAKE_SECURE_CONFIRMATION, the ONE constant), then calls the
  *   provisioning endpoint POST /api/v1/external-access/provision-project with transition "make-secure" (round 33 item 1:
- *   the server holds that path to the Write gate and shares the record to its creator too) (task 144, generalized to the
- *   three roots; task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the
+ *   the server holds that path to the Write gate and shares the record to its creator too; round 40 item 2: the caller
+ *   keeps access on the forward path and when the call finishes an earlier run) (task 144, generalized to the three
+ *   roots; task 148's transition carries the existing children, round 26 item 3 its files). Refreshes, shows the
  *   outcome - and, when the server names someone it did not share the record with (`skippedPrincipals`: the creator on
  *   the No Access list, unverifiable, or a failed share), a per-person warning (SKIPPED_PRINCIPAL_COPY; never silent).
+ *   A failure after the secure flag was written that the server answers as "the same caller may call again"
+ *   (MAKE_SECURE_RETRY_IN_PLACE) offers that call in place: a confirm dialog with the server's message and Make Secure /
+ *   Cancel (round 40 item 1).
  *   Shipped only where task 148's transition is deployed - an import/packaging rule, not a runtime check
  *   (infrastructure/dataverse/ribbon/AccessRibbons/README.md).
  * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: confirms with
@@ -27,7 +32,10 @@
  *
  * Secure state: sprk_issecure is on no form, so a ValueRule cannot read it. The rules read it with
  * Xrm.WebApi.retrieveRecord (every user reads the true value under task 150's reader profile). Anything other than a
- * stored true or false - a failed read, a masked (empty) value - hides BOTH commands (fail closed, ADR-003).
+ * stored true or false - a failed read, a masked (empty) value - hides BOTH commands (fail closed, ADR-003). The same
+ * read takes sprk_containerid and _owninguser_value (round 40 item 1): a PROVISIONED secure record is owned by the
+ * Secure Record owner TEAM and records its own container, so a flagged record with no container, or one a USER owns, is
+ * one whose secure transition did not finish, and Make Secure is offered on it as well as Remove Secure.
  *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
@@ -54,8 +62,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
 (function (ns) {
     // 1.1.0 - task 150: Make Secure / Remove Secure. 1.2.0 - round 33: the make-secure transition, the Remove Secure
-    // confirmation, per-person warnings for skippedPrincipals.
-    ns.VERSION = "1.2.0";
+    // confirmation, per-person warnings for skippedPrincipals. 1.3.0 - round 40: Make Secure offered on an unfinished
+    // secure transition, the in-place retry, "Someone" for a name that cannot be resolved.
+    ns.VERSION = "1.3.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -252,10 +261,19 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         return record.recordType + "_" + record.recordId;
     }
 
+    /** The ONE read the secure-state rules make (round 40 item 1: the flag, and what tells a finished transition apart). */
+    var SECURE_STATE_SELECT = "?$select=sprk_issecure,sprk_containerid,_owninguser_value";
+
+    var UNKNOWN_STATE = Object.freeze({ secure: null, unfinished: false });
+
     /**
-     * The record's stored secure flag: true, false - or null when it is not KNOWN (the read failed, or the value came
-     * back empty: a masked field-secured column). Null hides both commands. Cached per record for a short while, so the
-     * flyout's rules cost one read; the commands forget it before they refresh the form.
+     * The record's secure state, from ONE read: `secure` is the stored flag - true, false, or null when it is not KNOWN
+     * (the read failed, or the value came back empty: a masked field-secured column; null hides both commands).
+     * `unfinished` is true for a record flagged secure whose transition did not finish (round 40 item 1): provisioning
+     * leaves a finished secure record owned by the Secure Record owner TEAM with its own container recorded, so one with no
+     * container recorded, or one a USER owns, is not finished - every failure after the flag write leaves one of those
+     * two shapes (the flag is never cleared), and the server finishes it when Make Secure is called again. Cached per
+     * record for a short while, so the flyout's rules cost one read; the commands forget it before they refresh the form.
      */
     function readSecureState(entityName, record) {
         var key = stateKey(record);
@@ -266,22 +284,25 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
         var promise;
         try {
-            promise = Promise.resolve(Xrm.WebApi.retrieveRecord(entityName, record.recordId, "?$select=sprk_issecure"))
+            promise = Promise.resolve(Xrm.WebApi.retrieveRecord(entityName, record.recordId, SECURE_STATE_SELECT))
                 .then(function (row) {
                     var value = row ? row.sprk_issecure : undefined;
-                    if (value === true || value === false) {
-                        return value;
+                    if (value !== true && value !== false) {
+                        console.warn(LOG, "sprk_issecure came back empty; Make Secure and Remove Secure stay hidden.");
+                        return UNKNOWN_STATE;
                     }
 
-                    console.warn(LOG, "sprk_issecure came back empty; Make Secure and Remove Secure stay hidden.");
-                    return null;
+                    var container = row.sprk_containerid;
+                    var hasContainer = typeof container === "string" && container.trim().length > 0;
+                    var userOwned = typeof row._owninguser_value === "string" && row._owninguser_value.length > 0;
+                    return { secure: value, unfinished: value === true && (!hasContainer || userOwned) };
                 }, function (error) {
                     console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
-                    return null;
+                    return UNKNOWN_STATE;
                 });
         } catch (error) {
             console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
-            promise = Promise.resolve(null);
+            promise = Promise.resolve(UNKNOWN_STATE);
         }
 
         secureStates[key] = { at: Date.now(), promise: promise };
@@ -299,10 +320,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
-     * the record, the same rule as Update Access) AND the stored flag equals `wantSecure`. An unknown flag is never equal,
-     * so a failed or masked read hides both commands.
+     * the record, the same rule as Update Access) AND `wanted(state)` holds for the record's secure state. An unknown flag
+     * satisfies neither rule, so a failed or masked read hides both commands.
      */
-    function secureCommandEnabled(primaryControl, wantSecure) {
+    function secureCommandEnabled(primaryControl, wanted) {
         try {
             if (!helpersLoaded()) {
                 return false;
@@ -316,7 +337,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
             return Promise.all([Promise.resolve(ns.canUpdateAccess(primaryControl)), readSecureState(entityName, record)])
                 .then(function (answers) {
-                    return answers[0] === true && answers[1] === wantSecure;
+                    return answers[0] === true && wanted(answers[1]) === true;
                 })
                 .catch(function (error) {
                     console.warn(LOG, "A secure-command rule failed; the command stays hidden.", error);
@@ -328,14 +349,22 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         }
     }
 
-    /** EnableRule for "Make Secure": the record is NOT secure and the caller has Write. */
+    /**
+     * EnableRule for "Make Secure": the caller has Write, and the record is NOT secure - or it is flagged secure but its
+     * transition did not finish (round 40 item 1; acceptance (e) amended: hidden on a PROVISIONED secure record). Calling
+     * it again then finishes the transition: the server resumes or re-runs it.
+     */
     ns.canMakeSecure = function (primaryControl) {
-        return secureCommandEnabled(primaryControl, false);
+        return secureCommandEnabled(primaryControl, function (state) {
+            return state.secure === false || (state.secure === true && state.unfinished === true);
+        });
     };
 
     /** EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3). */
     ns.canRemoveSecure = function (primaryControl) {
-        return secureCommandEnabled(primaryControl, true);
+        return secureCommandEnabled(primaryControl, function (state) {
+            return state.secure === true;
+        });
     };
 
     /**
@@ -395,8 +424,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      * The per-person warnings after a call that succeeded but did NOT share the record with someone the server named in
      * `skippedPrincipals` - on Make Secure, the record's creator (round 33 item 1): on its No Access list, that list could
      * not be checked, or the share itself failed. Never silent (round 33 item 5). The ONE constant: round 29's sentences and
-     * round 33 item 5's generic one, the same words the Create Project wizard shows, with {record} filled per table the way
-     * owner round 27's copy is (adjustable in UAT). {name} is the person's full name, or their id when it cannot be read.
+     * round 33 item 5's generic one, the same words the Create Project wizard shows, generalized to {record} per table the
+     * way owner round 27's copy is (round 40 item 3; adjustable in UAT). {name} is the person's full name, or
+     * UNNAMED_PERSON ("Someone") when it cannot be resolved (round 40 item 3).
      */
     ns.SKIPPED_PRINCIPAL_COPY = Object.freeze({
         "sdap.provision.principal_no_access":
@@ -424,20 +454,33 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
         var word = ns.RECORD_WORDS[entityName] || "record";
         var text = known ? ns.SKIPPED_PRINCIPAL_COPY[reasonCode] : ns.SKIPPED_PRINCIPAL_GENERIC;
-        return text.split("{name}").join(name).split("{record}").join(word);
+        var who = typeof name === "string" && name.trim() ? name : ns.UNNAMED_PERSON;
+        return text.split("{name}").join(who).split("{record}").join(word);
     };
 
-    /** A user's full name for a warning; their id when it cannot be read (the warning is shown either way). */
+    /**
+     * Round 40 item 3: the {name} of a warning whose person cannot be named - an empty id, a name that cannot be read,
+     * an empty name. Never an empty name, and the warning is shown either way (never silent).
+     */
+    ns.UNNAMED_PERSON = "Someone";
+
+    /** A user's full name for a warning; UNNAMED_PERSON when there is no id or the name cannot be resolved. */
     function personName(systemUserId) {
+        if (typeof systemUserId !== "string" || systemUserId.trim().length === 0) {
+            return Promise.resolve(ns.UNNAMED_PERSON); // no id: nothing to read
+        }
+
         try {
             return Promise.resolve(Xrm.WebApi.retrieveRecord("systemuser", systemUserId, "?$select=fullname"))
                 .then(function (row) {
-                    return row && typeof row.fullname === "string" && row.fullname ? row.fullname : systemUserId;
+                    return row && typeof row.fullname === "string" && row.fullname.trim()
+                        ? row.fullname
+                        : ns.UNNAMED_PERSON;
                 }, function () {
-                    return systemUserId;
+                    return ns.UNNAMED_PERSON;
                 });
         } catch (error) {
-            return Promise.resolve(systemUserId);
+            return Promise.resolve(ns.UNNAMED_PERSON);
         }
     }
 
@@ -458,8 +501,52 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         });
     }
 
-    /** Runs one designation call and shows its outcome as Update Access does (a notification, or an alert). */
-    function runDesignation(primaryControl, start, commandName, path, successText, extra) {
+    /**
+     * Round 40 item 1: the Make Secure failures AFTER its first write (the secure flag) that the server answers as "the
+     * same caller may call again" - one per step of the transition. Each is offered again IN PLACE: the alert becomes a
+     * confirm dialog with the server's message and Make Secure / Cancel, and Make Secure repeats the same call (the
+     * repeat call round 26 promises). After Step 7 the record reads as provisioned, so the enable rule no longer offers the
+     * command and this dialog is the ribbon's retry (the jobs are the backstop: secure-child reconciliation for children,
+     * task 166's relocator re-entry for files); before it, the enable rule offers it again too. Refusals that need an
+     * administrator first (creator_share_failed_resumable, cascade_children_not_restored, owner_assignment_failed,
+     * owner_assignment_not_applied) are NOT here: repeating them repeats the refusal, so they stay an alert naming the
+     * administrator's step.
+     */
+    ns.MAKE_SECURE_RETRY_IN_PLACE = Object.freeze([
+        "sdap.provision.secure_flag_not_set",          // Step 4.1: the flag write or its read-back
+        "sdap.provision.shared_container_not_cleared",  // Step 4.2: a shared container's unlink
+        "sdap.provision.creator_share_failed",          // Steps 4.5 / 5.5 (ownership restored), or a resume's proven share
+        "sdap.provision.owner_assignment_unverified",   // Step 5: the move could not be read back
+        "sdap.provision.container_creation_failed",     // Step 6
+        "sdap.provision.container_not_recorded",        // Step 7
+        "sdap.provision.children_incomplete",           // Step 8, after Step 7 (round 40)
+        "sdap.provision.files_incomplete"               // the file relocation, after Step 7 (round 40; round 26 item 3)
+    ]);
+
+    /** The failure's reason code (ProblemDetails extension), or null. */
+    function reasonCodeOf(result) {
+        return result && result.body && typeof result.body.reasonCode === "string" ? result.body.reasonCode : null;
+    }
+
+    /** Offers a retryable failure's call again (round 40 item 1); Cancel leaves the outcome as it is. */
+    function offerRetry(primaryControl, start, commandName, path, successText, extra, retryCodes, result) {
+        return confirmFirst({
+            title: commandName,
+            text: ns.refusalText(commandName, result),
+            confirmButtonLabel: commandName,
+            cancelButtonLabel: "Cancel"
+        }).then(function (again) {
+            return again
+                ? runDesignation(primaryControl, start, commandName, path, successText, extra, retryCodes)
+                : result;
+        });
+    }
+
+    /**
+     * Runs one designation call and shows its outcome as Update Access does (a notification, or an alert) - or, for a
+     * failure in `retryCodes`, offers the same call again in place.
+     */
+    function runDesignation(primaryControl, start, commandName, path, successText, extra, retryCodes) {
         var record = start.record;
         return postDesignation(path, record, extra).then(function (result) {
             if (result.skipped && result.reason === "no-token") {
@@ -471,6 +558,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             refreshAfter(primaryControl, record);
 
             if (!result.ok) {
+                if (retryCodes && retryCodes.indexOf(reasonCodeOf(result)) >= 0) {
+                    return offerRetry(primaryControl, start, commandName, path, successText, extra, retryCodes, result);
+                }
+
                 alert(commandName, ns.refusalText(commandName, result));
                 return result;
             }
@@ -518,9 +609,11 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 }
 
                 // Round 33 item 1: the transition tells the server this is Make Secure (the Write gate), not the
-                // wizards' create-then-secure path (the creator rule).
+                // wizards' create-then-secure path (the creator rule). Round 40 item 1: a retryable failure after the
+                // flag write is offered again in place.
                 return runDesignation(primaryControl, start, "Make Secure", PROVISION_PATH,
-                    "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.", { transition: MAKE_SECURE_TRANSITION });
+                    "This " + ns.RECORD_WORDS[start.entityName] + " is now secure.", { transition: MAKE_SECURE_TRANSITION },
+                    ns.MAKE_SECURE_RETRY_IN_PLACE);
             });
         } catch (error) {
             console.error(LOG, "makeSecure failed:", error);

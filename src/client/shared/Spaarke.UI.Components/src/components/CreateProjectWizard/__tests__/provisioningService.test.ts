@@ -19,6 +19,7 @@ import {
   provisionSecureProject,
   classifyProvisioningFailure,
   describeSkippedPrincipal,
+  UNNAMED_PERSON,
   type IProvisionProjectResponse,
 } from '../provisioningService';
 
@@ -689,6 +690,42 @@ describe('provisionSecureProject — failure classification', () => {
       expect.anything()
     );
     expect(result.warnings?.join(' ')).not.toContain('server prose');
+  });
+
+  // Round 40 item 3: a person who cannot be named is "Someone" — never an empty name, never the raw id, never silent.
+  it.each([
+    ['an id the host gave no name for', '99999999-9999-9999-9999-999999999999', {}],
+    [
+      'an id the host named with a blank',
+      '99999999-9999-9999-9999-999999999999',
+      { '99999999-9999-9999-9999-999999999999': '  ' },
+    ],
+    ['an empty id', '', { '': 'Not Used' }],
+  ])('names %s as "Someone" (round 40 item 3)', async (_case, systemUserId, names) => {
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [{ systemUserId, reasonCode: 'sdap.provision.principal_share_failed', message: 'x' }],
+      })
+    );
+
+    const result = await provisionSecureProject(
+      { projectId: PROJECT_ID },
+      authFetch as never,
+      BFF,
+      names as Record<string, string>
+    );
+
+    expect(result.warnings).toEqual([
+      'Someone was not given access to this project. You can share it with them later from Manage Access.',
+    ]);
+  });
+
+  it('the fallback word is ONE constant, and a blank name given to describeSkippedPrincipal is never shown blank', () => {
+    expect(UNNAMED_PERSON).toBe('Someone');
+    expect(describeSkippedPrincipal('sdap.provision.principal_no_access', '')).toBe(
+      "Someone is on this project's No Access list, so the project was not shared with them."
+    );
   });
 
   it('returns no warnings when no colleague was skipped', async () => {

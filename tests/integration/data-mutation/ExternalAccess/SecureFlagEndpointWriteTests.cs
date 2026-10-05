@@ -693,6 +693,9 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
         _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
         FlagWrites(recordId).Should().BeEmpty("a record that already reads true is not written again");
+        // F8 holds WITHOUT the transition (the wizards' and an administrator's API path): the caller is never added.
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId,
+            "a resume without the Make Secure transition shares to the record's creator only (F8)");
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -927,15 +930,17 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
 
     /// <summary>
     /// Make Secure meeting an UNFLAGGED record already owned by the owner team (an earlier run stopped after the move, or a
-    /// manual Assign): a Write holder who did not create it resumes it — the Write gate, as on the forward path — and the
-    /// share goes to the record's creator, never the caller (F8). Without the transition the same call is refused
+    /// manual Assign): a Write holder who did not create it resumes it — the Write gate, as on the forward path — and, as on
+    /// the forward path (round 40 item 2: the asymmetry is removed), the CALLER is shared at the creator's level and the
+    /// record's creator beside them. Without the transition the same call is refused
     /// (Provision_ResumingAnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_IsRefusedBeforeAnyWrite).
     /// </summary>
     [Theory]
     [InlineData("project")]
     [InlineData("matter")]
     [InlineData("workassignment")]
-    public async Task Provision_MakeSecure_ResumingAnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_Resumes(string recordType)
+    public async Task Provision_MakeSecure_ResumingAnUnflaggedRecord_ByAWriteHolderWhoDidNotCreateIt_SharesTheCallerAndTheCreator(
+        string recordType)
     {
         var recordId = Guid.NewGuid();
         Seed(recordType, recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
@@ -947,9 +952,227 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         _fixture.IsSecureOf(recordId).Should().BeTrue();
         _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask,
+            "the creator keeps access, as the confirmation says");
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask,
+                "a non-creator who runs Make Secure keeps access on BOTH paths (round 40 item 2)");
+        (await AdditionalSharedOf(response)).Should().Be(1, "the creator is counted beside the caller, as on the forward path");
+        (await SkippedOf(response)).Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Round 40 item 1: a Make Secure that failed after its first write is finished by the SAME command. Every failure
+    // between the flag and Step 7 leaves a FLAGGED record (the flag is never cleared) that the owner team owns with no
+    // container — the shape below. The retry is a resume with the forward Make Secure rules, not the resume's own (F8)
+    // rules, which would refuse the records the forward path secured anyway.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The R-150-6 retry: a FLAGGED record the owner team owns with no container (an earlier Make Secure stopped at Step 6
+    /// or 7). The same non-creator Write holder finishes it; they and the record's creator each hold the creator's level.
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task Provision_MakeSecure_FinishingAFlaggedRecord_ByAWriteHolderWhoDidNotCreateIt_SharesTheCallerAndTheCreator(
+        string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
         _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
-        _fixture.Grants.Should().NotContain(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId,
-            "a resume shares to the record's creator, never the caller (F8)");
+        FlagWrites(recordId).Should().BeEmpty("the earlier run wrote the flag; it is not written again");
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharedToCreatorSystemUserId").GetGuid()
+            .Should().Be(ProvisionProjectTestFixture.CallerSystemUserId, "on Make Secure the proven share is the caller's");
+    }
+
+    /// <summary>
+    /// The forward path secured a record whose creator is on its No Access list (creator skipped, named) and then stopped at
+    /// Step 6. The retry finishes it with the SAME rule — never the resume's 409 <c>resume_creator_no_access</c>, which would
+    /// leave the record unfinishable from the command that started it.
+    /// </summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecordWhoseCreatorIsOnTheNoAccessList_FinishesAndNamesThem()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Colleague, recordId);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == Colleague, "a walled creator is never shared to");
+        var skipped = await SkippedOf(response);
+        skipped.Should().ContainSingle();
+        skipped[0].GetProperty("systemUserId").GetGuid().Should().Be(Colleague);
+        skipped[0].GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalNoAccess);
+    }
+
+    /// <summary>
+    /// A disabled creator: the forward path secures without sharing to them, and so does the retry — never the resume's 409
+    /// <c>resume_creator_unavailable</c>. The caller's proven share is the record's reader (S5).
+    /// </summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecordWithADisabledCreator_FinishesForTheCaller()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (true, false);   // disabled
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == Colleague);
+        _fixture.SomeoneCanOpen(recordId).Should().BeTrue();
+    }
+
+    /// <summary>A caller on the No Access list is refused before any write — on the resume as on the forward path.</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecord_WhenTheCallerIsOnTheNoAccessList_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("workassignment", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.NoAccessList.DenySystemUserOnRecord(ProvisionProjectTestFixture.CallerSystemUserId, recordId);
+
+        var response = await PostAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        AssertResumeWroteNothing(recordId);
+    }
+
+    /// <summary>A caller whose Dataverse identity cannot be established is refused before any write (never shared to "nobody").</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecord_WhenTheCallerCannotBeIdentified_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.CallerSystemUserIdResolves = false;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorUnresolved);
+        AssertResumeWroteNothing(recordId);
+    }
+
+    /// <summary>Who created the record could not be read: refused before any write, as on the forward path.</summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecord_WhenTheCreatorCannotBeRead_IsRefusedBeforeAnyWrite()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.SystemUserReadFailsFor = Colleague;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordCreatorUnverifiable);
+        AssertResumeWroteNothing(recordId);
+    }
+
+    /// <summary>
+    /// The caller's share cannot be written: 500 <c>creator_share_failed</c> (<c>resumed: true</c>), no container created —
+    /// the record stays as the earlier run left it plus the flag, and the same caller may call again.
+    /// </summary>
+    [Fact]
+    public async Task Provision_MakeSecure_FinishingARecord_WhenTheCallersShareFails_StopsBeforeTheContainer()
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.FailShareForPrincipal = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        using (var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+            problem.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty("no container before the caller's share is proven");
+        _fixture.ContainerIdOf(recordId).Should().BeNull();
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+    }
+
+    /// <summary>
+    /// Round 40 item 2: whoever runs Make Secure KEEPS access — never narrowed. A Full Access holder (Write + Delete, one of
+    /// the people owner F3 lets remove the designation) keeps Full Access, on the forward path and on a resume; nothing is
+    /// modified for them. (The wizards' creator share stays EXACTLY the creator's level.)
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Provision_MakeSecure_ByAFullAccessHolder_KeepsTheirFullAccess(bool resuming)
+    {
+        var recordId = Guid.NewGuid();
+        Seed("matter", recordId, isSecure: resuming,
+            owningTeamId: resuming ? ProvisionProjectTestFixture.SecureOwnerTeamId : null, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.SeedShare(recordId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
+            Sprk.Bff.Api.Services.Access.RecordShareLevels.FullAccessRights);
+        var fullAccessMask = Sprk.Bff.Api.Services.Access.RecordShareLevels.MaskForRightsCsv(
+            Sprk.Bff.Api.Services.Access.RecordShareLevels.FullAccessRights);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(fullAccessMask,
+            "a Full Access holder who secures the record keeps Full Access — never narrowed to the creator's level");
+        _fixture.Modifies.Should().NotContain(m => m.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.ShareMaskOf(recordId, Colleague).Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+    }
+
+    /// <summary>
+    /// The level is a floor, not a widening: a caller whose share carries a right no level grants (Assign — a secure record
+    /// leaves the Secure Record business unit only through the unsecure endpoint) is set to the levels' rights only, and a
+    /// View-only caller is raised to the creator's level.
+    /// </summary>
+    [Theory]
+    [InlineData("ReadAccess", "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess")]
+    [InlineData("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess,AssignAccess",
+        "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess")]
+    [InlineData("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess,ShareAccess,AssignAccess",
+        "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess,ShareAccess")]
+    public async Task Provision_MakeSecure_TheCallersShare_IsTheCreatorsLevelOrTheirOwnLevelIfHigher_NeverAssign(
+        string held, string expected)
+    {
+        var recordId = Guid.NewGuid();
+        Seed("project", recordId, isSecure: false, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.SeedShare(recordId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId), held);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(Sprk.Bff.Api.Services.Access.RecordShareLevels.MaskForRightsCsv(expected));
     }
 
     // ═════════════════════════════════════════════════════════════════════════

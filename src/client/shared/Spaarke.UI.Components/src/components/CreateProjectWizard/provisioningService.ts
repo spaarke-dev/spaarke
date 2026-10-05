@@ -529,15 +529,30 @@ const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>>
  * Round 33 item 5: the per-person warning for a skipped colleague whose reason code this client does not know. Never
  * silent — the person is named, and the code is logged for support. The server's own `message` is still never shown.
  */
-const SKIPPED_PRINCIPAL_GENERIC = (name: string) => `${name} was not given access to this project.`;
+const SKIPPED_PRINCIPAL_GENERIC = (name: string) =>
+  `${name?.trim() ? name : UNNAMED_PERSON} was not given access to this project.`;
+
+/**
+ * Round 40 item 3: the `{name}` of a per-person warning whose person cannot be named — an empty id, or an id the host gave
+ * no name for. Never an empty name; the warning is shown either way (never silent). The ribbon script uses the same word.
+ */
+export const UNNAMED_PERSON = 'Someone';
+
+/** A skipped colleague's display name: the host's non-blank name for the id, else {@link UNNAMED_PERSON}. */
+function skippedPersonName(principalNames: Readonly<Record<string, string>> | undefined, systemUserId: string): string {
+  const name = systemUserId ? principalNames?.[systemUserId] : undefined;
+  return typeof name === 'string' && name.trim() ? name : UNNAMED_PERSON;
+}
 
 /**
  * The authored per-person warning for one skipped colleague, or `undefined` for a reason code this client does not know
- * (the caller then shows the generic warning, `SKIPPED_PRINCIPAL_GENERIC`, and logs the code).
+ * (the caller then shows the generic warning, `SKIPPED_PRINCIPAL_GENERIC`, and logs the code). A blank `name` is
+ * {@link UNNAMED_PERSON}.
  */
 export function describeSkippedPrincipal(reasonCode: string, name: string): string | undefined {
+  const who = name?.trim() ? name : UNNAMED_PERSON;
   return Object.prototype.hasOwnProperty.call(SKIPPED_PRINCIPAL_COPY, reasonCode)
-    ? SKIPPED_PRINCIPAL_COPY[reasonCode](name)
+    ? SKIPPED_PRINCIPAL_COPY[reasonCode](who)
     : undefined;
 }
 
@@ -823,7 +838,8 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
  * @param bffBaseUrl - Base URL for the BFF API (e.g. "https://spe-api-dev.azurewebsites.net/api")
  * @param principalNames - Optional. Display names of the `sharePrincipalIds` the host sent, keyed by systemuser id — the
  *   `{name}` of the per-person warnings (round 29). A host that names colleagues knows their names; the server's response
- *   carries only ids. An id with no name here is shown as the id.
+ *   carries only ids. An id with no (or a blank) name here, or an empty id, is shown as "Someone" (`UNNAMED_PERSON`, round
+ *   40 item 3) — never an empty name.
  * @returns IProvisionProjectResult — never throws.
  */
 export async function provisionSecureProject(
@@ -917,7 +933,7 @@ export async function provisionSecureProject(
     // Round 29: each colleague the server did not share to is a per-person warning, in authored copy.
     const warnings: string[] = [];
     for (const skipped of data.skippedPrincipals ?? []) {
-      const name = principalNames?.[skipped.systemUserId] ?? skipped.systemUserId;
+      const name = skippedPersonName(principalNames, skipped.systemUserId);
       const warning = describeSkippedPrincipal(skipped.reasonCode, name);
       if (warning) {
         warnings.push(warning);
