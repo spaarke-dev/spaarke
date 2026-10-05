@@ -1609,6 +1609,7 @@ public sealed class RecordContainerResolver
                 ["sprk_event"] = RecordKind.Intermediate,
                 ["sprk_invoice"] = RecordKind.Intermediate,
                 ["sprk_todo"] = RecordKind.Intermediate,
+                ["sprk_memo"] = RecordKind.Intermediate,
                 ["sprk_agreement"] = RecordKind.Intermediate,
                 ["sprk_budget"] = RecordKind.Intermediate,
                 ["sprk_reportcard"] = RecordKind.Intermediate,
@@ -1618,6 +1619,10 @@ public sealed class RecordContainerResolver
                 ["contact"] = RecordKind.Party,
                 ["account"] = RecordKind.Party,
                 ["sprk_organization"] = RecordKind.Party,
+                // Task 147 r1: a memo's sprk_regardingtimekeeper. A timekeeper is a person (a biller on an invoice line,
+                // live 2026-10-04: lookups to contact, invoice and invoice line), like a contact, which also carries an
+                // sprk_invoice lookup and is a party.
+                ["sprk_timekeeper"] = RecordKind.Party,
             };
 
         /// <summary>
@@ -1649,6 +1654,22 @@ public sealed class RecordContainerResolver
                     parties: CoreAncestorResolver.PartyRegardingColumns["sprk_todo"]),
                 ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks,
                     parties: CoreAncestorResolver.PartyRegardingColumns["sprk_event"]),
+                // Task 147 r1 (live sweep of sprk_memo, read-only, 2026-10-04: 37 columns, 15 sprk_ lookups plus the pair).
+                // The memo joined the CHILD taxonomy (owner round 2 item 6), so the resolver must READ it: until this
+                // entry a memo was a child with unknown links and every container resolution of one refused 409
+                // (verifier item 2). Its links are the to-do's, except that its report-card lookup is named
+                // sprk_reportcard. Parties: contact, organization and timekeeper. sprk_memo is in StampSourceColumns, so
+                // its intermediates are compared live like a to-do's (CoreAncestorStampTopologyLockstepTests).
+                ["sprk_memo"] = new(polymorphic: true,
+                [
+                    ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
+                    ("sprk_regardingservicerequest", "sprk_servicerequest"),
+                    ("sprk_regardinganalysis", "sprk_analysis"), ("sprk_regardingcommunication", "sprk_communication"),
+                    ("sprk_regardingdocument", "sprk_document"), ("sprk_regardingevent", "sprk_event"),
+                    ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingagreement", "sprk_agreement"),
+                    ("sprk_regardingbudget", "sprk_budget"), ("sprk_reportcard", "sprk_reportcard"),
+                ], parties: CoreAncestorResolver.PartyRegardingColumns["sprk_memo"]),
                 // Typed sprk_project / sprk_matter are its OWN root links; sprk_regardingagreement is an intermediate
                 // (f3). An invoice carries no copy, so a set sprk_regardingagreement stays HELD (task 156). Task 150 (owner
                 // round 10 item 11): these links are the ONLY thing that decides an invoice — its own sprk_issecure is not

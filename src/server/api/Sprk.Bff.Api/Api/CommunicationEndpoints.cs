@@ -80,6 +80,40 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // unified-access-control-r2 task 147 r1c (owner round 28 item 1: "re-files go through the existing families"; round 36
+        // item 2: 161's family had no re-file route, so the event route's rule applies here too). The browser's re-file of a
+        // communication (the Communication form's Connections links, ConnectionsWriteHandler) sends its regarding lookups and
+        // ADR-024 resolver fields here — ONLY those (the association status and override reason stay the caller's own
+        // update). The identity precondition, then 161's per-record gate AS THE CALLER (Write on the communication; the
+        // shape checked first), then the ONE re-file core (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved
+        // under, F3 on a move out of a secure record, the owner decided and assigned; an unfiled communication keeps its
+        // creator, E1), the core-ancestor re-stamp, and SecureChildReconciler.AfterRefileAsync (its mirror, and 148's pass over
+        // what is filed under it when it moved under, out of or between secure records).
+        group.MapPatch("/{id:guid}/filing", (
+                Guid id,
+                [Microsoft.AspNetCore.Mvc.FromBody] System.Text.Json.JsonElement body,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+                HttpContext httpContext,
+                ILogger<Program> logger,
+                CancellationToken ct) =>
+                ChildRecordEndpoints.UpdateAsync(
+                    "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
+                    filingOnly: true))
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Refile)
+            .WithName("RefileCommunication")
+            .WithDescription("Re-file a communication: its regarding lookups and regarding fields only, as the caller (Write on " +
+                "the communication, AppendTo on every record it is moved under, F3 on a move out of a secure record); the " +
+                "owner follows the records it is filed under, and so do the records filed under it")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+
         // GET /{id}/status was DELETED by unified-access-control-r2 task 161 (owner round 10 item 1): it had no caller
         // anywhere in the repository and is in no published API description (src/solutions/CopilotAgent/
         // spaarke-bff-openapi.yaml publishes only /send from this group), and it answered any signed-in caller with

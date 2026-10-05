@@ -11,6 +11,7 @@
  * @see approach-a-dynamic-form-renderer.md
  */
 
+import { childCreateFailure, createChildThroughBff } from "./services/childRecordWrites";
 import * as React from "react";
 import {
   FluentProvider,
@@ -36,7 +37,6 @@ import {
 import { FormRenderer } from "./components/form";
 import { MemoSection } from "./components/MemoSection";
 import { closeSidePane } from "./services/sidePaneService";
-import { getXrm } from "./utils/xrmAccess";
 import { IEventRecord } from "./types/EventRecord";
 import type { ILookupValue } from "./types/FormConfig";
 import {
@@ -612,16 +612,12 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       return;
     }
 
-    // No memo section visible — create one via WebApi
+    // No memo section visible — create one through the BFF (UAC-r2 task 147 r1, owner round 28 item 1: the server
+    // decides the memo's owner, the Secure Record Owners team when the event belongs to a secure record).
     if (!params.eventId) return;
-    const xrm = getXrm();
-    if (!xrm?.WebApi?.createRecord) {
-      console.warn("[App] Xrm.WebApi.createRecord not available");
-      return;
-    }
 
     try {
-      await xrm.WebApi.createRecord("sprk_memo", {
+      await createChildThroughBff("sprk_memo", {
         sprk_name: "Event Memo",
         sprk_memobody: "",
         "sprk_RegardingEvent@odata.bind": `/sprk_events(${params.eventId})`,
@@ -635,6 +631,8 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       });
     } catch (err) {
       console.error("[App] Error creating memo:", err);
+      // UAC-r2 task 147 r1c (owner round 28 item 1: "refusals show the ProblemDetails message"): the server's own words.
+      setFooterMessage(createErrorMessage(childCreateFailure(err, "memo")));
     }
   }, [params.eventId]);
 
@@ -663,14 +661,11 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    */
   const handleAddTodo = React.useCallback(async () => {
     if (!params.eventId) return;
-    const xrm = getXrm();
-    if (!xrm?.WebApi?.createRecord) {
-      console.warn("[App] Xrm.WebApi.createRecord not available");
-      return;
-    }
 
+    // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5) — the server decides the to-do's owner and
+    // derives its core-ancestor stamp from the event (WP-1); nothing is created as the user.
     try {
-      await xrm.WebApi.createRecord("sprk_todo", {
+      await createChildThroughBff("sprk_todo", {
         sprk_name: "New To Do",
         statecode: 0,
         statuscode: 1,
@@ -679,6 +674,8 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       console.log("[App] sprk_todo created for event:", params.eventId);
     } catch (err) {
       console.error("[App] Error creating to-do:", err);
+      // UAC-r2 task 147 r1c (owner round 28 item 1): the refusal is shown — the to-do was NOT created.
+      setFooterMessage(createErrorMessage(childCreateFailure(err, "to-do")));
     }
   }, [params.eventId]);
 

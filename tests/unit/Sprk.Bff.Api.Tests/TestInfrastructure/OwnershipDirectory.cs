@@ -181,10 +181,14 @@ internal sealed class OwnershipDirectory
         return this;
     }
 
+    /// <summary>Task 147 r1: called after every owner assignment is recorded (a second world mirroring the move).</summary>
+    public Action<string, Guid, Guid>? OnAssign { get; set; }
+
     public void Assign(string entity, Guid id, Dictionary<string, object> fields)
     {
         var owner = (EntityReference)fields["ownerid"];
         Assignments.Add((entity, id, owner.Id));
+        OnAssign?.Invoke(entity, id, owner.Id);
         if (!_ignoreAssignments && _records.TryGetValue((entity, id), out var row))
         {
             row["owningteam"] = new EntityReference("team", owner.Id);

@@ -694,6 +694,46 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
     }
 
     // =============================================================================================
+    // PATCH /{id}/filing — task 147 r1c (owner round 36 item 2): the re-file, in 161's family
+    // =============================================================================================
+
+    private static readonly Dictionary<string, object?> FilingBody = new()
+    {
+        ["sprk_RegardingMatter@odata.bind"] = null,
+        ["sprk_regardingrecordid"] = null,
+    };
+
+    [Fact]
+    public async Task Filing_ABodyNamingAnythingButTheFiling_Is400_BeforeAnyRightsQuestion()
+    {
+        var id = Guid.NewGuid();
+        VisibleCommunication(id);
+        _host.Probe.Grant(CommunicationSet, id, AccessRights.Read | AccessRights.Write);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Patch, $"/api/communications/{id}/filing",
+            new Dictionary<string, object?> { ["sprk_RegardingMatter@odata.bind"] = null, ["sprk_associationstatus"] = null }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("child_record.not_filing");
+        _host.Probe.Calls.Should().BeEmpty("the shape is answered before any Dataverse question");
+        AssertNothingDownstream();
+    }
+
+    [Fact]
+    public async Task Filing_ByAReadOnlyCaller_Is403_InTheFamilysOwnShape_AndNothingDownstreamRuns()
+    {
+        var id = Guid.NewGuid();
+        VisibleCommunication(id);
+        _host.Probe.Grant(CommunicationSet, id, AccessRights.Read | AccessRights.AppendTo);
+
+        var denied = await _host.SendAsync(Request(HttpMethod.Patch, $"/api/communications/{id}/filing", FilingBody));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await denied.Content.ReadAsStringAsync()).Should().Contain(CommunicationRecordAuthorizationFilter.RefileDenyCode);
+        AssertNothingDownstream();
+    }
+
+    // =============================================================================================
     // POST /send and /send-bulk — every body id, on every type and mode, once, before the first send
     // =============================================================================================
 
@@ -1013,7 +1053,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         "send", "send-bulk", "template/render", "archive", "suggest-associations", "confirm-affinity",
         "threads", "create-task", "proposals/apply", "proposals/dismiss", "proposals/create-task/apply",
         "proposals/undo", "tasks/undo", "accounts/verify", "threads/rename", "threads/pin", "threads/deactivate",
-        "message/deactivate",
+        "message/deactivate", "filing",
     };
 
     [Theory]
@@ -1081,17 +1121,17 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         Guid? threadId = null,
         Guid? inheritFrom = null,
         (string Type, Guid Id)? association = null) => new
-    {
-        to = new[] { "recipient@outside.com" },
-        subject = "Re: the matter",
-        body = "<p>Please see attached.</p>",
-        communicationType = type,
-        sendMode,
-        attachmentDocumentIds = attachments,
-        threadId,
-        inheritRegardingFromCommunicationId = inheritFrom,
-        associations = association is { } a ? new[] { new { entityType = a.Type, entityId = a.Id } } : null,
-    };
+        {
+            to = new[] { "recipient@outside.com" },
+            subject = "Re: the matter",
+            body = "<p>Please see attached.</p>",
+            communicationType = type,
+            sendMode,
+            attachmentDocumentIds = attachments,
+            threadId,
+            inheritRegardingFromCommunicationId = inheritFrom,
+            associations = association is { } a ? new[] { new { entityType = a.Type, entityId = a.Id } } : null,
+        };
 
     private static object BulkBody(string[]? attachments = null, (string Type, Guid Id)? association = null) => new
     {
@@ -1126,6 +1166,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             "threads/pin" => Request(HttpMethod.Patch, $"/api/communications/threads/{id}/pin", new { pinned = true }, withToken, withOid),
             "threads/deactivate" => Request(HttpMethod.Delete, $"/api/communications/threads/{id}", null, withToken, withOid),
             "message/deactivate" => Request(HttpMethod.Delete, $"/api/communications/{id}", null, withToken, withOid),
+            "filing" => Request(HttpMethod.Patch, $"/api/communications/{id}/filing", FilingBody, withToken, withOid),
             _ => throw new ArgumentOutOfRangeException(nameof(route), route, null),
         };
     }
@@ -1195,6 +1236,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
                 _host.Probe.Grant(ThreadSet, id, AccessRights.Read | AccessRights.Write);
                 break;
             case "message/deactivate":
+            case "filing":
                 VisibleCommunication(id);
                 _host.Probe.Grant(CommunicationSet, id, AccessRights.Read | AccessRights.Write);
                 break;

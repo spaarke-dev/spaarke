@@ -24,6 +24,8 @@
  * @see workAssignmentService.cascade.test.ts (sibling FR-WIZ-04 reference shape)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
 import type { ICreateEventFormState } from '../formTypes';
@@ -141,7 +143,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -162,7 +164,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(
       makeForm({ regardingRecordId: 'matter-guid-1', regardingRecordName: 'Some Matter' }),
       'sprk_matter'
@@ -183,7 +185,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: null,
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -200,7 +202,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-file-index',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -219,7 +221,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -246,7 +248,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -264,7 +266,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       { userHasBu: false }
     );
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -286,7 +288,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm(), undefined, {
       getCurrentUserId: () => USER_GUID,
     });

@@ -12,6 +12,8 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.{ts,tsx}'],
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+    // v1.7.0 (UAC-r2 task 147 r1): the BFF re-file bootstraps @spaarke/auth lazily; the handler suites inject the re-file.
+    '^@spaarke/auth$': '<rootDir>/__tests__/__mocks__/spaarkeAuth.ts',
     // Task 020: the Layer-1 connections logic now lives in the shared lib
     // (`@spaarke/communication-components`). Map the package specifiers to the
     // shared TS source so tests exercise the re-homed logic directly. The

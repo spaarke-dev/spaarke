@@ -34,6 +34,8 @@ module.exports = {
     // `generated/ManifestTypes` is emitted by the PCF build (gitignored); map it
     // to a stub so the App/index compile under Jest without a prior build.
     'generated/ManifestTypes$': '<rootDir>/__tests__/__mocks__/manifestTypes.ts',
+    // v1.6.0 (UAC-r2 task 147 r1): the BFF re-file bootstraps @spaarke/auth lazily; the suites inject the re-file.
+    '^@spaarke/auth$': '<rootDir>/__tests__/__mocks__/spaarkeAuth.ts',
     // The shared lib has its OWN node_modules carrying React 19 (it targets Code
     // Pages too). Left unmapped, a deep-imported shared source file resolves
     // `react` against THAT copy — a second React instance alongside this PCF's

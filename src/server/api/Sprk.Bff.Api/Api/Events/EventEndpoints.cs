@@ -42,6 +42,13 @@ namespace Sprk.Bff.Api.Api.Events;
 /// <c>POST /{id}/cancel</c> and <c>GET /{id}/logs</c> had no caller in the repository and are in no published API
 /// description (the Copilot plugin publishes list, get, create and complete only), so task 159 deleted them rather
 /// than gating them. Re-adding any of them needs a caller, a gate, and a row in the route authorization ledger.</para>
+/// <para><b>The re-file (task 147 r1c, owner round 36).</b> <c>PATCH /{id}/filing</c> is the event's ONE re-file route
+/// (the browser's: the regarding picker on a saved event, the event side pane's regarding lookups). It changes only the
+/// filing — the regarding lookups and their ADR-024 resolver fields — behind a shape filter and
+/// <c>RecordRouteAccessAuthorizationFilter("write")</c> on <c>sprk_events({id})</c>; the re-file core then asks AppendTo
+/// on every new parent and F3 on a move out of a secure record, assigns the owner, re-stamps, mirrors and moves what is
+/// filed under the event (<see cref="ChildRecordEndpoints.UpdateAsync"/>). Every other change to an event stays the
+/// caller's own Dataverse update.</para>
 /// </remarks>
 public static class EventEndpoints
 {
@@ -112,6 +119,32 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict) // task 146: no owner resolvable
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // PATCH /api/v1/events/{id}/filing - Re-file the event (unified-access-control-r2 task 147 r1c; owner round 28 item 1
+        // and round 36). Task 159 deleted the general PUT /{id} (round 10 item 1: no caller), so the event's ONE re-file route
+        // lives here, in 159's family ("add the route there if the family lacks it; never a second one"). It changes ONLY the
+        // filing — the regarding lookups and their ADR-024 resolver fields: the shape filter first (no I/O, so a 400 never
+        // becomes a 403); then 159's as-caller check on the event itself (no Read → the uniform 404; Read without Write →
+        // 403); then the ONE re-file core (OwnedChildWrite.RefileAsync): AppendTo on every record the event is moved under,
+        // 146's F3 on a move out of a secure record, the owner decided before the caller's own PATCH and assigned after it,
+        // read back; then 156's core-ancestor re-stamp; then the row's mirror and 148's pass over everything filed under it
+        // when it moved under, out of or between secure records (SecureChildReconciler.AfterRefileAsync).
+        group.MapPatch("/{id:guid}/filing", RefileEventAsync)
+            .AddEndpointFilter(ValidateFilingRequestAsync)
+            .AddRecordRouteAccessAuthorizationFilter("write", EventEntitySet, "id")
+            .WithName("RefileEvent")
+            .WithSummary("Re-file an event (change only what it is filed under)")
+            .WithDescription("Takes the Web API payload of the event's regarding lookups and regarding fields, and nothing else. " +
+                "The caller needs Write on the event, AppendTo on every record it is moved under and, to move it out of a " +
+                "secure record, Full Access on that record or to be the event's creator; the owner is re-derived and assigned, " +
+                "the core-ancestor stamp re-derived, and the records filed under the event follow it. An event the caller " +
+                "cannot read gets the same 404 as one that does not exist.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         // POST /api/v1/events/{id}/complete - Mark event as completed
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
             .AddRecordRouteAccessAuthorizationFilter("write", EventEntitySet, "id")
@@ -127,6 +160,35 @@ public static class EventEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
+
+    // =============================================================================================================
+    // PATCH /{id}/filing — the event's re-file (task 147 r1c, round 36)
+    // =============================================================================================================
+
+    /// <summary>
+    /// The filing route's request shape (no I/O), BEFORE the authorization filter: only the regarding lookups and the ADR-024
+    /// resolver fields (<see cref="ChildRecordEndpoints.FilingShapeProblem"/>).
+    /// </summary>
+    internal static async ValueTask<object?> ValidateFilingRequestAsync(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var body = context.Arguments.OfType<System.Text.Json.JsonElement>().FirstOrDefault();
+        return ChildRecordEndpoints.FilingShapeProblem(body, "sprk_event") ?? await next(context);
+    }
+
+    /// <summary>PATCH /api/v1/events/{id}/filing — the ONE browser re-file core, filing columns only.</summary>
+    internal static Task<IResult> RefileEventAsync(
+        Guid id,
+        [FromBody] System.Text.Json.JsonElement body,
+        [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        [FromServices] Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        CancellationToken ct) =>
+        ChildRecordEndpoints.UpdateAsync(
+            "sprk_event", id, body, user, ownership, restamper, children, httpContext, logger, ct, filingOnly: true);
 
     // =============================================================================================================
     // Request-shape validation (no I/O) — runs BEFORE the authorization filter on POST /

@@ -81,6 +81,17 @@ public static class RecordCreatorPerson
         "sprk_communicationattachment", "sprk_communicationparticipant", "sprk_emailreviewlog", "sprk_analysis",
         "sprk_analysisoutput", "sprk_emailartifact", "sprk_attachmentartifact", "sprk_fileversion", "sprk_invoice",
         "sprk_spendsignal", "sprk_spendsnapshot",
+        // Task 147 r1 (owner round 28 item 1): the browser's memo and report-card creates are app-only too (G5), so they
+        // record the person who asked. Added to scripts/Set-ChildRecordCreatorPersonSchema.ps1 in the same change; the
+        // column lands in dev through that script's dry run / -Apply / -Verify (manual gate G147-5).
+        "sprk_memo", "sprk_reportcard",
+        // Task 147 r1 (owner round 28 item 2, E2): the secure-record ribbon's "New Budget" creates a budget app-only
+        // through POST /api/v1/child-records/sprk_budget, so it records the person who asked too (same script, gate G147-5).
+        "sprk_budget",
+        // Task 147 r1c (E2, the live inventory of every main form): "New KPI Assessment" (matter, project and report card
+        // forms) and "New Billing Event" (invoice form) create through the same route, so they record the person too
+        // (same script, gate G147-5).
+        "sprk_kpiassessment", "sprk_billingevent",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

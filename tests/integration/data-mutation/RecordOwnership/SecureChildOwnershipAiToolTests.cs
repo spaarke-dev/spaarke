@@ -71,7 +71,20 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         _appOnly
             .Setup(a => a.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) => _appCreates.Add((t, id, f)))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) =>
+            {
+                // Task 147 r1c-v1 (verifier item 1): the app-only create is a Web API PATCH too — a body naming a lookup by
+                // its logical name is refused (the DataverseWebApiService throws on the non-success status).
+                if (ScriptedUserClient.UndeclaredPropertyIn(t, JsonSerializer.Serialize(f), "ownerid", "sprk_CreatedByPerson") is { } undeclared)
+                {
+                    throw new HttpRequestException(
+                        $"0x80060888 Could not find a property named '{undeclared}' on type 'Microsoft.Dynamics.CRM.{t}'.",
+                        null, System.Net.HttpStatusCode.BadRequest);
+                }
+
+                _appCreates.Add((t, id, f));
+                MaterializeInShareWorld(t, id, f);
+            })
             .Returns(Task.CompletedTask);
     }
 
@@ -654,6 +667,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
             ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
             ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
+            // Task 147 r1: the browser child-record routes' tables.
+            ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
+            ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
+            ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -696,8 +713,62 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // Task 147 r1c (round 34 item 6): the document's event lookup is sprk_relatedevent / sprk_RelatedEvent
+                // (Spaarke.Dataverse.DocumentLinkFields, live metadata). There is NO sprk_event column on sprk_document.
+                ("sprk_relatedevent", "sprk_event", "sprk_RelatedEvent"),
             },
-            ["task"] = new[] { ("regardingobjectid", "sprk_matter", "regardingobjectid_sprk_matter") },
+            // Task 147 r1c: the remaining census create/re-file tables (live navigation-property casing).
+            ["sprk_invoice"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            ["sprk_reportcard"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
+            ["sprk_analysis"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
+            // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
+            // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
+            // lower-case (sprk_matter) live.
+            ["sprk_kpiassessment"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            ["sprk_billingevent"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_matter"),
+                ("sprk_project", "sprk_project", "sprk_project"),
+            },
+            // A polymorphic lookup: one navigation property per target table (task 147 r1c-v1: a clear goes through one).
+            ["task"] = new[]
+            {
+                ("regardingobjectid", "sprk_matter", "regardingobjectid_sprk_matter"),
+                ("regardingobjectid", "sprk_project", "regardingobjectid_sprk_project"),
+            },
+            // Task 147 r1 (live navigation-property casing: the schema name).
+            ["sprk_memo"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+            },
+            ["sprk_event"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
+            // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
+            ["sprk_budget"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
         };
 
         public HashSet<string> Held { get; } = new(StringComparer.OrdinalIgnoreCase)
@@ -706,18 +777,97 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreateActivity", "prvAppendActivity", "prvCreatesprk_matter", "prvAppendsprk_matter",
             "prvCreatesprk_workassignment", "prvAppendsprk_workassignment",
             "prvCreatesprk_project", "prvAppendsprk_project",
+            "prvCreatesprk_memo", "prvAppendsprk_memo", "prvCreatesprk_event", "prvAppendsprk_event",
+            "prvCreatesprk_budget", "prvAppendsprk_budget",
+            "prvCreatesprk_document", "prvAppendsprk_document", "prvCreatesprk_invoice", "prvAppendsprk_invoice",
+            "prvCreatesprk_reportcard", "prvAppendsprk_reportcard", "prvCreatesprk_analysis", "prvAppendsprk_analysis",
+            "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
+        public HashSet<Guid> Missing { get; } = new();
 
         /// <summary>Records the caller holds Full Access on (Delete as well) — F3's question (task 146 c1).</summary>
         public HashSet<Guid> FullAccessOn { get; } = new();
         public HashSet<string> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public HashSet<Guid> InvisibleRows { get; } = new();
+
+        /// <summary>
+        /// Task 147 r1c-v1 (verifier item 2): rows that EXIST but the caller may not read — Dataverse answers a retrieve of
+        /// one with 403 (the read privilege's depth does not reach it), where a row that does not exist answers 404.
+        /// </summary>
+        public HashSet<Guid> UnreadableRows { get; } = new();
+
+        /// <summary>Task 147 r1: the owning team a row read as the caller reports (<c>_owningteam_value</c>).</summary>
+        public Dictionary<Guid, Guid> OwningTeamOf { get; } = new();
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
+
+        /// <summary>Task 147 r1c-v1: every write Dataverse refused because its body named a property the type does not declare.</summary>
+        public List<(string Path, string Property)> RefusedBodies { get; } = new();
+
+        /// <summary>
+        /// Task 147 r1c-v1 (verifier item 1): the property of <paramref name="jsonBody"/> the Web API would REFUSE on
+        /// <paramref name="table"/>, or <c>null</c>. A lookup is declared on the entity type only as its single-valued
+        /// navigation property (case-sensitive, <c>sprk_RegardingMatter</c>) and the read-only <c>_…_value</c>; its logical
+        /// name is not a property — live, spaarkedev1: <c>0x80060888 Could not find a property named 'sprk_regardingmatter'
+        /// on type 'Microsoft.Dynamics.CRM.sprk_todo'</c>. So a body naming a lookup by its logical name (to set OR to
+        /// clear it), or binding a navigation property the type does not declare, is refused, as Dataverse refuses it.
+        /// <paramref name="alsoDeclared"/>: navigation properties the scripted table list leaves out (the server's own
+        /// owner and creator-person binds on the app-only create).
+        /// </summary>
+        internal static string? UndeclaredPropertyIn(string table, string jsonBody, params string[] alsoDeclared)
+        {
+            var lookups = Lookups.GetValueOrDefault(table, Array.Empty<(string Column, string Target, string Navigation)>());
+            using var document = JsonDocument.Parse(jsonBody);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Name.EndsWith("@odata.bind", StringComparison.Ordinal))
+                {
+                    var navigation = property.Name[..^"@odata.bind".Length];
+                    if (!lookups.Any(l => string.Equals(l.Navigation, navigation, StringComparison.Ordinal))
+                        && !alsoDeclared.Contains(navigation, StringComparer.Ordinal))
+                    {
+                        return property.Name;
+                    }
+
+                    continue;
+                }
+
+                if (property.Name.Contains('@', StringComparison.Ordinal))
+                    continue; // an instance annotation
+
+                if (lookups.Any(l => string.Equals(l.Column, property.Name, StringComparison.OrdinalIgnoreCase)))
+                    return property.Name;
+            }
+
+            return null;
+        }
+
+        /// <summary>The table a Web API path addresses (<c>sprk_todos(…)</c> or <c>/api/data/v9.2/sprk_todos</c>).</summary>
+        private static string? TableOf(string path)
+        {
+            var segment = path.TrimEnd('/');
+            segment = segment[(segment.LastIndexOf('/') + 1)..];
+            var set = segment.Contains('(', StringComparison.Ordinal) ? segment[..segment.IndexOf('(')] : segment;
+            return EntitySets.FirstOrDefault(kv => kv.Value == set).Key;
+        }
+
+        /// <summary>Dataverse's answer to a body naming an undeclared property: 400, nothing written.</summary>
+        private DataverseUserResponse? RefuseUndeclared(string path, string jsonBody)
+        {
+            if (TableOf(path) is not { } table || UndeclaredPropertyIn(table, jsonBody) is not { } property)
+                return null;
+
+            RefusedBodies.Add((path, property));
+            var name = property.EndsWith("@odata.bind", StringComparison.Ordinal) ? property[..^"@odata.bind".Length] : property;
+            return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest,
+                $"0x80060888 Could not find a property named '{name}' on type 'Microsoft.Dynamics.CRM.{table}'.");
+        }
 
         [GeneratedRegex(@"^EntityDefinitions\(LogicalName='(?<t>[a-z_]+)'\)(?<rest>.*)$")]
         private static partial Regex Definition();
@@ -739,6 +889,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(Target().Match(path).Groups["id"].Value);
+                if (Missing.Contains(id))
+                    return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
@@ -798,9 +950,17 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
             // A row read as the caller: "{set}({id})?$select=…".
             var rowId = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);
-            return InvisibleRows.Contains(rowId)
-                ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found.")
-                : Ok(new { id = rowId });
+            if (InvisibleRows.Contains(rowId))
+                return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Not found.");
+            if (UnreadableRows.Contains(rowId))
+            {
+                return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied,
+                    $"Principal user (Id={me:D}, type=8) is missing prvRead privilege on the record (Id={rowId:D}).");
+            }
+            var rowBody = new Dictionary<string, object?> { ["id"] = rowId };
+            if (OwningTeamOf.TryGetValue(rowId, out var owningTeam))
+                rowBody["_owningteam_value"] = owningTeam.ToString("D");
+            return Ok(rowBody);
         }
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
@@ -808,6 +968,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken)
         {
+            if (RefuseUndeclared(absoluteApiPath, jsonBody) is { } refused)
+                return Task.FromResult(refused);
+
             Posts.Add((absoluteApiPath, jsonBody));
             return Task.FromResult(Ok(new { sprk_todoid = Guid.NewGuid(), activityid = Guid.NewGuid() }, 201));
         }
@@ -816,6 +979,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             if (PatchStatus >= 400)
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
+            if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
+                return Task.FromResult(refused);
 
             Patches.Add((relativePath, jsonBody));
             return Task.FromResult(DataverseUserResponse.Ok(204, null));

@@ -281,7 +281,15 @@ public class RecordOwnerAssignmentCensusTests
             "The one owned-create path of the chat tools: as-the-caller checks, the resolver's owner, the app-only create."),
         new UnscannedWriter("DataverseUpdateRecordHandler.cs", "run-as-user PATCH of any table (lookups allowed)",
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
-            + "read back); any other table moved under a SECURE record is refused."),
+            + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
+            + "OwnedChildWrite.RefileAsync."),
+
+        // ── task 147 r1 (owner round 28 item 1): the browser's child writers, through the BFF ─────────────────────────
+        new UnscannedWriter("ChildRecordEndpoints.cs", "app-only create (G5) + run-as-user re-file PATCH of a child table",
+            "POST /api/v1/child-records/{table}: OwnedChildWrite.CreateAsync (as-the-caller checks, the resolver's owner, the "
+            + "app-only create). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
+            + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
+            + "caller's own update."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -1248,7 +1256,7 @@ public class RecordOwnerAssignmentCensusTests
     /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself). r2: the chat tools'
     /// one owned-create path (<c>OwnedChildWrite.CreateAsync</c>, itself an UnscannedWriter that calls the resolver).</summary>
     private static readonly Regex ResolverCall = new(
-        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync)\s*\(",
+        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync|OwnedChildWrite\.RefileAsync)\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>An owner write onto a row about to be created.</summary>
@@ -1396,8 +1404,13 @@ public class RecordOwnerAssignmentCensusTests
         Assert.True(stale.Count == 0, "Stale run-as-user classification entries:\n" + string.Join("\n", stale));
     }
 
-    /// <summary>A POST or PATCH through the run-as-user client field (<c>_dataverse</c> of type <c>IDataverseUserClient</c>).</summary>
-    private static readonly Regex RunAsUserWrite = new(@"\b_dataverse\s*\.\s*(?:PostAsync|PatchAsync)\s*\(", RegexOptions.Compiled);
+    /// <summary>
+    /// A POST or PATCH through the run-as-user client: the handlers' field <c>_dataverse</c>, or — task 147 r1 — the
+    /// <c>user</c> parameter the shared re-file core (<c>OwnedChildWrite.RefileAsync</c>) and the browser child-record
+    /// routes take it as. The census had seen only the field name, so a re-file core taking the client as a parameter would
+    /// have been invisible to it.
+    /// </summary>
+    private static readonly Regex RunAsUserWrite = new(@"\b(?:_dataverse|user)\s*\.\s*(?:PostAsync|PatchAsync)\s*\(", RegexOptions.Compiled);
 
     /// <summary>Files that POST or PATCH through the run-as-user client and are classified nowhere.</summary>
     private static List<string> UnclassifiedRunAsUserWrites(IReadOnlyDictionary<string, string> files)
@@ -1434,9 +1447,17 @@ public class RecordOwnerAssignmentCensusTests
                 "}",
             }),
             ["DataverseSearchDataHandler.cs"] = "IDataverseUserClient _dataverse; _dataverse.PostAsync(x);",
+            // Task 147 r1: the client held as a PARAMETER named user (the shared re-file core's shape).
+            ["NewParameterRefile.cs"] = SourceScan.CodeText(new[]
+            {
+                "internal static class NewParameterRefile",
+                "{",
+                "    static Task A(IDataverseUserClient user) => user.PatchAsync($\"{set}({id:D})\", body, ct);",
+                "}",
+            }),
         };
 
-        Assert.Equal(new[] { "NewCreateHandler.cs", "NewRefileHandler.cs" }, UnclassifiedRunAsUserWrites(files));
+        Assert.Equal(new[] { "NewCreateHandler.cs", "NewRefileHandler.cs", "NewParameterRefile.cs" }, UnclassifiedRunAsUserWrites(files));
     }
 
     [Fact(DisplayName = "Task 146: every seam refuses a create with no resolved owner team")]

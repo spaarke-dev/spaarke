@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -11,7 +12,6 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
-using Microsoft.Xrm.Sdk;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -75,6 +75,13 @@ public enum CommunicationRecordRoute
 
     /// <summary><c>DELETE /api/communications/{id}</c> — Write on the message.</summary>
     MessageDeactivate,
+
+    /// <summary>
+    /// <c>PATCH /api/communications/{id}/filing</c> (unified-access-control-r2 task 147 r1c, owner round 36 item 2) — the body
+    /// names only filing columns (400 first, no I/O), then Write on the communication. AppendTo on each record it is moved
+    /// under and F3 on a move out of a secure record are asked by the re-file core in the handler, as the caller.
+    /// </summary>
+    Refile,
 }
 
 /// <summary>
@@ -164,6 +171,9 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
     public const string CreateTaskApplyDenyReasonCode = "sdap.access.deny.communication.create_task_apply";
     public const string ArchiveDenyReasonCode = "sdap.access.deny.communication.archive";
 
+    /// <summary>Task 147 r1c: the filing route's one deny code (unknown, invisible and unwritable alike).</summary>
+    public const string RefileDenyCode = "COMMUNICATION_REFILE_FORBIDDEN";
+
     private readonly CommunicationRecordRoute _route;
 
     public CommunicationRecordAuthorizationFilter(CommunicationRecordRoute route) => _route = route;
@@ -197,7 +207,8 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             CommunicationRecordRoute.ThreadRename
                 or CommunicationRecordRoute.ThreadPin
                 or CommunicationRecordRoute.ThreadDeactivate => await gate.AuthorizeThreadWriteAsync(),
-            CommunicationRecordRoute.MessageDeactivate => await gate.AuthorizeMessageWriteAsync(),
+            CommunicationRecordRoute.MessageDeactivate
+                or CommunicationRecordRoute.Refile => await gate.AuthorizeMessageWriteAsync(),
             _ => Denial.Problem(new SdapProblemException("COMMUNICATION_ROUTE_UNDECLARED", "Forbidden", "Access denied", 403)),
         };
 
@@ -299,8 +310,16 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
         {
             CommunicationRecordRoute.CreateRecordThread => RecordThreadTarget().Invalid,
             CommunicationRecordRoute.TemplateRender => TemplateRegardingTarget().Invalid,
+            CommunicationRecordRoute.Refile => FilingShape(),
             _ => null,
         };
+
+        /// <summary>Task 147 r1c: the filing route's body — only the regarding lookups and resolver fields (the shared rule).</summary>
+        private Denial? FilingShape() =>
+            ChildRecordEndpoints.FilingShapeProblem(
+                    _context.Arguments.OfType<JsonElement>().FirstOrDefault(), "sprk_communication") is { } problem
+                ? Denial.Of(problem)
+                : null;
 
         /// <summary>The thread's regarding entity set, or the 400 the request gets for its shape.</summary>
         private (string? EntitySet, Denial? Invalid) RecordThreadTarget()
@@ -380,6 +399,7 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             CommunicationRecordRoute.ThreadRename => ThreadWriteDenial("THREAD_RENAME_FORBIDDEN"),
             CommunicationRecordRoute.ThreadPin => ThreadWriteDenial("THREAD_PIN_FORBIDDEN"),
             CommunicationRecordRoute.ThreadDeactivate => ThreadWriteDenial("THREAD_DELETE_FORBIDDEN"),
+            CommunicationRecordRoute.Refile => RefileDenial(),
             _ => MessageWriteDenial(),
         };
 
@@ -517,6 +537,14 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             code: code,
             title: "Forbidden",
             detail: "The thread does not exist or is not visible to the caller.",
+            statusCode: 403));
+
+        /// <summary>Task 147 r1c: the filing route's deny — the same words for a communication that does not exist, one the
+        /// caller cannot see and one they cannot write (no existence oracle).</summary>
+        private static Denial RefileDenial() => Denial.Problem(new SdapProblemException(
+            code: RefileDenyCode,
+            title: "Forbidden",
+            detail: "The communication does not exist or is not visible to the caller, or the caller may not change it.",
             statusCode: 403));
 
         /// <summary>The message-deactivate handler's own visibility-deny body.</summary>

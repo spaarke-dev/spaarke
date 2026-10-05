@@ -319,6 +319,15 @@ public class RouteAuthorizationGuardTests
             + "rewriting the caller's FetchXML against their accessible-record set — a query-shaping "
             + "mechanism with no route-level equivalent."),
 
+        new GovernedFile("Api/ChildRecordEndpoints.cs", Scope.HandlerAuthorized,
+            "unified-access-control-r2 task 147 r1 (owner round 28 item 1): POST /api/v1/child-records/{table} and PATCH "
+            + "/api/v1/child-records/{table}/{id} — the browser's child-record creates and re-files. The decision is in the "
+            + "handler, AS THE CALLER, because the records to authorize against are whatever the Web API payload binds: "
+            + "the table's Create/Append privilege, AppendTo on EVERY bound record (a record the caller cannot append to "
+            + "and one that does not exist answer the same 404), no field-secured or server-owned column; a re-file "
+            + "also needs the row readable (uniform 404) and F3 to leave a secure record. Pinned through the real "
+            + "handlers by tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs."),
+
         // ---- Compose: ONE governed file became EIGHT (compose-r8 task 070) ----
         // Api/ComposeEndpoints.cs was split by reason-to-change. It is the same route surface, keyed the
         // same way (documentSpeId / documentId / sessionId), authorized the same way (group-level
@@ -973,7 +982,17 @@ public class RouteAuthorizationGuardTests
     //
     // Reconcile at integration: sibling sweep tasks (159-169) move this count too; the merged value is the
     // master count after every retired and added file, recounted, not a sum of deltas.
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 118 (2026-10-04, unified-access-control-r2 task 147 r1c, owner round 28 item 1 + round 36; written as
+    // 122 -> 123 on the task branch, before 160, 163 and 164 landed here):
+    //
+    //   147  +1  Api/ChildRecordEndpoints.cs ADDED — the browser's child-record writes through the BFF (G5 create,
+    //            re-file through the shared core). It writes Dataverse content keyed by caller-chosen ids, so it IS
+    //            governed: classified HandlerAuthorized above, with the reason. The re-file routes the events and
+    //            communications families gained (PATCH /api/v1/events/{id}/filing — round 36, after task 159 deleted
+    //            the general PUT — and PATCH /api/communications/{id}/filing) live in existing files and call the same
+    //            handler, so the census cannot see them.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

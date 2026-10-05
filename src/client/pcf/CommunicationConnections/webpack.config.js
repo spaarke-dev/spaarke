@@ -36,6 +36,9 @@ module.exports = {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
       '@spaarke/sdap-client$': false,
+      // v1.7.0 (UAC-r2 task 147 r1): the shared lib's root barrel reaches SprkChat's lazy `import('pdfjs-dist')`, whose
+      // ESM build the PCF toolchain's babel cannot parse. This control never previews a PDF - stub the dead chunk.
+      'pdfjs-dist$': false,
     },
   },
   module: {

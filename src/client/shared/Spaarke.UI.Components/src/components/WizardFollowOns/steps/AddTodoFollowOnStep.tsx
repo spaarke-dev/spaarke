@@ -36,6 +36,7 @@ import type { ICreateTodoFormState, AssociationResult } from '../../CreateTodoWi
 import { TodoService } from '../../CreateTodoWizard/todoService';
 import type { ICreateTodoResult } from '../../CreateTodoWizard/todoService';
 import type { IDataService } from '../../../types/serviceInterfaces';
+import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
 // ---------------------------------------------------------------------------
@@ -121,13 +122,19 @@ export type CreatedChildRef = AssociationResult;
  * @param formValues   To Do fields collected by `AddTodoFollowOnStep`.
  * @param child        The just-created child record (regarding target). MUST be
  *                     one of the `sprk_todo` regarding targets.
+ * @param authenticatedFetch BFF-authenticated fetch and
+ * @param bffBaseUrl   its base URL — UAC-r2 task 147 r1 (owner round 28 item 1): the To Do is created through the
+ *                     BFF (G5), which decides its owner. Without them the create is refused (never created as the
+ *                     user), unless `dataService` already routes child writes through the BFF.
  */
 export async function createTodoRegardingChild(
   dataService: IDataService,
   formValues: ICreateTodoFormState,
-  child: CreatedChildRef
+  child: CreatedChildRef,
+  authenticatedFetch?: AuthenticatedFetchFn,
+  bffBaseUrl?: string
 ): Promise<ICreateTodoResult> {
-  const todoService = new TodoService(dataService);
+  const todoService = new TodoService(dataService, authenticatedFetch, bffBaseUrl);
   return todoService.createTodo(formValues, {
     entityType: child.entityType,
     recordId: child.recordId,

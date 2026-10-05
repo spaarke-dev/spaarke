@@ -34,6 +34,7 @@
  *   - No 6-layer navigation detection / side pane cleanup
  */
 
+import { createTodoThroughBff } from '../services/childRecordWrites';
 import * as React from "react";
 import {
   makeStyles,
@@ -757,11 +758,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       }
       void (async () => {
         try {
-          await webApi.createRecord('sprk_todo', payload);
+          // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5) — the server decides the owner.
+          await createTodoThroughBff(payload);
           refetch();
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[SmartToDo] three-field quickAdd create failed:', err);
+          // UAC-r2 task 147 r1c (owner round 28 item 1: "refusals show the ProblemDetails message"): the server's own
+          // words reach the user — the to-do was NOT created (nothing is left owned by the user).
+          setAddError(err instanceof Error && err.message ? err.message : 'Failed to create to-do item. Please try again.');
         }
       })();
     };

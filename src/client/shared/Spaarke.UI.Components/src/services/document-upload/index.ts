@@ -57,4 +57,7 @@ export type { DocumentRecordServiceOptions, EntityConfigResolver } from './Docum
 // IDataverseClient implementation (Code Pages). The PCF-side PcfDataverseClient
 // was DELETED 2026-10-03 (reuse audit C-26): zero instantiation sites.
 export { ODataDataverseClient } from './ODataDataverseClient';
+
+// UAC-r2 task 147 r1 (owner round 28 item 1): the upload pipeline's document creates go through the BFF (G5).
+export { withBffChildCreates } from './BffChildRecordDataverseClient';
 export type { ODataDataverseClientOptions } from './ODataDataverseClient';

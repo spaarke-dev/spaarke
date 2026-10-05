@@ -19,17 +19,23 @@
  */
 
 import * as React from 'react';
-import { createXrmDataService } from '@spaarke/ui-components';
-import type { AssociationResult, IDataService } from '@spaarke/ui-components';
-import { associateDocumentToParent, type IAssociateDocumentResult } from './documentAssociationWrite';
+import type { AssociationResult } from '@spaarke/ui-components';
+import {
+  associateDocumentToParent,
+  bffDocumentRefile,
+  type DocumentRefile,
+  type IAssociateDocumentResult,
+} from './documentAssociationWrite';
+import { authenticatedFetch } from '../../services/authInit';
+import { getBffBaseUrl } from '../../config/runtimeConfig';
 
 export interface IUseCreateOnSaveAssociationOptions {
   /**
-   * Dataverse write surface. Defaults to `createXrmDataService()` (the
-   * client-side Dataverse call per ADR-028 -- no BFF, no raw Bearer). Tests
-   * inject a mock.
+   * How the document is filed under the chosen record. Defaults to the BFF re-file
+   * (`PUT /api/v1/documents/{id}` over the SpaarkeAi authenticated fetch) — UAC-r2 task 147 r1: filing a document under a
+   * record changes its owner, so it is never a client-side Dataverse write. Tests inject a mock.
    */
-  dataService?: IDataService;
+  refileDocument?: DocumentRefile;
 }
 
 export interface IUseCreateOnSaveAssociationResult {
@@ -70,10 +76,13 @@ export interface IUseCreateOnSaveAssociationResult {
 export function useCreateOnSaveAssociation(
   options?: IUseCreateOnSaveAssociationOptions
 ): IUseCreateOnSaveAssociationResult {
-  // Lazy-init via useState initializer (runs once) -- avoids mutating a ref
-  // during render. Production callers omit `options.dataService` and get the
-  // real Xrm-backed adapter; tests inject a mock.
-  const [dataService] = React.useState<IDataService>(() => options?.dataService ?? createXrmDataService());
+  // Lazy-init via useState initializer (runs once) -- avoids mutating a ref during render. The base URL is read at call
+  // time, not here: the runtime config may resolve after the first render.
+  const [refileDocument] = React.useState<DocumentRefile>(
+    () =>
+      options?.refileDocument ??
+      ((documentId, body) => bffDocumentRefile(authenticatedFetch, getBffBaseUrl())(documentId, body))
+  );
 
   const [association, setAssociation] = React.useState<AssociationResult | null>(null);
   const [isAssociating, setIsAssociating] = React.useState(false);
@@ -90,7 +99,7 @@ export function useCreateOnSaveAssociation(
 
       setIsAssociating(true);
       try {
-        const result = await associateDocumentToParent(dataService, documentId, association);
+        const result = await associateDocumentToParent(refileDocument, documentId, association);
         if (!result.success) {
           setError(result.warning ?? 'Failed to associate the document.');
         }
@@ -99,7 +108,7 @@ export function useCreateOnSaveAssociation(
         setIsAssociating(false);
       }
     },
-    [association, dataService]
+    [association, refileDocument]
   );
 
   return { association, setAssociation, associate, isAssociating, error };

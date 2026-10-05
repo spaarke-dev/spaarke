@@ -587,14 +587,18 @@ public static class ExternalAccessModule
         // synchronizer, DataverseWebApiClient — is registered unconditionally. §10/§11: notes/task-148-secure-child-backfill.md.
         services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
 
-        // Task 148 — the sweep over every sprk_issecure = true root: the one-time backfill (scripts/Invoke-SecureChildBackfill.ps1)
-        // and, once task 147 schedules it, the L4 safety net. ⚠️ enabled: false IS THE SHIPPING STATE and writes are
-        // separately gated on SecureChild:Reconciliation:WritesEnabled (absent = report-only) — the
-        // ExternalAccessReconciliationJob posture: it MOVES ownership of existing rows, so enabling it is an owner action.
-        // ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032):
-        // IServiceScopeFactory, IBackgroundJobStore, TimeProvider and IConfiguration are unconditional.
+        // Task 148 — the sweep over every sprk_issecure = true root (the one-time backfill, scripts/Invoke-SecureChildBackfill.ps1)
+        // — and task 147's recent-changes pass, the L4 net for children written OUTSIDE the product (imports, flows, direct
+        // API). ENABLED every 2 minutes (task 147, round 28 item 2, 2026-10-04: "every 2 minutes with writes ON in every
+        // environment where 148 is deployed, with a standing report of each correction"). The recent-changes pass writes
+        // unless SecureChild:Reconciliation:RecentChangesWritesEnabled is false (an emergency stop); its writes only move a
+        // child INTO isolation (Sweep trigger). The SWEEP keeps the ExternalAccessReconciliationJob posture — it MOVES
+        // ownership of every existing row, so its writes stay an owner action, gated on SecureChild:Reconciliation:WritesEnabled
+        // (absent = report-only), and a scheduled tick skips the sweep window while it is report-only. ADR-052 places it in the
+        // BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, TimeProvider and
+        // IConfiguration are unconditional, and the reconciler and synchronizer it resolves per run are registered above.
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob>(
-            Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob.DefaultCronSchedule, enabled: false);
+            Sprk.Bff.Api.Services.Access.SecureChildReconciliationJob.DefaultCronSchedule);
 
         // unified-access-control-r2 task 143 (owner Q4; round 3 R3/R4) — the No Access safety net: every 5 minutes,
         // every active entry is enforced through NoAccessShareEnforcer (out-of-band MDA shares after an entry, records

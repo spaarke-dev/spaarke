@@ -47,6 +47,11 @@ namespace Sprk.Bff.Api.Tests.Api.Events;
 /// <para><b>Four routes are gone.</b> PUT /{id}, DELETE /{id}, POST /{id}/cancel and GET /{id}/logs had no caller and
 /// no published description, so task 159 deleted them (owner round 10 item 1);
 /// <see cref="DeletedRoutes_AreNotMapped_AndReachNothing"/> keeps them deleted.</para>
+/// <para><b>One route was added (task 147 r1c, owner round 36).</b> <c>PATCH /{id}/filing</c> is the event's ONE re-file
+/// route: a shape filter (filing columns only, before any rights question), then 159's
+/// <c>RecordRouteAccessAuthorizationFilter("write")</c> on <c>sprk_events({id})</c>, then the ONE re-file core (its own
+/// tests: <c>SecureChildOwnershipAiToolTests.ChildRecordRoutes</c>). The deleted-route pins name exact verbs and paths,
+/// so none of them matches it; two more rows pin that no general update came back with it.</para>
 /// </remarks>
 public class EventEndpointsAuthorizationContractTests
 {
@@ -473,6 +478,7 @@ public class EventEndpointsAuthorizationContractTests
     [InlineData("GET", "/api/v1/events/{id}")]
     [InlineData("POST", "/api/v1/events/{id}/complete")]
     [InlineData("POST", "/api/v1/events")]
+    [InlineData("PATCH", "/api/v1/events/{id}/filing")]
     public async Task Unauthenticated_EveryRouteIs401(string verb, string path)
     {
         await using var host = await EventsAuthHost.StartAsync();
@@ -497,13 +503,16 @@ public class EventEndpointsAuthorizationContractTests
     [InlineData("DELETE", "/api/v1/events/{id}")]
     [InlineData("POST", "/api/v1/events/{id}/cancel")]
     [InlineData("GET", "/api/v1/events/{id}/logs")]
+    // Task 147 r1c (owner round 36): the re-file added PATCH /{id}/filing ONLY — no general update came back with it.
+    [InlineData("PATCH", "/api/v1/events/{id}")]
+    [InlineData("PUT", "/api/v1/events/{id}/filing")]
     public async Task DeletedRoutes_AreNotMapped_AndReachNothing(string verb, string path)
     {
         await using var host = await EventsAuthHost.StartAsync();
         var eventId = Guid.NewGuid();
         host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.Delete);
         var request = new HttpRequestMessage(new HttpMethod(verb), path.Replace("{id}", eventId.ToString()));
-        if (verb is "PUT")
+        if (verb is "PUT" or "PATCH")
         {
             request.Content = JsonContent.Create(new { subject = "x" });
         }
@@ -513,6 +522,102 @@ public class EventEndpointsAuthorizationContractTests
         response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
         (await response.Content.ReadAsStringAsync()).Should().BeEmpty("no handler or filter produced a body");
         host.Probe.RightsCalls.Should().BeEmpty();
+        host.Events.VerifyNoOtherCalls();
+    }
+
+    // =========================================================================================
+    // PATCH /api/v1/events/{id}/filing — task 147 r1c (owner round 36): the re-file, in 159's family
+    // =========================================================================================
+
+    private static HttpRequestMessage FilingRequest(Guid id, object body) =>
+        new(HttpMethod.Patch, $"/api/v1/events/{id}/filing") { Content = JsonContent.Create(body) };
+
+    private static readonly Dictionary<string, object?> FilingBody = new()
+    {
+        ["sprk_RegardingMatter@odata.bind"] = "/sprk_matters(5ca11e40-0000-4000-8000-0000000000aa)",
+        ["sprk_regardingrecordid"] = "5ca11e40-0000-4000-8000-0000000000aa",
+    };
+
+    [Fact]
+    public async Task FilingRoute_ABodyNamingAnythingButTheFiling_Is400_BeforeAnyRightsQuestion()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var eventId = Guid.NewGuid();
+
+        var response = await host.SendAsync(FilingRequest(eventId, new Dictionary<string, object?>
+        {
+            ["sprk_RegardingMatter@odata.bind"] = "/sprk_matters(5ca11e40-0000-4000-8000-0000000000aa)",
+            ["statuscode"] = 2,
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadFromJsonAsync<JsonObject>())!["reasonCode"]!.GetValue<string>()
+            .Should().Be("child_record.not_filing");
+        host.Probe.RightsCalls.Should().BeEmpty("a 400 is never turned into a 403 and discloses nothing about a record");
+        host.FilingUser.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FilingRoute_CallerWithoutRead_GetsTheUniform404_AndTheReFileCoreNeverRuns()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var eventId = Guid.NewGuid();
+        host.Probe.Grant(EventsSet, eventId, AccessRights.Write | AccessRights.Append | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(FilingRequest(eventId, FilingBody));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadFromJsonAsync<JsonObject>())!["reasonCode"]!.GetValue<string>()
+            .Should().Be("sdap.access.deny.record_unavailable");
+        host.Probe.RightsCalls.Should().Contain((EventsSet, eventId, true));
+        host.FilingUser.Invocations.Should().BeEmpty();
+        host.Events.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task FilingRoute_CallerWithReadButNotWrite_Is403InsufficientRights_AndTheReFileCoreNeverRuns()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var eventId = Guid.NewGuid();
+        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(FilingRequest(eventId, FilingBody));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        JsonNode.Parse(body)!["reasonCode"]!.GetValue<string>().Should().Be("sdap.access.deny.insufficient_rights");
+        body.Should().NotContain(eventId.ToString());
+        host.FilingUser.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FilingRoute_NoBearerToken_TheRealProbeDenies_AndTheReFileCoreNeverRuns()
+    {
+        await using var host = await EventsAuthHost.StartAsync(useRealProbe: true);
+
+        var response = await host.SendAsync(FilingRequest(Guid.NewGuid(), FilingBody), withToken: false);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.FilingUser.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FilingRoute_AWriter_PassesTheFilters_IntoTheReFileCore_AsTheCaller()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var eventId = Guid.NewGuid();
+        host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write);
+
+        var response = await host.SendAsync(FilingRequest(eventId, FilingBody));
+
+        // The core's first question is the caller's own metadata read; the host's caller client answers 503, so the
+        // response is the core's own failure — proof that the filters let a writer through to it, and that it asked as the
+        // caller (IDataverseUserClient), never the event service.
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        host.FilingUser.Verify(
+            u => u.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         host.Events.VerifyNoOtherCalls();
     }
 
@@ -598,6 +703,21 @@ public class EventEndpointsAuthorizationContractTests
         public RecordingMembershipEventPublisher Publisher { get; } = new();
 
         /// <summary>
+        /// Task 147 r1c: the caller's own Dataverse client the filing route's re-file core asks first — strict; its metadata
+        /// read answers 503, so a request that reaches the core ends there (the core's own tests drive it fully).
+        /// </summary>
+        public Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> FilingUser { get; } = FilingUserClient();
+
+        private static Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> FilingUserClient()
+        {
+            var user = new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict);
+            user.Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Fail(
+                    503, "dataverse.unavailable", "Dataverse is unavailable."));
+            return user;
+        }
+
+        /// <summary>
         /// Task 146's ONE owner resolver (sweep integration): every create and log row is owned by the team it names. A
         /// module-boundary double — 146's own tests drive the real resolver; here only the gate is under test.
         /// </summary>
@@ -648,6 +768,12 @@ public class EventEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             builder.Services.AddSingleton(new CoreAncestorResolver(
                 Entities.Object, (entity, ct) => ColumnProbe(entity, ct), NullLogger<CoreAncestorResolver>.Instance));
+
+            // Task 147 r1c: the filing route's services (the re-file core's own tests drive them fully).
+            builder.Services.AddSingleton(FilingUser.Object);
+            builder.Services.AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);
+            builder.Services.AddScoped(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.ReconcilerOver(
+                () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(), new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable(), null!));
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();

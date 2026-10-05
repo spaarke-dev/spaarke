@@ -57,6 +57,7 @@ import {
   ReconciliationWorkspace,
   RECONCILIATION_VIEWS,
   buildResolveReview,
+  bffRefile,
   resolveRegarding,
   type EmailWorkspaceWebApi,
   type CreatedRecordRef,
@@ -227,7 +228,8 @@ function Root() {
   // to satisfy the review/workspace `onAssociationsChanged` contract.
   const handleAssociationsChanged = React.useCallback(() => {}, []);
   const resolveReview = React.useMemo(
-    () => buildResolveReview(webApi, handleAssociationsChanged),
+    // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
+    () => buildResolveReview(webApi, handleAssociationsChanged, bffRefile(authenticatedFetch, getBffBaseUrl() ?? '')),
     [webApi, handleAssociationsChanged]
   );
 

@@ -796,6 +796,14 @@ public sealed class MembershipResolverService : IMembershipResolverService
     internal const string CreatedByRole = "createdBy";
 
     /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): the person who asked for a row the BFF created as the
+    /// APPLICATION — <c>sprk_createdbyperson</c>. "Every reader of who created it uses RecordCreatorPerson (createdbyperson,
+    /// else createdby)": a to-do, event, memo or document the browser now creates through the BFF has the application as its
+    /// <c>createdby</c>, so without this term it would drop out of its creator's briefing.
+    /// </summary>
+    internal const string CreatorPersonAttribute = Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column;
+
+    /// <summary>
     /// Reduces discovered descriptors to the PERSON terms of the people-targeting surface (owner decisions round 2
     /// item 9 + Q8; round 3 D1): a record is FOR a person when that person CREATED it (a human <c>createdby</c>), is
     /// NAMED in one of its registry-listed Contact-typed "Assigned *" columns, or personally OWNS it.
@@ -846,7 +854,8 @@ public sealed class MembershipResolverService : IMembershipResolverService
             }
         }
 
-        var result = new List<MembershipDescriptor>(discovered.Count + 1);
+        var result = new List<MembershipDescriptor>(discovered.Count + 2);
+        MembershipDescriptor? creatorPerson = null;
         foreach (var d in discovered)
         {
             if (string.IsNullOrWhiteSpace(d.Field))
@@ -869,6 +878,15 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 result.Add(d);
             }
 
+            if (string.Equals(field, CreatorPersonAttribute, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+            {
+                // Task 147 r1: discovered only where the column exists (the schema scripts put it on the roots and the
+                // stamped child tables), so a table without it never names it in the query. Bound under the human rule
+                // below, with Created By.
+                creatorPerson = d;
+            }
+
             // Anything else — owningteam, owningbusinessunit, team/BU/org/account-typed lookups, maker-authored
             // systemuser lookups, a force-included createdby (re-added below under the human rule) — selects nothing.
         }
@@ -885,6 +903,20 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 IdentityType: "SystemUser",
                 TargetTable: "systemuser",
                 Source: "people-targeting"));
+
+            // Task 147 r1 (owner round 28 item 1): "createdbyperson, else createdby". The two terms are OR-ed: a row the
+            // BFF created as the application names the person in sprk_createdbyperson (its createdby is the application,
+            // which is never a human caller); a row a person created themselves names them in createdby, and no writer
+            // stamps sprk_createdbyperson on such a row (it is field-secured, written only by the BFF's app-only creates).
+            if (creatorPerson is not null)
+            {
+                result.Add(new MembershipDescriptor(
+                    Field: CreatorPersonAttribute,
+                    Role: CreatedByRole,
+                    IdentityType: "SystemUser",
+                    TargetTable: "systemuser",
+                    Source: "people-targeting"));
+            }
         }
         else
         {

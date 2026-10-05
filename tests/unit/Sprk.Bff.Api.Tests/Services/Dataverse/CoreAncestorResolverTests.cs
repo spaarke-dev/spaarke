@@ -84,7 +84,7 @@ public class CoreAncestorResolverTests
     public void ChildRecordEntities_ArePinnedLiterally()
     {
         CoreAncestorResolver.ChildRecordEntities.Should().Equal(
-            "sprk_invoice", "sprk_communication", "sprk_document", "sprk_event", "sprk_todo", "sprk_analysis");
+            "sprk_invoice", "sprk_communication", "sprk_document", "sprk_event", "sprk_todo", "sprk_analysis", "sprk_memo");
     }
 
     [Fact]
@@ -144,6 +144,33 @@ public class CoreAncestorResolverTests
             .Should().Equal(CoreAncestorResolver.ChildRecordEntities);
     }
 
+    /// <summary>
+    /// Task 147: the stamp backfill script carries a THIRD copy of the taxonomy (it says it "MUST mirror" the resolvers).
+    /// Nothing pinned it, so the memo could have joined both resolvers and stayed out of the backfill. The script's
+    /// <c>$CoreEntities</c> / <c>$ChildEntities</c> literals and its default <c>-Entities</c> (every child) are pinned here.
+    /// </summary>
+    [Fact]
+    public void Taxonomy_MatchesTheStampBackfillScript()
+    {
+        var scriptPath = FindRepoFile("scripts/Backfill-CoreAncestorStamps.ps1");
+        scriptPath.Should().NotBeNull("the stamp backfill is the third copy of the taxonomy; if it moved, update this test");
+        var script = File.ReadAllText(scriptPath!);
+
+        ParsePsStringArray(script, @"\$CoreEntities\s*=\s*@\(([^)]*)\)")
+            .Should().Equal(CoreAncestorResolver.CoreRecordEntities);
+        ParsePsStringArray(script, @"\$ChildEntities\s*=\s*@\(([^)]*)\)")
+            .Should().Equal(CoreAncestorResolver.ChildRecordEntities);
+        ParsePsStringArray(script, @"\[string\[\]\]\$Entities\s*=\s*@\(([^)]*)\)")
+            .Should().BeEquivalentTo(CoreAncestorResolver.ChildRecordEntities, "a dry run with no -Entities covers every child");
+    }
+
+    private static IReadOnlyList<string> ParsePsStringArray(string source, string pattern)
+    {
+        var match = Regex.Match(source, pattern);
+        match.Success.Should().BeTrue($"the script must declare {pattern}");
+        return Regex.Matches(match.Groups[1].Value, "'([^']+)'").Select(m => m.Groups[1].Value).ToList();
+    }
+
     // ---------------------------------------------------------------------
     // Derivation
     // ---------------------------------------------------------------------
@@ -193,6 +220,24 @@ public class CoreAncestorResolverTests
         result.Status.Should().Be(CoreAncestorStatus.Derived);
         result.Stamps.Should().ContainSingle()
             .Which.Should().Be(new CoreAncestorStamp("sprk_matter", "sprk_regardingmatter", MatterId));
+    }
+
+    /// <summary>
+    /// Task 147 (owner round 2 item 6): a record filed under a MEMO derives the memo's own core ancestor. Before
+    /// <c>sprk_memo</c> joined the CHILD set, a memo target read as Unclassified and its project was lost.
+    /// </summary>
+    [Fact]
+    public async Task MemoTarget_DerivesTheMemosOwnProjectAncestor()
+    {
+        var row = new Entity("sprk_memo");
+        row["sprk_regardingproject"] = new EntityReference("sprk_project", ProjectId);
+        var resolver = Build(EntityServiceReturning(row), Probe(CommunicationColumns));
+
+        var result = await resolver.ResolveStampsAsync("sprk_memo", CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle()
+            .Which.Should().Be(new CoreAncestorStamp("sprk_project", "sprk_regardingproject", ProjectId));
     }
 
     [Fact]
@@ -365,6 +410,29 @@ public class CoreAncestorResolverTests
             sources.Select(s => s.Intermediate).Should().OnlyContain(i => CoreAncestorResolver.IsStampSourceEntity(i),
                 $"every record {table} can be filed under must have known root columns, or its copy cannot be checked");
         }
+    }
+
+    /// <summary>
+    /// Task 147 r1 (verifier item 1): since task 156 C# derivation keys on <see cref="CoreAncestorResolver.IntermediateRootColumns"/>,
+    /// while the TypeScript side (until task 169 lands) derives every <c>CHILD_RECORD_ENTITIES</c> target through the four
+    /// <c>sprk_regarding{core}</c> columns. A CHILD type missing from the C# map reads Unclassified on the server and is
+    /// derived in the browser — the two sides disagree and no taxonomy parity test sees it. This pins the C# precondition:
+    /// every CHILD is an intermediate here, and every CHILD whose root columns are the four stamp columns carries exactly
+    /// the four the TypeScript side reads.
+    /// </summary>
+    [Fact(DisplayName = "Task 147 r1: every CHILD taxonomy entity is a C# intermediate, so no CHILD target reads Unclassified on the server while the browser derives it")]
+    public void EveryChildTaxonomyEntity_IsAnIntermediate()
+    {
+        CoreAncestorResolver.ChildRecordEntities
+            .Should().OnlyContain(e => CoreAncestorResolver.IsStampSourceEntity(e),
+                "a record filed under any CHILD type must be derived on the server, as it is in the browser");
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a memo's root columns are exactly the four stamp columns (what the TypeScript side reads for a CHILD target)")]
+    public void Memo_RootColumns_AreTheFourStampColumns()
+    {
+        CoreAncestorResolver.IntermediateRootColumns["sprk_memo"]
+            .Should().BeEquivalentTo(CoreAncestorResolver.CoreAncestorLookups.Select(l => (l.LookupAttribute, l.EntityType)));
     }
 
     // ClassifyStampSource — the ONE rule the cascade, the reconciliation job and the storage resolver share.

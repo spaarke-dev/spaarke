@@ -107,6 +107,29 @@ public sealed record SecureChildMirrorRemoval(SecureChildShareSyncStatus Status,
 }
 
 /// <summary>
+/// The secure roots above a set of child rows (task 147, <see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>).
+/// <see cref="SecureChildShareSyncStatus.Completed"/> means every row was walked. NotApplicable means the environment has
+/// no Secure Record owner team. Failed means the team is ambiguous and nothing was decided.
+/// </summary>
+/// <param name="Status">How the walk ended.</param>
+/// <param name="Roots">The distinct isolated roots found, as (table, id) ordered by table then id.</param>
+/// <param name="Undetermined">Rows whose roots could not all be determined from the data, each with the reason: a missing
+/// ancestor, a root flagged secure but not isolated, or a chain deeper than the walk.</param>
+/// <param name="Detail">Why the walk was Failed or NotApplicable.</param>
+/// <param name="UndeterminedRows">The rows of <paramref name="Undetermined"/>, as (table, id), in the same order — so a caller
+/// can look at exactly those rows again (task 147 r1: the reconciliation job carries them to its next run).</param>
+public sealed record SecureRootsAbove(
+    SecureChildShareSyncStatus Status,
+    IReadOnlyList<(string Table, Guid Id)> Roots,
+    IReadOnlyList<string> Undetermined,
+    string? Detail,
+    IReadOnlyList<(string Table, Guid Id)>? UndeterminedRows = null)
+{
+    /// <summary>The undetermined rows as (table, id); empty when none.</summary>
+    public IReadOnlyList<(string Table, Guid Id)> UndeterminedRowRefs => UndeterminedRows ?? Array.Empty<(string, Guid)>();
+}
+
+/// <summary>
 /// Keeps every CHILD of a secure record shared with exactly the internal principals its secure root is shared with —
 /// never wider (unified-access-control-r2 task 149; owner round 7 item 5: "each child's principals and rights equal the
 /// root's POA share set ... never wider than the root's").
@@ -211,8 +234,167 @@ public sealed class SecureChildShareSynchronizer
         return RunAsync(new RowRef(rootLogicalName.ToLowerInvariant(), rootId), ct);
     }
 
+    /// <summary>
+    /// Task 147 r1: whether <paramref name="teamId"/> is this environment's Secure Record owner team (the browser re-file
+    /// route asks before it takes the mirror off a row it moved out). An ambiguous or absent team answers no; a Dataverse
+    /// fault propagates.
+    /// </summary>
+    public async Task<bool> IsSecureOwnerTeamAsync(Guid teamId, CancellationToken ct) =>
+        teamId != Guid.Empty
+        && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
+
+    /// <summary>
+    /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
+    /// re-file route BEFORE it moves the row, so that afterwards it can tell a row that LEFT isolation (its mirrored shares
+    /// go, owner round 22) from a row that was never isolated (a share on it is its user's own intent and is kept). A row
+    /// that does not exist, an absent Secure team and an ambiguous one answer no; a Dataverse fault propagates.
+    /// </summary>
+    public async Task<bool> IsSecureTeamOwnedAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
+        if (!SecureChildLineage.Children.TryGetValue(childLogicalName.Trim(), out var table))
+            return false;
+
+        var query = new QueryExpression(table.LogicalName)
+        {
+            ColumnSet = new ColumnSet(OwningTeamColumn),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, childId);
+        var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var owningTeam = row?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
+        return owningTeam is { } teamId && await IsSecureOwnerTeamAsync(teamId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>How many times a re-file out of a secure record tries to take the mirrored shares off before it reports.</summary>
+    internal const int MirrorRemovalAttempts = 3;
+
+    /// <summary>
+    /// Task 149's mirror after ONE RE-FILE, inline (task 147 r1; one implementation for every re-file writer since r1c — the
+    /// browser routes, <c>PUT /api/v1/documents/{id}</c> and the chat update tool): moved under a secure record → shared
+    /// with its sharees now (<see cref="SyncChildAsync"/>), not at the next two-minute reconcile; moved OUT of every secure
+    /// record (it was isolated before the re-file and is not now) → its mirrored shares go now (<see cref="RemoveMirrorAsync"/>,
+    /// owner round 22: only a row that WAS isolated carries the mirror; a share on a never-isolated row is its user's own
+    /// intent and is kept). The two-minute share job is no backstop for the move out — it looks only at Secure-team-owned
+    /// rows — so a removal that faults is retried (<see cref="MirrorRemovalAttempts"/>) and then logged as an ERROR naming
+    /// the row. Never throws.
+    /// </summary>
+    /// <param name="wasIsolated">Whether the row was owned by the Secure team BEFORE the re-file (asked only when needed;
+    /// a fault means "unknown": nothing is removed, and it is logged).</param>
+    public async Task AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(wasIsolated);
+        SecureChildShareSyncStatus mirrored;
+        try
+        {
+            var result = await SyncChildAsync(childLogicalName, childId, ct).ConfigureAwait(false);
+            mirrored = result.Status;
+            if (result.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-SHARES] {Table} {Id} was re-filed under a secure record, but its sharees were not mirrored " +
+                    "({Status}: {Detail}); the two-minute reconcile completes it", childLogicalName, childId, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: the share mirror after a re-file faulted; the two-minute " +
+                "reconcile completes it", childLogicalName, childId);
+            return;
+        }
+
+        if (mirrored != SecureChildShareSyncStatus.NotApplicable)
+            return;
+
+        bool isolatedBefore;
+        try
+        {
+            isolatedBefore = await wasIsolated().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: whether it was isolated before the re-file could not be " +
+                "read, so its mirrored shares (if any) were NOT removed", childLogicalName, childId);
+            return;
+        }
+
+        if (!isolatedBefore)
+            return;
+
+        SecureChildMirrorRemoval? removal = null;
+        for (var attempt = 1; attempt <= MirrorRemovalAttempts; attempt++)
+        {
+            try
+            {
+                removal = await RemoveMirrorAsync(childLogicalName, childId, ct).ConfigureAwait(false);
+                if (removal.IsComplete)
+                    return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: removing its mirrored shares faulted (attempt {Attempt})",
+                    childLogicalName, childId, attempt);
+            }
+        }
+
+        _logger.LogError(
+            "[SECURE-CHILD-SHARES] {Table} {Id} left its secure record, but its mirrored shares were not all removed after " +
+            "{Attempts} attempts ({Status}: {Detail}) — the secure record's sharees may still open it", childLogicalName, childId,
+            MirrorRemovalAttempts, removal?.Status, removal?.Detail);
+    }
+
     /// <summary>Brings EVERY secure child in the environment into line — the scheduled reconcile.</summary>
     public Task<SecureChildShareSyncResult> ReconcileAllAsync(CancellationToken ct) => RunAsync(scope: null, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): mirrors ONE child — the row a browser writer just
+    /// created or re-filed through the BFF — inline, so the people the secure record is shared with see it at once rather
+    /// than at the next two-minute reconcile (owner round 11 item 2 remains the backstop). The same mirror the scheduled
+    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Share or Assign, a No Access
+    /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
+    /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
+    /// </summary>
+    public async Task<SecureChildShareSyncResult> SyncChildAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
+        if (!SecureChildLineage.Children.TryGetValue(childLogicalName.Trim(), out var table))
+            throw new ArgumentOutOfRangeException(nameof(childLogicalName), childLogicalName, "Not a secure-child table.");
+
+        Guid secureTeamId;
+        try
+        {
+            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+            if (team.Refusal is { } refusal)
+                return SecureChildShareSyncResult.Failed(refusal);
+            if (team.TeamId is not { } id)
+                return SecureChildShareSyncResult.NotApplicable("this environment has no Secure Record owner team, so no record is secure");
+            secureTeamId = id;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] The Secure Record owner team could not be read; {Table} {Id} was not mirrored.",
+                table.LogicalName, childId);
+            return SecureChildShareSyncResult.Failed("the Secure Record owner team could not be read");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        try
+        {
+            if (!await run.LoadSecureChildAsync(table, childId).ConfigureAwait(false))
+            {
+                return SecureChildShareSyncResult.NotApplicable(
+                    $"{table.LogicalName} {childId:D} is not owned by the Secure Record owner team, so it is not mirrored");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] {Table} {Id} could not be read; it was not mirrored.", table.LogicalName, childId);
+            return SecureChildShareSyncResult.Failed("the record could not be read");
+        }
+
+        return await run.SynchronizeAsync(scope: null).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// unified-access-control-r2 task 148 — takes the mirrored shares off ONE child that a pass has just re-owned OUT of the
@@ -324,6 +506,64 @@ public sealed class SecureChildShareSynchronizer
         return failed
             ? new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Incomplete, revoked, $"not every mirrored share on {child} was removed")
             : new SecureChildMirrorRemoval(SecureChildShareSyncStatus.Completed, revoked, null);
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 147: the secure roots that the given child rows sit under. These are the records whose
+    /// reconcile pass (<see cref="SecureChildReconciler.ReconcileAsync"/>) brings those rows into line. The upward walk is
+    /// the same one the mirror uses (<c>LineageOfAsync</c>): through Secure-team-owned and user-owned rows, never through an
+    /// ordinary team's, at most <see cref="MaxLineageDepth"/> levels. That is the ownership resolver's own rule, so a row is
+    /// placed under a root here exactly when the resolver would give it the Secure team. The rows' own owners do not matter.
+    /// Each row is passed as read, carrying its lineage lookups (<see cref="SecureChildLineage.Table.Lookups"/>) and owner
+    /// columns. A lookup the caller did not read counts as absent, so it can only leave a record out.
+    /// </summary>
+    /// <remarks>
+    /// The secure-child reconciliation job's recent-changes pass calls this (task 147). That pass is the L4 net for children
+    /// written outside the product (out-of-the-box forms, quick create, grid edits, imports, flows) and for every client
+    /// writer still on <c>Xrm.WebApi</c>. Fail closed: if the Secure Record owner team is ambiguous, the answer is
+    /// <see cref="SecureChildShareSyncStatus.Failed"/>, and a Dataverse fault propagates. Either way the caller decides
+    /// nothing. A row whose roots cannot all be determined is listed in <see cref="SecureRootsAbove.Undetermined"/>, never
+    /// silently dropped.
+    /// </remarks>
+    public async Task<SecureRootsAbove> SecureRootsAboveAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        foreach (var row in rows)
+        {
+            if (!SecureChildLineage.IsChild(row.LogicalName))
+                throw new ArgumentOutOfRangeException(nameof(rows), row.LogicalName, "Not a secure-child table.");
+        }
+
+        var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        if (team.Refusal is { } refusal)
+            return new SecureRootsAbove(SecureChildShareSyncStatus.Failed, Array.Empty<(string, Guid)>(), Array.Empty<string>(), refusal);
+        if (team.TeamId is not { } secureTeamId)
+        {
+            return new SecureRootsAbove(SecureChildShareSyncStatus.NotApplicable, Array.Empty<(string, Guid)>(),
+                Array.Empty<string>(), "this environment has no Secure Record owner team, so no record is secure");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        var roots = new HashSet<RowRef>();
+        var undetermined = new List<string>();
+        var undeterminedRows = new List<(string Table, Guid Id)>();
+        foreach (var entity in rows.DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id)))
+        {
+            var (reference, lineage) = await run.LineageOfReadRowAsync(entity).ConfigureAwait(false);
+            roots.UnionWith(lineage.SecureRoots);
+            if (lineage.Undetermined is { } why)
+            {
+                undetermined.Add($"{reference}: {why}");
+                undeterminedRows.Add((reference.Table, reference.Id));
+            }
+        }
+
+        return new SecureRootsAbove(
+            SecureChildShareSyncStatus.Completed,
+            roots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).Select(r => (r.Table, r.Id)).ToList(),
+            undetermined,
+            null,
+            undeterminedRows);
     }
 
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)
@@ -543,6 +783,30 @@ public sealed class SecureChildShareSynchronizer
         }
 
         /// <summary>
+        /// Task 147 r1: ONE row, read with its lineage lookups and owner. True (and loaded as the run's only secure child)
+        /// when it is Secure-team-owned; false when it is not, or does not exist. A fault propagates.
+        /// </summary>
+        public async Task<bool> LoadSecureChildAsync(SecureChildLineage.Table table, Guid id)
+        {
+            var query = new QueryExpression(table.LogicalName)
+            {
+                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, id);
+            var entity = (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (entity is null)
+                return false;
+
+            var row = ToRow(table, entity);
+            if (row.OwningTeam != _secureTeamId)
+                return false;
+
+            _secureChildren[row.Ref] = row;
+            return true;
+        }
+
+        /// <summary>
         /// The Secure-team-owned DESCENDANTS of one root (the scoped run): the lineage lookups walked downward, level by
         /// level, through exactly the rows the upward walk follows — Secure-team-owned, and user-owned looked through, never
         /// an ordinary team's — for at most <see cref="MaxLineageDepth"/> levels, which is as deep as the upward walk can
@@ -685,6 +949,16 @@ public sealed class SecureChildShareSynchronizer
         }
 
         // ── Lineage ────────────────────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Task 147: the secure roots above ONE child row the caller has already read, whatever that row's own owner is. A
+        /// fault propagates.
+        /// </summary>
+        public async Task<(RowRef Reference, Lineage Lineage)> LineageOfReadRowAsync(Entity entity)
+        {
+            var row = ToRow(SecureChildLineage.Children[entity.LogicalName], entity);
+            return (row.Ref, await LineageOfAsync(row).ConfigureAwait(false));
+        }
 
         /// <summary>The secure roots a row descends from, walking its lookups upward (see the class remarks).</summary>
         private async Task<Lineage> LineageOfAsync(Row row)

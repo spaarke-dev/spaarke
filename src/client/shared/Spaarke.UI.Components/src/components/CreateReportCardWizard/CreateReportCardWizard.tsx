@@ -539,11 +539,17 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         // -- Follow-on: Add To Do (sprk_todo regarding the new Report Card, NOT the host) --
         if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
           try {
-            const todoResult = await createTodoRegardingChild(dataService, todoFormRef.current, {
-              entityType: 'sprk_reportcard',
-              recordId: reportCardId,
-              recordName: reportCardName,
-            });
+            const todoResult = await createTodoRegardingChild(
+              dataService,
+              todoFormRef.current,
+              {
+                entityType: 'sprk_reportcard',
+                recordId: reportCardId,
+                recordName: reportCardName,
+              },
+              authFetch,
+              bffBaseUrl
+            );
             if (!todoResult.success) {
               warnings.push(
                 `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +

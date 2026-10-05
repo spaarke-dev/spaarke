@@ -115,6 +115,7 @@ import {
   createTodoRegardingChild,
   discoverNavProps,
   resolveAnalysisFilePreview,
+  withBffChildWrites,
 } from '@spaarke/ui-components';
 import type {
   AssociationResult,
@@ -916,17 +917,26 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         }
 
         // -- Create the sprk_analysis record ---------------------------------
-        const analysisId = await dataService.createRecord('sprk_analysis', payload);
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the analysis (and its follow-on To Do) is created through the BFF
+        // (G5) — the server decides the owner; nothing is created as the user. A refusal surfaces the server's message.
+        const childWrites = withBffChildWrites(dataService, authFetch, bffBaseUrl);
+        const analysisId = await childWrites.createRecord('sprk_analysis', payload);
 
         // -- Follow-on: Create To Do (Field-Mapping-driven internally via
         //    TodoService.createTodo — task 021) --------------------------------
         if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
           try {
-            const todoResult = await createTodoRegardingChild(dataService, todoFormRef.current, {
-              entityType: 'sprk_analysis',
-              recordId: analysisId,
-              recordName: finishName,
-            });
+            const todoResult = await createTodoRegardingChild(
+              childWrites,
+              todoFormRef.current,
+              {
+                entityType: 'sprk_analysis',
+                recordId: analysisId,
+                recordName: finishName,
+              },
+              authFetch,
+              bffBaseUrl
+            );
             if (!todoResult.success) {
               warnings.push(
                 `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +

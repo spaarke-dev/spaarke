@@ -238,6 +238,10 @@ public static class EndpointMappingExtensions
         app.MapFieldMappingEndpoints();
         app.MapEventEndpoints();
         app.MapWorkAssignmentEndpoints();
+        // unified-access-control-r2 task 147 r1 (owner round 28 item 1): the BFF write path for child records created or
+        // re-filed in the browser (G5). UNCONDITIONAL (bff-extensions.md §F.1): IDataverseUserClient, IRecordOwnershipResolver,
+        // IFieldMappingDataverseService and CoreAncestorRestamper are all registered unconditionally.
+        app.MapChildRecordEndpoints();
         app.MapScorecardCalculatorEndpoints();
 
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
