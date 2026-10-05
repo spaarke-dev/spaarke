@@ -280,6 +280,48 @@ Fixes:
         census 122 to 123, SPA vitest 12, modal jest 2; RecordShareExpiryTests' live-column list gained the new column (the
         deploy-order hazard, by design). 22 BFF + 6 SPA + 1 modal seeded violations each went red.
     </outcome>
+    <outcome date="2026-10-04" round="r-final (after the machine restart)" branch="task/uac-r2-140-x1-v1c" base="wip/uac-r2-140-x1-v1-restart @ c1210b9da" status="code-complete; every verifier r1 item closed in code; G-140-1 (operator schema -Apply then -Verify) and G-140-2 (criterion 21 manual live gate) remain the pending manual gates (main session; exact commands in the task note section 5).">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md section 11.
+      - The WIP restart commit was reviewed, built and kept; its untested parts were completed.
+      - Round 34 item 3 (BINDING): POST set-record-share-expiry takes every contact-issued share over in its ONE transaction
+        (sprk_grantedbycontact cleared via DBNull.Value, sprk_grantedby = the caller's systemuser when it resolves);
+        IGenericEntityService.BulkUpdateAsync now clears on DBNull.Value (UpdateAsync's convention). The core's take-over
+        stamp is now under test. Writers enumerated: core + set-record-share-expiry change active rows (both take over);
+        /revoke, project closure and the reconciliation job deactivate (out of every contact path); no Spaarke role holds
+        prvWrite on sprk_externalrecordaccess (live read-only).
+      - G-140-1 false negative closed: the script's step (d) uses scripts/common/DataverseSolutionMembership.ps1 with the
+        table's MetadataId (live read-only probe: a column of sprk_externalrecordaccess has no own solutioncomponents row and
+        reads ViaTable); pinned by a new ContactGrantGuardTests fact. .NOTES test reference corrected.
+      - Grantee resolution strictly within the grantor's organizations (POML step 4): by email through the new
+        ExternalParticipationService.FindConferringMembersByEmailAsync (scoped junction read, chunked, live-verified query);
+        by id one uniform 422 ("This person"), no stored email echoed, the same reads for every id.
+      - External SPA: the six pre-existing tsc errors fixed (one was a real display defect in OutsideCounselDashboard), the
+        one lint warning fixed, npm run typecheck added.
+      Placement (CLAUDE.md section 10): BFF, inside the existing ExternalParticipationService / ExternalGrantLifecycle /
+      SetRecordShareExpiryEndpoint; no new endpoint, DI registration, option, job, column, PCF or package.
+      Justification (CLAUDE.md section 11) for the new surface:
+      (a) FindConferringMembersByEmailAsync (+ its pure projection, filter builder and row types). Existing:
+          IContactIdentityStore.FindActiveContactsByEmailAsync (system-wide, two rows), ReadOrganizationMembershipsAsync (one
+          contact's memberships), FindWallMemberContactsAsync (one organization's WALL set, ids only). Extension: none can
+          answer "active members of THESE organizations who use THIS email" under the conferring rule; it lives beside them
+          in the same service and reuses ProjectOrganizationMemberships, WallMembershipStateClause, OrganizationMembershipSelect
+          and OrganizationStateExpand. Cost of doing nothing: POML step 4 violated; a colleague is refused 409 when an outsider
+          shares the address, and the answer discloses that outsider.
+      (b) ExternalGrantLifecycle.AddInternalTakeOverFields + two logical-name constants. Existing: the core's Web API
+          take-over (@odata.bind). Extension: the SDK bulk path needs logical names and an EntityReference, a different wire
+          shape; one helper beside the existing names. Cost of doing nothing: round 34 item 3 unimplemented.
+      (c) external-spa "typecheck" npm script. Existing: none. Cost of doing nothing: the tsc gate is not runnable and the
+          errors it found had accumulated unseen.
+      - The full ArchTests run found the new junction read tripping task 109's guard
+        (ExternalAccessQueryIntegrityGuardTests: membership-junction queries build their $filter through a named builder).
+        The guard was extended to the third direction ((organizations, email) -&gt; colleagues): BuildColleagueByEmailFilter
+        is accepted, required to be found, and its body held to the wall rule (WallMembershipStateClause, no date column).
+        ColleagueByEmailWireTests (3) pin the production read on the wire over an in-memory server (exact filter, paging,
+        live row shape, faulted page = Failed, chunks).
+      Tests (KEEP paths): ContactGrantAuthorizationTests +3 (core stamp; cross-surface share-expiry theory x2) and the by-id
+      theory extended; RecordShareExpiryTests +3; ColleagueByEmailWireTests +3; ContactGrantGuardTests +1 fact; the task-109
+      junction guard extended; SPA vitest +1. 17 BFF + 5 ArchTests + 1 SPA seeded violations each went red, each restored.
+    </outcome>
   </execution>
   <ui-tests>
     <test name="A Full Access contact grants a colleague in their own organization">

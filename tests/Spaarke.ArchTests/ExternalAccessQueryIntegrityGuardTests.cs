@@ -128,6 +128,13 @@ public class ExternalAccessQueryIntegrityGuardTests
     /// either one. The member read's wire shape is also pinned behaviourally, by the two
     /// <c>OrganizationMembershipReadTests.OrgFanOut_TheRealMemberPageRead_*</c> tests.</para>
     /// </remarks>
+    /// <para><b>The third direction (task 140 r-final).</b> The contact-side grant resolves a colleague by email through
+    /// ONE junction read scoped to the grantor's organizations (<c>ReadColleagueMembershipRowsAsync</c>), whose filter is
+    /// built by <c>BuildColleagueByEmailFilter</c> — organizations × WALL state clause × the contact's state and email, no
+    /// date term (the conferring dates are decided in memory by <c>ProjectColleaguesByEmail</c>). It is accepted here as
+    /// the builder of that direction, is required to be found (not vacuous), and the builder itself is held to the wall
+    /// rule: it names <c>WallMembershipStateClause</c> and no date column. Its wire shape is pinned behaviourally by
+    /// <c>ColleagueByEmailWireTests</c> (the filter the server receives EQUALS the builder's output).</para>
     [Fact(DisplayName = "Task 109: membership-junction queries build their $filter, never inline it")]
     public void MembershipJunctionQueriesUseTheWallSafeFilterBuilder()
     {
@@ -163,17 +170,35 @@ public class ExternalAccessQueryIntegrityGuardTests
             + $"task-137 grant-cache fan-out) was not found in {ParticipationServiceRelativePath}. If it moved or "
             + "was renamed, fix this guard rather than deleting it.");
 
+        Assert.True(
+            windows.Any(w => w.Window.Contains("BuildColleagueByEmailFilter", StringComparison.Ordinal)),
+            "The (organizations, email) -> colleagues junction read (BuildColleagueByEmailFilter, the task-140 contact-side "
+            + $"grant) was not found in {ParticipationServiceRelativePath}. If it moved or was renamed, fix this guard rather "
+            + "than deleting it.");
+
+        // The third builder is held to the wall rule here, because no other assertion in this file sees its body.
+        var builderStart = Array.FindIndex(lines, l => l.Contains("internal static string BuildColleagueByEmailFilter(", StringComparison.Ordinal));
+        Assert.True(builderStart >= 0, $"BuildColleagueByEmailFilter was not found in {ParticipationServiceRelativePath}.");
+        var builderEnd = Array.FindIndex(lines, builderStart, l => l.TrimEnd().EndsWith("\";", StringComparison.Ordinal));
+        Assert.True(builderEnd >= builderStart, "The end of BuildColleagueByEmailFilter's expression body was not found.");
+        var colleagueBuilder = string.Join('\n', lines[builderStart..(builderEnd + 1)]);
+        Assert.Contains("WallMembershipStateClause", colleagueBuilder, StringComparison.Ordinal);
+        Assert.DoesNotContain("sprk_enddate", colleagueBuilder, StringComparison.Ordinal);
+        Assert.DoesNotContain("sprk_startdate", colleagueBuilder, StringComparison.Ordinal);
+
         var inlined = windows
             .Where(w => !w.Window.Contains("BuildOrganizationMembershipFilter", StringComparison.Ordinal)
-                        && !w.Window.Contains("ExternalOrganizationMembership.ActiveMembersFilter", StringComparison.Ordinal))
+                        && !w.Window.Contains("ExternalOrganizationMembership.ActiveMembersFilter", StringComparison.Ordinal)
+                        && !w.Window.Contains("BuildColleagueByEmailFilter", StringComparison.Ordinal))
             .Select(w => (Line: w.Index + 1, Text: lines[w.Index].Trim()))
             .ToList();
 
         Assert.True(
             inlined.Count == 0,
             "A sprk_contactorganizations query builds its $filter inline instead of calling "
-            + "BuildOrganizationMembershipFilter (contact -> organizations) or "
-            + "ExternalOrganizationMembership.ActiveMembersFilter (organization -> members). The first defines the "
+            + "BuildOrganizationMembershipFilter (contact -> organizations), "
+            + "ExternalOrganizationMembership.ActiveMembersFilter (organization -> members) or BuildColleagueByEmailFilter "
+            + "((organizations, email) -> colleagues, task 140). The first defines the "
             + "FR-23 WALL-subject set and must stay statecode-only; a date bound added there narrows the ethical "
             + "wall (owner D-2 part 2 / D-10). The second defines whom a grant-cache invalidation reaches; a filter "
             + "inlined there can silently leave members on the 60-second TTL. Date bounds belong to the conferring "
