@@ -328,6 +328,9 @@ environments:
       deployment_method: GitHub Actions OIDC
       deployment_workflow: .github/workflows/deploy-bff-api.yml
       app_registration_ref: app_registrations.bff_api
+      # Redis: Azure Managed Redis, Microsoft Entra only (T242/T242b, 2026-10-05). The BFF reads the plain
+      # setting Redis__Endpoint and signs in with its managed identity — no key, no connection string.
+      redis_endpoint: spaarke-bff-redis-dev.westus2.redis.azure.net:10000
       secrets:
         # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
         # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated
@@ -336,8 +339,14 @@ environments:
         # Do NOT re-add a kv: reference here — `Graph:Credentials:RequireSecretFreeIdentity=true` makes
         # the BFF refuse to start outside Development if ClientSecret returns to the credential order.
         application_insights_key: kv:application-insights-key
-        servicebus_connection_string: kv:ServiceBus-ConnectionString
-        redis_connection_string: kv:Redis-ConnectionString
+        # servicebus_connection_string REMOVED 2026-10-05 (drift fix): `ServiceBus-ConnectionString` was soft-deleted
+        # 2026-08-25 and spaarke-bff-dev holds no Key Vault reference to it (see keyvault_inventory.retired_soft_deleted).
+        # The two Communication KV references below are wired on spaarke-bff-dev (verified 2026-10-05).
+        communication_webhook_client_state: kv:Communication-WebhookClientState # Communication__WebhookClientState
+        communication_webhook_signing_key: kv:Communication-WebhookSigningKey # Communication__WebhookSigningKey
+        # redis_connection_string REMOVED 2026-10-05 (T242b step 7): `ConnectionStrings__Redis` was deleted from
+        # spaarke-bff-dev; the cache has access keys disabled. Do NOT re-add a kv: reference — the BFF refuses a
+        # Redis connection string outside Development/Testing.
       legacy:
         _meta:
           status: legacy
@@ -443,14 +452,10 @@ environments:
         # ---------------------------------------------------------------------
         default_index_name: spaarke-records-index
         secrets:
-          # Canonical (preferred — per spec FR-21 + task 001 user Option C remediation 2026-06-26)
-          admin_key: kv:AiSearch--AdminKey
           endpoint_ref: kv:ai-search-endpoint
-          # Legacy aliases — same value as canonical (transition compatibility; retire post-migration audit)
-          # `AzureAISearchApiKey` is the older app-settings reference (BFF AiSearch__ReferencesApiKey)
-          # `ai-search-key` is the older operational name; mirrored 2026-06-26
-          admin_key_alias_legacy_app: kv:AzureAISearchApiKey
-          admin_key_alias_legacy_ops: kv:ai-search-key
+          # Admin keys RETIRED (drift fix 2026-10-05): `AiSearch--AdminKey`, `AzureAISearchApiKey` and
+          # `ai-search-key` are all soft-deleted (2026-08-18 / 2026-08-25) and spaarke-bff-dev references none of
+          # them — only `ai-search-endpoint`. See keyvault_inventory.retired_soft_deleted. Do NOT re-add.
         deployer: scripts/ai-search/Deploy-AllIndexes.ps1 # FR-07 unified deployer
         operator_runbook: docs/guides/ai-search-azure-setup.md
         catalog_doc: docs/architecture/AI-SEARCH-INDEX-CATALOG.md
@@ -524,12 +529,10 @@ environments:
         - ai-openai-endpoint
         - ai-openai-key
         - ai-search-endpoint
-        - ai-search-key # legacy operational alias (mirrors AiSearch--AdminKey)
-        - AiSearch--AdminKey # canonical per spec FR-21; added 2026-06-26 task 001
-        - AzureAISearchApiKey # legacy app-settings alias (mirrors AiSearch--AdminKey); added 2026-06-26 task 001
         - application-insights-key
-        - Redis-ConnectionString
-        - ServiceBus-ConnectionString
+        - Communication-WebhookClientState
+        - Communication-WebhookSigningKey
+        - communication-trackingfooter-signingkey # read at runtime BY NAME via Communication__TrackingFooter__SigningKeySecretName (not a KV reference)
         - spe-owning-app-secret
         - ciam-graph-provisioner-cert # CIAM graph-provisioner app cert (added 2026-07-19, external-access-platform-r1 task 002)
       retired_soft_deleted: # Secrets retired via KV soft-delete; recoverable during 90-day retention window (do NOT purge — soft-delete is reversible)
@@ -541,6 +544,21 @@ environments:
           retired: 2026-09-28 # task 215 — paired cert password for retired spe-app-cert
           deleted_utc: 2026-09-29T03:03:07Z # actual az-recorded softDelete timestamp
           scheduled_purge_utc: 2026-12-28T03:03:07Z # 90 days from soft-delete per vault default; DO NOT purge before this date
+        - name: ai-search-key
+          deleted_utc: 2026-08-18T03:30:02Z # actual az-recorded softDelete timestamp (read 2026-10-05)
+          scheduled_purge_utc: 2026-11-16T03:30:02Z # DO NOT purge before this date
+        - name: AzureAISearchApiKey
+          deleted_utc: 2026-08-18T03:29:59Z
+          scheduled_purge_utc: 2026-11-16T03:29:59Z # DO NOT purge before this date
+        - name: AiSearch--AdminKey
+          deleted_utc: 2026-08-25T02:34:13Z
+          scheduled_purge_utc: 2026-11-23T02:34:13Z # DO NOT purge before this date
+        - name: ServiceBus-ConnectionString
+          deleted_utc: 2026-08-25T02:34:11Z
+          scheduled_purge_utc: 2026-11-23T02:34:11Z # DO NOT purge before this date
+      retained_unreferenced: # In the vault, read by nothing, kept on purpose (Key Vault secrets are never deleted)
+        - footer-hmac-key # created per email-communication-intelligence-r2's operator guide, but the live setting names `communication-trackingfooter-signingkey`
+        - Redis-ConnectionString # T242b 2026-10-05 — old dev cache's key; the BFF and Worker now use Redis__Endpoint + managed identity
       not_secret_but_stored_as_secret: # These are GUIDs/URLs — should live in YAML, not KV
         - bff-api-tenant-id # = tenant.id
         - DATAVERSE-URL # = environments.dev.dataverse.env_url
@@ -556,10 +574,8 @@ environments:
         # several places: measured 2026-08-24, it held a DIFFERENT value. It was orphaned (zero code/config
         # consumers, per code-quality-and-assurance-r3 HYGIENE-2) and was deleted separately.
         - [ai-openai-key, AzureOpenAI-ApiKey] # PascalCase legacy entry
-        # AI Search admin key has 3 KV entries that all hold the same value — by intentional Option C design
-        # (task 001 user remediation 2026-06-26) to support concurrent canonical + legacy callers during transition.
-        # Retirement path: after all consumers migrate to `AiSearch--AdminKey`, drop `ai-search-key` + `AzureAISearchApiKey`.
-        - [AiSearch--AdminKey, ai-search-key, AzureAISearchApiKey]
+        # [AiSearch--AdminKey, ai-search-key, AzureAISearchApiKey] — all three soft-deleted 2026-08-18/25 (see
+        # retired_soft_deleted); no longer a live duplicate set.
       orphaned_or_unreviewed: # Not yet classified — review next sync
         []
 

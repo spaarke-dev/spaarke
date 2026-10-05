@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Seed the L2 platform-controlplane Key Vault (sprk-controlplane-{env}-kv)
-    with the 5 secrets its App Service KV-reference app-settings resolve --
+    with the secrets its App Service KV-reference app-settings resolve --
     idempotent, never-overwrite, sentinel-aware.
 
 .DESCRIPTION
@@ -48,19 +48,13 @@
        Admin' through its managed identity's federated credential. An existing
        sentinel copy in a vault is left in place -- never deleted -- and is
        unused.)
-      5. Redis-ConnectionString   (G-8 Batch 4 AMENDMENT, for G-8 Batch 3's
-                                  audit defect #6 fix) -- the Worker's
-                                  ConnectionStrings__Redis KV-ref source
-                                  (Level-2 dispatch-idempotency Redis; the
-                                  Worker FAIL-FASTS at composition time
-                                  without a real value). Value from
-                                  -RedisConnectionString, else AUTO-RESOLVED
-                                  from the per-env spaarke-bff-redis-{env}
-                                  instance (az redis show + list-keys,
-                                  composed exactly like
-                                  scripts/Deploy-RedisCache.ps1:
-                                  {host}:{sslPort},password={primaryKey},ssl=True,abortConnect=False),
-                                  else sentinel + follow-up ceremony.
+      (Redis-ConnectionString is no longer seeded -- task 242b, 2026-10-05:
+       the Worker reaches Azure Managed Redis through the plain setting
+       Redis__Endpoint and signs in with its managed identity (access keys
+       are disabled), so modules/controlplane-worker-app-service.bicep has no
+       ConnectionStrings__Redis Key Vault reference in any environment. An
+       existing copy in a vault is left in place -- never deleted -- and is
+       unused.)
 
     NEVER-DELETE / NEVER-OVERWRITE GUARD (BINDING):
       If a secret ALREADY EXISTS in the vault -- with ANY value -- this script
@@ -105,28 +99,6 @@
     shared secret). If unset, a random GUID is GENERATED and seeded -- both
     the Worker and the sidecar container resolve this same KV secret, so a
     generated value is self-consistent without operator follow-up.
-
-.PARAMETER RedisConnectionString
-    Optional real value for Redis-ConnectionString (StackExchange.Redis
-    format). If unset, the script attempts to AUTO-RESOLVE it from the
-    per-env spaarke-bff-redis-{env} Azure Cache for Redis instance (the same
-    source of truth scripts/Deploy-RedisCache.ps1 upserts from) via
-    `az redis show` + `az redis list-keys`. If that resolution also fails
-    (instance absent / caller lacks listKeys rights), the sentinel
-    'pending-oob-population' is seeded and an operator MUST replace it
-    out-of-band -- the Worker crash-loops at boot until then.
-
-.PARAMETER RedisCacheName
-    Azure Cache for Redis instance name used for Redis-ConnectionString
-    auto-resolution. Default: spaarke-bff-redis-{Environment}
-    (Deploy-RedisCache.ps1 convention). Ignored when -RedisConnectionString
-    is passed.
-
-.PARAMETER RedisCacheResourceGroupName
-    Resource group hosting the Redis instance for auto-resolution. Default
-    per Deploy-RedisCache.ps1's env switch: dev -> spe-infrastructure-westus2
-    (legacy DO-NOT-RENAME), staging -> rg-spaarke-staging,
-    prod -> rg-spaarke-prod. Ignored when -RedisConnectionString is passed.
 
 .PARAMETER DryRun
     Preview mode. Sets $WhatIfPreference = $true for the whole run so every
@@ -182,15 +154,6 @@ param(
     [string]$SidecarSharedSecret,
 
     [Parameter(Mandatory = $false)]
-    [string]$RedisConnectionString,
-
-    [Parameter(Mandatory = $false)]
-    [string]$RedisCacheName,
-
-    [Parameter(Mandatory = $false)]
-    [string]$RedisCacheResourceGroupName,
-
-    [Parameter(Mandatory = $false)]
     [switch]$DryRun
 )
 
@@ -204,16 +167,6 @@ if ($DryRun) {
 }
 
 if (-not $KeyVaultName) { $KeyVaultName = "sprk-controlplane-$Environment-kv" }
-if (-not $RedisCacheName) { $RedisCacheName = "spaarke-bff-redis-$Environment" }
-if (-not $RedisCacheResourceGroupName) {
-    # Same env switch as scripts/Deploy-RedisCache.ps1 (dev's RG is the legacy
-    # DO-NOT-RENAME spe-infrastructure-westus2, not the canonical shape).
-    $RedisCacheResourceGroupName = switch ($Environment) {
-        'dev'     { 'spe-infrastructure-westus2' }
-        'staging' { 'rg-spaarke-staging' }
-        'prod'    { 'rg-spaarke-prod' }
-    }
-}
 
 $SentinelValue = 'pending-oob-population'
 
@@ -294,72 +247,11 @@ if ($LASTEXITCODE -ne 0 -or -not $vaultProbe) {
 Write-Success "Key Vault reachable: $KeyVaultName"
 
 # -----------------------------------------------------------------------------
-# Redis-ConnectionString source resolution (G-8 Batch 4 amendment for Batch
-# 3's audit defect #6 fix -- the Worker's ConnectionStrings__Redis KV-ref).
-# Precedence: existing KV secret (skip resolution entirely -- the seed loop's
-# never-overwrite guard will SKIP it anyway, and probing first avoids a
-# needless `az redis list-keys` call, which requires listKeys action rights)
-# > -RedisConnectionString parameter > auto-resolve from spaarke-bff-redis-
-# {env} (same composition as scripts/Deploy-RedisCache.ps1) > sentinel.
-# All calls here are READ-ONLY, so this runs under -WhatIf too.
-# -----------------------------------------------------------------------------
-
-Write-Section 'RESOLVE Redis-ConnectionString SOURCE'
-
-$redisValue = $SentinelValue
-$redisProvenance = 'sentinel'
-$redisFollowUp = "Operator MUST replace with the real Redis connection string out-of-band (easiest: scripts/Deploy-RedisCache.ps1 -Environment $Environment -KeyVaultName $KeyVaultName upserts it from $RedisCacheName) -- the Worker CRASH-LOOPS at boot (NFR-05 fail-fast) until then."
-
-$redisExistingProbe = az keyvault secret show `
-    --vault-name $KeyVaultName `
-    --name 'Redis-ConnectionString' `
-    --query 'name' `
-    --output tsv 2>$null
-if ($LASTEXITCODE -eq 0 -and $redisExistingProbe) {
-    Write-Info "Redis-ConnectionString already exists in '$KeyVaultName' -- source resolution skipped (the seed loop's never-overwrite guard will SKIP it)."
-    $redisFollowUp = $null
-}
-elseif ($RedisConnectionString) {
-    $redisValue = $RedisConnectionString
-    $redisProvenance = 'parameter'
-    $redisFollowUp = $null
-    Write-Success 'Redis-ConnectionString supplied via -RedisConnectionString.'
-}
-else {
-    Write-Step "Attempting auto-resolution from Redis instance '$RedisCacheName' (rg: $RedisCacheResourceGroupName)"
-    $redisInstance = az redis show `
-        --resource-group $RedisCacheResourceGroupName `
-        --name $RedisCacheName `
-        --query '{hostName:hostName,sslPort:sslPort}' `
-        --output json 2>$null | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or -not $redisInstance -or -not $redisInstance.hostName) {
-        Write-Warn "Redis instance '$RedisCacheName' not found / not readable in rg '$RedisCacheResourceGroupName' -- falling back to sentinel. Provision it via scripts/Deploy-RedisCache.ps1, or pass -RedisConnectionString."
-    }
-    else {
-        $redisPrimaryKey = az redis list-keys `
-            --resource-group $RedisCacheResourceGroupName `
-            --name $RedisCacheName `
-            --query 'primaryKey' `
-            --output tsv 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($redisPrimaryKey)) {
-            Write-Warn "az redis list-keys failed for '$RedisCacheName' (caller may lack the listKeys action right) -- falling back to sentinel. Pass -RedisConnectionString, or re-run with sufficient RBAC."
-        }
-        else {
-            # EXACT composition parity with scripts/Deploy-RedisCache.ps1.
-            $redisValue = "$($redisInstance.hostName):$($redisInstance.sslPort),password=$($redisPrimaryKey.Trim()),ssl=True,abortConnect=False"
-            $redisProvenance = 'resolved'
-            $redisFollowUp = $null
-            Write-Success "Redis-ConnectionString auto-resolved from '$RedisCacheName' (host: $($redisInstance.hostName):$($redisInstance.sslPort); value not echoed)."
-        }
-    }
-}
-
-# -----------------------------------------------------------------------------
 # Secret plan -- name + value + PROVENANCE (values are never echoed).
 # Names MUST match the Bicep modules' KV-reference SecretName= values exactly:
 #   modules/controlplane-app-service.bicep        -> Dataverse-ClientSecret
 #   modules/controlplane-worker-app-service.bicep -> Dataverse-ClientSecret,
-#       BFF-API-ClientSecret, Sidecar-Shared-Secret, Redis-ConnectionString
+#       BFF-API-ClientSecret, Sidecar-Shared-Secret
 # -----------------------------------------------------------------------------
 
 $secretPlan = @(
@@ -383,13 +275,6 @@ $secretPlan = @(
         Provenance = if ($SidecarSharedSecret) { 'parameter' } else { 'generated' }
         FollowUp   = $null
         Note       = 'X-Sidecar-Auth shared secret. Worker AND sidecar container both resolve this same KV secret, so a generated value is self-consistent.'
-    }
-    [pscustomobject]@{
-        Name       = 'Redis-ConnectionString'
-        Value      = $redisValue
-        Provenance = $redisProvenance
-        FollowUp   = $redisFollowUp
-        Note       = 'Worker ConnectionStrings__Redis KV-ref source (G-8 Batch 3 / audit defect #6 -- Level-2 dispatch-idempotency Redis; Worker fail-fasts at composition time without it). Source of truth: spaarke-bff-redis-{env} per Deploy-RedisCache.ps1.'
     }
 )
 
