@@ -710,28 +710,73 @@ public partial class RouteAuthorizationGuardTests
     //
     // MAINTENANCE: adding a public route = add it here AND give it its waiver. Removing or gating one (task 166 for
     // the document probe, the UNOWNED-NEW owner for the ACS ingress) = delete its line here in the same diff.
+    //
+    // EACH ROUTE'S COMPENSATING CONTROL IS PINNED HERE, AND ENFORCED (main-session round 43 item 1, task 167 f2-v1).
+    // Owner round 12 item 1 keeps the strict AnonymousByDesign rule — an anonymous route's compensating control is
+    // MANDATORY — and until f2-v1 only the three liveness probes had theirs read from code; for the other thirteen it was
+    // waiver TEXT, so removing `.RequireRateLimiting("anonymous")` from /healthz/dataverse kept the build green. Each line
+    // below lists EVERY control the route carries, of three kinds:
+    //   - RateLimitControl("policy")  — exactly ONE .RequireRateLimiting("policy") on the effective chain, a plain literal;
+    //   - WebhookSignatureControl()   — .RequireWebhookSignature(...) on the chain (WebhookSignatureFilter, fail closed);
+    //   - DevelopmentOnlyControl()    — the registration sits in the then-branch of `if (<env>.IsDevelopment())`, <env> an
+    //                                   IWebHostEnvironment / IHostEnvironment parameter or an `.Environment` property.
+    // EveryExplicitlyAnonymousRouteCarriesItsPinnedControl fails when a control is removed, swapped (a looser policy is a
+    // different policy), added unpinned, or applied in a form the guard cannot read (an attribute, metadata, a wrapper —
+    // RateLimitPoliciesAreAppliedOnlyOnAScannedChain refuses those outright), and when the route's waiver text does not
+    // name exactly these controls. A route with no control at all fails.
     // =============================================================================================
 
-    private sealed record AnonymousRoute(string Route, string Control);
+    private enum AnonymousControlKind
+    {
+        RateLimit,
+        WebhookSignature,
+        DevelopmentOnly,
+    }
+
+    /// <summary>One compensating control of an explicitly anonymous route. <see cref="Evidence"/> is the text its waiver
+    /// must name.</summary>
+    private sealed record AnonymousControl(AnonymousControlKind Kind, string? Policy)
+    {
+        public string Evidence => Kind switch
+        {
+            AnonymousControlKind.RateLimit => $"RequireRateLimiting(\"{Policy}\")",
+            AnonymousControlKind.WebhookSignature => "RequireWebhookSignature",
+            _ => "IsDevelopment()",
+        };
+    }
+
+    private static AnonymousControl RateLimitControl(string policy) => new(AnonymousControlKind.RateLimit, policy);
+
+    private static AnonymousControl WebhookSignatureControl() => new(AnonymousControlKind.WebhookSignature, null);
+
+    private static AnonymousControl DevelopmentOnlyControl() => new(AnonymousControlKind.DevelopmentOnly, null);
+
+    private sealed record AnonymousRoute(string Route, string Purpose, IReadOnlyList<AnonymousControl> Controls);
+
+    private static AnonymousRoute PublicRoute(string route, string purpose, params AnonymousControl[] controls) => new(route, purpose, controls);
 
     private static readonly IReadOnlyList<AnonymousRoute> ExplicitlyAnonymousRoutes = new[]
     {
-        new AnonymousRoute("GET /healthz", "liveness probe; RequireRateLimiting(\"health-probe\")"),
-        new AnonymousRoute("GET /healthz/catalog", "catalog probe; RequireRateLimiting(\"health-probe\")"),
-        new AnonymousRoute("GET /ping", "warm-up probe; RequireRateLimiting(\"health-probe\")"),
-        new AnonymousRoute("GET /healthz/dataverse", "Dataverse probe; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /healthz/dataverse/crud", "Dataverse CRUD probe; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /healthz/dataverse/doc/{id}", "Pending 166 (an anonymous document read); RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /status", "service metadata; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /api/config/client", "MSAL bootstrap config; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /api/config", "public runtime config; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("GET /api/office/health", "Office add-in connectivity; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("POST /api/office/save-debug", "mapped only when env.IsDevelopment()"),
-        new AnonymousRoute("POST /api/registration/demo-request", "public demo form; RequireRateLimiting(\"anonymous\")"),
-        new AnonymousRoute("POST /api/onboarding/consent-callback", "HMAC-SHA256 over the body"),
-        new AnonymousRoute("POST /api/compose/webhooks/spe-doc-changed", "RequireWebhookSignature"),
-        new AnonymousRoute("POST /api/communications/incoming-webhook", "RequireWebhookSignature"),
-        new AnonymousRoute("POST /api/communications/acs/eventgrid", "Pending UNOWNED-NEW (the shared secret is optional)"),
+        PublicRoute("GET /healthz", "liveness probe", RateLimitControl("health-probe")),
+        PublicRoute("GET /healthz/catalog", "catalog probe", RateLimitControl("health-probe")),
+        PublicRoute("GET /ping", "warm-up probe", RateLimitControl("health-probe")),
+        PublicRoute("GET /healthz/dataverse", "Dataverse probe", RateLimitControl("anonymous")),
+        PublicRoute("GET /healthz/dataverse/crud", "Dataverse CRUD probe", RateLimitControl("anonymous")),
+        PublicRoute("GET /healthz/dataverse/doc/{id}", "Pending 166 (an anonymous document read)", RateLimitControl("anonymous")),
+        PublicRoute("GET /status", "service metadata", RateLimitControl("anonymous")),
+        PublicRoute("GET /api/config/client", "MSAL bootstrap config", RateLimitControl("anonymous")),
+        PublicRoute("GET /api/config", "public runtime config", RateLimitControl("anonymous")),
+        PublicRoute("GET /api/office/health", "Office add-in connectivity", RateLimitControl("anonymous")),
+        PublicRoute("POST /api/office/save-debug", "development-only diagnostic", DevelopmentOnlyControl()),
+        PublicRoute("POST /api/registration/demo-request", "public demo form", RateLimitControl("anonymous")),
+        PublicRoute("POST /api/onboarding/consent-callback", "admin-consent redirect target (HMAC-SHA256 over the body in the handler)",
+            RateLimitControl("anonymous")),
+        PublicRoute("POST /api/compose/webhooks/spe-doc-changed", "Graph change-notification webhook",
+            WebhookSignatureControl(), RateLimitControl("webhook-graph")),
+        PublicRoute("POST /api/communications/incoming-webhook", "Graph mail-notification webhook",
+            WebhookSignatureControl(), RateLimitControl("webhook-graph")),
+        PublicRoute("POST /api/communications/acs/eventgrid", "Pending UNOWNED-NEW (the shared secret is optional)",
+            RateLimitControl("webhook-graph")),
     };
 
     // =============================================================================================
@@ -744,6 +789,9 @@ public partial class RouteAuthorizationGuardTests
     // not anonymous. Round 12 item 1 still holds — the probes ARE rate limited; this is which limit.
     // MAINTENANCE: a new liveness probe a platform polls joins this set in the same diff that maps it, with its
     // AnonymousByDesign waiver naming RequireRateLimiting("health-probe"). Any other anonymous route uses "anonymous".
+    // This set equals the ExplicitlyAnonymousRoutes lines whose control is RateLimitControl("health-probe")
+    // (EveryExplicitlyAnonymousRouteCarriesItsPinnedControl asserts it), and the policy can no longer reach a route by an
+    // [EnableRateLimiting] attribute or metadata (RateLimitPoliciesAreAppliedOnlyOnAScannedChain, task 167 f2-v1).
     // =============================================================================================
 
     private static readonly IReadOnlySet<string> HealthProbeRoutes = new HashSet<string>(StringComparer.Ordinal)
@@ -2100,31 +2148,34 @@ public partial class RouteAuthorizationGuardTests
         // =========================================================================================
 
         // ---------- P:AnonymousByDesign ----------
+        // Each reason names EXACTLY the controls ExplicitlyAnonymousRoutes pins for the route, and the guard reads each of
+        // them from code (EveryExplicitlyAnonymousRouteCarriesItsPinnedControl, main-session round 43 item 1).
         Permanent("GET /healthz", PermanentBasis.AnonymousByDesign, "167",
             "App Service liveness probe, anonymous by platform contract. Mandatory control: "
-            + "RequireRateLimiting(\"health-probe\") at EndpointMappingExtensions.cs:71 (owner round 12 item 1; the "
+            + "RequireRateLimiting(\"health-probe\") at EndpointMappingExtensions.cs:72 (owner round 12 item 1; the "
             + "dedicated per-IP probe policy, owner round 14 item 1, RateLimitingModule.cs); the HealthCheckOptions "
             + "(:67-70) have no ResponseWriter, so the body is the aggregate status word only — no record, no id, no "
             + "side effect."),
         Permanent("GET /healthz/catalog", PermanentBasis.AnonymousByDesign, "167",
             "FR-P0-04 catalog-reconciliation probe. Mandatory control: RequireRateLimiting(\"health-probe\") at "
-            + "EndpointMappingExtensions.cs:79 (owner rounds 12 item 1 + 14 item 1); the HealthCheckOptions (:75-78) "
-            + "have no ResponseWriter, so the body is the aggregate status word only; takes no id and writes nothing."),
+            + "EndpointMappingExtensions.cs:85 (owner rounds 12 item 1 + 14 item 1); the HealthCheckOptions (:80-83) "
+            + "have no ResponseWriter, so the body is the aggregate status word only; takes no id and writes nothing; "
+            + "each check is memoized for 30 s and time-bounded (MemoizedHealthCheck.cs, round 34 item 7, round 43 item 2)."),
         Permanent("GET /healthz/dataverse", PermanentBasis.AnonymousByDesign, "167",
             "Dataverse connectivity probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:86; the handler (TestDataverseConnectionAsync, :496-513) takes no id "
+            + "EndpointMappingExtensions.cs:92; the handler (TestDataverseConnectionAsync, :502-519) takes no id "
             + "and returns a fixed status message, never ex.Message (task 023)."),
         Permanent("GET /healthz/dataverse/crud", PermanentBasis.AnonymousByDesign, "167",
             "Dataverse CRUD probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:89; the handler (TestDataverseCrudOperationsAsync, :515-532) takes no "
+            + "EndpointMappingExtensions.cs:95; the handler (TestDataverseCrudOperationsAsync, :521-538) takes no "
             + "id and returns a fixed healthy/failed message with no record content."),
         Permanent("GET /ping", PermanentBasis.AnonymousByDesign, "167",
             "Warm-up probe. Mandatory control: RequireRateLimiting(\"health-probe\") at "
-            + "EndpointMappingExtensions.cs:127 (owner rounds 12 item 1 + 14 item 1); the handler (:125) answers the constant "
+            + "EndpointMappingExtensions.cs:133 (owner rounds 12 item 1 + 14 item 1); the handler (:131) answers the constant "
             + "text \"pong\" — no input is read, nothing is looked up, nothing is written."),
         Permanent("GET /status", PermanentBasis.AnonymousByDesign, "167",
             "Service metadata probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:141; the body (:131-139) is the constant service name, version and "
+            + "EndpointMappingExtensions.cs:147; the body (:137-145) is the constant service name, version and "
             + "server time — no id, no record."),
         Permanent("GET /api/config/client", PermanentBasis.AnonymousByDesign, "167",
             "MSAL bootstrap config for a page with no token yet. Mandatory control: "
@@ -2148,26 +2199,28 @@ public partial class RouteAuthorizationGuardTests
             + "input and creates a NEW request row — it names no existing record. (Its 409 on a duplicate e-mail "
             + "is noted in the task note.)"),
         Permanent("POST /api/onboarding/consent-callback", PermanentBasis.AnonymousByDesign, "167",
-            "External admin-consent redirect target (no token exists yet). Mandatory control: HMAC-SHA256 over "
-            + "the raw body, ConsentCallbackEndpoint.cs:120-139 — a missing header, a missing key or a mismatch "
-            + "is refused before any work."),
+            "External admin-consent redirect target (no token exists yet). Mandatory control: "
+            + "RequireRateLimiting(\"anonymous\") at ConsentCallbackEndpoint.cs:72. Authenticity: HMAC-SHA256 over "
+            + "the raw body in the handler, ConsentCallbackEndpoint.cs:119-150 — a missing header, a missing key or a "
+            + "mismatch is refused before any work."),
         Permanent("POST /api/compose/webhooks/spe-doc-changed", PermanentBasis.AnonymousByDesign, "167",
             "Graph change-notification webhook (Graph sends no OAuth token). Mandatory control: "
             + "RequireWebhookSignature at ComposeSyncEndpoints.cs:44, which fails closed with no key or header "
-            + "(WebhookSignatureFilter.cs:93-117); the validationToken handshake "
-            + "(ComposeSyncEndpoints.cs:104-110) only echoes the token."),
+            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :48 (defense in depth); "
+            + "the validationToken handshake (ComposeSyncEndpoints.cs:104-110) only echoes the token."),
         Permanent("POST /api/communications/incoming-webhook", PermanentBasis.AnonymousByDesign, "167",
             "Graph mail-notification webhook. Mandatory control: RequireWebhookSignature at "
             + "CommunicationEndpoints.cs:402, which fails closed with no key or header "
-            + "(WebhookSignatureFilter.cs:93-117); the validationToken handshake "
-            + "(CommunicationEndpoints.cs:1175-1184) only echoes the token."),
+            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :406 (defense in depth); "
+            + "the validationToken handshake (CommunicationEndpoints.cs:1175-1184) only echoes the token."),
 
         // ---------- N:UNOWNED-NEW ----------
         Pending("POST /api/communications/acs/eventgrid", "UNOWNED-NEW", Gap.NoDecision,
             "[medium] ANONYMOUS, and no MANDATORY authenticity control. The ?sig= shared secret is enforced "
             + "only when configured (AcsEventGridIngressService.cs:68-69); the mandatory topic allow-list "
             + "(:121-141) checks a topic string the caller writes in the body. Anyone who knows the ACS topic id "
-            + "can enqueue forged chat events."),
+            + "can enqueue forged chat events. Its only control until then: RequireRateLimiting(\"webhook-graph\") at "
+            + "AcsEventGridEndpoints.cs:32 (600/min per IP)."),
         Pending("GET /api/ai/chat/context-mappings/analysis/{analysisId}", "UNOWNED-NEW", Gap.NoDecision,
             "[medium] Refuted by ACCIDENT, not by a decision: the app-only Retrieve asks for attributes that do "
             + "not exist (AnalysisChatContextResolver.cs:267-277). AiAuthorizationFilter does not decide here. "
@@ -2244,7 +2297,8 @@ public partial class RouteAuthorizationGuardTests
         Pending("GET /healthz/dataverse/doc/{id}", "166", Gap.NoDecision,
             "[high] ANONYMOUS read of any sprk_document by id (EndpointMappingExtensions.cs:91-123): name, file "
             + "name, parent, matter, project and invoice ids, app-only via IDocumentDataverseService. Rate limit "
-            + "only. Task 166 amendment (a) owns it (owner round 12 item 8 keeps it there); consumer "
+            + "only: RequireRateLimiting(\"anonymous\") at :129. Task 166 amendment (a) owns it (owner round 12 item 8 "
+            + "keeps it there); consumer "
             + ".claude/skills/bff-deploy/SKILL.md §9c must move to GET /healthz/dataverse first."),
         Pending("POST /api/compose/documents/{documentSpeId}/save", "166", Gap.NoDecision,
             "[medium] The SPE write is OBO, but the body TenantId and SessionId flow into the first-save rebind "
@@ -2578,6 +2632,9 @@ public partial class RouteAuthorizationGuardTests
     // fix task deletes the waiver and sets ResolvedBy + a ProofTest that pins the route's ABSENCE (its verb + a path the
     // template matches, asserted 404/405 signed in or absent from the endpoint table). Any other absent key still fails
     // (main-session round 34 item 4; RetiredEntryViolations).
+    // Every ProofTest — a deny test or an absence pin — must RUN (task 167 f2-v1): a plain xUnit [Fact] or [Theory] with no
+    // Skip on any attribute, public, outside any #if region, with no Skip call and no `return` in its own body, in a file
+    // one of ProofTestProjects compiles (RouteAuthorizationGuardTests.cs "A PROOF TEST MUST RUN").
     // For an InsufficientDecision entry the guard cannot SEE a fix made inside an already-credited filter or
     // handler; that resolution is by declaration (ResolvedBy + ProofTest), reviewed at code review.
     // =============================================================================================

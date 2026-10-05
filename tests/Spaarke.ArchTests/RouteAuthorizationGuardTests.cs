@@ -52,7 +52,14 @@ namespace Spaarke.ArchTests;
 /// route pass Rule A by a credited filter, a HandlerDecision or a SystemAdmin / SPE-admin AdminOnlyRoutes entry, delete
 /// its waiver, and set <c>ResolvedBy</c> to the task id and <c>ProofTest</c> to its behavioural deny test. A route the fix
 /// task DELETED resolves with <c>ResolvedBy</c> and a <c>ProofTest</c> that pins its absence (task 167 f2, main-session
-/// round 34 items 4-5).</para>
+/// round 34 items 4-5). Either proof must RUN: a plain, unskipped xUnit <c>[Fact]</c>/<c>[Theory]</c> in a file a CI-run
+/// test project compiles (task 167 f2-v1, <see cref="ProofTestProjects"/>).</para>
+///
+/// <para><b>The public surface and its controls</b> (task 167 f1, f2-v1). Every anonymous route is pinned in
+/// <c>ExplicitlyAnonymousRoutes</c> WITH the compensating controls it carries — a rate-limit policy,
+/// <c>RequireWebhookSignature</c>, an IsDevelopment-only mapping — and the build reads each from code
+/// (<see cref="EveryExplicitlyAnonymousRouteCarriesItsPinnedControl"/>); a rate-limit policy is applied only by a chain
+/// call the scanner reads (<see cref="RateLimitPoliciesAreAppliedOnlyOnAScannedChain"/>).</para>
 ///
 /// <para><b>Why source analysis and not endpoint reflection</b> (task 074, still true).
 /// <c>AddEndpointFilter</c> adds NOTHING to <c>EndpointBuilder.Metadata</c> — reflection yields only
@@ -523,8 +530,424 @@ public partial class RouteAuthorizationGuardTests
         if (!ContainsToken(CodeOf(raw), parts[1]))
         {
             yield return $"{label}: ProofTest method '{parts[1]}' is not in {parts[0]}";
+            yield break;
+        }
+
+        // A proof pins something only if it RUNS (task 167 f2-v1, the f2 verifier's item 3): the file is compiled by a
+        // test project CI runs, and the method is a plain xUnit test that nothing skips.
+        var compiled = ProofTestCompilationProblem(parts[0], readTestFile);
+        if (compiled is not null)
+        {
+            yield return $"{label}: ProofTest {entry.ProofTest} never runs — {compiled}";
+        }
+
+        var runnable = RunnableTestProblem(raw, parts[1]);
+        if (runnable is not null)
+        {
+            yield return $"{label}: ProofTest {entry.ProofTest} never runs — {runnable}";
         }
     }
+
+    // =============================================================================================
+    // A PROOF TEST MUST RUN (task 167 f2-v1 — the f2 verifier's item 3)
+    // ---------------------------------------------------------------------------------------------
+    // A sweep entry resolves on the strength of its ProofTest — the deny test of a fixed route, or the absence pin of a
+    // deleted one (main-session round 34 item 4). Until f2-v1 the guard read only the test's TEXT, so a
+    // [Fact(Skip = "...")], a method with no test attribute, or a file no test project compiles was accepted, and the
+    // verifier resolved a deleted S-79 on each with the guard green. A ProofTest now must:
+    //   1. sit in a file one of the CI-run BFF test projects (ProofTestProjects) COMPILES — evaluated from the project's
+    //      own Compile items (SDK default glob, Include / Exclude / Remove in document order, Directory.Build.props
+    //      before and Directory.Build.targets after); an unreadable item fails closed;
+    //   2. be a plain xUnit [Fact] or [Theory] (Xunit.Fact/Theory, with or without the Attribute suffix) — not a custom
+    //      or Skippable attribute, which can skip at runtime — with no Skip argument on any of its attributes (an
+    //      [InlineData(..., Skip = ...)] row included);
+    //   3. be one public, non-generic method of public, non-abstract (static allowed) types, outside every
+    //      #if/#elif/#else region, whose body calls no Skip API and has no `return` statement outside a nested lambda —
+    //      an early return leaves its assertions unrun.
+    // =============================================================================================
+
+    /// <summary>The test projects a ProofTest may live in: each is run by CI (TheProofTestProjectsAreRunByCi).
+    /// MAINTENANCE: a new suite joins this list only once CI runs it (in Spaarke.sln, or named by a `dotnet test` step) —
+    /// the pin fails otherwise.</summary>
+    private static readonly IReadOnlyList<string> ProofTestProjects = new[]
+    {
+        "tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj",
+        "tests/integration/Sprk.Bff.Api.IntegrationTests/Sprk.Bff.Api.IntegrationTests.csproj",
+        "tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj",
+        "tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj",
+    };
+
+    /// <summary>Null when one of <see cref="ProofTestProjects"/> compiles <paramref name="file"/>; otherwise why not.</summary>
+    private static string? ProofTestCompilationProblem(string file, Func<string, string?> readRepoFile)
+    {
+        if (file.Contains('\\') || file.StartsWith('/') || file.Split('/').Any(s => s is "" or "." or ".."))
+        {
+            return $"'{file}' is not a normalized repo-relative path (forward slashes, no '.' or '..' segments)";
+        }
+
+        var problems = new List<string>();
+        foreach (var project in ProofTestProjects)
+        {
+            var xml = readRepoFile(project);
+            if (xml is null)
+            {
+                problems.Add($"{project} does not exist");
+                continue;
+            }
+
+            var directory = project[..project.LastIndexOf('/')];
+            var imports = DirectoryBuildFiles(directory, readRepoFile);
+            if (ProjectCompiles(directory, xml, imports, file))
+            {
+                return null;
+            }
+        }
+
+        return $"no CI-run test project compiles '{file}' (checked {string.Join(", ", ProofTestProjects)}"
+               + (problems.Count == 0 ? string.Empty : "; " + string.Join("; ", problems))
+               + ") — an uncompiled test pins nothing";
+    }
+
+    /// <summary>The Directory.Build.props (imported first) and Directory.Build.targets (imported last) MSBuild finds for a
+    /// project in <paramref name="directory"/>: the nearest of each, walking up to the repo root.</summary>
+    private static (string? Props, string? Targets) DirectoryBuildFiles(string directory, Func<string, string?> readRepoFile)
+    {
+        string? Nearest(string name)
+        {
+            var dir = directory;
+            while (true)
+            {
+                var text = readRepoFile(dir.Length == 0 ? name : $"{dir}/{name}");
+                if (text is not null)
+                {
+                    return text;
+                }
+
+                if (dir.Length == 0)
+                {
+                    return null;
+                }
+
+                var slash = dir.LastIndexOf('/');
+                dir = slash < 0 ? string.Empty : dir[..slash];
+            }
+        }
+
+        return (Nearest("Directory.Build.props"), Nearest("Directory.Build.targets"));
+    }
+
+    /// <summary>
+    /// Whether the SDK-style project in <paramref name="projectDirectory"/> compiles <paramref name="file"/>, by MSBuild's
+    /// item semantics for one path: the default <c>**/*.cs</c> glob (unless disabled, and minus bin/, obj/ and dot-folders),
+    /// then every <c>Compile</c> element in evaluation order — Directory.Build.props, the project, Directory.Build.targets —
+    /// an <c>Include</c> (less its <c>Exclude</c>) adding the path, a <c>Remove</c> taking it away. Fail closed: a
+    /// conditional or unreadable <c>Include</c> adds nothing; a conditional or unreadable <c>Remove</c> removes; a custom
+    /// <c>DefaultItemExcludes</c> disables the default glob.
+    /// </summary>
+    private static bool ProjectCompiles(string projectDirectory, string projectXml, (string? Props, string? Targets) imports, string file)
+    {
+        var documents = new[] { imports.Props, projectXml, imports.Targets }
+            .Where(x => x is not null)
+            .Select(x => { try { return System.Xml.Linq.XDocument.Parse(x!); } catch (System.Xml.XmlException) { return null; } })
+            .ToList();
+        if (documents.Any(d => d is null))
+        {
+            return false;
+        }
+
+        var properties = documents.SelectMany(d => d!.Descendants()).Where(e => e.Parent?.Name.LocalName == "PropertyGroup").ToList();
+        var defaults = !properties.Any(p =>
+            (p.Name.LocalName is "EnableDefaultCompileItems" or "EnableDefaultItems" && p.Value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase))
+            || p.Name.LocalName is "DefaultItemExcludes" or "DefaultExcludesInProjectFolder");
+
+        var included = defaults && UnderDefaultCompileGlob(projectDirectory, file);
+        foreach (var compile in documents.SelectMany(d => d!.Descendants()).Where(e => e.Name.LocalName == "Compile"))
+        {
+            var conditional = compile.AncestorsAndSelf().Any(e => e.Attribute("Condition") is not null);
+            var include = compile.Attribute("Include")?.Value;
+            var exclude = compile.Attribute("Exclude")?.Value;
+            var remove = compile.Attribute("Remove")?.Value;
+
+            if (include is not null && !conditional
+                && GlobListMatches(projectDirectory, include, file) == true
+                && GlobListMatches(projectDirectory, exclude, file) == false)
+            {
+                included = true;
+            }
+
+            if (remove is not null && GlobListMatches(projectDirectory, remove, file) != false)
+            {
+                included = false;
+            }
+        }
+
+        return included;
+    }
+
+    private static bool UnderDefaultCompileGlob(string projectDirectory, string file)
+    {
+        if (!file.StartsWith(projectDirectory + "/", StringComparison.OrdinalIgnoreCase)
+            || !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var segments = file[(projectDirectory.Length + 1)..].Split('/');
+        return segments[0] is not ("bin" or "obj") && !segments.Any(s => s.StartsWith('.'));
+    }
+
+    /// <summary>True / false whether a ';'-separated MSBuild item spec matches <paramref name="file"/>; null when it
+    /// cannot be read (a property or item reference, a path climbing out of the repo). A null <paramref name="spec"/>
+    /// matches nothing.</summary>
+    private static bool? GlobListMatches(string projectDirectory, string? spec, string file)
+    {
+        if (spec is null)
+        {
+            return false;
+        }
+
+        foreach (var raw in spec.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (raw.Contains("$(", StringComparison.Ordinal) || raw.Contains("@(", StringComparison.Ordinal)
+                || raw.Contains("%(", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var segments = new List<string>(projectDirectory.Split('/'));
+            foreach (var segment in raw.Replace('\\', '/').Split('/'))
+            {
+                if (segment is "" or ".")
+                {
+                    continue;
+                }
+
+                if (segment == "..")
+                {
+                    if (segments.Count == 0)
+                    {
+                        return null;
+                    }
+
+                    segments.RemoveAt(segments.Count - 1);
+                    continue;
+                }
+
+                segments.Add(segment);
+            }
+
+            var pattern = "^" + string.Join("/", segments.Select(s => s == "**"
+                ? "\u0001"
+                : Regex.Escape(s).Replace(@"\*", "[^/]*", StringComparison.Ordinal).Replace(@"\?", "[^/]", StringComparison.Ordinal))) + "$";
+            pattern = pattern.Replace("\u0001/", "(?:[^/]+/)*", StringComparison.Ordinal).Replace("\u0001", ".*", StringComparison.Ordinal);
+            if (Regex.IsMatch(file, pattern, RegexOptions.IgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static readonly IReadOnlySet<string> PlainXunitTestAttributes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Fact", "FactAttribute", "Theory", "TheoryAttribute",
+        "Xunit.Fact", "Xunit.FactAttribute", "Xunit.Theory", "Xunit.TheoryAttribute",
+        "global::Xunit.Fact", "global::Xunit.FactAttribute", "global::Xunit.Theory", "global::Xunit.TheoryAttribute",
+    };
+
+    private static readonly Regex SkipApiCall = new(
+        @"(?<![\w.])Skip\s*\.\s*\w+\s*\(|\bAssert\s*\.\s*Skip\w*\s*\(|\bSkip\w*Exception\b|(?<![\w.])Skip\w*\s*\(",
+        RegexOptions.Compiled);
+
+    /// <summary>Null when test <paramref name="methodName"/> in <paramref name="raw"/> is a plain xUnit test that runs;
+    /// otherwise why it never does (task 167 f2-v1).</summary>
+    private static string? RunnableTestProblem(string raw, string methodName)
+    {
+        var unit = new SourceUnit("proof-test", raw);
+        var methods = unit.Methods.Where(m => m.Name == methodName).ToList();
+        if (methods.Count != 1)
+        {
+            return methods.Count == 0
+                ? $"no method '{methodName}' is declared there"
+                : $"'{methodName}' is declared {methods.Count} times — a proof names exactly one test";
+        }
+
+        var method = methods[0];
+        var code = unit.Code;
+
+        // #if / #elif / #else: the method may not be compiled at all. (Read over Code: a directive-shaped line inside a
+        // string literal is blanked there.)
+        var depth = 0;
+        foreach (var line in code[..method.NameIndex].Split('\n'))
+        {
+            var directive = line.TrimStart();
+            if (Regex.IsMatch(directive, @"^#\s*if\b"))
+            {
+                depth++;
+            }
+            else if (Regex.IsMatch(directive, @"^#\s*endif\b"))
+            {
+                depth--;
+            }
+        }
+
+        if (depth != 0)
+        {
+            return "it sits inside an #if/#endif region, so whether it is compiled depends on a symbol";
+        }
+
+        // Attributes: the lines above the header that are attribute lines (or blank), and the header itself.
+        var lineStart = code.LastIndexOf('\n', Math.Max(0, method.NameIndex - 1)) + 1;
+        var start = lineStart;
+        while (start > 1)
+        {
+            var previousEnd = start - 1;
+            var previousStart = code.LastIndexOf('\n', previousEnd - 1) + 1;
+            var previous = code[previousStart..previousEnd].Trim();
+            if (previous.Length != 0 && !previous.StartsWith('['))
+            {
+                break;
+            }
+
+            start = previousStart;
+        }
+
+        var header = code[start..method.NameIndex];
+        var attributes = new List<string>();
+        for (var i = header.IndexOf('['); i >= 0 && i < header.Length; i = header.IndexOf('[', i))
+        {
+            var close = MatchClose(header, i);
+            if (close < 0)
+            {
+                return "its attribute list cannot be read";
+            }
+
+            attributes.AddRange(SplitTopLevel(header, i + 1, close)
+                .Select(s => Regex.Match(header[s.Start..s.End].Trim(), @"^(?:\w+\s*:\s*)?(?<name>(?:global::)?[A-Za-z_][\w.]*)").Groups["name"].Value));
+            i = close + 1;
+        }
+
+        if (!attributes.Any(PlainXunitTestAttributes.Contains))
+        {
+            return attributes.Count == 0
+                ? "it carries no [Fact] or [Theory] attribute, so xUnit never runs it"
+                : $"its attributes [{string.Join(", ", attributes)}] include no plain xUnit [Fact] or [Theory] — a custom or "
+                  + "Skippable test attribute can skip it at runtime";
+        }
+
+        if (Regex.IsMatch(header, @"\bSkip\s*="))
+        {
+            return "an attribute sets Skip, so xUnit reports it skipped (or skips its data rows) and never runs it";
+        }
+
+        var modifiers = header[(header.LastIndexOf(']') + 1)..];
+        if (!Regex.IsMatch(modifiers, @"\bpublic\b") || Regex.IsMatch(modifiers, @"\babstract\b"))
+        {
+            return "it is not a public, non-abstract method, so xUnit does not run it";
+        }
+
+        if (Regex.IsMatch(code[(method.NameIndex + methodName.Length)..], @"^\s*<"))
+        {
+            return "it is a generic method";
+        }
+
+        foreach (var type in unit.Types.Where(t => t.BodyStart <= method.NameIndex && method.NameIndex < t.BodyEnd))
+        {
+            var mods = TypeModifiers(unit, type);
+            if (mods is null || !Regex.IsMatch(mods, @"\bpublic\b") || (Regex.IsMatch(mods, @"\babstract\b") && !Regex.IsMatch(mods, @"\bsealed\b"))
+                || Regex.IsMatch(code[(TypeNameEnd(unit, type) ?? 0)..], @"^\s*<"))
+            {
+                return $"its type '{type.Name}' is not a public, non-abstract, non-generic type, so xUnit never runs its tests";
+            }
+        }
+
+        // The body: no Skip API, and no `return` outside a nested lambda or local function — an early return leaves the
+        // assertions unrun.
+        if (SkipApiCall.IsMatch(method.Body))
+        {
+            return "its body calls a Skip API, so it can skip at runtime";
+        }
+
+        if (Regex.IsMatch(BlankNestedFunctionBodies(method.Body), @"\breturn\b"))
+        {
+            return "its body has a `return` statement, so it can end before its assertions run";
+        }
+
+        return null;
+    }
+
+    /// <summary>A local-function head at a statement start: <c>[static|async] Type Name[&lt;T&gt;](</c>.</summary>
+    private static readonly Regex LocalFunctionHead = new(
+        @"(?<=[;{}]\s*)(?:(?:static|async|unsafe|extern)\s+)*(?<type>[A-Za-z_][\w.]*(?:\s*<[^;{}()]*?>)?(?:\s*\[\s*\])*\??)\s+(?<name>[A-Za-z_]\w*)\s*(?:<[^;{}()]*?>)?\s*\(",
+        RegexOptions.Compiled);
+
+    /// <summary>Words that make a <see cref="LocalFunctionHead"/> match something else (with <see cref="StatementKeywords"/>,
+    /// read at call time — static initializers of different partial files run in no defined order).</summary>
+    private static readonly IReadOnlySet<string> NotATypeOrNameExtra = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "in", "is", "as", "out", "ref", "nameof", "typeof", "sizeof", "when", "and", "or", "not",
+    };
+
+    private static bool NotATypeOrName(string word) => StatementKeywords.Contains(word) || NotATypeOrNameExtra.Contains(word);
+
+    /// <summary><paramref name="body"/> with the block bodies of its nested lambdas (<c>=&gt; { … }</c>) and local functions
+    /// blanked — what is left runs as the method itself.</summary>
+    private static string BlankNestedFunctionBodies(string body)
+    {
+        var chars = body.ToCharArray();
+        void Blank(int open)
+        {
+            var close = MatchClose(body, open);
+            for (var k = open + 1; k < close && close > 0; k++)
+            {
+                if (chars[k] != '\n')
+                {
+                    chars[k] = ' ';
+                }
+            }
+        }
+
+        foreach (Match arrow in Regex.Matches(body, @"=>\s*\{"))
+        {
+            Blank(arrow.Index + arrow.Length - 1);
+        }
+
+        foreach (Match head in LocalFunctionHead.Matches(body))
+        {
+            var type = head.Groups["type"].Value;
+            var name = head.Groups["name"].Value;
+            if (NotATypeOrName(type) || NotATypeOrName(name))
+            {
+                continue;
+            }
+
+            var close = MatchClose(body, head.Index + head.Length - 1);
+            var open = close < 0 ? -1 : SkipWs(body, close + 1);
+            if (open > 0 && open < body.Length && body[open] == '{')
+            {
+                Blank(open);
+            }
+        }
+
+        return new string(chars);
+    }
+
+    /// <summary>The modifiers written before <paramref name="type"/>'s keyword, or null when its header is not found.</summary>
+    private static string? TypeModifiers(SourceUnit unit, TypeDecl type)
+        => TypeHeaderOf(unit, type)?.Groups["mods"].Value;
+
+    private static int? TypeNameEnd(SourceUnit unit, TypeDecl type)
+    {
+        var header = TypeHeaderOf(unit, type);
+        return header is null ? null : header.Groups["name"].Index + header.Groups["name"].Length;
+    }
+
+    private static Match? TypeHeaderOf(SourceUnit unit, TypeDecl type)
+        => TypeHeader.Matches(unit.Code)
+            .Where(m => m.Groups["name"].Value == type.Name && m.Index < type.BodyStart)
+            .OrderByDescending(m => m.Index)
+            .FirstOrDefault();
 
     // =============================================================================================
     // RETIRED SWEEP ROUTES (main-session round 34 item 4)
@@ -2203,6 +2626,18 @@ public partial class RouteAuthorizationGuardTests
     //   - only AddPolicy calls INSIDE AddAuthorization(...) were catalogued, so an AddAuthorizationBuilder().AddPolicy
     //     or Configure<AuthorizationOptions> re-registration was invisible. Now every AddPolicy outside the rate
     //     limiter's and CORS's own registration calls is catalogued.
+    // Task 167 f2-v1 (the f2 verifier's items 1 and 2) closed two more:
+    //   - the catalog keyed policy names ORDINALLY, but ASP.NET Core resolves them case-INSENSITIVELY
+    //     (AuthorizationOptions' policy map is OrdinalIgnoreCase — pinned by
+    //     PolicyAndRateLimitNamesResolveAsTheGuardAssumes), so `AddPolicy("systemadmin", permissive)` after
+    //     SystemAdmin replaced it at runtime while the guard still counted ONE SystemAdmin. The catalog is now
+    //     OrdinalIgnoreCase for registrations and lookups: a re-registration in another letter case is a second
+    //     registration of the same policy, so the name is ambiguous and nothing naming it is sign-in;
+    //   - a call AFTER RequireAuthenticatedUser() could undo it: `Strip(p)` (a helper that clears Requirements), or
+    //     `p.RequireAuthenticatedUser().Strip()` (an extension on the chain). Now EVERY statement of the builder
+    //     lambda must be one that can only ADD — `p.AuthenticationSchemes = …;`, `p.Requirements.Add(…);`, or a chain
+    //     of the framework's own AuthorizationPolicyBuilder add-members (AddOnlyPolicyBuilderMembers) — and the
+    //     parameter may appear nowhere else (never passed as an argument, aliased or captured).
     // The runtime half is the FallbackPolicy (AuthorizationModule.ApplyFallbackPolicy, owner round 14 item 2),
     // pinned by TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser and proven over HTTP by
     // tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs.
@@ -2242,9 +2677,30 @@ public partial class RouteAuthorizationGuardTests
     /// through (task 167 f2).</summary>
     private sealed record StringConstant(string Type, string Name, string Value, SourceUnit Unit);
 
+    /// <summary>
+    /// The members of <c>AuthorizationPolicyBuilder</c> that can only ADD to the policy being built (task 167 f2-v1, the
+    /// f2 verifier's item 2). A builder lambda proves sign-in only when every call on its parameter is one of these —
+    /// anything else (<c>Combine</c>, an extension method, a helper the builder is passed to) could clear or replace
+    /// the requirement list after <c>RequireAuthenticatedUser()</c> added to it.
+    /// MAINTENANCE: only a framework member that cannot remove or replace a requirement or the requirement list joins
+    /// this set; a policy that needs anything else names a policy object the guard does not read, and is not sign-in.
+    /// </summary>
+    private static readonly IReadOnlySet<string> AddOnlyPolicyBuilderMembers = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "RequireAuthenticatedUser", "RequireClaim", "RequireRole", "RequireUserName", "RequireAssertion",
+        "AddRequirements", "AddAuthenticationSchemes",
+    };
+
     private static PolicyCatalog PolicyCatalogOf(IEnumerable<SourceUnit> units)
     {
         var list = units.ToList();
+
+        // An EXTENSION method in BFF + shared code named like an add-member could be picked over the framework's member
+        // (a different argument list), so a chain calling that name proves nothing (task 167 f2-v1).
+        var shadowed = list.SelectMany(u => u.Methods)
+            .Where(m => m.IsExtension && AddOnlyPolicyBuilderMembers.Contains(m.Name))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
         var constants = new Dictionary<string, string>(StringComparer.Ordinal);
         var allConstants = new List<StringConstant>();
@@ -2265,7 +2721,9 @@ public partial class RouteAuthorizationGuardTests
             }
         }
 
-        var named = new Dictionary<string, List<PolicyRegistration>>(StringComparer.Ordinal);
+        // OrdinalIgnoreCase, as AuthorizationOptions resolves policy names (task 167 f2-v1, the f2 verifier's item 1):
+        // "systemadmin" IS "SystemAdmin" at runtime, and the last AddPolicy for it wins.
+        var named = new Dictionary<string, List<PolicyRegistration>>(StringComparer.OrdinalIgnoreCase);
         var unresolved = new List<PolicyRegistration>();
         var defaults = new List<PolicyRegistration>();
         var fallbacks = new List<PolicyRegistration>();
@@ -2303,7 +2761,7 @@ public partial class RouteAuthorizationGuardTests
                 }
 
                 var nameText = unit.Text[args[0].Start..args[0].End];
-                var requires = PolicyBuilderRequiresAuthenticatedUser(unit.Text[args[1].Start..args[1].End]);
+                var requires = PolicyBuilderRequiresAuthenticatedUser(unit.Text[args[1].Start..args[1].End], shadowed);
                 var name = ResolveRegistrationName(nameText, unit, constants, allConstants);
                 if (name is null)
                 {
@@ -2379,35 +2837,64 @@ public partial class RouteAuthorizationGuardTests
 
     /// <summary>
     /// True only when the policy-builder lambda passed to <c>AddPolicy(name, p =&gt; …)</c> calls
-    /// <c>p.RequireAuthenticatedUser()</c> UNCONDITIONALLY (task 167 f2, the f1 verifier's item 5):
+    /// <c>p.RequireAuthenticatedUser()</c> UNCONDITIONALLY and nothing in it can UNDO that call:
     /// <list type="bullet">
     ///   <item>expression body — a call chain on the parameter (<c>p =&gt; p.RequireRole("x").RequireAuthenticatedUser()</c>)
     ///   that IS the whole body and contains the call; or</item>
-    ///   <item>block body — the call is in a chain statement of the unbroken run of top-level statements that opens the
-    ///   block, each of them <c>p.Chain(…);</c> or <c>p.Member = …;</c>. An <c>if</c>, a loop, a <c>return</c>, a lambda or
-    ///   any other statement before it ends the run, so <c>if (x) p.RequireAuthenticatedUser();</c> — or the call after an
-    ///   early return — proves nothing.</item>
+    ///   <item>block body — EVERY top-level statement of the block is <c>p.AuthenticationSchemes = …;</c>,
+    ///   <c>p.Requirements.Add(…);</c> or <c>p.Chain(…);</c>, and one chain contains the call. An <c>if</c>, a loop, a
+    ///   <c>return</c>, a declaration or any other statement anywhere in the block proves nothing (task 167 f2, the f1
+    ///   verifier's item 5: <c>if (x) p.RequireAuthenticatedUser();</c>, or the call after an early return).</item>
     /// </list>
-    /// A body that touches its requirement list other than by <c>.Requirements.Add(…)</c> (a <c>Clear</c>, a
-    /// <c>Remove</c>) proves nothing either: it could undo the call. A non-lambda second argument (a policy object, a
-    /// method group) is not read. Before f2 the TEXT <c>RequireAuthenticatedUser()</c> anywhere in the arguments counted,
-    /// so a dead or conditional call made a permissive SystemAdmin "sign-in" and the full ArchTests stayed green.
+    /// And, task 167 f2-v1 (the f2 verifier's item 2): every member of every chain is one of the framework's ADD-ONLY
+    /// builder members (<see cref="AddOnlyPolicyBuilderMembers"/>, none shadowed by an extension method in
+    /// <paramref name="shadowed"/>), and the parameter appears NOWHERE but at the head of those statements — so
+    /// <c>p.RequireAuthenticatedUser(); Strip(p);</c>, <c>p.RequireAuthenticatedUser().Strip()</c>, <c>var q = p;</c>, or the
+    /// builder captured in an assertion lambda proves nothing. Before f2-v1 the scan stopped at the first chain containing
+    /// the call, so a helper called AFTER it could clear the requirement list (the verifier's seed: SystemAdmin public at
+    /// runtime, ArchTests 399/399 green). A body that touches its requirement list other than by <c>.Requirements.Add(…)</c>
+    /// proves nothing either; nor does a non-lambda second argument (a policy object, a method group).
     /// </summary>
-    private static bool PolicyBuilderRequiresAuthenticatedUser(string argumentText)
+    private static bool PolicyBuilderRequiresAuthenticatedUser(string argumentText, IReadOnlySet<string>? shadowed = null)
     {
+        shadowed ??= new HashSet<string>(StringComparer.Ordinal);
         var unit = new SourceUnit("policy-lambda", argumentText);
         var code = unit.Code;
         var head = Regex.Match(code, @"^\s*(?:static\s+)?(?:\(\s*(?:[A-Za-z_][\w.<>?]*\s+)?(?<p>[A-Za-z_]\w*)\s*\)|(?<p>[A-Za-z_]\w*))\s*=>");
-        if (!head.Success || Regex.IsMatch(code, @"\.\s*Requirements\b(?!\s*\.\s*Add\s*\()"))
+
+        // An assertion that SUCCEEDS other requirements (context.Succeed(r) over context.PendingRequirements) satisfies the
+        // sign-in requirement for an anonymous caller — it proves nothing (task 167 f2-v1; also refused repo-wide by
+        // NothingButAnAuthenticatedUserSatisfiesSignIn).
+        if (!head.Success || Regex.IsMatch(code, @"\.\s*Requirements\b(?!\s*\.\s*Add\s*\()|\bPendingRequirements\b|\.\s*Succeed\s*\("))
         {
             return false;
         }
 
         var parameter = head.Groups["p"].Value;
+        var heads = new HashSet<int>();
         bool StartsWithParameter(int at)
             => at + parameter.Length <= code.Length
                && string.CompareOrdinal(code, at, parameter, 0, parameter.Length) == 0
+               && (at == 0 || !IsIdentChar(code[at - 1]))
                && (at + parameter.Length == code.Length || !IsIdentChar(code[at + parameter.Length]));
+
+        bool AddOnlyChain(List<ChainCall> calls)
+            => calls.Count > 0 && calls.All(c => AddOnlyPolicyBuilderMembers.Contains(c.Name) && !shadowed.Contains(c.Name));
+
+        // The parameter's only occurrences are the statement heads accepted below — never an argument, an alias, a
+        // capture in a nested lambda, or a right-hand side.
+        bool ParameterOnlyAtHeads()
+        {
+            for (var at = head.Index + head.Length; at < code.Length; at++)
+            {
+                if (StartsWithParameter(at) && !heads.Contains(at))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         var i = SkipWs(code, head.Index + head.Length);
         if (i < code.Length && code[i] == '{')
@@ -2418,26 +2905,34 @@ public partial class RouteAuthorizationGuardTests
                 return false;
             }
 
+            var found = false;
             var s = i + 1;
             while (true)
             {
                 s = SkipWs(code, s);
-                if (s >= close || !StartsWithParameter(s))
+                if (s == close)
+                {
+                    return found && SkipWs(code, close + 1) == code.Length && ParameterOnlyAtHeads();
+                }
+
+                if (s > close || !StartsWithParameter(s))
                 {
                     return false;
                 }
 
+                heads.Add(s);
                 var dot = SkipWs(code, s + parameter.Length);
                 if (dot >= close || code[dot] != '.')
                 {
                     return false;
                 }
 
-                var assignment = Regex.Match(code[dot..close], @"^\.\s*[A-Za-z_]\w*\s*=(?![=>])");
+                // The only settable member that cannot drop a requirement: the scheme list.
+                var assignment = Regex.Match(code[dot..close], @"^\.\s*(?<member>[A-Za-z_]\w*)\s*=(?![=>])");
                 if (assignment.Success)
                 {
                     var end = StatementEnd(code, dot + assignment.Length);
-                    if (end < 0 || end > close)
+                    if (assignment.Groups["member"].Value != "AuthenticationSchemes" || end < 0 || end > close)
                     {
                         return false;
                     }
@@ -2446,7 +2941,7 @@ public partial class RouteAuthorizationGuardTests
                     continue;
                 }
 
-                // p.Requirements.Add(...); — adds a requirement; it cannot skip the statements after it.
+                // p.Requirements.Add(...); — adds a requirement.
                 var add = Regex.Match(code[dot..close], @"^\.\s*Requirements\s*\.\s*Add\s*\(");
                 if (add.Success)
                 {
@@ -2462,16 +2957,12 @@ public partial class RouteAuthorizationGuardTests
                 }
 
                 var (calls, chainEnd, problem) = ParseChain(unit, dot);
-                if (problem is not null || chainEnd >= close || code[chainEnd] != ';')
+                if (problem is not null || chainEnd >= close || code[chainEnd] != ';' || !AddOnlyChain(calls))
                 {
                     return false;
                 }
 
-                if (calls.Any(c => c.Name == "RequireAuthenticatedUser" && c.Args.Trim().Length == 0))
-                {
-                    return true;
-                }
-
+                found |= calls.Any(c => c.Name == "RequireAuthenticatedUser" && c.Args.Trim().Length == 0);
                 s = chainEnd + 1;
             }
         }
@@ -2481,10 +2972,13 @@ public partial class RouteAuthorizationGuardTests
             return false;
         }
 
+        heads.Add(i);
         var (exprCalls, exprEnd, exprProblem) = ParseChain(unit, SkipWs(code, i + parameter.Length));
         return exprProblem is null
                && SkipWs(code, exprEnd) == code.Length
-               && exprCalls.Any(c => c.Name == "RequireAuthenticatedUser" && c.Args.Trim().Length == 0);
+               && AddOnlyChain(exprCalls)
+               && exprCalls.Any(c => c.Name == "RequireAuthenticatedUser" && c.Args.Trim().Length == 0)
+               && ParameterOnlyAtHeads();
     }
 
     /// <summary>
@@ -2499,7 +2993,7 @@ public partial class RouteAuthorizationGuardTests
         var unit = new SourceUnit("policy-rhs", rhs);
         var code = unit.Code;
         var builder = Regex.Match(code, @"^\s*new\s+(?:(?:global::)?[A-Za-z_][\w.]*\.)?AuthorizationPolicyBuilder\s*\(");
-        if (!builder.Success)
+        if (!builder.Success || Regex.IsMatch(code, @"\bPendingRequirements\b|\.\s*Succeed\s*\(|\.\s*Requirements\b"))
         {
             return false;
         }
@@ -2566,12 +3060,15 @@ public partial class RouteAuthorizationGuardTests
                                + "constant) — an inline lambda or a policy object is never read as sign-in");
             }
 
+            // Looked up case-INSENSITIVELY, as ASP.NET Core does (task 167 f2-v1).
             var registrations = catalog.Named.GetValueOrDefault(name) ?? new List<PolicyRegistration>();
             if (registrations.Count != 1)
             {
                 return (false, registrations.Count == 0
                     ? $"no AddPolicy(\"{name}\", ...) registration inside AddAuthorization(...) was found"
-                    : $"policy '{name}' is registered {registrations.Count} times ({string.Join(", ", registrations.Select(r => $"{r.File}:{r.Line}"))})");
+                    : $"policy '{name}' is registered {registrations.Count} times ("
+                      + string.Join(", ", registrations.Select(r => $"\"{r.Name}\" at {r.File}:{r.Line}"))
+                      + ") — ASP.NET Core resolves policy names case-insensitively and the LAST registration wins");
             }
 
             anyRequires |= registrations[0].RequiresAuthenticatedUser;
@@ -2695,12 +3192,13 @@ public partial class RouteAuthorizationGuardTests
     [Fact(DisplayName = "Task 167 f2 controls: a conditional, dead or undone RequireAuthenticatedUser and an aliased or re-registered policy are not sign-in")]
     public void SignInVerdict_NegativeControl_ConditionalCallsAndAliasesAreNotSignIn()
     {
-        static PolicyCatalog Catalog(string registrations, string extra = "")
+        static PolicyCatalog Catalog(string registrations, string extra = "", string members = "")
             => PolicyCatalogOf(new[] { new SourceUnit("Infrastructure/DI/AuthorizationModule.cs",
                 "public static class AuthorizationModule\n{\n    private const string AdminAlias = \"SystemAdmin\";\n"
+                + "    private const string LowerAlias = \"systemadmin\";\n"
                 + "    public static void Add(IServiceCollection services)\n    {\n"
                 + "        services.AddAuthorization(options =>\n        {\n" + registrations + "\n        });\n" + extra
-                + "    }\n}") });
+                + "    }\n" + members + "}") });
 
         static bool SystemAdminIsSignIn(PolicyCatalog catalog)
             => AnonymousByOmissionViolations(ScanText("Api/Fake/Admin.cs",
@@ -2747,6 +3245,66 @@ public partial class RouteAuthorizationGuardTests
         Assert.Equal(2, outside.Named["SystemAdmin"].Count);
         Assert.False(SystemAdminIsSignIn(outside));
 
+        // NEGATIVE (task 167 f2-v1, the f2 verifier's item 1 seed and its relatives): a re-registration under ANOTHER
+        // LETTER CASE — a literal, a const alias, through the AuthorizationBuilder — replaces SystemAdmin at runtime
+        // (policy names resolve case-insensitively, the last AddPolicy wins), so it is a SECOND registration of the same
+        // policy and nothing naming it is sign-in. Before f2-v1 the catalog keyed names ordinally and stayed green.
+        foreach (var recased in new[]
+                 {
+                     "            options.AddPolicy(\"systemadmin\", p => p.RequireAssertion(_ => true));",
+                     "            options.AddPolicy(\"SYSTEMADMIN\", p => p.RequireAssertion(_ => true));",
+                     "            options.AddPolicy(LowerAlias, p => p.RequireAssertion(_ => true));",
+                 })
+        {
+            var catalog = Catalog(proven + "\n" + recased);
+            Assert.Equal(2, catalog.Named["SystemAdmin"].Count);
+            Assert.Equal(2, catalog.Named["systemadmin"].Count);
+            Assert.False(SystemAdminIsSignIn(catalog), recased);
+            Assert.Contains("case-insensitively", AnonymousByOmissionViolations(ScanText("Api/Fake/Admin.cs",
+                new[] { "        app.MapGet(\"/api/zz/admin\", Get).RequireAuthorization(\"SystemAdmin\");" }), catalog).Single(),
+                StringComparison.Ordinal);
+        }
+
+        Assert.False(SystemAdminIsSignIn(Catalog(proven,
+            "        services.AddAuthorizationBuilder().AddPolicy(\"systemAdmin\", p => p.RequireAssertion(_ => true));\n")));
+
+        // POSITIVE: a route naming the policy in another case reaches the ONE registration (as it does at runtime).
+        Assert.Empty(AnonymousByOmissionViolations(ScanText("Api/Fake/Admin.cs",
+            new[] { "        app.MapGet(\"/api/zz/admin\", Get).RequireAuthorization(\"systemadmin\");" }), Catalog(proven)));
+
+        // NEGATIVE (task 167 f2-v1, the f2 verifier's item 2 seed and its relatives): a statement AFTER (or before)
+        // RequireAuthenticatedUser() that is not add-only — a helper the builder is passed to, an extension call on the
+        // chain or as its own statement, a non-add member (Combine), an alias, the builder captured in an assertion
+        // lambda or used on a right-hand side, and a name an extension method in the module shadows.
+        const string strip = "    private static void Strip(AuthorizationPolicyBuilder b) { b.Requirements.Clear(); b.RequireAssertion(_ => true); }\n"
+                             + "    private static AuthorizationPolicyBuilder StripExt(this AuthorizationPolicyBuilder b) { b.Requirements.Clear(); return b; }\n";
+        foreach (var body in new[]
+                 {
+                     "p => { p.RequireAuthenticatedUser(); Strip(p); p.RequireAssertion(_ => true); }",
+                     "p => { p.RequireAuthenticatedUser(); AuthorizationModule.Strip(p); }",
+                     "p => p.RequireAuthenticatedUser().StripExt()",
+                     "p => { p.RequireAuthenticatedUser().StripExt(); }",
+                     "p => { p.RequireAuthenticatedUser(); p.StripExt(); }",
+                     "p => { p.StripExt(); p.RequireAuthenticatedUser(); }",
+                     "p => { p.RequireAuthenticatedUser(); p.Combine(Permissive); }",
+                     "p => { p.RequireAuthenticatedUser(); var q = p; }",
+                     "p => { p.RequireAuthenticatedUser(); p.RequireAssertion(ctx => { Strip(p); return true; }); }",
+                     "p => { p.RequireAuthenticatedUser(); p.AuthenticationSchemes = Schemes(p); }",
+                     "p => { p.RequireAuthenticatedUser(); p.DefaultPolicy = null; }",
+                     "p => { p.RequireAuthenticatedUser(); return; }",
+                 })
+        {
+            var catalog = Catalog($"            options.AddPolicy(\"SystemAdmin\", {body});", members: strip);
+            Assert.False(Assert.Single(catalog.Named["SystemAdmin"]).RequiresAuthenticatedUser, body);
+            Assert.False(SystemAdminIsSignIn(catalog), body);
+        }
+
+        const string shadow = "    public static AuthorizationPolicyBuilder RequireRole(this AuthorizationPolicyBuilder b, int level) { b.Requirements.Clear(); return b; }\n";
+        var shadowed = Catalog("            options.AddPolicy(\"SystemAdmin\", p => { p.RequireAuthenticatedUser(); p.RequireRole(1); });", members: shadow);
+        Assert.False(Assert.Single(shadowed.Named["SystemAdmin"]).RequiresAuthenticatedUser);
+        Assert.True(Assert.Single(Catalog("            options.AddPolicy(\"SystemAdmin\", p => { p.RequireAuthenticatedUser(); p.RequireRole(\"Admin\"); });")
+            .Named["SystemAdmin"]).RequiresAuthenticatedUser);
+
         // NEGATIVE: a DefaultPolicy override proven only by text — a conditional right-hand side — is not proven.
         var conditionalDefault = Catalog(proven
             + "\n            options.DefaultPolicy = flag ? new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build() "
@@ -2784,6 +3342,222 @@ public partial class RouteAuthorizationGuardTests
             + "        services.AddCors(o => o.AddPolicy(CorsName, b => b.AllowAnyOrigin()));\n");
         Assert.Empty(hosts.Unresolved);
         Assert.True(SystemAdminIsSignIn(hosts));
+    }
+
+    // =============================================================================================
+    // NOTHING BUT AN AUTHENTICATED USER SATISFIES SIGN-IN (task 167 f2-v1 — completing criterion 12, "sign-in PROVEN")
+    // ---------------------------------------------------------------------------------------------
+    // A policy that calls RequireAuthenticatedUser() adds DenyAnonymousAuthorizationRequirement, whose own handler succeeds
+    // it only for an authenticated user — and never FAILS it. So ANY other code that can call
+    // AuthorizationHandlerContext.Succeed on it (an IAuthorizationHandler that succeeds context.PendingRequirements, a
+    // RequireAssertion lambda that does the same, an AuthorizationHandler<DenyAnonymousAuthorizationRequirement>) or that
+    // replaces a stage of the framework's pipeline (the policy provider, the evaluator, the handler provider, the
+    // middleware result handler, the authorization service) would let an anonymous caller through a policy the guard
+    // proved. Refused, so the proof stays a proof:
+    //   - no BFF / shared code names a pipeline-replacement type, implements or registers IAuthorizationService, or
+    //     implements IAuthorizationHandler directly;
+    //   - every AuthorizationHandler<T> handles a requirement type T declared in BFF / shared code;
+    //   - `PendingRequirements` appears nowhere, and every `.Succeed(` is `context.Succeed(requirement)` inside such a
+    //     handler's HandleRequirementAsync — the requirement it was handed, nothing else.
+    // MAINTENANCE: a genuine need for any of these is a change to the authorization architecture (ADR-008), reviewed as such.
+    // =============================================================================================
+
+    private static readonly Regex AuthorizationPipelineStage = new(
+        @"(?<![\w])(?:IAuthorizationPolicyProvider|DefaultAuthorizationPolicyProvider|IPolicyEvaluator|PolicyEvaluator|IAuthorizationEvaluator"
+        + @"|DefaultAuthorizationEvaluator|IAuthorizationHandlerProvider|DefaultAuthorizationHandlerProvider|IAuthorizationHandlerContextFactory"
+        + @"|DefaultAuthorizationHandlerContextFactory|IAuthorizationMiddlewareResultHandler|AuthorizationMiddlewareResultHandler"
+        + @"|DefaultAuthorizationService)(?![\w])",
+        RegexOptions.Compiled);
+
+    private static string BaseListOf(SourceUnit unit, TypeDecl type)
+    {
+        var nameEnd = TypeNameEnd(unit, type);
+        return nameEnd is null || nameEnd.Value > type.BodyStart ? string.Empty : unit.Code[nameEnd.Value..type.BodyStart];
+    }
+
+    /// <summary>An <c>IAuthorizationService</c> reference with its qualifier.</summary>
+    private static readonly Regex AuthorizationServiceName = new(
+        @"(?<![\w.])(?<q>(?:global::)?(?:[A-Za-z_]\w*\s*\.\s*)*)IAuthorizationService\b", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Whether an <c>IAuthorizationService</c> reference with qualifier <paramref name="qualifier"/> in <paramref name="unit"/>
+    /// is ASP.NET Core's (which decides every policy) rather than Spaarke.Core.Auth's own resource-authorization
+    /// interface of the same name. Unknown resolves to the framework's (fail closed).
+    /// </summary>
+    private static bool IsFrameworkAuthorizationService(SourceUnit unit, string qualifier)
+    {
+        var q = Regex.Replace(qualifier, @"\s+", string.Empty);
+        if (q.Length > 0)
+        {
+            return !q.EndsWith("Spaarke.Core.Auth.", StringComparison.Ordinal);
+        }
+
+        return !(unit.Types.Any(t => t.Name == "IAuthorizationService")
+                 || Regex.IsMatch(unit.Code, @"(?m)^\s*using\s+Spaarke\.Core\.Auth\s*;")
+                 || Regex.IsMatch(unit.Code, @"(?m)^\s*namespace\s+Spaarke\.Core\.Auth\b"));
+    }
+
+    private static List<string> SignInSatisfactionViolations(IEnumerable<SourceUnit> units)
+    {
+        var list = units.ToList();
+        var violations = new List<string>();
+        var requirementTypes = list.SelectMany(u => u.Types.Where(t => Regex.IsMatch(BaseListOf(u, t), @"\bIAuthorizationRequirement\b")))
+            .Select(t => t.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var unit in list)
+        {
+            var code = unit.Code;
+            string At(int index) => $"{unit.Path}:{unit.LineOf(index)}";
+
+            foreach (Match m in AuthorizationPipelineStage.Matches(code))
+            {
+                violations.Add($"{At(m.Index)}: '{m.Value}' — replaces a stage of the framework's authorization pipeline, which could "
+                               + "let a request through a policy the guard proved requires an authenticated user");
+            }
+
+            foreach (Match m in Regex.Matches(code, @"\bAdd\w*\s*<\s*(?<q>(?:global::)?(?:[A-Za-z_]\w*\s*\.\s*)*)IAuthorizationService\b|typeof\s*\(\s*(?<q>(?:global::)?(?:[A-Za-z_]\w*\s*\.\s*)*)IAuthorizationService\s*\)"))
+            {
+                if (IsFrameworkAuthorizationService(unit, m.Groups["q"].Value))
+                {
+                    violations.Add($"{At(m.Index)}: registers an IAuthorizationService — the framework's service decides every policy");
+                }
+            }
+
+            foreach (Match m in Regex.Matches(code, @"\bPendingRequirements\b"))
+            {
+                violations.Add($"{At(m.Index)}: reads PendingRequirements — code that can see the pending requirements can succeed "
+                               + "the sign-in requirement for an anonymous caller");
+            }
+
+            foreach (var type in unit.Types)
+            {
+                var bases = BaseListOf(unit, type);
+                if (AuthorizationServiceName.Matches(bases).Any(m => IsFrameworkAuthorizationService(unit, m.Groups["q"].Value)))
+                {
+                    violations.Add($"{At(type.BodyStart)}: {type.Name} implements IAuthorizationService (ASP.NET Core's)");
+                }
+
+                if (Regex.IsMatch(bases, @"\bIAuthorizationHandler\b"))
+                {
+                    violations.Add($"{At(type.BodyStart)}: {type.Name} implements IAuthorizationHandler directly — it can succeed ANY "
+                                   + "pending requirement, sign-in included; derive from AuthorizationHandler<TRequirement> over a BFF requirement");
+                }
+
+                var handled = Regex.Match(bases, @"\bAuthorizationHandler\s*<\s*(?<req>[A-Za-z_][\w.]*)");
+                if (handled.Success && !requirementTypes.Contains(handled.Groups["req"].Value.Split('.')[^1]))
+                {
+                    violations.Add($"{At(type.BodyStart)}: {type.Name} handles {handled.Groups["req"].Value}, which is not a requirement "
+                                   + "type declared in BFF / shared code — a framework requirement (DenyAnonymousAuthorizationRequirement) "
+                                   + "would let it answer sign-in");
+                }
+            }
+
+            foreach (Match s in Regex.Matches(code, @"\.\s*Succeed\s*\("))
+            {
+                var method = unit.MethodAt(s.Index);
+                var declaring = method is null ? null : unit.TypeAt(method.NameIndex);
+                var isHandler = method is not null && declaring is not null && method.Name == "HandleRequirementAsync"
+                                && method.Params.Count >= 2
+                                && Regex.IsMatch(method.Params[0].Type, @"(?:^|\.)AuthorizationHandlerContext$")
+                                && Regex.IsMatch(BaseListOf(unit, declaring), @"\bAuthorizationHandler\s*<");
+                var open = s.Index + s.Length - 1;
+                var close = MatchClose(code, open);
+                var receiver = IdentifierBefore(code, s.Index).Name;
+                var argument = close < 0 ? string.Empty : code[(open + 1)..close].Trim();
+                if (!isHandler || receiver != method!.Params[0].Name || argument != method.Params[1].Name)
+                {
+                    violations.Add($"{At(s.Index)}: '.Succeed({argument})' — only `context.Succeed(requirement)` inside an "
+                                   + "AuthorizationHandler<T>.HandleRequirementAsync may succeed a requirement, and only the one it was handed");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1: nothing but an authenticated user satisfies sign-in — no pipeline replacement, no handler that succeeds another requirement")]
+    public void NothingButAnAuthenticatedUserSatisfiesSignIn()
+    {
+        var units = BffAndSharedUnits().ToList();
+        var violations = SignInSatisfactionViolations(units);
+        Assert.True(
+            violations.Count == 0,
+            "The guard proves a policy calls RequireAuthenticatedUser(); that proof holds only if nothing else can satisfy the "
+            + "sign-in requirement. Each of these could let an anonymous caller through a proven policy.\n\n  "
+            + string.Join("\n  ", violations));
+
+        // Non-vacuous: the one real handler is read, and it succeeds only its own requirement.
+        Assert.Contains(units, u => u.Types.Any(t => t.Name == "ResourceAccessHandler"
+                                                     && Regex.IsMatch(BaseListOf(u, t), @"\bAuthorizationHandler\s*<\s*ResourceAccessRequirement")));
+        Assert.Contains(units, u => Regex.IsMatch(u.Code, @"\bcontext\s*\.\s*Succeed\s*\(\s*requirement\s*\)"));
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1 controls: a handler or assertion that succeeds another requirement, and a replaced pipeline stage, fail")]
+    public void SignInSatisfaction_NegativeControl_EachBypassFails()
+    {
+        static List<string> Of(string source) => SignInSatisfactionViolations(new[] { new SourceUnit("Infrastructure/Authorization/X.cs", source) });
+
+        const string requirement = "public sealed class OwnRequirement : IAuthorizationRequirement { }\n";
+        const string good = requirement
+            + "public sealed class OwnHandler : AuthorizationHandler<OwnRequirement>\n{\n"
+            + "    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, OwnRequirement requirement)\n    {\n"
+            + "        if (context.User.Identity?.IsAuthenticated == true) { context.Succeed(requirement); }\n        return Task.CompletedTask;\n    }\n}\n";
+
+        // POSITIVE: the real shapes — the typed handler, and Spaarke.Core.Auth's OWN IAuthorizationService (a resource
+        // decision service of the same name, not ASP.NET Core's), implemented and registered.
+        Assert.Empty(Of(good));
+        Assert.Empty(Of("namespace Spaarke.Core.Auth;\npublic interface IAuthorizationService { }\n"
+                        + "public class AuthorizationService : IAuthorizationService { }\n"));
+        Assert.Empty(Of("using Spaarke.Core.Auth;\npublic sealed class Mine : IAuthorizationService { }\n"));
+        Assert.Empty(Of("public static class R { public static void A(IServiceCollection s) => "
+                        + "s.AddScoped<Spaarke.Core.Auth.IAuthorizationService>(sp => sp.GetRequiredService<X>()); }"));
+        Assert.NotEmpty(Of("using Spaarke.Core.Auth;\npublic sealed class Mine : Microsoft.AspNetCore.Authorization.IAuthorizationService { }\n"));
+
+        // NEGATIVE: every way to satisfy another requirement or replace the pipeline.
+        foreach (var (source, why) in new[]
+                 {
+                     (good.Replace("context.Succeed(requirement)", "foreach (var r in context.PendingRequirements.ToList()) context.Succeed(r)", StringComparison.Ordinal), "PendingRequirements"),
+                     (good.Replace("context.Succeed(requirement)", "foreach (var r in context.Requirements) context.Succeed(r)", StringComparison.Ordinal), ".Succeed(r)"),
+                     (requirement + "public sealed class AllowAll : IAuthorizationHandler { public Task HandleAsync(AuthorizationHandlerContext c) => Task.CompletedTask; }", "implements IAuthorizationHandler directly"),
+                     (good.Replace("AuthorizationHandler<OwnRequirement>", "AuthorizationHandler<DenyAnonymousAuthorizationRequirement>", StringComparison.Ordinal)
+                          .Replace("OwnRequirement requirement", "DenyAnonymousAuthorizationRequirement requirement", StringComparison.Ordinal), "not a requirement type declared"),
+                     ("public static class M { public static void A(AuthorizationOptions o) => o.AddPolicy(\"P\", p => p.RequireAssertion(ctx => { ctx.Succeed(null!); return true; })); }", ".Succeed("),
+                     ("public sealed class Provider : IAuthorizationPolicyProvider { }", "IAuthorizationPolicyProvider"),
+                     ("public sealed class Result : IAuthorizationMiddlewareResultHandler { }", "IAuthorizationMiddlewareResultHandler"),
+                     ("public static class R { public static void A(IServiceCollection s) => s.AddSingleton<IAuthorizationService, Mine>(); }", "registers an IAuthorizationService"),
+                     ("public sealed class Mine : IAuthorizationService { }", "implements IAuthorizationService"),
+                 })
+        {
+            Assert.Contains(Of(source), v => v.Contains(why, StringComparison.Ordinal));
+        }
+
+        // The policy-builder proof refuses the assertion form too, so a SystemAdmin that succeeds pending requirements is
+        // not sign-in even before the repo-wide rule runs.
+        Assert.False(PolicyBuilderRequiresAuthenticatedUser(
+            "p => { p.RequireAuthenticatedUser(); p.RequireAssertion(ctx => { foreach (var r in ctx.PendingRequirements.ToList()) ctx.Succeed(r); return true; }); }"));
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1: policy names resolve case-insensitively and rate-limit names ordinally at runtime — as the guard assumes")]
+    public void PolicyAndRateLimitNamesResolveAsTheGuardAssumes()
+    {
+        // The premise of the OrdinalIgnoreCase policy catalog (the f2 verifier's item 1): a second AddPolicy whose name
+        // differs only in case REPLACES the first — GetPolicy("SystemAdmin") answers the later, permissive policy.
+        var authorization = new Microsoft.AspNetCore.Authorization.AuthorizationOptions();
+        authorization.AddPolicy("SystemAdmin", p => p.RequireAuthenticatedUser());
+        authorization.AddPolicy("systemadmin", p => p.RequireAssertion(_ => true));
+        var resolved = authorization.GetPolicy("SystemAdmin");
+        Assert.NotNull(resolved);
+        Assert.IsType<Microsoft.AspNetCore.Authorization.Infrastructure.AssertionRequirement>(Assert.Single(resolved!.Requirements));
+
+        // The premise of the ORDINAL rate-limit pins (CarriesHealthProbePolicy, the anonymous-control pin): rate-limit policy
+        // names are case-sensitive — "HEALTH-PROBE" is a different (here unregistered) policy, never the probe policy — and a
+        // second registration of the SAME name throws, so no re-registration can loosen "anonymous" unseen.
+        var limiter = new Microsoft.AspNetCore.RateLimiting.RateLimiterOptions();
+        limiter.AddPolicy("health-probe", _ => System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("x"));
+        limiter.AddPolicy("HEALTH-PROBE", _ => System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("x"));
+        Assert.ThrowsAny<ArgumentException>(() =>
+            limiter.AddPolicy("health-probe", _ => System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("x")));
     }
 
     [Fact(DisplayName = "Task 167 f1 controls: a permissive or unresolvable policy is not sign-in, whatever its census list; proven forms are")]
@@ -3160,19 +3934,145 @@ public partial class RouteAuthorizationGuardTests
         + @"|Assert\s*\.\s*Equal\s*\(\s*(?:System\.Net\.)?HttpStatusCode\s*\.\s*Unauthorized\b",
         RegexOptions.Compiled);
 
+    /// <summary>Used only by the non-vacuity check: some presence test in the tree carries signed-in or table evidence.</summary>
     private static readonly Regex SignedInOrTableEvidence = new(
         @"Authorization\s*=\s*new\s+(?:[\w.]+\.)?AuthenticationHeaderValue\b"
         + @"|\bCreateAuthenticated\w*\s*\(|\bCreateClientWithRights\s*\(|\bCreateReportingClient\s*\(|\bCreateTestSession\s*\("
-        + @"|\bEndpointTable\s*\.|\bEndpointDataSource\b|\bRouteEndpoint\b"
-        + @"|\bauthenticated\s*:\s*true\b|\bTestHttpContexts\s*\.\s*Authenticated\b",
+        + @"|\bEndpointTable\s*\.|\bEndpointDataSource\b|\bRouteEndpoint\b",
         RegexOptions.Compiled);
 
+    /// <summary>A request: <c>client.GetAsync(</c> on a named client, or on a client made inline
+    /// (<c>_factory.CreateAuthenticatedClient().GetAsync(</c>). <c>verb</c> is the method's leading verb.</summary>
     private static readonly Regex ClientCall = new(
-        @"(?<![\w.])(?<client>[A-Za-z_]\w*)\s*!?\s*\.\s*(?:Get|Post|Put|Patch|Delete|Send)\w*Async\s*\(", RegexOptions.Compiled);
+        @"(?:(?<![\w.])(?<client>[A-Za-z_]\w*)|(?<made>(?<![\w])[A-Za-z_]\w*\s*\([^()]*\)))\s*!?\s*\.\s*(?<verb>Get|Post|Put|Patch|Delete|Send)\w*Async\s*\(",
+        RegexOptions.Compiled);
 
     private static readonly Regex SignedInClientFactory = new(
         @"\b(?:CreateAuthenticated\w*|CreateHttpClient|CreateClientWithRights|CreateReportingClient|CreateTestSession)\s*\(",
         RegexOptions.Compiled);
+
+    /// <summary>A response variable read by an assertion: <c>r.StatusCode</c>, <c>r!.StatusCode</c>, <c>r?.StatusCode</c>.</summary>
+    private static readonly Regex StatusCodeRead = new(@"(?<![\w.])(?<v>[A-Za-z_]\w*)\s*[!?]?\s*\.\s*StatusCode\b", RegexOptions.Compiled);
+
+    /// <summary>One request a presence assertion depends on: the client (named or made inline), its verb, the raw text of
+    /// its first argument, and — for <c>SendAsync(request)</c> — the request-message variable.</summary>
+    private sealed record PresenceRequest(string? Client, string? Made, string Verb, string? PathText, string? Message);
+
+    private static PresenceRequest RequestOf(Match call, string body, string bodyText)
+    {
+        // Brackets and commas are read from the code (literals blanked); the argument TEXT from the raw source.
+        var open = call.Index + call.Length - 1;
+        var close = MatchClose(body, open);
+        var first = close < 0 ? null : SplitTopLevel(body, open + 1, close).Select(s => bodyText[s.Start..s.End].Trim()).FirstOrDefault();
+        var verb = call.Groups["verb"].Value.ToUpperInvariant();
+        return new PresenceRequest(
+            call.Groups["client"].Success ? call.Groups["client"].Value : null,
+            call.Groups["made"].Success ? call.Groups["made"].Value : null,
+            verb,
+            verb == "SEND" ? null : first,
+            verb == "SEND" && first is not null && Regex.IsMatch(first, @"^[A-Za-z_]\w*$") ? first : null);
+    }
+
+    /// <summary>
+    /// The requests a presence assertion at <paramref name="at"/> depends on (task 167 f2-v1, the f2 verifier's item 6): the
+    /// request made inside the asserting statement itself, or the one assigned — last, before the assertion — to the
+    /// response variable the statement reads. Null when the guard cannot trace it (a helper, a lambda parameter, a
+    /// collection), and the caller then demands evidence for EVERY request the method sends.
+    /// </summary>
+    private static List<PresenceRequest>? RequestsBehind(string body, string bodyText, int at)
+    {
+        var statementStart = StatementStartBefore(body, at);
+        var end = StatementEnd(body, at);
+        var statement = (statementStart, end < 0 ? body.Length : end);
+        var inline = ClientCall.Matches(body[..statement.Item2]).Where(m => m.Index >= statementStart).ToList();
+        if (inline.Count > 0)
+        {
+            return inline.Select(m => RequestOf(m, body, bodyText)).ToList();
+        }
+
+        var variables = StatusCodeRead.Matches(body[statementStart..statement.Item2]).Select(m => m.Groups["v"].Value)
+            .Distinct(StringComparer.Ordinal).ToList();
+        if (variables.Count == 0)
+        {
+            return null;
+        }
+
+        var requests = new List<PresenceRequest>();
+        foreach (var variable in variables)
+        {
+            var assignment = Regex.Matches(body[..statementStart], $@"(?<![\w.]){Regex.Escape(variable)}\s*=(?![=>])").LastOrDefault();
+            if (assignment is null)
+            {
+                return null;
+            }
+
+            var rhsEnd = StatementEnd(body, assignment.Index + assignment.Length);
+            var calls = ClientCall.Matches(body[..(rhsEnd < 0 ? body.Length : rhsEnd)])
+                .Where(m => m.Index >= assignment.Index + assignment.Length).ToList();
+            if (calls.Count != 1)
+            {
+                return null;
+            }
+
+            requests.Add(RequestOf(calls[0], body, bodyText));
+        }
+
+        return requests;
+    }
+
+    /// <summary>Whether <paramref name="request"/> is shown to be signed in — its client built by a signed-in factory or
+    /// given a bearer by the method or by class setup, or its request message given one by the method — or is tied to an
+    /// endpoint-table read of the SAME verb and path in the method.</summary>
+    private static bool HasPresenceEvidence(PresenceRequest request, string body, string bodyText, string setup)
+    {
+        if (request.Made is not null)
+        {
+            return SignedInClientFactory.IsMatch(request.Made);
+        }
+
+        var scopes = new[] { body, setup };
+        if (request.Client is not null && scopes.Any(scope =>
+                Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(request.Client)}\s*=\s*[^;]*?{SignedInClientFactory}")
+                || Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(request.Client)}\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*=")))
+        {
+            return true;
+        }
+
+        if (request.Message is not null
+            && Regex.IsMatch(body, $@"(?<![\w.]){Regex.Escape(request.Message)}\s*\.\s*Headers\s*\.\s*Authorization\s*="))
+        {
+            return true;
+        }
+
+        // The endpoint table, for this verb and this path text: EndpointTable.AssertMapped(f, "GET", <same path>) or
+        // EndpointTable.Maps(f, "GET", <same path>).Should().BeTrue().
+        if (request.PathText is null)
+        {
+            return false;
+        }
+
+        foreach (Match table in Regex.Matches(body, @"\bEndpointTable\s*\.\s*(?<api>AssertMapped|Maps)\s*\("))
+        {
+            var open = table.Index + table.Length - 1;
+            var close = MatchClose(body, open);
+            if (close < 0)
+            {
+                continue;
+            }
+
+            var args = SplitTopLevel(body, open + 1, close).Select(s => Squash(bodyText[s.Start..s.End])).ToList();
+            var asserted = table.Groups["api"].Value == "AssertMapped"
+                           || Regex.IsMatch(body[(close + 1)..Math.Min(body.Length, close + 40)], @"^\s*\.\s*Should\s*\(\s*\)\s*\.\s*BeTrue\s*\(");
+            if (asserted && args.Count == 3
+                && string.Equals(args[1], $"\"{request.Verb}\"", StringComparison.OrdinalIgnoreCase)
+                && args[2] == Squash(request.PathText))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>The unit's code with every parsed method BODY blanked: what remains is class-level setup — field
     /// initializers and constructors — which applies to every test of the class. Another test method's body never
@@ -3194,8 +4094,15 @@ public partial class RouteAuthorizationGuardTests
         return new string(chars);
     }
 
-    /// <summary>"file:line Method — why" for every test method in <paramref name="units"/> that asserts a route's
-    /// PRESENCE with only an anonymous request as evidence.</summary>
+    /// <summary>
+    /// "file:line Method — why" for every test method in <paramref name="units"/> that asserts a route's PRESENCE with only an
+    /// anonymous request as evidence. Task 167 f2-v1 (the f2 verifier's item 6): the evidence is tied to the request whose
+    /// response is asserted — a signed-in client (by a signed-in factory, or a bearer the method or the class SETUP sets on
+    /// that client), a bearer on that request message, or an endpoint-table read of that verb and path. Before f2-v1 ANY
+    /// such evidence anywhere in the method exempted it, so an unused signed-in client beside an anonymous
+    /// <c>NotBe(NotFound)</c> passed. When the asserted response cannot be traced, every request the method sends needs
+    /// its own evidence.
+    /// </summary>
     private static List<string> AnonymousPresenceProofViolations(IEnumerable<SourceUnit> units)
     {
         var violations = new List<string>();
@@ -3205,35 +4112,37 @@ public partial class RouteAuthorizationGuardTests
             foreach (var method in unit.Methods)
             {
                 var body = method.Body;
-                var notFoundShape = AnonymousPresenceAssertion.IsMatch(body);
-                var claimShape = PresenceClaimingName.IsMatch(method.Name) && UnauthorizedAssertion.IsMatch(body);
-                if (!notFoundShape && !claimShape)
+                var assertions = AnonymousPresenceAssertion.Matches(body).Select(m => (m.Index, NotFound: true)).ToList();
+                if (PresenceClaimingName.IsMatch(method.Name))
+                {
+                    assertions.AddRange(UnauthorizedAssertion.Matches(body).Select(m => (m.Index, NotFound: false)));
+                }
+
+                if (assertions.Count == 0)
                 {
                     continue;
                 }
 
-                if (SignedInOrTableEvidence.IsMatch(body))
-                {
-                    continue;
-                }
-
-                // A client the method uses that is built signed in, or signed in, by the method itself or by class-level
-                // setup (e.g. `_httpClient = _fixture.CreateHttpClient();` in the constructor) — never by ANOTHER test.
+                // A header ANOTHER test sets on a shared field lends nothing (xUnit builds a new instance per test); class
+                // setup — field initializers and constructors — does.
                 setup ??= ClassSetupCodeOf(unit);
-                var scopes = new[] { body, setup };
-                var signedInClient = ClientCall.Matches(body).Select(m => m.Groups["client"].Value).Distinct(StringComparer.Ordinal)
-                    .Any(client => scopes.Any(scope =>
-                        Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(client)}\s*=\s*[^;]*?{SignedInClientFactory}")
-                        || Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(client)}\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*=")));
-                if (signedInClient)
+                var bodyText = unit.Text[method.BodyStart..method.BodyEnd];
+                var all = ClientCall.Matches(body).Select(m => RequestOf(m, body, bodyText)).ToList();
+                foreach (var (index, notFound) in assertions)
                 {
-                    continue;
-                }
+                    var requests = RequestsBehind(body, bodyText, index) ?? all;
+                    if (requests.Count > 0 && requests.All(r => HasPresenceEvidence(r, body, bodyText, setup)))
+                    {
+                        continue;
+                    }
 
-                violations.Add($"{unit.Path}:{unit.LineOf(method.NameIndex)} {method.Name} — "
-                               + (notFoundShape
-                                   ? "asserts \"not 404 / not 405\" with no signed-in request and no endpoint-table read"
-                                   : "claims the route is registered/routed on the strength of an anonymous 401"));
+                    violations.Add($"{unit.Path}:{unit.LineOf(method.NameIndex)} {method.Name} — "
+                                   + (notFound
+                                       ? "asserts \"not 404 / not 405\" on a request with no signed-in client, no bearer on the request "
+                                         + "and no endpoint-table read of the same verb and path"
+                                       : "claims the route is registered/routed on the strength of an anonymous 401"));
+                    break;
+                }
             }
         }
 
@@ -3302,6 +4211,39 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(Scan("        var r = await _client.GetAsync(\"/api/x/1\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);",
             members: "    private readonly HttpClient _client;\n    public PresenceTests(CustomWebAppFactory factory)\n    {\n"
                      + "        _client = factory.CreateClient();\n        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n    }\n"));
+
+        // NEGATIVE (task 167 f2-v1, the f2 verifier's item 6 seed and its relatives): evidence that is not about the
+        // ASSERTED request — an unused signed-in client, a signed-in request to another route, an endpoint-table read of
+        // another path or verb, a Maps(...) whose answer is never asserted, an anonymous client made inline.
+        const string anonymous = "        var r = await _client.GetAsync(\"/api/ai/scopes/personas\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);";
+        foreach (var unrelated in new[]
+                 {
+                     "        var signedIn = new HttpClient();\n        signedIn.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n",
+                     "        using var signedIn = _factory.CreateAuthenticatedClient();\n        var other = await signedIn.GetAsync(\"/api/me\");\n",
+                     "        EndpointTable.AssertMapped(_factory, \"GET\", \"/api/ai/scopes/actions\");\n",
+                     "        EndpointTable.AssertMapped(_factory, \"POST\", \"/api/ai/scopes/personas\");\n",
+                     "        var mapped = EndpointTable.Maps(_factory, \"GET\", \"/api/ai/scopes/personas\");\n",
+                 })
+        {
+            Assert.Single(Scan(unrelated + anonymous));
+        }
+
+        Assert.Single(Scan("        var r = await _factory.CreateClient().GetAsync(\"/api/x\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);"));
+        Assert.Single(Scan("        var rs = await Task.WhenAll(new[] { _client.GetAsync(\"/api/x\") });\n"
+                           + "        rs.Should().AllSatisfy(r => { r.StatusCode.Should().NotBe(HttpStatusCode.NotFound); });"));
+
+        // POSITIVE (f2-v1): the evidence IS about the asserted request — the same verb and path in the table (AssertMapped,
+        // or Maps(...).Should().BeTrue()), a bearer on the request message, a signed-in client made inline, and an untraceable
+        // response (a lambda parameter) whose every request goes through a signed-in client.
+        Assert.Empty(Scan(anonymous + "\n        EndpointTable.AssertMapped(_factory, \"GET\", \"/api/ai/scopes/personas\");"));
+        Assert.Empty(Scan(anonymous + "\n        EndpointTable.Maps(_factory, \"GET\", \"/api/ai/scopes/personas\").Should().BeTrue();"));
+        Assert.Empty(Scan("        var request = new HttpRequestMessage(HttpMethod.Get, \"/api/x\");\n"
+                          + "        request.Headers.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n"
+                          + "        var r = await _client.SendAsync(request);\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);"));
+        Assert.Empty(Scan("        var r = await _factory.CreateAuthenticatedClient().GetAsync(\"/api/x\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);"));
+        Assert.Empty(Scan("        var rs = await Task.WhenAll(new[] { _httpClient!.GetAsync(\"/api/x\") });\n"
+                          + "        rs.Should().AllSatisfy(r => { r.StatusCode.Should().NotBe(HttpStatusCode.NotFound); });",
+            members: "    private readonly HttpClient? _httpClient = _fixture.CreateHttpClient();\n"));
     }
 
     // =============================================================================================
@@ -3322,8 +4264,11 @@ public partial class RouteAuthorizationGuardTests
     private static IEnumerable<string> AnonymousKeys(IEnumerable<RouteRegistration> routes)
         => routes.Where(r => r.Anonymous).Select(r => r.Key);
 
+    /// <summary>Rate-limit policy names resolve ORDINALLY at runtime (PolicyAndRateLimitNamesResolveAsTheGuardAssumes), so
+    /// "HEALTH-PROBE" is not the probe policy; it is still matched case-insensitively here, so the pin errs toward
+    /// reporting (task 167 f2-v1).</summary>
     private static bool CarriesHealthProbePolicy(RouteRegistration route)
-        => route.Chain.Any(c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"health-probe\"");
+        => route.Chain.Any(c => c.Name == "RequireRateLimiting" && string.Equals(c.Args.Trim(), "\"health-probe\"", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>A plain, non-interpolated, non-concatenated string literal — the only rate-limit policy NAME the guard can
     /// read. Anything else (<c>"health-" + "probe"</c>, a constant, an interpolation, a policy object) could name the
@@ -3433,6 +4378,490 @@ public partial class RouteAuthorizationGuardTests
             "        app.MapPost(\"/api/zz/public\", Post).AllowAnonymous();").ToArray())), pinned));
         Assert.Equal(new[] { "removed: GET /status" }, PinnedSetDifferences(AnonymousKeys(Probes(real[0], real[1], real[2],
             "        app.MapGet(\"/status\", () => Results.Ok()).RequireAuthorization();")), pinned));
+    }
+
+    // =============================================================================================
+    // EVERY EXPLICITLY ANONYMOUS ROUTE CARRIES ITS PINNED COMPENSATING CONTROL — read from code, not from waiver text
+    // (main-session round 43 item 1; task 167 f2-v1 — the f2 verifier's items 4 and 5)
+    // ---------------------------------------------------------------------------------------------
+    // Owner round 12 item 1 keeps the strict AnonymousByDesign rule: an anonymous route's compensating control is
+    // MANDATORY. Until f2-v1 the guard read that control from code only for the three liveness probes (HealthProbeRoutes);
+    // for the other thirteen it was the waiver's TEXT, so `.RequireRateLimiting("anonymous")` could be deleted from
+    // /healthz/dataverse with ArchTests green — and the probe pin read only RequireRateLimiting CHAIN calls, so
+    // `[EnableRateLimiting("health-probe")]` on the handler moved that Dataverse-reading route onto the 12x looser policy
+    // unseen. Now:
+    //   - EveryExplicitlyAnonymousRouteCarriesItsPinnedControl: each ExplicitlyAnonymousRoutes line pins EVERY control its
+    //     route carries (a rate-limit policy, RequireWebhookSignature, an IsDevelopment-only mapping) and the route must
+    //     carry exactly those — removed, swapped, added unpinned, doubled, or unreadable all fail — and its waiver must
+    //     name exactly those;
+    //   - RateLimitPoliciesAreAppliedOnlyOnAScannedChain: a rate-limit policy is applied ONLY by .RequireRateLimiting("…")
+    //     on a route or group chain the scanner reads. [EnableRateLimiting] / [DisableRateLimiting] (attribute, metadata
+    //     object or any other use), a wrapper extension and a method group are refused outright, the way [AllowAnonymous]
+    //     is (AnonymityIsDeclaredOnlyOnAScannedChain).
+    // MAINTENANCE: a changed control changes its ExplicitlyAnonymousRoutes line and its waiver in the same reviewed diff.
+    // =============================================================================================
+
+    /// <summary>The <c>if</c> header of a development-only block: <c>if (&lt;env&gt;.IsDevelopment())</c> (or <c>else if</c>), with
+    /// nothing else in the condition.</summary>
+    private static readonly Regex DevelopmentOnlyHeader = new(
+        @"^(?:else\s+)?if\s*\(\s*(?<env>[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)*)\s*\.\s*IsDevelopment\s*\(\s*\)\s*\)$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex HostEnvironmentType = new(
+        @"^(?:global::)?(?:Microsoft\.AspNetCore\.Hosting\.)?IWebHostEnvironment\??$|^(?:global::)?(?:Microsoft\.Extensions\.Hosting\.)?IHostEnvironment\??$",
+        RegexOptions.Compiled);
+
+    /// <summary>Index of the innermost <c>{</c> enclosing <paramref name="position"/> (balanced brackets skipped; an open
+    /// <c>(</c> or <c>[</c> is climbed out of), or -1.</summary>
+    private static int EnclosingBlockOpen(string code, int position)
+    {
+        var depth = 0;
+        for (var i = position - 1; i >= 0; i--)
+        {
+            var c = code[i];
+            if (c is ')' or ']' or '}')
+            {
+                depth++;
+            }
+            else if (c is '(' or '[' or '{')
+            {
+                if (depth > 0)
+                {
+                    depth--;
+                }
+                else if (c == '{')
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Index just after the statement boundary (<c>;</c>, <c>{</c> or <c>}</c> at depth zero) that precedes
+    /// <paramref name="position"/>; 0 when there is none. Open brackets around <paramref name="position"/> are climbed out of.</summary>
+    private static int StatementStartBefore(string code, int position)
+    {
+        var depth = 0;
+        for (var i = position - 1; i >= 0; i--)
+        {
+            var c = code[i];
+            if (c is ')' or ']')
+            {
+                depth++;
+            }
+            else if (c is '(' or '[')
+            {
+                depth = Math.Max(0, depth - 1);
+            }
+            else if (c is ';' or '{' or '}' && depth == 0)
+            {
+                return i + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>True when the registration sits in the then-branch of <c>if (&lt;env&gt;.IsDevelopment())</c> — braced or not,
+    /// at any depth — and &lt;env&gt; is an IWebHostEnvironment / IHostEnvironment parameter of the enclosing method or an
+    /// <c>.Environment</c> property. A look-alike the guard cannot verify is recorded in <paramref name="problems"/>.</summary>
+    private static bool IsMappedOnlyInDevelopment(RouteRegistration route, List<string> problems)
+    {
+        var unit = route.Unit;
+        if (unit is null || route.HandlerStart <= 0)
+        {
+            return false;
+        }
+
+        var code = unit.Code;
+
+        bool Accept(string header, int at)
+        {
+            var m = DevelopmentOnlyHeader.Match(Squash(header));
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            var env = Regex.Replace(m.Groups["env"].Value, @"\s+", string.Empty);
+            var method = unit.MethodAt(at);
+            var parameter = method?.Params.FirstOrDefault(p => p.Name == env);
+            if ((parameter is not null && HostEnvironmentType.IsMatch(Regex.Replace(parameter.Type, @"\s+", string.Empty)))
+                || env.EndsWith(".Environment", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            problems.Add($"{route.Key} at {route.File}:{route.Line} sits under `{Squash(header)}`, but '{env}' is not an "
+                         + "IWebHostEnvironment / IHostEnvironment parameter of the enclosing method or an .Environment property — "
+                         + "the guard cannot verify the mapping is development-only");
+            return false;
+        }
+
+        // Every enclosing block, inner to outer — `if (env.IsDevelopment()) { … group.MapPost(...) … }`. (A brace-less
+        // `if (…) group.MapPost(...)` never reaches here: the scanner refuses a registration that is not at a statement
+        // start, so such a route is unparseable, not live.)
+        for (var open = EnclosingBlockOpen(code, route.HandlerStart); open >= 0; open = EnclosingBlockOpen(code, open))
+        {
+            var headerStart = StatementStartBefore(code, open);
+            if (Accept(code[headerStart..open], open))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The compensating controls a route ACTUALLY carries, read from code; plus what the guard cannot read.</summary>
+    private static (List<AnonymousControl> Controls, List<string> Problems) ActualControls(RouteRegistration route)
+    {
+        var controls = new List<AnonymousControl>();
+        var problems = new List<string>();
+        foreach (var call in route.Chain.Where(c => c.Name == "RequireRateLimiting"))
+        {
+            var argument = call.Args.Trim();
+            if (PlainStringLiteral.IsMatch(argument))
+            {
+                controls.Add(RateLimitControl(argument[1..^1]));
+            }
+            else
+            {
+                problems.Add($"RequireRateLimiting({Squash(call.Args)}) at {call.File}:{call.Line} is not a plain string literal — "
+                             + "the guard cannot tell which policy it names");
+            }
+        }
+
+        if (route.Chain.Any(c => c.Name == "RequireWebhookSignature"))
+        {
+            controls.Add(WebhookSignatureControl());
+        }
+
+        if (IsMappedOnlyInDevelopment(route, problems))
+        {
+            controls.Add(DevelopmentOnlyControl());
+        }
+
+        return (controls, problems);
+    }
+
+    private static readonly Regex NamedRateLimitInText = new("RequireRateLimiting\\(\"[^\"]*\"\\)", RegexOptions.Compiled);
+
+    private static List<string> AnonymousControlViolations(
+        IReadOnlyList<RouteRegistration> routes, IReadOnlyList<AnonymousRoute> pinned, IReadOnlyList<Waiver> waivers,
+        IReadOnlySet<string> healthProbeRoutes, IReadOnlyList<SourceUnit> units)
+    {
+        var violations = new List<string>();
+
+        // An IsDevelopment EXTENSION method in BFF + shared code could answer true anywhere it is in scope.
+        violations.AddRange(units.SelectMany(u => u.Methods.Where(m => m.IsExtension && m.Name == "IsDevelopment")
+            .Select(m => $"{u.Path}:{u.LineOf(m.NameIndex)}: an IsDevelopment extension method — a development-only mapping "
+                         + "could no longer be told apart from one this method enables anywhere")));
+
+        foreach (var anon in pinned)
+        {
+            var key = anon.Route;
+            if (anon.Controls.Count == 0)
+            {
+                violations.Add($"{key}: no compensating control is pinned — an anonymous route's control is MANDATORY "
+                               + "(owner round 12 item 1): a rate-limit policy, RequireWebhookSignature or an IsDevelopment-only mapping");
+            }
+
+            var expected = anon.Controls.Select(c => c.Evidence).ToList();
+            if (expected.Count != expected.Distinct(StringComparer.Ordinal).Count()
+                || anon.Controls.Count(c => c.Kind == AnonymousControlKind.RateLimit) > 1)
+            {
+                violations.Add($"{key}: a control (or more than one rate-limit policy) is pinned twice — the last rate-limit "
+                               + "metadata wins at runtime, so a route carries exactly one");
+            }
+
+            var matches = routes.Where(r => r.Key == key && !r.Unparseable && !r.Unbound).ToList();
+            if (matches.Count != 1)
+            {
+                violations.Add($"{key}: pinned in ExplicitlyAnonymousRoutes, but {matches.Count} live registrations have this key");
+                continue;
+            }
+
+            var route = matches[0];
+            var (actual, problems) = ActualControls(route);
+            violations.AddRange(problems.Select(p => $"{key}: {p}"));
+            var found = actual.Select(c => c.Evidence).ToList();
+            foreach (var missing in expected.Except(found, StringComparer.Ordinal))
+            {
+                violations.Add($"{key} at {route.File}:{route.Line}: its pinned control {missing} is not on the route — removed, "
+                               + "swapped for another policy, or applied in a form the guard cannot read (an attribute, metadata, a "
+                               + "wrapper extension)");
+            }
+
+            foreach (var extra in found.Distinct(StringComparer.Ordinal).Except(expected, StringComparer.Ordinal))
+            {
+                violations.Add($"{key} at {route.File}:{route.Line}: it carries {extra}, which ExplicitlyAnonymousRoutes does not "
+                               + "pin — a changed control changes the pin (and the waiver) in the same reviewed diff");
+            }
+
+            var rateLimits = route.Chain.Count(c => c.Name == "RequireRateLimiting");
+            if (rateLimits > 1)
+            {
+                violations.Add($"{key} at {route.File}:{route.Line}: {rateLimits} RequireRateLimiting calls on its effective chain "
+                               + "(route and groups) — the LAST one wins at runtime; keep exactly one");
+            }
+
+            // The waiver's text and the pinned controls agree (round 43 item 1).
+            var waived = waivers.Where(w => w.Route == key).ToList();
+            if (waived.Count != 1)
+            {
+                violations.Add($"{key}: {waived.Count} waivers — an explicitly anonymous route has exactly one (AnonymousByDesign or Pending)");
+                continue;
+            }
+
+            var reason = waived[0].Reason;
+            foreach (var evidence in expected.Where(e => !reason.Contains(e, StringComparison.Ordinal)))
+            {
+                violations.Add($"{key}: its waiver does not name its pinned control {evidence}");
+            }
+
+            foreach (var named in NamedRateLimitInText.Matches(reason).Select(m => m.Value).Distinct(StringComparer.Ordinal)
+                         .Where(n => !expected.Contains(n, StringComparer.Ordinal)))
+            {
+                violations.Add($"{key}: its waiver names {named}, which is not the rate-limit policy pinned for it");
+            }
+
+            if (reason.Contains("RequireWebhookSignature", StringComparison.Ordinal) && !expected.Contains("RequireWebhookSignature"))
+            {
+                violations.Add($"{key}: its waiver names RequireWebhookSignature, which is not pinned for it");
+            }
+
+            if (reason.Contains("IsDevelopment", StringComparison.Ordinal) && !expected.Contains("IsDevelopment()"))
+            {
+                violations.Add($"{key}: its waiver names an IsDevelopment-only mapping, which is not pinned for it");
+            }
+        }
+
+        // The probe-policy pin and this one name the same three routes.
+        violations.AddRange(PinnedSetDifferences(
+                pinned.Where(a => a.Controls.Any(c => c.Kind == AnonymousControlKind.RateLimit && c.Policy == "health-probe")).Select(a => a.Route),
+                healthProbeRoutes)
+            .Select(d => $"HealthProbeRoutes and the health-probe lines of ExplicitlyAnonymousRoutes disagree — {d}"));
+
+        return violations;
+    }
+
+    /// <summary>Any identifier ending in EnableRateLimiting / DisableRateLimiting / RequireRateLimiting (with a suffix:
+    /// the attribute classes, a custom wrapper), in code.</summary>
+    private static readonly Regex RateLimitingIdentifier = new(@"(?<![\w])\w*(?:Enable|Disable|Require)RateLimiting\w*", RegexOptions.Compiled);
+
+    private static List<string> RateLimitFormViolations(IEnumerable<SourceUnit> units, IEnumerable<RouteRegistration> routes)
+    {
+        var scanned = routes.SelectMany(r => r.Chain)
+            .Where(c => c.Name == "RequireRateLimiting")
+            .Select(c => (c.File, c.Line))
+            .ToHashSet();
+        var violations = new List<string>();
+
+        foreach (var unit in units)
+        {
+            var code = unit.Code;
+            foreach (Match m in RateLimitingIdentifier.Matches(code))
+            {
+                var at = $"{unit.Path}:{unit.LineOf(m.Index)}";
+                if (m.Value != "RequireRateLimiting")
+                {
+                    violations.Add($"{at}: '{m.Value}' — a rate-limit policy applied or removed by an attribute, a metadata "
+                                   + "object or another API is invisible to the anonymous-control and probe-policy pins (the looser "
+                                   + "\"health-probe\" policy must not spread, owner round 14 item 1). Write .RequireRateLimiting(\"policy\") "
+                                   + "on the route or group chain");
+                    continue;
+                }
+
+                var p = m.Index - 1;
+                while (p >= 0 && char.IsWhiteSpace(code[p]))
+                {
+                    p--;
+                }
+
+                var next = SkipWs(code, m.Index + m.Length);
+                if (!(p >= 0 && code[p] == '.' && next < code.Length && code[next] == '('))
+                {
+                    violations.Add($"{at}: RequireRateLimiting used as a method group or other non-call — the guard reads only "
+                                   + ".RequireRateLimiting(\"policy\") on a route chain");
+                }
+                else if (!scanned.Contains((unit.Path, unit.LineOf(m.Index))))
+                {
+                    violations.Add($"{at}: a .RequireRateLimiting(...) call on no route chain the scanner reads (a wrapper "
+                                   + "extension, or a static call?) — every route it reaches gets a policy the pins cannot see");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1: a rate-limit policy is applied only by .RequireRateLimiting(\"…\") on a scanned chain — no attribute, metadata or wrapper")]
+    public void RateLimitPoliciesAreAppliedOnlyOnAScannedChain()
+    {
+        var violations = RateLimitFormViolations(BffAndSharedUnits(), Real.Routes);
+        Assert.True(
+            violations.Count == 0,
+            "A rate-limit policy the scanner cannot see can SPREAD the looser \"health-probe\" policy (120/min) to a route that "
+            + "must stay on \"anonymous\" (10/min), or remove a pinned control, with every pin green — the f2 verifier's "
+            + "[EnableRateLimiting(\"health-probe\")] on GET /healthz/dataverse did exactly that. Apply a policy only with "
+            + ".RequireRateLimiting(\"policy\") on the route or MapGroup chain.\n\n  " + string.Join("\n  ", violations));
+
+        // Non-vacuous: the scan sees the real policies on their chains.
+        Assert.True(Real.Routes.SelectMany(r => r.Chain).Count(c => c.Name == "RequireRateLimiting") > 20);
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1: every explicitly anonymous route carries exactly its pinned compensating control, named by its waiver (round 43 item 1)")]
+    public void EveryExplicitlyAnonymousRouteCarriesItsPinnedControl()
+    {
+        var violations = AnonymousControlViolations(Real.Live.ToList(), ExplicitlyAnonymousRoutes, Waivers, HealthProbeRoutes,
+            BffAndSharedUnits().ToList());
+        Assert.True(
+            violations.Count == 0,
+            "An anonymous route's compensating control is MANDATORY (owner round 12 item 1), and since main-session round 43 "
+            + "item 1 the build reads it from CODE: each route carries exactly the controls its ExplicitlyAnonymousRoutes line "
+            + "pins (a rate-limit policy, RequireWebhookSignature, an IsDevelopment-only mapping), and its waiver names "
+            + "exactly those. Restore the control, or change the pin and the waiver in the same diff.\n\n  "
+            + string.Join("\n  ", violations));
+
+        // Non-vacuous: all three kinds are in use and each is read from code on its route.
+        var byKey = Real.Live.GroupBy(r => r.Key).ToDictionary(g => g.Key, g => g.First());
+        Assert.Contains(RateLimitControl("anonymous"), ActualControls(byKey["GET /healthz/dataverse"]).Controls);
+        Assert.Contains(WebhookSignatureControl(), ActualControls(byKey["POST /api/communications/incoming-webhook"]).Controls);
+        Assert.Contains(DevelopmentOnlyControl(), ActualControls(byKey["POST /api/office/save-debug"]).Controls);
+        Assert.Equal(16, ExplicitlyAnonymousRoutes.Count);
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1 controls: a removed, swapped, unpinned, doubled or unseen anonymous-route control fails; the pinned shapes pass")]
+    public void AnonymousControls_NegativeControl_EachChangedOrUnseenControlFails()
+    {
+        const string reason = "Seeded by the round-43 control: a public route whose mandatory control is";
+
+        // The real shapes, as a fixture: a rate-limited probe, a signed webhook, a development-only mapping.
+        static string Module(string probe = ".AllowAnonymous().RequireRateLimiting(\"anonymous\")",
+            string webhook = ".AllowAnonymous().RequireWebhookSignature(\"X-Hub-Signature-256\", Key, \"C\").RequireRateLimiting(\"webhook-graph\")",
+            string debugOpen = "        if (env.IsDevelopment())\n        {\n", string debugClose = "        }\n",
+            string members = "", string environment = "IWebHostEnvironment env")
+            => "public static class P\n{\n"
+               + $"    public static void MapP(this IEndpointRouteBuilder app, {environment})\n    {{\n"
+               + $"        app.MapGet(\"/healthz/dataverse\", Probe){probe};\n"
+               + $"        app.MapPost(\"/api/communications/incoming-webhook\", Hook){webhook};\n"
+               + debugOpen
+               + "            app.MapPost(\"/api/office/save-debug\", (HttpContext c) => Results.Ok()).AllowAnonymous();\n"
+               + debugClose
+               + "    }\n\n    private static IResult Probe() => Results.Ok();\n" + members + "}";
+
+        var pinned = new[]
+        {
+            PublicRoute("GET /healthz/dataverse", "probe", RateLimitControl("anonymous")),
+            PublicRoute("POST /api/communications/incoming-webhook", "webhook", WebhookSignatureControl(), RateLimitControl("webhook-graph")),
+            PublicRoute("POST /api/office/save-debug", "debug", DevelopmentOnlyControl()),
+        };
+        var waivers = new[]
+        {
+            Permanent("GET /healthz/dataverse", PermanentBasis.AnonymousByDesign, "167", $"{reason} RequireRateLimiting(\"anonymous\"); P.cs:5."),
+            Permanent("POST /api/communications/incoming-webhook", PermanentBasis.AnonymousByDesign, "167",
+                $"{reason} RequireWebhookSignature and RequireRateLimiting(\"webhook-graph\"); P.cs:6."),
+            Permanent("POST /api/office/save-debug", PermanentBasis.AnonymousByDesign, "167", $"{reason} the if (env.IsDevelopment()) block; P.cs:9."),
+        };
+        var noProbes = new HashSet<string>(StringComparer.Ordinal);
+
+        List<string> Violations(string module, IReadOnlyList<AnonymousRoute>? pins = null, IReadOnlyList<Waiver>? waived = null)
+        {
+            var units = new[] { new SourceUnit("Api/P.cs", module) };
+            var routes = ScanFixtures(new[] { ("Api/P.cs", module), ("Program.cs", "var app = builder.Build();\napp.MapP(app.Environment);") }, "Api/P.cs");
+            return AnonymousControlViolations(routes, pins ?? pinned, waived ?? waivers, noProbes, units)
+                .Concat(RateLimitFormViolations(units, routes))
+                .ToList();
+        }
+
+        // POSITIVE: the pinned shapes; the `.Environment` property form; `else if`; a block nested inside the dev block.
+        Assert.Empty(Violations(Module()));
+        Assert.Empty(Violations(Module(debugOpen: "        if (app.Environment.IsDevelopment())\n        {\n", environment: "int unused")));
+        Assert.Empty(Violations(Module(debugOpen: "        if (Flag) { }\n        else if (env.IsDevelopment())\n        {\n")));
+        Assert.Empty(Violations(Module(debugOpen: "        if (env.IsDevelopment())\n        {\n        if (Flag)\n        {\n",
+            debugClose: "        }\n        }\n")));
+
+        // A brace-less `if (env.IsDevelopment()) app.MapPost(...)` is not read as a live route at all (the scanner refuses a
+        // registration that is not at a statement start), so it can carry no control the pin would credit.
+        Assert.Contains(Violations(Module(debugOpen: "        if (env.IsDevelopment())\n", debugClose: string.Empty)),
+            v => v.StartsWith("POST /api/office/save-debug: pinned in ExplicitlyAnonymousRoutes, but 0 live registrations", StringComparison.Ordinal));
+
+        // NEGATIVE — the rate limit: removed (the f2 verifier's item 5 seed), swapped for a looser policy, doubled, unreadable.
+        Assert.Contains(Violations(Module(probe: ".AllowAnonymous()")),
+            v => v.StartsWith("GET /healthz/dataverse at Api/P.cs:5: its pinned control RequireRateLimiting(\"anonymous\") is not on the route", StringComparison.Ordinal));
+        var swapped = Violations(Module(probe: ".AllowAnonymous().RequireRateLimiting(\"health-probe\")"));
+        Assert.Contains(swapped, v => v.Contains("its pinned control RequireRateLimiting(\"anonymous\") is not on the route", StringComparison.Ordinal));
+        Assert.Contains(swapped, v => v.Contains("it carries RequireRateLimiting(\"health-probe\"), which ExplicitlyAnonymousRoutes does not pin", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(probe: ".AllowAnonymous().RequireRateLimiting(\"anonymous\").RequireRateLimiting(\"webhook-graph\")")),
+            v => v.Contains("2 RequireRateLimiting calls on its effective chain", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(probe: ".AllowAnonymous().RequireRateLimiting(Policies.Anonymous)")),
+            v => v.Contains("is not a plain string literal", StringComparison.Ordinal));
+
+        // NEGATIVE — applied in a form the guard cannot see (the f2 verifier's item 4 seed): an attribute on the handler, a
+        // metadata object, a wrapper extension. Each fails the form rule AND the pin.
+        foreach (var (probe, members) in new[]
+                 {
+                     (".AllowAnonymous()", "    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(\"health-probe\")]\n    private static IResult Probe2() => Results.Ok();\n"),
+                     (".AllowAnonymous().WithMetadata(new EnableRateLimitingAttribute(\"anonymous\"))", string.Empty),
+                     (".AllowAnonymous().Limited()", "    private static RouteHandlerBuilder Limited(this RouteHandlerBuilder b) => b.RequireRateLimiting(\"anonymous\");\n"),
+                     (".AllowAnonymous().RequireRateLimiting(\"anonymous\").DisableRateLimiting()", string.Empty),
+                 })
+        {
+            var unseen = Violations(Module(probe: probe, members: members));
+            Assert.Contains(unseen, v => v.StartsWith("Api/P.cs:", StringComparison.Ordinal));
+            if (!probe.Contains("RequireRateLimiting", StringComparison.Ordinal))
+            {
+                Assert.Contains(unseen, v => v.Contains("its pinned control RequireRateLimiting(\"anonymous\") is not on the route", StringComparison.Ordinal));
+            }
+        }
+
+        // NEGATIVE — the webhook signature: removed, or applied as a raw filter the pin does not read.
+        Assert.Contains(Violations(Module(webhook: ".AllowAnonymous().RequireRateLimiting(\"webhook-graph\")")),
+            v => v.Contains("its pinned control RequireWebhookSignature is not on the route", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(webhook: ".AllowAnonymous().AddEndpointFilter<WebhookSignatureFilter>().RequireRateLimiting(\"webhook-graph\")")),
+            v => v.Contains("its pinned control RequireWebhookSignature is not on the route", StringComparison.Ordinal));
+
+        // NEGATIVE — the development-only mapping: moved out, inverted, widened, in the else-branch, or on something that is
+        // not the host environment.
+        foreach (var (open, close, environment) in new[]
+                 {
+                     (string.Empty, string.Empty, "IWebHostEnvironment env"),
+                     ("        if (!env.IsDevelopment())\n        {\n", "        }\n", "IWebHostEnvironment env"),
+                     ("        if (env.IsDevelopment() || Flag)\n        {\n", "        }\n", "IWebHostEnvironment env"),
+                     ("        if (env.IsDevelopment()) { }\n        else\n        {\n", "        }\n", "IWebHostEnvironment env"),
+                     ("        if (env.IsDevelopment()) { }\n", string.Empty, "IWebHostEnvironment env"),
+                     ("        if (env.IsDevelopment())\n        {\n", "        }\n", "AppSettings env"),
+                 })
+        {
+            Assert.Contains(Violations(Module(debugOpen: open, debugClose: close, environment: environment)),
+                v => v.Contains("its pinned control IsDevelopment() is not on the route", StringComparison.Ordinal));
+        }
+
+        Assert.Contains(Violations(Module(members: "    public static bool IsDevelopment(this IWebHostEnvironment e) => true;\n")),
+            v => v.Contains("an IsDevelopment extension method", StringComparison.Ordinal));
+
+        // NEGATIVE — the pin itself: a route with no control pinned, and a control the route carries but the pin omits.
+        var unpinned = pinned.Select(a => a.Route == "GET /healthz/dataverse" ? a with { Controls = Array.Empty<AnonymousControl>() } : a).ToList();
+        var noControl = Violations(Module(probe: ".AllowAnonymous()"), unpinned);
+        Assert.Contains(noControl, v => v.StartsWith("GET /healthz/dataverse: no compensating control is pinned", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(), unpinned), v => v.Contains("it carries RequireRateLimiting(\"anonymous\"), which ExplicitlyAnonymousRoutes does not pin", StringComparison.Ordinal));
+
+        // NEGATIVE — the waiver text and the pin disagree: a different policy named, the control not named, a kind not pinned.
+        Waiver[] Rewaive(string route, string text) => waivers.Select(w => w.Route == route ? w with { Reason = text } : w).ToArray();
+        Assert.Contains(Violations(Module(), waived: Rewaive("GET /healthz/dataverse", $"{reason} RequireRateLimiting(\"health-probe\"); P.cs:5.")),
+            v => v.Contains("its waiver names RequireRateLimiting(\"health-probe\"), which is not the rate-limit policy pinned", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(), waived: Rewaive("GET /healthz/dataverse", $"{reason} a fixed message only; P.cs:5.")),
+            v => v.Contains("its waiver does not name its pinned control RequireRateLimiting(\"anonymous\")", StringComparison.Ordinal));
+        Assert.Contains(Violations(Module(), waived: Rewaive("GET /healthz/dataverse", $"{reason} RequireRateLimiting(\"anonymous\") and RequireWebhookSignature; P.cs:5.")),
+            v => v.Contains("its waiver names RequireWebhookSignature, which is not pinned", StringComparison.Ordinal));
+
+        // NEGATIVE — HealthProbeRoutes and the pinned health-probe lines must name the same routes.
+        Assert.Contains(AnonymousControlViolations(Array.Empty<RouteRegistration>(), Array.Empty<AnonymousRoute>(), Array.Empty<Waiver>(),
+                new HashSet<string>(StringComparer.Ordinal) { "GET /ping" }, Array.Empty<SourceUnit>()),
+            v => v.StartsWith("HealthProbeRoutes and the health-probe lines", StringComparison.Ordinal));
     }
 
     // =============================================================================================
@@ -4196,7 +5625,8 @@ public partial class RouteAuthorizationGuardTests
     [Fact(DisplayName = "Task 167 f2 controls: a retired sweep route resolves only with ResolvedBy and a ProofTest that pins its absence (round 34 item 4)")]
     public void SweepLedger_RetiredRoutes_NegativeControl_OnlyAPinnedAbsenceResolves()
     {
-        const string proofFile = "tests/fake/RetiredRouteProofs.cs";
+        // A path a CI-run test project compiles (the Sprk.Bff.Api.Tests regression glob) — since f2-v1 a proof must also run.
+        const string proofFile = "tests/integration/regression/RetiredRouteProofs.cs";
         string? Read(string path) => path == proofFile ? RetiredProofFixture : ReadRepoFile(path);
 
         // Simulate the integration state: the route is deleted (absent from the scan) and its waiver is gone. Nothing
@@ -4254,6 +5684,213 @@ public partial class RouteAuthorizationGuardTests
         var withTwin = RealAssessments.Value.Where(a => a.Key != "PUT /api/v1/events/{id:guid}").Concat(rekeyed).ToList();
         Assert.Contains(Ledger("PUT /api/v1/events/{id:guid}", "159", "DeletedRoutes_AreNotMapped_AndReachNothing", withTwin),
             v => v.Contains("RE-KEYED", StringComparison.Ordinal));
+    }
+
+    // The f2 verifier's item 3 shapes (task 167 f2-v1), as a fixture: one runnable absence proof of S-79's
+    // GET /api/communications/{id:guid}/status, and the same proof in every form that never runs.
+    private const string ProofShapesFixture = """
+        public class ProofShapes
+        {
+            [Fact]
+            public async Task Runs()
+            {
+                using var client = _fixture.CreateAuthenticatedClient();
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            [Fact(DisplayName = "the same, with a lambda and a local function that return")]
+            public async Task RunsWithNestedReturns()
+            {
+                Func<int> one = () => { return 1; };
+                static int Two() { return 2; }
+                using var client = _fixture.CreateAuthenticatedClient();
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound, $"{one()}{Two()}");
+            }
+
+            [Fact(Skip = "never runs")]
+            public async Task Skipped()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            public async Task NoAttribute()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            [SkippableFact]
+            public async Task Skippable()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            [Theory]
+            [InlineData("/api/communications/16700000-0000-0000-0000-000000000079/status", Skip = "never runs")]
+            public async Task SkippedRow(string path)
+            {
+                var response = await client.GetAsync(path);
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            [Fact]
+            public async Task SkipsAtRuntime()
+            {
+                Skip.If(true);
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+            [Fact]
+            public async Task ReturnsEarly()
+            {
+                if (DateTime.UtcNow.Year > 0)
+                {
+                    return;
+                }
+
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+
+        #if NEVER
+            [Fact]
+            public async Task Excluded()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+        #endif
+
+            [Fact]
+            internal async Task NotPublic()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+        }
+
+        public abstract class AbstractProofs
+        {
+            [Fact]
+            public async Task InAbstract()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+        }
+
+        internal class InternalProofs
+        {
+            [Fact]
+            public async Task InInternal()
+            {
+                var response = await client.GetAsync($"/api/communications/{Guid.NewGuid()}/status");
+                response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            }
+        }
+        """;
+
+    [Fact(DisplayName = "Task 167 f2-v1 controls: a ProofTest resolves only when it RUNS — compiled by a CI-run test project, a plain unskipped xUnit test")]
+    public void ProofTest_NegativeControl_OnlyARunnableCompiledTestProves()
+    {
+        const string route = "GET /api/communications/{id:guid}/status";   // S-79, owned by 161
+        const string compiled = "tests/integration/regression/ProofShapes.cs";
+        const string uncompiled = "tests/zz/ProofShapes.cs";
+        Func<string, string?> Reading(string? csprojOverride = null) => path =>
+            path.EndsWith("/ProofShapes.cs", StringComparison.Ordinal) ? ProofShapesFixture
+            : path == "tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj" && csprojOverride is not null ? csprojOverride
+            : ReadRepoFile(path);
+
+        // The verifier's item 3 seed, end to end: S-79's route deleted (absent from the scan), its waiver gone, ResolvedBy 161.
+        List<string> Retired(string file, string method, Func<string, string?>? read = null)
+        {
+            var ledger = SweepFindings.Select(e => e.Route == route ? e with { ResolvedBy = "161", ProofTest = $"{file}::{method}" } : e).ToList();
+            var label = SweepFindings.Single(e => e.Route == route).SweepId + " " + route;
+            return LedgerViolations(RealAssessments.Value.Where(a => a.Key != route).ToList(), Waivers.Where(w => w.Route != route).ToList(),
+                    ledger, read ?? Reading())
+                .Where(v => v.StartsWith(label + ":", StringComparison.Ordinal) || v.StartsWith(label + " ", StringComparison.Ordinal))
+                .ToList();
+        }
+
+        // POSITIVE: the runnable proof (and one whose only returns are inside a lambda and a local function).
+        Assert.Empty(Retired(compiled, "Runs"));
+        Assert.Empty(Retired(compiled, "RunsWithNestedReturns"));
+
+        // NEGATIVE — the verifier's three seeds: Skip'd, no test attribute, a file no test project compiles.
+        Assert.Contains(Retired(compiled, "Skipped"), v => v.Contains("never runs — an attribute sets Skip", StringComparison.Ordinal));
+        Assert.Contains(Retired(compiled, "NoAttribute"), v => v.Contains("never runs — it carries no [Fact] or [Theory]", StringComparison.Ordinal));
+        Assert.Contains(Retired(uncompiled, "Runs"), v => v.Contains("never runs — no CI-run test project compiles 'tests/zz/ProofShapes.cs'", StringComparison.Ordinal));
+
+        // NEGATIVE — their relatives: a Skippable attribute, a skipped data row, a runtime Skip, an early return, an #if
+        // region, a non-public method, an abstract or internal class, a build-output path, a non-normalized path.
+        foreach (var (method, why) in new[]
+                 {
+                     ("Skippable", "include no plain xUnit [Fact] or [Theory]"),
+                     ("SkippedRow", "an attribute sets Skip"),
+                     ("SkipsAtRuntime", "calls a Skip API"),
+                     ("ReturnsEarly", "has a `return` statement"),
+                     ("Excluded", "#if/#endif region"),
+                     ("NotPublic", "not a public, non-abstract method"),
+                     ("InAbstract", "its type 'AbstractProofs' is not a public, non-abstract"),
+                     ("InInternal", "its type 'InternalProofs' is not a public, non-abstract"),
+                 })
+        {
+            Assert.Contains(Retired(compiled, method), v => v.Contains("never runs — ", StringComparison.Ordinal) && v.Contains(why, StringComparison.Ordinal));
+        }
+
+        Assert.Contains(Retired("tests/unit/Sprk.Bff.Api.Tests/obj/ProofShapes.cs", "Runs"), v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+        Assert.Contains(Retired("tests/integration/regression/../zz/ProofShapes.cs", "Runs"), v => v.Contains("not a normalized repo-relative path", StringComparison.Ordinal));
+
+        // The project evaluation itself: a Compile Remove takes the file out; a conditional Include does not bring a file
+        // in; an unconditional Include does; a property-driven Remove fails closed; EnableDefaultCompileItems=false drops
+        // the default glob.
+        var csproj = ReadRepoFile("tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj")!;
+        string With(string item) => csproj.Replace("</Project>", $"  <ItemGroup>\n    {item}\n  </ItemGroup>\n</Project>", StringComparison.Ordinal);
+        Assert.Contains(Retired(compiled, "Runs", Reading(With("<Compile Remove=\"..\\..\\integration\\regression\\ProofShapes.cs\" />"))),
+            v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+        Assert.Contains(Retired(compiled, "Runs", Reading(With("<Compile Remove=\"$(Excluded)\" />"))),
+            v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+        Assert.Contains(Retired(uncompiled, "Runs", Reading(With("<Compile Include=\"..\\..\\zz\\**\\*.cs\" Condition=\"'$(Zz)' == 'true'\" />"))),
+            v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+        Assert.Empty(Retired(uncompiled, "Runs", Reading(With("<Compile Include=\"..\\..\\zz\\**\\*.cs\" />"))));
+        Assert.Contains(Retired(uncompiled, "Runs", Reading(With("<Compile Include=\"..\\..\\zz\\**\\*.cs\" Exclude=\"..\\..\\zz\\Proof*.cs\" />"))),
+            v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+        Assert.Empty(Retired("tests/unit/Sprk.Bff.Api.Tests/ProofShapes.cs", "Runs",
+            path => path == "tests/unit/Sprk.Bff.Api.Tests/ProofShapes.cs" ? ProofShapesFixture : ReadRepoFile(path)));
+        Assert.Contains(Retired("tests/unit/Sprk.Bff.Api.Tests/ProofShapes.cs", "Runs",
+                path => path == "tests/unit/Sprk.Bff.Api.Tests/ProofShapes.cs" ? ProofShapesFixture
+                    : path == "tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj"
+                        ? csproj.Replace("<PropertyGroup>", "<PropertyGroup>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>", StringComparison.Ordinal)
+                        : ReadRepoFile(path)),
+            v => v.Contains("no CI-run test project compiles", StringComparison.Ordinal));
+
+        // A DEPLOYED-route proof (ResolvedBy on a live, credited route) is held to the same standard.
+        var credited = RealAssessments.Value.Select(a => a.Key == route ? a with { Credit = Credit.HandlerDecision } : a).ToList();
+        var live = SweepFindings.Select(e => e.Route == route ? e with { ResolvedBy = "161", ProofTest = $"{compiled}::Skipped" } : e).ToList();
+        Assert.Contains(LedgerViolations(credited, Waivers.Where(w => w.Route != route).ToList(), live, Reading()),
+            v => v.Contains("never runs — an attribute sets Skip", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 167 f2-v1: every project a ProofTest may live in is run by CI (the solution or a dotnet test step)")]
+    public void TheProofTestProjectsAreRunByCi()
+    {
+        var solution = ReadRepoFile("Spaarke.sln")!;
+        var workflows = Directory.EnumerateFiles(Path.Combine(SourceScan.RepoRoot, ".github", "workflows"), "*.yml")
+            .Select(File.ReadAllText)
+            .ToList();
+        foreach (var project in ProofTestProjects)
+        {
+            Assert.NotNull(ReadRepoFile(project));
+            var inSolution = solution.Contains(project.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
+            var tested = workflows.Any(w => w.Split('\n').Any(l => l.Contains("dotnet test", StringComparison.Ordinal)
+                                                                   && l.Contains(project, StringComparison.OrdinalIgnoreCase)));
+            Assert.True(inSolution || tested, $"{project} is neither in Spaarke.sln nor run by a `dotnet test` step in .github/workflows");
+        }
     }
 
     [Fact(DisplayName = "Task 167 f2 controls: admin credit resolves a sweep entry only in a SystemAdmin or SPE-admin AdminOnlyRoutes group (round 34 item 5)")]

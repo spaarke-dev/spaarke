@@ -23,8 +23,10 @@ namespace Sprk.Bff.Api.Tests.Api;
 /// <para><b>The contract.</b> The route is anonymous, and each of its checks reads Dataverse as the BFF's own identity.
 /// So each check's <c>HealthCheckResult</c> is computed at most once per 30 seconds per instance and SHARED by every
 /// caller in that window — concurrent callers included (one in-flight evaluation); a FAULT is shared the same way and for
-/// no longer than the same 30 seconds; a caller that hangs up does not cancel the shared evaluation. This is in addition
-/// to the <c>health-probe</c> rate limit, not instead of it.</para>
+/// no longer than the same 30 seconds; a caller that hangs up does not cancel the shared evaluation; and an evaluation
+/// that HANGS ends at <see cref="CatalogHealthChecks.EvaluationTimeout"/> as a shared timeout fault, re-evaluated after the
+/// window (main-session round 43 item 2) — never a permanently stuck memo. This is in addition to the <c>health-probe</c>
+/// rate limit, not instead of it.</para>
 ///
 /// <para><b>How.</b> The window is measured on <see cref="TimeProvider"/>, so every test drives a
 /// <see cref="FakeTimeProvider"/> — no sleeps, no wall clock. The memo itself is exercised directly (a counting check
@@ -46,17 +48,33 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
 
         public int Calls => Volatile.Read(ref _calls);
 
+        /// <summary>Completes when the first evaluation has entered the check (the evaluation runs on a worker).</summary>
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>The token the most recent evaluation was handed.</summary>
+        public CancellationToken LastToken { get; private set; }
+
         public Func<int, Task<HealthCheckResult>> Next { get; set; } = call => Task.FromResult(HealthCheckResult.Healthy($"evaluation {call}"));
 
         public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
-            => Next(Interlocked.Increment(ref _calls));
+        {
+            LastToken = cancellationToken;
+            var call = Interlocked.Increment(ref _calls);
+            Entered.TrySetResult();
+            return Next(call);
+        }
     }
+
+    /// <summary>A real-time safety net for awaiting a signal the test itself controls — never a timing assumption.</summary>
+    private static readonly TimeSpan Safety = TimeSpan.FromSeconds(30);
+
+    private static readonly TimeSpan Bound = CatalogHealthChecks.EvaluationTimeout;
 
     /// <summary>The production decorator over <paramref name="inner"/>, one NEW instance per probe sharing one state —
     /// exactly how the health-check service builds it from the registration's factory.</summary>
     private static Func<CancellationToken, Task<HealthCheckResult>> Probe(CountingCheck inner, TimeProvider time)
     {
-        var state = new MemoizedHealthCheck.State(Window);
+        var state = new MemoizedHealthCheck.State(Window, Bound);
         var scopes = new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         var context = new HealthCheckContext
         {
@@ -69,6 +87,8 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
     public void TheWindowIsThirtySeconds()
     {
         Window.Should().Be(TimeSpan.FromSeconds(30), "main-session round 34 item 7 fixes the memo at 30 seconds");
+        Bound.Should().BePositive().And.BeLessThanOrEqualTo(Window,
+            "main-session round 43 item 2: a hung evaluation ends as a cached fault, and the bound is no longer than the window");
     }
 
     [Fact]
@@ -110,6 +130,7 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
         // Parallel.For returns every one of them has either started the evaluation or joined it — nothing is timed.
         var callers = new Task<HealthCheckResult>[25];
         Parallel.For(0, callers.Length, i => callers[i] = probe(CancellationToken.None));
+        await inner.Entered.Task.WaitAsync(Safety);   // the one evaluation runs on a worker (round 43 item 2)
         inner.Calls.Should().Be(1, "callers that arrive while an evaluation is running wait for it instead of starting their own");
         callers.Should().OnlyContain(c => !c.IsCompleted, "the one evaluation is still running");
 
@@ -187,6 +208,63 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
     }
 
     // =============================================================================================
+    // Every evaluation ends — a hang included (main-session round 43 item 2)
+    // =============================================================================================
+
+    [Fact]
+    public async Task AHungEvaluation_EndsAtTheBound_AsASharedTimeoutFault_AndIsReEvaluatedAfterTheWindow()
+    {
+        var clock = new FakeTimeProvider();
+        var never = new TaskCompletionSource<HealthCheckResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var inner = new CountingCheck { Next = call => call == 1 ? never.Task : Task.FromResult(HealthCheckResult.Healthy("recovered")) };
+        var probe = Probe(inner, clock);
+
+        var first = probe(CancellationToken.None);
+        await inner.Entered.Task.WaitAsync(Safety);
+        clock.Advance(Bound - TimeSpan.FromTicks(1));
+        first.IsCompleted.Should().BeFalse("one tick short of the bound the evaluation is still allowed to run");
+
+        clock.Advance(TimeSpan.FromTicks(1));
+        var fault = await first.WaitAsync(Safety);
+        fault.Status.Should().Be(HealthStatus.Unhealthy, "a hung check reports the registration's failure status at the bound");
+        fault.Description.Should().Contain($"did not complete within {Bound.TotalSeconds:0.#} s");
+        inner.LastToken.IsCancellationRequested.Should().BeTrue("the hung evaluation's own token is cancelled at the bound");
+
+        clock.Advance(Window - TimeSpan.FromTicks(1));
+        var shared = await probe(CancellationToken.None).WaitAsync(Safety);
+        shared.Exception.Should().BeSameAs(fault.Exception, "the timeout is shared like any fault — never a stuck memo");
+        inner.Calls.Should().Be(1);
+
+        clock.Advance(TimeSpan.FromTicks(1));
+        (await probe(CancellationToken.None).WaitAsync(Safety)).Status.Should().Be(HealthStatus.Healthy,
+            "a timeout is NOT cached beyond the window: the next probe evaluates again");
+        inner.Calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ACheckThatBlocksSynchronously_IsBoundedToo()
+    {
+        var clock = new FakeTimeProvider();
+        using var gate = new ManualResetEventSlim(false);
+        var inner = new CountingCheck
+        {
+            Next = _ =>
+            {
+                gate.Wait();   // blocks its thread before returning any task — the evaluation runs on a worker, so it is bounded
+                return Task.FromResult(HealthCheckResult.Healthy("late"));
+            },
+        };
+        var probe = Probe(inner, clock);
+
+        var caller = probe(CancellationToken.None);
+        await inner.Entered.Task.WaitAsync(Safety);
+        caller.IsCompleted.Should().BeFalse();
+        clock.Advance(Bound);
+        (await caller.WaitAsync(Safety)).Description.Should().Contain("did not complete within");
+        gate.Set();   // release the worker
+    }
+
+    // =============================================================================================
     // The real app — the route, and every check on it
     // =============================================================================================
 
@@ -250,6 +328,8 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
             registration.Factory(scope.ServiceProvider).Should().BeOfType<MemoizedHealthCheck>(
                 $"'{registration.Name}' is on the anonymous /healthz/catalog route, so it must be registered with "
                 + "CatalogHealthChecks.AddCatalogCheck (memoized), not AddCheck");
+            registration.Timeout.Should().Be(CatalogHealthChecks.EvaluationTimeout,
+                $"'{registration.Name}': the health-check service stops each caller's wait at the same bound (round 43 item 2)");
         }
 
         // CONTROL: the predicate above is not vacuous — a catalog check registered the plain way is NOT memoized, and
@@ -262,6 +342,7 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
         var options = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations.ToDictionary(r => r.Name);
         options["plain"].Factory(provider).Should().NotBeOfType<MemoizedHealthCheck>();
         options["memoized"].Factory(provider).Should().BeOfType<MemoizedHealthCheck>();
+        options["plain"].Timeout.Should().Be(Timeout.InfiniteTimeSpan, "a plain AddCheck has no bound — the control for the pin above");
         options["memoized"].Tags.Should().BeEquivalentTo(new[] { "x", CatalogHealthChecks.Tag });
     }
 }

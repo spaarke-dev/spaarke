@@ -19,9 +19,18 @@ namespace Sprk.Bff.Api.Infrastructure.HealthChecks;
 /// <para><b>Faults are memoized too, for no longer than the same window.</b> A check that throws becomes a
 /// <see cref="HealthCheckRegistration.FailureStatus"/> result carrying the exception, shared like any other result and
 /// re-evaluated once the window has passed — so a caller cannot defeat the memo by provoking faults, and a recovered
-/// dependency is visible within one window. The shared evaluation runs on <see cref="CancellationToken.None"/> in a
-/// DI scope of its own: one caller hanging up neither cancels it nor disposes services the others are waiting on;
-/// that caller alone stops waiting.</para>
+/// dependency is visible within one window. The shared evaluation runs in a DI scope of its own, on a token no CALLER
+/// owns: one caller hanging up neither cancels it nor disposes services the others are waiting on; that caller alone
+/// stops waiting.</para>
+///
+/// <para><b>Every evaluation ends — a hang included</b> (main-session round 43 item 2). The shared evaluation is bounded by
+/// <see cref="State.EvaluationTimeout"/>, measured on the same <see cref="TimeProvider"/>: it runs on a worker (so a check
+/// that blocks synchronously is bounded too), its token is cancelled at the bound, and if it has not finished by then the
+/// memo completes with a <see cref="HealthCheckRegistration.FailureStatus"/> result saying so. That timeout result is
+/// shared and re-evaluated like any other fault — for no longer than the memo window — so a hung dependency is never a
+/// permanently stuck memo, and no caller waits on it longer than the bound. The abandoned evaluation's scope is disposed
+/// when it does finish. The registration also carries <see cref="HealthCheckRegistration.Timeout"/> = the same bound
+/// (<see cref="CatalogHealthChecks.AddCatalogCheck{T}"/>), so the health-check service itself stops each caller's wait.</para>
 ///
 /// <para><b>Freshness cost, stated.</b> An operator who seeds the catalog (<c>scripts/Seed-TypedHandlers.ps1</c>) sees
 /// the result at most <see cref="CatalogHealthChecks.MemoTtl"/> later. The startup surfaces are unchanged: each check's
@@ -82,42 +91,84 @@ internal sealed class MemoizedHealthCheck : IHealthCheck
         return entry.Result;
     }
 
-    /// <summary>Runs the inner check once and completes <paramref name="completion"/>; never throws.</summary>
+    /// <summary>Runs the inner check once — bounded by <see cref="State.EvaluationTimeout"/> — and completes
+    /// <paramref name="completion"/>; never throws.</summary>
     private async Task EvaluateAsync(HealthCheckContext context, TaskCompletionSource<Entry> completion)
     {
+        var failureStatus = context.Registration?.FailureStatus ?? HealthStatus.Unhealthy;
+        var bound = _state.EvaluationTimeout;
+        var timeout = new CancellationTokenSource(bound, _time);
+        var run = Task.Run(() => RunInnerAsync(context, timeout.Token), CancellationToken.None);
+
         HealthCheckResult result;
         try
         {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var check = _create(scope.ServiceProvider);
-            result = await check.CheckHealthAsync(context, CancellationToken.None).ConfigureAwait(false);
+            result = await run.WaitAsync(bound, _time).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException || (ex is OperationCanceledException && timeout.IsCancellationRequested))
+        {
+            result = new HealthCheckResult(
+                failureStatus,
+                $"The check did not complete within {bound.TotalSeconds:0.#} s. This timeout is shared like any other fault and "
+                + "re-evaluated after the memo window.",
+                ex);
         }
         catch (Exception ex)
         {
             result = new HealthCheckResult(
-                context.Registration?.FailureStatus ?? HealthStatus.Unhealthy,
+                failureStatus,
                 "The check threw. This fault is shared like any other result and re-evaluated after the memo window.",
                 ex);
         }
 
+        // The timeout source lives until the evaluation it bounds ends — an abandoned one included (its own scope is
+        // disposed by RunInnerAsync when it finishes). Observing the outcome keeps a late fault from going unobserved.
+        _ = run.ContinueWith(
+            static (finished, source) =>
+            {
+                _ = finished.Exception;
+                ((CancellationTokenSource)source!).Dispose();
+            },
+            timeout,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
         completion.SetResult(new Entry(result, _time.GetUtcNow()));
+    }
+
+    /// <summary>The inner check in its own DI scope, on the evaluation's bounded token.</summary>
+    private async Task<HealthCheckResult> RunInnerAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var check = _create(scope.ServiceProvider);
+        return await check.CheckHealthAsync(context, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The memo one registration shares across every probe (and every <see cref="MemoizedHealthCheck"/>
     /// instance the health-check service builds for it).</summary>
     internal sealed class State
     {
-        public State(TimeSpan ttl)
+        public State(TimeSpan ttl, TimeSpan evaluationTimeout)
         {
             if (ttl <= TimeSpan.Zero)
             {
                 throw new ArgumentOutOfRangeException(nameof(ttl), ttl, "The memo window must be positive.");
             }
 
+            if (evaluationTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(evaluationTimeout), evaluationTimeout, "The evaluation bound must be positive.");
+            }
+
             Ttl = ttl;
+            EvaluationTimeout = evaluationTimeout;
         }
 
         public TimeSpan Ttl { get; }
+
+        /// <summary>The longest one shared evaluation may run before the memo records it as a timed-out fault.</summary>
+        public TimeSpan EvaluationTimeout { get; }
 
         internal object Gate { get; } = new();
 
@@ -138,6 +189,15 @@ internal static class CatalogHealthChecks
     public static readonly TimeSpan MemoTtl = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// The longest one evaluation of a catalog check may run (main-session round 43 item 2): a hung Dataverse read becomes a
+    /// shared timeout fault at this bound, re-evaluated after <see cref="MemoTtl"/>. A healthy evaluation is 2-3 Dataverse
+    /// queries (seconds at most); no deploy step or poller reads <c>/healthz/catalog</c>, so a cold-start timeout costs
+    /// one window of a reported fault, never a failed deploy. Also the registration's
+    /// <see cref="HealthCheckRegistration.Timeout"/>, so no caller waits longer.
+    /// </summary>
+    public static readonly TimeSpan EvaluationTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// Registers <typeparamref name="T"/> as a <c>/healthz/catalog</c> check: the <see cref="Tag"/> is added to
     /// <paramref name="tags"/>, and its result is memoized for <see cref="MemoTtl"/> through ONE
     /// <see cref="MemoizedHealthCheck.State"/> owned by this registration. <typeparamref name="T"/> is resolved the way
@@ -151,7 +211,7 @@ internal static class CatalogHealthChecks
         IEnumerable<string> tags)
         where T : class, IHealthCheck
     {
-        var state = new MemoizedHealthCheck.State(MemoTtl);
+        var state = new MemoizedHealthCheck.State(MemoTtl, EvaluationTimeout);
         var allTags = tags.Append(Tag).Distinct(StringComparer.Ordinal).ToArray();
         return builder.Add(new HealthCheckRegistration(
             name,
@@ -161,6 +221,7 @@ internal static class CatalogHealthChecks
                 scoped => ActivatorUtilities.GetServiceOrCreateInstance<T>(scoped),
                 sp.GetService<TimeProvider>() ?? TimeProvider.System),
             failureStatus,
-            allTags));
+            allTags,
+            EvaluationTimeout));
     }
 }
