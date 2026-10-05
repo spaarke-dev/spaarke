@@ -1,5 +1,7 @@
 # Visual Host "+" Create Button
 
+> **Portfolio**: [Project #1244](https://github.com/spaarke-dev/spaarke/issues/1244) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-07-09 · **Status**: Complete · **Owner**: ralph.schroeder@hotmail.com
 > **Branch**: `work/visual-host-create-button-r1`
 

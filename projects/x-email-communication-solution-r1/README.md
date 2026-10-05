@@ -1,5 +1,7 @@
 # Email Communication Solution R1
 
+> **Portfolio**: [Project #1269](https://github.com/spaarke-dev/spaarke/issues/1269) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: COMPLETE
 > **Branch**: `work/email-communication-solution-r1`
 > **Started**: 2026-02-20

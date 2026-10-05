@@ -1,5 +1,7 @@
 # Spaarke Compose R3 — Word-Feature Fidelity
 
+> **Portfolio**: [Project #1200](https://github.com/spaarke-dev/spaarke/issues/1200) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-07-16
 >
 > **Status**: In Progress (pipeline-initialized — tasks generated, ready to execute)

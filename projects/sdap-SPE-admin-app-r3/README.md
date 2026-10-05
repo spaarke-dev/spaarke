@@ -1,5 +1,7 @@
 # sdap-SPE-admin-app-r3
 
+> **Portfolio**: [Project #1192](https://github.com/spaarke-dev/spaarke/issues/1192) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 **Decompose `Infrastructure/Graph/SpeAdminGraphService.cs`.**
 
 > **Status**: seeded 2026-08-31 — `design.md` only. `/design-to-spec` has **not** been run.

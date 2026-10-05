@@ -1,5 +1,7 @@
 # PCF Legacy Retirement — R1
 
+> **Portfolio**: [Project #1171](https://github.com/spaarke-dev/spaarke/issues/1171) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Deferred / awaiting owner scope confirmation
 > **Created**: 2026-08-21 by `customer-provisioning-orchestration-r1` H-3 solution-scoping
 > **Predecessor**: `pcf-orphan-cleanup-r1` (2026-06-22, stalled at Task 003)

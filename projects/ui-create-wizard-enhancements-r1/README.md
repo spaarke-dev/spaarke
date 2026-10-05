@@ -1,5 +1,7 @@
 # UI Create Wizard Enhancements R1
 
+> **Portfolio**: [Project #1242](https://github.com/spaarke-dev/spaarke/issues/1242) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-03-23
 >
 > **Status**: In Progress

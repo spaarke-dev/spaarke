@@ -1,5 +1,7 @@
 # AI Semantic Search UI R3
 
+> **Portfolio**: [Project #1264](https://github.com/spaarke-dev/spaarke/issues/1264) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete (pending manual Dataverse deployment)
 > **Branch**: `work/ai-semantic-search-ui-r3`
 > **Started**: 2026-02-24

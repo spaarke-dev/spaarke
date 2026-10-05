@@ -1,5 +1,7 @@
 # JSON Prompt Schema (JPS) System
 
+> **Portfolio**: [Project #1255](https://github.com/spaarke-dev/spaarke/issues/1255) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/ai-json-prompt-schema`
 > **Started**: 2026-03-03

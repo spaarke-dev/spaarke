@@ -1,5 +1,7 @@
 # Spaarke Compose R8 — Render-on-Save Fidelity Architecture
 
+> **Portfolio**: [Project #1203](https://github.com/spaarke-dev/spaarke/issues/1203) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: 🔬 **Investigation (pre-spec, folder-only, execution-gated)** — created 2026-08-18 from
 > `spaarkeai-compose-r7` UAT + the proactive hidden-issue audit.
 > **Owner**: Ralph Schroeder

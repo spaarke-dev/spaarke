@@ -152,6 +152,18 @@ gh issue create \
   --body "{see body template below}"
 ```
 
+**Then set the board `Type` field** — `gh issue create --project` adds the item to the board but leaves `Type` empty, which is why dozens of deferred/issue entries accumulated with no Type (found + backfilled 2026-10-04). Immediately after creation, resolve the new item's project-item id (`gh project item-list {board-number} --owner {owner} --format json`, match by issue number) and set Type:
+
+```bash
+gh project item-edit \
+  --id {item-id} \
+  --project-id {project-node-id} \
+  --field-id {type-field-id} \
+  --single-select-option-id {option-id}
+```
+
+`kind: defer` → `Type = Idea` (closest existing fit — deferred scope is prospective work, same as an Idea). `kind: issue` → `Type = Bug`. There is no dedicated "Deferred"/"Finding" Type as of 2026-10-04 — if the board ever adds one, prefer it over this mapping. Do not skip this step even though `gh issue create` succeeds without it; an item with no Type is invisible to any Type-filtered portfolio view (including per-project cost rollups) and silently reads as noise rather than tracked work.
+
 **Body template**:
 ```
 Filed from project `{project-name}` ({KIND}-{NNN}). Full context: `projects/{project-name}/notes/defer-issues.md#{kind-anchor}`.

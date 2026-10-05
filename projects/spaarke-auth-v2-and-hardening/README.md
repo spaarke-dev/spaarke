@@ -1,5 +1,7 @@
 # Spaarke Auth v2 + Hardening
 
+> **Portfolio**: [Project #1212](https://github.com/spaarke-dev/spaarke/issues/1212) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: In Progress
 > **Branch**: `work/spaarke-auth-v2-and-hardening`
 > **Worktree**: `c:/code_files/spaarke-wt-spaarke-auth-v2-and-hardening`

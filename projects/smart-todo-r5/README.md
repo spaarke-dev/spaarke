@@ -1,5 +1,7 @@
 # Smart To Do R5
 
+> **Portfolio**: [Project #1195](https://github.com/spaarke-dev/spaarke/issues/1195) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: **COMPLETE (2026-08-17) — with operator-accepted deferrals.** Core shipped + merged to master (`c3b80eece`) + deployed to spaarkedev1 (RegardingResolver PCF v1.4.9, MatterRibbons v1.0.0.1, `sprk_smarttodo` + `sprk_spaarkeai` code pages) + BFF deployed to `spaarke-bff-dev` (INBOUND fix, dry-run gated). `/code-review` clean · `/test-diet` reconciled (0 scaffolding; report at `notes/test-diet-report.md`). **Operator explicitly deferred** (2026-08-17, tracked D-10..D-13): ribbon expansion to 5 more entities (051/052 — "we'll do when we can eyeball the live deploys"), Playwright real-env run (041 — "not using Playwright for now"). 032 header-hide is won't-do (design constraint: hiding the OOB command bar removes Save). These are accepted deferrals, not incomplete work.
 > **Type**: Shared library + Dataverse schema + Code Page + PCF form-wiring + Ribbon
 > **Complexity**: Medium-High (multi-surface; BFF=N, SpaarkeAi=Y)
