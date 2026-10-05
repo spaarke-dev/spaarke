@@ -528,9 +528,10 @@ const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>>
 /**
  * Round 33 item 5: the per-person warning for a skipped colleague whose reason code this client does not know. Never
  * silent — the person is named, and the code is logged for support. The server's own `message` is still never shown.
+ * `name` is always one {@link skippedPersonName} resolved — never blank (an unnamed person is already
+ * {@link UNNAMED_PERSON} there), so this composes it as given: one place decides "Someone".
  */
-const SKIPPED_PRINCIPAL_GENERIC = (name: string) =>
-  `${name?.trim() ? name : UNNAMED_PERSON} was not given access to this project.`;
+const SKIPPED_PRINCIPAL_GENERIC = (name: string) => `${name} was not given access to this project.`;
 
 /**
  * Round 40 item 3: the `{name}` of a per-person warning whose person cannot be named — an empty id, or an id the host gave

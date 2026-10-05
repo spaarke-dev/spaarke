@@ -564,7 +564,11 @@ describe('provisionSecureProject — failure classification', () => {
     // EMITTED is the endpoint's `internal const string Reason*` set, transcribed — the guard against the drift task
     // 068 found (container_not_recorded once fell through to copy that was wrong in both halves). Adding a Reason*
     // constant server-side means adding it to EMITTED and deciding deliberately what state and retryability it has.
-    // Nothing the endpoint emits lands on the generic 'error' copy.
+    // Nothing the endpoint emits ON THIS PATH lands on the generic 'error' copy. One code is not on it: on the form's
+    // Make Secure command only (transition "make-secure"), a caller whose effective rights cannot be read is refused with
+    // owner F3's `sdap.unsecure.permission_unverifiable` (task 150 round 46 item 1) — the wizard sends no transition, the
+    // server makes no such read for it (SecureFlagEndpointWriteTests.Provision_TheWizardsPath_ReadsNoFloor_...), and the
+    // ribbon shows the server's own message.
     for (const [code, , , status] of FAILURE_CODES) {
       expect(classifyProvisioningFailure(code, undefined, status).failureKind).not.toBe('error');
     }
@@ -762,6 +766,35 @@ describe('provisionSecureProject — failure classification', () => {
       expect.stringContaining('for a reason this client does not know'),
       expect.objectContaining({ reasonCode: 'sdap.provision.principal_invented_later' })
     );
+  });
+
+  // Round 40 item 3 on the generic path: an unknown reason for a person the host gave no (or a blank) name for is
+  // "Someone" too — the name is resolved once (skippedPersonName), before either warning is composed.
+  it.each([
+    ['no name', {}],
+    ['a blank name', { '66666666-6666-6666-6666-666666666666': '   ' }],
+  ])('the generic per-person warning names an unnamed person as "Someone" (%s)', async (_case, names) => {
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [
+          {
+            systemUserId: '66666666-6666-6666-6666-666666666666',
+            reasonCode: 'sdap.provision.principal_invented_later',
+            message: 'x',
+          },
+        ],
+      })
+    );
+
+    const result = await provisionSecureProject(
+      { projectId: PROJECT_ID },
+      authFetch as never,
+      BFF,
+      names as Record<string, string>
+    );
+
+    expect(result.warnings).toEqual(['Someone was not given access to this project.']);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

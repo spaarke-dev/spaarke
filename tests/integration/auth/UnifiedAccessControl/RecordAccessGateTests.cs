@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using Moq;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -199,6 +201,157 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         var response = await client.GetAsync($"{GatePath}?recordType=project&recordId={Guid.NewGuid()}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 150, round 46 item 4 — includeOwner: the record's owning team, and whether it is the Secure Record Owners team
+    // (the Access ribbon's "did this secure transition finish?"). Facts about the RECORD; the delegation answer and its
+    // gate are unchanged, and a caller without Write still gets the filter's 403 with no owner read.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid SecureBusinessUnit = Guid.Parse("d9ec0b6f-0000-0000-0000-0000000000b0");
+    private static readonly Guid SecureOwnerTeam = Guid.Parse("daec0b6f-0000-0000-0000-0000000000f1");
+
+    /// <summary>The record's owner read (the gate's ONE read of the record) answers <paramref name="row"/> for this record.</summary>
+    private void OwnerReadAnswers(Guid recordId, RecordAccessGateEndpoint.OwnerRow? row, Exception? fault = null)
+    {
+        var setup = _fixture.DataverseClient.Setup(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
+            It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())), It.IsAny<string?>(),
+            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()));
+        if (fault is not null)
+            setup.ThrowsAsync(fault);
+        else
+            setup.ReturnsAsync(row is null
+                ? new List<RecordAccessGateEndpoint.OwnerRow>()
+                : new List<RecordAccessGateEndpoint.OwnerRow> { row });
+    }
+
+    /// <summary>
+    /// Which team is the Secure Record Owners team: the configured business unit (one row), then its named owner team(s)
+    /// — <paramref name="teams"/> rows, so two make it ambiguous (SecureRecordOwnerTeam.IdentifyAsync's own reads).
+    /// </summary>
+    private void SecureOwnerTeamsAre(params Guid[] teams)
+    {
+        _fixture.DataverseClient
+            .Setup(c => c.QueryAsync<SecureRecordOwnerTeam.IdRow>(
+                "businessunits", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SecureRecordOwnerTeam.IdRow> { new() { businessunitid = SecureBusinessUnit } });
+        _fixture.DataverseClient
+            .Setup(c => c.QueryAsync<SecureRecordOwnerTeam.IdRow>(
+                "teams", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(teams.Select(t => new SecureRecordOwnerTeam.IdRow { teamid = t, name = "Secure Record Owners" }).ToList());
+    }
+
+    private static (JsonElement OwningTeamId, JsonElement OwnedBySecureOwnerTeam) OwnerFactsOf(JsonDocument document) =>
+        (document.RootElement.GetProperty("owningTeamId"), document.RootElement.GetProperty("ownedBySecureOwnerTeam"));
+
+    /// <summary>
+    /// Asked for the owner, the gate names it: a USER-owned record is not owned by the Secure team (owningTeamId null); a
+    /// record the Secure Record Owners team owns is; any OTHER team is not — the case the client cannot tell apart on its
+    /// own (a secure record reassigned outside Spaarke).
+    /// </summary>
+    [Theory]
+    [InlineData("user", false)]
+    [InlineData("secure-team", true)]
+    [InlineData("other-team", false)]
+    public async Task GetCanManageAccess_WithIncludeOwner_NamesTheOwningTeamAndWhetherItIsTheSecureOwnerTeam(
+        string owner, bool expected)
+    {
+        var recordId = Guid.NewGuid();
+        var otherTeam = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        SecureOwnerTeamsAre(SecureOwnerTeam);
+        OwnerReadAnswers(recordId, owner switch
+        {
+            "user" => new RecordAccessGateEndpoint.OwnerRow { _owninguser_value = Guid.NewGuid() },
+            "secure-team" => new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = SecureOwnerTeam },
+            _ => new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = otherTeam },
+        });
+
+        var response = await client.GetAsync($"{GatePath}?recordType=matter&recordId={recordId}&includeOwner=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("canManageAccess").GetBoolean().Should().BeTrue();
+        var (owningTeamId, ownedBySecure) = OwnerFactsOf(document);
+        ownedBySecure.GetBoolean().Should().Be(expected);
+        if (owner == "user")
+            owningTeamId.ValueKind.Should().Be(JsonValueKind.Null);
+        else
+            owningTeamId.GetGuid().Should().Be(owner == "secure-team" ? SecureOwnerTeam : otherTeam);
+    }
+
+    /// <summary>
+    /// Unknown is never an answer: the owner read fails, the record reads with no owner, or which team is the Secure Record
+    /// Owners team is ambiguous — each answers <c>ownedBySecureOwnerTeam: null</c> (the client then offers nothing on that
+    /// basis), and the delegation answer is still the filter's 200.
+    /// </summary>
+    [Theory]
+    [InlineData("owner-read-fails")]
+    [InlineData("no-owner")]
+    [InlineData("secure-team-ambiguous")]
+    public async Task GetCanManageAccess_WithIncludeOwner_WhenTheOwnerCannotBeTold_SaysUnknown(string shape)
+    {
+        var recordId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        switch (shape)
+        {
+            case "owner-read-fails":
+                SecureOwnerTeamsAre(SecureOwnerTeam);
+                OwnerReadAnswers(recordId, null, new HttpRequestException("Dataverse 503: simulated owner read failure."));
+                break;
+            case "no-owner":
+                SecureOwnerTeamsAre(SecureOwnerTeam);
+                OwnerReadAnswers(recordId, new RecordAccessGateEndpoint.OwnerRow());
+                break;
+            default:
+                SecureOwnerTeamsAre(SecureOwnerTeam, Guid.NewGuid());
+                OwnerReadAnswers(recordId, new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = SecureOwnerTeam });
+                break;
+        }
+
+        var response = await client.GetAsync($"{GatePath}?recordType=project&recordId={recordId}&includeOwner=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("canManageAccess").GetBoolean().Should().BeTrue();
+        OwnerFactsOf(document).OwnedBySecureOwnerTeam.ValueKind.Should().Be(JsonValueKind.Null,
+            "a fact that could not be established is never reported as either answer");
+    }
+
+    /// <summary>Not asked, the gate reads nothing: the Manage Access gates' form-load path stays one rights probe.</summary>
+    [Fact]
+    public async Task GetCanManageAccess_WithoutIncludeOwner_ReadsNoOwner()
+    {
+        var recordId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+
+        var response = await client.GetAsync($"{GatePath}?recordType=workassignment&recordId={recordId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        OwnerFactsOf(document).OwnedBySecureOwnerTeam.ValueKind.Should().Be(JsonValueKind.Null);
+        _fixture.DataverseClient.Verify(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
+            It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())), It.IsAny<string?>(),
+            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>A caller without Write gets the filter's 403 even when asking for the owner — and no owner read is made.</summary>
+    [Fact]
+    public async Task GetCanManageAccess_WithIncludeOwner_ForCallerWithoutWrite_IsDeniedAndReadsNoOwner()
+    {
+        var recordId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        var response = await client.GetAsync($"{GatePath}?recordType=project&recordId={recordId}&includeOwner=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+        _fixture.DataverseClient.Verify(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
+            It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())), It.IsAny<string?>(),
+            It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

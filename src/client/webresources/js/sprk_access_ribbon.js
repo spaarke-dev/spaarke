@@ -34,8 +34,12 @@
  * Xrm.WebApi.retrieveRecord (every user reads the true value under task 150's reader profile). Anything other than a
  * stored true or false - a failed read, a masked (empty) value - hides BOTH commands (fail closed, ADR-003). The same
  * read takes sprk_containerid and _owninguser_value (round 40 item 1): a PROVISIONED secure record is owned by the
- * Secure Record owner TEAM and records its own container, so a flagged record with no container, or one a USER owns, is
- * one whose secure transition did not finish, and Make Secure is offered on it as well as Remove Secure.
+ * Secure Record Owners TEAM and records its own container, so a flagged record with no container, or one a USER owns, is
+ * one whose secure transition did not finish, and Make Secure is offered on it as well as Remove Secure. A flagged
+ * record with a container that a TEAM owns is finished only if that team is the Secure Record Owners team - the
+ * server's configuration, so the rule asks the server (round 46 item 4: can-manage-access with includeOwner=true). Any
+ * OTHER team - a secure record reassigned outside Spaarke - is unfinished too; an answer that cannot be had keeps Make
+ * Secure hidden on that record (Remove Secure still follows the flag).
  *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
@@ -63,8 +67,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 (function (ns) {
     // 1.1.0 - task 150: Make Secure / Remove Secure. 1.2.0 - round 33: the make-secure transition, the Remove Secure
     // confirmation, per-person warnings for skippedPrincipals. 1.3.0 - round 40: Make Secure offered on an unfinished
-    // secure transition, the in-place retry, "Someone" for a name that cannot be resolved.
-    ns.VERSION = "1.3.0";
+    // secure transition, the in-place retry, "Someone" for a name that cannot be resolved. 1.4.0 - round 46 item 4: a
+    // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
+    ns.VERSION = "1.4.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -83,6 +88,17 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             typeof Spaarke.AssignedAccess !== "undefined" && !!Spaarke.AssignedAccess.sync;
     }
 
+    /** The can-manage-access URL for one record; `includeOwner` also asks who owns it (round 46 item 4). */
+    function gateUrl(baseUrl, record, includeOwner) {
+        return baseUrl + GATE_PATH + "?recordType=" + encodeURIComponent(record.recordType) +
+            "&recordId=" + encodeURIComponent(record.recordId) + (includeOwner ? "&includeOwner=true" : "");
+    }
+
+    /** Whether a gate answer is a 200-body about THIS record (the gate echoes the id it answered about). */
+    function answersFor(body, record) {
+        return !!body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
+    }
+
     /** Asks the server whether the caller may manage access on the record; caches true/false (never an error). */
     function queryCanManage(record, cacheKey) {
         return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
@@ -91,8 +107,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                     return false; // no silent token: "no" (not cached - a later evaluation may have one)
                 }
 
-                var url = baseUrl + GATE_PATH + "?recordType=" + encodeURIComponent(record.recordType) +
-                    "&recordId=" + encodeURIComponent(record.recordId);
+                var url = gateUrl(baseUrl, record, false);
                 return fetch(url, { headers: { "Accept": "application/json", "Authorization": "Bearer " + token } })
                     .then(function (response) {
                         if (response.status !== 200) {
@@ -102,8 +117,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
                         return response.json().then(function (body) {
                             // The answer must be about THIS record (the gate echoes the id it answered about).
-                            var same = body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
-                            var can = !!(same && body.canManageAccess === true);
+                            var can = answersFor(body, record) && body.canManageAccess === true;
                             safeSessionSet(cacheKey, can ? "true" : "false");
                             return can;
                         });
@@ -267,13 +281,52 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     var UNKNOWN_STATE = Object.freeze({ secure: null, unfinished: false });
 
     /**
+     * Round 46 item 4: whether the Secure Record Owners team owns the record - the server's answer (can-manage-access with
+     * includeOwner=true; which team that is, is the server's configuration). Resolves true or false, or null when it
+     * cannot be had (no token, a non-200, an answer about another record or without a definite answer, a failure); never
+     * rejects, never cached beyond the secure state it feeds.
+     */
+    function queryOwnedBySecureOwnerTeam(record) {
+        return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
+            return Spaarke.BffAuth.getToken(baseUrl).then(function (token) {
+                if (!token) {
+                    return null;
+                }
+
+                return fetch(gateUrl(baseUrl, record, true),
+                    { headers: { "Accept": "application/json", "Authorization": "Bearer " + token } })
+                    .then(function (response) {
+                        if (response.status !== 200) {
+                            return null;
+                        }
+
+                        return response.json().then(function (body) {
+                            if (!answersFor(body, record) || body.canManageAccess !== true) {
+                                return null;
+                            }
+
+                            var owned = body.ownedBySecureOwnerTeam;
+                            return owned === true || owned === false ? owned : null;
+                        });
+                    });
+            });
+        }).catch(function (error) {
+            console.warn(LOG, "Who owns this record could not be asked.", error);
+            return null;
+        });
+    }
+
+    /**
      * The record's secure state, from ONE read: `secure` is the stored flag - true, false, or null when it is not KNOWN
      * (the read failed, or the value came back empty: a masked field-secured column; null hides both commands).
-     * `unfinished` is true for a record flagged secure whose transition did not finish (round 40 item 1): provisioning
-     * leaves a finished secure record owned by the Secure Record owner TEAM with its own container recorded, so one with no
-     * container recorded, or one a USER owns, is not finished - every failure after the flag write leaves one of those
-     * two shapes (the flag is never cleared), and the server finishes it when Make Secure is called again. Cached per
-     * record for a short while, so the flyout's rules cost one read; the commands forget it before they refresh the form.
+     * `unfinished` is true for a record flagged secure whose transition did not finish (round 40 item 1; round 46 item
+     * 4): provisioning leaves a finished secure record owned by the Secure Record Owners TEAM with its own container
+     * recorded, so one with no container recorded, one a USER owns, or one ANOTHER team owns is not finished - every
+     * failure after the flag write leaves one of the first two shapes (the flag is never cleared), a reassignment outside
+     * Spaarke the third, and the server finishes each when Make Secure is called again. The owner question goes to the
+     * server only when the read leaves it open (flagged, a container recorded, no owning user); an answer that cannot be
+     * had is not "unfinished" - Make Secure stays hidden on that record. Cached per record for a short while, so the
+     * flyout's rules cost one read; the commands forget it before they refresh the form.
      */
     function readSecureState(entityName, record) {
         var key = stateKey(record);
@@ -295,7 +348,19 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                     var container = row.sprk_containerid;
                     var hasContainer = typeof container === "string" && container.trim().length > 0;
                     var userOwned = typeof row._owninguser_value === "string" && row._owninguser_value.length > 0;
-                    return { secure: value, unfinished: value === true && (!hasContainer || userOwned) };
+                    if (value !== true || !hasContainer || userOwned) {
+                        return { secure: value, unfinished: value === true };
+                    }
+
+                    // Flagged, its container recorded, owned by a team: finished only when that team is the Secure Record
+                    // Owners team (round 46 item 4).
+                    return queryOwnedBySecureOwnerTeam(record).then(function (ownedBySecureTeam) {
+                        if (ownedBySecureTeam === null) {
+                            console.warn(LOG, "Who owns this record could not be told; Make Secure stays hidden on it.");
+                        }
+
+                        return { secure: true, unfinished: ownedBySecureTeam === false };
+                    });
                 }, function (error) {
                     console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
                     return UNKNOWN_STATE;
@@ -506,8 +571,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      * same caller may call again" - one per step of the transition. Each is offered again IN PLACE: the alert becomes a
      * confirm dialog with the server's message and Make Secure / Cancel, and Make Secure repeats the same call (the
      * repeat call round 26 promises). After Step 7 the record reads as provisioned, so the enable rule no longer offers the
-     * command and this dialog is the ribbon's retry (the jobs are the backstop: secure-child reconciliation for children,
-     * task 166's relocator re-entry for files); before it, the enable rule offers it again too. Refusals that need an
+     * command and this dialog is the ribbon's retry (the scheduled backstop is task 147's SecureChildReconciliationJob,
+     * every 2 minutes: the children, and - round 46 item 2, wired at integration - the pending Make Secure file
+     * relocations through the ONE DocumentContainerRelocator); before it, the enable rule offers it again too. Refusals that need an
      * administrator first (creator_share_failed_resumable, cascade_children_not_restored, owner_assignment_failed,
      * owner_assignment_not_applied) are NOT here: repeating them repeats the refusal, so they stay an alert naming the
      * administrator's step.

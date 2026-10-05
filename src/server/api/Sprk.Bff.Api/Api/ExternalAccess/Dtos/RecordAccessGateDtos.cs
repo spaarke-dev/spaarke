@@ -7,13 +7,20 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 // the same reason: the delegation check authorizes exactly the record the answer is about.
 
 /// <summary>
-/// Query string for <c>GET /api/v1/external-access/can-manage-access?recordType=&amp;recordId=</c>.
+/// Query string for <c>GET /api/v1/external-access/can-manage-access?recordType=&amp;recordId=[&amp;includeOwner=true]</c>.
 /// </summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
 /// <param name="RecordId">The record the caller is asking about. Required.</param>
+/// <param name="IncludeOwner">
+/// Task 150 (round 46 item 4): <c>true</c> also reports who OWNS the record — its owning team, and whether that is the
+/// Secure Record Owners team — for the Access ribbon's "did this record's secure transition finish?" question. Omitted or
+/// <c>false</c>: no owner read is made (the Manage Access gates' form-load path stays one rights probe). It changes nothing
+/// about the delegation answer.
+/// </param>
 public record RecordAccessGateQuery(
     string? RecordType,
-    Guid? RecordId);
+    Guid? RecordId,
+    bool? IncludeOwner = null);
 
 /// <summary>
 /// The answer: whether the caller may change who can access this record.
@@ -32,6 +39,19 @@ public record RecordAccessGateQuery(
 /// answer with more than two states has somewhere to go. Callers MUST treat anything other than
 /// <c>200 + canManageAccess: true</c> as "no" — see the endpoint's remarks.
 /// </param>
+/// <param name="OwningTeamId">
+/// Only with <c>includeOwner=true</c> (round 46 item 4): the team that owns the record, or <c>null</c> when a user owns
+/// it — or when the owner could not be read (then <see cref="OwnedBySecureOwnerTeam"/> is <c>null</c> too).
+/// </param>
+/// <param name="OwnedBySecureOwnerTeam">
+/// Only with <c>includeOwner=true</c>: <c>true</c> when the record is owned by the Secure Record Owners team (the named
+/// owner team provisioning assigns secure records to), <c>false</c> when it is owned by a user or by any other team, and
+/// <c>null</c> when that could not be told — the owner could not be read, or which team is the Secure Record Owners
+/// team could not be established (absent, ambiguous or unreadable). A client MUST treat <c>null</c> as unknown, never
+/// as either answer.
+/// </param>
 public record RecordAccessGateResponse(
     Guid RecordId,
-    bool CanManageAccess);
+    bool CanManageAccess,
+    Guid? OwningTeamId = null,
+    bool? OwnedBySecureOwnerTeam = null);

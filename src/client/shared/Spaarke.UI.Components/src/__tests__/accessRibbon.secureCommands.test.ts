@@ -1,5 +1,5 @@
 /**
- * `sprk_access_ribbon.js` 1.3.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
+ * `sprk_access_ribbon.js` 1.4.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -25,7 +25,11 @@
  *  - round 40 item 1 (acceptance (e) amended — Make Secure hidden on a PROVISIONED secure record): Make Secure is offered
  *    again on a record flagged secure whose transition did not finish (no container recorded, or owned by a user), from
  *    the same one read; and a Make Secure failure after the flag write that the server answers as "the same caller may
- *    call again" offers the call in place (confirm dialog, the server's message, Make Secure / Cancel).
+ *    call again" offers the call in place (confirm dialog, the server's message, Make Secure / Cancel);
+ *  - round 46 item 4: a flagged record with a container that a TEAM owns is finished only when the server says that team
+ *    is the Secure Record Owners team (can-manage-access, includeOwner=true) — another team (reassigned outside Spaarke)
+ *    is unfinished; an answer that cannot be had keeps Make Secure hidden there; the question is asked only when the read
+ *    leaves it open, and asked again after a command.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -68,7 +72,20 @@ interface World {
   openAlertDialog: jest.Mock;
   addGlobalNotification: jest.Mock;
   authenticatedFetch: jest.Mock;
+  /** The page's `fetch` — the can-manage-access gate's seam (the ribbon asks it with the helper's token). */
+  gateFetch: jest.Mock;
 }
+
+/** The Secure Record Owners team — what the server names as the owner of a PROVISIONED record. */
+const SECURE_OWNER_TEAM = 'daec0b6f-0000-0000-0000-0000000000f1';
+
+/** can-manage-access with includeOwner=true, answered about THIS record. */
+const ownerAnswer = (ownedBySecureOwnerTeam: boolean | null, owningTeamId: string | null = SECURE_OWNER_TEAM) =>
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({ recordId: RECORD_ID, canManageAccess: true, owningTeamId, ownedBySecureOwnerTeam }),
+  }) as unknown as Response;
 
 function load(): World {
   delete win.Spaarke;
@@ -77,6 +94,9 @@ function load(): World {
   const openAlertDialog = jest.fn().mockResolvedValue(undefined);
   const addGlobalNotification = jest.fn().mockResolvedValue('n1');
   const authenticatedFetch = jest.fn();
+  // Default: the server says the Secure Record Owners team owns the record (a PROVISIONED record's owner).
+  const gateFetch = jest.fn().mockResolvedValue(ownerAnswer(true));
+  (win as any).fetch = gateFetch;
 
   win.Xrm = {
     WebApi: { retrieveRecord, retrieveMultipleRecords: jest.fn().mockRejectedValue(new Error('not used')) },
@@ -92,8 +112,16 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.3.0'); // the real script ran
-  return { ribbon, retrieveRecord, openConfirmDialog, openAlertDialog, addGlobalNotification, authenticatedFetch };
+  expect(ribbon?.VERSION).toBe('1.4.0'); // the real script ran
+  return {
+    ribbon,
+    retrieveRecord,
+    openConfirmDialog,
+    openAlertDialog,
+    addGlobalNotification,
+    authenticatedFetch,
+    gateFetch,
+  };
 }
 
 function form(entityName: string) {
@@ -349,6 +377,125 @@ describe('round 40 item 1 — Make Secure is offered again on a secure transitio
 
     expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(false);
     expect(await ribbon.canRemoveSecure(form('sprk_project'))).toBe(false);
+  });
+});
+
+describe('round 46 item 4 — a flagged record a team OTHER than the Secure Record Owners team owns is unfinished', () => {
+  /** Flagged, its own container recorded, owned by a TEAM (no owning user): the read alone cannot tell which team. */
+  const TEAM_OWNED_WITH_CONTAINER = {
+    sprk_issecure: true,
+    sprk_containerid: 'b!its-own-container',
+    _owninguser_value: null,
+  };
+
+  it.each(Object.keys(RECORD_TYPES))(
+    'a %s reassigned outside Spaarke to another team: Make Secure ("finish") AND Remove Secure',
+    async entityName => {
+      const { ribbon, retrieveRecord, gateFetch } = load();
+      canManage(entityName, true);
+      retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+      gateFetch.mockResolvedValue(ownerAnswer(false, 'ffffffff-1111-2222-3333-444444444444'));
+
+      expect(await ribbon.canMakeSecure(form(entityName))).toBe(true);
+      expect(await ribbon.canRemoveSecure(form(entityName))).toBe(true);
+      expect(retrieveRecord).toHaveBeenCalledTimes(1);
+      expect(gateFetch).toHaveBeenCalledTimes(1); // both rules share the one owner answer
+      const [url, init] = gateFetch.mock.calls[0];
+      expect(url).toBe(
+        `${BFF}/api/v1/external-access/can-manage-access?recordType=${RECORD_TYPES[entityName]}&recordId=${RECORD_ID}&includeOwner=true`
+      );
+      expect(init.headers.Authorization).toBe('Bearer token-not-a-credential');
+    }
+  );
+
+  it('owned by the Secure Record Owners team (the server says so): PROVISIONED — Make Secure hidden', async () => {
+    const { ribbon, retrieveRecord, gateFetch } = load();
+    canManage('sprk_matter', true);
+    retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+    gateFetch.mockResolvedValue(ownerAnswer(true));
+
+    expect(await ribbon.canMakeSecure(form('sprk_matter'))).toBe(false);
+    expect(await ribbon.canRemoveSecure(form('sprk_matter'))).toBe(true);
+    expect(gateFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['an unknown answer (null)', () => ownerAnswer(null)],
+    ['a non-200', () => response(403, { reasonCode: 'sdap.access.deny.delegation_write_required' })],
+    [
+      'an answer about another record',
+      () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            recordId: 'bbbbbbbb-1111-2222-3333-444444444444',
+            canManageAccess: true,
+            ownedBySecureOwnerTeam: false,
+          }),
+        }) as unknown as Response,
+    ],
+    ['a failed request', () => Promise.reject(new Error('network down'))],
+  ])(
+    'who owns it cannot be told (%s): Make Secure stays hidden, Remove Secure follows the flag',
+    async (_case, answer) => {
+      const { ribbon, retrieveRecord, gateFetch } = load();
+      canManage('sprk_project', true);
+      retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+      gateFetch.mockImplementation(() => answer());
+
+      expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(false);
+      expect(await ribbon.canRemoveSecure(form('sprk_project'))).toBe(true);
+    }
+  );
+
+  it('with no silent token the owner question is not asked, and Make Secure stays hidden', async () => {
+    const { ribbon, retrieveRecord, gateFetch } = load();
+    canManage('sprk_project', true);
+    win.Spaarke.BffAuth.getToken = jest.fn().mockResolvedValue(null);
+    retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+
+    expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(false);
+    expect(gateFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not secure', NOT_SECURE],
+    ['flagged, no container', { sprk_issecure: true, sprk_containerid: null, _owninguser_value: null }],
+    [
+      'flagged, user-owned with a container (a legacy record before task 133’s owner move)',
+      {
+        sprk_issecure: true,
+        sprk_containerid: 'b!its-own-container',
+        _owninguser_value: 'eeeeeeee-1111-2222-3333-444444444444',
+      },
+    ],
+  ])('the read alone decides when it can (%s): no owner question is asked', async (_shape, row) => {
+    const { ribbon, retrieveRecord, gateFetch } = load();
+    canManage('sprk_workassignment', true);
+    retrieveRecord.mockResolvedValue(row);
+
+    expect(await ribbon.canMakeSecure(form('sprk_workassignment'))).toBe(true);
+    expect(gateFetch).not.toHaveBeenCalled();
+  });
+
+  it('after Make Secure the owner is asked again (never a stale answer): the finished record hides Make Secure', async () => {
+    const { ribbon, retrieveRecord, gateFetch, openConfirmDialog, authenticatedFetch } = load();
+    canManage('sprk_matter', true);
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    authenticatedFetch.mockResolvedValue(response(200, { recordType: 'matter' }));
+    retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+    gateFetch.mockResolvedValueOnce(ownerAnswer(false, 'ffffffff-1111-2222-3333-444444444444'));
+    const matter = form('sprk_matter');
+
+    expect(await ribbon.canMakeSecure(matter)).toBe(true);
+    await ribbon.makeSecure(matter);
+    await settle();
+    gateFetch.mockResolvedValueOnce(ownerAnswer(true)); // the call re-owned it to the Secure Record Owners team
+
+    expect(await ribbon.canMakeSecure(matter)).toBe(false);
+    expect(gateFetch).toHaveBeenCalledTimes(2);
+    expect(retrieveRecord).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -660,6 +807,23 @@ describe('Make Secure — the people it was NOT shared with are named (round 33 
     if (!systemUserId) {
       expect(retrieveRecord).not.toHaveBeenCalled();
     }
+  });
+
+  it('round 40 item 3 — a whitespace-only id is no id: "Someone", and no user read is made with it', async () => {
+    const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
+    openConfirmDialog.mockResolvedValue({ confirmed: true });
+    retrieveRecord.mockResolvedValue({ fullname: 'Should Not Be Read' });
+    authenticatedFetch.mockResolvedValue(
+      response(200, {
+        skippedPrincipals: [{ systemUserId: '   ', reasonCode: 'sdap.provision.principal_no_access', message: 'x' }],
+      })
+    );
+
+    await ribbon.makeSecure(form('sprk_matter'));
+    await settle();
+
+    expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Make Secure', text: SKIPPED.noAccess('Someone', 'matter') });
+    expect(retrieveRecord).not.toHaveBeenCalled();
   });
 
   it('round 40 item 3 — the fallback is ONE constant, and describeSkippedPrincipal never fills an empty name', () => {

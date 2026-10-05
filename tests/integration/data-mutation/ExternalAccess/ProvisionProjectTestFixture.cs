@@ -265,9 +265,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>
     /// Task 150 r2 (verifier F6): the SECOND rights probe of a record THROWS. The first is the route's Write gate; the
-    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3).
+    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3) — or, on Make Secure, the caller's
+    /// effective-rights floor (round 46 item 1).
     /// </summary>
     public bool FullAccessProbeThrows { get; set; }
+
+    /// <summary>
+    /// Task 150 (round 46 item 1): the SECOND rights probe of a record answers <see cref="AccessRights.None"/> — what the
+    /// real probe answers when it cannot answer (deliberately indistinguishable from "no rights") — while the first, the
+    /// route's Write gate, answered Write.
+    /// </summary>
+    public bool FollowUpRightsProbeAnswersNone { get; set; }
 
     /// <summary>
     /// Task 150: every root read returns <c>sprk_issecure</c> EMPTY (JSON null) — what Dataverse answers for a
@@ -613,6 +621,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         CallerHoldsWrite = true;
         CallerHoldsDelete = false;
         FullAccessProbeThrows = false;
+        FollowUpRightsProbeAnswersNone = false;
         SecureFlagReadsEmpty = false;
         SecureFlagWriteFails = false;
         SecureFlagWriteNotApplied = false;
@@ -1437,6 +1446,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             _fixture.DelegationProbes.Add((entitySet, recordId));
             if (_fixture.FullAccessProbeThrows && earlierProbes >= 1)
                 throw new HttpRequestException("Dataverse 503: simulated failure of RetrievePrincipalAccess.");
+            if (_fixture.FollowUpRightsProbeAnswersNone && earlierProbes >= 1)
+                return Task.FromResult(AccessRights.None);
 
             var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
