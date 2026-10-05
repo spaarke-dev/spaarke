@@ -12,7 +12,12 @@ This is the running list of obligations the main session takes on while integrat
 - [x] **143 × 149.** `SecureShareNoAccessGuard` and the `SyncRootAsync` callers confirmed present after the 149-r4 merge (`67d20b393`).
 - [x] **142 × 149.** 142's Assigned-To materializer wired to 149's child-share fan-out (149's note: the second of the two to land does it) — fix `b1443d12a`, 4 tests.
 - [x] **146 × 156 × 142 × 133** hand-merge done in `d457890f9`: update writers = write → 156 restamp → 142 materializer; ONE creator stamp (146's in-payload; 133's interim stamp and 149's `WithCreatorPersonAsync` removed); `ForChild` ignores `sprk_regardingrecordtype`; `EventColumnsWritten` includes the regarding lookups.
-- [ ] **Run the external-grid jest suite** (`DataGrid.externalHost.test.tsx`, needs `npm install --legacy-peer-deps --no-audit --no-fund` in `src/client/shared/Spaarke.UI.Components`) and check whether `Spe.Integration.Tests`' 5 build warnings predate the merges.
+- [x] **Run the external-grid jest suite**: 7/7, done at the 150 merge. **`Spe.Integration.Tests` warnings (2026-10-04):** no new warnings. Master has 5× CA2024 and integ has 4, all in `AnalysisEndpointsIntegrationTests.cs` (162's rewrite removed one).
+- [ ] **`Spaarke.UI.Components` jest (2026-10-04, compared with master `c2ef1857b`):**
+  - 12 tests fail every run on integ. One is integ-only: the `todoScoreMappings` sha256 pin. Master fixed it after our merge-base in `b5b0c0ce0` (#1118), so **merge origin/master into integ before the PR**, then re-run.
+  - The other 11 fail on master too, with no UAC commit involved: surfaceLaunchRegistry ×2, buildDynamicWorkspaceConfig (h), configResolution ×2 (CRLF comment strip), RichFilePreview ×2, TimelineComposeBox ×3, ConversationView.forward.
+  - Root causes are in `scratchpad/q` and in the main-session report.
+  - Filed as #1290 so the owning projects can fix them; not UAC code.
 - [ ] **156 × 146 hand-merge points:** the `DataverseUpdateRecordHandler` constructor, remarks and PATCH block; the `TaskActionCore` / `ActionSeam` / `CreateTaskNodeExecutor` constructors; and `RecordOwnershipContext.ForChild` must ignore `sprk_regardingrecordtype`. 156's note lists them.
 - [ ] **167's ledger** (sweep integration): fill `ResolvedBy` and `ProofTest` from each fix task's "Route authorization ledger input" table, delete the Pending waivers that are now stale, and assign each UNOWNED-NEW entry to an owning task.
 
@@ -67,5 +72,6 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] 143's §6.5 path A exception (`IScheduledJobLease` as a per-record mutex; design.md §9).
 - [ ] 142's ADR-034 A4 path-B block.
 - [ ] 146 and 149 ship together; the 152 ordering.
+- [ ] Merge origin/master into integ (picks up #1118's todoScoring pin fix and anything else master gained), rebuild, re-run the suites.
 - [ ] Publish size (fresh short-path worktrees, Compress-Archive, equal file counts) and the CVE check.
 - [ ] Each route the sweep tasks deleted, with its no-caller and not-published evidence (owner round 10 item 1).
