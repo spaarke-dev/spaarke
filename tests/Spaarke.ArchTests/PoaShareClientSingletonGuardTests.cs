@@ -134,14 +134,16 @@ public class PoaShareClientSingletonGuardTests
     //       compared by METADATA identity (so a same-name overload that writes — task 132 f1-v1c verifier seed N2 — is
     //       outside them), each its own write (TheSeamWritesPoaOnlyFromItsThreeInterfaceMethods). (b) In each of the three,
     //       EVERY path through the compiled body (IlPathScan: the async state machine, its exceptions, suspensions and
-    //       resumptions, every finally) that makes the client write first awaits it, then calls EvictAfterShareWriteAsync
-    //       with the SAME entitySetName and recordId, and awaits that, before the method completes — returned, thrown or
-    //       cancelled (EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord; seed N1, a team-only early return that
-    //       wrote with no eviction, is exactly a path this rejects). (c) EvictAfterShareWriteAsync, on every path, calls
-    //       IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync with its own entitySetName and recordId and awaits
-    //       it (EveryPathThroughTheEvictionHelperInvalidatesThatRecord). What the invalidator then evicts for those
-    //       arguments is the behaviour tests' (AccessCacheInvalidationTests.Shares: every write x every principal kind x
-    //       each outcome, over the production seam and client).
+    //       resumptions, every finally) that makes the client write first awaits it, then calls the seam's EVICTION with the
+    //       SAME entitySetName and recordId, and awaits that, before the method completes — returned, thrown or cancelled
+    //       (EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord; seed N1, a team-only early return that wrote with no
+    //       eviction, is exactly a path this rejects). (c) What counts as the eviction is found in the IL, not named: a seam
+    //       method the writes call that, on every path, calls IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync
+    //       with its own entitySetName and recordId and awaits it — and one must exist
+    //       (TheSeamsWritesCallAnEvictionThatInvalidatesThatRecordOnEveryPath). A renamed helper is followed; a helper with
+    //       a path that skips the invalidation is no eviction. What the invalidator then evicts for those arguments is the
+    //       behaviour tests' (AccessCacheInvalidationTests.Shares: every write x every principal kind x each outcome, over
+    //       the production seam and client).
     //   C4. A POA action name loaded as a string constant anywhere but the client — an SDK OrganizationRequest by name, a
     //       hand-built POST or $batch, a name the compiler folded from constant pieces, in any letter case — and a POA write
     //       method's name loaded as a constant (reflection, nameof, a `dynamic` call's binder name)
@@ -460,23 +462,45 @@ public class PoaShareClientSingletonGuardTests
         return map.TargetMethods[slot];
     }
 
-    /// <summary>The seam's private eviction helper — the call every write must be followed by.</summary>
-    internal static MethodInfo SeamEvictionHelper() =>
-        typeof(DataverseRecordShareService)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
-            .Single(m => m.Name == "EvictAfterShareWriteAsync");
+    /// <summary>
+    /// The seam's eviction, found in the IL rather than named: every method declared on the seam that the three writes'
+    /// compiled bodies call (the writes themselves excepted), with what the every-path analysis found in it. A renamed or
+    /// replaced helper is followed; a seam method that does not invalidate its record on every path — a logging helper, or
+    /// an eviction helper with a path that skips the invalidation — does not count as the eviction.
+    /// </summary>
+    internal static IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> SeamEvictionCandidates()
+    {
+        var writes = SeamWriteNames.Select(SeamWriteMethod).ToList();
+        return IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseRecordShareService)))
+            .Where(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod) is { } source
+                        && writes.Any(w => w.HasSameMetadataDefinitionAs(source)))
+            .Select(r => r.Target)
+            .OfType<MethodInfo>()
+            .Where(t => t.DeclaringType == typeof(DataverseRecordShareService) && !writes.Any(w => w.HasSameMetadataDefinitionAs(t)))
+            .DistinctBy(t => t.MetadataToken)
+            .Select(t => (t, ShareKey.All(k => t.GetParameters().Any(p => p.Name == k))
+                ? IlPathScan.Analyse(t, EvictionHelperRule)
+                : new IlPathScan.Result(new[] { "takes no entitySetName / recordId to invalidate" }, Array.Empty<int>(), Array.Empty<int>())))
+            .ToList();
+    }
 
-    /// <summary>C3 (b): a client POA write opens the obligation; the seam's eviction helper, with the same record, discharges it.</summary>
-    internal static IlPathScan.Rule SeamWriteRule(MethodInfo evictionHelper) => new()
+    /// <summary>Whether <paramref name="target"/> is one of <paramref name="candidates"/> that invalidates its record on every path.</summary>
+    internal static bool IsAnEviction(IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> candidates, MethodBase target) =>
+        candidates.Any(c => c.Result.Violations.Count == 0
+                            && c.Result.DischargingCalls.Count > 0
+                            && c.Method.HasSameMetadataDefinitionAs(target));
+
+    /// <summary>C3 (b): a client POA write opens the obligation; an eviction of the same record discharges it.</summary>
+    internal static IlPathScan.Rule SeamWriteRule(Func<MethodBase, bool> isEviction) => new()
     {
         Opens = IsTheClientsPoaWrite,
-        Discharges = target => target.HasSameMetadataDefinitionAs(evictionHelper),
+        Discharges = isEviction,
         KeyParameters = ShareKey,
         Opening = "the POA write",
         Discharge = "the eviction",
     };
 
-    /// <summary>C3 (c): the helper owes, from entry, the invalidator's share-change eviction of its own record.</summary>
+    /// <summary>C3 (c): a seam method counts as the eviction when it owes, from entry, the invalidator's share-change eviction of its own record — and pays it on every path.</summary>
     internal static readonly IlPathScan.Rule EvictionHelperRule = new()
     {
         Opens = _ => false,
@@ -543,32 +567,43 @@ public class PoaShareClientSingletonGuardTests
     [InlineData(nameof(IDataverseRecordShareService.RevokeAccessAsync))]
     public void EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord(string write)
     {
-        var result = IlPathScan.Analyse(SeamWriteMethod(write), SeamWriteRule(SeamEvictionHelper()));
+        var candidates = SeamEvictionCandidates();
+        var result = IlPathScan.Analyse(SeamWriteMethod(write), SeamWriteRule(target => IsAnEviction(candidates, target)));
 
         Assert.True(result.OpeningCalls.Count > 0, $"precondition: the path analysis reaches {write}'s client write");
-        Assert.True(result.DischargingCalls.Count > 0, $"precondition: the path analysis reaches {write}'s eviction");
         Assert.True(
             result.Violations.Count == 0,
             $"DataverseRecordShareService.{write} has a path on which the POA write is not followed — after it completes, with "
-            + "the same entitySetName and recordId, awaited — by EvictAfterShareWriteAsync before the method returns, throws "
-            + "or is cancelled (task 132). On that path the sharee's root set and every snapshot of the record stay stale for "
-            + "their TTLs: an unshare that keeps access. Keep the write inside the try whose finally evicts."
-            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", result.Violations)}");
+            + "the same entitySetName and recordId, awaited — by a call to a seam method that invalidates that record on every "
+            + "path, before the method returns, throws or is cancelled (task 132). On that path the sharee's root set and every "
+            + "snapshot of the record stay stale for their TTLs: an unshare that keeps access. Keep the write inside the try "
+            + "whose finally evicts."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", result.Violations)}"
+            + $"{Environment.NewLine}  the seam methods the writes call: {Describe(candidates)}");
     }
 
-    [Fact(DisplayName = "Task 132: every path through the seam's eviction helper invalidates that record and awaits it")]
-    public void EveryPathThroughTheEvictionHelperInvalidatesThatRecord()
+    [Fact(DisplayName = "Task 132: the seam's writes call an eviction that invalidates that record on every path and awaits it")]
+    public void TheSeamsWritesCallAnEvictionThatInvalidatesThatRecordOnEveryPath()
     {
-        var result = IlPathScan.Analyse(SeamEvictionHelper(), EvictionHelperRule);
+        var candidates = SeamEvictionCandidates();
 
-        Assert.True(result.DischargingCalls.Count > 0, "precondition: the path analysis reaches the helper's invalidator call");
         Assert.True(
-            result.Violations.Count == 0,
-            "DataverseRecordShareService.EvictAfterShareWriteAsync has a path that returns without calling — with its own "
-            + "entitySetName and recordId, awaited — IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync (task 132): "
-            + "every share write that reaches it would leave the record's access caches stale."
-            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", result.Violations)}");
+            candidates.Any(c => IsAnEviction(candidates, c.Method)),
+            "none of the seam methods the three writes call invalidates, on every path, the record it is given — "
+            + "IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync with its own entitySetName and recordId, awaited "
+            + "(task 132): every share write would leave the record's access caches stale."
+            + $"{Environment.NewLine}  {Describe(candidates)}");
     }
+
+    private static string Describe(IReadOnlyList<(MethodInfo Method, IlPathScan.Result Result)> candidates) =>
+        candidates.Count == 0
+            ? "(none)"
+            : string.Join(
+                Environment.NewLine + "  ",
+                candidates.Select(c => $"{Signature(c.Method)}: "
+                                       + (c.Result.Violations.Count == 0 && c.Result.DischargingCalls.Count > 0
+                                           ? "invalidates on every path"
+                                           : string.Join("; ", c.Result.Violations.DefaultIfEmpty("never invalidates")))));
 
     // ── C4. POA actions and write methods named as constants ─────────────────────────────────────
 
@@ -926,11 +961,13 @@ public class PoaShareClientSingletonGuardTests
     {
         const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic;
         var controls = typeof(PoaEvictionPathControls);
-        var writeRule = SeamWriteRule(controls.GetMethod("EvictAsync", Any)!);
+        var evict = controls.GetMethod(nameof(PoaEvictionPathControls.EvictAsync), Any)!;
+        var invalidate = controls.GetMethod(nameof(PoaEvictionPathControls.InvalidateAsync), Any)!;
+        var writeRule = SeamWriteRule(target => target.HasSameMetadataDefinitionAs(evict));
         var helperRule = new IlPathScan.Rule
         {
             Opens = _ => false,
-            Discharges = target => target.HasSameMetadataDefinitionAs(controls.GetMethod("InvalidateAsync", Any)!),
+            Discharges = target => target.HasSameMetadataDefinitionAs(invalidate),
             KeyParameters = ShareKey,
             OwedAtEntry = true,
             Opening = "the helper",

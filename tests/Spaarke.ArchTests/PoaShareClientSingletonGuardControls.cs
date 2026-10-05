@@ -109,9 +109,9 @@ internal sealed class PoaEvictionPathControls
 {
     private readonly DataverseWebApiService _client = null!;
 
-    private Task EvictAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
+    internal Task EvictAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
 
-    private Task InvalidateAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
+    internal Task InvalidateAsync(string entitySetName, Guid recordId) => Task.CompletedTask;
 
     // ── every path evicts ──
 

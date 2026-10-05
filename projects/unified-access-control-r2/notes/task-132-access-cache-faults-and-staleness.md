@@ -1,9 +1,9 @@
 # Task 132 (#1056) — C12: access caches stop storing faults, BFF writes evict, TTLs cut to 2 minutes
 
 **Status:** code complete on `task/uac-r2-132` (parent `task/uac-r2-137-b2`, merged with `work/unified-access-control-r2`
-at `3a6b38cb1`); verifier round **r1** closed on `task/uac-r2-132-r1` (§15). POML status
-**completed-with-escalation**: escalation 7 (§8) is unanswered by owner rounds 1-9, and the dev deploy and the manual
-live gate (criterion 21) are pending manual gates (§12). Rigor FULL, Opus 5.5 @ xhigh.
+at `3a6b38cb1`); verifier rounds **r1** (§15), **f1** (§16), **f1-v1** (§16.6) and **f1-v1c** (§16.7) closed. POML status
+**completed**: escalation 7 (§8) was answered by owner round 10 item 3 (§16); the dev deploy and the manual live gate
+(criterion 21) are pending manual gates, now a dry-run / `-Apply` / `-Verify` script (§12 item 3). Rigor FULL, Opus 5.5 @ xhigh.
 
 **Owner sign-off (merge gate, criterion 18):** owner rounds 3 **R3/R4** (2026-09-30, BINDING) — *"Access changes must
 take effect in MINUTES, never hourly … the background job is only a safety net, running at ≤ 5 min"* — relayed by the
@@ -357,6 +357,38 @@ P11). The r1 seeds R1-R8 are in §15.
      logged as `[WF-AUTHZ] Deny-veto subject … UNREADABLE`.
 2. **Publish size / CVE** — ~~skipped by run instruction~~ **CLOSED in r1**: measured by the verifier, recorded in §10
    (+0.01 MB, 212 / 212 files, no package change).
+3. **G-1 / G-2 as a script (f1-v1c-v1, §16.7)** — `projects/unified-access-control-r2/notes/task-132-live-gate.ps1`.
+   Every live write is behind `-Apply`; every result is checkable with `-Verify`; everything else is read-only. Run from
+   the repository root of the branch being verified, signed in with `az login` as an operator (not a service principal).
+   The script records the deploy start and the matter's original owner in
+   `%TEMP%\task-132-live-gate.state.json`. Commands, in order:
+
+   ```powershell
+   $g = 'projects/unified-access-control-r2/notes/task-132-live-gate.ps1'
+   # G-1 — deploy (the precondition and the settings are printed first; -Apply refuses if sprk_primarycontact is missing)
+   & $g -Step Preflight
+   & $g -Step Deploy                     # dry run: prints the exact Deploy-BffApi.ps1 command
+   & $g -Step Deploy -Apply              # LIVE WRITE: deploys this branch's BFF to spaarke-bff-dev
+   & $g -Step Deploy -Verify             # /healthz 200 and the site modified after the recorded start
+   # G-2 (a) — a team-owned TEST matter the test user sees through their team; another team as the target
+   & $g -Step ReassignMatter -MatterId <matter> -ToTeamId <team> -TestUserId <user>           # dry run
+   & $g -Step ReassignMatter -MatterId <matter> -ToTeamId <team> -TestUserId <user> -Apply    # LIVE WRITE (record change)
+   #   now poll the Teams/SPA matter list AS THE TEST USER; record the minute it disappears (bound: <= 4 min)
+   & $g -Step ReassignMatter -MatterId <matter> -TestUserId <user> -Verify
+   & $g -Step RestoreMatter -MatterId <matter> -Apply                                         # LIVE WRITE (restore)
+   & $g -Step RestoreMatter -MatterId <matter> -Verify
+   # G-2 (b) — by hand: the BU colleague loads the project list (warm cache); provision a secure TEST project from the
+   #   wizard (or unsecure -> re-secure the dev secure test project); record the colleague's FIRST list response after
+   #   provisioning returns (must not list it) and a direct read (must be denied). Then, read-only:
+   & $g -Step VerifyProvision -ProjectId <project> -ColleagueUserId <colleague>
+   # G-2 (c) — the ExternalAccess__ImpersonatedRootSets__Enabled line of Preflight (record it; run (b) with it on too if
+   #   task 036 has merged)
+   ```
+
+   **Preflight, run read-only 2026-10-05 against dev:** `systemuser.sprk_primarycontact` PRESENT; `spaarke-bff-dev`
+   `Redis__Enabled = true`; `Membership__CacheInvalidator__Enabled` and `ExternalAccess__ImpersonatedRootSets__Enabled`
+   not set (the appsettings default applies; no code on this branch reads the latter — 036 is not merged here);
+   `/healthz` 200.
 
 ## 13. Placement + justification (CLAUDE.md §10 / §11)
 
@@ -530,7 +562,10 @@ scan of the BFF's assemblies (C1-C5 in §16.6: any reference to the client's POA
 receiver, the SDK messages, a POA action or write name loaded as a constant, and pins on the client's and the seam's write
 methods) plus text rules for breadth; only a name the code computes or reads at run time is beyond it. *Corrected in f1-v1:
 as first committed in f1 this sentence read "fails the build on a POA write that bypasses the seam", which the verifier
-disproved — the f1 detector only saw a bare-identifier receiver (seeds S5 / S6 stayed green). §16.6.*
+disproved — the f1 detector only saw a bare-identifier receiver (seeds S5 / S6 stayed green). §16.6.* *Strengthened in
+f1-v1c-v1 (§16.7): f1-v1's C3 pinned method NAMES and its behaviour proof ran only a user principal (seeds N1 / N2
+passed); C3 now proves the eviction on EVERY path through the seam's writes, and C6 / T5 read metadata, constant data and
+configuration.*
 `InternalShareEndpoints`' existing per-user `ImpersonatedRootSetSource.InvalidateAsync` is kept: it
 is what works where the invalidator is the Null peer (in-memory cache, Development/Testing).
 
@@ -691,7 +726,7 @@ stream or an unresolvable token):
 | — | Which assemblies the compiled rules must read | `EveryBffOrClientReachingProjectIsScanned` — derived from the csproj graph: every `src/**` project in `Sprk.Bff.Api`'s ProjectReference closure (the process whose caches a share stales) plus every project that reaches `Spaarke.Dataverse` (project, binary or package reference); each must load, or the build fails. Today: Spaarke.Dataverse, Spaarke.Core, Spaarke.Scheduling, Sprk.Bff.Api | exact over `src/**` |
 | C1 | A reference to the client's `Grant/Modify/RevokeAccessAsync` from ANY type but the seam — the client itself included — through any receiver expression (S5), a cast, an indexer, inside a lambda / local function / async method, as a method group, or as an expression tree's method handle | `EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams` (a target counts if declared on the client, a subclass, or a base type / interface it implements; vacuity: it must see the seam's own three calls) | exact |
 | C2 | A FOURTH POA write on the client, which C1 would not know by name | `TheClientsPoaWritesAreExactlyTheThreeTheGuardNames` — the client methods that load a POA action name are exactly the three | exact |
-| C3 | A write ON the seam that does not evict | `TheSeamWritesPoaOnlyFromItsThreeEvictingMethods` — the seam's references to the client's writes come only from its own three same-named methods, the three the `PoaSeam_*` behaviour tests prove evict | exact |
+| C3 | A write ON the seam that does not evict | ~~`TheSeamWritesPoaOnlyFromItsThreeEvictingMethods` — the seam's references to the client's writes come only from its own three same-named methods, the three the `PoaSeam_*` behaviour tests prove evict~~ | ~~exact~~ **Corrected in f1-v1c-v1 (§16.7):** it compared method NAMES and the behaviour cases ran only a user principal, so verifier seeds N1 (a team-only early return inside `GrantAccessAsync`) and N2 (a same-name overload) passed. Replaced by C3 (a) the interface-map pin, (b) the every-path analysis of each write, (c) the every-path analysis of the eviction helper. |
 | C4 | A POA action name loaded as a string constant outside the client (an SDK `OrganizationRequest` by name, a hand-built POST or `$batch` line, a name the compiler folded from constant pieces) and a POA write method's name loaded as a constant (reflection, `nameof`, a `dynamic` call's binder name) | `NoCompiledCodeOutsideTheClientNamesAPoaActionOrWrite` — action names matched as whole words (`\b(Grant\|Modify\|Revoke)Access\b`: conservative — a log line naming an action as a word is flagged too); method names exact; vacuity: it must see the client's three action loads | exact over IL constants |
 | C5 | The SDK's `GrantAccessRequest` / `ModifyAccessRequest` / `RevokeAccessRequest`, however imported (a global using defeats T2) | `NoCompiledCodeUsesTheSdkPoaMessages` — by FULL type name (`typeof`-checked; the BFF's own DTOs share the short names) | exact |
 | T1 | A `.XAccessAsync(` call in any `src/server` file whose receiver is not an identifier declared there ONLY as `IDataverseRecordShareService`: an expression receiver (`…)`, `…>`, `…]` — S5), a `var` / `dynamic` / undeclared name, a name also declared as another type (S6) | `EveryPoaShareWriteGoesThroughTheEvictingSeam` + `EachNamedShareWriterWritesOnlyThroughTheSeam` ×8 | conservative (may flag a legal call; C1 is the precise rule) |
@@ -773,5 +808,169 @@ delta). No plugin (ADR-002); fail closed unchanged (ADR-003).
 54 skipped (15,490; 25 m 33 s)**; NetArchTest **614 / 0 / 0** (606 + 8; re-run after the last edit, a failure-message
 wording change in the guard); `Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed /
 0 failed / 25 skipped (428)**. No contention failure. No package change (no publish-size or CVE delta).
+
+`.claude/**`: no edit needed.
+
+### 16.7 Verifier round f1-v1c (2026-10-05; `task/uac-r2-132-f1-v1c-v1` from `task/uac-r2-132-f1-v1c` @ `137b088f5`)
+
+Owner and main-session rounds 1-43 re-read from `work/unified-access-control-r2`: none speaks to this guard beyond round
+15's standing directive ("fix it the correct way; never defer"). No `NOTE-FROM-MAIN.md`. No live write; the only live
+call was the new gate script's read-only `Preflight` (below).
+
+**Verifier items (f1-v1c numbering).** 1 (the verifier's own read-only run), 2 (the restart WIP), 3 (items 2, 3, 6, 7, 8
+of f1-v1), 4 (S5, routes AROUND the seam) and 5 (the seam's catch) were met; 8 (suites) and 9 (SCAN cost, an
+observation) need no change — the suites are re-run below. **6 (blocking) and 10 — C3's false negatives and the wording
+that denied them — CLOSED.** **7 (observation) — CLOSED** (hardened, not only disclosed). **11** — the live gates now ship
+as a dry-run / `-Apply` / `-Verify` script with the exact commands; the gates themselves stay the main session's.
+**12** — the criterion-17 reviewer approval is PR-time (unchanged).
+
+**Items 6 / 10 — what was wrong.** f1-v1's C3 (`TheSeamWritesPoaOnlyFromItsThreeEvictingMethods`) compared source-method
+NAMES (`"RevokeAccessAsync → RevokeAccessAsync"`), and the behaviour cases that were said to prove "each of the three
+evicts" ran only `DataversePrincipalRef.User`. So it proved: *the seam calls the client's writes from methods named like
+its three writes, and the user path through each evicts.* The verifier's seeds showed both gaps: **N1**, a team-only early
+return in the seam's `GrantAccessAsync` before its `try` (a team share — what `PlaybookSharingService` writes — with no
+eviction), left all 22 guard tests and all 49 behaviour tests green; **N2**, a same-name non-evicting `RevokeAccessAsync`
+overload on the seam, left all 22 guard tests green. §16.6's C3 row, the guard header and the class remarks claimed
+"exact" for what was neither.
+
+**Items 6 / 10 — the fix: C3 proves the eviction on every path, structurally, and the behaviour cases cover every
+principal kind.**
+
+| # | Rule (test) | What it proves |
+|---|---|---|
+| C3 (a) | `TheSeamWritesPoaOnlyFromItsThreeInterfaceMethods` | The seam references the client's POA writes only from the three methods `typeof(DataverseRecordShareService).GetInterfaceMap(typeof(IDataverseRecordShareService))` binds to the interface's Grant/Modify/RevokeAccessAsync — compared by METADATA identity (`HasSameMetadataDefinitionAs`), so a same-name overload (N2), a helper, a local function or a lambda that writes is outside them — and each calls its own same-named write. |
+| C3 (b) | `EveryPathThroughEachSeamWriteAwaitsItThenEvictsThatRecord` ×3 | For each of the three, an IL path analysis of the compiled body (new test helper `tests/Spaarke.ArchTests/IlPathScan.cs`) shows that EVERY path that makes the client write — returned, thrown, cancelled, suspended and resumed, through every `finally` — first awaits it (the write's own task completes), then calls the seam's eviction (C3 (c)) with the SAME `entitySetName` and `recordId` (the hoisted parameters, never re-assigned on the path), then awaits that, before the method completes. N1 is a path it rejects. |
+| C3 (c) | `TheSeamsWritesCallAnEvictionThatInvalidatesThatRecordOnEveryPath` | What counts as the eviction is FOUND IN THE IL, not named (no string-bound reflection into the private helper — ADR-038 B8's concern): a seam method the three writes call that, on every path from entry, calls `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync` with its own `entitySetName` and `recordId` and awaits it (its catch then logs); one must exist. Today that is `EvictAfterShareWriteAsync`. A renamed helper is followed; a helper with a path that skips the invalidation is no eviction, so (b) fails for every write as well. |
+| behaviour | `PoaSeam_EveryShareWrite_…` ×12, `PoaSeam_WhenEvictionThrows_…` ×12, `PoaSeam_WhenTheCallerCancels_…` ×6 | What the eviction DOES — the record's root sets and snapshots gone — for every write × every `DataversePrincipalKind` (derived from the enum: a new kind gets its cases) × Dataverse accepting / refusing, and cancellation for every write × kind; the in-memory Web API now records each request body and the case asserts it carried the principal's kind (`teams(` / `systemusers(`), so a "team" case cannot silently run as a user one. |
+
+**The path analysis (`IlPathScan`)** is an abstract interpretation of one compiled body, explored to a fixed point. An
+async method is analysed as the compiler built it — the state machine's `MoveNext`, whose state field and dispatch local
+are tracked as constants so every dispatch branch is decided exactly; a `ret` in a non-negative state is a suspension
+(resumed at entry in that state, keeping the state machine's fields — the parked awaiter included — and the obligation);
+in state -1 / -2 it is completion; a `ret` whose state it lost is reported, not guessed. Exceptions leave every
+instruction that can raise one (every call except the await plumbing, which fails only by running out of memory;
+`throw`, `rethrow`; checked conversions, casts, array access, division; static fields; a field reached through anything
+but `this` or the state machine's owner) to each enclosing handler, innermost first; `catch (object)` / `catch
+(Exception)` stop the search, a filter is assumed to accept and to decline, a `finally` / `fault` runs and the search
+continues after it; `leave` runs every `finally` it crosses. The obligation moves None → Issued (the write returned its
+task) → Owed (that task's `GetResult` returned or threw; or the write call itself threw) → Discharging (the eviction was
+called with equal keys) → None (the eviction's `GetResult` returned or threw); awaiters are followed through
+`ConfigureAwait`, `GetAwaiter`, locals, the awaiter fields and suspension. An eviction while Issued, an eviction with
+other keys, a second write while one is owed, and a completion in any phase but None are violations. It fails loud on an
+unrecognised state-machine prologue, an `endfinally` it did not enter, `calli` / `jmp`, and a path explosion.
+
+Verified in **Debug and Release** (the IL differs: Release keeps `this` in a local, Debug pads the dispatch with `br.s`
+and `nop`): guard 30 / 0 / 0 in both. Controls (`PathAnalysis_FlagsEveryNonEvictingShape_AndPassesTheEvictingOnes`, over
+`PoaEvictionPathControls` — compile-only fixtures): **pass** the seam's own shape, a caught failure that returns inside
+the `try`, a real `finally` (`using`) around it, the helper's shape; **flag**, each by its own reason, N1's team-only early
+return, a conditional eviction, an eviction before the write, a swallowed failure that returns before the eviction, a
+write not awaited before the eviction, an eviction not awaited, an eviction of another record, a record id re-assigned
+before the eviction, a non-async pass-through, two writes before one eviction, and — for the helper rule — an early
+return for one entity set, an invalidation not awaited, an invalidation of another record. C3 (a)'s control
+(`PoaSeamPinControl`) reports N2's overload and a write inside a lambda held by a pinned-name method, and passes the
+bound method.
+
+**What C3 does not claim:** what the invalidator then deletes for those arguments — that is the behaviour tests'
+(`PoaSeam_*` above, end to end over the production seam, client and invalidator; `ShareChangeEviction_*` for the
+patterns, criterion 23).
+
+**Item 7 — the enum route, closed rather than only disclosed.** `enum PoaAction { GrantAccess, … }` +
+`PostAsJsonAsync(action.ToString(), payload)` loads no constant, so C4 could not see it. New rules:
+
+| # | Rule (test) | Closes |
+|---|---|---|
+| C6 | `NoCompiledMetadataOutsideTheClientNamesAPoaAction` | A POA action carried by METADATA in the scanned assemblies, outside the client: a type, member, **enum value** or parameter NAMED as one; a POA action or write-method name held as a const field's value, a default parameter value, a custom attribute argument (types, members, parameters, return values, assembly, modules), the text of an embedded resource, or constant DATA — a UTF-8 literal (`"…"u8`) or a byte / char array initializer, an RVA field's bytes, reported under the methods that load it. |
+| C4 (widened) | `NoCompiledCodeOutsideTheClientNamesAPoaActionOrWrite` | The action-name match is now case-insensitive: `"revokeaccess".ToUpperInvariant()` is the action too. |
+| T5 | `NoDeployedConfigurationNamesAPoaAction` | A POA action or write name in the configuration the BFF is deployed with or reads back: `src/server/**` settings files (appsettings and templates, XML / config / resx / YAML), everything under `infra/` (the Bicep and the Dataverse rows — playbooks, actions, tools — the BFF reads at run time), and the Bicep / ARM under `infrastructure/bicep/`. Precondition: the walk reaches `appsettings.template.json` and `customer.bicep`. |
+
+Controls: `MetadataAndConfigurationDetectors_FlagEveryCarrier_AndPassOtherWords` (`PoaBypassControl_Metadata`: an enum
+value, a const, an attribute argument, a default value, a member name, a camel-case parameter name, a UTF-8 literal and a
+char-array initializer all flagged;
+`GrantAccessAsync` and `"GrantAccessRequest"` not; configuration text in both cases flagged, other words not).
+
+**The disclosure, narrowed to what no static scan can reach:** a value that exists only at RUN time — a name assembled
+from pieces none of which is the name (fragments joined by a call, an enum value's name plus a runtime suffix, single
+characters, a decoding) or read from a LIVE store no repository file holds (an App Service setting set by hand, Key Vault, Dataverse, an HTTP response). Also stated:
+POA writes made OUTSIDE the BFF (MDA sharing, flows, operator scripts) are not this guard's job — their staleness is the
+TTL-bounded out-of-band row signed off in §9 / caching-architecture.md (owner R3/R4).
+
+**Wording corrected** (each had claimed more than C3 proved): the guard header's C3 entry (now (a)/(b)/(c) as above, plus
+C6 / T5 and the narrowed disclosure); `DataverseRecordShareService`'s class remarks (now a "What the build guard proves"
+paragraph: outside the type / inside the type / what the behaviour tests prove / what no static guard can see);
+`IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync` remarks; the `AccessCacheInvalidationTests.Shares.cs`
+summary; §16.6's C3 row (struck through, the original kept for the record, with a pointer here); the f1-v1 POML outcome
+(correction appended).
+
+**`IlCallScan` changes:** a full instruction decoder (`Instructions`: offset, opcode, absolute branch targets, switch
+targets, local / argument indexes, constants, tokens) that `TokenOperands` now builds on; `SourceMethod` (the MethodInfo
+an async state machine was built from, `null` for a lambda) beside `SourceMethodName`; `CompiledBody` (a method's
+`MoveNext` or itself). The decoder refactor is re-proved on the REAL scan by re-running f1-v1 seeds S5, S12, S16, S17
+(below), not only by the control-type assertions.
+
+**Seeds — all run against the final code by a script (`seeds132.py`): seeded in the real file, rebuilt, run, restored by
+`git checkout HEAD`, `git status --porcelain` empty and `git diff --quiet HEAD` asserted, the files touched; created
+files removed.** Guard = `PoaShareClientSingletonGuardTests` (30); behaviour = `AccessCacheInvalidationTests` +
+`DataverseRecordShare*` (66).
+
+| # | Seed | Guard red (of 30) | Behaviour red (of 66) | What it proves |
+|---|---|---|---|---|
+| N1 | the verifier's: a team-only early return in the seam's `GrantAccessAsync`, before the `try`, writing with no eviction | **1** — C3 (b) `GrantAccessAsync` | **5** — `EveryShareWrite` (grant, Team) ×2, `WhenEvictionThrows` (grant, Team) ×2, `WhenTheCallerCancels` (grant, Team) | item 6 (N1); the user-only cases could not see it |
+| N2 | the verifier's: a same-name non-evicting `RevokeAccessAsync(…, bool quiet, …)` overload on the seam | **1** — C3 (a) | 0 | item 6 (N2): only the interface-map pin sees it |
+| P1 | `ModifyAccessAsync`'s `finally` evicts only for a systemuser principal | **1** — C3 (b) `ModifyAccessAsync` | **5** — the Team modify cases | a conditional eviction |
+| P2 | `RevokeAccessAsync` evicts `Guid.Empty` instead of the record | **1** — C3 (b) `RevokeAccessAsync` ("the eviction is given (entitySetName, ?)") | **6** — every revoke case but the eviction-throws ones | the eviction's keys must be the write's |
+| P3 | `GrantAccessAsync` does not await the write before its `finally` evicts | **1** — C3 (b) `GrantAccessAsync` | **9** | the write completes before the eviction |
+| P4 | the eviction helper returns early for `sprk_playbooks` — a set no behaviour case uses | **1** — C3 (c) | **0** | a branch on an input the cases do not take: only the structural rule sees it (the N1 class, generalised) |
+| P5 | the eviction helper starts the invalidation and does not await it | **1** — C3 (c) | 3, timing-dependent (the un-awaited eviction races the assertion) | the structural rule is deterministic where the behaviour cases are a race |
+| P6 | the verifier's item 7: `enum PoaSeedAction { GrantAccess, ModifyAccess, RevokeAccess }` + `PostAsJsonAsync(action.ToString(), payload)` in a BFF file | **1** — C6 (enum values) | — | item 7 |
+| P7 | an embedded resource in the BFF naming `RevokeAccess` | **2** — C6 (resource), T5 | — | resources and src/server configuration |
+| P8 | an unused `const string Route = "grantaccess"` in a BFF file (never loaded) | **1** — C6 (const, any case) | — | consts read by reflection |
+| P9 | `"revokeaccess".ToUpperInvariant()` | **1** — C4 (any case) | — | case-insensitive constants |
+| P10 | `"PoaSeed": "GrantAccess"` in `appsettings.template.json` | **1** — T5 | — | deployed configuration |
+| P11 | a Dataverse row under `infra/dataverse/` naming `RevokeAccess` | **1** — T5 | — | data the BFF reads back |
+| P12 | `new string(new[] { 'G', 'r', … })` posted as a route in a BFF file | **1** — C6 (constant data) | — | char-array initializers (no `ldstr`, no quoted name) |
+| P13 | `Encoding.UTF8.GetString("RevokeAccess"u8)` in a BFF file | **2** — C6 (constant data), task 060's payload rule (the quoted name in source) | — | UTF-8 literals |
+| S5 | f1-v1's S5 re-run (the client resolved inline) | **3** — C1, T1, per-writer | — | the decoder refactor kept C1 |
+| S12 | f1-v1's S12 re-run (a fourth client write) | **2** — C2, C4 | — | … and C2 / C4 |
+| S16 | f1-v1's S16 re-run (`"Revoke" + "Access"` folded) | **1** — C4 | — | … and the folded constant |
+| S17 | f1-v1's S17 re-run (an expression tree over the client) | **3** — C1 (by `ldtoken`), T1, per-writer | — | … and the `ldtoken` read |
+
+All 19 seeds red; every one restored (`git status --porcelain` empty, `git diff --quiet HEAD` = 0, file touched). P6, P7
+and P8 were run twice — before and after C6 learned constant data — red both times; the table shows the final run.
+
+**Item 11 — the live gates, as a script.** `projects/unified-access-control-r2/notes/task-132-live-gate.ps1` (operator
+tool, not product code): `Preflight` (read-only: the deploy-order precondition `systemuser.sprk_primarycontact`; the App
+Service settings `Redis__Enabled`, `Membership__CacheInvalidator__Enabled`, `ExternalAccess__ImpersonatedRootSets__Enabled`
+— criterion 21(c); `/healthz`; the site's last-modified time); `Deploy` (G-1: dry run prints the exact command; `-Apply`
+refuses unless the precondition holds, records the start, runs `scripts/Deploy-BffApi.ps1` with the dev defaults;
+`-Verify` checks `/healthz` 200 and that the site was modified after the start); `ReassignMatter` (21(a): dry run shows
+the owner, the target team and the test user's `RetrievePrincipalAccess`; `-Apply` records the original owner and the
+time, then reassigns the TEST matter; `-Verify` shows the owner, the minutes since, and Dataverse's own answer for the
+test user); `RestoreMatter` (`-Apply` / `-Verify`); `VerifyProvision` (21(b), read-only: the project's owner, the
+colleague's `RetrievePrincipalAccess`, and the `[ACCESS-EVICT]` traces for the project from Application Insights).
+**`Preflight` was run read-only on 2026-10-05 against dev:** `systemuser.sprk_primarycontact` PRESENT;
+`spaarke-bff-dev` `Redis__Enabled = true`; `Membership__CacheInvalidator__Enabled` and
+`ExternalAccess__ImpersonatedRootSets__Enabled` not set (the appsettings default applies; no code on this branch reads
+the latter — 036 is not merged here); `/healthz` 200. The exact commands for the main session are in §12.
+
+**Item 12** — criterion 17's ADR-009 path C reviewer approval is cited at PR time; the paragraph is drafted in §15.3.
+An executor cannot give a reviewer's approval; nothing else is owed.
+
+**Placement / justification (CLAUDE.md §10 / §11).** No production surface added: the production edits are doc comments
+only (`IDataverseRecordShareService.cs`, `IMembershipCacheInvalidator.cs`) — no BFF IL change, so no publish-size or CVE
+delta. New TEST helper `IlPathScan`: (1) existing — `IlCallScan` (which methods a body REFERENCES, which strings it loads)
+and `SourceScan` (text); neither can say what happens on every PATH from one call; (2) extension — it reuses
+`IlCallScan`'s decoder, token resolution and state-machine mapping (extended, not copied), but path analysis is a
+different responsibility (control flow, exception regions, abstract values) from a reference scan, so it is its own
+class (§11.5: decompose where the reason to change diverges); (3) cost of doing nothing — a share write on any path the
+behaviour cases do not take (N1's team branch; a branch on an entity set no case uses) ships without the access-cache
+eviction — an unshare that keeps access for up to 2 minutes — with the build green. New test file
+`PoaShareClientSingletonGuardControls.cs`: the guard's compile-only fixtures (the existing ones moved, the new ones
+added), kept apart from the rules they feed. New operator script `notes/task-132-live-gate.ps1`: (1) existing —
+task 133's `notes/task-133-live-gate.ps1` (its own gate's steps) and `scripts/Deploy-BffApi.ps1` (which the `Deploy` step
+calls rather than re-implements); (2) extension — 133's script is that task's gate; one script per gate is the
+established shape; (3) cost of doing nothing — criterion 21's live writes stay hand-typed, with no dry run and no
+recorded original owner to restore. No package, no plugin (ADR-002); fail closed unchanged (ADR-003).
+
+RESULTS_PARAGRAPH
 
 `.claude/**`: no edit needed.
