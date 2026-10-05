@@ -11,9 +11,13 @@
 > — three parallel audits against live Dataverse + code. **It corrected four claims in this document**; §1.3 and
 > §3.2 carry the corrections, and `notes/mvp-technical-spec.md` §10.7 carries the live row counts.
 > **Rev 4 inputs** (owner feedback 2026-10-01): [`notes/daily-briefing-ontology-fit.md`](notes/daily-briefing-ontology-fit.md)
-> (how the shipped Briefing's items enter the worklist) · the **Console prototype** at
-> `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` (v2.1, findings 1–17) — the
-> **UI/UX contract for this project**, see §11 and §12.
+> (how the shipped Briefing's items enter the worklist) · the **Console prototype** — the
+> **UI/UX contract for this project** is
+> [`HANDOFF.md`](https://github.com/spaarke-dev/spaarke-prototype/blob/ae1cc9f/projects/2026-10-spaarke-console/HANDOFF.md)
+> in `spaarke-dev/spaarke-prototype`, branch `feature/2026-10-spaarke-console`, path
+> `projects/2026-10-spaarke-console/`, **pinned commit `ae1cc9f` (v4, findings 1–40)**; local copy
+> `c:\code_files\spaarke-prototype-wt-spaarke-console\projects\2026-10-spaarke-console\HANDOFF.md`. Read its §0
+> ("what changed since v3") first. See §11 and §12.
 > **Audience**: owner review · `/design-to-spec` · `code-review` · future sessions.
 
 ---
@@ -879,7 +883,7 @@ Carried from `current-task.md`; full rationale in the notes.
 | `spaarke-connect-integration-module-r1` | Design harvested, not forked. Its README still needs a status note |
 | Communication-intelligence owner | Review of the PR #1032 semantics, especially `statuscode = Open` |
 | App Insights | The only way to diagnose the swallow-and-log paths |
-| **The Console prototype** | `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` (v2.1). **The UI/UX contract for this project**, carried forward into `/design-to-spec`: the closed component kit (one shape per verb), the single review process, progressive disclosure, count filters as lenses on membership, and findings 1–17. Three of those findings **contradict** documents in this project and are reconciled here — finding 9 (criterion 7, §7), finding 4 (Decision Record → flag is 1:N, D-2), finding 2 (the §8.0.1(a) predicate cannot produce per-clause witnesses). It is still in review (round 2 pending), so treat the **kit** as settled and the **row copy** as draft |
+| **The Console prototype** | **The UI/UX contract for this project** is `HANDOFF.md` in `spaarke-dev/spaarke-prototype`, branch `feature/2026-10-spaarke-console`, path `projects/2026-10-spaarke-console/`, **pinned commit `ae1cc9f` (v4, findings 1–40)**; local copy `c:\code_files\spaarke-prototype-wt-spaarke-console\projects\2026-10-spaarke-console\HANDOFF.md`. **Owner 2026-10-05: v4 is the baseline**, refined during UAT in this project. Read HANDOFF §0 ("what changed since v3") first. **Before any UI task starts**, check it against HANDOFF §1 (binding behaviour), §3 (data needs) and §4.1 (wizard host). **Do not port prototype code** — it is a mocked standalone app built without this project's full context, so anything it shows that the real solution cannot do is flagged for the owner to resolve (`notes/v4-prototype-vs-solution.md`), and v4 is reconciled against this design and the spec in `notes/v4-reconciliation.md`. Earlier findings 2, 4 and 9 (v2.1) were reconciled here: finding 9 (criterion 7, §7), finding 4 (Decision Record → flag is 1:N, D-2), finding 2 (the §8.0.1(a) predicate cannot produce per-clause witnesses) |
 
 ---
 
@@ -895,8 +899,8 @@ Carried from `current-task.md`; full rationale in the notes.
 3. Settle **D-2**, **D-7**, **D-8** and the `sprk_signal` shape (§5 deferred-in-project, incl. CM-9 resolution
    semantics and D-3's polymorphic-subject + matter-lookup consequence) **before the evaluator writes its first
    signal**. Fold in **BR-1** at the same time — it changes the same field list.
-3a. **Close the prototype loop**: round-2 review, then agree the kit as the Console's component contract and
-   carry findings 1–17 into the spec (§11).
+3a. ✅ **Prototype loop closed** (owner, 2026-10-05): v4 (`ae1cc9f`, findings 1–40) is the baseline contract,
+   refined during UAT; reconciliation into the spec is `notes/v4-reconciliation.md` (§11).
 3b. Record the shape × binding-mode feasibility matrix (review §1.5) in component model §4.5 or §4.7 —
    non-blocking, but it is the concrete reason to ask a customer for API access rather than accepting
    MCP-only: **API access buys the obligation module; MCP alone does not.**

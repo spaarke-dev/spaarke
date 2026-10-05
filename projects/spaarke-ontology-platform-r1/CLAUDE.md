@@ -84,6 +84,13 @@ what goes in the Decision Record.
 ⚠️ **Always cite the full path for `MetricCard`** — a second, unrelated one exists at
 `Spaarke.Visuals/src/components/MetricCard.tsx` serving the `VisualHost` PCF (that ambiguity is item C-3).
 
+**The UI/UX contract is the Console prototype's `HANDOFF.md` @ `ae1cc9f` (v4, findings 1–40)** —
+`spaarke-dev/spaarke-prototype`, branch `feature/2026-10-spaarke-console`, path `projects/2026-10-spaarke-console/`;
+local copy `c:\code_files\spaarke-prototype-wt-spaarke-console\projects\2026-10-spaarke-console\HANDOFF.md`. Read its
+§0 first. **Before any UI task starts, check the task against HANDOFF §1 (binding behaviour), §3 (data needs) and
+§4.1 (wizard host). Do not port prototype code.** Where v4 shows something the solution cannot do, it is an owner
+decision, not an implementer's: see `notes/v4-prototype-vs-solution.md`.
+
 **One component with data-driven variants, not a family.** A second row component is a design failure, not a
 feature. Anything genuinely new lands in `@spaarke/ui-components`, never in `src/solutions/SpaarkeAi/`.
 

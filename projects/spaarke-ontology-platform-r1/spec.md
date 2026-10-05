@@ -12,9 +12,13 @@
 > row counts) · [`notes/schema-draft.md`](notes/schema-draft.md) (the five tables, field by field) ·
 > [`notes/reuse-verification-2026-10-02.md`](notes/reuse-verification-2026-10-02.md) (C-1..C-27) ·
 > [`notes/security-roles.md`](notes/security-roles.md) (privileges; §7 = second verification pass)
-> **UI/UX contract**: the Console prototype at
-> `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` (v2.1, findings 1–17) — **the design
-> contract, not the implementation.** Do not port prototype source.
+> **UI/UX contract**: the Console prototype's
+> [`HANDOFF.md`](https://github.com/spaarke-dev/spaarke-prototype/blob/ae1cc9f/projects/2026-10-spaarke-console/HANDOFF.md)
+> — `spaarke-dev/spaarke-prototype`, branch `feature/2026-10-spaarke-console`, path `projects/2026-10-spaarke-console/`,
+> **pinned commit `ae1cc9f` (v4, findings 1–40)**; local copy
+> `c:\code_files\spaarke-prototype-wt-spaarke-console\projects\2026-10-spaarke-console\HANDOFF.md`. Read its §0 ("what
+> changed since v3") first. **The design contract, not the implementation.** Do not port prototype code. Before any
+> UI task starts, check it against HANDOFF §1 (binding behaviour), §3 (data needs) and §4.1 (wizard host).
 
 ---
 
@@ -667,8 +671,11 @@ would report ~0% action rate on every Do rule, making a noisy policy and a perfe
 
 ### 8.2 External
 
-App Insights (the only way to diagnose the swallow-and-log paths) · the Console prototype round-2 review
-(treat the **kit** as settled and the **row copy** as draft) · a communication-intelligence domain owner for
+App Insights (the only way to diagnose the swallow-and-log paths) · the Console prototype contract —
+`HANDOFF.md` @ `ae1cc9f` (v4, findings 1–40) in `spaarke-dev/spaarke-prototype`, branch
+`feature/2026-10-spaarke-console`; **owner-accepted as the baseline 2026-10-05**, refined during UAT. Inconsistencies
+between it and what the solution can actually do are flagged for the owner (`notes/v4-prototype-vs-solution.md`);
+its reconciliation against this spec is `notes/v4-reconciliation.md` · a communication-intelligence domain owner for
 the PR #1032 semantics review.
 
 ---
