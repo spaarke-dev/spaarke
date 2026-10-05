@@ -2212,7 +2212,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -2227,6 +2227,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        Guid? ownerUserId = null,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        // unified-access-control-r2 task 159: a silent-empty stub here would read as "the caller may see nothing".
+        throw new NotImplementedException("QueryEventsAsCallerAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
+    }
+
     public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
     {
         // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
@@ -2239,22 +2259,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
-    {
-        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
-        throw new NotImplementedException("UpdateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
     public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
-    public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)

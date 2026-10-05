@@ -213,17 +213,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             }
 
             // Task 147 r1c: a write that may move a CHILD row into or out of a secure record reads, BEFORE it, whether the
-            // row is isolated — so a move OUT also takes the secure record's mirrored shares off (owner round 22), exactly
-            // as the browser re-file routes do. One implementation: SecureChildShareSynchronizer.AfterRefileAsync.
+            // row is isolated — so a move OUT also takes the secure record's mirrored shares off (owner round 22) and
+            // releases what is filed under it, exactly as the browser re-file routes do. One implementation:
+            // SecureChildReconciler.AfterRefileAsync (round 36).
             using var shareScope = MayRefile(tablename, mapped.Item!) ? _scopes?.CreateScope() : null;
-            var shares = shareScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+            var children = shareScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
             Exception? isolationReadFault = null;
             var isolatedBefore = false;
-            if (shares is not null)
+            if (children is not null)
             {
                 try
                 {
-                    isolatedBefore = await shares.IsSecureTeamOwnedAsync(tablename, recordId, cancellationToken).ConfigureAwait(false);
+                    isolatedBefore = await children.IsSecureTeamOwnedAsync(tablename, recordId, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -238,14 +239,6 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             if (refile.Result is { } refileResult)
             {
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
-            }
-
-            if (refile.Written && shares is not null)
-            {
-                await shares.AfterRefileAsync(
-                    tablename, recordId,
-                    () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
-                    CancellationToken.None).ConfigureAwait(false);
             }
 
             if (!refile.Written)
@@ -275,6 +268,16 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     "[dataverse.update_record] the core-ancestor re-stamp after the update of {Entity} {RecordId} did not finish "
                     + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
                     tablename, recordId, restamp.Failures.Count, restamp.Truncated);
+            }
+
+            // Task 147 r1c (round 36), AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule
+            // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
+            if (refile.Written && children is not null)
+            {
+                await children.AfterRefileAsync(
+                    tablename, recordId,
+                    () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
+                    CancellationToken.None).ConfigureAwait(false);
             }
 
             // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and

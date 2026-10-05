@@ -13,7 +13,7 @@
 |---------|--------|----------|
 | Document Analysis (SSE) | Deployed | POST /api/ai/document-intelligence/analyze |
 | Background Analysis | Deployed | POST /api/ai/document-intelligence/enqueue |
-| Record Matching | Deployed | POST /api/ai/document-intelligence/match-records |
+| Record Matching | Background only (the HTTP match-records / associate-record routes were retired by unified-access-control-r2 task 164) | AttachmentClassificationJobHandler; admin sync under /api/admin/record-matching |
 | AnalysisBuilder PCF | v1.12.0 | Custom Page hosted |
 | AnalysisWorkspace PCF | v1.0.29 | Custom Page hosted |
 

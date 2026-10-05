@@ -14,15 +14,15 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 
 /// <summary>
-/// unified-access-control-r2 task 156, verifier round 2 item 8 — the REAL mapped <c>PUT /api/v1/events/{id}</c> route. The
-/// update writes only the event's regarding PAIR, but on an event that carries two typed sources the pair decides which
-/// one its copy comes from (<see cref="CoreAncestorResolver.ClassifyStampSource"/> rule 3). Moving the pair re-stamps the
-/// event, and everything filed under it, in the same request.
+/// unified-access-control-r2 task 156, verifier round 2 item 8, restated at the sweep integration: the event re-file route
+/// <c>PUT /api/v1/events/{id}</c> that 156 wired to re-stamp after the write was DELETED by task 159 (owner round 10 item 1:
+/// no caller in the repo, not in the published Copilot description). The stamp-freshness concern 156 closed for it now holds
+/// because NO HTTP path re-files an event: through the REAL Program, both shapes 156 pinned (a pair move, a rename) reach no
+/// handler, and nothing is read, patched or re-stamped.
 /// </summary>
 /// <remarks>
-/// Only module boundaries are substituted: the event service (its PATCH applies the pair to the in-memory row, as
-/// <c>DataverseWebApiService.UpdateEventAsync</c> writes it) and the Dataverse rows the cascade reads and PATCHes
-/// (<see cref="StampWorld"/>). The restamper is the real one.
+/// Only module boundaries are substituted: the event service and the Dataverse rows the cascade would read and PATCH
+/// (<see cref="StampWorld"/>). A route that came back would have to answer here, and would need 156's re-stamp again.
 /// </remarks>
 public class EventRefileRestampRouteTests : IClassFixture<EventRefileRestampFixture>
 {
@@ -34,38 +34,24 @@ public class EventRefileRestampRouteTests : IClassFixture<EventRefileRestampFixt
         _fixture.Reseed();
     }
 
-    [Fact(DisplayName = "Task 156 route (verifier round 2 item 8): PUT /api/v1/events/{id} moving the pair from the event's communication (matter A) to its invoice (matter B) re-stamps the event AND the to-do under it in the same request")]
-    public async Task Put_MovingThePairToTheEventsOtherSource_RestampsTheEventAndItsChildren()
+    [Theory(DisplayName = "Task 156 x 159: PUT /api/v1/events/{id} is not routed in the real Program -- a pair move and a rename both reach nothing, read nothing and re-stamp nothing")]
+    [InlineData("pair-move")]
+    [InlineData("rename")]
+    public async Task Put_TheDeletedRefileRoute_ReachesNothing_AndRestampsNothing(string shape)
     {
         using var client = _fixture.Client();
+        object body = shape == "pair-move"
+            ? new { regardingRecordType = 2, regardingRecordId = EventRefileRestampFixture.Invoice, regardingRecordName = "INV-0001" }
+            : new { subject = "Hearing (moved)" };
 
-        var response = await client.PutAsJsonAsync(
-            $"/api/v1/events/{EventRefileRestampFixture.Event}",
-            new
-            {
-                regardingRecordType = 2, // Invoice
-                regardingRecordId = EventRefileRestampFixture.Invoice,
-                regardingRecordName = "INV-0001",
-            });
+        var response = await client.PutAsJsonAsync($"/api/v1/events/{EventRefileRestampFixture.Event}", body);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.World.Lookup("sprk_event", EventRefileRestampFixture.Event, "sprk_regardingmatter")
-            .Should().Be(EventRefileRestampFixture.MatterB, "the event's copy now comes from its invoice");
-        _fixture.World.Lookup("sprk_todo", EventRefileRestampFixture.TodoUnderEvent, "sprk_regardingmatter")
-            .Should().Be(EventRefileRestampFixture.MatterB, "and the cascade carries it to the to-do filed under the event");
-    }
-
-    [Fact(DisplayName = "Task 156 route (verifier round 2 item 8): an event update that does not touch the pair (a rename) re-stamps nothing and reads nothing")]
-    public async Task Put_RenamingTheEvent_RestampsNothing_AndReadsNothing()
-    {
-        using var client = _fixture.Client();
-
-        var response = await client.PutAsJsonAsync(
-            $"/api/v1/events/{EventRefileRestampFixture.Event}", new { subject = "Hearing (moved)" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+        _fixture.Events.ReceivedCalls().Should().BeEmpty("no event handler ran");
         _fixture.World.Patches.Should().BeEmpty();
-        _fixture.World.Service.ReceivedCalls().Should().BeEmpty("a write that cannot move a stamp costs nothing");
+        _fixture.World.Service.ReceivedCalls().Should().BeEmpty("nothing was re-stamped");
+        _fixture.World.Lookup("sprk_event", EventRefileRestampFixture.Event, "sprk_regardingmatter")
+            .Should().Be(EventRefileRestampFixture.MatterA, "the event's copy is untouched");
     }
 }
 
@@ -80,6 +66,9 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
     internal static readonly Guid TodoUnderEvent = Guid.Parse("15600000-0000-0000-0000-000000000131");
 
     internal StampWorld World { get; } = new();
+
+    /// <summary>The event service at its module boundary (no member is configured: no route may reach it here).</summary>
+    internal IEventDataverseService Events { get; } = Substitute.For<IEventDataverseService>();
 
     /// <summary>
     /// Fresh rows per test (the host is shared by the class): an event filed under a communication (matter A — the pair
@@ -100,6 +89,7 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
                 [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
                 pairId: Event.ToString()));
         World.Service.ClearReceivedCalls();
+        Events.ClearReceivedCalls();
     }
 
     public HttpClient Client()
@@ -116,14 +106,13 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IEventDataverseService>();
-            services.AddSingleton(BuildEvents());
+            services.AddSingleton(Events);
 
             services.RemoveAll<CoreAncestorRestamper>();
             services.AddSingleton(_ => World.Restamper);
 
-            // Batch 4 integration (task 146): a change of regarding is a RE-FILE — authorized as the caller (Write on the
-            // event, AppendTo on the record it is filed to) and owned through the one resolver before the write. Both are
-            // module boundaries here: the caller holds the rights, and the owner double applies the write.
+            // The caller holds every right and the owner double would answer, so a 404/405 here is the ROUTE's
+            // absence, never an authorization or ownership refusal.
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(new AllowAllAccessDataSource());
             services.RemoveAll<IRecordOwnershipResolver>();
@@ -147,30 +136,5 @@ public sealed class EventRefileRestampFixture : CustomWebAppFactory
         public Task<AccessSnapshot> GetRecordAccessAsync(
             string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
             GetUserAccessAsync(userId, recordId.ToString(), userAccessToken, ct);
-    }
-
-    /// <summary>The event service: the event exists, and its update writes the pair exactly as the Web API service does.</summary>
-    private IEventDataverseService BuildEvents()
-    {
-        var events = Substitute.For<IEventDataverseService>();
-        events.GetEventAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult<EventEntity?>(new EventEntity
-            {
-                Id = call.ArgAt<Guid>(0),
-                Name = "Hearing",
-                StatusCode = 3,
-            }));
-        events.UpdateEventAsync(Arg.Any<Guid>(), Arg.Any<UpdateEventRequest>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var request = call.ArgAt<UpdateEventRequest>(1);
-                if (request.RegardingRecordType.HasValue)
-                {
-                    World.SetPair("sprk_event", call.ArgAt<Guid>(0), request.RegardingRecordId);
-                }
-
-                return Task.CompletedTask;
-            });
-        return events;
     }
 }

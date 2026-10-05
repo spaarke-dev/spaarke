@@ -88,6 +88,13 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private SecureChildShareSynchronizer Shares() => ShareWorld.Synchronizer(_shareTable);
 
+    /// <summary>
+    /// Task 147 r1c (round 36): the REAL task 148 reconciler over the same share world — the after-re-file step every re-file
+    /// writer runs (the row's mirror, then the pass over what is filed under it). A pass below a CHILD row never reads the
+    /// platform-cascade rows, so it needs no Web API client.
+    /// </summary>
+    private SecureChildReconciler Children() => SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!);
+
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -534,6 +541,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty();
     }
 
+    // ── PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing (round 36) ───────────────────
+
     [Fact]
     public async Task EventFiling_AnEventMovedUnderASecureMatter_IsOwnedByTheNamedTeam()
     {
@@ -541,29 +550,163 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         ShareWorld.UserOwnedChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
-        var result = await ChildRecordEndpoints.UpdateAsync(
-            "sprk_event", Event, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
-            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
 
-        Status(result).Should().Be(StatusCodes.Status204NoContent);
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
         _world.Assignments.Should().Equal(("sprk_event", Event, Directory.SecureNamedTeam));
         _shareTable.MaskOf("sprk_event", Event, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
     }
 
     [Fact]
+    public async Task EventFiling_TheRegardingLookupsAndTheResolverFields_AreTheFiling_AndAreWrittenAsTheCaller()
+    {
+        // The RegardingResolver's saved-host payload: the chosen lookup, the cleared siblings, the ADR-024 resolver fields.
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        var result = await RefileEvent(new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingProject@odata.bind"] = null,
+            ["sprk_regardingrecordid"] = OrdinaryMatter.ToString("D"),
+            ["sprk_regardingrecordname"] = "Smith v. Jones",
+            ["sprk_regardingrecordurl"] = "/main.aspx?etn=sprk_matter",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_events({Event:D})");
+    }
+
+    [Theory]
+    [InlineData("sprk_name")]
+    [InlineData("statuscode")]
+    [InlineData("sprk_CompletedBy@odata.bind")]
+    [InlineData("ownerid@odata.bind")]
+    public async Task EventFiling_APayloadNamingAnythingButTheFiling_Is400_AndNothingIsWritten(string property)
+    {
+        // Owner round 36: "it changes only the filing" — every other change to an event is the caller's own update.
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await RefileEvent(new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+            [property] = property.EndsWith("@odata.bind", StringComparison.Ordinal) ? $"/systemusers({Caller:D})" : "x",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFilingCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EventFiling_MovedUnderASecureMatter_TakesTheToDoFiledUnderTheEventIntoIsolation_AndMirrorsIt()
+    {
+        // Round 36: "then 148/149's child pass runs when the event moves under ... a secure parent". Before r1c a to-do of the
+        // event stayed readable by the business unit under the secure matter until the next sweep.
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000011");
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        ShareWorld.OrdinaryChild("sprk_todo", todoOfEvent, ("sprk_regardingevent", "sprk_event", Event));
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "the to-do follows its event into isolation in the same request");
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "and the secure matter's sharee sees it at once");
+    }
+
+    [Fact]
+    public async Task EventFiling_MovedOutOfASecureMatter_ByAFullAccessHolder_ReleasesTheToDoFiledUnderIt_AndTakesItsMirrorOff()
+    {
+        // The release rides the event's own F3 (Full Access on the matter left): the to-do was isolated only through it.
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000012");
+        MovedOutOfTheSecureMatter(todoOfEvent, alsoUnderTheSecureMatter: false);
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().Equal(("sprk_event", Event, Directory.ChildTeam));
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(Directory.ChildTeam),
+            "it follows the event out to the event's business unit team");
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "owner round 22: its mirror of the secure matter's sharees goes with it");
+    }
+
+    [Fact]
+    public async Task EventFiling_MovedOutOfASecureMatter_KeepsAToDoAlsoFiledUnderThatMatterIsolated()
+    {
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000013");
+        MovedOutOfTheSecureMatter(todoOfEvent, alsoUnderTheSecureMatter: true);
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "secure-if-any: it is still filed under the secure matter itself");
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task EventFiling_OfAnEventThatWasNeverIsolated_ReleasesNothingFiledUnderIt()
+    {
+        // Owner round 24 item 2: no F3 was asked (the event left no secure record), so an isolated to-do under it — held
+        // for an F3 holder's act — is not this re-file's to release.
+        var heldTodo = Guid.Parse("a2470000-0000-4000-8000-000000000014");
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        ShareWorld.SecureChild("sprk_todo", heldTodo, ("sprk_regardingevent", "sprk_event", Event));
+        _shareTable.Seed("sprk_todo", heldTodo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.OwnerOf("sprk_todo", heldTodo).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_todo", heldTodo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+        ShareWorld.OwnerWrites.Should().NotContain(w => w.Id == heldTodo);
+    }
+
+    [Fact]
+    public async Task EventFiling_MovedBetweenSecureMatters_MovesTheToDosMirrorToTheNewMattersSharees()
+    {
+        var secondMatter = Guid.Parse("a2470000-0000-4000-8000-0000000000c1");
+        var secondSharee = Guid.Parse("a2470000-0000-4000-8000-0000000000b2");
+        var todoOfEvent = Guid.Parse("a2470000-0000-4000-8000-000000000015");
+        _world.WithSecureRoot("sprk_matter", secondMatter);
+        _world.WithRecord("sprk_event", Event, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[Event] = Directory.SecureNamedTeam;
+        ShareWorld.SecureRoot("sprk_matter", secondMatter);
+        _shareTable.Seed("sprk_matter", secondMatter, DataversePrincipalRef.User(secondSharee), CollaborateMask);
+        ShareWorld.SecureChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", secondMatter));
+        ShareWorld.SecureChild("sprk_todo", todoOfEvent, ("sprk_regardingevent", "sprk_event", Event));
+        _shareTable.Seed("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee), CollaborateMask);
+
+        var result = await RefileEvent(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({secondMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShareWorld.OwnerOf("sprk_todo", todoOfEvent).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the first matter's sharee loses the to-do with the event");
+        _shareTable.MaskOf("sprk_todo", todoOfEvent, DataversePrincipalRef.User(secondSharee)).Should().Be(CollaborateMask,
+            "and the second matter's sharee gains it");
+    }
+
+    [Fact]
     public async Task CommunicationFiling_ACommunicationMovedUnderASecureMatter_IsPatchedAsTheCaller_ThenOwnedByTheNamedTeam_AndMirrored()
     {
-        // PATCH /api/communications/{id}/filing (the communications family, round 28) — the Connections writers' route.
+        // PATCH /api/communications/{id}/filing (the communications family, round 28/36) — the Connections writers' route.
         var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
         _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
         ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
-        var result = await ChildRecordEndpoints.UpdateAsync(
-            "sprk_communication", communication,
-            Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
-            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
         _user.Patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_communications({communication:D})");
@@ -578,16 +721,85 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
         _user.NoAppendTo.Add(SecureMatter);
 
-        var result = await ChildRecordEndpoints.UpdateAsync(
-            "sprk_communication", communication,
-            Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
-            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
 
         Status(result).Should().Be(StatusCodes.Status404NotFound);
         ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
         _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await RefileCommunication(communication, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = null,
+            ["sprk_associationstatus"] = null,
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFilingCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, bool> FilingShapes => new()
+    {
+        { "{}", false },
+        { "[]", false },
+        { "\"x\"", false },
+        { "{\"sprk_regarding\":null}", false },
+        { "{\"@odata.etag\":\"W/1\"}", false },
+        { "{\"sprk_regardingrecordid\":\"x\",\"sprk_name\":\"y\"}", false },
+        { "{\"sprk_RegardingMatter@odata.bind\":\"/sprk_matters(00000000-0000-0000-0000-000000000001)\"}", true },
+        { "{\"sprk_RegardingRecordType@odata.bind\":null,\"sprk_regardingrecordid\":null}", true },
+        { "{\"sprk_regardingrecordnumber\":\"MAT-1\",\"sprk_regardingrecordurl\":null,\"sprk_regardingrecordname\":\"A\"}", true },
+    };
+
+    [Theory]
+    [MemberData(nameof(FilingShapes))]
+    public void FilingShape_AcceptsOnlyTheRegardingLookupsAndTheResolverFields(string json, bool accepted)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        var problem = ChildRecordEndpoints.FilingShapeProblem(document.RootElement.Clone(), "sprk_event");
+
+        if (accepted)
+        {
+            problem.Should().BeNull();
+        }
+        else
+        {
+            Status(problem!).Should().Be(StatusCodes.Status400BadRequest);
+            ReasonCode(problem!).Should().Be(ChildRecordEndpoints.NotFilingCode);
+        }
+    }
+
+    /// <summary>
+    /// An event filed under the secure matter (isolated, with a to-do under it isolated and mirrored), that a Full Access
+    /// holder moves to the ordinary matter. The share world sees the PATCH's result (the event under the ordinary matter);
+    /// the event's business unit team is known to it so the released to-do's owner can be derived.
+    /// </summary>
+    private void MovedOutOfTheSecureMatter(Guid todoOfEvent, bool alsoUnderTheSecureMatter)
+    {
+        _world.WithRecord("sprk_event", Event, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[Event] = Directory.SecureNamedTeam;
+        ShareWorld.Add("businessunit", Directory.ChildBu, ("name", "Spaarke Business Unit 1"));
+        ShareWorld.Team(Directory.ChildTeam, Directory.ChildBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        ShareWorld.SecureChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        var lookups = alsoUnderTheSecureMatter
+            ? new[] { ("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", SecureMatter) }
+            : new[] { ("sprk_regardingevent", "sprk_event", Event) };
+        ShareWorld.SecureChild("sprk_todo", todoOfEvent, lookups);
+        _shareTable.Seed("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee), CollaborateMask);
     }
 
     /// <summary>Every table re-filed through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup.</summary>
@@ -718,12 +930,13 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "owner round 22: a share on a never-isolated row is its user's own intent");
     }
 
-    /// <summary>The chat update tool with a scope that resolves the REAL synchronizer over this test's share world.</summary>
+    /// <summary>The chat update tool with a scope that resolves the REAL reconciler (and its synchronizer) over this test's
+    /// share world.</summary>
     private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
         string table, Guid id, params (string Column, JsonElement Value)[] item)
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Shares());
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Children());
         var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
         var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
             .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(provider);
@@ -741,7 +954,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                         tablename = table,
                         recordId = id,
                         item = item.ToDictionary(i => i.Column, i => i.Value),
-                    })) with { UserId = Guid.NewGuid().ToString() },
+                    })) with
+                { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
     }
 
@@ -754,8 +968,21 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
-            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(),
+            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>PATCH /api/v1/events/{id}/filing's REAL handler (the route's filters are pinned through the real mapper by
+    /// EventEndpointsAuthorizationContractTests).</summary>
+    private Task<IResult> RefileEvent(Dictionary<string, object?> payload) =>
+        Sprk.Bff.Api.Api.Events.EventEndpoints.RefileEventAsync(
+            Event, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
+            NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
+    private Task<IResult> RefileCommunication(Guid communication, Dictionary<string, object?> payload) =>
+        ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(),
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
 
     private static CoreAncestorRestamper Restamper() =>
         new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper;

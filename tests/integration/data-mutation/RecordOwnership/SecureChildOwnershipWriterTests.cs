@@ -1062,6 +1062,14 @@ public class SecureChildOwnershipWriterTests
             builder.Services.AddSingleton(ownership);
             builder.Services.AddSingleton(Analyses.Object);
 
+            // Task 162 (sweep integration): /create is gated as the caller BEFORE the owner question (G5: the Create
+            // privilege, analysis.attach on the document, Read on each scope row). Not this suite's subject (162's
+            // AnalysisEndpointsAuthorizationContractTests pins it) — the gate is open here so the owner decision runs.
+            builder.Services.AddSingleton<Spaarke.Dataverse.IAccessDataSource>(new GateOpenAccessDataSource());
+            builder.Services.AddScoped<Spaarke.Core.Auth.IAuthorizationRule, Spaarke.Core.Auth.Rules.OperationAccessRule>();
+            builder.Services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
+            builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(new GateOpenProbe());
+
             // Sibling handlers' services — registered so minimal-API parameter inference treats them as services.
             var cache = new InMemoryTenantCache();
             var chatRepository = new CapturingChatDataverseRepository();
@@ -1106,6 +1114,37 @@ public class SecureChildOwnershipWriterTests
                 await _app.StopAsync();
                 await _app.DisposeAsync();
             }
+        }
+
+        /// <summary>Every record answers full rights (task 162's gate is open; see the registration).</summary>
+        private sealed class GateOpenAccessDataSource : Spaarke.Dataverse.IAccessDataSource
+        {
+            private static readonly Spaarke.Dataverse.AccessRights All =
+                Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write | Spaarke.Dataverse.AccessRights.Append
+                | Spaarke.Dataverse.AccessRights.AppendTo | Spaarke.Dataverse.AccessRights.Create | Spaarke.Dataverse.AccessRights.Delete
+                | Spaarke.Dataverse.AccessRights.Share;
+
+            public Task<Spaarke.Dataverse.AccessSnapshot> GetUserAccessAsync(
+                string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+                Task.FromResult(new Spaarke.Dataverse.AccessSnapshot { UserId = userId, ResourceId = resourceId, AccessRights = All });
+
+            public Task<Spaarke.Dataverse.AccessSnapshot> GetRecordAccessAsync(
+                string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+                GetUserAccessAsync(userId, recordId.ToString(), userAccessToken, ct);
+        }
+
+        /// <summary>The caller holds every table privilege (task 162's gate is open; see the registration).</summary>
+        private sealed class GateOpenProbe : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe
+        {
+            public GateOpenProbe()
+                : base(new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+                    NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance)
+            {
+            }
+
+            public override Task<bool> CallerHoldsPrivilegeAsync(
+                string? callerBearerToken, string privilegeName, CancellationToken ct = default) =>
+                Task.FromResult(!string.IsNullOrEmpty(callerBearerToken));
         }
     }
 }

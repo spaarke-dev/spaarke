@@ -268,8 +268,8 @@ public static class EndpointMappingExtensions
         app.MapKnowledgeBaseEndpoints();
         // UAT round-3 D3: NDA-standard clause text by ref (KNW-011 Part B) for the review comment hover.
         app.MapNdaStandardEndpoints();
-        // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
-        app.MapPromptLibraryEndpoints();
+        // AIPU2-035's Prompt Library (/api/ai/prompts, six routes) was REMOVED by unified-access-control-r2
+        // task 164 (owner round 10 item 1): no caller in the repo and not in any published API description.
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
         app.MapFeedbackEndpoints();
         app.MapChatEndpoints();
@@ -323,20 +323,20 @@ public static class EndpointMappingExtensions
         app.MapVisualizationEndpoints();
         app.MapResilienceEndpoints();
 
+        // POST /api/ai/document-intelligence/match-records and /associate-record (RecordMatchEndpoints) were
+        // REMOVED by unified-access-control-r2 task 164 (owner round 10 item 1): no caller in the repo and not
+        // in any published API description (sweep findings #31 and #32). RecordMatchService stays — the
+        // background AttachmentClassificationJobHandler uses it with fixed arguments.
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled"))
         {
-            app.MapRecordMatchEndpoints();
             app.MapRecordMatchingAdminEndpoints();
         }
 
-        // Admin endpoints that depend on Analysis services (ReferenceIndexingService).
-        // MapBuilderScopeAdminEndpoints removed 2026-07-07 (redesign-r1 task 050) with the
-        // AiPlaybookBuilder estate — builder-scope import had no surviving consumer.
-        if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
-            app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-        {
-            app.MapAdminKnowledgeEndpoints();
-        }
+        // MapAdminKnowledgeEndpoints (/api/admin/knowledge/*) REMOVED 2026-10-03 by unified-access-control-r2
+        // task 163 with AdminKnowledgeEndpoints.cs and its only service, ReferenceIndexingService: owner round
+        // 10 item 1 (no caller in the repo, in no published API description). The three routes let any
+        // signed-in user write into, re-embed or wipe the SHARED reference grounding index (sweep findings
+        // #20, #21, #49). MapBuilderScopeAdminEndpoints was removed earlier (redesign-r1 task 050).
 
         app.MapWorkspaceEndpoints();
         app.MapWorkspaceLayoutEndpoints();

@@ -822,6 +822,27 @@ public class FinanceEndpointsAuthorizationContractTests
 
             return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }
+
+        /// <summary>
+        /// What WhoAmI on the caller's OBO token answers (task 162 f1, the personal-analysis creator match). Null — the
+        /// default, and the base class's answer without OBO configuration — means "the caller's systemuserid could not be
+        /// established".
+        /// </summary>
+        public Guid? CallerSystemUserId { get; set; }
+
+        /// <summary>How many times the caller's systemuserid was asked for.</summary>
+        public int SystemUserIdCalls { get; private set; }
+
+        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
+        {
+            SystemUserIdCalls++;
+            if (ThrowOnEveryCall is not null)
+            {
+                return Task.FromException<Guid?>(ThrowOnEveryCall);
+            }
+
+            return Task.FromResult(string.IsNullOrEmpty(callerBearerToken) ? null : CallerSystemUserId);
+        }
     }
 
     /// <summary>

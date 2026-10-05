@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Ai.Audit;
 using Sprk.Bff.Api.Services.Ai.Feedback;
 using Sprk.Bff.Api.Services.Ai.Memory;
-using Sprk.Bff.Api.Services.Ai.PromptLibrary;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -157,10 +156,11 @@ public static class AiPersistenceModule
         // Scoped is safe; per-request usage from the governance endpoints.
         services.AddScoped<IMemoryAccessAuthorizer, MemoryAccessAuthorizer>();
 
-        // AIPU2-035: PromptLibraryService — Personal + Team template CRUD (Cosmos DB prompts container).
-        // Scoped: one instance per HTTP request; shares the singleton CosmosClient.
-        // Org + System template tiers are deferred to AIPU2-036 (Dataverse integration).
-        services.AddScoped<IPromptLibraryService, PromptLibraryService>();
+        // AIPU2-035's PromptLibraryService (Personal + Team template CRUD) was REMOVED with its six
+        // /api/ai/prompts routes by unified-access-control-r2 task 164 (owner round 10 item 1): no caller in
+        // the repo, not in any published API description, and sweep findings #56/#57 (any signed-in user
+        // could read, overwrite, delete or plant another user's or team's templates). The Cosmos "prompts"
+        // container is still provisioned by infrastructure/bicep; retiring it is a separate infra change.
 
         // AIPU2-036: FeedbackService — per-response thumbs up/down storage and aggregation.
         // Scoped: one instance per HTTP request; shares the singleton CosmosClient.

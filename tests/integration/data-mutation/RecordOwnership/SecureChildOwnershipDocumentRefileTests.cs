@@ -194,6 +194,31 @@ public sealed class SecureChildOwnershipDocumentRefileTests : IClassFixture<Docu
     }
 
     [Fact]
+    public async Task DocumentPut_MovingOutOfASecureMatter_ByAFullAccessHolder_ReleasesTheAnalysisFiledUnderIt()
+    {
+        // Round 36 (one after-re-file step for every re-file writer): the document's analysis was isolated only through the
+        // document, so it follows the document out under the same F3 act, and its mirror goes with it.
+        var documentId = DocumentRefileOwnershipTestFixture.SecureDocument;
+        var analysis = Guid.Parse("b1460000-0000-4000-8000-0000000000a1");
+        _fixture.ShareWorld.Add("businessunit", Directory.ChildBu, ("name", "Spaarke Business Unit 1"));
+        _fixture.ShareWorld.Team(Directory.ChildTeam, Directory.ChildBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        _fixture.ShareWorld.SecureChild("sprk_analysis", analysis, ("sprk_documentid", "sprk_document", documentId));
+        _fixture.ShareTable.Seed("sprk_analysis", analysis, DataversePrincipalRef.User(DocumentRefileOwnershipTestFixture.Sharee),
+            DocumentRefileOwnershipTestFixture.CollaborateMask);
+        _fixture.ShareWorld.Set("sprk_document", documentId, "sprk_matter",
+            new EntityReference("sprk_matter", DocumentRefileOwnershipTestFixture.OrdinaryMatter));
+        using var client = _fixture.CreateClientWithRights(RefileRights + ",DeleteAccess");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.OrdinaryMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareWorld.OwnerOf("sprk_analysis", analysis).Should().Be(DataversePrincipalRef.Team(Directory.ChildTeam));
+        _fixture.ShareTable.MaskOf("sprk_analysis", analysis, DataversePrincipalRef.User(DocumentRefileOwnershipTestFixture.Sharee))
+            .Should().BeNull();
+    }
+
+    [Fact]
     public async Task DocumentPut_ReFilingANeverIsolatedDocument_KeepsItsOwnShares()
     {
         // Owner round 22: a share on an ordinary, never-isolated row is its user's own intent — only a row that WAS
@@ -298,9 +323,12 @@ public sealed class DocumentRefileOwnershipTestFixture : DocumentDestroyAuthoriz
             services.RemoveAll<IRecordOwnershipResolver>();
             services.AddScoped<IRecordOwnershipResolver>(_ => World.Resolver());
 
-            // Task 147 r1c: the route's inline mirror runs over the CURRENT share world.
+            // Task 147 r1c: the route's after-re-file step (the mirror, then task 148's pass over what is filed under the
+            // document) runs over the CURRENT share world. A pass below a child row needs no Web API client.
             services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
             services.AddScoped(_ => ShareWorld.Synchronizer(ShareTable));
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+            services.AddScoped(_ => SecureChildShareWorld.ReconcilerOver(() => ShareWorld, ShareTable, null!));
 
             // c1: the caller-scoped probe F3 asks — rights from the same "rights=" bearer-token convention as the access
             // seam above, for every record; WhoAmI = ProbeCaller.

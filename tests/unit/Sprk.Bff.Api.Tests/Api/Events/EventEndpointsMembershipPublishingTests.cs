@@ -263,6 +263,9 @@ public class EventEndpointsMembershipPublishingTests
         public RecordOwnershipResolverDouble Ownership { get; } = new();
         public DataverseCreateEventRequest? Created { get; private set; }
 
+        // Task 159 added the regarding resolvers to the handler. These tests create an event with NO regarding, so
+        // neither is reached: the strict record-type mock and the resolver over the strict Dataverse mock would fail
+        // the test if either were.
         public Task<IResult> RunAsync() => EventEndpoints.CreateEventAsync(
             new ApiCreateEventRequest("Hearing prep"),
             EventService.Object,
@@ -271,6 +274,11 @@ public class EventEndpointsMembershipPublishingTests
             Dataverse.Object,
             CallerResolver.Object,
             Identity.Object,
+            new Mock<ICommunicationDataverseService>(MockBehavior.Strict).Object,
+            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+                Dataverse.Object,
+                (_, _) => throw new InvalidOperationException("no regarding: the column probe must not be reached"),
+                NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
             HttpContextFor(_callerOid),
             NullLogger<Program>.Instance,
             CancellationToken.None);

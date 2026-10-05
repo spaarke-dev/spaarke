@@ -658,11 +658,12 @@ public class TodoGenerationServiceTests
     [Fact]
     public async Task RunGenerationPass_CompletedOverdueEvent_NotIncluded()
     {
-        // Arrange: overdue event with statuscode=5 (Completed) should be skipped
+        // Arrange: overdue event with the LIVE Completed statuscode (659490002; task 159 — the old 5 is not a value of
+        // sprk_event.statuscode) should be skipped
         var service = CreateService(_eventSourcedEnabledOptions);
         var completedEvent = BuildEvent(
             name: "Completed Filing",
-            statusCode: 5,
+            statusCode: 659490002,
             dueDate: DateTime.UtcNow.Date.AddDays(-3));
 
         _eventsMock
@@ -711,7 +712,7 @@ public class TodoGenerationServiceTests
         // Assert — dry-run: events WERE queried (via the event service), but NOTHING created.
         _eventsMock.Verify(
             d => d.QueryEventsAsync(
-                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
@@ -749,14 +750,14 @@ public class TodoGenerationServiceTests
         // Assert — the composite QueryEventsAsync is NEVER used for events (the bug).
         _dataverseMock.Verify(
             d => d.QueryEventsAsync(
-                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
         // The event service WAS the source for both rules, and both produced a To Do.
         _eventsMock.Verify(
             d => d.QueryEventsAsync(
-                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));

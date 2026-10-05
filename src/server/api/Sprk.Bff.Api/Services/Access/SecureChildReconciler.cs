@@ -360,6 +360,158 @@ public sealed class SecureChildReconciler
         return await pass.RunAsync().ConfigureAwait(false);
     }
 
+    /// <summary>How many times the child pass after a re-file runs before it reports (every pass is idempotent).</summary>
+    internal const int RefileChildPassAttempts = 2;
+
+    /// <summary>
+    /// Task 147 r1c: whether ONE row is owned by the Secure Record owner team right now — a re-file writer asks BEFORE its
+    /// write, for <see cref="AfterRefileAsync"/>'s <c>wasIsolated</c>. See <see cref="SecureChildShareSynchronizer.IsSecureTeamOwnedAsync"/>.
+    /// </summary>
+    public Task<bool> IsSecureTeamOwnedAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        _shares.IsSecureTeamOwnedAsync(childLogicalName, childId, ct);
+
+    /// <summary>Task 147 r1c: whether <paramref name="teamId"/> is the Secure Record owner team (a writer that read the row's
+    /// owning team before its write). See <see cref="SecureChildShareSynchronizer.IsSecureOwnerTeamAsync"/>.</summary>
+    public Task<bool> IsSecureOwnerTeamAsync(Guid teamId, CancellationToken ct) => _shares.IsSecureOwnerTeamAsync(teamId, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1c (owner round 28 item 1; round 36: "then 148/149's child pass runs when the event
+    /// moves under or out of a secure parent") — the ONE step after a re-file, for EVERY re-file writer (the event and
+    /// communication filing routes, <c>PATCH /api/v1/child-records/{table}/{id}</c>, <c>PUT /api/v1/documents/{id}</c> and
+    /// the chat update tool). Never throws; the re-file it follows stands.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>(1) The row itself</b> — task 149's mirror, inline (<see cref="SecureChildShareSynchronizer.AfterRefileAsync"/>):
+    /// shared with its secure roots' sharees when it is isolated now; its mirrored shares removed when it LEFT isolation.</para>
+    /// <para><b>(2) Everything filed under it</b> — when the row was isolated before the re-file or is isolated now (it moved
+    /// under, out of, or between secure records), this engine's pass runs over the row's own descendants (to-dos, memos, event
+    /// logs, documents and their analyses, …): each re-decided by the ONE ownership rule against the owners its parents have
+    /// NOW, re-owned across the isolation boundary, read back, its mirror brought in line (an isolated descendant mirrors ITS
+    /// OWN secure roots' sharees — <see cref="SecureChildShareSynchronizer.SyncChildAsync"/> — since the row is not a root);
+    /// one that leaves isolation loses its mirror (owner round 22). Without it a re-filed event's to-dos would stay readable
+    /// by the business unit under the secure record it moved into until the next sweep, and stay isolated for good under the
+    /// ordinary record it moved out to.</para>
+    /// <para><b>Release (owner round 24 item 2).</b> A descendant leaves isolation only when the ROW left it in this re-file —
+    /// a move the re-file core admitted only after the caller's F3 (Full Access on every secure record left, or the row's
+    /// creator; owner round 10 item 7). Its descendants were isolated only through it, so they follow it out under the same
+    /// act. A row that was not isolated before releases nothing: an isolated descendant whose every parent is ordinary is held
+    /// and reported <see cref="SecureChildRowOutcome.NeedsF3"/>, as the sweep does. Whether the row was isolated before is
+    /// read by the writer BEFORE its write (<paramref name="wasIsolated"/>); when it cannot be read nothing is released.</para>
+    /// <para><b>Fail closed (ADR-003).</b> A pass that does not complete is run again once (<see cref="RefileChildPassAttempts"/>);
+    /// then it is logged as an ERROR naming the row. Every row it could not move is left as it was — an isolated row stays
+    /// isolated (an under-share); an ordinary row under a secure record is moved in by the two-minute recent-changes pass,
+    /// which sees the re-filed row's modification.</para>
+    /// </remarks>
+    /// <param name="childLogicalName">The re-filed row's table.</param>
+    /// <param name="childId">The re-filed row.</param>
+    /// <param name="wasIsolated">Whether the row was owned by the Secure Record owner team BEFORE the re-file.</param>
+    /// <param name="ct">Cancellation (writers pass <see cref="CancellationToken.None"/>: the write has landed).</param>
+    /// <returns>The descendants' pass, or <c>null</c> when none ran.</returns>
+    public async Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
+        ArgumentNullException.ThrowIfNull(wasIsolated);
+        var table = childLogicalName.Trim().ToLowerInvariant();
+
+        bool? before = null;
+        Exception? beforeFault = null;
+        try
+        {
+            before = await wasIsolated().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            beforeFault = ex;
+        }
+
+        // (1) The row's own mirror — one implementation (task 149's synchronizer); it logs a fault reading `before`.
+        await _shares.AfterRefileAsync(
+            table, childId,
+            () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault),
+            ct).ConfigureAwait(false);
+
+        if (!SecureChildLineage.IsChild(table))
+            return null;
+
+        bool now;
+        try
+        {
+            now = await _shares.IsSecureTeamOwnedAsync(table, childId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its owner could not be read back, so " +
+                "the records filed under it were NOT reconciled; the two-minute recent-changes pass moves them into isolation " +
+                "if it is isolated, and nothing is released.", table, childId);
+            return null;
+        }
+
+        if (before != true && !now)
+            return null; // neither under a secure record before nor now: nothing filed under it crosses the boundary
+
+        var mayRelease = before == true && !now;
+        var anchor = new RecordOwnershipParent(table, childId);
+        SecureChildReconcileReport? report = null;
+        for (var attempt = 1; attempt <= RefileChildPassAttempts; attempt++)
+        {
+            report = await ReconcileBelowAsync(anchor, now, mayRelease, ct).ConfigureAwait(false);
+            if (report.IsComplete)
+                return report;
+        }
+
+        _logger.LogError(
+            "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed ({Direction}), but the records filed under it were not all " +
+            "brought in line after {Attempts} passes ({Status}: refused={Refused} failed={Failed} needsF3={NeedsF3}; {Detail}). " +
+            "Every row not moved was left as it was.", table, childId,
+            mayRelease ? "out of isolation" : now ? "into or within isolation" : "unchanged", RefileChildPassAttempts,
+            report!.Status, report.Tables.Sum(t => t.Refused), report.Tables.Sum(t => t.Failed),
+            report.Tables.Sum(t => t.NeedsF3), report.Detail ?? "-");
+        return report;
+    }
+
+    /// <summary>One pass over the descendants of a re-filed CHILD row (never its platform-cascade rows: only a root has those).</summary>
+    private async Task<SecureChildReconcileReport> ReconcileBelowAsync(
+        RecordOwnershipParent anchor, bool anchorIsolated, bool mayRelease, CancellationToken ct)
+    {
+        const SecureChildReconcileMode mode = SecureChildReconcileMode.Apply;
+        Guid secureTeamId;
+        try
+        {
+            var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (team.Refusal is { } refusal)
+                return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, anchor.EntityLogicalName,
+                    anchor.RecordId, refusal);
+            if (team.TeamId is not { } id)
+                return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.NotApplicable, mode, anchor.EntityLogicalName,
+                    anchor.RecordId, "this environment has no Secure Record owner team, so no record is secure");
+            secureTeamId = id;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: the Secure Record owner team could not be read; nothing " +
+                "filed under it was decided.", anchor.EntityLogicalName, anchor.RecordId);
+            return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, anchor.EntityLogicalName,
+                anchor.RecordId, "the Secure Record owner team could not be read");
+        }
+
+        var pass = new Pass(this, mode, anchor, anchorIsolated, unsecuring: false, mayRelease, secureTeamId, ct);
+        try
+        {
+            await pass.LoadDescendantsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: the records filed under it could not be read; nothing " +
+                "was written.", anchor.EntityLogicalName, anchor.RecordId);
+            return SecureChildReconcileReport.Ended(SecureChildReconcileStatus.Failed, mode, anchor.EntityLogicalName,
+                anchor.RecordId, "the records filed under it could not be read");
+        }
+
+        return await pass.RunAsync().ConfigureAwait(false);
+    }
+
     /// <summary>One pass's state; nothing outlives it.</summary>
     private sealed class Pass
     {
@@ -368,6 +520,10 @@ public sealed class SecureChildReconciler
         private readonly RecordOwnershipParent _root;
         private readonly bool _rootIsolated;
         private readonly bool _unsecuring;
+
+        // Task 147 r1c: a pass below a re-filed CHILD row (AfterRefileAsync) — no platform-cascade rows, and each isolated
+        // descendant mirrors its own secure roots' sharees (there is no root to sync from).
+        private readonly bool _anchorIsRoot;
 
         // Owner round 24 item 2: only an unsecure (an F3 holder's act) takes a child out of isolation.
         private readonly bool _mayRelease;
@@ -392,6 +548,7 @@ public sealed class SecureChildReconciler
             _root = root;
             _rootIsolated = rootIsolated;
             _unsecuring = unsecuring;
+            _anchorIsRoot = SecureChildLineage.IsRoot(root.EntityLogicalName);
             _mayRelease = mayRelease;
             _secureTeamId = secureTeamId;
             _ct = ct;
@@ -486,7 +643,9 @@ public sealed class SecureChildReconciler
         public async Task<SecureChildReconcileReport> RunAsync()
         {
             // 1. The rows the root's own Assign cascades to: the rule's owner for a child of the root (owner round 13 item 1).
-            await PlaceCascadeRowsAsync().ConfigureAwait(false);
+            //    Only a root has them (a pass below a re-filed child row has none).
+            if (_anchorIsRoot)
+                await PlaceCascadeRowsAsync().ConfigureAwait(false);
 
             // 2. Every descendant, decided by the rule against the owners its parents have NOW (report-only: would have) —
             //    repeated until nothing is left to move (a fixpoint). One ordered sweep is not enough: a row's parents can sit
@@ -683,8 +842,10 @@ public sealed class SecureChildReconciler
 
                 // 3b. INTO isolation: the root's sharees mirrored onto every Secure-team-owned child (task 149) — the rows
                 // put back above included.
-                if (_rootIsolated)
+                if (_anchorIsRoot && _rootIsolated)
                     shares = await _owner._shares.SyncRootAsync(_root.EntityLogicalName, _root.RecordId, _ct).ConfigureAwait(false);
+                else if (!_anchorIsRoot)
+                    shares = await MirrorIsolatedDescendantsAsync(ordered, current, results).ConfigureAwait(false);
             }
 
             foreach (var row in ordered)
@@ -733,6 +894,53 @@ public sealed class SecureChildReconciler
             return new SecureChildReconcileReport(
                 status, _mode, _root.EntityLogicalName, _root.RecordId, _rootIsolated, tables, _changes, shares,
                 mirrorRevoked, mirrorIncomplete, null);
+        }
+
+        /// <summary>
+        /// Task 147 r1c — below a re-filed CHILD row: every descendant the Secure team owns after the moves gets the mirror task
+        /// 149 computes for that row (<see cref="SecureChildShareSynchronizer.SyncChildAsync"/> — the intersection of ITS secure
+        /// roots' sharees), so a row that moved between secure records loses the old record's sharees and gains the new one's.
+        /// A row whose move failed is left as the next pass finds it. <c>null</c> when no row is isolated.
+        /// </summary>
+        private async Task<SecureChildShareSyncResult?> MirrorIsolatedDescendantsAsync(
+            IReadOnlyList<Entity> ordered,
+            IReadOnlyDictionary<(string Table, Guid Id), DataversePrincipalRef?> current,
+            IReadOnlyDictionary<(string Table, Guid Id), RowResult> results)
+        {
+            var synced = new List<SecureChildShareSyncResult>();
+            foreach (var row in ordered)
+            {
+                var key = (row.LogicalName, row.Id);
+                if (!IsIsolated(current[key]) || results[key].Outcome == SecureChildRowOutcome.Failed)
+                    continue;
+
+                try
+                {
+                    synced.Add(await _owner._shares.SyncChildAsync(row.LogicalName, row.Id, _ct).ConfigureAwait(false));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: its mirror faulted.", row.LogicalName, row.Id);
+                    synced.Add(SecureChildShareSyncResult.Failed("the mirror faulted"));
+                }
+            }
+
+            if (synced.Count == 0)
+                return null;
+
+            var open = synced.Where(r => !r.IsComplete).ToList();
+            return new SecureChildShareSyncResult(
+                open.Count == 0 ? SecureChildShareSyncStatus.Completed : SecureChildShareSyncStatus.Incomplete,
+                synced.Count,
+                synced.Sum(r => r.ChildrenUpdated),
+                synced.Sum(r => r.ChildrenUnchanged),
+                synced.Sum(r => r.ChildrenNotUpdated) + open.Count(r => r.ChildrenLeftOutOfLine == 0),
+                synced.Sum(r => r.ChildrenHeld),
+                synced.Sum(r => r.ChildrenOutsideSecureRoots),
+                synced.Sum(r => r.SharesGranted),
+                synced.Sum(r => r.SharesChanged),
+                synced.Sum(r => r.SharesRevoked),
+                open.Select(r => r.Detail).FirstOrDefault(d => d is not null));
         }
 
         /// <summary>

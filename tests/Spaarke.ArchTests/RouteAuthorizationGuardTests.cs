@@ -200,11 +200,9 @@ public class RouteAuthorizationGuardTests
         // the body-declared per-record filter (Write on the document + AppendTo on the target). match-records serves
         // record names/ids from the AI record index with no per-caller trimming — the same shape /api/ai/search/records
         // closed — and is a Pending waiver below, not a hidden pass.
-        new GovernedFile("Api/Ai/RecordMatchEndpoints.cs", Scope.RouteLevelGate,
-            "/api/ai/document-intelligence/* — associate-record RE-FILES a document (a reparent that changes its owner; "
-            + "gated by AddFinanceAuthorizationFilter(ResolveAssociateTargets): Write on the body DocumentId through the "
-            + "document path + AppendTo on the body RecordId's entity set). match-records returns matched matter/"
-            + "project/invoice records from the AI record index — Pending waiver."),
+        // (Api/Ai/RecordMatchEndpoints.cs — governed by task 146 r1 for associate-record — left this list with the file:
+        // task 164 deleted both of its routes under owner round 10 item 1. Absence pinned by
+        // tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs. Sweep integration 2026-10-04.)
 
         // ---- Office add-in surface: added 2026-09-29 by task 120 (GitHub #1015) ----
         //
@@ -289,6 +287,26 @@ public class RouteAuthorizationGuardTests
             "POST /api/{matters|projects}/{id}/recalculate-grades — reads KPI assessments app-only and writes six "
             + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
             + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
+
+        // ---- AI analysis: added 2026-10-03 by unified-access-control-r2 task 162 (sweep findings #1, #2, #22,
+        //      #50, #51, #52; GitHub #233 item 1) ----
+        //
+        // Absent from this census while serving analysis working documents and writing sprk_analysis rows,
+        // document profile fields and SPE files app-only. Worse than absent: every route here carried an
+        // Add…AuthorizationFilter, so Rule A credited them by NAME and Rule B passed the filter file because its
+        // text contains "AuthorizationService" — while four of the seven decided nothing (AnalysisAccess was a
+        // pass-through, and AiAuthorizationFilter ignores the fork/promote bodies). The structural rules cannot
+        // tell a deciding filter from a decorative one with the right name; AnalysisEndpointsAuthorizationContract
+        // Tests (real MapAnalysisEndpoints host, one deny case per mapped route, completeness-checked) is what
+        // proves these. /fork, /{analysisId}/save and /{analysisId}/export were DELETED (owner round 10 item 1).
+        new GovernedFile("Api/Ai/AnalysisEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/analysis/* — create and execute (Read on every body document via IAiAuthorizationService; "
+            + "execute adds the run filter: Write on every document for the document-profile branch or a playbook "
+            + "that can write, plus the playbook-use decision), promote (G5: Create privilege on sprk_analysis, "
+            + "analysis.attach on the body document and regarding record, playbook-use; the session owner and the "
+            + "session-derived document are checked in the handler, see SessionOwnershipGuardTests) and GET "
+            + "/{analysisId} (Read on EVERY populated anchor of the analysis, uniform 404). Every new check is "
+            + "evaluated by FinanceAuthorizationFilter; no route in this file carries a waiver."),
 
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
@@ -592,19 +610,9 @@ public class RouteAuthorizationGuardTests
         // 078 perturbation-proved the gate is what keeps Rule A green here, not a waiver: removing
         // .AddContainerDocumentAuthorizationFilter() makes Rule A FAIL naming this route again.
 
-        // ---------- task 146 r1: first measurement of Api/Ai/RecordMatchEndpoints.cs ----------
-        //
-        // PENDING, and honestly so (maintenance rule 4). The file entered this census because its sibling route,
-        // associate-record, became an ownership-changing re-file (now gated). match-records was already
-        // authentication-only before task 146 and still is: it returns matched record names and ids from the AI record
-        // index without trimming to what the caller may read — the shape /api/ai/search/records closed with
-        // RecordSearchAuthorizationFilter. Gating it is not task 146's scope (it writes nothing and changes no owner),
-        // so it is recorded here as a work item rather than left invisible.
-        new Waiver("POST /api/ai/document-intelligence/match-records", WaiverKind.Pending, "UNOWNED",
-            "COLLECTION READ over the AI record index (matter / project / invoice names and ids matched to a document's "
-            + "extracted entities) with no per-caller result trimming. Pre-existing, surfaced when task 146 r1 brought "
-            + "the file into this census for associate-record. Needs the RecordSearchAuthorizationFilter treatment "
-            + "(trim to records the caller can read) — no owning task yet."),
+        // ---------- task 146 r1: Api/Ai/RecordMatchEndpoints.cs — the match-records Pending waiver is DELETED ----------
+        // Deleted, not converted: task 164 deleted the route (owner round 10 item 1: no caller, not published), which is
+        // the only way a Pending waiver leaves without a gate (maintenance rule 3). Sweep integration 2026-10-04.
 
         // ---------- PERMANENT ----------
         new Waiver("POST /api/v1/documents", WaiverKind.Permanent, "-",
@@ -938,14 +946,53 @@ public class RouteAuthorizationGuardTests
     //            Pinned through the real pipeline by
     //            tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs.
     //
-    // 122 -> 123 (2026-10-04, unified-access-control-r2 task 147 r1, owner round 28 item 1):
+    // 122 -> 120 (2026-10-04, sweep integration of unified-access-control-r2 task 160, GitHub #1099; written as
+    // 120 -> 118 on the task branch, before 142 and 143 landed here). A DOWNWARD move, the census's third firing in the
+    // delete direction:
+    //
+    //   160  -2  Api/Dataverse/FetchEndpoints.cs and Api/Dataverse/RecordEndpoints.cs DELETED — the
+    //            internal POST /api/dataverse/fetch and GET /api/dataverse/record/{entityLogicalName}/
+    //            {id:guid}. Route sweep findings #9 and #10 (both critical): each ran the caller's query
+    //            APP-ONLY behind DataverseAuthorizationFilter, which checks a table privilege at any depth
+    //            and never a record. Owner round 10 item 1: no caller in the repo, in no published API
+    //            description, so deleted rather than fixed. Neither file was in GovernedFiles and neither
+    //            had a waiver, so the count alone moves. Deny proof:
+    //            Sprk.Bff.Api.IntegrationTests.Api.Dataverse.DataverseProxyRoutesRemovedTests.
+    //
+    // 120 -> 119 (2026-10-04, sweep integration of unified-access-control-r2 task 163; written as 120 -> 119 on the task
+    // branch). A DOWNWARD move:
+    //
+    //   163  -1  Api/Ai/AdminKnowledgeEndpoints.cs DELETED with all three of its routes (POST
+    //            /api/admin/knowledge/index-references, POST and DELETE /index-reference/{knowledgeSourceId})
+    //            under owner round 10 item 1 — no caller in the repo and in no published API description.
+    //            The file was NOT in GovernedFiles, so there is no entry to remove. Api/Ai/KnowledgeBaseEndpoints.cs
+    //            lost four routes in the same task but keeps GET /indexes/health, so it is still counted.
+    //
+    // 119 -> 117 (2026-10-04, sweep integration of unified-access-control-r2 task 164, owner round 10 item 1; written as
+    // 120 -> 118 on task 164's own branch, and 119 -> 117 on task 163's fix round that merged it). A DOWNWARD move:
+    //
+    //   164  -1  Api/Ai/PromptLibraryEndpoints.cs DELETED — all six /api/ai/prompts routes retired (no caller in
+    //            the repo, not in any published API description; sweep findings #56 and #57). Never governed.
+    //        -1  Api/Ai/RecordMatchEndpoints.cs DELETED — POST /api/ai/document-intelligence/match-records and
+    //            /associate-record retired on the same rule (sweep #31, #32). Never governed.
+    //         0  GET /api/ai/playbooks/by-name/{name} and PUT /api/ai/playbooks/{id:guid}/nodes/reorder were
+    //            retired too, but their files (PlaybookEndpoints.cs, NodeEndpoints.cs) still map other routes, so
+    //            the census cannot see them. Absence is pinned by
+    //            tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs.
+    //
+    // Reconcile at integration: sibling sweep tasks (159-169) move this count too; the merged value is the
+    // master count after every retired and added file, recounted, not a sum of deltas.
+    //
+    // 117 -> 118 (2026-10-04, unified-access-control-r2 task 147 r1c, owner round 28 item 1 + round 36; written as
+    // 122 -> 123 on the task branch, before 160, 163 and 164 landed here):
     //
     //   147  +1  Api/ChildRecordEndpoints.cs ADDED — the browser's child-record writes through the BFF (G5 create,
     //            re-file through the shared core). It writes Dataverse content keyed by caller-chosen ids, so it IS
     //            governed: classified HandlerAuthorized above, with the reason. The re-file routes the events and
-    //            communications families gained (PATCH /api/v1/events/{id}/filing, PATCH /api/communications/{id}/filing)
-    //            live in existing files and call the same handler.
-    private const int ExpectedEndpointFileCount = 123;
+    //            communications families gained (PATCH /api/v1/events/{id}/filing — round 36, after task 159 deleted
+    //            the general PUT — and PATCH /api/communications/{id}/filing) live in existing files and call the same
+    //            handler, so the census cannot see them.
+    private const int ExpectedEndpointFileCount = 118;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver
@@ -1279,13 +1326,21 @@ public class RouteAuthorizationGuardTests
                 + "not per-record authorization — the record decision is SpeAdminAuthorizationFilter's job.",
             ["AgentAuthorizationFilter"] =
                 "M365 Copilot gateway (/api/agent/*). Asserts a resolvable oid AND tid on the inbound agent "
-                + "token and denies without either. Identity precondition for a gateway, not a document "
-                + "route — it serves no document metadata or bytes, so it is outside Rule A's subject too.",
+                + "token and denies without either — an IDENTITY PRECONDITION only. It decides nothing about "
+                + "records, and the agent routes DO reach document and playbook data: the per-record decisions "
+                + "are made by other filters in the same chain (POST /run-playbook: PlaybookAuthorizationFilter "
+                + "run mode — the playbook-use decision, Read/Write on the document and the record parameters; "
+                + "POST /message: AiAuthorizationFilter's chat-context evaluation of the body document and the "
+                + "resumed session's stored context; task 164), and the status route's run-owner comparison is "
+                + "in its handler.",
             ["CommunicationAuthorizationFilter"] =
-                "Gates SENDING a communication, not reading a record. Its own summary is explicit that "
-                + "Phase 1 permits any authenticated user with a valid oid, so it does not misrepresent "
-                + "itself as a per-resource gate. Per-record scoping is ICommunicationAccessFilter's job, "
-                + "which is a separate seam already in DecisionServices.",
+                "IDENTITY PRECONDITION only (authenticated + a resolvable oid) for the /api/communications "
+                + "routes; it decides nothing about any record, and its summary says so. The 2026-10-02 route "
+                + "sweep found the old reason here ('per-record scoping is ICommunicationAccessFilter's job') "
+                + "false for twelve routes whose paths never reached that seam. Since task 161 the per-record "
+                + "decision is CommunicationRecordAuthorizationFilter, attached AFTER this filter in each such "
+                + "route's chain (.AddCommunicationRecordAuthorizationFilter) and inspected by Rule B in its own "
+                + "right; routes carrying ONLY this filter must scope their reads to the caller in the handler.",
             ["WorkspaceAuthorizationFilter"] =
                 "Resolves the caller's oid, denies 401 when absent, and stashes it in HttpContext.Items so "
                 + "handlers do not repeat claim extraction. A claim-resolution precondition by construction "

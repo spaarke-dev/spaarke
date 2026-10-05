@@ -51,6 +51,8 @@ public class CommunicationSetThreadPinnedContractTests : IDisposable
     {
         _factory = new CommunicationPinTestWebAppFactory();
         _client = _factory.CreateClient();
+        // Task 161: the record gate asks every rights question with the caller's own token.
+        _client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token");
     }
 
     public void Dispose()
@@ -94,6 +96,8 @@ public class CommunicationSetThreadPinnedContractTests : IDisposable
     {
         var threadId = Guid.NewGuid();
         _factory.ResolveCaller(CallerSystemUserId);
+        // Task 161: pinning writes the shared thread record — the caller must hold Write on it.
+        _factory.Probe.Grant("sprk_communicationthreads", threadId, AccessRights.Read | AccessRights.Write);
         _factory.SetThreadVisibleRows(new[]
         {
             new Dictionary<string, JsonElement>
@@ -129,6 +133,8 @@ public class CommunicationSetThreadPinnedContractTests : IDisposable
     {
         var threadId = Guid.NewGuid();
         _factory.ResolveCaller(CallerSystemUserId);
+        // Task 161: pinning writes the shared thread record — the caller must hold Write on it.
+        _factory.Probe.Grant("sprk_communicationthreads", threadId, AccessRights.Read | AccessRights.Write);
         _factory.SetThreadVisibleRows(new[]
         {
             new Dictionary<string, JsonElement>
@@ -166,6 +172,9 @@ public sealed class CommunicationPinTestWebAppFactory : WebApplicationFactory<Pr
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
     public Mock<IImpersonatedCommunicationQuery> ImpersonatedQueryMock { get; } = new();
     public Mock<ICallerSystemUserResolver> CallerResolverMock { get; } = new();
+
+    /// <summary>Task 161: the record gate asks the probe for Write on the thread (the rename/pin/delete write the SHARED record).</summary>
+    public RecordingProbe Probe { get; } = new();
 
     private readonly bool _disableAuth;
 
@@ -294,6 +303,8 @@ public sealed class CommunicationPinTestWebAppFactory : WebApplicationFactory<Pr
             services.AddSingleton(ImpersonatedQueryMock.Object);
             services.RemoveAll<ICallerSystemUserResolver>();
             services.AddScoped(_ => CallerResolverMock.Object);
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(Probe);
 
             // Avoid a real Dataverse boot (mirrors OfficeCommunicationsTestWebAppFactory).
             var dataverseServiceMock = new Mock<IDataverseService>();

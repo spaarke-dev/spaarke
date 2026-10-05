@@ -213,6 +213,35 @@ public static partial class ProblemDetailsHelper
             ? decision.ToProblem(refusal.Reason ?? decision.MoveOutDetail(noun), traceId)
             : RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
 
+    /// <summary>
+    /// The ONE reasonCode of <see cref="UniformRecordNotFound"/>. Deliberately the same for an absent record and
+    /// for one the caller may not read; distinguishing them in any channel would confirm the existence of records
+    /// the caller cannot see.
+    /// </summary>
+    public const string RecordUnavailableReasonCode = "sdap.access.deny.record_unavailable";
+
+    /// <summary>
+    /// The uniform "not found" response: byte-identical, apart from the correlation id, for a record that does not
+    /// exist, a record the caller may not read, and a record that disappears between the authorization check and
+    /// the handler. It never contains the requested id.
+    /// </summary>
+    /// <remarks>
+    /// Moved here from <c>FinanceAuthorizationFilter</c> by unified-access-control-r2 task 159 with its bytes
+    /// unchanged, so the events filter and handlers share it rather than copy it. <c>FinanceAuthorizationFilter</c>
+    /// keeps same-named members that forward here (task 130's contract tests pin them).
+    /// </remarks>
+    public static IResult UniformRecordNotFound(HttpContext httpContext) =>
+        Results.Problem(
+            title: "Not Found",
+            detail: "The requested record was not found.",
+            statusCode: StatusCodes.Status404NotFound,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = RecordUnavailableReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+
     private static string GetErrorCode(string? errorCode, int status)
     {
         // Graph SDK v5.x: Error codes are in ex.Error.Code property

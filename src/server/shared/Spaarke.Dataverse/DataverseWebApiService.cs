@@ -304,9 +304,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return entitySetName;
     }
 
-    public async Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -317,42 +317,180 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid? ownerUserId = null,
         CancellationToken ct = default)
     {
-        // Build OData query
+        // APP-ONLY: background callers only (TodoGenerationService). See the interface remarks.
+        var url = BuildEventQueryUrl(
+            regardingRecordType, regardingRecordId, regardingRecordTypeRefId: null,
+            eventTypeId, statusCode, priority, dueDateFrom, dueDateTo, skip, top, ownerUserId);
+
+        return QueryEventsCoreAsync(url, skip, top, impersonateSystemUserId: null, ct);
+    }
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        Guid? ownerUserId = null,
+        CancellationToken ct = default)
+    {
+        // Refused BEFORE the URL is built or anything is sent: an empty caller would otherwise be one bug away from
+        // the app-only query this method exists to replace (task 104's fail-closed rule, restated at the entry).
+        if (callerSystemUserId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "A caller-scoped event query requires a non-empty caller systemuserid; refusing to issue an app-only "
+                + "query on the access-scoped read path (fail closed).",
+                nameof(callerSystemUserId));
+        }
+
+        var url = BuildEventQueryUrl(
+            regardingRecordType, regardingRecordId, regardingRecordTypeRefId,
+            eventTypeId, statusCode, priority, dueDateFrom, dueDateTo, skip, top, ownerUserId);
+
+        return QueryEventsCoreAsync(url, skip, top, callerSystemUserId, ct);
+    }
+
+    /// <summary>
+    /// The Dataverse Web API rejects <c>$top</c> above this (and rejects <c>$skip</c> outright), so a page window
+    /// <c>skip + top</c> may not exceed it. The endpoint validates the same bound as a 400.
+    /// </summary>
+    internal const int MaxEventQueryWindow = 5000;
+
+    /// <summary>
+    /// The <c>$select</c> of the event list. Lookups are selected as <c>_x_value</c> (a lookup's logical name is not a
+    /// queryable property — live 400 on 2026-10-03); the regarding type is <c>_sprk_regardingrecordtype_value</c>, and
+    /// the eight typed lookups the API's 0-7 types use are selected so the mapper can derive the type by value.
+    /// </summary>
+    internal const string EventListSelect =
+        "sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,"
+        + "sprk_regardingrecordid,sprk_regardingrecordname,_sprk_regardingrecordtype_value,"
+        + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardinginvoice_value,"
+        + "_sprk_regardinganalysis_value,_sprk_regardingaccount_value,_sprk_regardingcontact_value,"
+        + "_sprk_regardingworkassignment_value,_sprk_regardingbudget_value,"
+        + "sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,"
+        + "createdon,modifiedon";
+
+    /// <summary>
+    /// The <c>$select</c> of a single event: the list's columns plus the reminder/related-event columns. There is no
+    /// <c>sprk_relatedevent</c> lookup on <c>sprk_event</c> (live 2026-10-03), so <c>_sprk_relatedevent_value</c> is
+    /// not selected — selecting it 400'd every GET /{id}.
+    /// </summary>
+    internal const string EventGetSelect =
+        EventListSelect + ",sprk_remindat,sprk_relatedeventtype,sprk_relatedeventoffsettype";
+
+    /// <summary>
+    /// The event-type <c>$expand</c>, by NAVIGATION property (<c>sprk_EventType_Ref</c>). The logical name
+    /// <c>sprk_eventtype_ref</c> is not a property of the entity type (live 400 on 2026-10-03).
+    /// </summary>
+    internal const string EventTypeExpand = "sprk_EventType_Ref($select=sprk_name)";
+
+    /// <summary>
+    /// The ONE URL builder for both event queries (app-only and caller-scoped), so the trimmed list and the
+    /// background scan cannot drift apart (unified-access-control-r2 task 159, #1098).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>No caller text reaches <c>$filter</c>.</b> Every clause is built from a typed value — a
+    /// <see cref="Guid"/> formatted "D", an <see cref="int"/>, or a <see cref="DateTime"/> formatted yyyy-MM-dd with
+    /// the invariant culture. The previous builder concatenated a caller string into
+    /// <c>sprk_regardingrecordid eq '…'</c>, so <c>x' or sprk_regardingrecordid ne 'zz</c> escaped the owner clause.</para>
+    /// <para><b>The regarding filters read the lookup as a lookup.</b> An id (with or without a type) filters on
+    /// <c>sprk_regardingrecordid</c>, plus the type's typed lookup when the type is given; a type alone filters on
+    /// <c>_sprk_regardingrecordtype_value</c> = its <c>sprk_recordtype_ref</c> row.</para>
+    /// <para><b>Paging without <c>$skip</c></b>, which the Dataverse Web API rejects ("Skip Clause is not supported in
+    /// CRM"): the request asks for the first <c>skip + top</c> rows, and the caller drops the first <c>skip</c>.
+    /// <c>$count=true</c> still counts the whole (for the caller-scoped query: the whole TRIMMED) result.</para>
+    /// </remarks>
+    internal static string BuildEventQueryUrl(
+        int? regardingRecordType,
+        Guid? regardingRecordId,
+        Guid? regardingRecordTypeRefId,
+        Guid? eventTypeId,
+        int? statusCode,
+        int? priority,
+        DateTime? dueDateFrom,
+        DateTime? dueDateTo,
+        int skip,
+        int top,
+        Guid? ownerUserId)
+    {
+        if (skip < 0)
+            throw new ArgumentOutOfRangeException(nameof(skip), skip, "skip must not be negative.");
+        if (top < 1)
+            throw new ArgumentOutOfRangeException(nameof(top), top, "top must be at least 1.");
+        if ((long)skip + top > MaxEventQueryWindow)
+            throw new ArgumentOutOfRangeException(
+                nameof(skip), skip, $"skip + top must not exceed {MaxEventQueryWindow} (the Dataverse $top limit).");
+
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
         var filters = new List<string>();
 
-        // Owner filter — scopes results to a specific user (used by Copilot integration)
-        if (ownerUserId.HasValue)
-            filters.Add($"_ownerid_value eq {ownerUserId.Value}");
+        if (ownerUserId is { } owner)
+            filters.Add(string.Create(inv, $"_ownerid_value eq {owner:D}"));
 
-        if (regardingRecordType.HasValue)
-            filters.Add($"sprk_regardingrecordtype eq {regardingRecordType.Value}");
+        if (regardingRecordId is { } regardingId)
+        {
+            filters.Add(string.Create(inv, $"sprk_regardingrecordid eq '{regardingId:D}'"));
 
-        if (!string.IsNullOrEmpty(regardingRecordId))
-            filters.Add($"sprk_regardingrecordid eq '{regardingRecordId}'");
+            if (regardingRecordType is { } typeWithId)
+            {
+                var lookup = RegardingRecordType.GetLookupFieldName(typeWithId)
+                    ?? throw new ArgumentOutOfRangeException(
+                        nameof(regardingRecordType), typeWithId, "Unknown regarding record type.");
+                filters.Add(string.Create(inv, $"_{lookup}_value eq {regardingId:D}"));
+            }
+        }
+        else if (regardingRecordType is { } typeOnly)
+        {
+            if (RegardingRecordType.GetLookupFieldName(typeOnly) is null)
+                throw new ArgumentOutOfRangeException(nameof(regardingRecordType), typeOnly, "Unknown regarding record type.");
 
-        if (eventTypeId.HasValue)
-            filters.Add($"_sprk_eventtype_ref_value eq {eventTypeId.Value}");
+            // sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref, never an option set. Filtering on it needs
+            // the environment's row id, which only the BFF resolves; without one there is nothing true to filter on.
+            if (regardingRecordTypeRefId is not { } refId || refId == Guid.Empty)
+                throw new ArgumentException(
+                    "A regarding-type filter without a regarding id needs that type's sprk_recordtype_ref row.",
+                    nameof(regardingRecordTypeRefId));
 
-        if (statusCode.HasValue)
-            filters.Add($"statuscode eq {statusCode.Value}");
+            filters.Add(string.Create(inv, $"_sprk_regardingrecordtype_value eq {refId:D}"));
+        }
 
-        if (priority.HasValue)
-            filters.Add($"sprk_priority eq {priority.Value}");
+        if (eventTypeId is { } eventType)
+            filters.Add(string.Create(inv, $"_sprk_eventtype_ref_value eq {eventType:D}"));
 
-        if (dueDateFrom.HasValue)
-            filters.Add($"sprk_duedate ge {dueDateFrom.Value:yyyy-MM-dd}");
+        if (statusCode is { } status)
+            filters.Add(string.Create(inv, $"statuscode eq {status}"));
 
-        if (dueDateTo.HasValue)
-            filters.Add($"sprk_duedate le {dueDateTo.Value:yyyy-MM-dd}");
+        if (priority is { } prio)
+            filters.Add(string.Create(inv, $"sprk_priority eq {prio}"));
+
+        if (dueDateFrom is { } from)
+            filters.Add(string.Create(inv, $"sprk_duedate ge {from:yyyy-MM-dd}"));
+
+        if (dueDateTo is { } to)
+            filters.Add(string.Create(inv, $"sprk_duedate le {to:yyyy-MM-dd}"));
 
         var filterQuery = filters.Count > 0 ? $"$filter={string.Join(" and ", filters)}&" : "";
-        var url = $"sprk_events?{filterQuery}$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)&$orderby=sprk_duedate asc,createdon desc&$skip={skip}&$top={top}&$count=true";
+        return string.Create(inv,
+            $"sprk_events?{filterQuery}$select={EventListSelect}&$expand={EventTypeExpand}"
+            + $"&$orderby=sprk_duedate asc,createdon desc&$top={skip + top}&$count=true");
+    }
 
-        _logger.LogDebug("Querying events: {Url}", url);
+    private async Task<(EventEntity[] Items, int TotalCount)> QueryEventsCoreAsync(
+        string url, int skip, int top, Guid? impersonateSystemUserId, CancellationToken ct)
+    {
+        _logger.LogDebug(
+            "Querying events (impersonated: {Impersonated}): {Url}", impersonateSystemUserId.HasValue, url);
 
         try
         {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct, impersonateSystemUserId);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -362,7 +500,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             if (data == null)
                 return (Array.Empty<EventEntity>(), 0);
 
-            var events = data.Value.Select(MapToEventEntity).ToArray();
+            var events = data.Value.Skip(skip).Take(top).Select(MapToEventEntity).ToArray();
             return (events, data.Count);
         }
         catch (Exception ex)
@@ -375,7 +513,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     public async Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
     {
 
-        var url = $"sprk_events({id})?$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,_sprk_regardingaccount_value,_sprk_regardinganalysis_value,_sprk_regardingcontact_value,_sprk_regardinginvoice_value,_sprk_regardingmatter_value,_sprk_regardingproject_value,_sprk_regardingbudget_value,_sprk_regardingworkassignment_value,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,sprk_remindat,_sprk_relatedevent_value,sprk_relatedeventtype,sprk_relatedeventoffsettype,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)";
+        var url = $"sprk_events({id:D})?$select={EventGetSelect}&$expand={EventTypeExpand}";
 
         _logger.LogDebug("Getting event: {Id}", id);
 
@@ -456,10 +594,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["sprk_eventname"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["statuscode"] = 3, // Open
-            ["statecode"] = 0,  // Active
+            // Live sprk_event option set (task 159, notes §0.2 (e)): Open = 659490001, statecode 0 (Active). The old
+            // value 3 is not a statuscode of this table.
+            ["statuscode"] = EventStatusOpen,
+            ["statecode"] = GetEventStateCode(EventStatusOpen),
             ["sprk_source"] = 0, // User
-            ["ownerid@odata.bind"] = $"/teams({owningTeamId})"
+            ["ownerid@odata.bind"] = $"/teams({owningTeamId})", // task 146 — resolved upstream; the builder refuses without it
         };
 
         // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
@@ -483,93 +623,89 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
 
         if (request.RegardingRecordType.HasValue)
-        {
-            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
-            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
-            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
-
-            // Set entity-specific lookup based on record type
-            var lookupField = RegardingRecordType.GetLookupFieldName(request.RegardingRecordType.Value);
-            var entityName = RegardingRecordType.GetEntityLogicalName(request.RegardingRecordType.Value);
-            if (lookupField != null && entityName != null && !string.IsNullOrEmpty(request.RegardingRecordId))
-            {
-                payload[$"{lookupField}@odata.bind"] = $"/{entityName}s({request.RegardingRecordId})";
-            }
-        }
+            AddRegardingWriteSet(payload, request);
 
         return payload;
     }
 
-    public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
-    {
-        var payload = BuildEventUpdatePayload(request);
+    /// <summary><c>sprk_event.sprk_regardingrecordname</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNameMaxLength = 1000;
 
-        if (payload.Count == 0)
-        {
-            _logger.LogDebug("No fields to update for event {Id}", id);
-            return;
-        }
-
-        _logger.LogInformation("Updating event: {Id}", id);
-
-        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        _logger.LogDebug("Event updated: {Id}", id);
-    }
+    /// <summary><c>sprk_event.sprk_regardingrecordnumber</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNumberMaxLength = 100;
 
     /// <summary>
-    /// The PATCH body of an event update: only the fields the request sets. A regarding change writes the denormalized
-    /// regarding text fields AND the entity-specific regarding lookups
-    /// (<see cref="UpdateEventRequest.RegardingLookupWrites"/>) — the lookups the BFF re-derives the event's owner from
-    /// (unified-access-control-r2 task 146 r1, verifier item 2: the update used to write only the text, so the owner
-    /// followed a lookup that was never written). A lookup is bound by its live navigation-property name and entity set;
-    /// a clear binds <c>null</c>.
+    /// Shapes the ADR-024 regarding write set into the create body, in this order: (i) the target's own typed lookup
+    /// by its live NAVIGATION property and its live entity SET; (ii) the record-type lookup to its
+    /// <c>sprk_recordtype_ref</c> row, left out when the environment has none; (iii) the denormalized id, name, url
+    /// and number; (iv) the FR-26 core-ancestor stamps.
     /// </summary>
-    internal static Dictionary<string, object?> BuildEventUpdatePayload(UpdateEventRequest request)
+    /// <remarks>
+    /// <b>Only shapes.</b> Every value is resolved by the BFF (task 159 LAYERING note). A missing entity set is a
+    /// programming error and throws — this method never derives a set name (no "logical name + s") and never
+    /// writes <c>sprk_regardingrecordtype</c> as a number or any <c>_x_value</c> key.
+    /// </remarks>
+    private static void AddRegardingWriteSet(Dictionary<string, object?> payload, CreateEventRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        var regardingType = request.RegardingRecordType!.Value;
+        var lookup = RegardingRecordType.GetLookupFieldName(regardingType)
+            ?? throw new ArgumentOutOfRangeException(nameof(request), regardingType, "Unknown regarding record type.");
+        var navigation = RegardingRecordType.GetEventNavigationProperty(lookup)
+            ?? throw new InvalidOperationException($"No sprk_event navigation property is known for '{lookup}'.");
 
-        var payload = new Dictionary<string, object?>();
+        if (request.RegardingRecordId is not { } targetId || targetId == Guid.Empty)
+            throw new ArgumentException("A regarding write needs the regarding record id.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.RegardingEntitySetName))
+            throw new ArgumentException(
+                "A regarding write needs the target's entity set, resolved from live metadata by the caller.",
+                nameof(request));
 
-        if (request.Name != null)
-            payload["sprk_eventname"] = request.Name;
+        // (i) the target's own typed lookup
+        payload[$"{navigation}@odata.bind"] = $"/{request.RegardingEntitySetName}({targetId:D})";
 
-        if (request.Description != null)
-            payload["sprk_description"] = request.Description;
+        // (ii) the record type, as a lookup to the environment's sprk_recordtype_ref row
+        if (request.RegardingRecordTypeRefId is { } refId && refId != Guid.Empty)
+            payload[$"{RegardingRecordType.EventRecordTypeNavigationProperty}@odata.bind"] =
+                $"/{RegardingRecordType.RecordTypeRefEntitySet}({refId:D})";
 
-        if (request.EventTypeId.HasValue)
-            payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
+        // (iii) the denormalized resolver fields
+        payload["sprk_regardingrecordid"] = targetId.ToString("D");
+        payload["sprk_regardingrecordname"] = Truncate(request.RegardingRecordName, EventRegardingRecordNameMaxLength);
+        payload["sprk_regardingrecordurl"] = request.RegardingRecordUrl;
+        if (!string.IsNullOrEmpty(request.RegardingRecordNumber))
+            payload["sprk_regardingrecordnumber"] = Truncate(request.RegardingRecordNumber, EventRegardingRecordNumberMaxLength);
 
-        if (request.BaseDate.HasValue)
-            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
-
-        if (request.DueDate.HasValue)
-            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
-
-        if (request.Priority.HasValue)
-            payload["sprk_priority"] = request.Priority.Value;
-
-        if (request.StatusCode.HasValue)
-            payload["statuscode"] = request.StatusCode.Value;
-
-        if (request.RegardingRecordType.HasValue)
+        // (iv) the core-ancestor stamps (the target's own lookup is never among them — DeriveForHostAsync skips it)
+        foreach (var stamp in request.RegardingCoreStamps ?? [])
         {
-            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
-            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
-            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
-        }
+            var stampNavigation = RegardingRecordType.GetEventNavigationProperty(stamp.LookupAttribute)
+                ?? throw new InvalidOperationException(
+                    $"No sprk_event navigation property is known for core stamp '{stamp.LookupAttribute}'.");
+            if (string.IsNullOrWhiteSpace(stamp.EntitySetName) || stamp.RecordId == Guid.Empty)
+                throw new ArgumentException($"Core stamp '{stamp.LookupAttribute}' has no entity set or id.", nameof(request));
 
-        foreach (var (recordType, recordId) in request.RegardingLookupWrites())
-        {
-            var navigationProperty = RegardingRecordType.GetEventNavigationPropertyName(recordType)!;
-            payload[$"{navigationProperty}@odata.bind"] = recordId is { } target
-                ? $"/{RegardingRecordType.GetEntitySetName(recordType)}({target})"
-                : null;
+            payload[$"{stampNavigation}@odata.bind"] = $"/{stamp.EntitySetName}({stamp.RecordId:D})";
         }
-
-        return payload;
     }
+
+    private static string? Truncate(string? value, int maxLength) =>
+        value is { Length: > 0 } && value.Length > maxLength ? value[..maxLength] : value;
+
+    // ── sprk_event status (live option set, spaarkedev1 2026-10-03; task 159 notes §0.2 (e)) ──
+    // statecode 0 (Active): Draft 1, Open 659490001, Completed 659490002, Closed 659490003, On Hold 659490006,
+    //                       Reassigned 659490007.
+    // statecode 1 (Inactive): No Further Action 2, Cancelled 659490004, Transferred 659490005.
+    // Note Completed is ACTIVE in this environment — the old "status >= 5 → Inactive" rule would have been refused.
+
+    /// <summary>The live Open statuscode, the create default.</summary>
+    internal const int EventStatusOpen = 659490001;
+
+    /// <summary>The statecode a live <c>sprk_event</c> statuscode belongs to (Dataverse refuses any other pairing).</summary>
+    internal static int GetEventStateCode(int statusCode) => statusCode switch
+    {
+        2 or 659490004 or 659490005 => 1,
+        _ => 0,
+    };
 
     public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
@@ -579,10 +715,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ["statuscode"] = statusCode
         };
 
-        // Set statecode based on statuscode
-        // Draft(1), Planned(2), Open(3), OnHold(4) = Active(0)
-        // Completed(5), Cancelled(6), Deleted(7) = Inactive(1)
-        payload["statecode"] = statusCode >= 5 ? 1 : 0;
+        // The statecode the live statuscode belongs to (task 159) — see GetEventStateCode.
+        payload["statecode"] = GetEventStateCode(statusCode);
 
         if (completedDate.HasValue)
             payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
@@ -593,34 +727,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event status updated: {Id}", id);
-    }
-
-    public async Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
-    {
-
-        var url = $"sprk_eventlogs?$filter=_sprk_event_value eq {eventId}&$select=sprk_eventlogid,sprk_eventlogname,_sprk_event_value,sprk_action,sprk_description,createdon,_createdby_value&$orderby=createdon desc";
-
-        _logger.LogDebug("Querying event logs for event: {EventId}", eventId);
-
-        try
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
-
-            var response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-            if (data == null)
-                return Array.Empty<EventLogEntity>();
-
-            return data.Value.Select(MapToEventLogEntity).ToArray();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error querying event logs for event {EventId}", eventId);
-            throw;
-        }
     }
 
     public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
@@ -1856,7 +1962,43 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     // Entity Mapping Helpers
     // ========================================
 
-    private EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
+    /// <summary>
+    /// The API's 0-7 regarding type of an event row, derived from its LOOKUPS (task 159, #1098): the one of the eight
+    /// typed lookups the API's types use whose value equals <c>sprk_regardingrecordid</c>. Null when none does.
+    /// </summary>
+    /// <remarks>
+    /// By value, not by "which lookup is set": a correctly written event regarding an invoice or analysis ALSO
+    /// carries its core ancestor's stamp in sprk_regardingmatter/project/workassignment, so "the set lookup" would be
+    /// ambiguous. <c>sprk_regardingrecordtype</c> is a lookup to <c>sprk_recordtype_ref</c> and is never read as a
+    /// number.
+    /// </remarks>
+    internal static int? DeriveRegardingRecordType(Dictionary<string, JsonElement> data)
+    {
+        if (!data.TryGetValue("sprk_regardingrecordid", out var idElement)
+            || idElement.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(idElement.GetString(), out var regardingId)
+            || regardingId == Guid.Empty)
+        {
+            return null;
+        }
+
+        for (var type = RegardingRecordType.Project; type <= RegardingRecordType.Budget; type++)
+        {
+            var lookup = RegardingRecordType.GetLookupFieldName(type);
+            if (lookup is not null
+                && data.TryGetValue($"_{lookup}_value", out var value)
+                && value.ValueKind == JsonValueKind.String
+                && Guid.TryParse(value.GetString(), out var lookupId)
+                && lookupId == regardingId)
+            {
+                return type;
+            }
+        }
+
+        return null;
+    }
+
+    internal static EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
     {
         return new EventEntity
         {
@@ -1868,8 +2010,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? desc.GetString() : null,
             EventTypeId = data.TryGetValue("_sprk_eventtype_ref_value", out var etId) && etId.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(etId.GetString()!) : null,
-            EventTypeName = data.TryGetValue("sprk_eventtype_ref", out var et) && et.ValueKind == JsonValueKind.Object
-                ? et.GetProperty("sprk_name").GetString() : null,
+            // The expanded event type comes back under its NAVIGATION property (sprk_EventType_Ref); the logical name
+            // is accepted too so a reader of either shape keeps the display name.
+            EventTypeName = (data.TryGetValue("sprk_EventType_Ref", out var et) || data.TryGetValue("sprk_eventtype_ref", out et))
+                && et.ValueKind == JsonValueKind.Object && et.TryGetProperty("sprk_name", out var etName)
+                ? etName.GetString() : null,
             StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
             StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 1,
             BaseDate = data.TryGetValue("sprk_basedate", out var bd) && bd.ValueKind != JsonValueKind.Null
@@ -1894,8 +2039,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? rrid.GetString() : null,
             RegardingRecordName = data.TryGetValue("sprk_regardingrecordname", out var rrn) && rrn.ValueKind != JsonValueKind.Null
                 ? rrn.GetString() : null,
-            RegardingRecordType = data.TryGetValue("sprk_regardingrecordtype", out var rrt) && rrt.ValueKind != JsonValueKind.Null
-                ? rrt.GetInt32() : null,
+            RegardingRecordType = DeriveRegardingRecordType(data),
             RegardingAccountId = data.TryGetValue("_sprk_regardingaccount_value", out var racc) && racc.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(racc.GetString()!) : null,
             RegardingAnalysisId = data.TryGetValue("_sprk_regardinganalysis_value", out var rana) && rana.ValueKind != JsonValueKind.Null
@@ -1916,28 +2060,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? created.GetDateTime() : DateTime.MinValue,
             ModifiedOn = data.TryGetValue("modifiedon", out var modified) && modified.ValueKind != JsonValueKind.Null
                 ? modified.GetDateTime() : DateTime.MinValue
-        };
-    }
-
-    private EventLogEntity MapToEventLogEntity(Dictionary<string, JsonElement> data)
-    {
-        return new EventLogEntity
-        {
-            Id = data.TryGetValue("sprk_eventlogid", out var id) && id.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(id.GetString()!) : Guid.Empty,
-            Name = data.TryGetValue("sprk_eventlogname", out var name) && name.ValueKind != JsonValueKind.Null
-                ? name.GetString() : null,
-            EventId = data.TryGetValue("_sprk_event_value", out var evId) && evId.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(evId.GetString()!) : Guid.Empty,
-            Action = data.TryGetValue("sprk_action", out var action) ? action.GetInt32() : 0,
-            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
-                ? desc.GetString() : null,
-            CreatedOn = data.TryGetValue("createdon", out var created) && created.ValueKind != JsonValueKind.Null
-                ? created.GetDateTime() : DateTime.MinValue,
-            CreatedById = data.TryGetValue("_createdby_value", out var cbId) && cbId.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(cbId.GetString()!) : null,
-            CreatedByName = data.TryGetValue("_createdby_value@OData.Community.Display.V1.FormattedValue", out var cbName) && cbName.ValueKind != JsonValueKind.Null
-                ? cbName.GetString() : null
         };
     }
 

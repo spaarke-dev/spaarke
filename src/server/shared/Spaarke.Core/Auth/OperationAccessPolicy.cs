@@ -192,6 +192,14 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
+        // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
+        // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
+        // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /
+        // 9: check as the user, then the app writes). AppendTo for the "finance.attach_invoice" reasoning (the
+        // new row's lookup attaches it to the parent); Read because the analysis then surfaces the parent's
+        // metadata to its creator. A separate key so deny logs name the operation.
+        ["analysis.attach"] = AccessRights.Read | AccessRights.AppendTo,
+
         // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
         // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
         // The live schema has NO sprk_invoice → sprk_document lookup; the link is sprk_document.sprk_invoice,
@@ -211,6 +219,16 @@ public static class OperationAccessPolicy
         // AppendToAccess into the snapshot, or this route stays permanently 403 — a silent failure.
         // Recorded as an explicit obligation on task 005.
         ["entity.associate_document"] = AccessRights.AppendTo,
+
+        // "event.attach_regarding" — AppendTo on the REGARDING record an sprk_event is filed under: the body
+        // RegardingRecordType/RegardingRecordId of POST /api/v1/events. Added by unified-access-control-r2 task 159
+        // (#1098). The event HOLDS the typed lookup; the record it points AT is the one being attached to, and
+        // Dataverse asks AppendTo of that record ("other records can be attached to this record") — the
+        // "finance.attach_invoice" reasoning. Not Write: filing an event under a matter does not modify the matter.
+        // A separate key rather than "entity.associate_document" (which names an Office DOCUMENT being filed) or
+        // "finance.attach_invoice" (which names an invoice): reusing either would misdescribe the act in every deny
+        // log. Resource = the regarding record, in the entity set Dataverse's own metadata names for its type.
+        ["event.attach_regarding"] = AccessRights.AppendTo,
 
         // ========================================================================
         // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)

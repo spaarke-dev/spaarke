@@ -33,7 +33,11 @@ namespace Sprk.Bff.Api.Api;
 /// of a secure record (owner round 10 item 7), the owner decided BEFORE the PATCH and assigned after it, read back. The
 /// same core the chat update tool uses. Events and communications are re-filed through their own route families
 /// (<c>PATCH /api/v1/events/{id}/filing</c>, <c>PATCH /api/communications/{id}/filing</c> — round 28: "never a second
-/// one"), which call <see cref="UpdateAsync"/>; a document is re-filed through <c>PUT /api/v1/documents/{id}</c>.</para>
+/// one"; round 36: those two change ONLY the filing — the regarding lookups and their ADR-024 resolver fields — and carry
+/// their family's as-caller Write check as an endpoint filter), which call <see cref="UpdateAsync"/>; a document is
+/// re-filed through <c>PUT /api/v1/documents/{id}</c>. After every re-file, <see cref="SecureChildReconciler.AfterRefileAsync"/>
+/// mirrors the row and runs task 148's pass over everything filed under it when it moved under, out of or between secure
+/// records (round 36).</para>
 /// <para><b>Uniform not-found (round 9).</b> A record the payload binds that the caller cannot append to and one that does
 /// not exist get the SAME 404; so do a row the caller cannot read and one that does not exist.</para>
 /// <para><b>Placement (CLAUDE.md §10; bff-extensions.md).</b> In the BFF: it is the invariant owner's write path (the
@@ -80,6 +84,55 @@ public static class ChildRecordEndpoints
 
     /// <summary>The caller's own rights refused the write (a table privilege, a field-secured or server-owned column).</summary>
     internal const string DeniedCode = "child_record.denied";
+
+    /// <summary>
+    /// A filing route's payload names something other than the filing (owner round 36: "it changes only the filing: the
+    /// regarding lookups and their ADR-024 pair"). Nothing is read or written.
+    /// </summary>
+    internal const string NotFilingCode = "child_record.not_filing";
+
+    private const string FilingColumnPrefix = "sprk_regarding";
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>
+    /// The filing columns of an event or a communication: its entity-specific regarding lookups (<c>sprk_regarding{table}</c>
+    /// — every ownership-parent lookup either table has, <see cref="SecureChildLineage"/>) and the ADR-024 resolver fields
+    /// (<c>sprk_regardingrecordtype</c>, <c>…recordid</c>, <c>…recordname</c>, <c>…recordurl</c>, <c>…recordnumber</c>) —
+    /// all, and only, the columns named <c>sprk_regarding…</c>. Navigation properties carry the schema-name casing
+    /// (<c>sprk_RegardingMatter</c>), so the comparison ignores case.
+    /// </summary>
+    internal static bool IsFilingColumn(string column) =>
+        column.StartsWith(FilingColumnPrefix, StringComparison.OrdinalIgnoreCase) && column.Length > FilingColumnPrefix.Length;
+
+    /// <summary>
+    /// The request-shape rule of a filing route (no I/O — it runs before the authorization filter, so a 400 never becomes a
+    /// 403 and discloses nothing about a record): a JSON object naming at least one property, every one a filing column or
+    /// its <c>@odata.bind</c>. <c>null</c> when the body may proceed.
+    /// </summary>
+    internal static IResult? FilingShapeProblem(JsonElement body, string entity)
+    {
+        if (body.ValueKind != JsonValueKind.Object || !body.EnumerateObject().Any())
+        {
+            return Problem(StatusCodes.Status400BadRequest, NotFilingCode,
+                $"Name what the {Noun(entity)} is filed under (its regarding lookups and regarding fields). Nothing was saved.");
+        }
+
+        foreach (var property in body.EnumerateObject())
+        {
+            var name = property.Name.EndsWith(BindSuffix, StringComparison.Ordinal)
+                ? property.Name[..^BindSuffix.Length]
+                : property.Name;
+            if (!IsFilingColumn(name))
+            {
+                return Problem(StatusCodes.Status400BadRequest, NotFilingCode,
+                    $"Only what the {Noun(entity)} is filed under can be changed here: '{property.Name}' is not one of its " +
+                    "regarding lookups or regarding fields. Nothing was saved.");
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Registers the child-record routes.</summary>
     public static void MapChildRecordEndpoints(this WebApplication app)
@@ -193,14 +246,14 @@ public static class ChildRecordEndpoints
         [FromServices] IDataverseUserClient user,
         [FromServices] IRecordOwnershipResolver ownership,
         [FromServices] CoreAncestorRestamper restamper,
-        [FromServices] SecureChildShareSynchronizer shares,
+        [FromServices] SecureChildReconciler children,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         return RefileTables.Contains(entity)
-            ? UpdateAsync(entity, id, body, user, ownership, restamper, shares, httpContext, logger, ct)
+            ? UpdateAsync(entity, id, body, user, ownership, restamper, children, httpContext, logger, ct)
             : Task.FromResult(Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode,
                 $"'{table}' records are not re-filed here."));
     }
@@ -209,6 +262,12 @@ public static class ChildRecordEndpoints
     /// The ONE browser re-file, shared by <c>PATCH /api/v1/child-records/{table}/{id}</c>,
     /// <c>PATCH /api/v1/events/{id}/filing</c> and <c>PATCH /api/communications/{id}/filing</c>.
     /// </summary>
+    /// <param name="filingOnly">The event and communication filing routes (owner round 36): the payload may name only filing
+    /// columns (<see cref="FilingShapeProblem"/>) — the routes' shape filter asks first; the handler asks again, so the
+    /// contract holds for any caller of this method. A navigation property is the schema name of its lookup column
+    /// (<c>sprk_RegardingMatter</c> → <c>sprk_regardingmatter</c>, live metadata, task 159 note §0.2(b)), so naming only
+    /// <c>sprk_regarding…</c> properties writes only <c>sprk_regarding…</c> columns; an unknown navigation property is the
+    /// mapper's 400.</param>
     internal static async Task<IResult> UpdateAsync(
         string entity,
         Guid id,
@@ -216,11 +275,15 @@ public static class ChildRecordEndpoints
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
         CoreAncestorRestamper restamper,
-        SecureChildShareSynchronizer shares,
+        SecureChildReconciler children,
         HttpContext httpContext,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool filingOnly = false)
     {
+        if (filingOnly && FilingShapeProblem(body, entity) is { } shape)
+            return shape;
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)
@@ -293,13 +356,14 @@ public static class ChildRecordEndpoints
 
         if (outcome.Written)
         {
-            // Task 149's mirror after the re-file, inline (task 147): moved under a secure record → shared with its sharees
-            // now; moved OUT of every secure record → the mirror goes now (only from a row that WAS isolated — its owning
-            // team, read as the caller before the write, rides along on `row`). One implementation for every re-file writer.
-            await shares.AfterRefileAsync(
+            // After the re-file, inline (task 147; round 36): the row's own mirror (moved under a secure record → shared with
+            // its sharees now; moved OUT → its mirror goes now, only from a row that WAS isolated — its owning team, read as
+            // the caller before the write, rides along on `row`), then task 148's pass over everything filed under it when
+            // it moved under, out of or between secure records. One implementation for every re-file writer.
+            await children.AfterRefileAsync(
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
-                            && await shares.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
+                            && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
                 CancellationToken.None).ConfigureAwait(false);
         }
 
