@@ -19,6 +19,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 /// can change a record's root, or what a record is filed under, re-stamps the dependent copies in the SAME operation:
 /// asserted on the child PATCHes, through each path's own entry point, over the real <see cref="CoreAncestorRestamper"/>.
 /// (The document PUT is driven through its real mapped route in <see cref="DocumentRefileRestampRouteTests"/>.)
+/// The POST associate-record path left the inventory with its route (task 164, owner round 10 item 1); the document PUT is
+/// now the only HTTP document re-file.
 /// </summary>
 public class RefilePathRestampTests
 {
@@ -31,34 +33,6 @@ public class RefilePathRestampTests
     private static readonly Guid TodoUnderCommunication = Guid.Parse("15600000-0000-0000-0000-000000000101");
     private static readonly Guid TodoUnderEvent = Guid.Parse("15600000-0000-0000-0000-000000000104");
     private static readonly Guid CarrierTodo = Guid.Parse("15600000-0000-0000-0000-000000000105");
-
-    [Fact(DisplayName = "Task 156 path: POST associate-record re-files the document → the to-do under it is re-stamped; the carrier to-do is not")]
-    public async Task AssociateRecord_RestampsTheDocumentsChildren()
-    {
-        var world = DocumentWorld();
-        var documents = Substitute.For<IDocumentDataverseService>();
-
-        var result = await RecordMatchEndpoints.AssociateRecord(
-            new AssociateRecordRequest
-            {
-                DocumentId = Document.ToString(),
-                RecordId = MatterB.ToString(),
-                RecordType = "sprk_matter",
-            },
-            documents, world.Restamper,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe(
-                new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-                NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance),
-            new Microsoft.AspNetCore.Http.DefaultHttpContext(),
-            NullLogger<Program>.Instance, CancellationToken.None);
-
-        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status200OK);
-        await documents.Received(1).UpdateDocumentAsync(
-            Document.ToString(), Arg.Is<UpdateDocumentRequest>(r => r.MatterLookup == MatterB), Arg.Any<CancellationToken>());
-        world.Lookup("sprk_todo", TodoUnderDocument, "sprk_regardingmatter").Should().Be(MatterB);
-        world.PatchesTo("sprk_todo", CarrierTodo).Should().BeEmpty("a direct, user-chosen matter is never re-stamped");
-    }
 
     [Fact(DisplayName = "Task 156 path: an UpdateRecord playbook node / ActionSeam writing a communication's matter re-stamps the to-do under it")]
     public async Task UpdateRecordActionCore_RestampsTheCommunicationsChildren()

@@ -28,9 +28,9 @@ namespace Sprk.Bff.Api.Api.Filters;
 /// SAME source its handler binds and returns the full list of checks. There is no fallback: a route whose
 /// declaration yields no check is denied.</para>
 /// <para><b>Not finance-only.</b> It is the one filter that authorizes several BODY-declared ids per route, so
-/// <c>POST /api/ai/document-intelligence/associate-record</c> reuses it (unified-access-control-r2 task 146 r1:
-/// Write on the document + AppendTo on the record it is filed to) rather than adding another filter
-/// (CLAUDE.md §11).</para>
+/// the analysis routes (task 162) reuse it rather than adding another filter (CLAUDE.md §11).
+/// (<c>POST /api/ai/document-intelligence/associate-record</c>, its first non-finance user under task 146 r1, was deleted
+/// by task 164.)</para>
 /// </remarks>
 public static class FinanceAuthorizationFilterExtensions
 {

@@ -224,12 +224,20 @@ public class ServerWriterAncestorStampingTests
         task.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId, "the stamp is unaffected");
     }
 
-    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a regarding type with no known name column (a report card) gets the pair with an empty name; no column is guessed and the record is not read for it")]
-    public async Task CreateTask_WhenTheRegardingTypeHasNoNameColumn_WritesThePairWithAnEmptyNameAndReadsNothingForIt()
+    // Sweep integration (task 161 x task 156): this test used a report card as "a regarding type with no known name column".
+    // Task 161 LIVE-VERIFIED sprk_reportcard's primary name (sprk_name) and added it to RegardingNameFields, so a report card
+    // now has a known column — and, after that change, so does every type TaskActionCore files under except
+    // sprk_recordtype_ref (which writes no pair; next test). The "never guess a column" rule is unchanged: the name is read
+    // ONLY through RegardingNameFields' live-verified map, with exactly that column.
+    [Fact(DisplayName = "Task 156 x 161: a report card's pair name is read through RegardingNameFields' live-verified column (sprk_name) and nothing else; no column is guessed")]
+    public async Task CreateTask_WhenRegardingAReportCard_ReadsItsNameThroughTheLiveVerifiedColumnOnly()
     {
         var reportCardId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
         var created = new List<Entity>();
         var entityService = EntityServiceCapturingCreates(created);
+        entityService
+            .Setup(s => s.RetrieveAsync("sprk_reportcard", reportCardId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_reportcard", reportCardId) { ["sprk_name"] = "Q3 report card" });
 
         var id = await TaskCore(entityService).CreateAsync(
             new TaskActionInput("Review", null, null, reportCardId, "sprk_reportcard", null),
@@ -238,14 +246,19 @@ public class ServerWriterAncestorStampingTests
         id.Should().NotBe(Guid.Empty);
         var task = created.Should().ContainSingle().Subject;
         var cleanId = reportCardId.ToString("D").ToLowerInvariant();
-        task["sprk_regardingrecordname"].Should().Be(string.Empty, "RegardingNameFields has no name column for a report card");
+        task["sprk_regardingrecordname"].Should().Be("Q3 report card", "RegardingNameFields names sprk_reportcard's live column");
         task["sprk_regardingrecordid"].Should().Be(cleanId);
         task["sprk_regardingrecordurl"].Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_reportcard&id={cleanId}");
         task.GetAttributeValue<EntityReference>("sprk_regardingreportcard")!.Id.Should().Be(reportCardId);
         entityService.Verify(
-            s => s.RetrieveAsync("sprk_reportcard", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "with no known name column there is nothing to read — a guessed column would only fail at Dataverse");
+            s => s.RetrieveAsync("sprk_reportcard", reportCardId,
+                It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_name"), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "exactly the live-verified column is read — never a guessed one");
+        entityService.Verify(
+            s => s.RetrieveAsync("sprk_reportcard", It.IsAny<Guid>(),
+                It.Is<string[]>(c => c.Length != 1 || c[0] != "sprk_name"), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // A sprk_recordtype_ref row is the one regarding target whose typed lookup on sprk_event IS the pair's type column

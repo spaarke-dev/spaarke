@@ -260,8 +260,7 @@ public class RecordOwnerAssignmentCensusTests
             "Office upload documents and their artifacts carry the resolved / carried team."),
         new UnscannedWriter("DataverseDocumentsEndpoints.cs", "seam caller (POST) + PUT re-file",
             "An update that files the document under a record is a reparent."),
-        new UnscannedWriter("RecordMatchEndpoints.cs", "document re-file (associate)",
-            "Associating a document with a record is a reparent."),
+        // (RecordMatchEndpoints.cs — the associate-record re-file — left with its routes: task 164, owner round 10 item 1.)
         new UnscannedWriter("DataverseUpdateHandler.cs", "generic update re-file (EntityReference values)",
             "An EntityReference onto a parent of a child table is a reparent."),
         new UnscannedWriter("UpdateRecordActionCore.cs", "generic update re-file (lookups)",

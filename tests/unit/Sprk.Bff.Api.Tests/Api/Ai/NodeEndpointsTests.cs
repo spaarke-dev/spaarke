@@ -152,22 +152,8 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
     #endregion
 
-    #region Reorder Nodes
-
-    [Fact]
-    public async Task ReorderNodes_EndpointExists_AcceptsPut()
-    {
-        // Arrange
-        var request = new { NodeIds = new[] { Guid.NewGuid(), Guid.NewGuid() } };
-
-        // Act
-        var response = await _client.PutAsJsonAsync($"/api/ai/playbooks/{_testPlaybookId}/nodes/reorder", request);
-
-        // Assert
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-    }
-
-    #endregion
+    // PUT /api/ai/playbooks/{id}/nodes/reorder was RETIRED by unified-access-control-r2 task 164 (owner round 10
+    // item 1); its absence is pinned by tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs.
 
     #region Update Node Scopes
 

@@ -74,6 +74,12 @@ public static class SessionOwnershipFilterExtensions
     public const string TenantMissingErrorCode = "auth.tid-missing";
 
     /// <summary>
+    /// The <see cref="HttpContext.Items"/> key under which an ALLOWED request carries the session this filter read (the
+    /// caller's own). Read by <c>AiAuthorizationFilter</c>'s stored-context check (task 164) to avoid a second read.
+    /// </summary>
+    public const string OwnedSessionItemKey = "Sprk.SessionOwnershipFilter.OwnedSession";
+
+    /// <summary>
     /// Requires that the caller owns the session identified by the route's <c>{sessionId}</c> value.
     /// Answers <c>401</c> when the caller carries no Entra <c>oid</c>, and <c>404</c> when the session
     /// is missing, unowned, or owned by someone else.
@@ -213,7 +219,10 @@ public static class SessionOwnershipFilterExtensions
                     });
             }
 
-            // Owned by the caller — allow.
+            // Owned by the caller — allow. The session just read is shared with the filters after this one
+            // (task 164: AiAuthorizationFilter's stored-context check) so a turn does not read it twice; this
+            // filter's own decision does not depend on it.
+            httpContext.Items[OwnedSessionItemKey] = session;
             return null;
         }
     }

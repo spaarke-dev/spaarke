@@ -37,8 +37,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// re-file guards task 146 r1 pinned on it (verifier items 2, 9, 18) protect nothing that still exists; one test pins that the
 /// route answers nothing and re-owns nothing. <b>POST /api/v1/events</b> keeps 146's owner resolution behind 159's
 /// as-the-caller gate (Create privilege + AppendTo on the regarding record).</para>
-/// <para><b>POST /api/ai/document-intelligence/associate-record</b> (verifier item 1): authorized as the caller (Write on the
-/// document, AppendTo on the target) before the reparent runs.</para>
+/// <para><b>POST /api/ai/document-intelligence/associate-record</b> was DELETED by task 164 (owner round 10 item 1); its
+/// absence is pinned by <c>AiPlaybookPromptRecordMatchRouteRetirementTests</c>.</para>
 /// <para>No HTTP handler is mocked (ADR-038 B1); the Dataverse seams are module-boundary doubles.</para>
 /// </remarks>
 [Trait("status", "new")]
@@ -105,43 +105,6 @@ public class SecureChildOwnershipEndpointTests
     }
 
     [Fact]
-    public async Task AssociateRecord_OutOfASecureMatter_ByAWriteOnlyHolderOnIt_Is403NotPermitted_AndWritesNothing()
-    {
-        var documentId = Guid.NewGuid();
-        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
-            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
-        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
-        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
-        host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo);
-        host.Access.Grant(Matters, SecureMatter, Collaborate);
-
-        var response = await host.AssociateAsync(documentId, OrdinaryMatter, "matter");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await ReasonCode(response)).Should().Be("sdap.unsecure.not_permitted");
-        host.DocumentUpdates.Should().BeEmpty();
-        world.Assignments.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task AssociateRecord_OutOfASecureMatter_ByAFullAccessHolderOnIt_IsReownedByTheNewMattersTeam()
-    {
-        var documentId = Guid.NewGuid();
-        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
-            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
-        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
-        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
-        host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo);
-        host.Access.Grant(Matters, SecureMatter, FullAccess);
-
-        var response = await host.AssociateAsync(documentId, OrdinaryMatter, "matter");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.DocumentUpdates.Should().ContainSingle().Which.MatterLookup.Should().Be(OrdinaryMatter);
-        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
-    }
-
-    [Fact]
     public async Task EventCreate_RegardingASecureProject_IsOwnedByTheNamedSecureTeam_AndSoIsItsLogRow()
     {
         await using var host = await EventsHost.StartAsync(World().Resolver());
@@ -188,80 +151,14 @@ public class SecureChildOwnershipEndpointTests
     }
 
     // =====================================================================================
-    // POST /api/ai/document-intelligence/associate-record
+    // POST /api/ai/document-intelligence/associate-record — DELETED (task 164, owner round 10 item 1)
     // =====================================================================================
-
-    [Fact]
-    public async Task AssociateRecord_ByACallerWithNoRightsOnTheDocument_Is403_AndTheSecureDocumentStaysPut()
-    {
-        // The verifier's reproduction: a secure document whose only secure lookup is sprk_matter, re-filed by GUID to an
-        // ordinary matter by any signed-in user — it used to land with that matter's business unit team.
-        var documentId = Guid.NewGuid();
-        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
-            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
-        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
-        host.Access.Grant(Matters, OrdinaryMatter, AccessRights.AppendTo); // the target only
-
-        var response = await host.AssociateAsync(documentId, OrdinaryMatter, "matter");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.DocumentUpdates.Should().BeEmpty();
-        world.Assignments.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task AssociateRecord_WithoutAppendToOnTheTarget_Is403_AndWritesNothing()
-    {
-        var documentId = Guid.NewGuid();
-        var world = World().WithRecord("sprk_document", documentId, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
-        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
-
-        var response = await host.AssociateAsync(documentId, SecureMatter, "sprk_matter");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.DocumentUpdates.Should().BeEmpty();
-        world.Assignments.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task AssociateRecord_Authorized_IntoASecureMatter_IsReownedByTheNamedTeam_ReadBack()
-    {
-        var documentId = Guid.NewGuid();
-        var world = World().WithRecord("sprk_document", documentId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
-            extra: new() { ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProject) });
-        await using var host = await RecordMatchHost.StartAsync(world.Resolver());
-        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
-        host.Access.Grant(Matters, SecureMatter, AccessRights.AppendTo);
-
-        var response = await host.AssociateAsync(documentId, SecureMatter, "matter");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.DocumentUpdates.Should().ContainSingle().Which.MatterLookup.Should().Be(SecureMatter);
-        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.SecureNamedTeam));
-        world.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam").Id
-            .Should().Be(Directory.SecureNamedTeam);
-    }
-
-    [Fact]
-    public async Task AssociateRecord_WithAnUnsupportedRecordType_Is400_BeforeAnyRightsQuery()
-    {
-        await using var host = await RecordMatchHost.StartAsync(World().Resolver());
-
-        var response = await host.AssociateAsync(Guid.NewGuid(), Guid.NewGuid(), "account");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        host.Access.Calls.Should().BeEmpty();
-        host.DocumentUpdates.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void AssociateRecord_DeclaresWriteOnTheDocumentAndAppendToOnTheTarget()
-    {
-        AssociateRecordEndpointsContract.TargetOperation.Should().Be("entity.associate_document");
-        OperationAccessPolicy.GetRequiredRights(AssociateRecordEndpointsContract.TargetOperation)
-            .Should().Be(AccessRights.AppendTo);
-    }
+    // The seven re-file tests task 146 r1/c1 pinned here (Write on the document, AppendTo on the target, F3 on a move out
+    // of a secure matter, the named-team re-own, the 400 before any rights query) protected a route task 164 retired (no
+    // caller, not published). Its absence — from the endpoint table AND on the wire — is pinned through the real Program by
+    // tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs; a document re-file now goes only
+    // through PUT /api/v1/documents/{id}, whose re-file authorization (AuthorizeRefileTargetsAsync) and F3 gate are 146's
+    // and are pinned on that route by SecureChildOwnershipDocumentRefileTests and DocumentRefileRestampRouteTests.
 
     // =====================================================================================
     // Harness
@@ -504,39 +401,4 @@ public class SecureChildOwnershipEndpointTests
 
         protected override void Map(WebApplication app) => app.MapEventEndpoints();
     }
-
-    internal sealed class RecordMatchHost : OwnershipHost
-    {
-        public List<UpdateDocumentRequest> DocumentUpdates { get; } = new();
-
-        public static async Task<RecordMatchHost> StartAsync(IRecordOwnershipResolver resolver)
-        {
-            var host = new RecordMatchHost();
-            await host.InitializeAsync(resolver);
-            return host;
-        }
-
-        public Task<HttpResponseMessage> AssociateAsync(Guid documentId, Guid recordId, string recordType) =>
-            SendAsync(Authenticated(HttpMethod.Post, "/api/ai/document-intelligence/associate-record",
-                new { documentId = documentId.ToString(), recordId = recordId.ToString(), recordType }));
-
-        protected override void Register(IServiceCollection services)
-        {
-            var documents = new Mock<IDocumentDataverseService>(MockBehavior.Strict);
-            documents
-                .Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Callback<string, UpdateDocumentRequest, CancellationToken>((_, r, _) => DocumentUpdates.Add(r))
-                .Returns(Task.CompletedTask);
-            services.AddSingleton(documents.Object);
-            services.AddSingleton(Mock.Of<IRecordMatchService>());
-        }
-
-        protected override void Map(WebApplication app) => app.MapRecordMatchEndpoints();
-    }
-}
-
-/// <summary>The associate-record contract constants, read through the endpoint class (internal, InternalsVisibleTo).</summary>
-internal static class AssociateRecordEndpointsContract
-{
-    public const string TargetOperation = RecordMatchEndpoints.AssociateTargetOperation;
 }

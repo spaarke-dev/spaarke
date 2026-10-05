@@ -591,7 +591,8 @@ public static class DataverseDocumentsEndpoints
     }
 
     /// <summary>The right filing a document under a record costs on that record: AppendTo (the key the record-keyed
-    /// upload, Office save, associate-record and event re-file routes use).</summary>
+    /// upload and Office save routes use; the associate-record and event re-file routes that also used it were deleted by
+    /// tasks 164 and 159).</summary>
     internal const string RefileTargetOperation = "entity.associate_document";
 
     /// <summary>

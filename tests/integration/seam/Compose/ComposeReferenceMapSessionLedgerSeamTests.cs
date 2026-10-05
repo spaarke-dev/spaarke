@@ -186,6 +186,40 @@ public sealed class ComposeReferenceMapSessionLedgerSeamTests : IClassFixture<Co
             "the new/split paragraph's paraId must appear as a NEW entry on the persisted session ledger (R4 re-anchor — never a silent number loss)");
     }
 
+    /// <summary>
+    /// unified-access-control-r2 task 164 r1 (owner round 16 item 2): a Path B load (no sprk_document row) binds the
+    /// session to the SPE drive-ITEM id; its chat turns are authorized by the caller's own SPE read of that item, which
+    /// needs the DRIVE too. The load must therefore record the drive on the session — otherwise every turn on the
+    /// session is refused as undecidable (AiAuthorizationFilter, fail closed).
+    /// </summary>
+    [Fact]
+    public async Task Load_PathB_RecordsTheDocumentsDriveOnTheSession_SoItsTurnsCanBeDecidedByTheCallersSpeRead()
+    {
+        _fixture.ResetBoundaries();
+
+        var original = ComposeCorpusFixtureLocator.LoadVerifiedBytes(LoadCorpusDoc(CorpusFileName));
+        var speId = $"spe-item-drive-{Guid.NewGuid():N}";
+        var driveId = $"drive-drive-{Guid.NewGuid():N}";
+        SetupLoadBoundary(driveId, speId, original);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var loadResponse = await client.GetAsync(
+            $"/api/compose/documents/{speId}?driveId={Uri.EscapeDataString(driveId)}&tenantId={Uri.EscapeDataString(ComposeFidelitySeamFixture.TestTenantId)}");
+        loadResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var load = await loadResponse.Content.ReadFromJsonAsync<LoadComposeDocumentResponse>();
+
+        ChatSession? session;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+            session = await sessions.GetSessionAsync(ComposeFidelitySeamFixture.TestTenantId, load!.SessionId, CancellationToken.None);
+        }
+
+        session.Should().NotBeNull();
+        session!.DocumentId.Should().Be(speId, "a Path B session is bound to the SPE drive-item id");
+        session.DocumentDriveId.Should().Be(driveId, "the turn-time SPE read needs the drive as well as the item");
+    }
+
     // ── Shared arrange + OOXML helpers ────────────────────────────────────────────────────────────
 
     private void SetupLoadBoundary(string driveId, string speId, byte[] bytes)

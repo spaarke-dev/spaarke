@@ -18,8 +18,8 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// columns, and only values derived from the data (the source's current root) — never a value from the caller, the
 /// owner or a direct, user-chosen link. The worst a caller could do with it is make a stamp correct.</para>
 /// <para><b>Runs to completion once the caller's record is written.</b> It takes no cancellation token, like every
-/// other after-write call site (the document PUT, associate-record, the event PUT, the field-mapping push, the playbook
-/// update node): an update that landed must not be reported as cancelled with its children half re-stamped. A child that
+/// other after-write call site (the document PUT, the field-mapping push, the playbook update node; associate-record and
+/// the event PUT were deleted by tasks 164 and 159): an update that landed must not be reported as cancelled with its children half re-stamped. A child that
 /// fails is in the report and the log, never thrown; the reconciliation job repairs it within one cycle.</para>
 /// <para><b>ADR-010.</b> A concrete class, not an interface: the narrowness is its single public member, and there is
 /// one implementation. Registered beside the restamper (<c>AddCoreAncestorResolver</c>), unconditionally, so every
