@@ -23,9 +23,10 @@ module.exports = {
     // from `@spaarke/ui-components` (previously had none). The real
     // package's `dist/index.js` is ESM (`export *`), which this config's
     // `.tsx?`-only `transform` does not cover inside `node_modules` — map
-    // to a narrow test-local stand-in re-exporting from TS source instead.
-    // See `test-mocks/spaarke-ui-components.ts`.
-    '^@spaarke/ui-components$': '<rootDir>/test-mocks/spaarke-ui-components.ts',
+    // to a test-local stand-in that maps each used export to its real TS
+    // source module and THROWS for any un-mapped export (never undefined).
+    // See `test-mocks/spaarke-ui-components.js`.
+    '^@spaarke/ui-components$': '<rootDir>/test-mocks/spaarke-ui-components.js',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {
