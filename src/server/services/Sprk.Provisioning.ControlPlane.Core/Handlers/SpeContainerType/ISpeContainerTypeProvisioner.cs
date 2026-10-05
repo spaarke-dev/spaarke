@@ -9,6 +9,14 @@
 // are created in a single invocation. Unit tests inject stubs to avoid pwsh +
 // Graph round-trips.
 //
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1):
+//   Every SPE container carries its owning business unit as the custom property
+//   Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName — the
+//   BFF's admin plane reaches NO unbound container. H8's root container is
+//   bound to the ROOT business unit of the customer's Dataverse environment
+//   (H8 therefore runs after H5 — DagAdvancer.HandlerDependencies) through
+//   BindRootContainerAsync, once the container is verified readable.
+//
 // WHY -CreateTestContainer FOR THE "ROOT CONTAINER" (deviation from the POML's
 // literal "invoke New-BusinessUnitContainer.ps1" wording — Path C pivot):
 //   New-BusinessUnitContainer.ps1 requires an EXISTING Dataverse business-unit
@@ -59,6 +67,51 @@ public interface ISpeContainerTypeProvisioner
     Task<SpeContainerTypeProvisionOutcome> ProvisionAsync(
         SpeContainerTypeProvisionRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stamps the root container H8 created with its owning business unit (unified-access-control-r2 task 165, owner
+    /// round 35 item 1 — every container-creation path stamps), reads the stamp back, and REMOVES the container when the
+    /// stamp does not read back, so no unbound container is left behind. Called by the handler once the container is
+    /// verified readable (an SPE container may be unaddressable for up to 24h after creation — stamping it earlier would
+    /// remove healthy containers during that documented window). Domain failures do NOT throw; infra faults before any
+    /// Graph call (cert load) MAY throw.
+    /// </summary>
+    Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Inputs to <see cref="ISpeContainerTypeProvisioner.BindRootContainerAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The owning app (H3 output) — the confidential-client identity that created the container.</param>
+/// <param name="VaultName">Customer Key Vault holding the SPE owner cert (T6).</param>
+/// <param name="CertSecretName">KV secret holding the base64 PFX SPE owner cert (T6).</param>
+/// <param name="ContainerId">The root container to bind.</param>
+/// <param name="BusinessUnitId">The owning business unit: the ROOT business unit of the customer's Dataverse environment.</param>
+public sealed record SpeContainerBindRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string VaultName,
+    string CertSecretName,
+    string ContainerId,
+    Guid BusinessUnitId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerTypeProvisioner.BindRootContainerAsync"/>.</summary>
+public abstract record SpeContainerBindOutcome
+{
+    private SpeContainerBindOutcome() { }
+
+    /// <summary>The stamp was written and read back.</summary>
+    public sealed record Bound : SpeContainerBindOutcome;
+
+    /// <summary>
+    /// The stamp did not land. <paramref name="Removed"/> is true when the container was then deleted (nothing unbound
+    /// is left); false when that also failed and an UNBOUND container remains (no admin route reaches it until the
+    /// backfill binds it with <c>-Bind</c> or an operator removes it).
+    /// </summary>
+    public sealed record NotBound(string Diagnostic, bool Removed) : SpeContainerBindOutcome;
 }
 
 /// <summary>

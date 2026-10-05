@@ -537,7 +537,7 @@ public static class ContainerEndpoints
                 ex.ContainerId, ex.Removed, configGuid, context.TraceIdentifier);
 
             // Removed: nothing remains active — the create simply did not happen, retry later (503). Not removed: an
-            // unbound container exists that only a root-unit administrator reaches; name it so it can be reconciled.
+            // unbound container exists that NO admin route reaches (round 35 item 2); name it so it can be reconciled.
             return ex.Removed
                 ? Results.Problem(
                     title: "Service Unavailable",
@@ -551,7 +551,7 @@ public static class ContainerEndpoints
                 : Results.Problem(
                     title: "Internal Server Error",
                     detail: "The container was created but could not be bound to its owning business unit, and could not be " +
-                            "removed. Only a root-unit administrator can reach it until it is removed or the backfill binds it.",
+                            "removed. No administrator can reach it until the backfill binds it (-Bind) or an operator removes it.",
                     statusCode: StatusCodes.Status500InternalServerError,
                     extensions: new Dictionary<string, object?>
                     {

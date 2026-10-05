@@ -61,6 +61,12 @@
 //         RunStatus.WaitingOnGate (NOT Resumable, NOT QuarantineRequired) +
 //         InterStepState IDs persisted + T6Verified gate Pending + NO
 //         CompletedPhase appended + kvWriter NEVER called.
+//   AC-23..AC-30 (unified-access-control-r2 task 165, owner round 35 item 1)
+//         Every container is stamped with its owning business unit: H8 binds
+//         the verified root container to the customer environment's ROOT
+//         business unit (H5 output) BEFORE the KV write and the H7 handoff;
+//         the owner is resolved before anything is created; a bind failure
+//         is QuarantineRequired and never hands the container to H7.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -86,6 +92,8 @@ public sealed class H8SpeContainerTypeHandlerTests
     private const string OwningAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
     private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
     private const string RootContainerId = "b!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private const string DataverseEnvUrl = "https://acme-prod.crm.dynamics.com";
+    private static readonly Guid RootBusinessUnitId = Guid.Parse("0b0b0b0b-1111-2222-3333-444444444444");
 
     // ---------- AC-1 happy path ----------
 
@@ -127,6 +135,13 @@ public sealed class H8SpeContainerTypeHandlerTests
 
         verifier.LastRequest!.ContainerId.Should().Be(RootContainerId);
         kvWriter.LastRequest!.ContainerTypeId.Should().Be(ContainerTypeId);
+
+        // Task 165, round 35 item 1 — the root container is bound to the environment's root business unit.
+        provisioner.BindCallCount.Should().Be(1);
+        provisioner.LastBindRequest!.ContainerId.Should().Be(RootContainerId);
+        provisioner.LastBindRequest.BusinessUnitId.Should().Be(RootBusinessUnitId);
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value
+            .GetProperty("owningBusinessUnitId").GetString().Should().Be(RootBusinessUnitId.ToString("D"));
     }
 
     // ---------- AC-2 T6 trap at provisioning ----------
@@ -562,6 +577,160 @@ public sealed class H8SpeContainerTypeHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
 
         kvWriter.CallCount.Should().Be(0, "KV write only happens after Verified, unchanged ordering");
+        provisioner.BindCallCount.Should().Be(0,
+            "the container is bound only once it is verified addressable — binding it during the 24h replication " +
+            "window would delete a healthy container");
+    }
+
+    // ---------- AC-23..AC-30 business-unit stamp (task 165, owner round 35 item 1) ----------
+
+    [Fact]
+    public async Task AC23_TheRootContainer_IsBoundToTheEnvironmentsRootBusinessUnit_AfterVerification_BeforeTheKvWrite()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-23");
+        var order = new List<string>();
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId, order);
+        var verifier = FakeVerifier.Verified("active", order);
+        var kvWriter = FakeKvWriter.Wrote(order);
+        var reader = FakeRootBusinessUnitReader.Returns(RootBusinessUnitId);
+        var handler = BuildHandler(repo, provisioner, verifier, kvWriter, reader);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        order.Should().Equal("provision", "verify", "bind", "kv");
+        reader.LastEnvironmentUrl.Should().Be(DataverseEnvUrl);
+        reader.LastTenantId.Should().Be(TenantId, "§4D I5 — the customer's tenant, never a default");
+        var bind = provisioner.LastBindRequest!;
+        bind.ContainerId.Should().Be(RootContainerId);
+        bind.BusinessUnitId.Should().Be(RootBusinessUnitId);
+        bind.TenantId.Should().Be(TenantId);
+        bind.OwningAppId.Should().Be(OwningAppId, "the same T6 identity that created the container binds it");
+        bind.VaultName.Should().Be(KeyVaultName);
+    }
+
+    [Fact]
+    public async Task AC24_MissingDataverseEnvUrl_FailsResumable_BeforeAnythingIsCreated()
+    {
+        var run = BuildRun();
+        run.InterStepState.DataverseEnvUrl = null;
+        var repo = new FakeRepository(run, etag: "etag-24");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var reader = FakeRootBusinessUnitReader.Returns(RootBusinessUnitId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote(), reader);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.MissingDataverseEnvUrl);
+        provisioner.CallCount.Should().Be(0, "no container may be created whose owner is not established");
+        reader.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC25_AnEnvironmentWithNoRootBusinessUnit_FailsResumable_AndCreatesNothing()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-25");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote(),
+            FakeRootBusinessUnitReader.Returns(null));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved);
+        provisioner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC26_ARootBusinessUnitReadFault_FailsResumable_AndCreatesNothing()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-26");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote(),
+            FakeRootBusinessUnitReader.Throws(new HttpRequestException("Dataverse 503")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved);
+        failure.Diagnostic.Should().Contain("Dataverse 503");
+        provisioner.CallCount.Should().Be(0, "fail closed: never create a container with an unread owner");
+    }
+
+    [Theory]
+    [InlineData(true, SpeContainerTypeRejectionCodes.ContainerBindingFailed)]
+    [InlineData(false, SpeContainerTypeRejectionCodes.ContainerBindingFailedNotRemoved)]
+    public async Task AC27_ABindFailure_IsQuarantined_AndTheContainerIsNeverHandedToH7(bool removed, string expectedCode)
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-27");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId,
+            bindOutcome: new SpeContainerBindOutcome.NotBound("the stamp did not read back", removed));
+        var kvWriter = FakeKvWriter.Wrote();
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), kvWriter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(expectedCode);
+        failure.Diagnostic.Should().Contain("did not read back");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().BeNull(
+            "an unbound (or removed) container must never become H7's sprk_SharePointEmbeddedContainerId");
+        repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+        kvWriter.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC28_ABindInfraFault_IsQuarantined_AndTheContainerIsNeverHandedToH7()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-28");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId,
+            bindThrows: new InvalidOperationException("KV cert unreadable"));
+        var kvWriter = FakeKvWriter.Wrote();
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), kvWriter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.ContainerBindingInfraFault);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNull();
+        kvWriter.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC29_AnIdempotentReRun_ReadsNoBusinessUnit_AndBindsNothing()
+    {
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H8",
+            IdempotencyKey = H8SpeContainerTypeHandler.BuildIdempotencyKey(CustomerId),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+            JobId = RunId,
+        });
+        run.InterStepState.DataverseEnvUrl = null; // a run that completed H8 before H8 needed it — still a no-op
+        var repo = new FakeRepository(run, etag: "etag-29");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var reader = FakeRootBusinessUnitReader.Returns(RootBusinessUnitId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote(), reader);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        reader.CallCount.Should().Be(0);
+        provisioner.BindCallCount.Should().Be(0);
     }
 
     // ---------- helpers ----------
@@ -570,10 +739,12 @@ public sealed class H8SpeContainerTypeHandlerTests
         IProvisioningRunRepository repo,
         ISpeContainerTypeProvisioner provisioner,
         ISpeContainerVerifier verifier,
-        ISpeContainerIdKvWriter kvWriter)
+        ISpeContainerIdKvWriter kvWriter,
+        IDataverseRootBusinessUnitReader? rootReader = null)
     {
         return new H8SpeContainerTypeHandler(
             repo, provisioner, verifier, kvWriter,
+            rootReader ?? FakeRootBusinessUnitReader.Returns(RootBusinessUnitId),
             Options.Create(new SpeContainerTypeOptions()),
             NullLogger<H8SpeContainerTypeHandler>.Instance);
     }
@@ -603,6 +774,7 @@ public sealed class H8SpeContainerTypeHandlerTests
         run.Parameters.NonSecret[H8SpeContainerTypeHandler.SubscriptionIdParameterKey] = SubscriptionId;
         run.Parameters.NonSecret[H8SpeContainerTypeHandler.SharePointDomainParameterKey] = SharePointDomain;
         run.InterStepState.BffAppRegId = OwningAppId;
+        run.InterStepState.DataverseEnvUrl = DataverseEnvUrl;
         if (provisionedOn is not null)
         {
             run.Parameters.NonSecret[H8SpeContainerTypeHandler.ProvisionedOnParameterKey] = provisionedOn;
@@ -645,18 +817,30 @@ public sealed class H8SpeContainerTypeHandlerTests
     {
         private readonly SpeContainerTypeProvisionOutcome? _outcome;
         private readonly Exception? _throwOnCall;
+        private readonly SpeContainerBindOutcome _bindOutcome;
+        private readonly Exception? _bindThrows;
+        private readonly List<string>? _order;
         public int CallCount { get; private set; }
         public SpeContainerTypeProvisionRequest? LastRequest { get; private set; }
+        public int BindCallCount { get; private set; }
+        public SpeContainerBindRequest? LastBindRequest { get; private set; }
 
-        private FakeProvisioner(SpeContainerTypeProvisionOutcome? outcome, Exception? throwOnCall)
+        private FakeProvisioner(
+            SpeContainerTypeProvisionOutcome? outcome, Exception? throwOnCall,
+            SpeContainerBindOutcome? bindOutcome = null, Exception? bindThrows = null, List<string>? order = null)
         {
             _outcome = outcome;
             _throwOnCall = throwOnCall;
+            _bindOutcome = bindOutcome ?? new SpeContainerBindOutcome.Bound();
+            _bindThrows = bindThrows;
+            _order = order;
         }
 
-        public static FakeProvisioner Success(string containerTypeId, string rootContainerId)
+        public static FakeProvisioner Success(
+            string containerTypeId, string rootContainerId, List<string>? order = null,
+            SpeContainerBindOutcome? bindOutcome = null, Exception? bindThrows = null)
             => new(new SpeContainerTypeProvisionOutcome.Success(
-                new SpeContainerTypeProvisionOutputs(containerTypeId, rootContainerId)), null);
+                new SpeContainerTypeProvisionOutputs(containerTypeId, rootContainerId)), null, bindOutcome, bindThrows, order);
 
         public static FakeProvisioner Failure(string diagnostic, bool isDelegatedTokenTrap)
             => new(new SpeContainerTypeProvisionOutcome.Failure(diagnostic, isDelegatedTokenTrap), null);
@@ -668,8 +852,45 @@ public sealed class H8SpeContainerTypeHandlerTests
         {
             CallCount++;
             LastRequest = request;
+            _order?.Add("provision");
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_outcome!);
+        }
+
+        public Task<SpeContainerBindOutcome> BindRootContainerAsync(SpeContainerBindRequest request, CancellationToken ct)
+        {
+            BindCallCount++;
+            LastBindRequest = request;
+            _order?.Add("bind");
+            if (_bindThrows is not null) throw _bindThrows;
+            return Task.FromResult(_bindOutcome);
+        }
+    }
+
+    private sealed class FakeRootBusinessUnitReader : IDataverseRootBusinessUnitReader
+    {
+        private readonly Guid? _root;
+        private readonly Exception? _throws;
+        public int CallCount { get; private set; }
+        public string? LastEnvironmentUrl { get; private set; }
+        public string? LastTenantId { get; private set; }
+
+        private FakeRootBusinessUnitReader(Guid? root, Exception? throws)
+        {
+            _root = root;
+            _throws = throws;
+        }
+
+        public static FakeRootBusinessUnitReader Returns(Guid? root) => new(root, null);
+        public static FakeRootBusinessUnitReader Throws(Exception ex) => new(null, ex);
+
+        public Task<Guid?> ReadRootBusinessUnitIdAsync(string environmentUrl, string tenantId, CancellationToken ct)
+        {
+            CallCount++;
+            LastEnvironmentUrl = environmentUrl;
+            LastTenantId = tenantId;
+            if (_throws is not null) throw _throws;
+            return Task.FromResult(_root);
         }
     }
 
@@ -677,17 +898,19 @@ public sealed class H8SpeContainerTypeHandlerTests
     {
         private readonly SpeContainerVerificationResult? _result;
         private readonly Exception? _throwOnCall;
+        private readonly List<string>? _order;
         public int CallCount { get; private set; }
         public SpeContainerVerificationRequest? LastRequest { get; private set; }
 
-        private FakeVerifier(SpeContainerVerificationResult? result, Exception? throwOnCall)
+        private FakeVerifier(SpeContainerVerificationResult? result, Exception? throwOnCall, List<string>? order = null)
         {
             _result = result;
             _throwOnCall = throwOnCall;
+            _order = order;
         }
 
-        public static FakeVerifier Verified(string status)
-            => new(new SpeContainerVerificationResult.Verified(status), null);
+        public static FakeVerifier Verified(string status, List<string>? order = null)
+            => new(new SpeContainerVerificationResult.Verified(status), null, order);
 
         public static FakeVerifier NotVerified(string diagnostic, bool isDelegatedTokenTrap)
             => new(new SpeContainerVerificationResult.NotVerified(diagnostic, isDelegatedTokenTrap), null);
@@ -702,6 +925,7 @@ public sealed class H8SpeContainerTypeHandlerTests
         {
             CallCount++;
             LastRequest = request;
+            _order?.Add("verify");
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_result!);
         }
@@ -711,16 +935,18 @@ public sealed class H8SpeContainerTypeHandlerTests
     {
         private readonly SpeContainerIdKvWriteResult? _result;
         private readonly Exception? _throwOnCall;
+        private readonly List<string>? _order;
         public int CallCount { get; private set; }
         public SpeContainerIdKvWriteRequest? LastRequest { get; private set; }
 
-        private FakeKvWriter(SpeContainerIdKvWriteResult? result, Exception? throwOnCall)
+        private FakeKvWriter(SpeContainerIdKvWriteResult? result, Exception? throwOnCall, List<string>? order = null)
         {
             _result = result;
             _throwOnCall = throwOnCall;
+            _order = order;
         }
 
-        public static FakeKvWriter Wrote() => new(new SpeContainerIdKvWriteResult.Wrote(), null);
+        public static FakeKvWriter Wrote(List<string>? order = null) => new(new SpeContainerIdKvWriteResult.Wrote(), null, order);
         public static FakeKvWriter Failure(string diagnostic)
             => new(new SpeContainerIdKvWriteResult.Failure(diagnostic), null);
         public static FakeKvWriter Throws(Exception ex) => new(null, ex);
@@ -730,6 +956,7 @@ public sealed class H8SpeContainerTypeHandlerTests
         {
             CallCount++;
             LastRequest = request;
+            _order?.Add("kv");
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_result!);
         }

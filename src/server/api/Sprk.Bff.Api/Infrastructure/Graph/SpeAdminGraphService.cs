@@ -601,6 +601,11 @@ public sealed class SpeAdminGraphService
     {
         ArgumentNullException.ThrowIfNull(config);
 
+        // 0. The config's secret name must be one the BFF may resolve (task 165, owner round 35 item 3) — checked BEFORE
+        //    the cache, so a config re-pointed at a non-conforming name is refused at once rather than served from a
+        //    client built for its old name. Throws SpeConfigSecretNameNotAllowedException; the vault is never called.
+        Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.EnsureAllowed(config.SecretKeyVaultName, config.ConfigId);
+
         // 1. Check cache
         if (_clientCache.TryGetValue(config.ConfigId, out var cached))
         {
@@ -662,7 +667,8 @@ public sealed class SpeAdminGraphService
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        // Single-app fallback: no owning app configured OR token provider not registered
+        // Single-app fallback: no owning app configured OR token provider not registered. GetClientForConfigAsync
+        // refuses a non-conforming secret name itself (task 165, round 35 item 3).
         if (!config.HasOwningApp || _tokenProvider is null)
         {
             _logger.LogDebug(
@@ -671,6 +677,10 @@ public sealed class SpeAdminGraphService
                 config.ConfigId);
             return await GetClientForConfigAsync(config, ct);
         }
+
+        // Task 165, round 35 item 3: refused BEFORE the OBO client cache, so a cached client cannot serve a config whose
+        // owning-app secret name is outside the allow-list.
+        Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.EnsureAllowed(config.OwningAppSecretName, config.ConfigId);
 
         ArgumentException.ThrowIfNullOrWhiteSpace(userAccessToken);
 
@@ -2808,8 +2818,8 @@ public sealed class SpeAdminGraphService
                 catch (Exception deleteEx)
                 {
                     _logger.LogCritical(deleteEx,
-                        "Container {ContainerId} is UNBOUND and could not be removed; only a root-unit administrator can " +
-                        "reach it until the backfill stamps or an operator removes it.", containerId);
+                        "Container {ContainerId} is UNBOUND and could not be removed; no admin route reaches it until the " +
+                        "backfill binds it (-Bind) or an operator removes it.", containerId);
                 }
             }
 
@@ -5927,7 +5937,9 @@ public sealed class SpeAdminGraphService
             string.Join(", ", applicationPermissions));
 
         // 1. Acquire a SharePoint-scoped access token using the config's app registration credentials.
-        //    The scope must target the SharePoint admin host (not graph.microsoft.com).
+        //    The scope must target the SharePoint admin host (not graph.microsoft.com). The secret name is judged first
+        //    (task 165, round 35 item 3) — a non-conforming one is refused before the vault is called.
+        Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.EnsureAllowed(config.SecretKeyVaultName, config.ConfigId);
         var clientSecret = await FetchKeyVaultSecretAsync(config.SecretKeyVaultName, ct);
         var credential = new ClientSecretCredential(config.TenantId, config.ClientId, clientSecret);
 
@@ -6009,10 +6021,14 @@ public sealed class SpeAdminGraphService
     // =========================================================================
 
     /// <summary>
-    /// Fetches a client secret from Azure Key Vault by secret name.
+    /// Fetches a client secret from Azure Key Vault by secret name. Its callers refuse a name outside
+    /// <see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy"/> with the config id first; this last line
+    /// refuses one too, so no path can reach the vault with it (task 165, round 35 item 3).
     /// </summary>
     private async Task<string> FetchKeyVaultSecretAsync(string secretName, CancellationToken ct)
     {
+        Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.EnsureAllowed(secretName, Guid.Empty);
+
         try
         {
             _logger.LogDebug("Retrieving secret '{SecretName}' from Key Vault", secretName);

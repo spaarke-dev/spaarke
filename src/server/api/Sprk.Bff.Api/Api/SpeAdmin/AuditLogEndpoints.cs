@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
@@ -34,6 +35,9 @@ public static class AuditLogEndpoints
     public static RouteGroupBuilder MapAuditLogEndpoints(this RouteGroupBuilder group)
     {
         group.MapGet("/audit", QueryAuditLogAsync)
+            // Reads Dataverse audit rows filtered by the config — never the config's credential, so a config with a
+            // non-conforming Key Vault secret name keeps its audit history readable (task 165, round 35 item 3).
+            .WithSpeAdminConfigCredentialUnused()
             .WithName("QueryAuditLog")
             .WithSummary("Query SPE audit log entries")
             .WithDescription(

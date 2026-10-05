@@ -32,8 +32,9 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 ///      serve several customers (Model 1), so "the containers of this config's type" is NOT "this config's
 ///      containers".
 ///   4. Store per-config counts and storage, plus the containers attributable to no config (unbound, or bound to a unit
-///      under which no config of that type sits) as a separate "unattributed" figure only a root-unit administrator
-///      sees. A container bound to a unit this environment does not know (another environment's, in a shared Model 1
+///      under which no config of that type sits) as a separate AGGREGATE "unattributed" figure (no container id or
+///      name) shown only in a platform operator's full view — the alarm that a backfill / -Bind is owed; no admin route
+///      reaches an unbound container (owner round 35 item 2). A container bound to a unit this environment does not know (another environment's, in a shared Model 1
 ///      consuming tenant) is counted nowhere.
 ///
 /// On-demand refresh: <c>POST /api/spe/dashboard/refresh</c> triggers a run through <c>ScheduledJobHost.TriggerNowAsync</c>
@@ -106,7 +107,7 @@ public sealed class SpeDashboardSyncService : IScheduledJob
             = new Dictionary<string, int>();
 
         /// <summary>
-        /// Containers attributable to no config: unbound (only a root-unit administrator reaches them), or bound to a
+        /// Containers attributable to no config: unbound (NO admin route reaches them — round 35 item 2), or bound to a
         /// unit under which no config of their type sits. Shown only in the platform operator's full view.
         /// </summary>
         [JsonPropertyName("unattributedContainerCount")]
@@ -208,7 +209,7 @@ public sealed class SpeDashboardSyncService : IScheduledJob
         /// <summary>Counted under <see cref="ContainerAttribution.ConfigId"/>.</summary>
         Config,
 
-        /// <summary>Counted in the unattributed figure only a root-unit administrator sees.</summary>
+        /// <summary>Counted in the aggregate unattributed figure, shown only in a platform operator's full view.</summary>
         Unattributed,
 
         /// <summary>Counted nowhere: bound to a unit this environment does not know, or not judgeable.</summary>
@@ -236,7 +237,7 @@ public sealed class SpeDashboardSyncService : IScheduledJob
     ///   Model 1 consuming tenant, which no administrator here reaches. When the hierarchy could not be read
     ///   (<paramref name="hierarchy"/> null), only an exact unit match is attributed and the rest is excluded
     ///   (fail closed).</item>
-    ///   <item>Unbound or malformed: unattributed (only a root-unit administrator reaches it).</item>
+    ///   <item>Unbound or malformed: unattributed (no admin route reaches it; counted only in the aggregate).</item>
     /// </list>
     /// A config with no business unit (the compatibility rule: visible to every admin) never receives a bound
     /// container — that would show it to everyone.

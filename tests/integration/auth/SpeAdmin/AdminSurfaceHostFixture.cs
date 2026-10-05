@@ -76,6 +76,12 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
     /// </summary>
     public GraphWireMockFixture Graph { get; } = new();
 
+    /// <summary>
+    /// Every log line the host writes (task 165, owner round 35 item 2: a refused container is logged with its reason —
+    /// <c>unbound</c> among them — while the caller sees one uniform 404, so the reason is observable only here).
+    /// </summary>
+    public RecordingLoggerProvider Logs { get; } = new();
+
     /// <summary>Points each config's app-only Graph client at <see cref="Graph"/>.</summary>
     public void UseGraphForConfig(params Guid[] configIds)
     {
@@ -107,6 +113,8 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
             // host configuration), so the routes are mapped; the recording fake replaces the real service.
             services.RemoveAll<IDataverseIndexSyncService>();
             services.AddSingleton<IDataverseIndexSyncService>(IndexSync);
+
+            services.AddSingleton<ILoggerProvider>(Logs);
         });
     }
 
@@ -147,6 +155,7 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
         Dataverse.Reset();
         IndexSync.Reset();
         Graph.Reset();
+        Logs.Clear();
     }
 
     protected override void Dispose(bool disposing)
@@ -392,6 +401,39 @@ public sealed class FakeDataverseTables
 }
 
 public sealed record DataverseCall(string Operation, string EntitySet, Guid? Id, string? Filter);
+
+/// <summary>A logger provider that records every formatted line (category, level, message) the host writes.</summary>
+public sealed class RecordingLoggerProvider : ILoggerProvider
+{
+    private readonly ConcurrentQueue<LogLine> _lines = new();
+
+    public IReadOnlyList<LogLine> Lines => _lines.ToArray();
+
+    public void Clear() => _lines.Clear();
+
+    public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, _lines);
+
+    public void Dispose()
+    {
+    }
+
+    public sealed record LogLine(string Category, LogLevel Level, string Message);
+
+    private sealed class RecordingLogger(string category, ConcurrentQueue<LogLine> lines) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (IsEnabled(logLevel))
+            {
+                lines.Enqueue(new LogLine(category, logLevel, formatter(state, exception)));
+            }
+        }
+    }
+}
 
 /// <summary>Records every call; returns canned results, or throws <see cref="ThrowOnCall"/> when set.</summary>
 public sealed class RecordingIndexSyncService : IDataverseIndexSyncService

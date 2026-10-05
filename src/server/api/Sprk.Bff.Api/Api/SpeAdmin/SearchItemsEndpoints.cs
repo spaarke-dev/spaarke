@@ -127,8 +127,10 @@ public static class SearchItemsEndpoints
 
             // Task 165, owner round 20 item 2: an item hit is shown only when its CONTAINER is one the caller reaches
             // (a scoped request's own containerId was already decided by SpeAdminTenantScopeFilter). A hit that names
-            // no container cannot be attributed and is dropped. Graph's total counts other customers' hits, so it is
-            // reported only to a platform operator from whose page nothing was removed; otherwise the page's count.
+            // no container cannot be attributed and is dropped — for every caller, platform operators included (an
+            // unattributable hit is judged by no binding; round 35 item 2). Graph's total counts other customers' hits,
+            // so it is reported only to a platform operator from whose page nothing was removed and only when there is
+            // no further page (a later page may hold hits nobody here reaches); otherwise the page's count.
             var trim = await tenantScope.TrimToReachableContainersAsync(
                 context.User,
                 config,
@@ -159,6 +161,7 @@ public static class SearchItemsEndpoints
                     .ToList(),
                 NextSkipToken: searchResult.NextSkipToken,
                 TotalCount: trim.IsPlatformOperator && visible.Count == searchResult.Items.Count
+                            && searchResult.NextSkipToken is null
                     ? searchResult.TotalCount
                     : visible.Count);
 

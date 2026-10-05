@@ -6,11 +6,13 @@
 
 .DESCRIPTION
     THE BINDING. Every SPE container carries its owning business unit as the fileStorageContainer custom property
-    'spaarkeBusinessUnitId' (the BFF constant SpeContainerBusinessUnitStamp.PropertyName). The SPE admin plane
-    authorizes every container, item, permission and bulk route PER CONTAINER against it: a container bound to a unit
-    the admin reaches (their own unit or a descendant); an UNBOUND container only for a root-unit admin; an unreadable
-    binding fails closed. New containers are stamped by the BFF when it creates them. This script stamps the ones that
-    already exist.
+    $SpeContainerStampProperty (scripts/common/SpeContainerBinding.ps1 — the ONE PowerShell constant, equal to the C#
+    constant Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName). The SPE admin plane authorizes every
+    container, item, permission and bulk route PER CONTAINER against it: a container bound to a unit the admin reaches
+    (their own unit or a descendant); an UNBOUND container by NO admin route, root-unit admins included (owner round 35
+    item 2); an unreadable binding fails closed. New containers are stamped by every creation path (the BFF, the L2 H8
+    handler, New-BusinessUnitContainer.ps1, Provision-Customer.ps1, Create-NewContainerType.ps1). This script stamps
+    the ones that already exist — from records, or from an operator's explicit -Bind.
 
     WHICH UNIT — derived ONLY from the authoritative records that created or own the container. Never guessed:
       1. businessunit.sprk_containerid            the unit whose default container it is
@@ -24,10 +26,18 @@
     by two sibling customers belongs to whoever sits above both). A claimant the hierarchy does not contain makes the
     container UNDERIVABLE. A configuration's sprk_defaultcontainerid is NOT a source: an administrator types it in.
 
+    -BIND (owner round 35 item 2). A container no authoritative record claims is UNDERIVABLE. An operator who knows its
+    owner binds it explicitly: -Bind '<containerId>=<businessUnitId>' (repeatable). The unit must be one this
+    environment's hierarchy holds; a -Bind for a DERIVABLE container must name the derived unit (records win — a
+    disagreeing -Bind is listed as BIND-CONFLICT and not written); a -Bind never overwrites a stamp; a -Bind naming a
+    container no config lists is BIND-UNUSED. Any invalid -Bind entry stops the run before any container is read or
+    anything is written (only the business-unit hierarchy, needed to validate it, has been read).
+
     WHAT IT WILL NOT DO.
-      - Stamp a container no authoritative record claims. Those are LISTED as UNDERIVABLE and left unbound (only a
-        root-unit admin reaches them). In a shared Model 1 consuming tenant another environment's containers appear
-        here too: they are underivable or FOREIGN and must never be stamped by this environment.
+      - Stamp a container no authoritative record claims and no -Bind names. Those are LISTED as UNDERIVABLE and left
+        unbound — and an unbound container is reached by NO admin route, so each must be bound (-Bind) or removed. In
+        a shared Model 1 consuming tenant another environment's containers appear here too: they are underivable or
+        FOREIGN and must never be stamped by this environment (do not -Bind a container you cannot attribute).
       - Overwrite an existing stamp. A stamp that differs from the derivation (MISMATCH), names a unit this
         environment does not know (FOREIGN) or is not one GUID (MALFORMED) is LISTED for an operator, never changed.
 
@@ -39,9 +49,14 @@
       - READ-BACK: every write is re-read; Graph accepting a PATCH is not evidence of the stamp.
       - SAMPLE FIRST: -MaxWritesPerRun bounds a run.
       - Idempotent: a stamped container is no longer a candidate; a re-run reports ToStamp: 0.
-      - -Verify: read-only. Exit 1 while ANY derivable container is unstamped or carries a different stamp, a
-        binding cannot be read, or a config's containers could not be listed at all (SKIPPED-CONFIG: an incomplete
-        config, or an owning-app secret the vault does not return) — a pass must not claim containers it never saw.
+      - -Verify: read-only. LISTS every container still unbound (UNBOUND: derivable but unstamped, underivable, or
+        malformed) and exits 1 while ANY is, while a container carries a stamp other than its records derive, a binding
+        cannot be read, or a config's containers could not be listed at all (SKIPPED-CONFIG: an incomplete config, or an
+        owning-app secret the vault does not return) — a pass must not claim containers it never saw.
+
+    MANUAL GATE (round 35 item 2). -Apply then -Verify exit 0 in EVERY environment is required BEFORE task 165's BFF is
+    deployed there, and again before a further environment is onboarded onto a container type another environment
+    already uses (docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
 
     AUTH — the operator's own az CLI identity reads Dataverse and the BFF Key Vault (the owning apps' secrets, never
     printed); Graph is called app-only as each config's owning app, exactly as the BFF does. No secret in this script.
@@ -59,7 +74,13 @@
     Write mode. Without it the script always dry-runs.
 
 .PARAMETER Verify
-    Read-only verification; exit 1 if any derivable container is not stamped with its derived unit.
+    Read-only verification: lists every unbound container; exit 1 if any container is unbound or stamped other than its
+    records derive, a binding is unreadable, or a config's containers could not be listed.
+
+.PARAMETER Bind
+    Explicit owners for containers no record claims: one or more '<containerId>=<businessUnitId>' (split at the LAST
+    '='). Validated against the business-unit hierarchy before any container is read; written only with -Apply (a dry run
+    and -Verify show the plan).
 
 .PARAMETER WhatIf
     Forces a dry-run even when -Apply is passed.
@@ -82,8 +103,12 @@
     The SAMPLE: stamp one container, read back; writes a reversal manifest.
 
 .EXAMPLE
+    .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind 'b!abc=0b0b0b0b-1111-2222-3333-444444444444' -Apply
+    Binds one underivable container to a named business unit (read back, reversal manifest written first).
+
+.EXAMPLE
     .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify
-    Exit 0 only when every derivable container carries its derived unit.
+    Exit 0 only when NO container is unbound and every stamp matches its records.
 #>
 
 [CmdletBinding()]
@@ -106,6 +131,8 @@ param(
 
     [string]$RevertManifest,
 
+    [string[]]$Bind = @(),
+
     [string]$LogPath
 )
 
@@ -113,8 +140,10 @@ $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent -or $Verify.IsPresent
 
-# ── The binding. MUST equal SpeContainerBusinessUnitStamp.PropertyName (SpeContainerStampScriptAgreementTests). ──
-$StampProperty = 'spaarkeBusinessUnitId'
+# ── The binding: THE PowerShell constant (scripts/common/SpeContainerBinding.ps1), pinned equal to the C# one by
+#    SpeAdminContainerBindingGuardTests. Never spelled again here. ──────────────────────────────────────────────────
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+$StampProperty = $SpeContainerStampProperty
 
 # ── The authoritative sources. MUST match the BFF's creation paths (SpeContainerStampScriptAgreementTests). ───────
 $SecureRootSets = [ordered]@{
@@ -192,36 +221,17 @@ function Invoke-Graph {
     return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers
 }
 
-# The binding of ONE container. Graph drops customProperties on the containers COLLECTION (measured 2026-10-04), so
-# this is always a single-container GET. Returns @{ Found; TypeId; Stamp; Malformed }.
+# The binding of ONE container (single-container GET — the collection drops customProperties) and the stamp write
+# (PATCH …/customProperties, property map as the body root): the shared functions in common/SpeContainerBinding.ps1,
+# the same ones every creation script uses.
 function Read-ContainerBinding {
     param([string]$Token, [string]$ContainerId)
-    try {
-        $c = Invoke-Graph $Token 'Get' "$GraphBase/storage/fileStorage/containers/$([uri]::EscapeDataString($ContainerId))?`$select=id,containerTypeId,customProperties"
-    } catch {
-        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { return @{ Found = $false } }
-        throw
-    }
-    $values = @()
-    if ($c.customProperties) {
-        foreach ($p in $c.customProperties.PSObject.Properties) {
-            if ($p.Name.Trim() -ieq $StampProperty) { $values += , [string]$p.Value.value }
-        }
-    }
-    $clean = @($values | ForEach-Object { ConvertTo-CleanGuid $_ })
-    if ($values.Count -eq 0) { return @{ Found = $true; TypeId = (ConvertTo-CleanGuid $c.containerTypeId); Stamp = $null; Malformed = $false } }
-    if (($clean | Where-Object { -not $_ }).Count -gt 0 -or ($clean | Select-Object -Unique).Count -ne 1) {
-        return @{ Found = $true; TypeId = (ConvertTo-CleanGuid $c.containerTypeId); Stamp = $null; Malformed = $true }
-    }
-    return @{ Found = $true; TypeId = (ConvertTo-CleanGuid $c.containerTypeId); Stamp = $clean[0]; Malformed = $false }
+    return Get-SpeContainerBinding -Token $Token -ContainerId $ContainerId -GraphBase $GraphBase
 }
 
-# PATCH /containers/{id}/customProperties with the property map as the BODY ROOT (merge semantics — no other property
-# is touched; a null value removes the property). The shape SpeAdminGraphService.WriteBusinessUnitStampAsync sends.
 function Write-ContainerStamp {
     param([string]$Token, [string]$ContainerId, [AllowNull()][string]$BusinessUnitId)
-    $value = if ($BusinessUnitId) { @{ value = $BusinessUnitId; isSearchable = $false } } else { $null }
-    Invoke-Graph $Token 'Patch' "$GraphBase/storage/fileStorage/containers/$([uri]::EscapeDataString($ContainerId))/customProperties" @{ $StampProperty = $value } | Out-Null
+    Set-SpeContainerStamp -Token $Token -ContainerId $ContainerId -BusinessUnitId $BusinessUnitId -GraphBase $GraphBase
 }
 
 # ══ Load the authoritative records ═══════════════════════════════════════════════════════════════════════════
@@ -234,6 +244,30 @@ foreach ($u in $units) {
     $parentOf[$id] = Get-Lookup $u 'parentbusinessunitid'
     $unitName[$id] = $u.name
 }
+
+# ── -Bind: validated BEFORE anything else is read or written (round 35 item 2) ─────────────────────────────────────
+$explicitBind = @{}
+$bindErrors = [System.Collections.Generic.List[string]]::new()
+foreach ($entry in $Bind) {
+    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+    $cut = $entry.LastIndexOf('=')
+    if ($cut -le 0 -or $cut -eq $entry.Length - 1) { $bindErrors.Add("'$entry' is not '<containerId>=<businessUnitId>'."); continue }
+    $bindContainer = $entry.Substring(0, $cut).Trim()
+    $bindUnit = ConvertTo-CleanGuid $entry.Substring($cut + 1)
+    if (-not $bindUnit) { $bindErrors.Add("'$entry': the business unit is not one GUID."); continue }
+    if (-not $parentOf.ContainsKey($bindUnit)) { $bindErrors.Add("'$entry': business unit $bindUnit is not in this environment's hierarchy."); continue }
+    if ($explicitBind.ContainsKey($bindContainer) -and $explicitBind[$bindContainer] -ne $bindUnit) {
+        $bindErrors.Add("'$bindContainer' is bound twice, to different units."); continue
+    }
+    $explicitBind[$bindContainer] = $bindUnit
+}
+if ($bindErrors.Count -gt 0) {
+    $script:LogWriter.Dispose()
+    Write-Host 'The -Bind input is invalid — nothing was read or written:' -ForegroundColor Red
+    $bindErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 2
+}
+$bindUsed = @{}
 
 function Get-Ancestry {
     # The unit and every ancestor, nearest first; cycle-safe.
@@ -347,8 +381,10 @@ if (-not $IsDryRun) {
     $manifest.Flush()
 }
 
-$stats = [ordered]@{ ConfigsSkipped = 0; Containers = 0; AlreadyStamped = 0; ToStamp = 0; Stamped = 0; Failed = 0; Underivable = 0; Mismatch = 0; Foreign = 0; Malformed = 0; Unreadable = 0 }
+$stats = [ordered]@{ ConfigsSkipped = 0; Containers = 0; AlreadyStamped = 0; ToStamp = 0; Stamped = 0; Failed = 0; Underivable = 0; Mismatch = 0; Foreign = 0; Malformed = 0; Unreadable = 0; BindConflict = 0; BindUnused = 0 }
 $listed = [System.Collections.Generic.List[string]]::new()
+# Every container still unbound after this pass (round 35 item 2: -Verify lists them all; no admin route reaches one).
+$unbound = [System.Collections.Generic.List[string]]::new()
 $seen = @{}
 $writes = 0
 
@@ -382,8 +418,15 @@ foreach ($config in $configs) {
 
             $derived = Get-DerivedOwner $containerId
             $label = "$containerId ($($c.displayName)) config $cid"
+            $operatorUnit = $null
+            if ($explicitBind.ContainsKey($containerId)) { $operatorUnit = $explicitBind[$containerId]; $bindUsed[$containerId] = $true }
 
-            if ($binding.Malformed) { $stats.Malformed++; $listed.Add("MALFORMED $label — the stamp is not one business-unit GUID; fix by hand."); continue }
+            if ($binding.Malformed) {
+                $stats.Malformed++
+                $listed.Add("MALFORMED $label — the stamp is not one business-unit GUID; fix by hand.")
+                $unbound.Add("UNBOUND $label — malformed stamp")
+                continue
+            }
 
             if ($binding.Stamp) {
                 if (-not $parentOf.ContainsKey($binding.Stamp)) {
@@ -393,34 +436,66 @@ foreach ($config in $configs) {
                 } else {
                     $stats.AlreadyStamped++
                 }
+                if ($operatorUnit -and $operatorUnit -ne $binding.Stamp) {
+                    $stats.BindConflict++; $listed.Add("BIND-CONFLICT $label — -Bind names $operatorUnit but the container is already stamped $($binding.Stamp). A stamp is never overwritten.")
+                }
                 continue
             }
 
-            if (-not $derived.Unit) {
-                $stats.Underivable++; $listed.Add("UNDERIVABLE $label — $($derived.Why). Left unbound (root-unit admins only).")
+            # Records win: an explicit -Bind may only confirm a derivable owner, or name the owner of an underivable one.
+            $target = $derived.Unit
+            $why = $derived.Why
+            if ($operatorUnit) {
+                if ($derived.Unit -and $derived.Unit -ne $operatorUnit) {
+                    $stats.BindConflict++
+                    $listed.Add("BIND-CONFLICT $label — -Bind names $operatorUnit but the records derive $($derived.Unit) [$($derived.Why)]. Not written.")
+                    $unbound.Add("UNBOUND $label — -Bind conflicts with the records")
+                    continue
+                }
+                if (-not $derived.Unit) { $target = $operatorUnit; $why = 'operator -Bind' }
+            }
+
+            if (-not $target) {
+                $stats.Underivable++
+                $listed.Add("UNDERIVABLE $label — $($derived.Why). Unbound: NO admin route reaches it — bind it with -Bind '$containerId=<businessUnitId>' -Apply, or remove it.")
+                $unbound.Add("UNBOUND $label — underivable (needs -Bind)")
                 continue
             }
 
             $stats.ToStamp++
-            Write-StampLog "PLAN $label -> $($derived.Unit) ($($unitName[$derived.Unit])) [$($derived.Why)]"
-            if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $writes -ge $MaxWritesPerRun)) { continue }
+            Write-StampLog "PLAN $label -> $target ($($unitName[$target])) [$why]"
+            if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $writes -ge $MaxWritesPerRun)) {
+                $unbound.Add("UNBOUND $label — to stamp $target [$why]")
+                continue
+            }
 
             # WRITE-AHEAD: the reversal row is on disk before the write it reverses.
-            $manifest.WriteLine("$containerId,$cid,,$($derived.Unit),$((Get-Date).ToUniversalTime().ToString('o'))")
+            $manifest.WriteLine("$containerId,$cid,,$target,$((Get-Date).ToUniversalTime().ToString('o'))")
             $manifest.Flush()
             $writes++
             try {
-                Write-ContainerStamp $token $containerId $derived.Unit
+                Write-ContainerStamp $token $containerId $target
                 $after = Read-ContainerBinding $token $containerId
-                if ($after.Stamp -ne $derived.Unit) { throw "read-back: $($after.Stamp)" }
-                $stats.Stamped++; Write-StampLog "STAMPED $label -> $($derived.Unit)"
-            } catch { $stats.Failed++; Write-StampLog "FAIL ${label}: $($_.Exception.Message)" }
+                if ($after.Stamp -ne $target) { throw "read-back: $($after.Stamp)" }
+                $stats.Stamped++; Write-StampLog "STAMPED $label -> $target [$why]"
+            } catch {
+                $stats.Failed++; Write-StampLog "FAIL ${label}: $($_.Exception.Message)"
+                $unbound.Add("UNBOUND $label — the stamp write failed: $($_.Exception.Message)")
+            }
         }
         $uri = $page.'@odata.nextLink'
     }
 }
 
+foreach ($container in $explicitBind.Keys) {
+    if (-not $bindUsed.ContainsKey($container)) {
+        $stats.BindUnused++
+        $listed.Add("BIND-UNUSED $container — no examined config lists this container; nothing was written for it (typo, another environment's container, or its config was skipped).")
+    }
+}
+
 foreach ($line in $listed) { Write-StampLog $line }
+foreach ($line in $unbound) { Write-StampLog $line }
 if ($manifest) { $manifest.Dispose() }
 $script:LogWriter.Dispose()
 
@@ -432,12 +507,16 @@ if ($listed.Count -gt 0) {
     Write-Host 'Listed for an operator (never written by this script):'
     $listed | ForEach-Object { Write-Host "  $_" }
 }
+if ($unbound.Count -gt 0) {
+    Write-Host "Containers still UNBOUND ($($unbound.Count)) — no SPE admin route reaches them:"
+    $unbound | ForEach-Object { Write-Host "  $_" }
+}
 if (-not $IsDryRun) { Write-Host "Reversal manifest: $manifestPath  (undo: -RevertManifest `"$manifestPath`" -Apply)" }
 Write-Host "Log: $LogPath"
 
 if ($Verify) {
-    # Every derivable container must carry its derived unit; a mismatch is a derivable container stamped otherwise. A
-    # config whose containers could not be listed fails too: nothing was proven about them.
-    exit ([int](($stats.ToStamp + $stats.Mismatch + $stats.Unreadable + $stats.ConfigsSkipped) -gt 0))
+    # Round 35 item 2: NO container may be unbound (derivable-unstamped, underivable, malformed); every stamp must match
+    # its records; every binding must be readable; every config's containers must have been listed.
+    exit ([int](($unbound.Count + $stats.Mismatch + $stats.Unreadable + $stats.ConfigsSkipped + $stats.BindConflict + $stats.BindUnused) -gt 0))
 }
-exit ([int]($stats.Failed -gt 0))
+exit ([int](($stats.Failed + $stats.BindConflict + $stats.BindUnused) -gt 0))

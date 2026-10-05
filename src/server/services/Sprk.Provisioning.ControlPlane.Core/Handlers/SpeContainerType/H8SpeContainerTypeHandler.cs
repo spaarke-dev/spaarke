@@ -45,6 +45,20 @@
 //     follows GUID canonicalization (script already emits canonical-form
 //     GUIDs from Graph responses).
 //
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1,
+// 2026-10-04 — supersedes the "H8 runs before H5/H6" premise of deviation (1)
+// below for the DAG): every SPE container is stamped with its owning business
+// unit at creation, and the BFF's admin plane reaches NO unbound container. H8
+// now depends on H3 AND H5 (DagAdvancer.HandlerDependencies), reads the new
+// environment's ROOT business unit before creating anything
+// (IDataverseRootBusinessUnitReader; missing/unreadable -> Resumable, no side
+// effect), and after verification binds the root container to it
+// (ISpeContainerTypeProvisioner.BindRootContainerAsync: stamp, read back,
+// DELETE on failure). A bind failure is QuarantineRequired
+// (ContainerBindingFailed / ...NotRemoved / ContainerBindingInfraFault) and the
+// container id is never handed to H7. Recorded for this project in
+// projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md.
+//
 // DEVIATION FROM POML LITERAL WORDING (documented per CLAUDE.md §6.5 — Path C
 // pivot-to-comply, discovered during implementation; see
 // projects/customer-provisioning-orchestration-r1/notes/task-051-h8-deviations.md
@@ -170,6 +184,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     private readonly ISpeContainerTypeProvisioner _provisioner;
     private readonly ISpeContainerVerifier _verifier;
     private readonly ISpeContainerIdKvWriter _kvWriter;
+    private readonly IDataverseRootBusinessUnitReader _rootBusinessUnitReader;
     private readonly SpeContainerTypeOptions _options;
     private readonly ILogger<H8SpeContainerTypeHandler> _logger;
 
@@ -185,6 +200,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         ISpeContainerTypeProvisioner provisioner,
         ISpeContainerVerifier verifier,
         ISpeContainerIdKvWriter kvWriter,
+        IDataverseRootBusinessUnitReader rootBusinessUnitReader,
         IOptions<SpeContainerTypeOptions> options,
         ILogger<H8SpeContainerTypeHandler> logger)
     {
@@ -192,6 +208,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(verifier);
         ArgumentNullException.ThrowIfNull(kvWriter);
+        ArgumentNullException.ThrowIfNull(rootBusinessUnitReader);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -199,6 +216,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         _provisioner = provisioner;
         _verifier = verifier;
         _kvWriter = kvWriter;
+        _rootBusinessUnitReader = rootBusinessUnitReader;
         _options = options.Value;
         _logger = logger;
     }
@@ -318,6 +336,50 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
+        // (5b) The root container's owner (unified-access-control-r2 task 165, owner round 35 item 1): every SPE
+        //      container is stamped with its owning business unit at creation — here the ROOT business unit of the
+        //      customer's Dataverse environment (H5 output; under D-12 the environment is the customer's own). Resolved
+        //      BEFORE any external side effect: H8 never creates a container it could not bind. H8 runs after H5
+        //      (DagAdvancer.HandlerDependencies), so a missing URL is an upstream defect — Resumable.
+        var dataverseEnvUrl = run.InterStepState.DataverseEnvUrl;
+        if (string.IsNullOrWhiteSpace(dataverseEnvUrl))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerTypeRejectionCodes.MissingDataverseEnvUrl,
+                "InterStepState.DataverseEnvUrl is empty — H5 (Dataverse environment) MUST complete before H8: the root " +
+                "container is bound to the environment's root business unit (task 165, owner round 35 item 1).",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        Guid rootBusinessUnitId;
+        try
+        {
+            var root = await _rootBusinessUnitReader
+                .ReadRootBusinessUnitIdAsync(dataverseEnvUrl, tenantId, cancellationToken)
+                .ConfigureAwait(false);
+            if (root is not { } resolved || resolved == Guid.Empty)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved,
+                    $"Dataverse environment '{dataverseEnvUrl}' reports no root business unit — the root container " +
+                    "would have no owner, so none is created.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            rootBusinessUnitId = resolved;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 could not read the root business unit: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved,
+                $"Reading the root business unit of '{dataverseEnvUrl}' failed: {ex.GetType().Name}: {ex.Message}. " +
+                "No container was created — Resumable.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // (6) Invoke the provisioner (container-type + root container, T6
         //     confidential-client cert-based). Infra faults are Resumable (no
         //     confirmed external side effect); domain Failure with
@@ -427,6 +489,46 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
 
         var verified = (SpeContainerVerificationResult.Verified)verifyResult;
 
+        // (7c) Bind the verified root container to its owning business unit (task 165, owner round 35 item 1): stamp,
+        //      read back, and REMOVE the container when the stamp did not land — no unbound container is handed to H7
+        //      or left behind. Done after verification because an SPE container may be unaddressable for up to 24h
+        //      after creation (7b): binding earlier would remove healthy containers during that documented window.
+        SpeContainerBindOutcome bindOutcome;
+        try
+        {
+            bindOutcome = await _provisioner.BindRootContainerAsync(
+                new SpeContainerBindRequest(
+                    CustomerId: envelope.CustomerId,
+                    TenantId: tenantId,
+                    OwningAppId: owningAppId,
+                    VaultName: keyVaultName,
+                    CertSecretName: certSecretName,
+                    ContainerId: outputs.RootContainerId,
+                    BusinessUnitId: rootBusinessUnitId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 bind infrastructure fault: runId={RunId} customerId={CustomerId} rootContainerId={RootContainerId}",
+                envelope.RunId, envelope.CustomerId, outputs.RootContainerId);
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                SpeContainerTypeRejectionCodes.ContainerBindingInfraFault,
+                $"Binding root container '{outputs.RootContainerId}' to business unit '{rootBusinessUnitId}' failed before " +
+                $"any Graph call: {ex.GetType().Name}: {ex.Message}. The container exists UNBOUND (no SPE admin route reaches " +
+                "it) — bind it with Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind, or remove it — QuarantineRequired.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (bindOutcome is SpeContainerBindOutcome.NotBound notBound)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                notBound.Removed
+                    ? SpeContainerTypeRejectionCodes.ContainerBindingFailed
+                    : SpeContainerTypeRejectionCodes.ContainerBindingFailedNotRemoved,
+                notBound.Diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
         // (8) Persist the real container-type id to the customer KV (the slot
         //     H4 pre-created with a placeholder — StaticKvSecretManifest.cs).
         SpeContainerIdKvWriteResult kvResult;
@@ -472,7 +574,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             envelope.RunId, envelope.CustomerId, outputs.ContainerTypeId, outputs.RootContainerId,
             verified.Status, kvResult.GetType().Name, stopwatch.ElapsedMilliseconds);
 
-        return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, verified, envelope, cancellationToken)
+        return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, verified, rootBusinessUnitId, envelope, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -615,6 +717,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         string idempotencyKey,
         SpeContainerTypeProvisionOutputs outputs,
         SpeContainerVerificationResult.Verified verified,
+        Guid owningBusinessUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -633,7 +736,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             Status = GateState.Verified,
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true),
+            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true, owningBusinessUnitId),
         };
 
         run.Status = RunStatus.Running;
@@ -683,13 +786,16 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     /// verification has explicitly NOT happened yet).
     /// </summary>
     private static System.Text.Json.JsonElement BuildEvidence(
-        string rootContainerId, string verifiedStatus, bool verifiedViaAppOnlyToken)
+        string rootContainerId, string verifiedStatus, bool verifiedViaAppOnlyToken, Guid? owningBusinessUnitId = null)
     {
+        // owningBusinessUnitId: the business unit the root container is stamped with (task 165, round 35 item 1);
+        // null while the container is not yet bound (the replication-pending wait).
         var doc = System.Text.Json.JsonSerializer.SerializeToElement(new
         {
             rootContainerId,
             verifiedStatus,
             verifiedViaAppOnlyToken,
+            owningBusinessUnitId = owningBusinessUnitId?.ToString("D"),
         });
         return doc;
     }

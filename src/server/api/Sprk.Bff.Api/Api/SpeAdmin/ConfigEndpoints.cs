@@ -73,7 +73,10 @@ public static class ConfigEndpoints
             .Produces<IReadOnlyList<ConfigSummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // The three config RECORD routes never use the config's credential, so a config whose stored Key Vault secret
+        // name is outside the allow-list can still be seen, corrected (PUT) and deleted (task 165, round 35 item 3).
         configs.MapGet("/{configId:guid}", GetConfigAsync)
+            .WithSpeAdminConfigCredentialUnused()
             .WithName("GetSpeConfig")
             .WithSummary("Get a single container type config by ID")
             .Produces<ConfigDetailDto>(StatusCodes.Status200OK)
@@ -90,6 +93,7 @@ public static class ConfigEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         configs.MapPut("/{configId:guid}", UpdateConfigAsync)
+            .WithSpeAdminConfigCredentialUnused()
             .WithName("UpdateSpeConfig")
             .WithSummary("Update an existing container type config")
             .Produces<ConfigDetailDto>(StatusCodes.Status200OK)
@@ -100,6 +104,7 @@ public static class ConfigEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         configs.MapDelete("/{configId:guid}", DeleteConfigAsync)
+            .WithSpeAdminConfigCredentialUnused()
             .WithName("DeleteSpeConfig")
             .WithSummary("Delete a container type config")
             .Produces(StatusCodes.Status204NoContent)
@@ -303,6 +308,12 @@ public static class ConfigEndpoints
             return ValidationProblem(kvValidation, context.TraceIdentifier);
         }
 
+        // Task 165, round 35 item 3: only names under the ONE pinned prefix are ever resolved.
+        if (!SpeConfigSecretNamePolicy.IsAllowed(request.KeyVaultSecretName))
+        {
+            return SecretNameNotAllowed(context.TraceIdentifier);
+        }
+
         // Task 165 (sweep #74): the business unit must be one the caller administers, the environment one
         // they can read (round 16 item 4), and no app-identity value may be borrowed from a config in a
         // unit they do not.
@@ -392,6 +403,13 @@ public static class ConfigEndpoints
             if (kvValidation != null)
             {
                 return ValidationProblem(kvValidation, context.TraceIdentifier);
+            }
+
+            // Task 165, round 35 item 3. Judged whenever sent — an unchanged re-send of a name stored before the rule
+            // is refused too, so saving a misconfigured config forces the rename.
+            if (!SpeConfigSecretNamePolicy.IsAllowed(request.KeyVaultSecretName))
+            {
+                return SecretNameNotAllowed(context.TraceIdentifier);
             }
         }
 
@@ -715,6 +733,22 @@ public static class ConfigEndpoints
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>Returns a 400 ProblemDetails result for validation errors (ADR-019).</summary>
+    /// <summary>
+    /// The 400 for a <c>keyVaultSecretName</c> outside <see cref="SpeConfigSecretNamePolicy"/> (task 165, round 35 item 3):
+    /// its own machine code, the same one the filter's 409 and the read guard carry.
+    /// </summary>
+    private static IResult SecretNameNotAllowed(string correlationId) =>
+        TypedResults.Problem(
+            detail: $"'keyVaultSecretName' must start with '{SpeConfigSecretNamePolicy.RequiredPrefix}' — the BFF resolves " +
+                    "no other Key Vault secret for a container type config.",
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Validation Error",
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = SpeConfigSecretNamePolicy.NotAllowedReasonCode,
+                ["correlationId"] = correlationId
+            });
+
     private static IResult ValidationProblem(string detail, string correlationId) =>
         TypedResults.Problem(
             detail: detail,

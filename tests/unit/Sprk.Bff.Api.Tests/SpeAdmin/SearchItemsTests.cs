@@ -199,6 +199,8 @@ public class SearchItemsTests : IClassFixture<AdminSurfaceHostFixture>
         {
             ["sprk_specontainertypeconfigid"] = InScopeConfig,
             ["_sprk_businessunit_value"] = CallerUnit,
+            // A name the BFF may resolve (task 165, round 35 item 3) — otherwise the filter answers 409 first.
+            ["sprk_keyvaultsecretname"] = "spe-owning-app-search",
         });
         dv.Add("sprk_specontainertypeconfigs", new()
         {

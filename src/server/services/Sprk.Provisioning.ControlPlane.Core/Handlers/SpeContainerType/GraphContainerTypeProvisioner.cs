@@ -74,6 +74,15 @@
 // 409 Conflict (treated as "already registered," not a failure) — a
 // zero-new-call-shape defensive addition, not a speculative GET.
 //
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1):
+// BindRootContainerAsync / BindNewContainerAsync stamp the root container with
+// the customer environment's ROOT business unit (custom property
+// Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName — the one
+// C# constant the BFF shares), read it back, and DELETE the container when the
+// stamp did not land. The handler calls it after verification. That bind step
+// IS unit-tested (GraphContainerTypeProvisionerBindTests: a GraphServiceClient
+// over a hand-written fake transport — never Mock<HttpMessageHandler>).
+//
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with the established project precedent (GraphAppRegistrationProvisioner.cs,
 // GraphRestAppRoleGranter.cs, the retired CreateNewContainerTypeScriptProvisioner.cs
@@ -231,6 +240,168 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
                   $"(customerId '{request.CustomerId}').";
             return new SpeContainerTypeProvisionOutcome.Failure(diagnostic, IsDelegatedTokenTrap: isTrap);
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
+
+        // Same T6 confidential-client identity that created the container (cert from the customer KV). A cert-load
+        // failure propagates: it happens before any Graph call, so nothing was changed.
+        using var cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
+            _sharedCredential, _clientOptions, request.VaultName, request.CertSecretName,
+            _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
+
+        var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        return await BindNewContainerAsync(graph, request.ContainerId, request.BusinessUnitId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// THE bind step for a container this handler created (unified-access-control-r2 task 165, owner round 35 item 1 —
+    /// the same rule the BFF's creation paths follow): <c>PATCH /storage/fileStorage/containers/{id}/customProperties</c>
+    /// with the property map as the BODY ROOT (Graph merges, so nothing else is touched), a single-container read-back
+    /// (<c>$select=id,customProperties</c> — the collection drops custom properties), and — when the stamp did not land,
+    /// for ANY reason — <c>DELETE /storage/fileStorage/containers/{id}</c>, so no unbound container is left behind.
+    /// Internal so a test can drive it with a <c>GraphServiceClient</c> over a fake transport.
+    /// </summary>
+    internal async Task<SpeContainerBindOutcome> BindNewContainerAsync(
+        GraphServiceClient graph,
+        string containerId,
+        Guid businessUnitId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        string failure;
+        try
+        {
+            if (businessUnitId == Guid.Empty)
+            {
+                throw new InvalidOperationException("No owning business unit was resolved (Guid.Empty) — the container cannot be bound.");
+            }
+
+            await WriteStampAsync(graph, containerId, businessUnitId, cancellationToken).ConfigureAwait(false);
+
+            using var readTimeout = LinkedTimeout(cancellationToken);
+            var container = await graph.Storage.FileStorage.Containers[containerId]
+                .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
+                .ConfigureAwait(false);
+
+            var stamped = ReadStamp(container);
+            if (stamped == businessUnitId)
+            {
+                _logger.LogInformation(
+                    "H8 root container {ContainerId} bound to business unit {BusinessUnitId} (stamp read back).",
+                    containerId, businessUnitId);
+                return new SpeContainerBindOutcome.Bound();
+            }
+
+            failure = $"The business-unit stamp did not read back on container '{containerId}' (read: " +
+                      $"'{stamped?.ToString() ?? "none"}', expected '{businessUnitId}').";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            failure = ex is ODataError odata
+                ? $"Graph ODataError {odata.ResponseStatusCode} binding container '{containerId}': {odata.Error?.Code} {odata.Error?.Message ?? odata.Message}"
+                : $"Binding container '{containerId}' failed: {ex.GetType().Name}: {ex.Message}";
+        }
+
+        _logger.LogError(
+            "H8 root container {ContainerId} could not be bound to business unit {BusinessUnitId} — removing it. {Failure}",
+            containerId, businessUnitId, failure);
+
+        try
+        {
+            using var deleteTimeout = LinkedTimeout(CancellationToken.None);
+            await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
+                .ConfigureAwait(false);
+            return new SpeContainerBindOutcome.NotBound(failure + " The container was removed.", Removed: true);
+        }
+        catch (Exception deleteEx)
+        {
+            _logger.LogCritical(deleteEx,
+                "H8 root container {ContainerId} is UNBOUND and could not be removed; no SPE admin route reaches it until " +
+                "the backfill binds it (-Bind) or an operator removes it.", containerId);
+            return new SpeContainerBindOutcome.NotBound(
+                failure + $" Removing it ALSO failed ({deleteEx.GetType().Name}: {deleteEx.Message}); container " +
+                $"'{containerId}' is left unbound.", Removed: false);
+        }
+    }
+
+    /// <summary>
+    /// <c>PATCH …/containers/{id}/customProperties</c> with <c>{"&lt;stamp&gt;": {"value": "&lt;unit&gt;", "isSearchable": false}}</c>
+    /// as the body root — the shape the BFF sends (<c>SpeAdminGraphService.WriteBusinessUnitStampAsync</c>), sent through
+    /// the SDK's request adapter so Graph failures arrive as <see cref="ODataError"/>.
+    /// </summary>
+    private async Task WriteStampAsync(
+        GraphServiceClient graph, string containerId, Guid businessUnitId, CancellationToken cancellationToken)
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName] = new Dictionary<string, object>
+            {
+                ["value"] = businessUnitId.ToString("D"),
+                ["isSearchable"] = false,
+            },
+        });
+
+        var baseUrl = (graph.RequestAdapter.BaseUrl ?? "https://graph.microsoft.com/v1.0").TrimEnd('/');
+        var requestInfo = new Microsoft.Kiota.Abstractions.RequestInformation
+        {
+            HttpMethod = Microsoft.Kiota.Abstractions.Method.PATCH,
+            URI = new Uri($"{baseUrl}/storage/fileStorage/containers/{Uri.EscapeDataString(containerId)}/customProperties"),
+        };
+        requestInfo.Headers.Add("Accept", "application/json");
+        requestInfo.SetStreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(payload)), "application/json");
+
+        var errorMapping = new Dictionary<string, Microsoft.Kiota.Abstractions.Serialization.ParsableFactory<Microsoft.Kiota.Abstractions.Serialization.IParsable>>
+        {
+            { "XXX", ODataError.CreateFromDiscriminatorValue },
+        };
+
+        using var timeout = LinkedTimeout(cancellationToken);
+        await graph.RequestAdapter.SendNoContentAsync(requestInfo, errorMapping, timeout.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>The business unit the container's stamp names, or null when it carries none (or not one GUID).</summary>
+    private static Guid? ReadStamp(FileStorageContainer? container)
+    {
+        var properties = container?.CustomProperties?.AdditionalData;
+        if (properties is null)
+        {
+            return null;
+        }
+
+        foreach (var (name, raw) in properties)
+        {
+            if (!string.Equals(name?.Trim(), Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (raw is Microsoft.Kiota.Abstractions.Serialization.UntypedObject node
+                && node.GetValue().TryGetValue("value", out var valueNode)
+                && valueNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString text
+                && Guid.TryParse(text.GetValue()?.Trim(), out var unit))
+            {
+                return unit;
+            }
+
+            return null;
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -21,9 +21,9 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// The tenant-scope filter confines the CONFIG a bulk request names to the caller's business units; the container ids
 /// are still caller-chosen, the job runs app-only with no caller context, and one container type serves several
 /// customers (Model 1). Each item is now read with the config's Graph client — its type AND its business-unit stamp —
-/// and written only when the caller's scope captured at acceptance reaches it. Every refusal — another type, another
-/// customer's unit, unbound (for a non-root caller), not found, a read fault — carries ONE error text and sends no
-/// write.
+/// and written only when the caller's scope captured at acceptance reaches it. Every refusal — another type, a type
+/// Graph does not report, another customer's unit, unbound or malformed (for EVERY caller, root included — owner round
+/// 35 item 2), not found, a read fault — carries ONE error text and sends no write.
 /// </para>
 /// <para>
 /// Driven through the two per-item methods with a REAL <see cref="SpeAdminGraphService"/> and a real
@@ -111,7 +111,7 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
         Writes("POST", "c-b").Should().BeEmpty();
     }
 
-    // ── (iii) an unbound container: root-unit admins only; a malformed stamp reads as unbound ──
+    // ── (iii) an unbound container: NO caller (round 35 item 2); a malformed stamp reads as unbound ──
 
     [Theory]
     [InlineData(null)]
@@ -126,16 +126,58 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
         Writes("DELETE", "c-unbound").Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task Delete_OfAnUnboundContainer_ByARootAdmin_IsSent()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task Delete_OfAnUnboundOrMalformedContainer_ByARootAdmin_IsRefused_AndNoDeleteIsSent(string? rawStamp)
     {
-        StubContainerRaw("c-unbound", ConfigType, rawStamp: null);
+        // Owner round 35 item 2 (amends round 20 item 2): an unbound container is reached by NO admin route — under Model
+        // 1 a root admin of any environment whose config names a shared type would otherwise reach other customers'.
+        StubContainerRaw("c-unbound", ConfigType, rawStamp);
         _graph.StubDelete($"{ContainersPath}/c-unbound");
 
         var error = await Delete("c-unbound", RootAdmin);
 
-        error.Should().BeNull();
-        Writes("DELETE", "c-unbound").Should().ContainSingle();
+        error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError);
+        Writes("DELETE", "c-unbound").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Grant_OnAnUnboundContainer_ByARootAdmin_IsRefused_AndNoPermissionIsPosted()
+    {
+        StubContainerRaw("c-unbound", ConfigType, rawStamp: null);
+
+        var error = await Grant("c-unbound", RootAdmin);
+
+        error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError);
+        Writes("POST", "c-unbound").Should().BeEmpty();
+    }
+
+    // ── (iii-b) a container whose type Graph does not REPORT (D10: the job takes no type on trust) ──
+
+    [Fact]
+    public async Task Delete_OfAContainerWhoseTypeGraphDoesNotReport_IsRefused_EvenInTheCallersOwnUnit()
+    {
+        // Bound to the caller's own unit, so ONLY the "type must be reported and equal" clause can refuse it: the bulk
+        // job acts app-only with no per-request filter, and an unreported type is never taken to be the config's.
+        StubContainerWithoutType("c-untyped", UnitA);
+        _graph.StubDelete($"{ContainersPath}/c-untyped");
+
+        var error = await Delete("c-untyped", LeafA);
+
+        error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError);
+        Writes("DELETE", "c-untyped").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Grant_OnAContainerWhoseTypeGraphDoesNotReport_IsRefused_EvenInTheCallersOwnUnit()
+    {
+        StubContainerWithoutType("c-untyped", UnitA);
+
+        var error = await Grant("c-untyped", LeafA);
+
+        error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError);
+        Writes("POST", "c-untyped").Should().BeEmpty();
     }
 
     // ── (iv) not found, read fault — the same text, no write ─────────────────
@@ -258,6 +300,13 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             $"{ContainersPath}/{id}",
             $$"""{"id":"{{id}}","displayName":"Container {{id}}","containerTypeId":"{{containerTypeId}}","customProperties":""" + customProperties + "}");
     }
+
+    /// <summary>A single-container GET answer that carries a stamp but NO <c>containerTypeId</c>.</summary>
+    private void StubContainerWithoutType(string id, Guid stampedUnit) =>
+        _graph.StubGet(
+            $"{ContainersPath}/{id}",
+            "{\"id\":\"" + id + "\",\"displayName\":\"Container " + id + "\",\"customProperties\":{\"" +
+            SpeContainerBusinessUnitStamp.PropertyName + "\":{\"value\":\"" + stampedUnit.ToString("D") + "\",\"isSearchable\":false}}}");
 
     private IReadOnlyList<RecordedGraphRequest> Writes(string method, string containerId) =>
         _graph.RequestsFor($"{ContainersPath}/{containerId}")

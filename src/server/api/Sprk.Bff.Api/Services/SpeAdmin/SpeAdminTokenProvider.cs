@@ -112,6 +112,10 @@ public sealed class SpeAdminTokenProvider
                 "Check HasOwningApp before calling AcquireOwningAppTokenAsync.");
         }
 
+        // Task 165, round 35 item 3: refused BEFORE the token cache, so a token cached for an earlier name cannot serve a
+        // config now naming a secret outside the allow-list; the vault is never called with such a name.
+        SpeConfigSecretNamePolicy.EnsureAllowed(config.OwningAppSecretName, config.ConfigId);
+
         // Build cache key: configId + SHA256(userToken)
         // Auth constraint: MUST hash user tokens; MUST NOT store plaintext tokens.
         var tokenHash = HashToken(userAccessToken);
@@ -191,6 +195,7 @@ public sealed class SpeAdminTokenProvider
                 $"Config '{config.ConfigId}' does not have an owning app secret name.");
         }
 
+        SpeConfigSecretNamePolicy.EnsureAllowed(config.OwningAppSecretName, config.ConfigId);
         return await FetchKeyVaultSecretAsync(config.OwningAppSecretName, ct);
     }
 
@@ -317,6 +322,9 @@ public sealed class SpeAdminTokenProvider
     /// </summary>
     private async Task<string> FetchKeyVaultSecretAsync(string secretName, CancellationToken ct)
     {
+        // The last line before the vault (task 165, round 35 item 3): no path reaches it with a non-conforming name.
+        SpeConfigSecretNamePolicy.EnsureAllowed(secretName, Guid.Empty);
+
         try
         {
             _logger.LogDebug("Retrieving owning app secret '{SecretName}' from Key Vault.", secretName);

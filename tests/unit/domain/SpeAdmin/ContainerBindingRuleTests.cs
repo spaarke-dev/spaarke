@@ -94,20 +94,56 @@ public sealed class ContainerBindingRuleTests
         leaf.CanReach(SpeContainerBinding.BoundTo(UnitASub)).Should().BeTrue();
         leaf.CanReach(SpeContainerBinding.BoundTo(UnitB)).Should().BeFalse("another customer's container");
         leaf.CanReach(SpeContainerBinding.BoundTo(Root)).Should().BeFalse("its parent's container");
-        leaf.CanReach(SpeContainerBinding.Unbound).Should().BeFalse("an unbound container is a root-unit admin's only");
+        leaf.CanReach(SpeContainerBinding.Unbound).Should().BeFalse("an unbound container is reached by no admin");
         leaf.CanReach(SpeContainerBinding.Malformed).Should().BeFalse();
     }
 
     [Fact]
-    public void ARootAdmin_ReachesItsUnitsAndUnboundContainers_ButNotAUnitItDoesNotKnow()
+    public void ARootAdmin_ReachesEveryBoundUnit_ButNoUnboundOrMalformedContainer_AndNoUnitItDoesNotKnow()
     {
         var root = new SpeAdminCallerScope(Root, IsPlatformOperator: true, new HashSet<Guid>(Hierarchy.Keys));
 
         root.CanReach(SpeContainerBinding.BoundTo(UnitB)).Should().BeTrue();
-        root.CanReach(SpeContainerBinding.Unbound).Should().BeTrue();
-        root.CanReach(SpeContainerBinding.Malformed).Should().BeTrue();
+        root.CanReach(SpeContainerBinding.BoundTo(Root)).Should().BeTrue();
+        root.CanReach(SpeContainerBinding.Unbound).Should().BeFalse(
+            "owner round 35 item 2: no admin route reaches an unbound container — under Model 1 a root admin of any " +
+            "environment whose config names a shared type would otherwise reach another customer's");
+        root.CanReach(SpeContainerBinding.Malformed).Should().BeFalse("a malformed stamp is treated as unbound");
         root.CanReach(SpeContainerBinding.BoundTo(Guid.Parse("f0000000-0000-0000-0000-0000000000ff"))).Should().BeFalse(
             "another environment's container in a shared Model 1 consuming tenant");
+    }
+
+    [Fact]
+    public void ClassifyContainer_NamesEveryRefusalReason_TheCallerSeesOne404ForAll()
+    {
+        var root = new SpeAdminCallerScope(Root, true, new HashSet<Guid>(Hierarchy.Keys));
+        var leaf = new SpeAdminCallerScope(UnitA, false, new HashSet<Guid> { UnitA, UnitASub });
+
+        SpeAdminTenantScope.ClassifyContainer(root, TypeT, null).Should().Be(SpeContainerRefusal.Absent);
+        SpeAdminTenantScope.ClassifyContainer(root, TypeT, new SpeContainerBindingRead("c", TypeX, SpeContainerBinding.BoundTo(UnitA)))
+            .Should().Be(SpeContainerRefusal.OtherType);
+        SpeAdminTenantScope.ClassifyContainer(root, TypeT, new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.Unbound))
+            .Should().Be(SpeContainerRefusal.Unbound);
+        SpeAdminTenantScope.ClassifyContainer(root, TypeT, new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.Malformed))
+            .Should().Be(SpeContainerRefusal.Malformed);
+        SpeAdminTenantScope.ClassifyContainer(leaf, TypeT, new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.BoundTo(UnitB)))
+            .Should().Be(SpeContainerRefusal.OutOfScope);
+        SpeAdminTenantScope.ClassifyContainer(leaf, TypeT, new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.BoundTo(UnitASub)))
+            .Should().Be(SpeContainerRefusal.None);
+
+        SpeAdminTenantScope.RefusalReason(SpeContainerRefusal.Unbound).Should().Be("unbound");
+        foreach (var refusal in new[] { SpeContainerRefusal.Absent, SpeContainerRefusal.OtherType, SpeContainerRefusal.Unbound,
+                     SpeContainerRefusal.Malformed, SpeContainerRefusal.OutOfScope })
+        {
+            SpeAdminTenantScope.DecideContainer(root, TypeT, refusal switch
+            {
+                SpeContainerRefusal.Absent => null,
+                SpeContainerRefusal.OtherType => new SpeContainerBindingRead("c", TypeX, SpeContainerBinding.BoundTo(UnitA)),
+                SpeContainerRefusal.Unbound => new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.Unbound),
+                SpeContainerRefusal.Malformed => new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.Malformed),
+                _ => new SpeContainerBindingRead("c", TypeT, SpeContainerBinding.BoundTo(Guid.Parse("f0000000-0000-0000-0000-0000000000ff"))),
+            }).Should().Be(SpeAdminScopeDecision.NotFoundOrOutOfScope, "every refusal is the one not-found answer ({0})", refusal);
+        }
     }
 
     [Fact]

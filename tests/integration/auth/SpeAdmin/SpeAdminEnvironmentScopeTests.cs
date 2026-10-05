@@ -364,7 +364,7 @@ public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHo
         ["_sprk_environment_value"] = environment,
         ["sprk_containertypeid"] = $"{tag}{tag}{tag}{tag}0000-0000-0000-0000-00000000000{tag}",
         ["sprk_owningappid"] = $"{tag}0{tag}0{tag}0{tag}0-0000-0000-0000-00000000000{tag}",
-        ["sprk_keyvaultsecretname"] = $"unit-{tag}-secret",
+        ["sprk_keyvaultsecretname"] = $"spe-owning-app-unit-{tag}",
         ["sprk_billingclassification"] = 100000001,
         ["statecode"] = 0,
     };
@@ -374,7 +374,7 @@ public sealed class SpeAdminEnvironmentScopeTests : IClassFixture<AdminSurfaceHo
         ["name"] = "New config",
         ["containerTypeId"] = "dddddddd-0000-0000-0000-00000000000d",
         ["owningAppId"] = "d0d0d0d0-0000-0000-0000-00000000000d",
-        ["keyVaultSecretName"] = "new-config-secret",
+        ["keyVaultSecretName"] = "spe-owning-app-new-config",
         ["businessUnitId"] = businessUnitId,
         ["environmentId"] = environmentId,
     };

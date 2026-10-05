@@ -165,7 +165,7 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
         ["_sprk_businessunit_value"] = unit,
         ["sprk_containertypeid"] = TypeT,
         ["sprk_owningappid"] = "a0a0a0a0-0000-0000-0000-00000000000a",
-        ["sprk_keyvaultsecretname"] = "shared-owning-secret",
+        ["sprk_keyvaultsecretname"] = "spe-owning-app-shared",
         ["statecode"] = 0,
     };
 

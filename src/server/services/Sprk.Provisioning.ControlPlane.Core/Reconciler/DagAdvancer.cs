@@ -136,7 +136,9 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
             [HandlerH6] = new[] { HandlerH5 },
             [HandlerH7] = new[] { HandlerH6 },
-            [HandlerH8] = new[] { HandlerH3 },
+            // H5 too (unified-access-control-r2 task 165, owner round 35 item 1): H8 stamps the root container with the
+            // customer environment's root business unit, which exists only once H5 has created the environment.
+            [HandlerH8] = new[] { HandlerH3, HandlerH5 },
             [HandlerH9] = new[] { HandlerH3 },                              // Also needs H4 KV transitively via H3.
             [HandlerH10] = new[] { HandlerH7 },
             [HandlerH11] = new[] { HandlerH10 },

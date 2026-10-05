@@ -34,17 +34,57 @@ public enum SpeAdminContainerLocation
 }
 
 /// <summary>
-/// What an APP-ONLY container-type route does to the container type its <c>{typeId}</c> names (type permissions,
-/// consuming-app registrations, register) — read by <see cref="SpeAdminTenantScopeFilter"/> (owner round 20 item 3's
-/// consequence). Container-type routes that act with the CALLER's own delegated token carry no mark: Graph decides those.
+/// Endpoint metadata: the route is an APP-ONLY container-type route (type permissions, consuming-app registrations,
+/// register) acting on the container type its <c>{typeId}</c> names — read by <see cref="SpeAdminTenantScopeFilter"/>
+/// (owner round 20 item 3's consequence; round 35 item 5). Container-type routes that act with the CALLER's own
+/// delegated token carry no mark: Graph decides those.
 /// </summary>
-public enum SpeAdminContainerTypeOperation
+/// <remarks>
+/// There is no read/write split any more (round 35 item 5): the reads list every customer's consuming app and
+/// registrations — the per-customer values round 20 item 3 keeps exclusive — so a read needs what a write needs, the
+/// caller reaching EVERY config that carries the type.
+/// </remarks>
+public sealed class SpeAdminContainerTypeScope
 {
-    /// <summary>Reads the type's app-only state.</summary>
-    Read,
+    /// <summary>The one instance routes carry.</summary>
+    public static SpeAdminContainerTypeScope Instance { get; } = new();
 
-    /// <summary>Changes state every customer of the type shares.</summary>
-    Write
+    private SpeAdminContainerTypeScope()
+    {
+    }
+}
+
+/// <summary>
+/// Endpoint metadata: ONLY a platform operator — an SPE admin whose OWN business unit is the root — may call the route
+/// (owner round 35 item 4: the security-alerts and secure-score routes read the whole Microsoft 365 tenant through any
+/// config's app, so in a shared Model 1 tenant a leaf admin would read every customer's alerts and score). Decided by
+/// <see cref="SpeAdminTenantScopeFilter"/> through the SAME check as the environment write rule (round 16 item 4).
+/// </summary>
+public sealed class SpeAdminPlatformOperatorOnly
+{
+    /// <summary>The one instance routes carry.</summary>
+    public static SpeAdminPlatformOperatorOnly Instance { get; } = new();
+
+    private SpeAdminPlatformOperatorOnly()
+    {
+    }
+}
+
+/// <summary>
+/// Endpoint metadata: the route names a config (<c>configId</c>) but never uses the config's CREDENTIAL — it reads or
+/// writes the config RECORD itself (GET / PUT / DELETE <c>/configs/{configId}</c>) or Dataverse rows filtered by it (the
+/// audit log). Such a route is exempt from the Key Vault secret-name rule (owner round 35 item 3), so an administrator
+/// can still see, correct (PUT) or delete a config whose stored secret name is outside the allow-list. Every OTHER
+/// configId route gets the rule — the safe default for a route added later.
+/// </summary>
+public sealed class SpeAdminConfigCredentialUnused
+{
+    /// <summary>The one instance routes carry.</summary>
+    public static SpeAdminConfigCredentialUnused Instance { get; } = new();
+
+    private SpeAdminConfigCredentialUnused()
+    {
+    }
 }
 
 /// <summary>
@@ -81,16 +121,37 @@ public static class SpeAdminTenantScopeFilterExtensions
     }
 
     /// <summary>
-    /// Marks an APP-ONLY <c>/containertypes/{typeId}/...</c> route with what it does to the type, so the group's
-    /// <see cref="SpeAdminTenantScopeFilter"/> applies the container-type rule (the type must be the config's own; a
-    /// write needs every config carrying the type to be reachable). <c>SpeAdminContainerTypeRouteGuardTests</c> fails the
-    /// build when an app-only type route lacks the mark.
+    /// Marks an APP-ONLY <c>/containertypes/{typeId}/...</c> route, so the group's <see cref="SpeAdminTenantScopeFilter"/>
+    /// applies the container-type rule: the type must be the config's own, and the caller must reach EVERY config that
+    /// carries the type — reads included (round 35 item 5). <c>SpeAdminContainerBindingGuardTests</c> fails the build
+    /// when an app-only type route lacks the mark.
     /// </summary>
     public static TBuilder WithSpeAdminContainerTypeScope<TBuilder>(
-        this TBuilder builder,
-        SpeAdminContainerTypeOperation operation) where TBuilder : IEndpointConventionBuilder
+        this TBuilder builder) where TBuilder : IEndpointConventionBuilder
     {
-        return builder.WithMetadata(operation);
+        return builder.WithMetadata(SpeAdminContainerTypeScope.Instance);
+    }
+
+    /// <summary>
+    /// Marks a route (or a group) as platform-operator-only (round 35 item 4): the group's
+    /// <see cref="SpeAdminTenantScopeFilter"/> refuses, with ONE 403 before any other read, every caller whose own
+    /// business unit is not the root — the same check the environment write rule uses.
+    /// </summary>
+    public static TBuilder RequireSpeAdminPlatformOperator<TBuilder>(
+        this TBuilder builder) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.WithMetadata(SpeAdminPlatformOperatorOnly.Instance);
+    }
+
+    /// <summary>
+    /// Marks a configId route that never uses the config's credential (the config record routes, the audit log), so the
+    /// Key Vault secret-name rule (round 35 item 3) does not stop an administrator from seeing, correcting or deleting a
+    /// misconfigured config. Every unmarked configId route gets the rule.
+    /// </summary>
+    public static TBuilder WithSpeAdminConfigCredentialUnused<TBuilder>(
+        this TBuilder builder) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.WithMetadata(SpeAdminConfigCredentialUnused.Instance);
     }
 
     /// <summary>
@@ -172,6 +233,17 @@ public static class SpeAdminTenantScopeFilterExtensions
 /// (<see cref="ScopeUnverifiable"/>); a Read mark on a route with no <c>id</c> value is a mis-wiring and is
 /// refused with the same 503.
 /// </para>
+/// <para>
+/// <b>Platform-operator-only routes</b> (round 35 item 4): a route marked <see cref="SpeAdminPlatformOperatorOnly"/>
+/// (the security alerts and secure score) is refused with ONE 403 for every caller whose own business unit is not the
+/// root, FIRST, through the same check the environment write rule uses.
+/// </para>
+/// <para>
+/// <b>The config's Key Vault secret name</b> (round 35 item 3): on every configId route that uses the config's
+/// credential (every route not marked <see cref="SpeAdminConfigCredentialUnused"/>), a config the caller may act on
+/// whose stored secret name is outside <see cref="SpeConfigSecretNamePolicy"/> is refused with 409
+/// (<see cref="ConfigSecretNameNotAllowed"/>) before the container rule or any handler could read the secret.
+/// </para>
 /// </remarks>
 public class SpeAdminTenantScopeFilter : IEndpointFilter
 {
@@ -199,8 +271,11 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     /// <summary>An app-only container-type route naming a type that is not the config's own: one 404.</summary>
     internal const string ContainerTypeNotFoundCode = "spe.admin.deny.container_type_out_of_scope";
 
-    /// <summary>A write to a container type another unreachable config also carries (shared, Model 1).</summary>
+    /// <summary>A container-type route (read or write) on a type another unreachable config also carries (shared, Model 1).</summary>
     internal const string ContainerTypeSharedCode = "spe.admin.deny.container_type_shared";
+
+    /// <summary>A platform-operator-only route called by an admin whose own business unit is not the root (round 35 item 4).</summary>
+    internal const string PlatformOperatorRequiredCode = "spe.admin.deny.platform_operator_required";
 
     private const string ConfigIdKey = "configId";
     private const string ContainerIdKey = "containerId";
@@ -223,6 +298,20 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
         EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
+
+        if (http.GetEndpoint()?.Metadata.GetMetadata<SpeAdminPlatformOperatorOnly>() is not null)
+        {
+            // Round 35 item 4 — decided before anything else is read, so the answer is the same 403 whatever the
+            // request names (no configId oracle).
+            var operatorRefusal = await RequirePlatformOperatorAsync(
+                http,
+                PlatformOperatorRequiredCode,
+                "Only a platform operator (an administrator in the root business unit) may read tenant-wide security data.");
+            if (operatorRefusal is not null)
+            {
+                return operatorRefusal;
+            }
+        }
 
         if (EnvironmentOperationOf(http) is { } environmentOperation)
         {
@@ -273,7 +362,9 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
             configId = parsed[0]!.Value;
         }
 
-        var decision = await _tenantScope.DecideConfigAccessAsync(http.User, configId, http.RequestAborted);
+        var usesConfigCredential = http.GetEndpoint()?.Metadata.GetMetadata<SpeAdminConfigCredentialUnused>() is null;
+        var decision = await _tenantScope.DecideConfigAccessAsync(
+            http.User, configId, usesConfigCredential, http.RequestAborted);
 
         switch (decision)
         {
@@ -286,6 +377,14 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
                     configId, http.Request.Path, http.TraceIdentifier);
 
                 return ScopeUnverifiable(http.TraceIdentifier);
+
+            case SpeAdminScopeDecision.SecretNameNotAllowed:
+                _logger?.LogError(
+                    "SPE Admin config {ConfigId} names a Key Vault secret outside the allow-list; refusing ({ReasonCode}). " +
+                    "Path={Path} TraceId={TraceId}",
+                    configId, SpeConfigSecretNamePolicy.NotAllowedReasonCode, http.Request.Path, http.TraceIdentifier);
+
+                return ConfigSecretNameNotAllowed(configId, http.TraceIdentifier);
 
             default:
                 _logger?.LogWarning(
@@ -373,20 +472,19 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// The container-type rule for a route marked <see cref="SpeAdminContainerTypeOperation"/>: the route's
-    /// <c>typeId</c> must be the config's own type; a write needs every config carrying it to be reachable. The refusal,
-    /// or null to continue.
+    /// The container-type rule for a route marked <see cref="SpeAdminContainerTypeScope"/>: the route's <c>typeId</c> must
+    /// be the config's own type, and every config carrying it must be reachable — reads and writes alike (round 35 item
+    /// 5). The refusal, or null to continue.
     /// </summary>
     private async Task<IResult?> DecideContainerTypeAsync(HttpContext http, Guid configId)
     {
-        if (ContainerTypeOperationOf(http) is not { } operation)
+        if (http.GetEndpoint()?.Metadata.GetMetadata<SpeAdminContainerTypeScope>() is null)
         {
             return null;
         }
 
         var typeId = http.Request.RouteValues.TryGetValue(TypeIdKey, out var raw) ? raw?.ToString() : null;
-        var decision = await _tenantScope.DecideContainerTypeAccessAsync(
-            http.User, configId, typeId, operation == SpeAdminContainerTypeOperation.Write, http.RequestAborted);
+        var decision = await _tenantScope.DecideContainerTypeAccessAsync(http.User, configId, typeId, http.RequestAborted);
 
         switch (decision)
         {
@@ -400,13 +498,59 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
                 return ProblemDetailsHelper.Forbidden(
                     ContainerTypeSharedCode,
                     "This container type is shared with a customer you do not administer. Only an administrator who " +
-                    "reaches every configuration of the type may change it.",
+                    "reaches every configuration of the type may read or change its permissions and consuming apps.",
                     http.TraceIdentifier);
 
             default:
                 return ContainerTypeNotFound(typeId ?? string.Empty, http.TraceIdentifier);
         }
     }
+
+    /// <summary>
+    /// THE platform-operator check (round 16 item 4's environment write rule; round 35 item 4's security routes): the
+    /// caller's OWN business unit must be the root. Anyone else gets ONE 403 with <paramref name="denyCode"/>; an
+    /// unreadable scope is the 503. Null to continue.
+    /// </summary>
+    private async Task<IResult?> RequirePlatformOperatorAsync(HttpContext http, string denyCode, string detail)
+    {
+        SpeAdminCallerScope scope;
+        try
+        {
+            scope = await _tenantScope.GetCallerScopeAsync(http.User, http.RequestAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex,
+                "SPE Admin platform-operator check UNVERIFIABLE; refusing. Path={Path} TraceId={TraceId}",
+                http.Request.Path, http.TraceIdentifier);
+            return ScopeUnverifiable(http.TraceIdentifier);
+        }
+
+        if (scope.IsPlatformOperator)
+        {
+            return null;
+        }
+
+        _logger?.LogWarning(
+            "SPE Admin platform-operator route DENIED: the caller's business unit is not the root ({DenyCode}). " +
+            "Path={Path} TraceId={TraceId}",
+            denyCode, http.Request.Path, http.TraceIdentifier);
+
+        return ProblemDetailsHelper.Forbidden(denyCode, detail, http.TraceIdentifier);
+    }
+
+    /// <summary>
+    /// THE "this config's Key Vault secret name is not allowed" answer (round 35 item 3): 409 — the config exists and the
+    /// caller may act on it, but its stored state forbids resolving its credential until an operator renames the secret.
+    /// </summary>
+    public static IResult ConfigSecretNameNotAllowed(Guid configId, string traceId) =>
+        Refusal(
+            StatusCodes.Status409Conflict,
+            "Conflict",
+            $"Container type config '{configId}' names a Key Vault secret outside the allowed " +
+            $"'{SpeConfigSecretNamePolicy.RequiredPrefix}' prefix. It cannot be used until an operator renames the secret.",
+            SpeConfigSecretNamePolicy.NotAllowedReasonCode,
+            traceId);
 
     /// <summary>
     /// THE "config not found" answer for every SPE admin route: the filter's out-of-scope and
@@ -484,20 +628,6 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
             ? SpeAdminContainerLocation.RecycleBin
             : SpeAdminContainerLocation.Active;
 
-    /// <summary>The container-type operation a route is marked with (a Write mark wins), or null.</summary>
-    private static SpeAdminContainerTypeOperation? ContainerTypeOperationOf(HttpContext http)
-    {
-        var marks = http.GetEndpoint()?.Metadata.OfType<SpeAdminContainerTypeOperation>().ToList();
-        if (marks is null || marks.Count == 0)
-        {
-            return null;
-        }
-
-        return marks.Contains(SpeAdminContainerTypeOperation.Write)
-            ? SpeAdminContainerTypeOperation.Write
-            : SpeAdminContainerTypeOperation.Read;
-    }
-
     /// <summary>
     /// Every non-empty containerId the request carries: the route value and the
     /// <see cref="ISpeAdminContainerScopedRequest.ContainerId"/> of each bound body argument.
@@ -546,6 +676,16 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     /// </summary>
     private async Task<IResult?> DecideEnvironmentAsync(HttpContext http, SpeAdminEnvironmentOperation operation)
     {
+        if (operation == SpeAdminEnvironmentOperation.Write)
+        {
+            // Writes depend only on the caller's own unit and the hierarchy — THE platform-operator check, shared with
+            // the security routes (round 35 item 4).
+            return await RequirePlatformOperatorAsync(
+                http,
+                EnvironmentWriteDeniedCode,
+                "Only a platform operator (an administrator in the root business unit) may create, change or delete SPE environments.");
+        }
+
         SpeAdminEnvironmentReach reach;
         try
         {
@@ -557,23 +697,6 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
                 "SPE Admin environment scope UNVERIFIABLE; refusing. Path={Path} TraceId={TraceId}",
                 http.Request.Path, http.TraceIdentifier);
             return ScopeUnverifiable(http.TraceIdentifier);
-        }
-
-        if (operation == SpeAdminEnvironmentOperation.Write)
-        {
-            if (reach.CanWrite)
-            {
-                return null;
-            }
-
-            _logger?.LogWarning(
-                "SPE Admin environment write DENIED: the caller's business unit is not the root. Path={Path} TraceId={TraceId}",
-                http.Request.Path, http.TraceIdentifier);
-
-            return ProblemDetailsHelper.Forbidden(
-                EnvironmentWriteDeniedCode,
-                "Only a platform operator (an administrator in the root business unit) may create, change or delete SPE environments.",
-                http.TraceIdentifier);
         }
 
         // Read by id. The route constraint is {id:guid}, so an unparseable value never reaches here; a

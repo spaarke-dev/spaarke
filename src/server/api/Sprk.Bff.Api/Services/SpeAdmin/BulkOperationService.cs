@@ -394,8 +394,9 @@ public sealed class BulkOperationService : BackgroundService
 
     /// <summary>
     /// The per-item error for a container this job will not touch. ONE text for "not found", "of another
-    /// container type", "bound to a business unit the caller does not administer", "unbound" (for a non-root
-    /// caller) and "the read failed", so a refused item's status does not tell the caller which of those it was.
+    /// container type", "of a type Graph does not report", "bound to a business unit the caller does not administer",
+    /// "unbound" or "malformed" (for EVERY caller, root included — round 35 item 2) and "the read failed", so a refused
+    /// item's status does not tell the caller which of those it was. The reason is logged.
     /// </summary>
     internal const string ContainerNotInScopeError =
         "The container was not found among the containers you administer under this configuration; it was not changed.";
@@ -541,17 +542,19 @@ public sealed class BulkOperationService : BackgroundService
                 () => _graphService.GetContainerBindingAsync(graphClient, containerId, deleted: false, ct),
                 $"GetContainerBinding({containerId})");
 
-            // Bulk requires the type to be REPORTED and equal: a container whose type Graph does not report is refused.
-            var permitted = read is not null
-                && SpeAdminTenantScope.SameGuid(read.ContainerTypeId, config.ContainerTypeId)
-                && SpeAdminTenantScope.DecideContainer(scope, config.ContainerTypeId, read) == SpeAdminScopeDecision.Permitted;
+            // Bulk requires the type to be REPORTED and equal: a container whose type Graph does not report is refused
+            // (the job acts app-only with no per-request filter, so an unreported type is not taken on trust — D10).
+            var typeReportedAndEqual = read is not null && SpeAdminTenantScope.SameGuid(read.ContainerTypeId, config.ContainerTypeId);
+            var refusal = SpeAdminTenantScope.ClassifyContainer(scope, config.ContainerTypeId, read);
+            var permitted = typeReportedAndEqual && refusal == SpeContainerRefusal.None;
 
             if (!permitted)
             {
                 _logger.LogWarning(
-                    "BulkOperationService: job {OperationId} — container '{ContainerId}' is not of config {ConfigId}'s " +
-                    "container type, is bound outside the caller's business units, or was not found; refused without a write.",
-                    operationId, containerId, config.ConfigId);
+                    "BulkOperationService: job {OperationId} — container '{ContainerId}' refused through config {ConfigId} " +
+                    "without a write — reason {Reason}.",
+                    operationId, containerId, config.ConfigId,
+                    refusal != SpeContainerRefusal.None ? SpeAdminTenantScope.RefusalReason(refusal) : "type_not_reported");
             }
 
             return permitted;

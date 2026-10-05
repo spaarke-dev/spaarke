@@ -131,8 +131,8 @@ public class ContainerOperations
             catch (Exception deleteEx)
             {
                 _logger.LogCritical(deleteEx,
-                    "Container {ContainerId} is UNBOUND and could not be removed; only a root-unit administrator can reach it " +
-                    "until the backfill stamps it or an operator removes it.", containerId);
+                    "Container {ContainerId} is UNBOUND and could not be removed; no admin route reaches it until the backfill " +
+                    "binds it (-Bind) or an operator removes it.", containerId);
             }
 
             throw new InvalidOperationException(

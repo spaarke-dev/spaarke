@@ -183,10 +183,18 @@ public class SpeAdminTenantScope
     /// exist, leaving the endpoint to 404 in a different shape from the filter's out-of-scope 404 — an
     /// existence oracle. The lookup now tells "does not exist" apart from "exists with no business unit".
     /// </para>
+    /// <para>
+    /// <b>The config's Key Vault secret name</b> (owner round 35 item 3). When <paramref name="usesConfigCredential"/>,
+    /// a config the caller may act on but whose stored <c>sprk_keyvaultsecretname</c> is outside
+    /// <see cref="SpeConfigSecretNamePolicy"/> answers <see cref="SpeAdminScopeDecision.SecretNameNotAllowed"/> — judged
+    /// only AFTER the scope, so another customer's config still gets the uniform 404 and its state is never disclosed.
+    /// The name is read in the same single row read as the business unit.
+    /// </para>
     /// </remarks>
     public async Task<SpeAdminScopeDecision> DecideConfigAccessAsync(
         ClaimsPrincipal? user,
         Guid configId,
+        bool usesConfigCredential,
         CancellationToken ct = default)
     {
         ConfigBusinessUnitLookup lookup;
@@ -207,28 +215,39 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.NotFoundOrOutOfScope;
         }
 
-        if (lookup.BusinessUnitId is null)
+        if (lookup.BusinessUnitId is { } configUnit)
         {
-            // The business-unit-less compatibility rule above. Deliberately unchanged by task 165.
-            return SpeAdminScopeDecision.Permitted;
+            IReadOnlyCollection<Guid> accessible;
+            try
+            {
+                accessible = await GetAccessibleBusinessUnitsAsync(user, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "SpeAdmin tenant scope: could not read the business-unit hierarchy — refusing config {ConfigId} (unverifiable).",
+                    configId);
+                return SpeAdminScopeDecision.Unverifiable;
+            }
+
+            if (!accessible.Contains(configUnit))
+            {
+                return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+            }
         }
 
-        IReadOnlyCollection<Guid> accessible;
-        try
+        // A config with no business unit reaches here under the compatibility rule above (deliberately unchanged by
+        // task 165). Only now — the caller may act on this config — is its secret name judged (round 35 item 3).
+        if (usesConfigCredential && !SpeConfigSecretNamePolicy.IsAllowed(lookup.SecretName))
         {
-            accessible = await GetAccessibleBusinessUnitsAsync(user, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex,
-                "SpeAdmin tenant scope: could not read the business-unit hierarchy — refusing config {ConfigId} (unverifiable).",
-                configId);
-            return SpeAdminScopeDecision.Unverifiable;
+            _logger.LogError(
+                "SpeAdmin tenant scope: config {ConfigId} names a Key Vault secret outside the allowed '{Prefix}' prefix — " +
+                "refusing ({ReasonCode}); the secret is never read.",
+                configId, SpeConfigSecretNamePolicy.RequiredPrefix, SpeConfigSecretNamePolicy.NotAllowedReasonCode);
+            return SpeAdminScopeDecision.SecretNameNotAllowed;
         }
 
-        return accessible.Contains(lookup.BusinessUnitId.Value)
-            ? SpeAdminScopeDecision.Permitted
-            : SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        return SpeAdminScopeDecision.Permitted;
     }
 
     /// <summary>
@@ -266,10 +285,11 @@ public class SpeAdminTenantScope
     /// type and its owning app — that is Model 1 (one container type, one owning app, one container per customer;
     /// container-type topology §3). Sharing them no longer opens another customer's containers: every container,
     /// item, permission and bulk route authorizes PER CONTAINER against the container's business-unit stamp
-    /// (<see cref="DecideContainerAccessAsync"/>), and the app-only container-TYPE routes refuse a write to a type a
-    /// config the caller cannot reach also carries (<see cref="DecideContainerTypeAccessAsync"/>). So the SHARED
+    /// (<see cref="DecideContainerAccessAsync"/>), and the app-only container-TYPE routes refuse a read or a write of a
+    /// type a config the caller cannot reach also carries (<see cref="DecideContainerTypeAccessAsync"/>). So the SHARED
     /// identity — <see cref="IdentityColumns.ContainerTypeId"/>, <see cref="IdentityColumns.OwningAppId"/> and
-    /// its secret <see cref="IdentityColumns.KeyVaultSecretName"/> — may be named by any config. The PER-CUSTOMER
+    /// its secret <see cref="IdentityColumns.KeyVaultSecretName"/> — may be named by any config (the secret name only
+    /// within <see cref="SpeConfigSecretNamePolicy"/>, enforced by the config endpoints, round 35 item 3). The PER-CUSTOMER
     /// identity — the consuming app (<see cref="IdentityColumns.ConsumingAppId"/>,
     /// <see cref="IdentityColumns.ConsumingAppKvSecret"/>; one per customer in both models, topology §3A) — stays
     /// exclusive: a value another unreachable config carries in a per-customer column may not be named in ANY
@@ -449,10 +469,14 @@ public class SpeAdminTenantScope
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The rule (owner round 20 item 2, <see cref="SpeAdminCallerScope.CanReach"/>): a container bound to a unit the
-    /// caller reaches (their own unit or a descendant); an unbound container only for a ROOT-unit admin; an unreadable
-    /// binding fails closed. The config itself was already confined by the filter's configId rule — this adds the
-    /// container, because one container type can serve several customers (Model 1).
+    /// The rule (owner round 20 item 2 as amended by round 35 item 2, <see cref="SpeAdminCallerScope.CanReach"/>): a
+    /// container bound to a unit the caller reaches (their own unit or a descendant); an UNBOUND or malformed container
+    /// by NO admin route, root-unit admins included — under Model 1 the root admin of any environment whose config names
+    /// a shared type would otherwise reach another customer's unbound containers; an unreadable binding fails closed. The
+    /// config itself was already confined by the filter's configId rule — this adds the container, because one container
+    /// type can serve several customers (Model 1). Every refusal is logged with its reason
+    /// (<see cref="SpeContainerRefusal"/>: <c>absent</c>, <c>other_type</c>, <c>unbound</c>, <c>malformed</c>,
+    /// <c>out_of_scope</c>); the caller sees ONE 404 whichever it was.
     /// </para>
     /// <para>
     /// The binding is read from the container itself with the config's own client (<see cref="SpeContainerBusinessUnitStamp"/>
@@ -506,41 +530,75 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.Unverifiable;
         }
 
-        var decision = DecideContainer(scope, config.ContainerTypeId, read);
-        if (decision != SpeAdminScopeDecision.Permitted)
+        var refusal = ClassifyContainer(scope, config.ContainerTypeId, read);
+        if (refusal != SpeContainerRefusal.None)
         {
             _logger.LogWarning(
-                "SpeAdmin tenant scope: container {ContainerId} is not one the caller may act on through config {ConfigId} " +
-                "(absent, of another container type, or bound outside the caller's business units).",
-                containerId, configId);
+                "SpeAdmin tenant scope: container {ContainerId} refused through config {ConfigId} — reason {Reason}.",
+                containerId, configId, RefusalReason(refusal));
+            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
         }
 
-        return decision;
+        return SpeAdminScopeDecision.Permitted;
     }
 
     /// <summary>
-    /// The per-container rule on one binding read: absent → not found; a container type Graph REPORTS that differs from
-    /// the config's → not found; otherwise <see cref="SpeAdminCallerScope.CanReach"/>.
+    /// The per-container rule on one binding read, as a decision: <see cref="SpeAdminScopeDecision.Permitted"/> only when
+    /// <see cref="ClassifyContainer"/> finds no refusal; every refusal is the ONE not-found answer.
     /// </summary>
     internal static SpeAdminScopeDecision DecideContainer(
+        SpeAdminCallerScope scope,
+        string? configContainerTypeId,
+        SpeContainerBindingRead? read) =>
+        ClassifyContainer(scope, configContainerTypeId, read) == SpeContainerRefusal.None
+            ? SpeAdminScopeDecision.Permitted
+            : SpeAdminScopeDecision.NotFoundOrOutOfScope;
+
+    /// <summary>
+    /// The per-container rule on one binding read, with the reason: absent → <see cref="SpeContainerRefusal.Absent"/>; a
+    /// container type Graph REPORTS that differs from the config's → <see cref="SpeContainerRefusal.OtherType"/>; an
+    /// unbound container → <see cref="SpeContainerRefusal.Unbound"/> and a malformed stamp →
+    /// <see cref="SpeContainerRefusal.Malformed"/> for EVERY caller (round 35 item 2); a unit the caller does not reach →
+    /// <see cref="SpeContainerRefusal.OutOfScope"/>.
+    /// </summary>
+    internal static SpeContainerRefusal ClassifyContainer(
         SpeAdminCallerScope scope,
         string? configContainerTypeId,
         SpeContainerBindingRead? read)
     {
         if (read is null)
         {
-            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+            return SpeContainerRefusal.Absent;
         }
 
         if (!string.IsNullOrWhiteSpace(read.ContainerTypeId) && !SameGuid(read.ContainerTypeId, configContainerTypeId))
         {
-            return SpeAdminScopeDecision.NotFoundOrOutOfScope;
+            return SpeContainerRefusal.OtherType;
         }
 
-        return scope.CanReach(read.Binding)
-            ? SpeAdminScopeDecision.Permitted
-            : SpeAdminScopeDecision.NotFoundOrOutOfScope;
+        if (read.Binding.IsMalformed)
+        {
+            return SpeContainerRefusal.Malformed;
+        }
+
+        if (read.Binding.BusinessUnitId is null)
+        {
+            return SpeContainerRefusal.Unbound;
+        }
+
+        return scope.CanReach(read.Binding) ? SpeContainerRefusal.None : SpeContainerRefusal.OutOfScope;
     }
+
+    /// <summary>The log word for a refusal (the 404 the caller sees is the same for every one).</summary>
+    internal static string RefusalReason(SpeContainerRefusal refusal) => refusal switch
+    {
+        SpeContainerRefusal.Absent => "absent",
+        SpeContainerRefusal.OtherType => "other_type",
+        SpeContainerRefusal.Unbound => "unbound",
+        SpeContainerRefusal.Malformed => "malformed",
+        SpeContainerRefusal.OutOfScope => "out_of_scope",
+        _ => "none",
+    };
 
     /// <summary>
     /// The containers in <paramref name="containerIds"/> the caller may see through <paramref name="config"/> — the
@@ -582,9 +640,18 @@ public class SpeAdminTenantScope
 
         foreach (var (id, read) in await Task.WhenAll(reads).ConfigureAwait(false))
         {
-            if (DecideContainer(scope, config.ContainerTypeId, read) == SpeAdminScopeDecision.Permitted)
+            var refusal = ClassifyContainer(scope, config.ContainerTypeId, read);
+            if (refusal == SpeContainerRefusal.None)
             {
                 reachable.Add(id);
+            }
+            else if (refusal is SpeContainerRefusal.Unbound or SpeContainerRefusal.Malformed)
+            {
+                // Not an error to the caller (the container is simply not listed), but an operator must bind it: no admin
+                // route reaches it until the backfill does (round 35 item 2).
+                _logger.LogWarning(
+                    "SpeAdmin tenant scope: container {ContainerId} of config {ConfigId} left out of a list — reason {Reason}.",
+                    id, config.ConfigId, RefusalReason(refusal));
             }
         }
 
@@ -646,20 +713,22 @@ public class SpeAdminTenantScope
 
     /// <summary>
     /// Whether the caller may act on container type <paramref name="typeId"/> through <paramref name="configId"/> on an
-    /// app-only container-type route (type permissions, consuming-app registrations, register).
+    /// app-only container-type route (type permissions, consuming-app registrations, register) — reads and writes alike.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>Why</b>. Narrowing the identity check (round 20 item 3) lets configs of different customers carry ONE
     /// container type and owning app. The container-type routes act app-only, as that shared owning app, on settings
-    /// every customer of the type shares — a consuming-app registration grants an app every container of the type. So:
+    /// every customer of the type shares — a consuming-app registration grants an app every container of the type — and
+    /// the reads (<c>GET …/permissions</c>, <c>GET …/consumers</c>) list every customer's consuming app and registrations,
+    /// the per-customer values round 20 item 3 keeps exclusive. So (round 35 item 5: the reads get the write rule):
     /// </para>
     /// <list type="bullet">
     ///   <item>the route's type must BE the config's type (compared as GUIDs) — a config is not a credential for some
     ///   other type its owning app can reach; otherwise <see cref="SpeAdminScopeDecision.NotFoundOrOutOfScope"/>;</item>
-    ///   <item>a WRITE needs the caller to reach EVERY config that carries the type — a type shared with a customer the
-    ///   caller cannot reach is shared infrastructure, changed only by an admin who reaches all of its customers (a
-    ///   root-unit admin reaches every config); otherwise <see cref="SpeAdminScopeDecision.ContainerTypeShared"/>.</item>
+    ///   <item>the caller must reach EVERY config that carries the type — a type shared with a customer the caller cannot
+    ///   reach is shared infrastructure, read or changed only by an admin who reaches all of its customers (a root-unit
+    ///   admin reaches every config); otherwise <see cref="SpeAdminScopeDecision.ContainerTypeShared"/>.</item>
     /// </list>
     /// <para>A read fault, or a full page of the config table, is <see cref="SpeAdminScopeDecision.Unverifiable"/>.</para>
     /// </remarks>
@@ -667,7 +736,6 @@ public class SpeAdminTenantScope
         ClaimsPrincipal? user,
         Guid configId,
         string? typeId,
-        bool write,
         CancellationToken ct = default)
     {
         SpeAdminCallerScope scope;
@@ -698,11 +766,6 @@ public class SpeAdminTenantScope
             return SpeAdminScopeDecision.NotFoundOrOutOfScope;
         }
 
-        if (!write)
-        {
-            return SpeAdminScopeDecision.Permitted;
-        }
-
         var accessible = scope.AccessibleBusinessUnits;
         var sharedWithAnUnreachableConfig = rows.Any(r =>
             SameGuid(r.ContainerTypeId, typeId) && !IsReachable(r, accessible));
@@ -710,8 +773,8 @@ public class SpeAdminTenantScope
         if (sharedWithAnUnreachableConfig)
         {
             _logger.LogWarning(
-                "SpeAdmin tenant scope: a write to container type {TypeId} through config {ConfigId} refused — a config " +
-                "the caller cannot reach also carries that type.", typeId, configId);
+                "SpeAdmin tenant scope: container type {TypeId} through config {ConfigId} refused — a config the caller " +
+                "cannot reach also carries that type.", typeId, configId);
             return SpeAdminScopeDecision.ContainerTypeShared;
         }
 
@@ -840,13 +903,13 @@ public class SpeAdminTenantScope
         var rows = await _dataverseClient.QueryAsync<ConfigBusinessUnitRow>(
             "sprk_specontainertypeconfigs",
             filter: $"sprk_specontainertypeconfigid eq {configId:D}",
-            select: "sprk_specontainertypeconfigid,_sprk_businessunit_value",
+            select: $"sprk_specontainertypeconfigid,_sprk_businessunit_value,{IdentityColumns.KeyVaultSecretName}",
             top: 1,
             cancellationToken: ct).ConfigureAwait(false);
 
         return rows.Count == 0
-            ? new ConfigBusinessUnitLookup(Exists: false, BusinessUnitId: null)
-            : new ConfigBusinessUnitLookup(Exists: true, BusinessUnitId: rows[0].BusinessUnitId);
+            ? new ConfigBusinessUnitLookup(Exists: false, BusinessUnitId: null, SecretName: null)
+            : new ConfigBusinessUnitLookup(Exists: true, BusinessUnitId: rows[0].BusinessUnitId, SecretName: rows[0].SecretName);
     }
 
     /// <summary>
@@ -923,7 +986,7 @@ public class SpeAdminTenantScope
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>Result of <see cref="ResolveConfigBusinessUnitAsync"/>.</summary>
-    internal readonly record struct ConfigBusinessUnitLookup(bool Exists, Guid? BusinessUnitId);
+    internal readonly record struct ConfigBusinessUnitLookup(bool Exists, Guid? BusinessUnitId, string? SecretName);
 
     private sealed class SystemUserRow
     {
@@ -941,6 +1004,9 @@ public class SpeAdminTenantScope
 
         [JsonPropertyName("_sprk_businessunit_value")]
         public Guid? BusinessUnitId { get; set; }
+
+        [JsonPropertyName(IdentityColumns.KeyVaultSecretName)]
+        public string? SecretName { get; set; }
     }
 
     private sealed class ConfigScopeRow
@@ -1020,10 +1086,17 @@ public enum SpeAdminScopeDecision
     EnvironmentOutOfScope,
 
     /// <summary>
-    /// A write to a container type that a config the caller cannot reach also carries (owner round 20 item 3's
-    /// consequence: a Model 1 type is shared infrastructure): 403.
+    /// An app-only container-type route (read or write, round 35 item 5) on a type that a config the caller cannot
+    /// reach also carries (owner round 20 item 3's consequence: a Model 1 type is shared infrastructure): 403.
     /// </summary>
     ContainerTypeShared,
+
+    /// <summary>
+    /// A config the caller may act on, whose stored Key Vault secret name is outside
+    /// <see cref="SpeConfigSecretNamePolicy"/> (round 35 item 3), on a route that uses the config's credential: 409 —
+    /// the secret is never read.
+    /// </summary>
+    SecretNameNotAllowed,
 
     /// <summary>A read the decision depends on failed: 503, never allow.</summary>
     Unverifiable
@@ -1047,14 +1120,40 @@ public sealed record SpeAdminCallerScope(
     public static SpeAdminCallerScope Nobody { get; } = new(null, false, new HashSet<Guid>());
 
     /// <summary>
-    /// THE per-container rule (owner round 20 item 2): a container bound to a business unit the caller reaches; an
-    /// unbound (or malformed) container only for a ROOT-unit admin. A binding that could not be READ never gets here —
-    /// that is a refusal (fail closed) before this is asked.
+    /// THE per-container rule (owner round 20 item 2, amended by round 35 item 2): a container bound to a business unit
+    /// the caller reaches. An UNBOUND or malformed container is reached by NO caller — root-unit admins included: under
+    /// Model 1 the root admin of any environment whose config names a shared container type would otherwise reach another
+    /// customer's unbound containers. A container is bound only by its creation path's stamp or by the backfill
+    /// (<c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1</c>, including its explicit <c>-Bind</c>). A binding that
+    /// could not be READ never gets here — that is a refusal (fail closed) before this is asked.
     /// </summary>
     public bool CanReach(SpeContainerBinding binding) =>
-        binding.BusinessUnitId is { } unit
-            ? AccessibleBusinessUnits.Contains(unit)
-            : IsPlatformOperator;
+        binding.BusinessUnitId is { } unit && !binding.IsMalformed && AccessibleBusinessUnits.Contains(unit);
+}
+
+/// <summary>
+/// Why a container was refused (<see cref="SpeAdminTenantScope.ClassifyContainer"/>) — for the LOG only: every refusal
+/// answers the caller with the same 404, so the response is never an oracle for which case it was.
+/// </summary>
+public enum SpeContainerRefusal
+{
+    /// <summary>Not refused.</summary>
+    None,
+
+    /// <summary>Graph does not find the container.</summary>
+    Absent,
+
+    /// <summary>Graph reports a container type that is not the config's.</summary>
+    OtherType,
+
+    /// <summary>The container carries no business-unit stamp — no admin route reaches it (round 35 item 2).</summary>
+    Unbound,
+
+    /// <summary>The stamp names no single business unit — treated as unbound.</summary>
+    Malformed,
+
+    /// <summary>Bound to a business unit the caller does not reach (or one this environment does not know).</summary>
+    OutOfScope
 }
 
 /// <summary>
@@ -1069,7 +1168,10 @@ public sealed record SpeAdminContainerTrim(IReadOnlySet<string> Reachable, bool 
 /// </summary>
 /// <param name="ConfigIds">The reachable config ids (in an accessible unit, or with no unit).</param>
 /// <param name="ReachesEveryConfig">The caller reaches every config in the table.</param>
-/// <param name="IsPlatformOperator">The caller's own unit is the root — the only caller who sees unbound containers.</param>
+/// <param name="IsPlatformOperator">
+/// The caller's own unit is the root — the only caller whose dashboard view carries the AGGREGATE count of unbound
+/// containers (the alarm that a backfill / <c>-Bind</c> is owed; no route reaches any of them, round 35 item 2).
+/// </param>
 public sealed record SpeAdminConfigReach(
     IReadOnlySet<Guid> ConfigIds,
     bool ReachesEveryConfig,

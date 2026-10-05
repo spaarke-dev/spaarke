@@ -210,6 +210,30 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
     }
 
     [Fact]
+    public async Task Refresh_AConfigWhoseSecretNameIsNotAllowed_IsAFailedConcernCarryingTheRulesReasonCode()
+    {
+        // Task 165, round 35 item 3: the job never resolves a secret name outside the allow-list — the config is reported
+        // as a failed concern with the rule's own reason code, and the other configs are still counted.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root, includeConfigB: false);
+        var badB = ConfigRow(ConfigB, UnitB, TypeT);
+        badB["sprk_keyvaultsecretname"] = "AzureOpenAI-ApiKey";
+        _fixture.Dataverse.Add(ConfigSet, badB);
+        StubGraph();
+        using var client = Admin();
+
+        var metrics = await Json(await client.PostAsync("/api/spe/dashboard/refresh", content: null));
+
+        var concern = metrics.GetProperty("concerns").EnumerateArray()
+            .Single(c => c.GetProperty("concern").GetString() == $"Graph containers (config {ConfigB})");
+        concern.GetProperty("succeeded").GetBoolean().Should().BeFalse();
+        concern.GetProperty("reason").GetString().Should().Contain(SpeConfigSecretNamePolicy.NotAllowedReasonCode);
+        metrics.GetProperty("containerCountByConfig").GetProperty(ConfigA.ToString()).GetInt32().Should().Be(2,
+            "a misconfigured config does not stop the others being counted");
+        metrics.GetProperty("syncHealth").GetString().Should().Be("Degraded");
+    }
+
+    [Fact]
     public async Task TheFirstViewWithNothingCached_StartsASync_AndALaterViewSeesItsResult()
     {
         StubGraph();
@@ -272,7 +296,7 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
         ["_sprk_environment_value"] = Environment,
         ["sprk_containertypeid"] = type,
         ["sprk_owningappid"] = "a0a0a0a0-0000-0000-0000-00000000000a",
-        ["sprk_keyvaultsecretname"] = "shared-owning-secret",
+        ["sprk_keyvaultsecretname"] = "spe-owning-app-shared",
         ["statecode"] = 0,
     };
 

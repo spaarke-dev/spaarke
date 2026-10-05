@@ -43,13 +43,15 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
     // Config B's identity — what a Unit-A admin must not borrow.
     private const string TypeB = "bbbbbbbb-0000-0000-0000-00000000000b";
     private const string AppB = "b0b0b0b0-0000-0000-0000-00000000000b";
-    private const string SecretB = "unit-b-owning-secret";
+    private const string SecretB = "spe-owning-app-unit-b";
     private const string ConsumingAppB = "cbcbcbcb-0000-0000-0000-00000000000b";
-    private const string ConsumingSecretB = "unit-b-consuming-secret";
+    // Conforming (round 35 item 3), so naming it as one's OWN keyVaultSecretName reaches the identity rule (403), not the
+    // prefix rule (400).
+    private const string ConsumingSecretB = "spe-owning-app-unit-b-consuming";
 
     private const string TypeA = "aaaaaaaa-0000-0000-0000-00000000000a";
     private const string AppA = "a0a0a0a0-0000-0000-0000-00000000000a";
-    private const string SecretA = "unit-a-owning-secret";
+    private const string SecretA = "spe-owning-app-unit-a";
     private const string AppN = "e0e0e0e0-0000-0000-0000-00000000000e";
 
     private const string OutOfScopeCode = "spe.admin.deny.config_out_of_scope";
@@ -196,7 +198,7 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
     {
         // Config B (Unit B) also carries Config A's stored owning app — a value the caller is not
         // introducing. The shipped client's PUT re-sends every field unchanged (formStateToUpsert).
-        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type", AppA, "other-secret"));
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type", AppA, "spe-owning-app-other"));
         using var client = Admin();
 
         var response = await client.PutAsJsonAsync($"/api/spe/configs/{ConfigA}", new
@@ -394,7 +396,7 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
         // The STORED side may be the odd spelling: unit B's row holds its CONSUMING app id with no hyphens.
         var storedN = Guid.Parse("b1b1b1b1-0000-0000-0000-00000000001b");
         _fixture.Dataverse.Add(ConfigSet, ConfigRow(
-            Guid.NewGuid(), UnitB, "other-type-n", "o1o1o1o1-0000-0000-0000-00000000001b", "other-secret-n", storedN.ToString("N")));
+            Guid.NewGuid(), UnitB, "other-type-n", "o1o1o1o1-0000-0000-0000-00000000001b", "spe-owning-app-other-n", storedN.ToString("N")));
         using var client = Admin();
 
         var problem = await Problem(
@@ -409,7 +411,7 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
     {
         // Config B also carries Config A's owning app. Re-sending A's own value as {B}-braced is not a new
         // borrowing, exactly as a case-only difference is not (D1).
-        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type", AppA, "other-secret"));
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.NewGuid(), UnitB, "other-type", AppA, "spe-owning-app-other"));
         using var client = Admin();
 
         var response = await client.PutAsJsonAsync($"/api/spe/configs/{ConfigA}", new
@@ -758,7 +760,7 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
 
         dv.Add(ConfigSet, ConfigRow(ConfigA, UnitA, TypeA, AppA, SecretA));
         dv.Add(ConfigSet, ConfigRow(ConfigB, UnitB, TypeB, AppB, SecretB, ConsumingAppB, ConsumingSecretB));
-        dv.Add(ConfigSet, ConfigRow(ConfigN, null, "eeeeeeee-0000-0000-0000-00000000000e", AppN, "no-unit-secret"));
+        dv.Add(ConfigSet, ConfigRow(ConfigN, null, "eeeeeeee-0000-0000-0000-00000000000e", AppN, "spe-owning-app-no-unit"));
     }
 
     private static Dictionary<string, object?> ConfigRow(
@@ -785,7 +787,7 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
             ["name"] = "New config",
             ["containerTypeId"] = "dddddddd-0000-0000-0000-00000000000d",
             ["owningAppId"] = "d0d0d0d0-0000-0000-0000-00000000000d",
-            ["keyVaultSecretName"] = "new-config-secret",
+            ["keyVaultSecretName"] = "spe-owning-app-new-config",
             ["businessUnitId"] = businessUnitId,
         };
 

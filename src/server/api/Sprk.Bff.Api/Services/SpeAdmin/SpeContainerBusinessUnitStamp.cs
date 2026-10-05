@@ -14,13 +14,18 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// Graph has no notion of which customer a container is "for". Routes bound only to a container type let one
 /// customer's administrator reach another customer's containers of the same type. The stamp is the authoritative
 /// binding the admin plane authorizes against, PER CONTAINER: a container bound to a unit an admin can reach (their
-/// own unit or a descendant); an unbound container only for an admin of the ROOT unit; an unreadable binding fails
-/// closed (<see cref="SpeAdminCallerScope.CanReach"/>).
+/// own unit or a descendant); an UNBOUND container by no admin route at all (owner round 35 item 2 — root-unit admins
+/// included); an unreadable binding fails closed (<see cref="SpeAdminCallerScope.CanReach"/>).
 /// </para>
 /// <para>
-/// <b>Server-owned.</b> Only the BFF's creation paths and the backfill script write it. The SPE admin custom-property
-/// route refuses to set or remove it (<see cref="IsReserved"/>), otherwise an administrator could re-bind a container
-/// into another customer's view.
+/// <b>Server-owned, and written by EVERY creation path</b> (round 35 item 1): the BFF's two creation paths (SPE admin
+/// plane, secure-record provisioning), the L2 control plane's H8 root container, and the operator scripts
+/// (<c>New-BusinessUnitContainer.ps1</c>, <c>Provision-Customer.ps1</c>, <c>Create-NewContainerType.ps1</c>) — each
+/// reads the stamp back and removes the container if it did not land — plus the backfill script. The SPE admin
+/// custom-property route refuses to set or remove it (<see cref="IsReserved"/>), otherwise an administrator could
+/// re-bind a container into another customer's view. The name is ONE C# constant shared with L2
+/// (<c>Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding</c>) and ONE PowerShell constant
+/// (<c>scripts/common/SpeContainerBinding.ps1</c>); <c>SpeAdminContainerBindingGuardTests</c> pins both.
 /// </para>
 /// <para>
 /// <b>Reading it.</b> Graph returns <c>customProperties</c> on a single-container GET with <c>$select</c> only: on the
@@ -31,12 +36,15 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// </remarks>
 public static class SpeContainerBusinessUnitStamp
 {
-    /// <summary>The custom property that carries the owning business unit's id (canonical <c>D</c> GUID form).</summary>
-    public const string PropertyName = "spaarkeBusinessUnitId";
+    /// <summary>
+    /// The custom property that carries the owning business unit's id (canonical <c>D</c> GUID form) — the ONE C#
+    /// constant, shared with the L2 control plane through the source-linked contract.
+    /// </summary>
+    public const string PropertyName = Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName;
 
     /// <summary>
     /// The binding a container's custom properties express: bound to a business unit, unbound (no stamp), or
-    /// malformed (a stamp that is not one non-empty GUID — read as unbound, so only a root-unit admin reaches it).
+    /// malformed (a stamp that is not one non-empty GUID — treated as unbound: no admin route reaches it).
     /// </summary>
     public static SpeContainerBinding Read(IReadOnlyList<CustomPropertyDto>? properties)
     {

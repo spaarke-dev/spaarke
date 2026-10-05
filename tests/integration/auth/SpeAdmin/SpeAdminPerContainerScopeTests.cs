@@ -22,7 +22,9 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// the config the request named and to that config's container type, so a leaf admin of Unit A, holding a config of
 /// the shared type, could act on Unit B's containers of the same type. Every container now carries its owning business
 /// unit (<see cref="SpeContainerBusinessUnitStamp"/>), and the decision is: a container bound to a unit the caller
-/// reaches; an unbound container only for a root-unit admin; an unreadable binding fails closed.
+/// reaches; an UNBOUND (or malformed) container by NO admin route, root-unit admins included (owner round 35 item 2 —
+/// under Model 1 a root admin of any environment whose config names a shared type would otherwise reach another
+/// customer's unbound containers), logged with reason <c>unbound</c>; an unreadable binding fails closed.
 /// </para>
 /// <para>
 /// <b>The tenant.</b> Root → {Unit A → {Unit A-sub}, Unit B}. Config A (Unit A) and Config B (Unit B) share container
@@ -185,7 +187,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Unbound containers: root-unit admins only
+    // Unbound containers: reached by NO admin route (owner round 35 item 2 — amends round 20's "root only")
     // ─────────────────────────────────────────────────────────────────────────
 
     [Theory]
@@ -201,26 +203,72 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
     [Theory]
     [MemberData(nameof(ActiveContainerRoutes))]
-    public async Task ARootAdmin_OnAnUnboundContainer_ReachesTheHandler(string method, string path, string body)
+    public async Task ARootAdmin_OnAnUnboundContainer_GetsTheUniform404_AndTheHandlerNeverRuns(string method, string path, string body)
     {
         _fixture.Reset();
         SeedTenant(callerUnit: Root);
         StubContainers();
         using var client = Admin();
 
-        var response = await client.SendAsync(Request(method, path, "c-unbound", body));
+        var problem = await Problem(await client.SendAsync(Request(method, path, "c-unbound", body)));
 
-        await AssertReachedTheHandler(response);
+        AssertUniformContainerNotFound(problem, "c-unbound", recycleBin: false);
+        HandlerConfigReads().Should().Be(1, "only the filter resolved the config — no admin route reaches an unbound container");
+        _fixture.Graph.AllRequests.Should().ContainSingle("only the binding was read; nothing was acted on")
+            .Which.RawQuery.Should().Contain("customProperties");
+    }
+
+    [Theory]
+    [MemberData(nameof(RecycleBinContainerRoutes))]
+    public async Task ARootAdmin_OnAnUnboundDeletedContainer_GetsTheUniform404(string method, string path, string body)
+    {
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
+        StubDeleted("c-unbound", null);
+        using var client = Admin();
+
+        AssertUniformContainerNotFound(
+            await Problem(await client.SendAsync(Request(method, path, "c-unbound", body))), "c-unbound", recycleBin: true);
+        HandlerConfigReads().Should().Be(1);
     }
 
     [Fact]
-    public async Task ALeafAdmin_OnAContainerWithAMalformedStamp_GetsTheUniform404()
+    public async Task AnUnboundContainer_IsRefusedWithReasonUnbound_InTheLog_WhileTheCallerSeesTheUniform404()
     {
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
+        using var client = Admin();
+
+        var unbound = await Problem(await client.GetAsync(Url("/api/spe/containers/{c}", "c-unbound")));
+        var foreign = await Problem(await client.GetAsync(Url("/api/spe/containers/{c}", "c-gone")));
+
+        unbound.Keys.Should().BeEquivalentTo(foreign.Keys, "the caller cannot tell an unbound container from an absent one");
+        _fixture.Logs.Lines.Should().Contain(l =>
+            l.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && l.Message.Contains("c-unbound", StringComparison.Ordinal)
+            && l.Message.Contains("reason unbound", StringComparison.Ordinal),
+            "round 35 item 2: the refusal is logged with reason 'unbound'");
+        _fixture.Logs.Lines.Should().Contain(l =>
+            l.Message.Contains("c-gone", StringComparison.Ordinal) && l.Message.Contains("reason absent", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("1a000000-0000-0000-0000-000000000000")]   // a leaf admin of Unit A
+    [InlineData("10000000-0000-0000-0000-000000000000")]   // a root-unit admin
+    public async Task AContainerWithAMalformedStamp_IsTheUniform404_ForEveryCaller(string callerUnit)
+    {
+        _fixture.Reset();
+        SeedTenant(callerUnit: Guid.Parse(callerUnit));
+        StubContainers();
         StubContainer("c-malformed", TypeT, "not-a-business-unit");
         using var client = Admin();
 
         AssertUniformContainerNotFound(
             await Problem(await client.GetAsync(Url("/api/spe/containers/{c}", "c-malformed"))), "c-malformed", recycleBin: false);
+        _fixture.Logs.Lines.Should().Contain(l =>
+            l.Message.Contains("c-malformed", StringComparison.Ordinal) && l.Message.Contains("reason malformed", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -403,7 +451,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     [Fact]
-    public async Task ContainerList_ForARootAdmin_AlsoHoldsUnboundContainers()
+    public async Task ContainerList_ForARootAdmin_HoldsEveryBoundContainer_ButNoUnboundOne()
     {
         _fixture.Reset();
         SeedTenant(callerUnit: Root);
@@ -413,7 +461,8 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
         var body = await Json(await client.GetAsync($"/api/spe/containers?configId={ConfigA}"));
 
-        Ids(body.GetProperty("items")).Should().BeEquivalentTo("c-own", "c-other", "c-unbound");
+        Ids(body.GetProperty("items")).Should().BeEquivalentTo(new[] { "c-own", "c-other" },
+            "round 35 item 2: an unbound container is listed for nobody — it must be bound (backfill -Bind) first");
     }
 
     [Fact]
@@ -468,6 +517,44 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         body.GetProperty("totalCount").GetInt32().Should().Be(1, "Graph's total counts the other customer's hit");
     }
 
+    [Fact]
+    public async Task SearchItems_AHitThatNamesNoContainer_IsDropped_EvenForARootAdmin()
+    {
+        // An unscoped hit whose container Graph does not report (no containerId, no parentReference.driveId) cannot be
+        // judged by any binding — like an unbound container, it is shown to nobody (round 20 item 2; round 35 item 2).
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
+        _fixture.Graph.StubPost("/search/query", SearchJsonRaw(total: 2, moreResultsAvailable: false,
+            DriveItemHit("item-own", "c-own"), DriveItemHit("item-orphan", driveId: null)));
+        using var client = Admin();
+
+        var body = await Json(await client.PostAsJsonAsync($"/api/spe/search/items?configId={ConfigA}", new { query = "x" }));
+
+        Ids(body.GetProperty("items")).Should().BeEquivalentTo(new[] { "item-own" },
+            "a hit attributable to no container is never shown");
+        body.GetProperty("totalCount").GetInt32().Should().Be(1, "a page from which a hit was removed never reports Graph's total");
+    }
+
+    [Theory]
+    [InlineData(false, 7)]   // the result is complete: Graph's total is the operator's to see
+    [InlineData(true, 1)]    // a further page exists that nobody here judged: never Graph's total
+    public async Task SearchItems_ForARootAdmin_ReportsGraphsTotal_OnlyWhenThereIsNoFurtherPage(bool moreResults, int expectedTotal)
+    {
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
+        _fixture.Graph.StubPost("/search/query", SearchJsonRaw(total: 7, moreResultsAvailable: moreResults,
+            DriveItemHit("item-own", "c-own")));
+        using var client = Admin();
+
+        var body = await Json(await client.PostAsJsonAsync($"/api/spe/search/items?configId={ConfigA}", new { query = "x" }));
+
+        Ids(body.GetProperty("items")).Should().BeEquivalentTo("item-own");
+        body.GetProperty("totalCount").GetInt32().Should().Be(expectedTotal,
+            "round 35 item 2: a later page may hold hits in unbound or another environment's containers, which no admin reaches");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // The stamp is server-owned
     // ─────────────────────────────────────────────────────────────────────────
@@ -490,8 +577,10 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     [Fact]
-    public async Task CustomProperties_StampingAnUnboundContainer_Is403_ForARootAdminToo()
+    public async Task CustomProperties_StampingAnUnboundContainer_IsTheUniform404_ForARootAdminToo_AndNothingIsPatched()
     {
+        // Round 35 item 2: no admin route reaches an unbound container at all, so the filter refuses it before the
+        // handler's own server-owned-stamp rule is even asked. Binding is the creation path's and the backfill's job.
         _fixture.Reset();
         SeedTenant(callerUnit: Root);
         StubContainers();
@@ -500,11 +589,9 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         var problem = await Problem(
             await client.PutAsJsonAsync(
                 Url("/api/spe/containers/{c}/customproperties", "c-unbound"),
-                new { properties = new[] { new { name = SpeContainerBusinessUnitStamp.PropertyName, value = UnitA.ToString(), isSearchable = false } } }),
-            HttpStatusCode.Forbidden);
+                new { properties = new[] { new { name = SpeContainerBusinessUnitStamp.PropertyName, value = UnitA.ToString(), isSearchable = false } } }));
 
-        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_binding_server_owned",
-            "binding a container is the creation path's and the backfill's job, never an admin's");
+        AssertUniformContainerNotFound(problem, "c-unbound", recycleBin: false);
         _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH");
     }
 
@@ -649,14 +736,42 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [Theory]
     [InlineData("GET", "/api/spe/containertypes/{t}/permissions")]
     [InlineData("GET", "/api/spe/containertypes/{t}/consumers")]
-    public async Task ALeafAdmin_ReadingItsOwnSharedContainerType_ReachesTheHandler(string method, string path)
+    public async Task ALeafAdmin_ReadingAContainerTypeSharedWithAnotherCustomer_Is403_AndNothingIsSent(string method, string path)
     {
+        // Round 35 item 5: these lists name every customer's consuming app and registrations — the per-customer values
+        // round 20 item 3 keeps exclusive — so a read needs what a write needs: every config of the type reachable.
         using var client = Admin();
 
-        var response = await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA));
+        var problem = await Problem(await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)), HttpStatusCode.Forbidden);
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("spe.admin.deny.container_type");
-        HandlerConfigReads().Should().BeGreaterThanOrEqualTo(1, "the handler resolved its config");
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_type_shared");
+        HandlerConfigReads().Should().Be(0, "the handler never ran");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, string, string> AdminsWhoReachEveryConfigOfTheType() => new()
+    {
+        // (caller unit, Config B's type, why)
+        { "10000000-0000-0000-0000-000000000000", TypeT, "a root-unit admin reaches both configs of the shared type" },
+        { "1a000000-0000-0000-0000-000000000000", TypeX, "type T is carried only by Unit A's own config" },
+    };
+
+    [Theory]
+    [MemberData(nameof(AdminsWhoReachEveryConfigOfTheType))]
+    public async Task AnAdminWhoReachesEveryConfigOfTheType_ReadsItsPermissionsAndConsumers(string callerUnit, string configBType, string why)
+    {
+        foreach (var path in new[] { "/api/spe/containertypes/{t}/permissions", "/api/spe/containertypes/{t}/consumers" })
+        {
+            _fixture.Reset();
+            SeedTenant(callerUnit: Guid.Parse(callerUnit), configBType: configBType);
+            StubContainers();
+            using var client = Admin();
+
+            var response = await client.SendAsync(TypeRequest("GET", path, TypeT, ConfigA));
+
+            (await response.Content.ReadAsStringAsync()).Should().NotContain("spe.admin.deny.container_type", why);
+            HandlerConfigReads().Should().BeGreaterThanOrEqualTo(1, "the handler resolved its config — " + why);
+        }
     }
 
     [Fact]
@@ -838,7 +953,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         ["_sprk_businessunit_value"] = unit,
         ["sprk_containertypeid"] = type,
         ["sprk_owningappid"] = "a0a0a0a0-0000-0000-0000-00000000000a",
-        ["sprk_keyvaultsecretname"] = "shared-owning-secret",
+        ["sprk_keyvaultsecretname"] = "spe-owning-app-shared",
         ["statecode"] = 0,
     };
 
@@ -890,6 +1005,15 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
             : "{\"hitId\":\"" + h.Id + "\",\"resource\":{\"@odata.type\":\"#microsoft.graph.fileStorageContainer\",\"id\":\"" + h.Id +
               "\",\"displayName\":\"" + h.Id + "\",\"containerTypeId\":\"" + TypeT + "\"}}")) +
         "]}]}]}";
+
+    /// <summary>A driveItem search hit; <paramref name="driveId"/> null = the hit names no container at all.</summary>
+    private static string DriveItemHit(string id, string? driveId) =>
+        "{\"hitId\":\"" + id + "\",\"resource\":{\"@odata.type\":\"#microsoft.graph.driveItem\",\"id\":\"" + id +
+        "\",\"name\":\"" + id + "\"" + (driveId is null ? "" : ",\"parentReference\":{\"driveId\":\"" + driveId + "\"}") + "}}";
+
+    private static string SearchJsonRaw(int total, bool moreResultsAvailable, params string[] hits) =>
+        "{\"value\":[{\"hitsContainers\":[{\"total\":" + total + ",\"moreResultsAvailable\":" +
+        (moreResultsAvailable ? "true" : "false") + ",\"hits\":[" + string.Join(",", hits) + "]}]}]}";
 
     private static IEnumerable<string> Ids(JsonElement items) =>
         items.EnumerateArray().Select(i => i.GetProperty("id").GetString()!);
