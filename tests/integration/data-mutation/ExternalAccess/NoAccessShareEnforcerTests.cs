@@ -825,6 +825,53 @@ public class NoAccessShareEnforcerTests
         report.CoveredRecords.Should().Be(NoAccessShareEnforcer.MaxCoveredRecords);
     }
 
+    /// <summary>
+    /// "Update Access" on a work assignment filed under a secure matter re-applies the MATTER's entries too (its list governs
+    /// every share on the work assignment — round 39 item 2), found through the one parent walk.
+    /// </summary>
+    [Fact]
+    public async Task EnforceForRecord_OnAWorkAssignmentFiledUnderASecureMatter_ReappliesTheMattersEntries()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var matterEntry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().ContainSingle(r => r.EntryId == matterEntry);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("the matter's wall reaches it now");
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>What the work assignment is filed under cannot be read: nothing is re-applied — reported, never "done".</summary>
+    [Fact]
+    public async Task EnforceForRecord_WhenWhatTheRecordIsFiledUnderCannotBeRead_ReappliesNothing_AndSaysSo()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.ChildWorld.FailingRowReadsOf(WorkAssignment, FiledWorkAssignment);
+        _h.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        _h.Store.AddEntry(subjectUser: Walled, objectRecord: (WorkAssignment, FiledWorkAssignment), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().ContainSingle().Which.Outcome.Should().Be(NoAccessEnforcementOutcome.Failed);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>More entries cover a secure parent than one call re-applies: reported (the 5-minute job enforces the rest).</summary>
+    [Fact]
+    public async Task EnforceForRecord_WhenMoreEntriesCoverTheMatterThanOneCallReapplies_IsReportedTruncated()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        for (var i = 0; i <= NoAccessShareEnforcer.MaxEntriesPerRecord; i++)
+            _h.Store.AddEntry(subjectUser: Guid.NewGuid(), objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().Contain(r => r.Failures.Any(f => f.Kind == "covering-entries-truncated"));
+    }
+
     /// <summary>A lease that is granted, then found expired (or unreachable) when renewed.</summary>
     private sealed class ExpiringLease(bool renewThrows) : Spaarke.Scheduling.IScheduledJobLease
     {

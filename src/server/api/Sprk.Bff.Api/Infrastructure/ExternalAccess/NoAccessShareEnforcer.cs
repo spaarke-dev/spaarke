@@ -310,6 +310,10 @@ public sealed class NoAccessShareEnforcer
     /// Re-applies No Access for ONE record: every active entry whose object is the record or an organization it references,
     /// each enforced as <see cref="EnforceEntryAsync"/> does (task 143 · owner R3: the task-142 "Update Access" command
     /// "also re-applies No Access for that record"). Every rule of the entry path holds, because it IS the entry path.
+    /// Task 158 final round (main-session round 58 item 1): a work assignment or project filed under secure records honours
+    /// their lists too (round 39 item 2), so the entries covering each secure matter or project the ONE parent walk
+    /// (<see cref="SecureRootInheritance.ReadSecureParentsAsync"/>) finds are re-applied as well — each in full, as every
+    /// entry here is (that parent, and what is filed under it). A filing that cannot be read re-applies nothing (reported).
     /// </summary>
     /// <returns>One report per covering entry; a single <see cref="NoAccessEnforcementOutcome.Failed"/> report (entry id
     /// <see cref="Guid.Empty"/>) when the covering entries could not be found.</returns>
@@ -318,19 +322,26 @@ public sealed class NoAccessShareEnforcer
     {
         try
         {
-            var referenced = await _participations
-                .GetReferencedOrganizationIdsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
-            if (referenced.TryGetValue(recordId, out var refs) && refs.Unreadable)
+            var (entryIds, truncated) = await EntriesCoveringAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
+
+            // Never throws a read fault: an unreadable record, filing or parent comes back Unverifiable.
+            var parents = await SecureRootInheritance
+                .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct).ConfigureAwait(false);
+            if (!parents.IsKnown)
             {
-                throw new InvalidOperationException("The record's referenced organizations could not be read.");
+                throw new InvalidOperationException($"What the record is filed under could not be read: {parents.Unverifiable}.");
             }
 
-            var orgIds = referenced.TryGetValue(recordId, out var r) ? r.OrganizationIds : Array.Empty<Guid>();
-            var (entryIds, truncated) = await _store
-                .ReadActiveEntryIdsCoveringAsync(recordId, orgIds, MaxEntriesPerRecord, ct).ConfigureAwait(false);
+            var covering = entryIds.ToList();
+            foreach (var parent in parents.SecureParents)
+            {
+                var (parentEntryIds, parentTruncated) = await EntriesCoveringAsync(parent.Table, parent.Id, ct).ConfigureAwait(false);
+                covering.AddRange(parentEntryIds);
+                truncated |= parentTruncated;
+            }
 
             var reports = new List<NoAccessEnforcementReport>();
-            foreach (var entryId in entryIds)
+            foreach (var entryId in covering.Distinct())
             {
                 reports.Add(await EnforceEntryAsync(entryId, cacheTenants, ct).ConfigureAwait(false));
             }
@@ -355,6 +366,21 @@ public sealed class NoAccessShareEnforcer
                         "The No Access entries that cover this record could not be read, so nothing was enforced. Try again.")),
             };
         }
+    }
+
+    /// <summary>The active entries whose object is the record or an organization it references. Throws on a failed read.</summary>
+    private async Task<(IReadOnlyList<Guid> EntryIds, bool Truncated)> EntriesCoveringAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct)
+    {
+        var referenced = await _participations
+            .GetReferencedOrganizationIdsAsync(entityLogicalName, new[] { recordId }, ct).ConfigureAwait(false);
+        if (referenced.TryGetValue(recordId, out var refs) && refs.Unreadable)
+        {
+            throw new InvalidOperationException($"The organizations {entityLogicalName} {recordId} references could not be read.");
+        }
+
+        var orgIds = referenced.TryGetValue(recordId, out var r) ? r.OrganizationIds : Array.Empty<Guid>();
+        return await _store.ReadActiveEntryIdsCoveringAsync(recordId, orgIds, MaxEntriesPerRecord, ct).ConfigureAwait(false);
     }
 
     // ── Covered records ───────────────────────────────────────────────────────
