@@ -325,8 +325,11 @@ public sealed class NoAccessShareEnforcer
             var (entryIds, truncated) = await EntriesCoveringAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
 
             // Never throws a read fault: an unreadable record, filing or parent comes back Unverifiable.
+            // Round 61 item 1: every secure ANCESTOR's entries (a work assignment under a project under the matter).
             var parents = await SecureRootInheritance
-                .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct).ConfigureAwait(false);
+                .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct,
+                    maxDepth: SecureRootInheritance.MaxFilingDepth)
+                .ConfigureAwait(false);
             if (!parents.IsKnown)
             {
                 throw new InvalidOperationException($"What the record is filed under could not be read: {parents.Unverifiable}.");
@@ -686,9 +689,13 @@ public sealed class NoAccessShareEnforcer
     {
         var (parentTable, parentId) = parent;
         IReadOnlyList<FiledRootRef> filed;
+        bool depthBoundReached;
         try
         {
-            filed = await SecureRootInheritance.ListFiledRootsAsync(_dataverse, _logger, new[] { parent }, ct).ConfigureAwait(false);
+            // Round 61 item 1: every secure record filed BELOW the parent, at any depth (bounded, cycle-safe).
+            var walk = await SecureRootInheritance.ListFiledRootsBelowAsync(_dataverse, _logger, new[] { parent }, ct)
+                .ConfigureAwait(false);
+            (filed, depthBoundReached) = (walk.Roots, walk.DepthBoundReached);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -727,7 +734,8 @@ public sealed class NoAccessShareEnforcer
             await EnforceOnRecordAsync((root.Table, root.Id), users, author, cacheTenants, run, ct).ConfigureAwait(false);
         }
 
-        if (undecided > 0 || run.Failures.Count > failuresBefore)
+        // A chain filed deeper than the walk follows is not "everything reached": fail closed (children-incomplete).
+        if (undecided > 0 || depthBoundReached || run.Failures.Count > failuresBefore)
         {
             FiledIncomplete(parentTable, parentId, run);
         }

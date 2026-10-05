@@ -239,6 +239,13 @@ public sealed record SecureRootCreatePlan(
 public sealed record FiledRootRef(string Table, Guid Id, string? Name, bool FlaggedSecure, bool Confirmed = true);
 
 /// <summary>
+/// Round 61 item 1: the work assignments and projects filed below a set of records at any depth
+/// (<see cref="SecureRootInheritance.ListFiledRootsBelowAsync"/>), and whether the chain went past the depth bound — in which
+/// case the caller cannot say it reached everything and fails closed.
+/// </summary>
+public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool DepthBoundReached);
+
+/// <summary>
 /// unified-access-control-r2 task 158 — a <c>sprk_workassignment</c> or <c>sprk_project</c> FILED UNDER a secure
 /// <c>sprk_matter</c> or <c>sprk_project</c> is itself secure (owner round 6), secured through
 /// <see cref="ProvisionProjectEndpoint.ProvisionInheritedAsync"/> — provisioning's own steps, for the person who created it —
@@ -2191,29 +2198,86 @@ public sealed class SecureRootInheritance
     /// does not exist, has none. Never throws a read fault: an unreadable record, filing or parent is
     /// <see cref="SecureParentsAnswer.Unverifiable"/>.
     /// </summary>
+    /// <param name="maxDepth">Round 61 item 1: how many levels of filing to climb. <c>1</c> (the default) is the record's
+    /// DIRECT secure parents — the sharee rule (owner round 11 item 4's intersection is over the records it is filed under,
+    /// never their ancestors). The No Access walls ask for <see cref="MaxFilingDepth"/>: a person walled off a secure matter
+    /// is walled off every secure record filed below it, at any depth (a work assignment under a project under the matter).
+    /// The climb goes level by level through every work assignment or project the record is filed under — secure or not, a
+    /// filing is a filing — with a visited set (a cycle ends the climb), and a chain still rising past the bound is
+    /// <see cref="SecureParentsAnswer.Unverifiable"/> (fail closed), never "no more parents".</param>
     internal static async Task<SecureParentsAnswer> ReadSecureParentsAsync(
         IGenericEntityService dataverse, ILogger logger, string table, Guid recordId, CancellationToken ct,
-        ConcurrentDictionary<Guid, string?>? recordTypes = null)
+        ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1)
     {
         if (!Inherits(table))
             return new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null);
 
-        FilingFacts? facts;
-        try
+        recordTypes ??= new ConcurrentDictionary<Guid, string?>();
+        var start = (Table: table.Trim().ToLowerInvariant(), Id: recordId);
+        var visited = new HashSet<(string, Guid)> { start };
+        var frontier = new List<(string Table, Guid Id)> { start };
+        var secure = new List<SecureFilingParent>();
+        string? unknown = null;
+        for (var level = 1; frontier.Count > 0; level++)
         {
-            facts = await ReadFactsAsync(dataverse, table.Trim().ToLowerInvariant(), recordId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId} could not be read.", table, recordId);
-            return new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), "the record could not be read");
+            var next = new List<(string Table, Guid Id)>();
+            foreach (var (rowTable, rowId) in frontier)
+            {
+                FilingFacts? facts;
+                try
+                {
+                    facts = await ReadFactsAsync(dataverse, rowTable, rowId, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning(ex, "[SECURE-INHERIT] {Table} {RecordId} could not be read.", rowTable, rowId);
+                    unknown ??= level == 1
+                        ? "the record could not be read"
+                        : $"what the {rowTable} it is filed under is itself filed under could not be read";
+                    continue;
+                }
+
+                if (facts is null)
+                    continue; // a record that does not exist confers nothing
+
+                if (level > maxDepth)
+                {
+                    // Past the bound: a row that is still filed under something ends the climb UNDECIDED (fail closed).
+                    if (facts.Typed.Values.Any(v => v is not null) || !string.IsNullOrWhiteSpace(facts.PairId))
+                        unknown ??= $"it is filed under a chain of more than {maxDepth} matters or projects, which is not followed further";
+                    continue;
+                }
+
+                var (answer, filedUnder) = await DecideParentsCoreAsync(dataverse, logger, facts, recordTypes, ct)
+                    .ConfigureAwait(false);
+                unknown ??= answer.Unverifiable;
+                foreach (var parent in answer.SecureParents)
+                {
+                    if (!secure.Any(s => string.Equals(s.Table, parent.Table, StringComparison.OrdinalIgnoreCase) && s.Id == parent.Id))
+                        secure.Add(parent);
+                }
+
+                // The direct question (maxDepth 1, the sharee rule) stops here. The walls climb on: only a work assignment or
+                // project is itself filed under something; a matter ends the chain.
+                foreach (var parent in maxDepth > 1 ? filedUnder : Array.Empty<(string Table, Guid Id)>())
+                {
+                    if (Inherits(parent.Table) && visited.Add((parent.Table, parent.Id)))
+                        next.Add(parent);
+                }
+            }
+
+            frontier = next;
         }
 
-        return facts is null
-            ? new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null)
-            : await DecideParentsAsync(dataverse, logger, facts, recordTypes ?? new ConcurrentDictionary<Guid, string?>(), ct)
-                .ConfigureAwait(false);
+        return new SecureParentsAnswer(secure, unknown);
     }
+
+    /// <summary>
+    /// Round 61 item 1: how far the No Access walls climb (<see cref="ReadSecureParentsAsync"/>) and reach down
+    /// (<see cref="ListFiledRootsBelowAsync"/>) through records filed under one another. Small, and enough for every chain
+    /// Spaarke creates (a work assignment under a project under a matter is two levels); a longer one fails closed.
+    /// </summary>
+    internal const int MaxFilingDepth = 4;
 
     /// <summary>
     /// The work assignments and projects filed under any of <paramref name="parents"/> (typed lookups, and the pair), with
@@ -2232,6 +2296,45 @@ public sealed class SecureRootInheritance
     /// without this scoped service by task 143's <see cref="NoAccessShareEnforcer"/> (which this class's dependencies reach,
     /// so it cannot depend on this class) — the counterpart of <see cref="ReadSecureParentsAsync"/>. Never a second copy.
     /// </summary>
+    /// <summary>
+    /// Round 61 item 1, the downward reach: every work assignment and project filed below <paramref name="parents"/>, at any
+    /// depth up to <paramref name="maxDepth"/> — <see cref="ListFiledRootsAsync(IGenericEntityService, ILogger, IReadOnlyCollection{ValueTuple{string, Guid}}, CancellationToken, ConcurrentDictionary{Guid, string}?)"/>
+    /// (the ONE child-direction listing) asked level by level, each confirmed project found becoming the next level's parent
+    /// (a work assignment files nothing under it). A visited set ends a cycle; a level past the bound that still finds a
+    /// record not yet reached sets <see cref="FiledRootsWalk.DepthBoundReached"/> (the caller fails closed). A read that
+    /// cannot complete throws, as the one-level listing does.
+    /// </summary>
+    internal static async Task<FiledRootsWalk> ListFiledRootsBelowAsync(
+        IGenericEntityService dataverse, ILogger logger, IReadOnlyCollection<(string Table, Guid Id)> parents,
+        CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = MaxFilingDepth)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        recordTypes ??= new ConcurrentDictionary<Guid, string?>();
+        var visited = parents.Select(p => (p.Table.ToLowerInvariant(), p.Id)).ToHashSet();
+        var found = new List<FiledRootRef>();
+        IReadOnlyCollection<(string Table, Guid Id)> frontier = parents;
+        for (var level = 1; frontier.Count > 0; level++)
+        {
+            var listed = await ListFiledRootsAsync(dataverse, logger, frontier, ct, recordTypes).ConfigureAwait(false);
+            var fresh = listed.Where(r => !visited.Contains((r.Table, r.Id))).ToList();
+            if (level > maxDepth)
+                return new FiledRootsWalk(found, DepthBoundReached: fresh.Count > 0);
+
+            var next = new List<(string Table, Guid Id)>();
+            foreach (var root in fresh)
+            {
+                visited.Add((root.Table, root.Id));
+                found.Add(root);
+                if (root.Confirmed && IsParent(root.Table))
+                    next.Add((root.Table, root.Id));
+            }
+
+            frontier = next;
+        }
+
+        return new FiledRootsWalk(found, DepthBoundReached: false);
+    }
+
     internal static async Task<IReadOnlyList<FiledRootRef>> ListFiledRootsAsync(
         IGenericEntityService dataverse, ILogger logger, IReadOnlyCollection<(string Table, Guid Id)> parents,
         CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null)
@@ -2435,6 +2538,13 @@ public sealed class SecureRootInheritance
 
     private static async Task<SecureParentsAnswer> DecideParentsAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
+        CancellationToken ct) =>
+        (await DecideParentsCoreAsync(dataverse, logger, facts, recordTypes, ct).ConfigureAwait(false)).Answer;
+
+    /// <summary>The direct decision, and every record the row is filed under that exists (secure or not) — what the
+    /// level-by-level climb (round 61 item 1) continues from.</summary>
+    private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<(string Table, Guid Id)> FiledUnder)> DecideParentsCoreAsync(
+        IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
         CancellationToken ct)
     {
         var named = new List<(string Table, Guid Id)>();
@@ -2477,6 +2587,7 @@ public sealed class SecureRootInheritance
         }
 
         var secure = new List<SecureFilingParent>();
+        var existing = new List<(string Table, Guid Id)>();
         foreach (var (table, id) in named.Distinct())
         {
             (bool? Flag, string? Name)? parent;
@@ -2493,6 +2604,7 @@ public sealed class SecureRootInheritance
 
             if (parent is null)
                 continue; // a record that does not exist confers nothing
+            existing.Add((table, id));
             if (parent.Value.Flag is null)
             {
                 unknown ??= $"the {table} it is filed under has no secure flag value (empty is never read as not secure)";
@@ -2503,7 +2615,7 @@ public sealed class SecureRootInheritance
                 secure.Add(new SecureFilingParent(table, id, parent.Value.Name));
         }
 
-        return new SecureParentsAnswer(secure, unknown);
+        return (new SecureParentsAnswer(secure, unknown), existing);
     }
 
     /// <summary>A matter's or project's flag and its name, or <c>null</c> when it does not exist.</summary>

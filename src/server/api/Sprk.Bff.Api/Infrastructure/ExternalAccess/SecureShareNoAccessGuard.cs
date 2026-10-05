@@ -173,10 +173,14 @@ public sealed class SecureShareNoAccessGuard
     {
         // The walk never throws a read fault: an unreadable filing or parent comes back as SecureParentsAnswer.Unverifiable,
         // which refuses below.
+        // Round 61 item 1: EVERY secure ancestor, not only the direct parent — the walk climbs level by level (bounded,
+        // cycle-safe; a chain past the bound is unverifiable and refuses).
         var parents = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
-            .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct).ConfigureAwait(false);
+            .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct,
+                maxDepth: Sprk.Bff.Api.Services.Access.SecureRootInheritance.MaxFilingDepth)
+            .ConfigureAwait(false);
 
-        return await CheckRecordAndSecureParentsAsync(entityLogicalName, recordId, systemUserId, scope, parents, ct)
+        return await CheckOwnAndAncestorsAsync(entityLogicalName, recordId, systemUserId, scope, parents, ct, null)
             .ConfigureAwait(false);
     }
 
@@ -193,6 +197,37 @@ public sealed class SecureShareNoAccessGuard
         IReadOnlyCollection<Guid>? prospectiveOrganizations = null)
     {
         ArgumentNullException.ThrowIfNull(parents);
+
+        // Round 61 item 1: the supplied filing names the DIRECT secure parents (as a write will leave it); every secure
+        // record above each of them is asked as well, through the same bounded, cycle-safe climb.
+        var ancestors = new List<Sprk.Bff.Api.Services.Access.SecureFilingParent>(parents.SecureParents);
+        var unverifiable = parents.Unverifiable;
+        foreach (var parent in parents.SecureParents)
+        {
+            var above = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
+                .ReadSecureParentsAsync(_dataverse, _logger, parent.Table, parent.Id, ct,
+                    maxDepth: Sprk.Bff.Api.Services.Access.SecureRootInheritance.MaxFilingDepth)
+                .ConfigureAwait(false);
+            unverifiable ??= above.Unverifiable;
+            foreach (var ancestor in above.SecureParents)
+            {
+                if (!ancestors.Any(a => string.Equals(a.Table, ancestor.Table, StringComparison.OrdinalIgnoreCase) && a.Id == ancestor.Id))
+                    ancestors.Add(ancestor);
+            }
+        }
+
+        return await CheckOwnAndAncestorsAsync(entityLogicalName, recordId, systemUserId, scope,
+            new Sprk.Bff.Api.Services.Access.SecureParentsAnswer(ancestors, unverifiable), ct, prospectiveOrganizations)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The record's own list and the list of every secure record in <paramref name="parents"/> (already the full
+    /// ancestry): a Walled answer anywhere wins, then an Unverifiable one.</summary>
+    private async Task<SecureShareWallDecision> CheckOwnAndAncestorsAsync(
+        string entityLogicalName, Guid recordId, Guid systemUserId, SecureWallRecordScope scope,
+        Sprk.Bff.Api.Services.Access.SecureParentsAnswer parents, CancellationToken ct,
+        IReadOnlyCollection<Guid>? prospectiveOrganizations)
+    {
         var own = scope switch
         {
             SecureWallRecordScope.AsFlagged => await CheckAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false),
