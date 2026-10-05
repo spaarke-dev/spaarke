@@ -468,7 +468,8 @@ public partial class RouteAuthorizationGuardTests
                 var resolvedByAdminPolicy = a.Credit == Credit.AdminOnly
                                             && adminGroup is not null
                                             && SweepAdminPolicies.Contains(adminGroup.Mechanism)
-                                            && a.Route.Forms.Contains(adminGroup.Mechanism, StringComparer.Ordinal);
+                                            && a.Route.Forms.Contains(adminGroup.Mechanism, StringComparer.Ordinal)
+                                            && string.Equals(adminGroup.File, a.Route.File, StringComparison.Ordinal);
                 var resolvedByCredit = a.Credit is Credit.PerResource or Credit.HandlerDecision || resolvedByAdminPolicy;
                 if (!resolvedByCredit)
                 {
@@ -478,7 +479,9 @@ public partial class RouteAuthorizationGuardTests
                                            ? "; it is not in AdminOnlyRoutes"
                                            : !SweepAdminPolicies.Contains(adminGroup.Mechanism)
                                                ? $"; its AdminOnlyRoutes group's mechanism is {adminGroup.Mechanism}, which is not an admin policy for a sweep entry"
-                                               : $"; its AdminOnlyRoutes group is gated by {adminGroup.Mechanism}, which the route does not carry"
+                                               : !string.Equals(adminGroup.File, a.Route.File, StringComparison.Ordinal)
+                                                   ? $"; it is listed in the {adminGroup.File} group but registered in {a.Route.File}"
+                                                   : $"; its AdminOnlyRoutes group is gated by {adminGroup.Mechanism}, which the route does not carry"
                                        : string.Empty)
                                    + "). An entry resolves ONLY by a credited filter, a HandlerDecision, or an AdminOnlyRoutes "
                                    + "entry whose group is gated by RequireAuthorization(\"SystemAdmin\") or the SPE admin "
@@ -1954,6 +1957,15 @@ public partial class RouteAuthorizationGuardTests
                     violations.Add($"{route} is in the {group.File} group gated by {group.Mechanism}, but its chain carries "
                                    + $"[{string.Join(", ", a.Route.Forms)}] — add the mechanism to the route, or move the route "
                                    + "to the group of the mechanism it really has");
+                }
+
+                // Groups are per FILE — one reason per operator surface — so a route is listed only in a group of the file
+                // that registers it (task 167 f2-v1, the f2 verifier's item 11 observation: a CommunicationEndpoints.cs
+                // route resolved through the MembershipAdminEndpoints.cs group).
+                if (a is not null && !string.Equals(a.Route.File, group.File, StringComparison.Ordinal))
+                {
+                    violations.Add($"{route} is registered in {a.Route.File} but listed in the {group.File} group — list it in a "
+                                   + "group of its own file, with that surface's reason");
                 }
             }
         }
@@ -5934,6 +5946,13 @@ public partial class RouteAuthorizationGuardTests
         Assert.Contains(Ledger(Gated(".AddRegistrationAuthorizationFilter()"), With(RegistrationApproverRole)),
             v => v.Contains("not an admin policy for a sweep entry", StringComparison.Ordinal));
         Assert.Contains(Ledger(ragKey, With(SystemAdminPolicy)), v => v.Contains("does not pass Rule A by credit", StringComparison.Ordinal));
+
+        // NEGATIVE (task 167 f2-v1, the f2 verifier's item 11 observation) — listed in ANOTHER FILE's SystemAdmin group: both
+        // the pin and the ledger refuse it.
+        var otherFile = withoutRoute.Append(new AdminOnlyGroup("Api/Admin/MembershipAdminEndpoints.cs", SystemAdminPolicy, reason, new[] { route })).ToList();
+        Assert.Contains(AdminOnlyMechanismViolations(new[] { systemAdmin }, otherFile.TakeLast(1).ToList()),
+            v => v.Contains("is registered in Api/Admin/RecordMatchingAdminEndpoints.cs but listed in the Api/Admin/MembershipAdminEndpoints.cs group", StringComparison.Ordinal));
+        Assert.Contains(Ledger(systemAdmin, otherFile), v => v.Contains("listed in the Api/Admin/MembershipAdminEndpoints.cs group but registered in", StringComparison.Ordinal));
 
         // NEGATIVE — the pin itself: a route added to a SystemAdmin group without SystemAdmin on its chain.
         Assert.Contains(AdminOnlyMechanismViolations(new[] { ragKey }, With(SystemAdminPolicy).TakeLast(1).ToList()),
