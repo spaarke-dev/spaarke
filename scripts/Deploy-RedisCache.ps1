@@ -331,7 +331,13 @@ if ($DeployAlerts) {
 # ---------------------------------------------------------------------------
 if (-not $WhatIfPreference -and (Test-Path $validationScript)) {
     Write-Host "Post-deploy verification..."
-    & pwsh $validationScript -RedisName $redisName -ResourceGroup $ResourceGroup
+    $validationArgs = @{ RedisName = $redisName; ResourceGroup = $ResourceGroup }
+    if ($CutoverBffSettings) {
+        # The cut-over just set Redis__Endpoint: confirm it names this cache.
+        $validationArgs.BffAppName = $bffAppName
+        $validationArgs.BffResourceGroup = "rg-spaarke-$Environment"
+    }
+    & $validationScript @validationArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Post-deploy verification failed (exit $LASTEXITCODE)"
         exit $LASTEXITCODE
