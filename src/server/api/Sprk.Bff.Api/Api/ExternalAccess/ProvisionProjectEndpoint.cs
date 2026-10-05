@@ -404,6 +404,16 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonRecordCreatorUnverifiable = "sdap.provision.record_creator_unverifiable";
 
     /// <summary>
+    /// Task 150 (round 53 item 1, for round 46 item 1): on Make Secure (<see cref="TransitionMakeSecure"/>) the caller's
+    /// EFFECTIVE rights on the record could not be read — the probe threw, or it answered without the Write the route's
+    /// gate admitted — so the share they keep could not be floored on them (<see cref="ReadMakeSecureCallerFloorAsync"/>).
+    /// Refused before any write (500); the same caller may call again. A provisioning code (round 26 item 1: codes are
+    /// namespaced by endpoint) — owner F3's <see cref="SecureDesignationRemoval.PermissionUnverifiableReasonCode"/> is the
+    /// unsecure endpoint's. The wizards' create-then-secure path reads no floor, so it never answers this code.
+    /// </summary>
+    internal const string ReasonCallerRightsUnverifiable = "sdap.provision.caller_rights_unverifiable";
+
+    /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
     /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
@@ -2240,7 +2250,7 @@ public static class ProvisionProjectEndpoint
     /// forward rules exactly.</para>
     /// <para><b>Order</b> (ADR-003, nothing written before every check): the caller by WhoAmI (unresolved: 403
     /// <see cref="ReasonCreatorUnresolved"/>) and, in the same step, their effective rights (round 46 item 1:
-    /// <see cref="ReadMakeSecureCallerFloorAsync"/>; unreadable: 500 <c>sdap.unsecure.permission_unverifiable</c>); the
+    /// <see cref="ReadMakeSecureCallerFloorAsync"/>; unreadable: 500 <see cref="ReasonCallerRightsUnverifiable"/>); the
     /// caller against the No Access list (403 <see cref="ReasonCreatorNoAccess"/> / 500
     /// <see cref="ReasonCreatorNoAccessUnverifiable"/>); the record's creator (<see cref="ResolveMakeSecureCreatorAsync"/>:
     /// an unreadable creator refuses); then the flag (the first write, skipped when already set); then the caller's share —
@@ -2376,13 +2386,12 @@ public static class ProvisionProjectEndpoint
     /// <para><b>Fail closed</b> (ADR-003). A probe that throws, or an answer without Write — the route's gate admitted
     /// Write on this record moments ago, so an answer lacking it is the probe's "could not answer" (it answers
     /// <see cref="AccessRights.None"/> for that, deliberately indistinguishable from "no rights") or a change mid-call —
-    /// refuses before any write with the existing unverifiable code for the caller's rights,
-    /// <see cref="SecureDesignationRemoval.PermissionUnverifiableReasonCode"/> (500; the same caller may retry). Never a
+    /// refuses before any write with <see cref="ReasonCallerRightsUnverifiable"/> (500; the same caller may retry). Never a
     /// floor of "nothing": that would narrow a Full Access holder and take away their F3 right to remove the designation.</para>
-    /// <para><b>Why that code.</b> It is the one code that already says "the caller's rights on this secure record could
-    /// not be read" (owner F3's, <see cref="SecureDesignationRemoval"/>), and the floor exists to keep exactly the right F3
-    /// decides from them. Every provisioning "unverifiable" code names a different fact (the No Access list, the record's
-    /// creator). The wizards' create-then-secure path never reads the floor, so it never answers this code.</para>
+    /// <para><b>Why its own code</b> (round 53 item 1). Codes are namespaced by endpoint (round 26 item 1): owner F3's
+    /// <see cref="SecureDesignationRemoval.PermissionUnverifiableReasonCode"/> names the same unreadable fact on the
+    /// unsecure endpoint, and every other provisioning "unverifiable" code names a different fact (the No Access list, the
+    /// record's creator). The wizards' create-then-secure path never reads the floor, so it never answers this code.</para>
     /// </remarks>
     private static async Task<(int HeldMask, IResult? Error)> ReadMakeSecureCallerFloorAsync(
         CallerRecordAccessProbe callerAccessProbe,
@@ -2426,14 +2435,15 @@ public static class ProvisionProjectEndpoint
     }
 
     /// <summary>
-    /// The caller's effective rights could not be read (round 46 item 1) — refused before any change, with owner F3's
-    /// unverifiable code for that same read (<see cref="ReadMakeSecureCallerFloorAsync"/>).
+    /// The caller's effective rights could not be read (round 46 item 1) — refused before any change with
+    /// <see cref="ReasonCallerRightsUnverifiable"/> (round 53 item 1; <see cref="ReadMakeSecureCallerFloorAsync"/>). The
+    /// detail is the copy round 53 ratified; the Access ribbon and the wizard's client carry the same words.
     /// </summary>
     private static IResult CallerAccessUnverifiable(SecureRecordRoot root, string traceId) =>
         Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
             $"Which access you hold on this {root.DisplayLabel.ToLowerInvariant()} could not be read, so securing it could " +
             "not make sure you keep that access. Nothing was changed; you may try again.",
-            traceId, (ReasonKey, SecureDesignationRemoval.PermissionUnverifiableReasonCode));
+            traceId, (ReasonKey, ReasonCallerRightsUnverifiable));
 
     // F6 row 9 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
     private static IResult NotRecordCreator(
@@ -3726,9 +3736,11 @@ public static class ProvisionProjectEndpoint
         /// <summary>
         /// Owned INSIDE the Secure Record BU, but by a team other than the named one (task 144) — the retired
         /// default team, before the migration. Refused before any write: the migration script, not a provisioning call,
-        /// moves it onto the named team.
+        /// moves it onto the named team. "Inside" is <see cref="SecureRecordOwnerTeam.IsInSecureBusinessUnit"/>, the rule the
+        /// <c>can-manage-access</c> owner answer uses too (round 53 item 2: the ribbon hides Make Secure on such a record).
         /// </summary>
         public bool IsOwnedInBusinessUnitByAnotherTeam(Guid secureBusinessUnitId, Guid ownerTeamId) =>
-            _owningbusinessunit_value is { } bu && bu == secureBusinessUnitId && !IsOwnedBy(ownerTeamId);
+            SecureRecordOwnerTeam.IsInSecureBusinessUnit(_owningbusinessunit_value, secureBusinessUnitId) == true
+            && !IsOwnedBy(ownerTeamId);
     }
 }

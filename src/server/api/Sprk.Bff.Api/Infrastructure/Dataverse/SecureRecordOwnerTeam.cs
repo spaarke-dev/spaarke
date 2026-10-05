@@ -255,6 +255,17 @@ public static class SecureRecordOwnerTeam
         return identity with { Refusal = null, OwnerTeamId = teamId, OwnerTeamName = teams[0].name ?? teamName };
     }
 
+    /// <summary>
+    /// Whether a record whose <c>owningbusinessunit</c> is <paramref name="owningBusinessUnitId"/> is owned INSIDE the Secure
+    /// Record business unit <paramref name="secureBusinessUnitId"/> — by the named owner team or by any OTHER team there (in
+    /// practice the retired default team, before task 144's migration). <c>null</c> when the record was read without its
+    /// owning business unit: that cannot be told. The ONE rule behind provisioning's <c>owned_by_other_secure_team</c>
+    /// refusal and the <c>can-manage-access</c> owner answer (task 150, round 53 item 2), so the Access ribbon hides Make
+    /// Secure on exactly the records that refusal would answer.
+    /// </summary>
+    internal static bool? IsInSecureBusinessUnit(Guid? owningBusinessUnitId, Guid secureBusinessUnitId) =>
+        owningBusinessUnitId is { } bu && bu != Guid.Empty ? bu == secureBusinessUnitId : null;
+
     /// <summary>Escapes a string for an OData single-quoted literal.</summary>
     internal static string EscapeODataStringLiteral(string value) => value.Replace("'", "''");
 

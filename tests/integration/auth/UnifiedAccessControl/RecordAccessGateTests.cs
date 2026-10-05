@@ -205,18 +205,27 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Task 150, round 46 item 4 — includeOwner: the record's owning team, and whether it is the Secure Record Owners team
-    // (the Access ribbon's "did this secure transition finish?"). Facts about the RECORD; the delegation answer and its
-    // gate are unchanged, and a caller without Write still gets the filter's 403 with no owner read.
+    // (the Access ribbon's "did this secure transition finish?"). Round 53 item 2 adds whether that team owns it INSIDE
+    // the Secure Record business unit (another team there is already isolated: the ribbon hides Make Secure). Facts about
+    // the RECORD; the delegation answer and its gate are unchanged, and a caller without Write still gets the filter's 403
+    // with no owner read.
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static readonly Guid SecureBusinessUnit = Guid.Parse("d9ec0b6f-0000-0000-0000-0000000000b0");
     private static readonly Guid SecureOwnerTeam = Guid.Parse("daec0b6f-0000-0000-0000-0000000000f1");
 
-    /// <summary>The record's owner read (the gate's ONE read of the record) answers <paramref name="row"/> for this record.</summary>
+    /// <summary>
+    /// The record's owner read (the gate's ONE read of the record) answers <paramref name="row"/> for this record — only
+    /// when it selects every column the answer is built from (both owner columns and the owning business unit), so a read
+    /// that stops asking for one answers nothing, and the definite answers below fail.
+    /// </summary>
     private void OwnerReadAnswers(Guid recordId, RecordAccessGateEndpoint.OwnerRow? row, Exception? fault = null)
     {
         var setup = _fixture.DataverseClient.Setup(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
-            It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())), It.IsAny<string?>(),
+            It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())),
+            It.Is<string?>(s => s != null && s.Split(',', StringSplitOptions.None).Contains("_owningteam_value")
+                && s.Split(',', StringSplitOptions.None).Contains("_owninguser_value")
+                && s.Split(',', StringSplitOptions.None).Contains("_owningbusinessunit_value")),
             It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()));
         if (fault is not null)
             setup.ThrowsAsync(fault);
@@ -244,20 +253,25 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
             .ReturnsAsync(teams.Select(t => new SecureRecordOwnerTeam.IdRow { teamid = t, name = "Secure Record Owners" }).ToList());
     }
 
-    private static (JsonElement OwningTeamId, JsonElement OwnedBySecureOwnerTeam) OwnerFactsOf(JsonDocument document) =>
-        (document.RootElement.GetProperty("owningTeamId"), document.RootElement.GetProperty("ownedBySecureOwnerTeam"));
+    private static (JsonElement OwningTeamId, JsonElement OwnedBySecureOwnerTeam, JsonElement InSecureBusinessUnit)
+        OwnerFactsOf(JsonDocument document) =>
+        (document.RootElement.GetProperty("owningTeamId"), document.RootElement.GetProperty("ownedBySecureOwnerTeam"),
+            document.RootElement.GetProperty("owningTeamInSecureBusinessUnit"));
 
     /// <summary>
-    /// Asked for the owner, the gate names it: a USER-owned record is not owned by the Secure team (owningTeamId null); a
-    /// record the Secure Record Owners team owns is; any OTHER team is not — the case the client cannot tell apart on its
-    /// own (a secure record reassigned outside Spaarke).
+    /// Asked for the owner, the gate names it: a USER-owned record is not owned by the Secure team (owningTeamId null, and
+    /// no team to place); a record the Secure Record Owners team owns is, inside the Secure Record business unit; ANOTHER
+    /// team inside that business unit (the retired default team before task 144's migration — round 53 item 2: already
+    /// isolated) is not the Secure team but IS inside; a team in another business unit (a reassignment outside Spaarke) is
+    /// neither — the cases the client cannot tell apart on its own.
     /// </summary>
     [Theory]
-    [InlineData("user", false)]
-    [InlineData("secure-team", true)]
-    [InlineData("other-team", false)]
-    public async Task GetCanManageAccess_WithIncludeOwner_NamesTheOwningTeamAndWhetherItIsTheSecureOwnerTeam(
-        string owner, bool expected)
+    [InlineData("user", false, null)]
+    [InlineData("secure-team", true, true)]
+    [InlineData("other-team-inside", false, true)]
+    [InlineData("other-team-outside", false, false)]
+    public async Task GetCanManageAccess_WithIncludeOwner_NamesTheOwningTeam_WhetherItIsTheSecureOwnerTeam_AndWhetherItIsInside(
+        string owner, bool expectedSecureTeam, bool? expectedInside)
     {
         var recordId = Guid.NewGuid();
         var otherTeam = Guid.NewGuid();
@@ -265,9 +279,22 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         SecureOwnerTeamsAre(SecureOwnerTeam);
         OwnerReadAnswers(recordId, owner switch
         {
-            "user" => new RecordAccessGateEndpoint.OwnerRow { _owninguser_value = Guid.NewGuid() },
-            "secure-team" => new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = SecureOwnerTeam },
-            _ => new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = otherTeam },
+            "user" => new RecordAccessGateEndpoint.OwnerRow
+            {
+                _owninguser_value = Guid.NewGuid(), _owningbusinessunit_value = Guid.NewGuid()
+            },
+            "secure-team" => new RecordAccessGateEndpoint.OwnerRow
+            {
+                _owningteam_value = SecureOwnerTeam, _owningbusinessunit_value = SecureBusinessUnit
+            },
+            "other-team-inside" => new RecordAccessGateEndpoint.OwnerRow
+            {
+                _owningteam_value = otherTeam, _owningbusinessunit_value = SecureBusinessUnit
+            },
+            _ => new RecordAccessGateEndpoint.OwnerRow
+            {
+                _owningteam_value = otherTeam, _owningbusinessunit_value = Guid.NewGuid()
+            },
         });
 
         var response = await client.GetAsync($"{GatePath}?recordType=matter&recordId={recordId}&includeOwner=true");
@@ -275,12 +302,38 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("canManageAccess").GetBoolean().Should().BeTrue();
-        var (owningTeamId, ownedBySecure) = OwnerFactsOf(document);
-        ownedBySecure.GetBoolean().Should().Be(expected);
+        var (owningTeamId, ownedBySecure, inside) = OwnerFactsOf(document);
+        ownedBySecure.GetBoolean().Should().Be(expectedSecureTeam);
+        if (expectedInside is { } expected)
+            inside.GetBoolean().Should().Be(expected);
+        else
+            inside.ValueKind.Should().Be(JsonValueKind.Null, "a user owner has no owning team to place");
         if (owner == "user")
             owningTeamId.ValueKind.Should().Be(JsonValueKind.Null);
         else
             owningTeamId.GetGuid().Should().Be(owner == "secure-team" ? SecureOwnerTeam : otherTeam);
+    }
+
+    /// <summary>
+    /// Round 53 item 2: a team-owned record read WITHOUT its owning business unit cannot be placed inside or outside the
+    /// Secure Record business unit — <c>owningTeamInSecureBusinessUnit: null</c>, never "outside" (which the ribbon would
+    /// read as an unfinished transition and offer Make Secure on a record that may already be isolated).
+    /// </summary>
+    [Fact]
+    public async Task GetCanManageAccess_WithIncludeOwner_ATeamOwnerReadWithoutItsBusinessUnit_IsNotPlaced()
+    {
+        var recordId = Guid.NewGuid();
+        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        SecureOwnerTeamsAre(SecureOwnerTeam);
+        OwnerReadAnswers(recordId, new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = Guid.NewGuid() });
+
+        var response = await client.GetAsync($"{GatePath}?recordType=project&recordId={recordId}&includeOwner=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var (_, ownedBySecure, inside) = OwnerFactsOf(document);
+        ownedBySecure.GetBoolean().Should().BeFalse();
+        inside.ValueKind.Should().Be(JsonValueKind.Null, "a fact that could not be established is never reported as either answer");
     }
 
     /// <summary>
@@ -319,6 +372,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         document.RootElement.GetProperty("canManageAccess").GetBoolean().Should().BeTrue();
         OwnerFactsOf(document).OwnedBySecureOwnerTeam.ValueKind.Should().Be(JsonValueKind.Null,
             "a fact that could not be established is never reported as either answer");
+        OwnerFactsOf(document).InSecureBusinessUnit.ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     /// <summary>Not asked, the gate reads nothing: the Manage Access gates' form-load path stays one rights probe.</summary>

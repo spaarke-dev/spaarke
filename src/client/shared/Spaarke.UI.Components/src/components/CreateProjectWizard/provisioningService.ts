@@ -483,6 +483,18 @@ const REASON_STATES: Readonly<
       'Whether you may access this project could not be checked, so securing it could not be finished. Nothing about the project changed.',
     retryable: true,
   },
+  // Task 150 round 53 item 1 (for round 46 item 1): on the form's Make Secure command (transition "make-secure"), which
+  // access the caller holds could not be read, so the share they keep could not be floored on it. Refused 500 before any
+  // change; the server tells the same caller they may call again. The wizards send no transition, so the server makes no
+  // such read for them — classified so a host that ever sends one is never left on the generic copy. The copy is round
+  // 53's ratified sentence ({record} = project — the ribbon and the server carry it whole), less its closing "you may try
+  // again": in this client the retry is the host's action, keyed on `retryable` (the copy rule above).
+  'sdap.provision.caller_rights_unverifiable': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Which access you hold on this project could not be read, so securing it could not make sure you keep that access. Nothing was changed.',
+    retryable: true,
+  },
 };
 
 /**

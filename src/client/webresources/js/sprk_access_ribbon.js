@@ -21,7 +21,8 @@
  *   the No Access list, unverifiable, or a failed share), a per-person warning (SKIPPED_PRINCIPAL_COPY; never silent).
  *   A failure after the secure flag was written that the server answers as "the same caller may call again"
  *   (MAKE_SECURE_RETRY_IN_PLACE) offers that call in place: a confirm dialog with the server's message and Make Secure /
- *   Cancel (round 40 item 1).
+ *   Cancel (round 40 item 1). Any other refusal is an alert with the server's message - except a code this script
+ *   carries its own words for (REFUSAL_COPY, round 53 item 1: caller_rights_unverifiable).
  *   Shipped only where task 148's transition is deployed - an import/packaging rule, not a runtime check
  *   (infrastructure/dataverse/ribbon/AccessRibbons/README.md).
  * - "Remove Secure" (task 150) - on a record that IS secure, for a caller with Write: confirms with
@@ -36,10 +37,13 @@
  * read takes sprk_containerid and _owninguser_value (round 40 item 1): a PROVISIONED secure record is owned by the
  * Secure Record Owners TEAM and records its own container, so a flagged record with no container, or one a USER owns, is
  * one whose secure transition did not finish, and Make Secure is offered on it as well as Remove Secure. A flagged
- * record with a container that a TEAM owns is finished only if that team is the Secure Record Owners team - the
- * server's configuration, so the rule asks the server (round 46 item 4: can-manage-access with includeOwner=true). Any
- * OTHER team - a secure record reassigned outside Spaarke - is unfinished too; an answer that cannot be had keeps Make
- * Secure hidden on that record (Remove Secure still follows the flag).
+ * record with a container that a TEAM owns asks the server who that team is (round 46 item 4: can-manage-access with
+ * includeOwner=true; which team and business unit are the Secure Record ones is the server's configuration): the Secure
+ * Record Owners team - finished; another team INSIDE the Secure Record business unit (the retired default team before
+ * task 144's migration) - secure and isolated already, nothing to finish, so Make Secure stays hidden (round 53 item 2;
+ * moving it to the named team is task 144's migration, and the server refuses it 409 owned_by_other_secure_team); a
+ * team in ANOTHER business unit - a secure record reassigned outside Spaarke - unfinished, Make Secure offered. An
+ * answer that cannot be had keeps Make Secure hidden on that record (Remove Secure still follows the flag).
  *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
@@ -69,7 +73,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // confirmation, per-person warnings for skippedPrincipals. 1.3.0 - round 40: Make Secure offered on an unfinished
     // secure transition, the in-place retry, "Someone" for a name that cannot be resolved. 1.4.0 - round 46 item 4: a
     // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
-    ns.VERSION = "1.4.0";
+    // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
+    // caller_rights_unverifiable refusal in this script's own words.
+    ns.VERSION = "1.5.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -281,12 +287,48 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     var UNKNOWN_STATE = Object.freeze({ secure: null, unfinished: false });
 
     /**
-     * Round 46 item 4: whether the Secure Record Owners team owns the record - the server's answer (can-manage-access with
-     * includeOwner=true; which team that is, is the server's configuration). Resolves true or false, or null when it
-     * cannot be had (no token, a non-200, an answer about another record or without a definite answer, a failure); never
-     * rejects, never cached beyond the secure state it feeds.
+     * Where a flagged, team-owned record's owner sits - the server's answer to can-manage-access with includeOwner=true
+     * (round 46 item 4; round 53 item 2). The ONE place the answer's three owner facts are read.
      */
-    function queryOwnedBySecureOwnerTeam(record) {
+    ns.OWNER_PLACEMENT = Object.freeze({
+        SECURE_OWNER_TEAM: "secure-owner-team",       // finished (with its container): provisioned
+        OTHER_TEAM_INSIDE: "other-team-inside",       // another team in the Secure Record business unit: already isolated
+        OTHER_TEAM_OUTSIDE: "other-team-outside"      // a team in another business unit: the secure transition did not finish
+    });
+
+    /**
+     * The owner placement in one gate answer, or null when the answer does not say it definitely: an answer about another
+     * record, one that is not a delegation "yes", an ownedBySecureOwnerTeam that is not exactly true or false, or - for
+     * another team - an owningTeamInSecureBusinessUnit that is not exactly true or false. Null is never either answer.
+     */
+    function ownerPlacementOf(body, record) {
+        if (!answersFor(body, record) || body.canManageAccess !== true) {
+            return null;
+        }
+
+        var owned = body.ownedBySecureOwnerTeam;
+        if (owned === true) {
+            return ns.OWNER_PLACEMENT.SECURE_OWNER_TEAM;
+        }
+
+        if (owned !== false) {
+            return null;
+        }
+
+        var inside = body.owningTeamInSecureBusinessUnit;
+        if (inside === true) {
+            return ns.OWNER_PLACEMENT.OTHER_TEAM_INSIDE;
+        }
+
+        return inside === false ? ns.OWNER_PLACEMENT.OTHER_TEAM_OUTSIDE : null;
+    }
+
+    /**
+     * Asks the server where the record's owner sits (ownerPlacementOf). Resolves a placement, or null when it cannot be
+     * had (no token, a non-200, a failure, or an answer that does not say it); never rejects, never cached beyond the
+     * secure state it feeds.
+     */
+    function queryOwnerPlacement(record) {
         return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
             return Spaarke.BffAuth.getToken(baseUrl).then(function (token) {
                 if (!token) {
@@ -301,12 +343,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                         }
 
                         return response.json().then(function (body) {
-                            if (!answersFor(body, record) || body.canManageAccess !== true) {
-                                return null;
-                            }
-
-                            var owned = body.ownedBySecureOwnerTeam;
-                            return owned === true || owned === false ? owned : null;
+                            return ownerPlacementOf(body, record);
                         });
                     });
             });
@@ -321,12 +358,14 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      * (the read failed, or the value came back empty: a masked field-secured column; null hides both commands).
      * `unfinished` is true for a record flagged secure whose transition did not finish (round 40 item 1; round 46 item
      * 4): provisioning leaves a finished secure record owned by the Secure Record Owners TEAM with its own container
-     * recorded, so one with no container recorded, one a USER owns, or one ANOTHER team owns is not finished - every
-     * failure after the flag write leaves one of the first two shapes (the flag is never cleared), a reassignment outside
-     * Spaarke the third, and the server finishes each when Make Secure is called again. The owner question goes to the
-     * server only when the read leaves it open (flagged, a container recorded, no owning user); an answer that cannot be
-     * had is not "unfinished" - Make Secure stays hidden on that record. Cached per record for a short while, so the
-     * flyout's rules cost one read; the commands forget it before they refresh the form.
+     * recorded, so one with no container recorded, one a USER owns, or one a team in ANOTHER business unit owns is not
+     * finished - every failure after the flag write leaves one of the first two shapes (the flag is never cleared), a
+     * reassignment outside Spaarke the third, and the server finishes each when Make Secure is called again. Another team
+     * INSIDE the Secure Record business unit (round 53 item 2: the retired default team before task 144's migration) is
+     * secure and isolated already - not unfinished; the server refuses it 409 and task 144's migration moves it. The
+     * owner question goes to the server only when the read leaves it open (flagged, a container recorded, no owning
+     * user); an answer that cannot be had is not "unfinished" - Make Secure stays hidden on that record. Cached per record
+     * for a short while, so the flyout's rules cost one read; the commands forget it before they refresh the form.
      */
     function readSecureState(entityName, record) {
         var key = stateKey(record);
@@ -352,14 +391,17 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                         return { secure: value, unfinished: value === true };
                     }
 
-                    // Flagged, its container recorded, owned by a team: finished only when that team is the Secure Record
-                    // Owners team (round 46 item 4).
-                    return queryOwnedBySecureOwnerTeam(record).then(function (ownedBySecureTeam) {
-                        if (ownedBySecureTeam === null) {
+                    // Flagged, its container recorded, owned by a team: unfinished only when that team owns it OUTSIDE the
+                    // Secure Record business unit (round 46 item 4; round 53 item 2).
+                    return queryOwnerPlacement(record).then(function (placement) {
+                        if (placement === null) {
                             console.warn(LOG, "Who owns this record could not be told; Make Secure stays hidden on it.");
+                        } else if (placement === ns.OWNER_PLACEMENT.OTHER_TEAM_INSIDE) {
+                            console.info(LOG, "Another team inside the Secure Record business unit owns this record: it " +
+                                "is isolated already, so Make Secure stays hidden (an administrator's migration moves it).");
                         }
 
-                        return { secure: true, unfinished: ownedBySecureTeam === false };
+                        return { secure: true, unfinished: placement === ns.OWNER_PLACEMENT.OTHER_TEAM_OUTSIDE };
                     });
                 }, function (error) {
                     console.warn(LOG, "sprk_issecure could not be read; Make Secure and Remove Secure stay hidden.", error);
@@ -469,6 +511,31 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
         return commandName + " did not complete" + (result && result.status ? " (" + result.status + ")" : "") +
             ". Reload the record to see its current state.";
+    };
+
+    /**
+     * Round 53 item 1: the refusals this script shows in its OWN words, by reason code - the copy round 53 ratified, the
+     * same words the server sends, {record} filled per table. The ONE constant; every other refusal shows the server's
+     * message (refusalText).
+     * - sdap.provision.caller_rights_unverifiable (500, Make Secure only): which access the caller holds could not be read,
+     *   so the share they keep could not be floored on it (round 46 item 1). Refused before any write: the record is
+     *   unchanged and Make Secure stays offered on it - that is the "try again" (a pre-write refusal, so not one of
+     *   MAKE_SECURE_RETRY_IN_PLACE, which are the failures AFTER the flag write).
+     */
+    ns.REFUSAL_COPY = Object.freeze({
+        "sdap.provision.caller_rights_unverifiable":
+            "Which access you hold on this {record} could not be read, so securing it could not make sure you keep that " +
+            "access. Nothing was changed; you may try again."
+    });
+
+    /** A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled), else refusalText. */
+    ns.refusalFor = function (commandName, result, entityName) {
+        var code = reasonCodeOf(result);
+        if (code !== null && Object.prototype.hasOwnProperty.call(ns.REFUSAL_COPY, code)) {
+            return ns.REFUSAL_COPY[code].split("{record}").join(ns.RECORD_WORDS[entityName] || "record");
+        }
+
+        return ns.refusalText(commandName, result);
     };
 
     /** Forgets the cached state, refreshes the form and then its command bar, so every rule reads the new state. */
@@ -598,7 +665,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     function offerRetry(primaryControl, start, commandName, path, successText, extra, retryCodes, result) {
         return confirmFirst({
             title: commandName,
-            text: ns.refusalText(commandName, result),
+            text: ns.refusalFor(commandName, result, start.entityName),
             confirmButtonLabel: commandName,
             cancelButtonLabel: "Cancel"
         }).then(function (again) {
@@ -628,7 +695,7 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                     return offerRetry(primaryControl, start, commandName, path, successText, extra, retryCodes, result);
                 }
 
-                alert(commandName, ns.refusalText(commandName, result));
+                alert(commandName, ns.refusalFor(commandName, result, start.entityName));
                 return result;
             }
 

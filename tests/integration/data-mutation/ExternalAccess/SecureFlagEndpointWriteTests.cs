@@ -1200,7 +1200,7 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
     // Round 46 item 1: the caller's Make Secure share is floored on their EFFECTIVE rights before the call — what F3 decides
     // Full Access from — so Delete held by ownership or by a security role is kept exactly as Delete held by a share. Never
     // more than they held, never less than Collaborate, never Assign. Read in the same pre-write step as WhoAmI; a read
-    // that fails refuses before any write with F3's unverifiable code.
+    // that fails refuses before any write with provisioning's own code (round 53 item 1).
     // ─────────────────────────────────────────────────────────────────────────
 
     private static readonly int FullAccessMask = Sprk.Bff.Api.Services.Access.RecordShareLevels.MaskForRightsCsv(
@@ -1211,6 +1211,15 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
     /// Delete through an explicit Full Access share, on the forward path and on a resume (the record is then the team's,
     /// so only a role can be the route). Without the floor they would end at Collaborate and lose F3.
     /// </summary>
+    /// <remarks>
+    /// Round 53 item 3: the two routes run DIFFERENT fixture paths. "ownership" answers Delete only while the caller OWNS
+    /// the record (<see cref="ProvisionProjectTestFixture.CallerDeletesWhatTheyOwn"/>, a user-depth role: read at the
+    /// moment of the probe, so it is gone once the Secure team owns the record — a floor read after the move would miss
+    /// it); "role" answers Delete whoever owns it (<see cref="ProvisionProjectTestFixture.CallerHoldsDelete"/>, a
+    /// business-unit or organization-depth role), on a record a colleague owns. The production code delegates both to
+    /// <c>RetrievePrincipalAccess</c>, so a REAL ownership-held or role-held Delete is proven only live (the G-11 ui-tests
+    /// "Make Secure run by the record's owner" and "Make Secure run by an administrator").
+    /// </remarks>
     [Theory]
     [InlineData("ownership")]
     [InlineData("role")]
@@ -1220,20 +1229,22 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         var recordId = Guid.NewGuid();
         switch (how)
         {
-            case "ownership":   // the caller owns it (and did not create it)
+            case "ownership":   // the caller owns it (and did not create it); their role gives Delete on what they own
                 _fixture.SeedProject(recordId, isSecure: false, createdBy: Colleague);
+                _fixture.CallerDeletesWhatTheyOwn = true;
                 break;
             case "role":        // a colleague owns it; the caller's role gives them Delete in its business unit
                 _fixture.SeedProject(recordId, isSecure: false, owningUserId: Colleague, createdBy: Colleague);
+                _fixture.CallerHoldsDelete = true;
                 break;
             default:            // an earlier Make Secure stopped after the move; the caller's role still gives Delete
                 _fixture.SeedProject(recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
                     createdBy: Colleague);
+                _fixture.CallerHoldsDelete = true;
                 break;
         }
 
         _fixture.SystemUsers[Colleague] = (false, false);
-        _fixture.CallerHoldsDelete = true;
 
         var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
 
@@ -1277,10 +1288,43 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
     }
 
     /// <summary>
+    /// The ownership route's twin (round 53 item 3): a role that gives Delete only on what the caller OWNS gives nothing on
+    /// a record a colleague owns, nor on a resume (the Secure Record owner team already owns it) — so those callers are
+    /// shared at exactly Collaborate. With the "ownership" case above, it shows that case holds Delete THROUGH owning the
+    /// record: the same switch, a different owner, a different floor.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Provision_MakeSecure_DeleteHeldOnlyOnOwnedRecords_IsNotKept_OnARecordTheCallerDoesNotOwn(bool resuming)
+    {
+        var recordId = Guid.NewGuid();
+        if (resuming)
+        {
+            _fixture.SeedProject(recordId, isSecure: true, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+                createdBy: Colleague);
+        }
+        else
+        {
+            _fixture.SeedProject(recordId, isSecure: false, owningUserId: Colleague, createdBy: Colleague);
+        }
+
+        _fixture.SystemUsers[Colleague] = (false, false);
+        _fixture.CallerDeletesWhatTheyOwn = true;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(recordId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(
+            ProvisionProjectEndpoint.CreatorAccessMask, "Delete on what they own is no Delete on a record someone else owns");
+    }
+
+    /// <summary>
     /// The read of the caller's effective rights fails — the probe throws, or answers without the Write the route admitted
-    /// them on (its "could not answer") — so the floor is unknown: refused before any write, 500 with F3's unverifiable code
-    /// for that read, on the forward path and on a resume. Never shared at a floor of "nothing" (which would narrow a Full
-    /// Access holder).
+    /// them on (its "could not answer") — so the floor is unknown: refused before any write, 500
+    /// <c>sdap.provision.caller_rights_unverifiable</c> (round 53 item 1: provisioning's own code — F3's
+    /// <c>sdap.unsecure.permission_unverifiable</c> is the unsecure endpoint's), the ratified detail verbatim, on the
+    /// forward path and on a resume. Never shared at a floor of "nothing" (which would narrow a Full Access holder).
     /// </summary>
     [Theory]
     [InlineData(false, false)]
@@ -1302,8 +1346,8 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         var response = await PostAsync(ProvisionRoute, new { recordType = "matter", recordId, transition = "make-secure" });
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
-        (await ReasonCodeOf(response)).Should().Be(
-            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        (await ReasonCodeOf(response)).Should().Be("sdap.provision.caller_rights_unverifiable",
+            "the wire code, verbatim — the ribbon and the wizard's client key their copy on it");
         (await DetailOf(response)).Should().Be(
             "Which access you hold on this matter could not be read, so securing it could not make sure you keep that " +
             "access. Nothing was changed; you may try again.");
@@ -1316,7 +1360,7 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
     /// <summary>
     /// The wizards' create-then-secure path (no transition) reads no floor: its creator's share is EXACTLY the creator's
     /// level even for a caller holding Delete (they own their new record), and a rights probe that would fail after the
-    /// gate is never reached — so that path never answers F3's code.
+    /// gate is never reached — so that path never answers <c>caller_rights_unverifiable</c>.
     /// </summary>
     [Fact]
     public async Task Provision_TheWizardsPath_ReadsNoFloor_AndSharesExactlyTheCreatorsLevel()
@@ -1406,6 +1450,34 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
             "the creator keeps access, as the confirmation says");
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("speContainerId").GetString().Should().Be(ItsOwnContainer);
+    }
+
+    /// <summary>
+    /// Round 53 item 2: a flagged root with its own container, owned by ANOTHER team INSIDE the Secure Record business unit
+    /// (the retired default team, before task 144's migration), is already secure and isolated — the ribbon hides Make
+    /// Secure there. Called through the API anyway, the server's answer is unchanged: 409
+    /// <c>owned_by_other_secure_team</c> naming the migration script, before any write and before the caller's rights are
+    /// read. Moving it onto the named team is task 144's migration, never a side effect of provisioning.
+    /// </summary>
+    [Fact]
+    public async Task Provision_MakeSecure_OnAFlaggedRecordOwnedByAnotherTeamInsideTheSecureBusinessUnit_IsStillRefused409()
+    {
+        var recordId = Guid.NewGuid();
+        _fixture.SeedProject(recordId, isSecure: true, containerId: ItsOwnContainer,
+            owningTeamId: ProvisionProjectTestFixture.SecureDefaultTeamId, createdBy: Colleague);
+        _fixture.SystemUsers[Colleague] = (false, false);
+
+        var response = await PostAsync(ProvisionRoute, new { recordType = "project", recordId, transition = "make-secure" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnedByOtherSecureTeam);
+        (await DetailOf(response)).Should().Contain("scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1");
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureDefaultTeamId);
+        _fixture.ContainerIdOf(recordId).Should().Be(ItsOwnContainer);
+        _fixture.Updates.Should().BeEmpty("refused before any write");
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.DelegationProbes.Count(p => p.RecordId == recordId).Should().Be(1, "only the route's Write gate asked");
     }
 
     // ═════════════════════════════════════════════════════════════════════════

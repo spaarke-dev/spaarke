@@ -12,10 +12,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
 /// <param name="RecordId">The record the caller is asking about. Required.</param>
 /// <param name="IncludeOwner">
-/// Task 150 (round 46 item 4): <c>true</c> also reports who OWNS the record — its owning team, and whether that is the
-/// Secure Record Owners team — for the Access ribbon's "did this record's secure transition finish?" question. Omitted or
-/// <c>false</c>: no owner read is made (the Manage Access gates' form-load path stays one rights probe). It changes nothing
-/// about the delegation answer.
+/// Task 150 (round 46 item 4; round 53 item 2): <c>true</c> also reports who OWNS the record — its owning team, whether
+/// that is the Secure Record Owners team, and whether that team owns it inside the Secure Record business unit — for the
+/// Access ribbon's "did this record's secure transition finish?" question. Omitted or <c>false</c>: no owner read is made
+/// (the Manage Access gates' form-load path stays one rights probe). It changes nothing about the delegation answer.
 /// </param>
 public record RecordAccessGateQuery(
     string? RecordType,
@@ -50,8 +50,18 @@ public record RecordAccessGateQuery(
 /// team could not be established (absent, ambiguous or unreadable). A client MUST treat <c>null</c> as unknown, never
 /// as either answer.
 /// </param>
+/// <param name="OwningTeamInSecureBusinessUnit">
+/// Only with <c>includeOwner=true</c> (round 53 item 2), for a record a TEAM owns: <c>true</c> when that team owns it
+/// inside the Secure Record business unit — the Secure Record Owners team, or ANOTHER team there (the retired default team
+/// before task 144's migration: the record is already isolated, and provisioning refuses it 409
+/// <c>sdap.provision.owned_by_other_secure_team</c>) — <c>false</c> when the team owns it in another business unit (a
+/// reassignment outside Spaarke: its secure transition did not finish). <c>null</c> when a user owns the record (see
+/// <see cref="OwningTeamId"/>) or when it could not be told. A client MUST treat <c>null</c> as unknown, never as either
+/// answer.
+/// </param>
 public record RecordAccessGateResponse(
     Guid RecordId,
     bool CanManageAccess,
     Guid? OwningTeamId = null,
-    bool? OwnedBySecureOwnerTeam = null);
+    bool? OwnedBySecureOwnerTeam = null,
+    bool? OwningTeamInSecureBusinessUnit = null);

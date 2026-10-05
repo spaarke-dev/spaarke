@@ -439,6 +439,9 @@ describe('provisionSecureProject — failure classification', () => {
     // deterministic; whether they are could not be checked — refused 500 before any change, the same caller may call again.
     ['sdap.provision.creator_no_access', 'not-started', false],
     ['sdap.provision.creator_no_access_unverifiable', 'not-started', true],
+    // Task 150 round 53 item 1: on Make Secure only, the caller's effective rights could not be read — refused 500 before
+    // any change, the same caller may call again (copy pinned verbatim below).
+    ['sdap.provision.caller_rights_unverifiable', 'not-started', true],
     // Task 143: a RESUME's person on the No Access list — 409, an administrator reviews the access (the 500 "could not be
     // checked" twin is pinned verbatim below, retryable).
     ['sdap.provision.resume_creator_no_access', 'needs-administrator', false, 409],
@@ -564,18 +567,37 @@ describe('provisionSecureProject — failure classification', () => {
     // EMITTED is the endpoint's `internal const string Reason*` set, transcribed — the guard against the drift task
     // 068 found (container_not_recorded once fell through to copy that was wrong in both halves). Adding a Reason*
     // constant server-side means adding it to EMITTED and deciding deliberately what state and retryability it has.
-    // Nothing the endpoint emits ON THIS PATH lands on the generic 'error' copy. One code is not on it: on the form's
-    // Make Secure command only (transition "make-secure"), a caller whose effective rights cannot be read is refused with
-    // owner F3's `sdap.unsecure.permission_unverifiable` (task 150 round 46 item 1) — the wizard sends no transition, the
-    // server makes no such read for it (SecureFlagEndpointWriteTests.Provision_TheWizardsPath_ReadsNoFloor_...), and the
-    // ribbon shows the server's own message.
+    // Nothing the endpoint emits lands on the generic 'error' copy — including `caller_rights_unverifiable` (task 150
+    // round 53 item 1), which only the form's Make Secure command can meet (the wizard sends no transition, and the
+    // server reads no floor for it: SecureFlagEndpointWriteTests.Provision_TheWizardsPath_ReadsNoFloor_...).
     for (const [code, , , status] of FAILURE_CODES) {
       expect(classifyProvisioningFailure(code, undefined, status).failureKind).not.toBe('error');
     }
     for (const [code] of WARNING_CODES) {
       expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
     }
-    expect(EMITTED).toHaveLength(38);
+    expect(EMITTED).toHaveLength(39);
+  });
+
+  // Task 150 round 53 item 1: provisioning's own code for an unreadable floor (codes are namespaced by endpoint — F3's
+  // `sdap.unsecure.permission_unverifiable` is the unsecure endpoint's). Round 53's ratified sentence, verbatim, with
+  // {record} = project; its closing "you may try again" is the host's retry action here (`retryable: true`), never words.
+  it('says which access the caller holds could not be read, and that nothing changed — retryable (caller_rights_unverifiable, round 53)', async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.caller_rights_unverifiable' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('not-started');
+    expect(result.retryable).toBe(true);
+    expect(result.reasonCode).toBe('sdap.provision.caller_rights_unverifiable');
+    expect(result.errorMessage).toBe(
+      'Which access you hold on this project could not be read, so securing it could not make sure you keep that access. Nothing was changed.'
+    );
+    expect(result.errorMessage).not.toContain('operator text');
   });
 
   // Round 29 (owner round 27's stance: the recommended wording, adjustable in UAT): task 143's five provisioning codes,

@@ -1,5 +1,5 @@
 /**
- * `sprk_access_ribbon.js` 1.4.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
+ * `sprk_access_ribbon.js` 1.5.0 — task 150's Make Secure / Remove Secure in task 142's ONE Access group.
  *
  * The ribbon script is a classic Dataverse web resource, not a module, so the suite runs the REAL files the way the form
  * does: each is injected as a <script> into the jsdom window (top-level `var Spaarke` becomes a global, exactly as in the
@@ -27,9 +27,14 @@
  *    the same one read; and a Make Secure failure after the flag write that the server answers as "the same caller may
  *    call again" offers the call in place (confirm dialog, the server's message, Make Secure / Cancel);
  *  - round 46 item 4: a flagged record with a container that a TEAM owns is finished only when the server says that team
- *    is the Secure Record Owners team (can-manage-access, includeOwner=true) — another team (reassigned outside Spaarke)
- *    is unfinished; an answer that cannot be had keeps Make Secure hidden there; the question is asked only when the read
- *    leaves it open, and asked again after a command.
+ *    is the Secure Record Owners team (can-manage-access, includeOwner=true) — a team in another business unit
+ *    (reassigned outside Spaarke) is unfinished; an answer that cannot be had keeps Make Secure hidden there, and each
+ *    "cannot be had" case reaches the guard it names (round 53 item 3: the fetch mock answers a real Promise); the
+ *    question is asked only when the read leaves it open, and asked again after a command;
+ *  - round 53 item 2: another team INSIDE the Secure Record business unit (the retired default team before task 144's
+ *    migration) owns a record that is already isolated — Make Secure hidden, Remove Secure shown;
+ *  - round 53 item 1: `sdap.provision.caller_rights_unverifiable` is shown in this script's own words (REFUSAL_COPY,
+ *    {record} filled), verbatim.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -48,6 +53,10 @@ const REMOVE_PARAGRAPHS = (record: string) => [
   `The ${record} and its related records return to normal access: people who can see records in its business unit will be able to see them, and the individual sharing set up while it was secure is removed.`,
   'To secure it again later, use Make Secure.',
 ];
+
+/** Round 53 item 1, verbatim — `sdap.provision.caller_rights_unverifiable` in the ribbon's own words. */
+const CALLER_RIGHTS_UNVERIFIABLE = (record: string) =>
+  `Which access you hold on this ${record} could not be read, so securing it could not make sure you keep that access. Nothing was changed; you may try again.`;
 
 /** Owner round 27, verbatim — the copy the user must see. {record} filled per table. */
 const PARAGRAPHS = (record: string) => [
@@ -79,12 +88,28 @@ interface World {
 /** The Secure Record Owners team — what the server names as the owner of a PROVISIONED record. */
 const SECURE_OWNER_TEAM = 'daec0b6f-0000-0000-0000-0000000000f1';
 
-/** can-manage-access with includeOwner=true, answered about THIS record. */
-const ownerAnswer = (ownedBySecureOwnerTeam: boolean | null, owningTeamId: string | null = SECURE_OWNER_TEAM) =>
+/** A team in ANOTHER business unit (a secure record reassigned outside Spaarke). */
+const OTHER_TEAM = 'ffffffff-1111-2222-3333-444444444444';
+
+/**
+ * can-manage-access with includeOwner=true, answered about THIS record: whether the Secure Record Owners team owns it, and
+ * whether its owning team owns it inside the Secure Record business unit (round 53 item 2).
+ */
+const ownerAnswer = (
+  ownedBySecureOwnerTeam: boolean | null,
+  owningTeamId: string | null = SECURE_OWNER_TEAM,
+  owningTeamInSecureBusinessUnit: boolean | null = ownedBySecureOwnerTeam === true ? true : null
+) =>
   ({
     ok: true,
     status: 200,
-    json: async () => ({ recordId: RECORD_ID, canManageAccess: true, owningTeamId, ownedBySecureOwnerTeam }),
+    json: async () => ({
+      recordId: RECORD_ID,
+      canManageAccess: true,
+      owningTeamId,
+      ownedBySecureOwnerTeam,
+      owningTeamInSecureBusinessUnit,
+    }),
   }) as unknown as Response;
 
 function load(): World {
@@ -112,7 +137,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.4.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.5.0'); // the real script ran
   return {
     ribbon,
     retrieveRecord,
@@ -168,16 +193,19 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 let consoleWarn: jest.SpyInstance;
 let consoleError: jest.SpyInstance;
+let consoleInfo: jest.SpyInstance;
 
 beforeEach(() => {
   window.sessionStorage.clear();
   consoleWarn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  consoleInfo = jest.spyOn(console, 'info').mockImplementation(() => {});
 });
 
 afterEach(() => {
   consoleWarn.mockRestore();
   consoleError.mockRestore();
+  consoleInfo.mockRestore();
 });
 
 describe('Make Secure confirmation copy (owner round 27) — ONE constant, verbatim', () => {
@@ -380,7 +408,7 @@ describe('round 40 item 1 — Make Secure is offered again on a secure transitio
   });
 });
 
-describe('round 46 item 4 — a flagged record a team OTHER than the Secure Record Owners team owns is unfinished', () => {
+describe('round 46 item 4 / round 53 items 2-3 — who owns a flagged, team-owned record decides whether it is unfinished', () => {
   /** Flagged, its own container recorded, owned by a TEAM (no owning user): the read alone cannot tell which team. */
   const TEAM_OWNED_WITH_CONTAINER = {
     sprk_issecure: true,
@@ -389,12 +417,12 @@ describe('round 46 item 4 — a flagged record a team OTHER than the Secure Reco
   };
 
   it.each(Object.keys(RECORD_TYPES))(
-    'a %s reassigned outside Spaarke to another team: Make Secure ("finish") AND Remove Secure',
+    'a %s reassigned outside Spaarke to a team in another business unit: Make Secure ("finish") AND Remove Secure',
     async entityName => {
       const { ribbon, retrieveRecord, gateFetch } = load();
       canManage(entityName, true);
       retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
-      gateFetch.mockResolvedValue(ownerAnswer(false, 'ffffffff-1111-2222-3333-444444444444'));
+      gateFetch.mockResolvedValue(ownerAnswer(false, OTHER_TEAM, false));
 
       expect(await ribbon.canMakeSecure(form(entityName))).toBe(true);
       expect(await ribbon.canRemoveSecure(form(entityName))).toBe(true);
@@ -419,33 +447,118 @@ describe('round 46 item 4 — a flagged record a team OTHER than the Secure Reco
     expect(gateFetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each(Object.keys(RECORD_TYPES))(
+    'round 53 item 2 — a %s owned by ANOTHER team INSIDE the Secure Record business unit is already isolated: Make Secure hidden, Remove Secure shown',
+    async entityName => {
+      const { ribbon, retrieveRecord, gateFetch } = load();
+      canManage(entityName, true);
+      retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+      // The retired default team, before task 144's migration: not the Secure Record Owners team, but inside its BU.
+      gateFetch.mockResolvedValue(ownerAnswer(false, 'dddddddd-1111-2222-3333-4444444444de', true));
+
+      expect(await ribbon.canMakeSecure(form(entityName))).toBe(false);
+      expect(await ribbon.canRemoveSecure(form(entityName))).toBe(true);
+      expect(gateFetch).toHaveBeenCalledTimes(1);
+      // Told apart from "could not be told": no warning, an explanation instead.
+      expect(consoleWarn).not.toHaveBeenCalled();
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining('[Access.Ribbon'),
+        expect.stringContaining('isolated already')
+      );
+    }
+  );
+
+  it('round 53 item 2 — the owner placements are ONE frozen constant', () => {
+    const { ribbon } = load();
+
+    expect(Object.isFrozen(ribbon.OWNER_PLACEMENT)).toBe(true);
+    expect(ribbon.OWNER_PLACEMENT).toEqual({
+      SECURE_OWNER_TEAM: 'secure-owner-team',
+      OTHER_TEAM_INSIDE: 'other-team-inside',
+      OTHER_TEAM_OUTSIDE: 'other-team-outside',
+    });
+  });
+
+  /**
+   * Round 53 item 3: every case answers through a REAL Promise (an `async` mock), so the answer reaches the ribbon's
+   * guards — never the catch by accident. Each body is a definite "another team, outside" answer EXCEPT for the one fact
+   * its case names, so only the guard that case names can stop it (each pinned by a seed that removes that guard).
+   */
+  const ABOUT_THIS_RECORD_OUTSIDE = {
+    recordId: RECORD_ID,
+    canManageAccess: true,
+    owningTeamId: OTHER_TEAM,
+    ownedBySecureOwnerTeam: false,
+    owningTeamInSecureBusinessUnit: false,
+  };
+  const answerWith = (status: number, body: Record<string, unknown>) =>
+    ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+  const without = (key: string) => {
+    const copy: Record<string, unknown> = { ...ABOUT_THIS_RECORD_OUTSIDE };
+    delete copy[key];
+    return copy;
+  };
+
+  it('the positive twin of the table below: that same answer, unaltered, offers Make Secure', async () => {
+    const { ribbon, retrieveRecord, gateFetch } = load();
+    canManage('sprk_project', true);
+    retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
+    gateFetch.mockImplementation(async () => answerWith(200, ABOUT_THIS_RECORD_OUTSIDE));
+
+    expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(true);
+  });
+
   it.each([
-    ['an unknown answer (null)', () => ownerAnswer(null)],
-    ['a non-200', () => response(403, { reasonCode: 'sdap.access.deny.delegation_write_required' })],
+    [
+      'ownedBySecureOwnerTeam is null (the server could not tell)',
+      () => answerWith(200, { ...ABOUT_THIS_RECORD_OUTSIDE, ownedBySecureOwnerTeam: null }),
+    ],
+    ['a 200 with ownedBySecureOwnerTeam omitted', () => answerWith(200, without('ownedBySecureOwnerTeam'))],
+    ['a non-200, even with an answer-shaped body', () => answerWith(500, ABOUT_THIS_RECORD_OUTSIDE)],
     [
       'an answer about another record',
+      () => answerWith(200, { ...ABOUT_THIS_RECORD_OUTSIDE, recordId: 'bbbbbbbb-1111-2222-3333-444444444444' }),
+    ],
+    [
+      'an answer that is not a delegation yes',
+      () => answerWith(200, { ...ABOUT_THIS_RECORD_OUTSIDE, canManageAccess: false }),
+    ],
+    [
+      'owningTeamInSecureBusinessUnit is null (the business unit could not be told)',
+      () => answerWith(200, { ...ABOUT_THIS_RECORD_OUTSIDE, owningTeamInSecureBusinessUnit: null }),
+    ],
+    [
+      'a 200 with owningTeamInSecureBusinessUnit omitted',
+      () => answerWith(200, without('owningTeamInSecureBusinessUnit')),
+    ],
+    [
+      'a body that is not JSON',
       () =>
         ({
           ok: true,
           status: 200,
-          json: async () => ({
-            recordId: 'bbbbbbbb-1111-2222-3333-444444444444',
-            canManageAccess: true,
-            ownedBySecureOwnerTeam: false,
-          }),
+          json: async () => {
+            throw new SyntaxError('Unexpected token < in JSON');
+          },
         }) as unknown as Response,
     ],
-    ['a failed request', () => Promise.reject(new Error('network down'))],
+    [
+      'a failed request',
+      () => {
+        throw new Error('network down');
+      },
+    ],
   ])(
     'who owns it cannot be told (%s): Make Secure stays hidden, Remove Secure follows the flag',
     async (_case, answer) => {
       const { ribbon, retrieveRecord, gateFetch } = load();
       canManage('sprk_project', true);
       retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
-      gateFetch.mockImplementation(() => answer());
+      gateFetch.mockImplementation(async () => answer());
 
       expect(await ribbon.canMakeSecure(form('sprk_project'))).toBe(false);
       expect(await ribbon.canRemoveSecure(form('sprk_project'))).toBe(true);
+      expect(gateFetch).toHaveBeenCalledTimes(1); // asked once; the answer was read, not skipped
     }
   );
 
@@ -485,7 +598,7 @@ describe('round 46 item 4 — a flagged record a team OTHER than the Secure Reco
     openConfirmDialog.mockResolvedValue({ confirmed: true });
     authenticatedFetch.mockResolvedValue(response(200, { recordType: 'matter' }));
     retrieveRecord.mockResolvedValue(TEAM_OWNED_WITH_CONTAINER);
-    gateFetch.mockResolvedValueOnce(ownerAnswer(false, 'ffffffff-1111-2222-3333-444444444444'));
+    gateFetch.mockResolvedValueOnce(ownerAnswer(false, OTHER_TEAM, false));
     const matter = form('sprk_matter');
 
     expect(await ribbon.canMakeSecure(matter)).toBe(true);
@@ -679,6 +792,48 @@ describe('Make Secure — confirms, then calls the provisioning endpoint', () =>
     expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Make Secure', text: detail });
     expect(addGlobalNotification).not.toHaveBeenCalled();
     expect(project.data.refresh).toHaveBeenCalledWith(false);
+  });
+
+  it.each([
+    ['sprk_project', 'project'],
+    ['sprk_matter', 'matter'],
+    ['sprk_workassignment', 'work assignment'],
+  ])(
+    "round 53 item 1 — caller_rights_unverifiable on a %s: the ribbon's own words ({record} = %s), an alert, no in-place retry; Make Secure stays offered",
+    async (entityName, record) => {
+      const { ribbon, openConfirmDialog, authenticatedFetch, openAlertDialog, retrieveRecord } = load();
+      canManage(entityName, true);
+      openConfirmDialog.mockResolvedValueOnce({ confirmed: true });
+      authenticatedFetch.mockResolvedValue(
+        response(500, { detail: 'operator text', reasonCode: 'sdap.provision.caller_rights_unverifiable' })
+      );
+      retrieveRecord.mockResolvedValue(NOT_SECURE); // refused before any write: the record is unchanged
+      const page = form(entityName);
+
+      await ribbon.makeSecure(page);
+      await settle();
+
+      expect(openAlertDialog).toHaveBeenCalledWith({ title: 'Make Secure', text: CALLER_RIGHTS_UNVERIFIABLE(record) });
+      expect(openConfirmDialog).toHaveBeenCalledTimes(1); // the owner copy only: a pre-write refusal is not retried in place
+      expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+      expect(await ribbon.canMakeSecure(page)).toBe(true); // "you may try again": the command is still there
+    }
+  );
+
+  it('round 53 item 1 — REFUSAL_COPY is ONE frozen constant, verbatim, and only its codes are worded here', () => {
+    const { ribbon } = load();
+
+    expect(Object.isFrozen(ribbon.REFUSAL_COPY)).toBe(true);
+    expect(ribbon.REFUSAL_COPY).toEqual({
+      'sdap.provision.caller_rights_unverifiable': CALLER_RIGHTS_UNVERIFIABLE('{record}'),
+    });
+    expect(
+      ribbon.refusalFor(
+        'Make Secure',
+        { status: 500, body: { detail: 'server words', reasonCode: 'sdap.provision.x' } },
+        'sprk_matter'
+      )
+    ).toBe('server words');
   });
 
   it('with no silent token it makes no call and says so', async () => {
