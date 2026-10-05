@@ -49,8 +49,10 @@ namespace Spaarke.ArchTests;
 ///
 /// <para><b>The sweep ledger.</b> The 82 findings (90 route keys) are pinned in <see cref="SweepFindings"/>,
 /// each a Pending waiver owned by its fix task 159-166. A fix task resolves its entry ONLY by credit: make the
-/// route pass Rule A by a credited filter or a HandlerDecision, delete its waiver, and set
-/// <c>ResolvedBy</c> to the task id and <c>ProofTest</c> to its behavioural deny test.</para>
+/// route pass Rule A by a credited filter, a HandlerDecision or a SystemAdmin / SPE-admin AdminOnlyRoutes entry, delete
+/// its waiver, and set <c>ResolvedBy</c> to the task id and <c>ProofTest</c> to its behavioural deny test. A route the fix
+/// task DELETED resolves with <c>ResolvedBy</c> and a <c>ProofTest</c> that pins its absence (task 167 f2, main-session
+/// round 34 items 4-5).</para>
 ///
 /// <para><b>Why source analysis and not endpoint reflection</b> (task 074, still true).
 /// <c>AddEndpointFilter</c> adds NOTHING to <c>EndpointBuilder.Metadata</c> — reflection yields only
@@ -1479,8 +1481,10 @@ public partial class RouteAuthorizationGuardTests
         Assert.True(
             violations.Count == 0,
             "The sweep ledger is the closed set of the 82 findings (90 route keys). A fix task resolves its entry ONLY "
-            + "by credit: make the route pass Rule A by a credited filter or a HandlerDecision, delete its waiver, and "
-            + "set ResolvedBy to the task id and ProofTest to its behavioural deny test. For an InsufficientDecision "
+            + "by credit: make the route pass Rule A by a credited filter, a HandlerDecision, or an AdminOnlyRoutes entry in a "
+            + "SystemAdmin / SPE-admin group (round 34 item 5), delete its waiver, and set ResolvedBy to the task id and "
+            + "ProofTest to its behavioural deny test. A route DELETED under owner round 10 item 1 resolves with ResolvedBy and "
+            + "a ProofTest that pins its ABSENCE (round 34 item 4). For an InsufficientDecision "
             + "entry the guard cannot see a fix made inside an already-credited filter or handler — that resolution is by "
             + "declaration (ResolvedBy + ProofTest), reviewed at code review.\n\n  " + string.Join("\n  ", violations));
     }

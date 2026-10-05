@@ -6,11 +6,13 @@
 > **Evidence**: `notes/route-authorization-sweep-2026-10-02.md` (82 findings, 90 route keys).
 > **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`; verifier round r1 on
 > `task/uac-r2-167-r1` (§15); verifier round r2 on `task/uac-r2-167-r2` (§16); fix round f1 on `task/uac-r2-167-f1`
-> (§17 — owner round 14 items 1-2 and the r2 verifier's residuals; **nothing left open**). **`src/` changes, each by
+> (§17 — owner round 14 items 1-2 and the r2 verifier's residuals); fix round f2 on `task/uac-r2-167-f2` (§18 —
+> main-session round 34 items 4, 5 and 7 and the f1 verifier's items 4-9; **nothing left open**). **`src/` changes, each by
 > owner decision**: round r1 (owner round 12 item 1) rate-limited `GET /healthz`, `GET /healthz/catalog` and `GET /ping`;
 > round f1 (owner round 14) moved those three to a dedicated `"health-probe"` policy (`RateLimitingModule.cs`) and set
 > the authorization FallbackPolicy (`AuthorizationModule.ApplyFallbackPolicy`), plus comment-only corrections in three
-> endpoint files that said "no FallbackPolicy exists" (§17.6).
+> endpoint files that said "no FallbackPolicy exists" (§17.6); round f2 (main-session round 34 item 7) memoizes every
+> `/healthz/catalog` check for 30 s (`Infrastructure/HealthChecks/MemoizedHealthCheck.cs`, §18.3).
 
 ## 0. ⚠️ Read first — a HIGH finding the sweep never traced (escalation trigger 7, sent to the main session)
 
@@ -682,7 +684,7 @@ into the fallback). So an **anonymous** request to an unmapped path, or to a map
 **401** instead of 404/405. A signed-in request still gets 404/405. CORS preflights are unaffected (`UseCors` answers them
 before `UseAuthorization`; `CorsAndAuthTests.Cors_Preflight_AllowsConfiguredOrigin` preflights an unmapped path and still
 gets 204). Platform pings of unmapped paths (Always On `/`, the container warm-up `/robots933456.txt`) only need a response,
-so 401 serves them as 404 did. Everything that read "anonymous 401 ⇒ route registered" or "anonymous 404 ⇒ route absent":
+so 401 serves them as 404 did. Everything that read "anonymous 401 ⇒ route registered" or "anonymous 404 ⇒ route absent": *(incomplete — completed in f2, §18.5)*
 
 | Artifact | Was | Now |
 |---|---|---|
@@ -861,6 +863,8 @@ needs the ComposeModule singleton pattern first), so any number of probes costs 
 instance, with a test that N concurrent probes cause one reconciliation and that a result older than the TTL is refreshed.
 Not applied here because it changes the freshness of another project's deploy gate (ai-architecture-redesign FR-P0-04)
 and is outside owner round 14's text; it needs a main-session decision under round 15.
+**→ Decided by main-session round 34 item 7 and implemented in f2 (§18.3):** a 30 s memo of each catalog check's result,
+shared by every caller, a fault included, tested with a FakeTimeProvider.
 
 ### 17.10 Step 9.5 quality gates (FULL — `src/`, `tests/**`, auth)
 
@@ -870,6 +874,9 @@ and is outside owner round 14's text; it needs a main-session decision under rou
 - *Warning (medium)* — the FallbackPolicy changes what an ANONYMOUS 401 means repo-wide; every in-repo reader of that
   signal was found by grep (`401`/`404` near "registered/exists/absent" over `tests/`, `scripts/`, `docs/guides/`,
   `docs/procedures/`, `.github/`, `.claude/skills/`) and fixed (§17.2); the `.claude` skill text is in §17.8.
+  **→ Not true, found by the f1 verifier (item 8):** the grep missed `docs/standards/ANTI-PATTERNS.md`, three tests the
+  verifier proved vacuous, and (f2) two more tests and a repo-root runbook. f2 fixed every one and replaced the grep with a
+  build rule (`NoTestProvesRoutePresenceWithAnAnonymousRequest`) — §18.5.
 - *Suggestion* — `SignInVerdict` reads `AddPolicy(...)` inside `AddAuthorization(...)` only; an
   `AddAuthorizationBuilder().AddPolicy(...)` chain is not catalogued, so such a policy would NOT count as sign-in (fails
   closed, with a message naming the missing registration). Same for a policy name built from a non-`AuthPolicies` constant.
@@ -906,3 +913,224 @@ ADR-002 (no plugin) ✓. No violation; no §6.5 path needed.
 Test scope beyond the listed behaviours: the `EndpointTable` helper's own control (one line of justification: the helper
 is now the evidence for 21 existence tests, so it needs a positive and a negative case of its own). ADR-038 bans hold in
 everything added. No test calls Dataverse or Azure; the publish-size measurement and the bicep compile were local builds.
+
+## 18. Fix round f2 (2026-10-04) — branch `task/uac-r2-167-f2`
+
+Base `263024620` (`task/uac-r2-167-f1`). Binding inputs: main-session round 34 items 4, 5 and 7 (the follow-up round's
+verifier questions, decided under round 15) and the f1 verifier's items 4-14. **Every item is closed; nothing is owed,
+deferred or left for the owner.** No live write (no Dataverse, Azure, Entra or SPE call).
+
+### 18.1 Per item
+
+| # | Item | Disposition | Where |
+|---|---|---|---|
+| 1a | Round 34 item 4 — a sweep entry whose route key is ABSENT passes only with `ResolvedBy` AND a `ProofTest` that pins the route's absence; any other absent key still fails | **Closed** (§18.2). `RetiredEntryViolations`: (1) `ResolvedBy` set and no waiver; (2) no live route has the same verb and path with only a parameter name or constraint changed (`RouteShape`) — that is a RE-KEY and still fails; (3) the `ProofTest` method exists and its scope (attributes, body, and the same-type members it names) pairs the retired VERB with a PATH the retired template matches and asserts absence (404/405, or an empty / false endpoint-table answer). Verified against all 31 absence proofs the deleting tasks wrote on `integ/uac-r2-batch4` (159, 160, 163, 164 — §18.2). Control `SweepLedger_RetiredRoutes_NegativeControl_OnlyAPinnedAbsenceResolves` (the three real shapes pass; no ResolvedBy, no/unknown ProofTest, a PRESENCE test, a `200` test, a different verb, a different path, a left-over waiver and a re-keyed twin each fail). Seeded on real source (f2-7). | `RouteAuthorizationGuardTests.cs` "RETIRED SWEEP ROUTES" |
+| 1b | Round 34 item 5 — `Credit.AdminOnly` resolves a sweep entry whose route is in the pinned `AdminOnlyRoutes` set, gated by `RequireAuthorization("SystemAdmin")` or the SPE admin policy; no longer `/api/spe/` only; a test fails on a route added to the set without that policy | **Closed** (§18.4). Each `AdminOnlyGroup` now DECLARES its mechanism (`SystemAdminPolicy`, `SpeAdminPolicy`, `RagApiKeyCredential`, `RegistrationApproverRole`; the RAG file split into its two groups). New pin `EveryAdminOnlyRouteCarriesItsGroupsMechanism` fails on a route listed under a mechanism its chain does not carry, on an unknown mechanism and on a route listed twice. The ledger accepts admin credit only when the route's group mechanism is in `SweepAdminPolicies` = {SystemAdmin, SPE admin filter} AND the route carries it; the RAG machine credential and the registration approver role stay admin credit for their own routes but resolve no sweep finding. Control `SweepLedger_AdminPolicy_NegativeControl_OnlyAnAdminPolicyGroupResolves`. Seeded on real source with S-47 (f2-8). | `RouteAuthorizationGuardTests.cs` `LedgerViolations`, `AdminOnlyMechanismViolations`; Ledger `AdminOnlyRoutes` |
+| 1c | Round 34 item 7 — `/healthz/catalog`: memoize its `HealthCheckResult` for 30 s, one result shared across callers, a fault cached no longer than the same 30 s, in addition to the `health-probe` rate limit, tested with a fake `TimeProvider` | **Closed** (§18.3). New `Infrastructure/HealthChecks/MemoizedHealthCheck.cs`: an `IHealthCheck` decorator with a per-registration `State` (single flight: concurrent callers share ONE in-flight evaluation; the result — or a fault, mapped to the registration's failure status with its exception — is shared until 30 s after it was produced, then re-evaluated). `CatalogHealthChecks.AddCatalogCheck<T>` registers a check as a catalog check (adds the `catalog` tag) and memoized; both catalog checks (`ai-catalog-reconciliation`, `compose-identity-key`) now use it. The rate limit is unchanged. `CatalogHealthMemoContractTests` (8): the window (shared to 30 s − 1 tick, refreshed at 30 s), single flight (25 parallel callers → 1 evaluation), a fault shared for the window and no longer, an Unhealthy result likewise, a caller hanging up does not cancel the shared evaluation, the REAL app over HTTP (5 anonymous `/healthz/catalog` calls → 1 Dataverse key read; +30 s → 2), and a pin that every `catalog`-tagged registration in the real app is memoized (with a control that a plain `AddCheck` is not). All on `FakeTimeProvider`. Seeded (f2-9a/b/c). | `MemoizedHealthCheck.cs`; `RoutingModule.cs`; `ComposeModule.cs`; `EndpointMappingExtensions.cs`; `tests/integration/contract/Api/CatalogHealthMemoContractTests.cs` |
+| 2, 3, 10 | Verifier's own runs; items 1-2 core; the runtime tests are not tautological | **Verified, not open.** Re-run in full on the f2 state (§18.11). | — |
+| 4, 11 | MEDIUM fail-open — a received-group continuation credited although the CALL passing the group is conditional | **Closed.** A run that opens a method RECEIVING the group is now credited only when EVERY call site that binds the group sits in an unconditional run itself — directly after the group's declaration, or (recursively, through any number of helpers) in the opening run of a method that received it. Otherwise a scanner problem names the conditional call and nothing is credited. Runs now also contain the call statements that pass the group on (`Helper(docs);`, `Type.Helper(docs);`, `docs.Helper();`), so an unconditional helper call keeps working. Control `GroupContinuation_NegativeControl_AReceivedGroupIsCreditedOnlyThroughUnconditionalCalls` (the verifier's seed, braced if, after an unrelated statement, in a lambda, extension form, inner-conditional and outer-conditional two-helper chains, the sign-in variant; the no-call control; five positives). Seeded on real source — the verifier's exact seed, its sign-in variant, its no-call control, and the unconditional positive (f2-1). | `RouteAuthorizationGuardTests.Scanner.cs` `RunsOf`, `CollectConditionalBindings`, `ArgumentFor` |
+| 5, 12(i) | MEDIUM — a conditional or dead `RequireAuthenticatedUser()` inside `AddPolicy` proved sign-in | **Closed.** `PolicyBuilderRequiresAuthenticatedUser`: the call must be in the unbroken opening run of the builder lambda's block (each statement `p.Chain(...);`, `p.Member = ...;` or `p.Requirements.Add(...);`), or be in the expression body's chain on the parameter. An `if`, loop, `return`, lambda or unrelated statement before it, a nested lambda, a ternary, a policy object, or any `.Requirements` edit other than `Add` proves nothing. The `DefaultPolicy` / `FallbackPolicy` right-hand side must be ONE `new AuthorizationPolicyBuilder(...)…​.Build()` chain containing the call (`BuiltPolicyRequiresAuthenticatedUser`). Control `SignInVerdict_NegativeControl_ConditionalCallsAndAliasesAreNotSignIn` (9 negative bodies incl. the verifier's seed; 6 positive real shapes). Seeded on real source — the verifier's exact seed (f2-2). | `RouteAuthorizationGuardTests.cs` "SIGN-IN IS VERIFIED" |
+| 6, 12(ii) | MEDIUM/LOW — an aliased re-registration through an unresolvable name evaded "registered exactly once" | **Closed, both ways the verifier offered.** (1) Same-file `const string` names and `Type.X` constants of BFF + shared types now RESOLVE, so `AddPolicy(AdminAlias, …)` with `AdminAlias = "SystemAdmin"` is a SECOND registration → ambiguous → not sign-in. (2) Any `AddPolicy` name still unresolvable (concatenation, `nameof`, interpolation, variable, unknown member) is recorded in `PolicyCatalog.Unresolved` and fails EVERY named verdict closed (bare `RequireAuthorization()` is unaffected — no `AddPolicy` can alias the default policy); `EveryRequireAuthorizationForm…` also asserts the set is empty. And every `AddPolicy` outside the rate limiter's and CORS's own registration calls is now catalogued — an `AddAuthorizationBuilder().AddPolicy(...)` or `Configure<AuthorizationOptions>` re-registration was as invisible as the alias. Seeded on real source — the verifier's alias seed and a concatenated name (f2-3, f2-3b). | same |
+| 7, 14 | LOW — the health-probe pin read literals only | **Closed.** `HealthProbePolicyViolations` now fails on ANY `RequireRateLimiting(...)` on a live route whose argument is not a plain string literal ("unreadable rate-limit policy"); every one in use today is a literal. Control cases in `AnonymousSurfaceAndProbePolicy_NegativeControl_PinsBite` (concatenation, constant, interpolated, verbatim, member; literal positive). Seeded on real source — the verifier's exact seed on `/healthz/dataverse` (f2-4). | `RouteAuthorizationGuardTests.cs` `HealthProbePolicyViolations` |
+| 8, 13 | LOW-MEDIUM — FallbackPolicy consequences missed: three tests still proved presence anonymously; ANTI-PATTERNS row 17 | **Closed, and made durable** (§18.5). The verifier's three plus TWO more the f1 grep also missed (`HandlerEndpointsTests.GetHandler_EndpointExists_AcceptsGet`, `PlaybookRunEndpointsTests.StreamRunStatus_EndpointExists_AcceptsGet` — anonymous "not 405") now prove presence with the endpoint table and/or a signed-in request; each was shown to FAIL with its route renamed (f2-5r). `ANTI-PATTERNS.md` row 17 corrected; a repo-root runbook (`notes/deploy-bff-api-log.md`) that read "401 confirms the endpoint is registered" — for a route that no longer exists — corrected. New build rule `NoTestProvesRoutePresenceWithAnAnonymousRequest` (+ control) fails on any test that asserts not-404 / not-405 / `!= NotFound`, or is NAMED as a presence proof and asserts an anonymous 401, with no signed-in request and no endpoint-table read; reverting the five tests to their f1 text makes it name exactly those five (f2-5b). | the five test files; `Spe.Integration.Tests.csproj` (links `EndpointTable.cs`); `docs/standards/ANTI-PATTERNS.md`; `notes/deploy-bff-api-log.md`; guard "NO TEST PROVES A ROUTE EXISTS…" |
+| 9 | LOW (backstopped) — the build pin passed a CONDITIONAL fallback application | **Closed.** `AppliedUnconditionally`: the assignment must be a statement of the unbroken opening run of an `AddAuthorization(o => …)` lambda (or its expression body), or a statement of the opening run of a helper whose CALL is such a statement. Control cases added to `FallbackPolicy_NegativeControl_EachUnsafeShapeFails` (brace-less if, braced if, after an early return, inside a never-invoked lambda, a non-call statement, a conditional assignment inline and in the helper; positives incl. the real shape with its guard clause, a qualified call and an expression-bodied lambda). Seeded on real source — the verifier's exact seed (f2-6): the build half now fails on its own. | `RouteAuthorizationGuardTests.cs` `FallbackPolicyViolations` |
+
+### 18.2 Retired sweep routes — the rule, and what the main session records at integration
+
+Tasks 159, 160, 163 and 164 DELETED routes under owner round 10 item 1. On this branch every sweep key still exists (the
+deletions are on `integ/uac-r2-batch4`), so the rule is proven by controls, by real-source seeds (f2-7) and by running it
+against the deleting tasks' own tests (exported read-only from `integ/uac-r2-batch4`; a temporary, uncommitted test fed
+each file to the rule): **all 31 route/proof pairs below pass, and the surviving-sibling test is refused.** At
+integration, for each entry: delete the waiver, set `ResolvedBy` to the task, and `ProofTest` exactly as below.
+
+| Sweep | Route key | ResolvedBy | ProofTest |
+|---|---|---|---|
+| S-15, S-14, S-11, S-37 | `PUT /api/v1/events/{id:guid}`, `DELETE /api/v1/events/{id:guid}`, `POST /api/v1/events/{id:guid}/cancel`, `GET /api/v1/events/{id:guid}/logs` | 159 | `tests/integration/contract/Api/Events/EventEndpointsAuthorizationContractTests.cs::DeletedRoutes_AreNotMapped_AndReachNothing` |
+| S-09 | `POST /api/dataverse/fetch` | 160 | `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/DataverseProxyRoutesRemovedTests.cs::PostFetch_IsNotMapped_ForAnAuthenticatedCallerWithReadOnEveryEntity` |
+| S-10 | `GET /api/dataverse/record/{entityLogicalName}/{id:guid}` | 160 | `…/DataverseProxyRoutesRemovedTests.cs::GetRecord_IsNotMapped_ForAnAuthenticatedCallerWithReadOnEveryEntity` |
+| S-03, S-06 (batch), S-26, S-27, S-28, S-30 (source), S-20, S-21, S-49 | the nine `/api/ai/rag/index/batch`, `/api/ai/rag/source/{sourceDocumentId}`, `/api/ai/knowledge/…` and `/api/admin/knowledge/index-reference(s)…` keys | 163 | `tests/integration/regression/KnowledgeAndRagRouteRetirementTests.cs::RetiredRoutes_AreAbsentFromTheEndpointTable` |
+| S-31, S-32, S-54, S-55 (by-name), S-56 ×2, S-57 ×4 | the six `/api/ai/prompts…` keys, `GET /api/ai/playbooks/by-name/{name}`, `PUT /api/ai/playbooks/{id:guid}/nodes/reorder`, `POST /api/ai/document-intelligence/match-records`, `…/associate-record` | 164 | `tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs::RetiredRoutes_AreAbsentFromTheEndpointTable` |
+
+Round 36 item 1's new `PUT /api/v1/events/{id}/regarding` (task 147) is a different shape from the deleted
+`PUT /api/v1/events/{id:guid}` (one more segment), so S-15 is NOT a re-key, and 159's `InlineData("PUT", "/api/v1/events/{id}")`
+does not match the new route. The rule's limit, stated: it binds the retired verb and path and an absence assertion to the
+same TEST, not row by row, so a test that pins route X's absence and sends route Y as a positive control in the SAME method
+would be accepted as Y's proof — the real proofs keep their positive controls in separate methods (checked).
+
+### 18.3 `/healthz/catalog` memo — design
+
+- **Where**: a decorator around each catalog check, registered by `CatalogHealthChecks.AddCatalogCheck<T>` (in the same
+  file). The `State` is created once per registration and captured by the registration's factory, so it lives as long as
+  the host; the health-check service builds a new `MemoizedHealthCheck` per probe that shares it. The inner check is
+  resolved exactly as `AddCheck<T>` resolves it (the `ComposeIdentityKeyHealthCheck` singleton; a fresh
+  `RoutingConsumerTypeHealthCheck`), inside a DI scope the evaluation OWNS — so a probe that hangs up neither cancels the
+  shared evaluation (it runs on `CancellationToken.None`) nor disposes services the other waiters depend on.
+- **Faults**: a throwing check becomes the registration's failure status with the exception, shared for the window like
+  any result — a caller cannot defeat the memo by provoking faults — and re-evaluated after it.
+- **Freshness**: a `/healthz/catalog` answer can be up to 30 s old (stated at the route and on the class). No deploy
+  workflow, script or control-plane handler polls `/healthz/catalog` (grep over `.github/`, `scripts/`, `infrastructure/`,
+  `src/`); the startup log surfaces (`IHostedService.StartAsync`) are unchanged.
+- **Bound achieved**: per instance, at most one evaluation of each check per 30 s, whatever the request rate or the
+  number of addresses — the 360-480 Dataverse requests/minute per address of §17.9 become ≤ 2 evaluations per 30 s.
+- **ADR-009**: an in-process memo of a DIAGNOSTIC result about catalog and schema metadata — ADR-009 "Allowed L1
+  Exceptions: Metadata, ≤ 15 min, document in code", documented on the class (path C: comply through the ADR's own
+  allowance; no `IMemoryCache`; the type is not a `*Cache`, so `ADR009_CachingTests` is not engaged). Not Redis: an in-flight
+  evaluation cannot be shared through a distributed cache, a `HealthCheckResult` with its exception does not round-trip,
+  and the probe must not start depending on Redis. **ADR-010**: no DI registration added (an `AddCheck<T>` became an `Add`
+  of a `HealthCheckRegistration`); both types are `internal` and concrete (tests reach them through the existing
+  `InternalsVisibleTo`).
+
+### 18.4 Admin credit for sweep entries — what siblings must do
+
+`AdminOnlyGroup` gained a `Mechanism` argument: `new AdminOnlyGroup("Api/…cs", SystemAdminPolicy, "reason ≥ 60 chars",
+new[] { … })`. **For the main session at integration**: any sibling that added an `AdminOnlyGroup` (or will — task 165
+plans to gate `/api/admin/record-matching/*`, S-47/48/77) passes the mechanism; a sweep entry resolved by admin gating sits
+in a `SystemAdminPolicy` or `SpeAdminPolicy` group, its waiver deleted, `ResolvedBy` + `ProofTest` set. The f2-8 positive
+seed is exactly that shape for S-47 and turns the guard green.
+
+### 18.5 Every reader of "anonymous 401 = registered" — completed, then enforced
+
+| Artifact | Was | Now |
+|---|---|---|
+| `DocumentVersionAuthorizationTests.SurvivingVersionRoute_WithoutBearer_Returns401NotFound` (the positive control for the file's absence 404s) | anonymous `NotBe(404)` | `SurvivingVersionRoutes_AreMapped_AndASignedInCallerIsAnsweredNot404`: a SIGNED-IN caller with no rights gets 403 (routed), both surviving templates are in the endpoint table, no version read |
+| `ScopePersonasEndpointTests.GetPersonas_EndpointExists_AcceptsGet` | anonymous `NotBe(404)` / `NotBe(405)` | `EndpointTable.AssertMapped`, then the same asserts with a bearer |
+| `ReportingEndpointTests.AllReportingEndpoints_AreRegistered_NotReturning404ForRouting` (Spe, runs) | anonymous `NotBe(404)` | `AllReportingEndpoints_AreRegistered_InTheEndpointTable` — a signed-in request cannot prove it either here (the disabled module's filter answers 404 for a registered route); `EndpointTable` is linked into `Spe.Integration.Tests` (not copied; not moved into `..\Shared`, which the control-plane load tests also compile); two negative rows |
+| `HandlerEndpointsTests.GetHandler_EndpointExists_AcceptsGet` *(found in f2)* | anonymous `NotBe(405)` | + `EndpointTable.AssertMapped` |
+| `PlaybookRunEndpointsTests.StreamRunStatus_EndpointExists_AcceptsGet` *(found in f2)* | anonymous `NotBe(405)` | + `EndpointTable.AssertMapped` |
+| `docs/standards/ANTI-PATTERNS.md` row 17 | "expect 401, not 404, for auth-protected routes" | verify WITH a bearer (anything but 404 = registered); an anonymous 401 proves only that authentication is enforced |
+| `notes/deploy-bff-api-log.md` (repo-root runbook) *(found in f2)* | "401 … confirms endpoint is registered" for `/api/ai/capabilities/refresh` | the route no longer exists; prove registration with a bearer |
+| stale comments: `DocumentIntelligenceEnqueueEndpointsTests` (×4), Spe `EventEndpointsTests` (×2), `FieldMappingEndpointsTests` (×2) | "401 means the endpoint exists" over a test that is (now) table- or bearer-backed | corrected |
+
+Reviewed and NOT changed (none claims presence): tests that assert an anonymous 401 to prove authentication is required
+(`*_WithoutAuth_*`, `*_ReturnProblemDetails_ForUnauthorized`, `RagSendToIndex…Unauthenticated_IsRejected…`); every other
+`NotBe(404)` in `tests/**` uses a signed-in client (checked one by one: the Api/Ai `*_WithAuth_*` tests, the Insights /
+Summarize / ChatAck contract tests, and the Spe Event / FieldMapping / ExternalAccess / Phase2 / System tests, whose
+`_httpClient` is `CreateHttpClient()` = signed in). `.claude/skills/bff-deploy/SKILL.md` keeps its §17.8 text (unchanged).
+
+**The build rule** (`NoTestProvesRoutePresenceWithAnAnonymousRequest`) scans every `tests/**/*.cs` method: a presence
+assertion (not-404, not-405, `!= NotFound`) — or a name claiming presence (`…StillRouted…`, `…IsRegistered…`,
+`…EndpointExists…`) with an asserted 401 — must come with a signed-in request or an endpoint-table read in the method,
+or a client the method or the class SETUP (constructor, field initializers) builds or signs in. A header another test
+method sets on a shared field does not count (xUnit builds an instance per test) — a false negative the f2-5 seed exposed
+and the rule now refuses. **For the main session at integration**: two tests on `integ/uac-r2-batch4` have the
+presence-by-anonymous-401 shape and WILL fail this rule when 167 merges — by design, they are vacuous under the
+FallbackPolicy: `tests/integration/regression/KnowledgeAndRagRouteRetirementTests.cs` and
+`tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs`, method
+`SurvivingSiblings_AreStillRouted_401WithoutABearer` in each. Exact replacement for each (keep its `[Theory]` /
+`[InlineData]` rows; `EndpointTable` is `Sprk.Bff.Api.Tests.EndpointTable`, the same namespace as these files):
+
+```csharp
+    public void SurvivingSiblings_AreStillMapped(string verb, string path)
+    {
+        // The positive control for the 404s above. An ANONYMOUS 401 no longer proves a route exists: the BFF's
+        // authorization FallbackPolicy (UAC-r2 task 167) answers 401 for a request that matches no route too.
+        // The endpoint table is the evidence that a surviving sibling is still routed.
+        EndpointTable.AssertMapped(_factory, verb, path);
+    }
+```
+
+### 18.6 Seeding proofs (f2) — each on REAL source or the real data file, run, captured, restored with `git checkout` and touched
+
+| # | Rule | Seeded | Result |
+|---|---|---|---|
+| f2-1 | Item 4 — the verifier's exact seed | `Api/DocumentVersionEndpoints.cs`: both `.AddDocumentAuthorizationFilter("read")` removed; `if (DateTime.UtcNow.Year < 0) SecureRead(docs);` after the `MapGroup`; `private static void SecureRead(RouteGroupBuilder g) { g.AddDocumentAuthorizationFilter("read"); }` | **1 failed / 67**: `EveryRouteDeclaresHowItIsAuthorized` — "…:268: 'g.AddDocumentAuthorizationFilter()' opens SecureRead, which RECEIVES the group, but not every call that passes the group in runs unconditionally… :101: the call passing 'docs' to SecureRead is not in the unbroken run…". (f1: 61/61 green.) **Control** (filters removed, no call): 1 failed, Rule A names both version routes "only signed-in". **Positive** (unconditional `SecureRead(docs);`): **68/68 green** — the helper's filter credits both routes. **Sign-in variant** (`if (…) Secure(docs);`, `group.RequireAuthorization();` in the helper, no group authorization): **2 failed** — the scanner problem and `NoRouteIsAnonymousByOmission`. |
+| f2-2 | Item 5 — the verifier's exact seed | `AuthorizationModule.cs` SystemAdmin: `if (DateTime.UtcNow.Year < 0) p.RequireAuthenticatedUser();` + `return true \|\| hasAdminRole \|\| hasAdminScope;` | **3 failed**: `EveryRequireAuthorizationForm…` — 'RequireAuthorization("SystemAdmin"): none of the policies "SystemAdmin" calls RequireAuthenticatedUser()…'; `NoRouteIsAnonymousByOmission` names the 8 SystemAdmin-only jobs/membership routes; the r2 control that runs on the real catalog. (f1: ArchTests 392/392 green.) |
+| f2-3 | Item 6 — the verifier's alias seed | `private const string AdminAlias = "SystemAdmin";` + `options.AddPolicy(AdminAlias, p => p.RequireAssertion(_ => true));` after SystemAdmin | **3 failed**: "policy 'SystemAdmin' is registered 2 times (AuthorizationModule.cs:368, :385)" + the 8 routes. (f1: 61/61 green.) |
+| f2-3b | Item 6 — an unresolvable name | `options.AddPolicy("System" + "Admin", p => p.RequireAssertion(_ => true));` | **3 failed**: every named form unproven — 'an AddPolicy registration has a name the guard cannot resolve (<unresolved "System" + "Admin"> at AuthorizationModule.cs:383)…' |
+| f2-4 | Item 7 — the verifier's exact seed | `/healthz/dataverse` → `.RequireRateLimiting("health-" + "probe")` | **1 failed**: `TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes` — "unreadable rate-limit policy: GET /healthz/dataverse at EndpointMappingExtensions.cs:92 — RequireRateLimiting("health-" + "probe") is not a plain string literal…". (f1: green.) |
+| f2-5 | Item 8 — a vacuous presence test comes back | `HandlerEndpointsTests.cs`: the new `EndpointTable.AssertMapped` line removed | First run: **green — a false negative of the new rule** (another test in the file sets the header on the shared `_client`). Rule fixed (class setup only); re-run: **1 failed** naming exactly `HandlerEndpointsTests.cs:159 GetHandler_EndpointExists_AcceptsGet`. |
+| f2-5b | Item 8 — the five tests at their f1 text | `git checkout HEAD~1 --` on the five test files | **1 failed**, naming exactly the five: Reporting `:758`, DocumentVersion `:218`, Handler `:159`, PlaybookRun `:175`, ScopePersonas `:48`. |
+| f2-5r | Item 8 — the fixed tests bite | five routes renamed in `src/` (`/personas`, `/{handlerId}`, `/{runId:guid}/stream`, `/{documentId}/versions`, reporting `/status`), BFF + both test projects rebuilt | **5 failed / 5**: four in the BFF unit assembly ("…must be a registered route…"; DocumentVersion: "Expected … Forbidden … found 404") and the Spe reporting test. (f1: each of the three verifier tests PASSED with its route renamed.) |
+| f2-6 | Item 9 — the verifier's exact seed | `if (DateTime.UtcNow.Year < 0) ApplyFallbackPolicy(options);` | **1 failed**: `TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser` — "…assigned in ApplyFallbackPolicy, but nothing applies it UNCONDITIONALLY inside AddAuthorization(...)…". (f1: green; only the runtime test caught it.) |
+| f2-7 | Round 34 item 4 | `PUT /api/v1/events/{id:guid}` deleted from `EventEndpoints.cs`, its waiver deleted, S-15 `ResolvedBy = "159"`, ProofTest = a seeded test file with `[InlineData("PUT", "/api/v1/events/{id}")]` + `BeOneOf(NotFound, MethodNotAllowed)` | **68/68 green.** Variant: ProofTest = a real absence test of a DIFFERENT route (`OboDriveKeyedRouteRetirementTests…RetiredOboPatchItemRoute…`) → **1 failed**: "the route is deleted, but ProofTest … does not pin its ABSENCE — it names no request or table row pairing PUT with a path …". Variant: no `ResolvedBy` → **2 failed**: "the route key is not on this branch … A DELETED route resolves only with ResolvedBy … and a ProofTest that pins its ABSENCE" (+ the original sweep-waiver control, which runs over unresolved entries). |
+| f2-8 | Round 34 item 5 | S-47 `POST /api/admin/record-matching/sync` gated `.RequireAuthorization("SystemAdmin")`, waiver deleted, `ResolvedBy = "165"`, listed in a new `SystemAdminPolicy` group | **68/68 green** (before f2: refused — not `/api/spe/`). Listed under `SpeAdminPolicy` instead → **2 failed**: the mechanism pin ("…is in the … group gated by AddSpeAdminAuthorizationFilter, but its chain carries [RequireAuthorization("SystemAdmin"), …]") and the ledger ("its AdminOnlyRoutes group is gated by AddSpeAdminAuthorizationFilter, which the route does not carry"). Gated by the RAG key in a `RagApiKeyCredential` group → **2 failed**: the ledger ("…mechanism is RequireAuthorization(AuthPolicies.RagApiKey), which is not an admin policy for a sweep entry") and the RAG-group pin. Gated by SystemAdmin but not listed → **3 failed**: the ledger ("it is not in AdminOnlyRoutes"), `TheSetOfAdminOnlyRoutesIsPinned` ("added"), and the admin control that diffs the real set. |
+| f2-9 | Round 34 item 7 | (a) `compose-identity-key` back on `AddCheck<T>` with the `catalog` tag; (b) the memo never holds a completed result; (c) no single flight (a new evaluation while one is running) | (a) **2 failed / 8**: the HTTP test ("five anonymous probes inside 30 s cost ONE Dataverse read … but found 5") and the registration pin. (b) **4 failed**: the HTTP test, the window, the fault and the Unhealthy tests. (c) **2 failed**: single flight ("… but found 25") and the hang-up test ("… found 2"). |
+
+After the last restore `git status` was clean. The inline-fixture controls listed in §18.1 run on every build.
+
+### 18.7 Placement and justification (CLAUDE.md §10 / §11)
+
+New BFF surface, with the three questions:
+
+- **`MemoizedHealthCheck` + `CatalogHealthChecks.AddCatalogCheck<T>`** (`Infrastructure/HealthChecks/MemoizedHealthCheck.cs`,
+  both `internal`). *Existing*: `IEndpointResponseCache` (an `IMemoryCache` response cache keyed by string — system clock,
+  no in-flight sharing, and ADR-009's path-A exception is scoped to it by exact name); `TopicRegistryTtlLookup` (a
+  domain-specific registry cache); the two health checks themselves (a memo in each would duplicate the logic, and
+  `RoutingConsumerTypeHealthCheck` is rebuilt per probe, so it could not hold one without becoming a singleton first).
+  Grep found no health-check decorator or single-flight helper in `src/`. *Extension*: it extends the framework's own
+  `HealthCheckRegistration` (a decorator applied at registration) rather than changing either check or adding a DI
+  service. *Cost of doing nothing*: one anonymous address drives ~360-480 Dataverse requests a minute through the BFF's
+  identity (a quarter to a third of the per-identity service-protection budget); a handful throttle every user. Decided
+  by main-session round 34 item 7. Placement: the BFF — it is the BFF's own probe of its own dependencies (§10 criteria:
+  nothing to place elsewhere).
+- No new endpoint, service type registered in DI, option, job, column, package, PCF or plugin (ADR-002). The DI
+  registration count is unchanged. Fail closed (ADR-003): every guard rule added fails CLOSED; the memo reports a fault as a
+  failure (never masks it as healthy).
+- New test file `tests/integration/contract/Api/CatalogHealthMemoContractTests.cs` (contract KEEP path). The
+  `Spe.Integration.Tests.csproj` LINKS the existing `EndpointTable.cs` (one definition, two suites). ADR-038 bans: none
+  (no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor null-check test; `FakeTimeProvider`, no `Task.Delay`, no
+  `Stopwatch`; `Mock<IDataverseService>` only to let the production key probe reach its overridden fetch seam, as its own
+  contract tests do).
+- **Publish size** (CLAUDE.md §10 item 4, measured): fresh source exports (`git archive` of `src/server`, `config/` and the root build files) of the base `263024620`
+  and of this branch's last `src/` commit `265a178d6` to short paths (`C:\w167f2b`, `C:\w167f2h`), `dotnet publish -c Release`
+  from the project directory, zipped with PowerShell `Compress-Archive` over `deploy\api-publish\*` (the `Deploy-BffApi.ps1`
+  method), PDBs included: base **45.65 MB** (47,870,406 bytes, 212 files, 4 PDBs) vs branch **45.65 MB** (47,872,621 bytes,
+  212 files, 4 PDBs) = **+2,215 bytes**. Equal file counts on both sides.
+- **CVE**: no package reference changed (no `.csproj` package or `Directory.Packages.props` edit; the only `.csproj` change
+  is a `Compile Include` link in a TEST project), so the vulnerable-package set is unchanged.
+
+### 18.8 `src/` files changed in f2
+
+`Infrastructure/HealthChecks/MemoizedHealthCheck.cs` (new), `Infrastructure/DI/RoutingModule.cs` and
+`Infrastructure/DI/ComposeModule.cs` (`AddCheck<T>` → `AddCatalogCheck<T>`, the `catalog` tag now added by the helper),
+`Infrastructure/DI/EndpointMappingExtensions.cs` (the two predicates use `CatalogHealthChecks.Tag`; the route comment states
+the memo and its freshness cost). None is a parallel-unsafe zone of this project.
+
+### 18.9 /conflict-check (round f2)
+
+Open PRs: **24 checked, none** touches a file this round edits. `integ/uac-r2-batch4` edits `EndpointMappingExtensions.cs`
+in other regions (163's knowledge-route removal, 164's route retirements): a textual merge. Integration notes for the
+main session are §18.2 (ledger rows), §18.4 (`AdminOnlyGroup` mechanism argument) and §18.5 (the two
+`SurvivingSiblings_AreStillRouted_401WithoutABearer` tests).
+
+### 18.10 Step 9.5 quality gates (FULL — `src/`, `tests/**`, auth)
+
+**Code review** (coverage-first; none Critical):
+- *Warning (medium)* — `AbsencePinProblem` binds verb + path + absence assertion per TEST, not per row (§18.2 limit);
+  the real proofs keep positive controls in separate methods.
+- *Warning (low)* — `/healthz/catalog` answers can be 30 s stale; stated at the route and on the class; no poller reads it.
+- *Suggestion* — `NoTestProvesRoutePresenceWithAnAnonymousRequest` recognises presence CLAIMS in the 401 shape by test
+  name; a presence claim written only in a failure message is caught in the not-404 shape but not in the 401 shape.
+- *Suggestion* — `ClassSetupCodeOf` treats all non-method code of a file as setup (a nested helper class's field of the
+  same name could lend evidence); none exists today.
+- *Suggestion* — `ResolveRegistrationName` resolves `Type.X` only for `const string` fields (not `static readonly`); an
+  unresolved name fails closed, so the gap only costs a false failure.
+- Complexity (CLAUDE.md §11.5): the guard's rules file grows by ~1,340 net lines in four cohesive sections (retired-route
+  proofs, admin mechanism, presence rule, policy-lambda proof) plus their controls; the scanner by ~250 (runs, binding
+  check, plain-statement runs). The memo is one 166-line file with one reason to change.
+- ADR-038 bans: none in anything added. AI-smell scan: no single-implementation interface, no log-and-rethrow, no null
+  check on a non-nullable (the f2 memo's constructor and extension take none).
+
+**ADR check**: ADR-003 ✓ (every rule fails closed; a fault is a failure) · ADR-008 ✓ (authorization still on endpoint
+metadata + filters; no new mechanism) · ADR-009 ✓ (metadata L1 exception documented in code — §18.3; path C) · ADR-010 ✓
+(no DI registration added; concrete internal types) · ADR-019/016 n/a (no new error surface) · ADR-038 ✓ (KEEP paths;
+controls on every rule; `FakeTimeProvider`) · ADR-002 ✓ (no plugin). No violation; no §6.5 escalation needed.
+
+### 18.11 Test runs (round f2, final state)
+
+| Suite | Result |
+|---|---|
+| Affected: `RouteAuthorizationGuardTests` | **68 / 68 passed** (61 + 7 new: `SignInVerdict_NegativeControl_ConditionalCallsAndAliasesAreNotSignIn`, `GroupContinuation_NegativeControl_AReceivedGroupIsCreditedOnlyThroughUnconditionalCalls`, `EveryAdminOnlyRouteCarriesItsGroupsMechanism`, `SweepLedger_RetiredRoutes_NegativeControl_OnlyAPinnedAbsenceResolves`, `SweepLedger_AdminPolicy_NegativeControl_OnlyAnAdminPolicyGroupResolves`, `NoTestProvesRoutePresenceWithAnAnonymousRequest`, `AnonymousPresenceProof_NegativeControl_OnlySignedInOrTableEvidenceCounts`) |
+| Affected unit / contract / auth tests (`CatalogHealthMemoContractTests` (new, 8), `ScopePersonasEndpointTests`, `HandlerEndpointsTests`, `PlaybookRunEndpointsTests`, `DocumentVersionAuthorizationTests`, `DocumentIntelligenceEnqueueEndpointsTests`, `AuthorizationFallbackPolicyTests`, `ComposeIdentityKeyHealthCheck*`, `HealthProbeRateLimitContractTests`, `RoutingConsumerTypeHealthCheck*`) | **120 passed, 6 pre-existing skips** of 126 |
+| Spe `ReportingEndpointTests` (affected) | **29 / 29 passed** |
+| `tests/Spaarke.ArchTests` (NetArchTest, full) | **399 / 399 passed**, 0 skipped (2 m 33 s) |
+| `Sprk.Bff.Api.IntegrationTests` (full) | **104 / 104 passed** (19 s) |
+| `Spe.Integration.Tests` (full) | **403 passed, 25 skipped, 0 failed** of 428 (7 m 34 s) — the 25 are the suite's own live-environment skips. *(A first full run showed 7 Reporting failures: its test DLL was still the build from seed f2-5r, which renamed `/api/reporting/status`; rebuilt from the restored source, the run above is clean. Recorded, not hidden.)* |
+| `Sprk.Bff.Api.Tests` (BFF unit, full, TRX) | **14,170 passed, 59 failed, 54 skipped** of 14,283 (34 m 51 s; 14,275 at f1 + the 8 new memo tests). All 59 are `TaskCanceledException` after 2 m 15 s – 6 m 07 s — the client-timeout contention signature of §12/§15.6/§16.6/§17.11 (66 dotnet/testhost processes on the machine during the run); none is an assertion (one, the Compose fidelity-gate harness, reports the cancellation as its failure reason). **Isolated re-run of those 59 methods (120 cases with the theories' parameters): 120 / 120 passed** (2 m 29 s). |
+
+Test scope beyond the listed behaviours: none. ADR-038 bans hold in everything added. No test calls Dataverse or Azure; the
+publish-size measurement was a local build.
+
+### 18.12 `.claude/` edits for the main session
+
+None new in f2. §17.8's `bff-deploy` skill text still stands (verify route registration with a bearer).

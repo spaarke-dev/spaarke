@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7).</parallel-reason>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9).</parallel-reason>
     <deps>none</deps>
     <tags>testing, security, auth, archtest, bff-api</tags>
     <estimated-effort>2-3 days</estimated-effort>
@@ -987,6 +987,59 @@ The route counts in the background come from a Python approximation of the scann
       PUBLISH SIZE: base 45.65 MB vs branch 45.65 MB (+398 bytes), Compress-Archive, 212 files each, PDBs included. No
       package change (CVE set unchanged).
     </outcome>
+    <outcome date="2026-10-04" branch="task/uac-r2-167-f2" base="263024620" result="completed; nothing open" round="fix f2 (main-session round 34 items 4, 5, 7 + the f1 verifier's items 4-14)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 18.
+      ROUND 34 ITEM 4 (closed): a sweep entry whose route key is absent passes only with ResolvedBy, no waiver, no live
+      re-keyed twin (same verb and path, only a parameter name or constraint changed), and a ProofTest whose scope pairs the
+      retired verb with a path the template matches and asserts absence (404/405 or an empty endpoint-table answer); any
+      other absent key still fails. All 31 absence proofs written by 159, 160, 163 and 164 on integ/uac-r2-batch4 pass the
+      rule (checked read-only); the ResolvedBy/ProofTest rows the main session records at integration are in note 18.2.
+      ROUND 34 ITEM 5 (closed): each AdminOnlyRoutes group declares its admin mechanism; a pin fails on a route listed without
+      it; admin credit resolves a sweep entry only in a SystemAdmin or SPE-admin group the route really carries (no longer
+      /api/spe/ only); the RAG key and the registration approver role resolve no sweep finding.
+      ROUND 34 ITEM 7 (closed): every /healthz/catalog check is registered through CatalogHealthChecks.AddCatalogCheck - one
+      evaluation per 30 s shared by every caller, single flight, a fault shared for no longer than the window, its own DI
+      scope, CancellationToken.None; the health-probe rate limit unchanged. CatalogHealthMemoContractTests (8, FakeTimeProvider,
+      incl. the real app over HTTP and a pin that every catalog-tagged registration is memoized).
+      VERIFIER ITEMS 4/11 (closed): a received-group continuation is credited only when every call binding the group is itself
+      in an unconditional run (recursively); otherwise a scanner problem. 5/12 (closed): RequireAuthenticatedUser must be in the
+      unbroken opening run of the policy lambda (or its expression chain); DefaultPolicy/FallbackPolicy right-hand sides must be
+      one builder chain. 6/12 (closed): same-file and Type.X const names resolve; any unresolvable AddPolicy name fails every
+      named verdict closed; AddPolicy outside AddAuthorization is catalogued. 7/14 (closed): a non-literal RequireRateLimiting
+      argument fails the probe pin. 8/13 (closed): the verifier's three vacuous presence tests plus two more found in f2 prove
+      presence by the endpoint table or a signed-in request; ANTI-PATTERNS row 17 and a repo-root runbook corrected; new build
+      rule NoTestProvesRoutePresenceWithAnAnonymousRequest refuses the shape (two integ tests will trip it at integration -
+      exact replacement in note 18.5). 9 (closed): the fallback pin requires an unconditional application. 2, 3, 10: verified.
+      SEEDING: f2-1..f2-9 on real source or the real data file, each failing exactly the named rule(s), each restored and
+      touched; f2-5 exposed a false negative in the new presence rule (a header set by another test counted), fixed and re-seeded.
+      TESTS: Guard 68/68; ArchTests 399/399; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed (a first run's 7 Reporting failures came from a test DLL still built from seed f2-5r; rebuilt, clean);
+      BFF unit suite 14170 passed / 59 failed / 54 skipped of 14283, all 59 TaskCanceledException client timeouts under machine
+      contention (66 dotnet processes), those 59 re-run in isolation 120/120 cases passed (note section 18.11).
+      PUBLISH SIZE: base 263024620 45.65 MB (47,870,406 bytes) vs branch 265a178d6 45.65 MB (47,872,621 bytes) = +2,215
+      bytes, Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
+    </outcome>
+    <justification-of-src-change round="f2">
+      Main-session round 34 item 7 (binding). NEW SURFACE: MemoizedHealthCheck (internal sealed IHealthCheck decorator) and
+      CatalogHealthChecks.AddCatalogCheck (internal static registration helper), Infrastructure/HealthChecks/MemoizedHealthCheck.cs.
+      EXISTING: IEndpointResponseCache (IMemoryCache, system clock, no in-flight sharing; ADR-009 path-A exception scoped to it by
+      name), TopicRegistryTtlLookup (domain registry cache), the two health checks (a memo in each duplicates logic, and
+      RoutingConsumerTypeHealthCheck is rebuilt per probe); grep found no health-check decorator or single-flight helper.
+      EXTENSION: a decorator on the framework's HealthCheckRegistration; no change to either check, no DI registration added
+      (AddCheck became Add of a registration; ADR-010). COST OF DOING NOTHING: one anonymous address drives ~360-480 Dataverse
+      requests a minute through the BFF identity on /healthz/catalog (a quarter to a third of the per-identity
+      service-protection budget); a handful throttle every user. ADR-009: metadata L1 exception documented on the class (path C).
+      No new endpoint, option, job, column, package, PCF or Dataverse plugin (ADR-002). Fail closed (ADR-003): a fault is
+      reported as a failure. Publish size measured (note 18.7).
+    </justification-of-src-change>
+    <justification-of-new-files round="f2">
+      tests/integration/contract/Api/CatalogHealthMemoContractTests.cs (contract KEEP path): round 34 item 7 asks for the memo
+      to be tested with a fake TimeProvider; EXISTING: no test exercised a memoized health check; EXTENSION: the
+      ComposeIdentityKeyHealthCheck contract tests cover the check's status ladder, not the route's cost; COST OF DOING
+      NOTHING: the 30 s window, single flight and fault expiry would be pinned only in source. Spe.Integration.Tests.csproj links
+      the EXISTING tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/EndpointTable.cs (no copy) so the Spe reporting test can
+      read registration from the endpoint table.
+    </justification-of-new-files>
     <justification-of-src-change round="f1">
       Owner round 14 items 1-2 (binding). NEW SURFACE: (1) the "health-probe" rate-limit policy. EXISTING: the
       "anonymous" policy (RateLimitingModule.cs, fixed 10/min per IP, 12 anonymous routes). EXTENSION: no - raising
