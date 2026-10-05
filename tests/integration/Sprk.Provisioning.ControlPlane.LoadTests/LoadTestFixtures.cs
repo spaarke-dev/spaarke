@@ -51,10 +51,12 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
 namespace Sprk.Provisioning.ControlPlane.LoadTests;
@@ -90,6 +92,11 @@ public sealed class L2LoadTestFactory : WebApplicationFactory<Program>
         // ReconcilerConcurrencyScenario constructs StateReconcilerService
         // directly with its own composition.
         builder.UseSetting("Reconciler:Enabled", "false");
+        // REG-07 (44c5f2087) registered the Dataverse environment registry client in the Api host; its options
+        // validator requires AdminEnvironmentUrl, and without it every scenario failed at host start. The real
+        // client is replaced below by the ADR-032 null client (lookup returns null → CreateRun logs and proceeds),
+        // so no HTTP call is added to the latency being measured. Same setting as RunsEndpointsTests.
+        builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-loadtest.crm.dynamics.com");
 
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs.
@@ -103,6 +110,9 @@ public sealed class L2LoadTestFactory : WebApplicationFactory<Program>
             ReplaceSingleton<IProvisioningRunRepository>(services, Repository);
             ReplaceSingleton<IHandlerEnqueuer>(services, Enqueuer);
             ReplaceSingleton<ICustomerRunGuard>(services, Guard);
+            ReplaceSingleton<IDataverseEnvironmentRegistryClient>(
+                services,
+                new NullDataverseEnvironmentRegistryClient(NullLogger<NullDataverseEnvironmentRegistryClient>.Instance));
 
             // Test-only auth — same pattern as RunsEndpointsTests.
             services.AddAuthentication()
