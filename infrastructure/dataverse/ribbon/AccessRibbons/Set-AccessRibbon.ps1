@@ -53,7 +53,18 @@
     The unique name of the dedicated ribbon solution holding the three entities (ribbon only). Required for -Apply.
 
 .PARAMETER SecureTransitionDeployed
-    Include Make Secure (see above).
+    Include Make Secure (see above). With -Apply it is CHECKED, not taken on trust (round 46 item 2, batch-4
+    integration): the script reads GET {BffBaseUrl}/api/admin/jobs/secure-child-reconciliation/status (read-only,
+    SystemAdmin) and refuses unless the job is enabled every 2 minutes and its latest completed run settled the
+    pending Make Secure file relocations in WRITE mode (SecureTransitionBackstopCheck.ps1). Requires -BffBaseUrl and
+    -ApiScope.
+
+.PARAMETER BffBaseUrl
+    -Apply -SecureTransitionDeployed only: the target environment's BFF (https://<app>.azurewebsites.net).
+
+.PARAMETER ApiScope
+    -Apply -SecureTransitionDeployed only: the BFF's API scope for `az account get-access-token --scope`
+    (api://<id>/.default). The Azure CLI login must be a user the BFF's SystemAdmin policy admits.
 
 .PARAMETER BeforeList
     -Verify only: the JSON -Apply wrote (before.json). Without it -Verify checks only the Access commands.
@@ -64,7 +75,7 @@
 .EXAMPLE
     pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                   # dry run, checked-in exports
     pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -SolutionName SpaarkeAccessRibbons `
-        -SecureTransitionDeployed -Apply
+        -SecureTransitionDeployed -BffBaseUrl https://<app>.azurewebsites.net -ApiScope api://<id>/.default -Apply
     pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -SecureTransitionDeployed `
         -Verify -BeforeList <WorkDir>/before.json
 #>
@@ -73,6 +84,8 @@ param(
     [string] $EnvironmentUrl,
     [string] $SolutionName,
     [switch] $SecureTransitionDeployed,
+    [string] $BffBaseUrl,
+    [string] $ApiScope,
     [switch] $Apply,
     [switch] $Verify,
     [string] $BeforeList,
@@ -85,6 +98,10 @@ if ($Apply -and $Verify) { throw 'Use -Apply OR -Verify (-Apply runs -Verify its
 if (($Apply -or $Verify) -and -not $EnvironmentUrl) { throw '-EnvironmentUrl is required for -Apply and -Verify.' }
 if ($Apply -and -not $SolutionName) { throw '-SolutionName (the dedicated ribbon solution) is required for -Apply.' }
 if ($Apply -and $SolutionName -eq 'SpaarkeCore') { throw 'Never import a ribbon through SpaarkeCore (ribbon-edit skill).' }
+if ($Apply -and $SecureTransitionDeployed -and (-not $BffBaseUrl -or -not $ApiScope)) {
+    throw '-Apply -SecureTransitionDeployed needs -BffBaseUrl and -ApiScope: Make Secure ships only after its file backstop is checked (round 46 item 2).'
+}
+. (Join-Path $PSScriptRoot 'SecureTransitionBackstopCheck.ps1')
 if ($EnvironmentUrl) { $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/') }
 
 $ribbonRoot = Split-Path -Parent $PSScriptRoot
@@ -252,6 +269,19 @@ if (-not $Apply) {
 }
 
 # -Apply (LIVE WRITE)
+if ($SecureTransitionDeployed) {
+    # Round 46 item 2: Make Secure ships only where its file backstop runs with its writes on. Read-only.
+    $bffToken = & az account get-access-token --scope $ApiScope --query accessToken -o tsv 2>$null
+    if (-not $bffToken) { throw "No token for $ApiScope. Run: az login (as a user the BFF's SystemAdmin policy admits)." }
+    $status = Invoke-RestMethod -Method Get -Uri "$($BffBaseUrl.TrimEnd('/'))/api/admin/jobs/secure-child-reconciliation/status" `
+        -Headers @{ Authorization = "Bearer $bffToken" }
+    $backstop = @(Test-SecureTransitionBackstop -Status $status)
+    if ($backstop.Count -gt 0) {
+        $backstop | ForEach-Object { Write-Host "REFUSED: $_" -ForegroundColor Red }
+        throw 'Make Secure is not shipped: its file backstop is not running with writes on (round 46 item 2). Nothing was written.'
+    }
+    Write-Host 'Make Secure file backstop: secure-child reconciliation enabled every 2 minutes, latest run settled relocations in write mode.' -ForegroundColor Green
+}
 Write-Host "APPLY to $EnvironmentUrl through solution '$SolutionName'. Make Secure: $(if ($SecureTransitionDeployed) { 'INCLUDED' } else { 'withheld' })."
 $token = Get-DvToken
 $beforeByEntity = [ordered] @{}

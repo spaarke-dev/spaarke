@@ -3,6 +3,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -54,6 +56,17 @@ namespace Sprk.Bff.Api.Services.Access;
 /// cursor live in this singleton, so a start (a restart, a deployment, a scale-out) loses them: a new instance therefore
 /// walks every secure record ONCE on its scheduled ticks — the CATCH-UP, the same reconcile, <c>MaxRootsPerRun</c> records
 /// a run — before its watermark alone decides (task 147 r1c). Nothing an earlier instance carried is lost with it.</para>
+/// <para><b>The Make Secure file backstop (round 46 item 2, wired at the batch-4 integration).</b> After the reconcile
+/// passes, each run also settles the PENDING Make Secure relocations through the ONE <see cref="DocumentContainerRelocator"/>
+/// (purpose MakeSecure; the target is each document's own derived container): every document whose relocation ledger
+/// (<c>sprk_relocationpending</c>) still owes a step, and every ISOLATED document (owned by the Secure Record owner team)
+/// whose file still sits in a business unit's shared container — the move a <c>files_incomplete</c> left unmade, which no
+/// ledger entry records because nothing was re-pointed. Both are read from state, so nothing is lost with this instance.
+/// At most <see cref="MaxRelocationsPerRunConfigKey"/> documents a run (default <see cref="DefaultMaxRelocationsPerRun"/>),
+/// in id order after a per-instance cursor so a row that cannot be finished never starves the others. Its writes follow the
+/// recent-changes pass (on unless that pass's emergency stop is set). Reported in <c>ResultJson.makeSecureRelocations</c>;
+/// a document still owing a step makes the run unsuccessful. A row that names no file it can resolve is reported
+/// (<c>unresolvable</c>) and never moved or deleted.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
@@ -90,6 +103,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     internal const string MaxRootsPerRunConfigKey = "SecureChild:Reconciliation:MaxRootsPerRun";
 
     internal const int DefaultMaxRootsPerRun = 50;
+
+    /// <summary>The per-run cap on the Make Secure file backstop (round 46 item 2).</summary>
+    internal const string MaxRelocationsPerRunConfigKey = "SecureChild:Reconciliation:MaxRelocationsPerRun";
+
+    internal const int DefaultMaxRelocationsPerRun = 25;
 
     /// <summary>
     /// Planned / applied row changes listed in <c>ResultJson</c>; <c>changesTotal</c> counts all of them, and the complete
@@ -354,6 +372,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             }
         }
 
+        // Round 46 item 2: the Make Secure file backstop, after the children (each document's container derives from its
+        // now-secure parents). Its writes follow the recent-changes pass.
+        var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
+            .ConfigureAwait(false);
+
         var lastKey = batch.Count > 0 ? batch[^1].Key : null;
         var passComplete = runSweep && start + batch.Count >= roots.Count;
         lock (_cursorGate)
@@ -404,7 +427,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // A recently changed row the pass could not place is reported and makes the run unsuccessful, never silently
         // skipped (task 147, ADR-003). Examples are a row under a record flagged secure but not isolated, or under a
         // missing ancestor.
-        var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0;
+        var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0
+                      && relocations.Failure is null && (relocations.Files?.Incomplete ?? 0) == 0;
         int carriedRoots, carriedRows;
         bool catchUpComplete;
         (string Table, Guid Id)? catchUpResumeAfter;
@@ -438,8 +462,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             Success: success,
             ErrorMessage: success
                 ? null
-                : $"{incompleteRoots.Count} secure record(s) not fully reconciled and {recent.Undetermined.Count} recently " +
-                  "changed related record(s) not placed; the next run revisits them: " + string.Join("; ", problems),
+                : $"{incompleteRoots.Count} secure record(s) not fully reconciled, {recent.Undetermined.Count} recently " +
+                  $"changed related record(s) not placed and {relocations.Files?.Incomplete ?? 0} Make Secure file " +
+                  $"relocation(s) still owed{(relocations.Failure is null ? "" : $" ({relocations.Failure})")}; the next run " +
+                  "revisits them: " + string.Join("; ", problems),
             ProcessedItems: work.Count,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
@@ -509,8 +535,163 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         resumeAfter = catchUpResumeAfter is { } c ? $"{c.Table}:{c.Id:D}" : null,
                     },
                 },
+                // Round 46 item 2: the Make Secure file backstop. `mode` "write" is what Set-AccessRibbon.ps1
+                // -SecureTransitionDeployed requires of the latest run before it ships Make Secure.
+                makeSecureRelocations = new
+                {
+                    mode = relocations.Mode,
+                    ledgerOwing = relocations.LedgerOwing,
+                    stranded = relocations.Stranded,
+                    examined = relocations.Files?.Examined ?? 0,
+                    moved = relocations.Files?.Moved ?? 0,
+                    incomplete = relocations.Files?.Incomplete ?? 0,
+                    unresolvable = relocations.Files?.Unresolvable ?? 0,
+                    counts = relocations.Files?.Counts,
+                    incompleteDocuments = relocations.Files?.IncompleteDocuments,
+                    unresolvableDocuments = relocations.Files?.UnresolvableDocuments,
+                    sourceChangedAfterMove = relocations.Files?.SourceChangedAfterMove ?? 0,
+                    versionsTruncated = relocations.Files?.VersionsTruncated ?? 0,
+                    sourceKeptForOtherRecords = relocations.Files?.SourceKeptForOtherRecords ?? 0,
+                    passComplete = relocations.PassComplete,
+                    failure = relocations.Failure,
+                },
                 attempt = context.Attempt,
             }, ResultJsonOptions));
+    }
+
+    /// <summary>What the Make Secure file backstop did in one run (round 46 item 2).</summary>
+    internal sealed record MakeSecureRelocationRun(
+        string Mode, int LedgerOwing, int Stranded, MakeSecureFilesSummary? Files, bool PassComplete, string? Failure);
+
+    /// <summary>
+    /// Round 46 item 2 — settles the PENDING Make Secure relocations through the ONE <see cref="DocumentContainerRelocator"/>:
+    /// the documents whose relocation ledger still owes a step, and the ISOLATED documents whose file still sits in a
+    /// business unit's shared container (a move a <c>files_incomplete</c> left unmade). Capped, in id order after a
+    /// per-instance cursor. A listing that cannot complete is reported (<see cref="MakeSecureRelocationRun.Failure"/>) and
+    /// never throws: the reconcile passes this run made stand.
+    /// </summary>
+    private async Task<MakeSecureRelocationRun> SettleMakeSecureRelocationsAsync(
+        IServiceProvider services, IGenericEntityService dataverse, bool writes, CancellationToken ct)
+    {
+        var mode = writes ? ModeWrite : ModeReportOnly;
+        var relocator = services.GetService<DocumentContainerRelocator>();
+        if (relocator is null)
+            return new MakeSecureRelocationRun("unavailable", 0, 0, null, true, null);
+
+        var cap = int.TryParse(_configuration[MaxRelocationsPerRunConfigKey], out var configured) && configured > 0
+            ? configured
+            : DefaultMaxRelocationsPerRun;
+
+        HashSet<Guid> owing, stranded;
+        try
+        {
+            owing = await ListDocumentsAsync(dataverse, NotNull(DocumentContainerRelocator.RelocationLedgerColumn), ct)
+                .ConfigureAwait(false);
+            stranded = await ListStrandedIsolatedDocumentsAsync(dataverse, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] The pending Make Secure file relocations could not be listed.");
+            return new MakeSecureRelocationRun(mode, 0, 0, null, false, "the pending Make Secure file relocations could not be listed");
+        }
+
+        var candidates = owing.Concat(stranded).Distinct().OrderBy(id => id).ToList();
+        Guid? after;
+        lock (_cursorGate)
+            after = _relocationCursor;
+        var take = candidates.Where(id => after is not { } a || id.CompareTo(a) > 0).Take(cap).ToList();
+        var passComplete = candidates.Count(id => after is not { } a || id.CompareTo(a) > 0) <= cap;
+        lock (_cursorGate)
+            _relocationCursor = passComplete || take.Count == 0 ? null : take[^1];
+
+        var outcomes = new List<DocumentRelocationOutcome>(take.Count);
+        foreach (var documentId in take)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                outcomes.Add(await relocator.RelocateIfMisplacedAsync(documentId, writes, RelocationPurpose.MakeSecure, ct)
+                    .ConfigureAwait(false));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] Make Secure relocation of document {DocumentId} faulted.", documentId);
+                outcomes.Add(new DocumentRelocationOutcome(
+                    documentId, RelocationState.Failed, null, null, null, null, $"faulted ({ex.GetType().Name})"));
+            }
+        }
+
+        var files = MakeSecureFilesSummary.From(DocumentRelocationBatchResult.From(outcomes));
+        _logger.Log(
+            files.Incomplete == 0 ? LogLevel.Information : LogLevel.Warning,
+            "[SECURE-CHILD-RECONCILE] make-secure-relocations mode={Mode} ledgerOwing={LedgerOwing} stranded={Stranded} " +
+            "examined={Examined} moved={Moved} incomplete={Incomplete} unresolvable={Unresolvable} passComplete={PassComplete}",
+            mode, owing.Count, stranded.Count, files.Examined, files.Moved, files.Incomplete, files.Unresolvable, passComplete);
+        return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null);
+    }
+
+    /// <summary>
+    /// The ISOLATED documents (owned by the Secure Record owner team) whose pointer still names a business unit's shared
+    /// container. An environment with no Secure Record owner team, or no business-unit container, has none.
+    /// </summary>
+    private async Task<HashSet<Guid>> ListStrandedIsolatedDocumentsAsync(IGenericEntityService dataverse, CancellationToken ct)
+    {
+        var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(dataverse, _configuration, ct)
+            .ConfigureAwait(false);
+        if (team.Refusal is { } refusal)
+            throw new InvalidOperationException(refusal);
+        if (team.TeamId is not { } secureTeamId)
+            return [];
+
+        var units = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("sprk_containerid"), NoLock = true };
+        units.Criteria.AddCondition("sprk_containerid", ConditionOperator.NotNull);
+        var shared = (await ReadAllAsync(dataverse, units, ct).ConfigureAwait(false))
+            .Select(u => u.GetAttributeValue<string>("sprk_containerid")?.Trim())
+            .Where(c => !string.IsNullOrEmpty(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<object>()
+            .ToArray();
+        if (shared.Length == 0)
+            return [];
+
+        var filter = new FilterExpression(LogicalOperator.And);
+        filter.AddCondition("owningteam", ConditionOperator.Equal, secureTeamId);
+        filter.AddCondition("sprk_graphdriveid", ConditionOperator.In, shared);
+        return await ListDocumentsAsync(dataverse, filter, ct).ConfigureAwait(false);
+    }
+
+    private static FilterExpression NotNull(string column)
+    {
+        var filter = new FilterExpression(LogicalOperator.And);
+        filter.AddCondition(column, ConditionOperator.NotNull);
+        return filter;
+    }
+
+    private static async Task<HashSet<Guid>> ListDocumentsAsync(
+        IGenericEntityService dataverse, FilterExpression filter, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_documentid"), NoLock = true };
+        query.Criteria.AddFilter(filter);
+        return (await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false)).Select(e => e.Id).Where(id => id != Guid.Empty)
+            .ToHashSet();
+    }
+
+    private static async Task<IReadOnlyList<Entity>> ReadAllAsync(
+        IGenericEntityService dataverse, QueryExpression query, CancellationToken ct)
+    {
+        query.PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 };
+        var rows = new List<Entity>();
+        for (var page = 1; ; page++)
+        {
+            if (page > MaxPages)
+                throw new InvalidOperationException($"{query.EntityName} still had rows after {MaxPages} pages.");
+            var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            rows.AddRange(result.Entities);
+            if (!result.MoreRecords)
+                return rows;
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
     }
 
     /// <summary>What the recent-changes pass found (task 147; carried rows task 147 r1).</summary>
@@ -687,6 +868,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     // run's ResultJson and its progress log lines carry the same position for an operator.
     private readonly object _cursorGate = new();
     private (string Table, Guid Id)? _cursor;
+
+    /// <summary>Round 46 item 2: where the Make Secure file backstop continues (per instance, like the sweep cursor).</summary>
+    private Guid? _relocationCursor;
 
     // Task 147: the recent-changes watermark, with the same per-instance, in-singleton reasoning as the cursor. A restart
     // looks back InitialRecentChangesLookback. A change older than that is reached by the full sweep.

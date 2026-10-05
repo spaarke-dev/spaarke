@@ -569,8 +569,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// Clears seeded rows, the write log and every environment switch. Called from the test class
     /// constructor, which xUnit runs before EVERY test.
     /// </summary>
+    /// <summary>
+    /// Batch-4 integration (round 26 item 3): the Make Secure file relocation runs through the REAL
+    /// <see cref="Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator"/>. A test that exercises it supplies one over
+    /// its own document-pointer world (read at request time); otherwise the host's own registration is used (no document
+    /// of these worlds carries a file, so it answers NoFile and moves nothing).
+    /// </summary>
+    internal Func<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>? RelocatorOverride { get; set; }
+
     public void Reset()
     {
+        RelocatorOverride = null;
         _records.Clear();
         CreatedEntitySets.Clear();
         Updates.Clear();
@@ -688,6 +697,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             services.RemoveAll<SecureChildReconciler>();
             services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
                 () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>()));
+
+            // Round 26 item 3 (batch-4 integration): the Make Secure file relocator — the test's, when it supplies one.
+            services.RemoveAll<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>();
+            services.AddScoped(sp => RelocatorOverride is { } make
+                ? make()
+                : ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(
+                    sp, sp.GetRequiredService<DataverseAccessDataSource>()));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,

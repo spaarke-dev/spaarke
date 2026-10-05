@@ -167,6 +167,14 @@ public sealed record SecureChildReconcileReport(
     /// <summary>True when nothing is left out of its invariant state (or there was nothing to do).</summary>
     public bool IsComplete => Status is SecureChildReconcileStatus.Completed or SecureChildReconcileStatus.NotApplicable;
 
+    /// <summary>
+    /// The <c>sprk_document</c> rows of this pass that end it ISOLATED (owned by the Secure Record owner team; planned, for
+    /// a report-only pass) — the files a Make Secure moves into the record's own container (round 26 item 3, wired at the
+    /// batch-4 integration: provisioning hands exactly these to <c>DocumentContainerRelocator</c>). Empty for an ended
+    /// pass. A document the pass leaves ordinary is not listed: its derived container is not the record's.
+    /// </summary>
+    public IReadOnlyList<Guid> IsolatedDocumentIds { get; init; } = [];
+
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
@@ -248,6 +256,7 @@ public sealed record SecureChildReconcileReport(
 public sealed class SecureChildReconciler
 {
     private const string OwningTeamColumn = "owningteam";
+    private const string DocumentTable = "sprk_document";
     private const string OwningUserColumn = "owninguser";
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
@@ -903,7 +912,14 @@ public sealed class SecureChildReconciler
 
             return new SecureChildReconcileReport(
                 status, _mode, _root.EntityLogicalName, _root.RecordId, _rootIsolated, tables, _changes, shares,
-                mirrorRevoked, mirrorIncomplete, null);
+                mirrorRevoked, mirrorIncomplete, null)
+            {
+                IsolatedDocumentIds = ordered
+                    .Where(r => string.Equals(r.LogicalName, DocumentTable, StringComparison.OrdinalIgnoreCase)
+                                && IsIsolated(current[(r.LogicalName, r.Id)]))
+                    .Select(r => r.Id)
+                    .ToList(),
+            };
         }
 
         /// <summary>

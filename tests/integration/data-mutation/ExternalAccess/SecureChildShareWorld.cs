@@ -464,6 +464,8 @@ internal sealed class SecureChildShareWorld
         {
             ConditionOperator.Equal => Same(actual, condition.Values.Single()),
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
+            // Batch-4 integration (round 46 item 2): the Make Secure file backstop lists rows whose ledger is set.
+            ConditionOperator.NotNull => actual is not null,
             // Task 147: the reconciliation job's recent-changes pass filters on modifiedon. A row with no modifiedon
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,

@@ -198,6 +198,9 @@ export type ProvisioningFailureKind =
    * call is refused at the Write gate and an administrator finishes, which the unconfirmed copy says.
    * Also (task 148, `children_incomplete`): secured and shared, but the project's EXISTING related records are not all
    * secured yet; each is left as it was, never more exposed. The same caller's next call completes them. Retryable.
+   * Also (round 26 item 3, `files_incomplete`): secured, shared, its container exists and its related records are
+   * secured, but some of its EXISTING files are not moved into its own container yet; none is more exposed than before.
+   * The same caller's next call completes them. Retryable.
    */
   | 'interrupted'
   /**
@@ -448,6 +451,15 @@ const REASON_STATES: Readonly<
     failureKind: 'interrupted',
     errorMessage:
       'The project was secured and shared with you, but some of its existing documents, events, to-dos or messages are not secured yet.',
+    retryable: true,
+  },
+  // Round 26 item 3 (wired at the batch-4 integration): secured, shared, its container exists and its related records are
+  // secured, but some of its existing files are not moved into its own container yet (each still where it was). The
+  // server tells the same caller that calling again completes them; the copy never advises it (FR-31, round 60 item 1).
+  'sdap.provision.files_incomplete': {
+    failureKind: 'interrupted',
+    errorMessage:
+      'The project was secured and shared with you, but some of its existing files have not been moved into its secure storage yet.',
     retryable: true,
   },
   'sdap.provision.creator_share_failed_resumable': {

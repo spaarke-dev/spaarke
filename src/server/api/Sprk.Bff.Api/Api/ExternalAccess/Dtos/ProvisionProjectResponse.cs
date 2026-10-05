@@ -92,7 +92,15 @@ public record ProvisionProjectResponse(
     bool Resumed = false,
     IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null,
     SecureChildPassSummary? Children = null,
-    bool ChildrenOnly = false);
+    bool ChildrenOnly = false)
+{
+    /// <summary>
+    /// Round 26 item 3 (wired at the batch-4 integration): what moving the record's existing files into its own container
+    /// did — counts, plus what a move stated (a source edited after its move, a truncated history, a source kept for
+    /// other records). Null for a call that did not reach the files.
+    /// </summary>
+    public MakeSecureFilesSummary? Files { get; init; }
+}
 
 /// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>
 public record ProvisionSkippedPrincipal(Guid SystemUserId, string ReasonCode, string Message);

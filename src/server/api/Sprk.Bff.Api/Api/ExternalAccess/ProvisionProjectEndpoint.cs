@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -362,6 +363,19 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonChildrenIncomplete = "sdap.provision.children_incomplete";
 
     /// <summary>
+    /// Round 26 item 3 (wired at the batch-4 integration): the record is isolated, shared, has its container and its
+    /// related records are secured, but some of its EXISTING files are not yet moved into its own container
+    /// (<see cref="DocumentContainerRelocator"/>, purpose <see cref="RelocationPurpose.MakeSecure"/>: copied with their
+    /// history, verified, re-pointed, the source deleted). 500 with the counts; the record stays flagged and provisioned,
+    /// nothing done is undone, and no file is more exposed than before. Calling again completes it (the already-provisioned
+    /// branch relocates again), and so does the secure-child reconciliation, which settles pending Make Secure relocations
+    /// every run (round 46 item 2). A row that names no file it can resolve (<see cref="RelocationState.FileMissing"/> — the
+    /// item is gone, or the communication-archive path wrote a document id where the item id belongs) is reported in
+    /// <c>filesUnresolvable</c>, never moved or deleted, and does not by itself make the result incomplete.
+    /// </summary>
+    internal const string ReasonFilesIncomplete = "sdap.provision.files_incomplete";
+
+    /// <summary>
     /// Task 150: <c>sprk_issecure</c> could not be set true — the write failed, or the read-back did not show
     /// <c>true</c>. It is the FIRST write, so nothing else was changed (the flag itself may or may not be set). The same
     /// caller may call again. A read-back that comes back without the value usually means this service lost its
@@ -550,6 +564,7 @@ public static class ProvisionProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildReconciler secureChildren,
+        DocumentContainerRelocator fileRelocator,
         IConfiguration configuration,
         SecureShareNoAccessGuard noAccessGuard,
         IMembershipCacheInvalidator accessCacheInvalidator,
@@ -687,7 +702,14 @@ public static class ProvisionProjectEndpoint
                 if (!pending.IsComplete)
                     return ChildrenIncomplete(pending, root, recordId, logger, traceId);
 
-                if (pending.WroteAnything)
+                // Round 26 item 3: the re-entry relocates the record's files again — a repeat call completes a
+                // files_incomplete (the relocator is idempotent: a moved file is InPlace, an owed step is settled first).
+                var pendingFiles = await FilesFollowAsync(
+                    fileRelocator, pending, row.sprk_containerid!, root, recordId, logger, traceId, ct);
+                if (pendingFiles.Error is not null)
+                    return pendingFiles.Error;
+
+                if (pending.WroteAnything || pendingFiles.Summary.Moved > 0)
                 {
                     logger.LogInformation(
                         "[PROVISION] {RecordType} {RecordId} was already provisioned; this call completed its related records " +
@@ -705,7 +727,10 @@ public static class ProvisionProjectEndpoint
                         RecordId: recordId,
                         Resumed: true,
                         Children: SecureChildPassSummary.From(pending),
-                        ChildrenOnly: true));
+                        ChildrenOnly: true)
+                    {
+                        Files = pendingFiles.Summary,
+                    });
                 }
 
                 // Provisioned, and nothing is written. The recorded container is one of two things (see RootRow): one
@@ -1017,19 +1042,30 @@ public static class ProvisionProjectEndpoint
         // After the container, so a related record the rule cannot place never keeps the record from storing documents.
         // A pass that does not complete is not a success (ADR-003): children_incomplete, and calling again completes it —
         // the record is then provisioned, so the already-provisioned branch above runs the pass (one resume path, 133's).
-        async Task<(SecureChildPassSummary? Summary, IResult? Error)> ChildrenFollowAsync()
+        //
+        // ── Then (round 26 item 3, wired at the batch-4 integration) the record's existing FILES follow it ──
+        // Every document the pass leaves isolated moves into the record's own container through the ONE
+        // DocumentContainerRelocator (purpose MakeSecure; copy with history, verify, re-point, delete the source). After the
+        // child pass, because the relocator derives each document's container from its (now secure) parents. Incomplete →
+        // files_incomplete; the record stays flagged and provisioned and the re-entry branch above relocates again.
+        async Task<(SecureChildPassSummary? Summary, MakeSecureFilesSummary? Files, IResult? Error)> ChildrenFollowAsync(
+            string containerId)
         {
             var pass = await secureChildren.ReconcileAsync(
                 root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, ct);
-            return pass.IsComplete
-                ? (SecureChildPassSummary.From(pass), null)
-                : (null, ChildrenIncomplete(pass, root, recordId, logger, traceId));
+            if (!pass.IsComplete)
+                return (null, null, ChildrenIncomplete(pass, root, recordId, logger, traceId));
+
+            var files = await FilesFollowAsync(fileRelocator, pass, containerId, root, recordId, logger, traceId, ct);
+            return files.Error is not null
+                ? (null, null, files.Error)
+                : (SecureChildPassSummary.From(pass), files.Summary, null);
         }
 
         // ── Steps 6 + 7: the record's own SPE container — kept when it already has one ──
         if (keptContainerId is not null)
         {
-            var keptChildren = await ChildrenFollowAsync();
+            var keptChildren = await ChildrenFollowAsync(keptContainerId);
             if (keptChildren.Error is not null)
                 return keptChildren.Error;
             var childSummary = keptChildren.Summary;
@@ -1051,7 +1087,10 @@ public static class ProvisionProjectEndpoint
                 RecordId: recordId,
                 Resumed: resume,
                 SkippedPrincipals: skippedPrincipals,
-                Children: childSummary));
+                Children: childSummary)
+            {
+                Files = keptChildren.Files,
+            });
         }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
@@ -1100,7 +1139,7 @@ public static class ProvisionProjectEndpoint
 
         // ── Step 8 (task 148) — see ChildrenFollowAsync above. A fan-out that does not complete is the children_incomplete
         // error now, no longer a logged warning (ADR-003).
-        var children = await ChildrenFollowAsync();
+        var children = await ChildrenFollowAsync(speContainerId);
         if (children.Error is not null)
             return children.Error;
 
@@ -1116,7 +1155,10 @@ public static class ProvisionProjectEndpoint
             RecordId: recordId,
             Resumed: resume,
             SkippedPrincipals: skippedPrincipals,
-            Children: children.Summary));
+            Children: children.Summary)
+        {
+            Files = children.Files,
+        });
     }
 
     // =========================================================================
@@ -1129,6 +1171,51 @@ public static class ProvisionProjectEndpoint
     /// exposed as it was before this call, never more. The detail and extensions carry per-table counts; calling again
     /// completes it (the record is provisioned, so the already-provisioned branch runs the pass).
     /// </summary>
+    private static async Task<(MakeSecureFilesSummary Summary, IResult? Error)> FilesFollowAsync(
+        DocumentContainerRelocator relocator, SecureChildReconcileReport pass, string containerId, SecureRecordRoot root,
+        Guid recordId, ILogger logger, string traceId, CancellationToken ct)
+    {
+        if (pass.IsolatedDocumentIds.Count == 0)
+            return (MakeSecureFilesSummary.None, null);
+
+        var batch = await relocator.RelocateDocumentsAsync(
+            pass.IsolatedDocumentIds, containerId, RelocationPurpose.MakeSecure, apply: true, ct);
+        var summary = MakeSecureFilesSummary.From(batch);
+        if (summary.Incomplete == 0)
+        {
+            logger.LogInformation(
+                "[PROVISION] {RecordType} {RecordId}: its files are in its own container (moved={Moved}, examined={Examined}, " +
+                "unresolvable={Unresolvable}). TraceId={TraceId}",
+                root.WireToken, recordId, summary.Moved, summary.Examined, summary.Unresolvable, traceId);
+            return (summary, null);
+        }
+
+        logger.LogError(
+            "[PROVISION] {RecordType} {RecordId} is secured and shared and its related records are secured, but its files are " +
+            "not all in its own container: moved={Moved} incomplete={Incomplete} unresolvable={Unresolvable} " +
+            "counts={Counts}. TraceId={TraceId}",
+            root.WireToken, recordId, summary.Moved, summary.Incomplete, summary.Unresolvable,
+            JsonSerializer.Serialize(summary.Counts), traceId);
+
+        return (summary, Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, and its related " +
+            $"records are secured, but {summary.Incomplete} of its existing files are not moved into its own container yet " +
+            $"({summary.Moved} moved). No file is more exposed than before this call. Calling provisioning again (the same " +
+            "caller may) completes them; the secure-child reconciliation completes them regardless.",
+            traceId,
+            (ReasonKey, ReasonFilesIncomplete),
+            ("filesExamined", summary.Examined),
+            ("filesMoved", summary.Moved),
+            ("filesIncomplete", summary.Incomplete),
+            ("filesUnresolvable", summary.Unresolvable),
+            ("fileCounts", summary.Counts),
+            ("incompleteDocuments", summary.IncompleteDocuments),
+            ("unresolvableDocuments", summary.UnresolvableDocuments),
+            ("sourceChangedAfterMove", summary.SourceChangedAfterMove),
+            ("versionsTruncated", summary.VersionsTruncated),
+            ("sourceKeptForOtherRecords", summary.SourceKeptForOtherRecords)));
+    }
+
     private static IResult ChildrenIncomplete(
         SecureChildReconcileReport pass, SecureRecordRoot root, Guid recordId, ILogger logger, string traceId)
     {

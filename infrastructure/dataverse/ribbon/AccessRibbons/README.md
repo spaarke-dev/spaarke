@@ -144,11 +144,15 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    ```powershell
    pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
-       -SecureTransitionDeployed -Apply                                                  # LIVE: export → merge → import → verify
+       -SecureTransitionDeployed -BffBaseUrl https://<app>.azurewebsites.net -ApiScope api://<id>/.default `
+       -Apply                                                                            # LIVE: backstop check → export → merge → import → verify
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SecureTransitionDeployed `
        -Verify -BeforeList <WorkDir>/before.json                                         # read-only, exit 0 = PASS
    ```
-   `-Apply` records each form's live command list (`before.json`), exports a dedicated small ribbon solution (per
+   With `-SecureTransitionDeployed`, `-Apply` first CHECKS the release rule instead of taking it on trust (round 46 item
+   2): a read-only `GET {BffBaseUrl}/api/admin/jobs/secure-child-reconciliation/status` must show the job enabled every 2
+   minutes with its latest completed run's `makeSecureRelocations.mode` = `write` (`SecureTransitionBackstopCheck.ps1`);
+   otherwise it refuses and writes nothing. Then `-Apply` records each form's live command list (`before.json`), exports a dedicated small ribbon solution (per
    `.claude/skills/ribbon-edit/SKILL.md` — never SpaarkeCore) holding the three entities, **checks in the exported
    work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
    (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:

@@ -435,6 +435,9 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.resume_creator_unavailable', 'needs-administrator', false],
     // Task 148: secured and shared, but some existing related records are not secured yet — the next call completes them.
     ['sdap.provision.children_incomplete', 'interrupted', true],
+    // Round 26 item 3 (batch-4 integration): secured and shared, but some existing files are not moved into the record's
+    // own container yet — the next call completes them.
+    ['sdap.provision.files_incomplete', 'interrupted', true],
     // Task 143 (owner N6), copy round 29: the caller is on the No Access list — refused 403 before any change,
     // deterministic; whether they are could not be checked — refused 500 before any change, the same caller may call again.
     ['sdap.provision.creator_no_access', 'not-started', false],
@@ -576,7 +579,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of WARNING_CODES) {
       expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
     }
-    expect(EMITTED).toHaveLength(39);
+    expect(EMITTED).toHaveLength(40);
   });
 
   // Task 150 round 53 item 1: provisioning's own code for an unreadable floor (codes are namespaced by endpoint — F3's
