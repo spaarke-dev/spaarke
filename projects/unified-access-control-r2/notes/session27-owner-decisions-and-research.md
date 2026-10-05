@@ -974,6 +974,14 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - Class (f): no test proves the deploy exits on an invalid declaration. It fails closed anyway.
 4. **Done at integration** as part of the 165 merge (the lane is at its cap).
 
+## Round 63 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 132, from its final verification (`task/uac-r2-132-g`, ready to merge).
+
+1. **Known limit (class f, option A):** the observer's `CancellationToken.None` contract is not pinned by a test. The current invalidators ignore the token, so there is no runtime effect. Add one line to 132's note "Known limits" at PR time; no code change.
+2. **The L2 guard gap is filed with its owner (option A): #1310.** `CosmosProvisioningSecretGuardTests` resolves DLLs by directory name and skips the L2 Api assembly. It belongs to the customer-provisioning lane, and is not fixed here.
+3. **Integration note (148 × 132):**
+   - Since round 55, every share write made through `DataverseWebApiService` evicts by itself. 148's child share mirroring and removal are therefore covered without any change.
+   - Child OWNER changes (re-own on secure/unsecure, the job) still call `InvalidateRecordOwnerChangeAsync`, using `CancellationToken.None`. This is checked and tested at the 132 merge (the "148 × 132 child evictions" item).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
