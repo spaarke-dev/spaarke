@@ -881,6 +881,56 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - **(b) The already-ordinary-path 500 copy** no longer says "Calling again completes it" where a repeat call cannot. State what the operator must do instead.
 3. **Known limit** (class f): the Revoked filter in `EndWhatAParentPassedOnAsync` (seed Z28) is equivalent by construction. No test is added.
 
+## Owner round 59 (2026-10-05). BINDING. Batch 5 scope (review: `notes/batch5-scope-review-2026-10-05.md`).
+
+**The owner, on the standard:** "The key to this review is making sure we are not over-engineering; but if the work is required then we need to do it — this isn't meant to take short cuts or remove important functionality." There is no fixed budget: "we need this functionality to be robust and comprehensive because it is what makes the system broadly usable." Owner round 56's bar stands, read with this clarification: required functionality is built fully; machinery that answers no realistic failure is not.
+
+1. **036 is built (owner).** At least what is needed so that internal users in Teams or the external app put core records at no risk.
+   - **Read set:** Dataverse decides which records an internal user sees, through the impersonated root set (FR-20), behind the flag.
+   - **Writes:** EVERY write route (create to-do, upload, create event, every other write in the external/Teams surface) checks the caller's real Dataverse rights on the target record, through the existing `CallerRecordAccessProbe`, before writing. No write relies on the fixed Read|Write|Create grant.
+   - Truncation reuses the existing `Capped` / `CapCeiling`. The runbook goes in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
+   - The ADR-034 amendment (§6.5 path B) is put to the owner with the task.
+2. **Deferred to a new project (owner): 056, 088, 089, 094, 095.**
+   - Each is filed as a GitHub issue.
+   - FR-32 point-in-time replay stays formally unmet in this project. Dataverse audit keeps accumulating, so no data is lost.
+3. **The promised features are kept (owner): 153, 101, 067, and 064's single per-record read that feeds them; also 099.**
+   - 153 covers project, matter and work assignment only. The Organization/Contact banners are cut: walls there are visible in 154's subgrids.
+   - 067 is a read-only No Access section plus suppressed and vetoed rows (066 is folded in). Authoring stays in 154's form, so there is ONE place to author.
+4. **154 keeps a record picker (main session, applying this round's "no removal of important functionality").**
+   - Pasting record GUIDs is not usable, and it is how the silent-wall defect arises.
+   - Reuse the EXISTING polymorphic record picker (the RegardingResolver / PolymorphicPicker the filing forms use). Do not build the new ObjectRecordPicker PCF.
+   - The save-time id check, and the reader rejecting a non-canonical id, are kept as well.
+   - The display-name column `sprk_objectrecordname` is kept ONLY if the picker cannot show the record without it.
+5. **Kept as reviewed:**
+   - 105 (paging);
+   - 113 (ISS-028);
+   - 114 (with its owner decision on the licence proxy and Assigned-To);
+   - 136 (live session only);
+   - 090 (trimmed; it absorbs 058, 082's paragraph, 087's doc correction and 089's known-gap line).
+6. **Merged as reviewed:**
+   - 003 → 130's live gate;
+   - 013 → 141 G-8;
+   - 037 and 039 → 136's CIAM session;
+   - 047 → the batch-4 deploy gates;
+   - 058 → 090;
+   - 066 → 067.
+7. **Cut as reviewed (each closed with its reason):**
+   - 054: known limit (fails closed); close #964.
+   - 055: the stamp already does it; the per-child block is a known limit.
+   - 057 and 069: already tested, or nothing left to test.
+   - 082: PR #840's guard exists.
+   - 087: Dataverse audit is the source.
+   - 110: met by 109; close #999.
+   - 111: no measurable impact.
+   - 112: rare and toward less access; with 140's If-Match now available it can be revisited cheaply if it ever occurs.
+   - 170: rename only. The duplicate record filter it exposed goes to the new project as a class (b) item.
+8. **Order:**
+   - 154 (security fix first);
+   - 113, 114, 105 and 101 in parallel;
+   - 064, then 153 and 067, then 099 (one PCF deploy);
+   - 036 once batch 4 is deployed (it can start alongside);
+   - 090 last.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
