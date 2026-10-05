@@ -139,7 +139,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
 | `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
-| `redis-key-rotation.yml` | 3 staggered quarterly crons (dev/staging/prod), dispatch | n/a | N/A (operational key rotation) |
+| `redis-key-rotation.yml` | 2 staggered quarterly crons (staging/prod), dispatch | n/a | N/A (operational key rotation) |
 | `report-workflow-health.yml` | Weekly (Mon 09:00 UTC), dispatch | n/a | No (advisory; tracking issue) |
 | `sdap-ci.yml` (legacy) | Push to `master` / PR (`paths-ignore`: docs/**, **.md, `.claude/**`, …) | n/a | No — superseded by `CI / Router`; pending deletion |
 | `sdap-ci-docs-only.yml` (legacy) | PR touching only `sdap-ci.yml`'s ignored paths | n/a | No — paired no-op fallback for `sdap-ci.yml` |
@@ -676,7 +676,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
-| `redis-key-rotation.yml` | 3 staggered quarterly crons (1st/8th/15th of Jan/Apr/Jul/Oct, 06:00 UTC) | Redis access-key rotation per environment (dev → staging → prod, 7-day soak each) | N/A — operational; has automatic rollback on health-check failure |
+| `redis-key-rotation.yml` | 2 staggered quarterly crons (8th/15th of Jan/Apr/Jul/Oct, 06:00 UTC) | Redis access-key rotation for legacy key-based caches (staging → prod, 7-day soak). Dev was removed 2026-10-05: its cache is Azure Managed Redis, Entra only, no key | N/A — operational; has automatic rollback on health-check failure |
 
 ### `nightly-health.yml`
 
@@ -706,9 +706,11 @@ Iterates every file in `.github/workflows/*.yml`, queries `gh run list --workflo
 
 ### `redis-key-rotation.yml`
 
-Three jobs (`rotate-dev`/`rotate-staging`/`rotate-prod`), each gated by `if:` matching its own cron expression or a dispatch `environment` input, authenticate via a per-environment OIDC-bound GitHub Environment and run `scripts/Rotate-RedisKey.ps1 -Environment {env} -Force` (Secondary regen → Key Vault upsert → BFF restart → `/healthz` poll → Primary regen, with automatic rollback on a failed health check). Each job posts an Application Insights KQL verification query to the run summary.
+Two jobs (`rotate-staging`/`rotate-prod`), each gated by `if:` matching its own cron expression or a dispatch `environment` input, authenticate via a per-environment OIDC-bound GitHub Environment and run `scripts/Rotate-RedisKey.ps1 -Environment {env} -Force` (Secondary regen → Key Vault upsert → BFF restart → `/healthz` poll → Primary regen, with automatic rollback on a failed health check). Each job posts an Application Insights KQL verification query to the run summary.
 
-**Manual dispatch**: `gh workflow run redis-key-rotation.yml -f environment=dev`
+**Manual dispatch**: `gh workflow run redis-key-rotation.yml -f environment=staging`
+
+**Dev has no job (removed 2026-10-05, task 242b)**: the dev cache is Azure Managed Redis with access keys disabled — the BFF and L2 Worker sign in with their managed identities, so there is no dev key to rotate. Customer stamps are the same (task 242).
 
 ---
 
@@ -1072,7 +1074,7 @@ stages until task 249, 2026-10-02 retired them.)*
 
 | Secret | Purpose |
 |--------|---------|
-| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | Per-environment (dev/staging/prod), bound via GitHub Environments |
+| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | Per-environment (staging/prod), bound via GitHub Environments |
 
 ### Nightly Health — Graph App-Role Parity (currently unconfigured)
 

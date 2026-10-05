@@ -199,8 +199,8 @@ non-production rows below are shared development infrastructure, not a customer-
 
 | Environment | Redis instance | Resource group | SKU |
 |-------------|---------------|----------------|-----|
-| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Cache for Redis Basic C0 (access key) today → Azure Managed Redis Balanced_B0 non-HA, Entra only (task 242b; `redis-dev.bicepparam`) |
-| demo | `spaarke-bff-redis-demo` (task 242b) | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only |
+| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-dev.bicepparam`; access policy: the dev BFF's and the L2 Worker's managed identities). Cut over 2026-10-05 (task 242b): the BFF and Worker reach it through `Redis__Endpoint`; the old Basic C0 cache of the same name is being retired |
+| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-demo.bicepparam`; access policy: the demo BFF's managed identity) |
 | staging | `spaarke-bff-redis-staging` (not deployed) | — | Azure Managed Redis Balanced_B0, HA (`redis-staging.bicepparam`) |
 | customer (prod, both models) | `sprk-{customerId}-{env}-redis`, one per customer, in the customer's own subscription | the customer's own resource group | **Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12; size up only on a measured memory metric — no scale-down) |
 

@@ -389,20 +389,9 @@ az keyvault secret set \
   --name "ServiceBus-ConnectionString" \
   --value "$SB_CONN_STRING"
 
-# Redis connection string (if enabled)
-if [ "$ENVIRONMENT" != "dev" ]; then
-  REDIS_KEY=$(az redis list-keys \
-    --name "redis-sdap-$ENVIRONMENT" \
-    --resource-group $RG_NAME \
-    --query primaryKey -o tsv)
-
-  REDIS_CONN_STRING="redis-sdap-$ENVIRONMENT.redis.cache.windows.net:6380,password=$REDIS_KEY,ssl=True,abortConnect=False"
-
-  az keyvault secret set \
-    --vault-name "kv-sdap-$ENVIRONMENT" \
-    --name "Redis-ConnectionString" \
-    --value "$REDIS_CONN_STRING"
-fi
+# Redis: NO secret (task 242, ADR-009 as amended). The cache is Azure Managed Redis with access keys
+# disabled; the BFF signs in with its managed identity. Provision it with scripts/Deploy-RedisCache.ps1
+# (adds the BFF identity to the cache's access policy) -- see docs/guides/redis-cache-azure-setup.md.
 ```
 
 #### Step 3: Configure App Service Settings
@@ -427,7 +416,7 @@ az webapp config appsettings set \
     "ServiceBus__QueueName=document-events" \
     "ServiceBus__MaxConcurrentCalls=5" \
     "Redis__Enabled=true" \
-    "Redis__ConnectionString=@Microsoft.KeyVault(SecretUri=https://kv-sdap-$ENVIRONMENT.vault.azure.net/secrets/Redis-ConnectionString/)" \
+    "Redis__Endpoint=<cache-name>.<region>.redis.azure.net:10000" \
     "Redis__InstanceName=sdap:" \
     "Authorization__Enabled=true" \
     "ASPNETCORE_ENVIRONMENT=Production"
