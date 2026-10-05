@@ -310,7 +310,7 @@ import type { ISecureFlagReader } from './handlers/bffWrites';
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-10-04';
+const BUILD_DATE = '2026-10-05';
 
 // ---------------------------------------------------------------------------
 // Styles

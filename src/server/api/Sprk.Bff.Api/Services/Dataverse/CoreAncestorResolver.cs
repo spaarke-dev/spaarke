@@ -138,7 +138,8 @@ public sealed class CoreAncestorResolver
     /// <summary>
     /// The columns ON each intermediate that name its root (project / matter / work assignment / service request), by
     /// root entity. From the task 155 f3 live sweep plus the task 156 sweep of the five types f3 classified but did not
-    /// describe (spaarkedev1, read-only, 2026-10-02).
+    /// describe (spaarkedev1, read-only, 2026-10-02). <b>Pinned by test; the TypeScript
+    /// <c>INTERMEDIATE_ROOT_COLUMNS</c> MUST equal it row for row (task 169).</b>
     /// </summary>
     /// <remarks>
     /// <para><b>Why not just the four <c>sprk_regarding{core}</c> columns.</b> Until task 156 this resolver derived a
@@ -153,10 +154,15 @@ public sealed class CoreAncestorResolver
     /// <para><b>The access taxonomy is untouched.</b> <see cref="ChildRecordEntities"/> and
     /// <see cref="CoreRecordEntities"/> (pinned to the TypeScript side) do not change: a core record still never
     /// inherits, and nothing here makes an intermediate itself inherit. What changes is only what a child filed
-    /// under one of these types is stamped WITH. The client mirror (<c>deriveCoreAncestorStamps</c>) still derives
-    /// only the four columns, so a CLIENT-created child under an invoice / document / agreement / budget / report card
-    /// is created unstamped (fail closed: it inherits nothing) and the reconciliation job stamps it within one cycle
-    /// (ADR-002 WP-2 / WP-5: the server owns the invariant).</para>
+    /// under one of these types is stamped WITH.</para>
+    /// <para><b>The client mirror derives the same table (task 169).</b> <c>PolymorphicResolverService.ts</c> carries a
+    /// literal <c>INTERMEDIATE_ROOT_COLUMNS</c> that <c>deriveCoreAncestorStamps</c> reads with the same ambiguity
+    /// rule, so a child picked through the RegardingResolver PCF under any of these types is stamped at save time.
+    /// This table stays the source of truth (ADR-002 WP-2: the server owns the invariant, the client previews it);
+    /// <c>CoreAncestorResolverTests.IntermediateRootColumns_MatchTheTypeScriptSide</c> and
+    /// <c>CoreAncestorResolverTests.CoreAncestorLookups_MatchTheTypeScriptSide</c> fail the build if the TypeScript
+    /// table or its stamp columns drift from this one. Client create paths that do not call the derivation at all
+    /// remain the reconciliation job's to stamp (WP-5).</para>
     /// <para>Two columns of one root type on one row (a document's <c>sprk_matter</c> and <c>sprk_relatedmatter</c>)
     /// that name DIFFERENT records are a derivation ERROR — the root is not known, so nothing is stamped.</para>
     /// </remarks>

@@ -129,6 +129,22 @@ const NARROW_NAV_PROPS: NavPropRow[] = [
   navRow('sprk_regardingrecordtype', 'sprk_recordtype_ref', 'RecordType'),
 ];
 
+/** A budget (an intermediate, task 169) whose root columns are typed `sprk_matter` / `sprk_project` lookups. */
+const BUDGET_1 = 'b0000001-0000-0000-0000-000000000001';
+const BUDGET_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+];
+
+/** A document whose `sprk_matter` and `sprk_relatedmatter` name DIFFERENT matters. */
+const DOC_AMBIGUOUS = 'd0000001-0000-0000-0000-000000000001';
+const DOCUMENT_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_relatedmatter', 'sprk_matter', 'RelatedMatter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+  navRow('sprk_relatedproject', 'sprk_project', 'RelatedProject'),
+];
+
 /** An even narrower host with no communication lookup (SRFR-048 guard). */
 const EVENT_NAV_PROPS: NavPropRow[] = [
   navRow('sprk_regardingmatter', 'sprk_matter', 'Matter'),
@@ -192,8 +208,10 @@ function makeWebApi(options?: { ancestors?: Record<string, Record<string, unknow
         // FR-26 rather than about SRFR-020/052.
         return { entities: [{ sprk_recordtype_refid: `rt-${entity}`, sprk_name: 'RT' }] };
       }
-      // FR-26 core-ancestor read — recognisable by its `_..._value` $select.
-      if (/\$select=_sprk_regarding/.test(query)) {
+      // FR-26 core-ancestor read — recognisable by its `_..._value` $select. Task 169:
+      // an intermediate's root columns may be typed (`_sprk_matter_value` on a budget,
+      // `_sprk_relatedmatter_value` on a document), not only `_sprk_regarding*_value`.
+      if (/\$select=_sprk_\w+_value/.test(query)) {
         const idMatch = /eq ([0-9a-f-]+)/i.exec(query);
         const id = (idMatch?.[1] ?? '').toLowerCase();
         const row = ancestors[id];
@@ -424,6 +442,76 @@ describe('ResolverWriteHandler', () => {
     expect(result.ancestorStatus).toBe('no-ancestor');
     expect(result.ancestorStamps).toEqual([]);
     expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-26 — intermediate targets (task 169: the client mirrors server task 156's
+  // IntermediateRootColumns, so a typed root on the target is stamped at save time)
+  // -------------------------------------------------------------------------
+
+  test('FR-26 SET — a budget target stamps the matter named by its typed sprk_matter lookup', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS });
+
+    // Sweep integration (169 on top of 147): a SAVED to-do host re-files through the BFF — wired as 147 wired the
+    // sibling FR-26 tests (bffWired routes the re-file into the webApi double so the payload is asserted as before).
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.ancestorStatus).toBe('derived');
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingBudget')).toBe(`/sprk_budgets(${BUDGET_1})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+  });
+
+  test('NFR-01 — a document naming two different matters refuses the pick on an existing host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(result.error).toMatch(/two different sprk_matter records/);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('NFR-01 — a document naming two different matters stages nothing on a new host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    // Nothing for the CREATE-mode presave bridge to stage.
+    expect(result.payload).toBeUndefined();
+    expect(result.ancestorStamps).toBeUndefined();
+    expect(result.clearLookups).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -929,6 +1017,50 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
     expect(webApi.updateRecord).not.toHaveBeenCalled();
   });
 
+  // 147 x 169 (owner round 28 item 3): a NEW host under a budget is decided by the budget's OWN root, which task 169's
+  // derivation now reads — refused under a secure root, staged under an ordinary one, refused when the root cannot be
+  // derived (fail closed). Before 169 every budget was "unclassified" and refused outright.
+  test.each([
+    ['its root is secure', true, true],
+    ['its root is not secure', false, true],
+    ['its root cannot be derived (no metadata)', false, false],
+  ])('a NEW host filed under a budget whose %s', async (label, rootIsSecure, metadataAvailable) => {
+    // Metadata is cached per entity; this block has no reset of its own, so start from a cold cache.
+    _resetNavPropCacheForTests();
+    _resetSharedNavPropCache();
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(rootIsSecure);
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      makeFetch(
+        metadataAvailable ? { sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS } : { sprk_todo: FULL_NAV_PROPS }
+      ) as unknown as typeof fetch
+    );
+
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    if (!metadataAvailable) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).not.toHaveBeenCalled();
+    } else if (rootIsSecure) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(result.error).toContain('filed under a secure record');
+    } else {
+      expect(result.success).toBe(true);
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(boundValue(result.payload!, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+    }
+    void label;
+  });
+
   // r1c: on a NEW host the form's own save creates the record OWNED BY THE USER, so the selection may ride it only when
   // the target is decided NOT to be under a secure record.
   test('a NEW host filed under a PARTY (contact) is staged — a party is never an ownership parent; no flag is read', async () => {
@@ -946,9 +1078,11 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
     expect(isSecureRoot).not.toHaveBeenCalled();
   });
 
+  // Sweep integration (169 on top of 147): this list also held 'a record outside the core taxonomy (unclassified: budget)'.
+  // Task 169 made the budget an INTERMEDIATE (its sprk_matter / sprk_project name its root), so no to-do catalog target
+  // is unclassified any more; the budget's NEW-host decision is pinned by the test that follows this one.
   test.each([
     ['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN],
-    ['a record outside the core taxonomy (unclassified: budget)', 'sprk_budget', MATTER_2],
   ])(
     'a NEW host filed under %s is REFUSED — its secure ancestry cannot be seen here',
     async (_label, entityType, id) => {

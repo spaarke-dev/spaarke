@@ -34,8 +34,17 @@ no exception was needed or taken.
 
 **Unclassified is a real third state, not an oversight.** These entities appear in the regarding catalog and
 confer access through *other* evaluator terms (org-expansion, explicit grant) — never through core-ancestor
-inheritance. Derivation returns `unclassified` and stamps nothing. Folding them into either set would be a
-silent model change.
+inheritance. Folding them into either set would be a silent model change.
+
+**Intermediates (task 156 server, task 169 client).** The taxonomy above says who INHERITS. A separate table
+says what a child filed UNDER a record is stamped WITH: `INTERMEDIATE_ROOT_COLUMNS` (TS) =
+`CoreAncestorResolver.IntermediateRootColumns` (C#), 30 rows over nine intermediates — the six CHILD entities
+plus `sprk_agreement`, `sprk_budget` and `sprk_reportcard`. Budget and report card therefore stay
+**Unclassified** in the taxonomy (they never inherit) but ARE intermediates: a to-do filed under a budget is
+stamped with the budget's matter / project. Derivation answers `unclassified` (no read, no metadata call) only
+for a target that is neither CORE nor an intermediate — `sprk_organization`, `contact`, `account`, anything not
+in the table. The two TS/C# tables are pinned to each other by
+`CoreAncestorResolverTests.IntermediateRootColumns_MatchTheTypeScriptSide`.
 
 Code: `CORE_RECORD_ENTITIES` / `CHILD_RECORD_ENTITIES` in
 `src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`.
@@ -47,11 +56,17 @@ Code: `CORE_RECORD_ENTITIES` / `CHILD_RECORD_ENTITIES` in
 | Target class | Read performed | Result status | Stamp written |
 |---|---|---|---|
 | **CORE** | none | `core-target` | The target itself, and **only** the target |
-| **CHILD**, ≥1 core-ancestor lookup populated | ONE `$select` of the target's own core-ancestor lookups | `derived` | Each non-null core ancestor |
-| **CHILD**, all core-ancestor lookups null | same one read | `no-ancestor` | none |
-| **CHILD**, target has no core-ancestor columns at all | metadata only | `no-ancestor` | none |
-| Neither | none | `unclassified` | none |
-| Read or metadata failure | attempted | `error` | **none — caller MUST abort the write** |
+| **INTERMEDIATE**, ≥1 root column populated | ONE `$select` of the target's own root columns (its `INTERMEDIATE_ROOT_COLUMNS` rows present in its metadata) | `derived` | One per ROOT TYPE, on the child's `CORE_ANCESTOR_LOOKUPS` column for that root (a document's `sprk_relatedmatter` → the child's `sprk_regardingmatter`) |
+| **INTERMEDIATE**, two columns of one root type name the SAME record (braces / case ignored) | same one read | `derived` | One stamp for that root |
+| **INTERMEDIATE**, two columns of one root type name DIFFERENT records (a document's `sprk_matter` ≠ `sprk_relatedmatter`) | same one read | `error` | **none** — the root is unknown; same rule as C# `ResolveStampsAsync` |
+| **INTERMEDIATE**, all root columns null | same one read | `no-ancestor` | none |
+| **INTERMEDIATE**, target carries none of its root columns (metadata lists only other lookups) | metadata only | `no-ancestor` | none |
+| Neither CORE nor an intermediate | none (no read, no metadata call) | `unclassified` | none |
+| Read or metadata failure, or the read returns no row (incl. a target the user cannot read) | attempted | `error` | **none — caller MUST abort the write** |
+
+Known, deliberate client/server difference (task 169): metadata that answers with an EMPTY column list is
+`error` on the client (`discoverNavProps` returns `[]` on success-with-nothing and on failure alike) and
+`NoAncestor` on the server. The client is the stricter, fail-closed side; it is not aligned by weakening it.
 
 ### 3.1 Matter does NOT inherit from Project
 
@@ -61,9 +76,9 @@ Pinned by `doesNotStampAMattersOwnProject` and `stampsOnlyTheTargetItselfForACor
 
 ### 3.2 Exactly one hop
 
-Derivation reads the target's own `sprk_regarding{core}` columns and **stops**. No recursion, no grandparent
-walk. Those columns are themselves FR-26 stamps written by this same function when the *target* was saved —
-which is precisely why one read is sufficient. Pinned by
+Derivation reads the target's own root columns and **stops**. No recursion, no grandparent walk. Those
+columns are either FR-26 stamps written when the *target* was saved (`sprk_regarding{core}`) or the target's own
+typed root lookups (invoice / budget / document) — which is precisely why one read is sufficient. Pinned by
 `takesExactlyOneHopAndNeverWalksTheGrandparentChain`.
 
 ### 3.3 Fail closed (NFR-01) — and the asymmetry that matters
@@ -174,8 +189,16 @@ acceptance criteria require the sets to be pinned literally so that *"changing e
 Making them configurable would let a config edit silently change who can see what, with no test failing —
 the precise failure mode the pinning exists to prevent.
 
-**Scope of the exception:** the two taxonomy constants and `CORE_ANCESTOR_LOOKUPS` in
-`PolymorphicResolverService.ts`. Nothing else. Recorded here per §6.5; cite in the PR.
+**Scope of the exception:** the two taxonomy constants, `CORE_ANCESTOR_LOOKUPS` and (widened by task 169,
+2026-10-04) `INTERMEDIATE_ROOT_COLUMNS` in `PolymorphicResolverService.ts`. Nothing else. Recorded here per
+§6.5; cite in the PR.
+
+**Task 169 widening — same rationale.** `INTERMEDIATE_ROOT_COLUMNS` is the client copy of the server's
+intermediate table (which columns on each record a child is filed under name its root). It is access model,
+not presentation: a configurable copy could drift from the C# `CoreAncestorResolver.IntermediateRootColumns`
+with no test failing, and the client would preview a different access answer from the one the server owns
+(ADR-002 WP-2). It is pinned to the C# table by `CoreAncestorResolverTests.IntermediateRootColumns_MatchTheTypeScriptSide`,
+and its stamp columns by `CoreAncestorLookups_MatchTheTypeScriptSide`. No other literal entity-name table was added.
 
 ### ⚠️ ADR-012 tension 2 — metadata read via raw `fetch`
 

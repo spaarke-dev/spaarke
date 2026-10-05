@@ -148,6 +148,10 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   owns the invariant; the client previews). The taxonomy literals pinned to the TypeScript side (`CORE_RECORD_ENTITIES`,
   `CHILD_RECORD_ENTITIES`) are untouched. *Reverse / follow-up:* mirror `IntermediateRootColumns` in the TS derivation.
   **Still open after verifier round 2 (item 13a)** — see that section for why it is not done in a BFF fix round.
+  **CLOSED by task 169 (2026-10-04, branch `task/uac-r2-169`):** the TS derivation reads a literal 30-row
+  `INTERMEDIATE_ROOT_COLUMNS` equal to `IntermediateRootColumns`, with the same two-roots-of-one-type rule; pinned by
+  `CoreAncestorResolverTests.IntermediateRootColumns_MatchTheTypeScriptSide` and `CoreAncestorLookups_MatchTheTypeScriptSide`
+  (`notes/task-169-ts-intermediate-root-columns.md`). The taxonomy literals are still untouched.
 - **(xiii) A row with a root, ONE intermediate and NO pair is a copy** (rule 5), because every writer that sets a direct root
   together with an intermediate also writes the pair (the Office save, `IncomingAssociationResolver`'s priority — matter /
   project before invoice / event — the outbound sender, the client RegardingResolver). *Reverse:* treat such rows as direct
@@ -357,7 +361,7 @@ unseeded, which is the finding. Its items, and what this round did with each:
 | 10 | ADR / constraint checks | Confirmed; nothing to change. |
 | 11 | Job never reports ok on a failed scan | Confirmed; nothing to change. |
 | 12 | Resolver never trusts a copy without the live comparison | Confirmed; the two guards it found untested are items 2 and 3, now pinned. |
-| 13a | (xii) the TypeScript stamp mirror is unchanged | **Not closed** — see below. |
+| 13a | (xii) the TypeScript stamp mirror is unchanged | **Not closed in this round** — see below. **Closed by task 169** (2026-10-04; `notes/task-169-ts-intermediate-root-columns.md`). |
 | 13b | POML `<metadata><status>` reads `completed` while AC1 and AC8 are open | **Closed.** `completed-with-escalation` plus a `status-note` — the project's convention for an implemented task with an open owner item (tasks 012, 023, 062, 071). |
 | 13c | `CoreAncestorRestampJobHandler` turns a merely TRUNCATED report into Failure, then Poisoned | **Closed.** Truncated with no failure = Success plus a warning: a retry re-lists from the first page and stops at the same bound, so it can never progress; the reconciliation job finishes the rest. Failures still retry, then dead-letter. Test `TruncatedOnlyCascade_IsCompleted_NeverRetriedOrPoisoned`; seed H2. |
 | 14 | Publish size not re-measured | Re-measured for this round (below). |
@@ -744,7 +748,7 @@ Results:
 
 - **AC8**, the manual dev live gate: the main session's, after deploy (POML `manual-live-gate`).
 - **Item 13a**, the TypeScript stamp mirror. Owner round 8 files it as work ("156 item 13a"). It is not in this round's
-  items, so it is not done here.
+  items, so it is not done here. **Done by task 169** (2026-10-04).
 - **#1098**, the events API. Not task 156's.
 
 ## Verifier round c1 (2026-10-03, branch `task/uac-r2-156-c1-r1`)
