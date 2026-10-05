@@ -474,6 +474,16 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - The test `ALeafAdmin_ReadingItsOwnSharedContainerType_ReachesTheHandler` is replaced by its refusing counterpart, plus a positive test for an admin who reaches every config of the type.
 6. **147 Q2:** answered by round 28 item 1 as written. Every browser-initiated child create through the BFF is owned by the team `RecordOwnershipResolver` names. For a child of a NON-secure parent, that is the business-unit default team (I-6). Children are no longer user-owned on that path.
 
+## Round 36 (2026-10-04). BINDING. Main-session decision under round 15. Event re-files after task 159 deleted `PUT /api/v1/events/{id}`.
+
+1. **The re-file gets its own route in 159's events family.** Round 28 routes event re-files "through 159/161's routes; add the route there if the family lacks it; never a second one". 159 deleted the general PUT (round 10 item 1: no caller), so task 147 adds ONE route to `Api/Events/EventEndpoints.cs`, for example `PUT /api/v1/events/{id}/regarding`.
+   - **It changes only the filing:** the regarding lookups and their ADR-024 pair.
+   - **What it carries:** 159's as-caller checks (Write on the event; AppendTo on the new parent). It also restores the two checks that went with the deleted PUT: 146's re-file F3 gate and 156's re-stamp. Then 148/149's child pass runs when the event moves under or out of a secure parent.
+   - **Absence pins:** 159's pins keep proving that the general PUT/DELETE/cancel/logs routes stay deleted. They are narrowed so they do not match the new route.
+   - **Bookkeeping:** the new route gets its route-ledger row for 167.
+   - **Base:** 147 merges `integ/uac-r2-batch4`, which now carries 159–164, before it builds the route.
+2. **Communications** keep 161's routes. If 161's family lacks a re-file route, the same rule applies.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
