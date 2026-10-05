@@ -305,7 +305,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution fails in GetClientForConfigAsync
+            // Surfaced by GetClientForConfigAsync: config not in the BFF's tenant, or no Graph client factory
             logger.LogError(ex,
                 "Configuration error listing items — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",
@@ -673,7 +673,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution or drive ID resolution fails.
+            // Surfaced by GetClientForConfigAsync's tenant guard, or when drive ID resolution fails.
             logger.LogError(ex,
                 "Configuration error creating folder — Container: {ContainerId}, FolderName: {FolderName}, " +
                 "ConfigId: {ConfigId}, TraceId: {TraceId}",
@@ -1108,7 +1108,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution or upload session creation fails.
+            // Surfaced by GetClientForConfigAsync's tenant guard, or when upload session creation fails.
             logger.LogError(ex,
                 "Configuration error uploading file — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",

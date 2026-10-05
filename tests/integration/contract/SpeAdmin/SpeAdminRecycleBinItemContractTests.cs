@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Azure.Core;
-using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -441,20 +440,10 @@ public class SpeAdminRecycleBinItemContractTests
             .Build();
 
         return new SpeAdminGraphService(
-            httpClientFactory: new UnusedHttpClientFactory(),
-            secretClient: new SecretClient(new Uri("https://unused.invalid/"), new UnusableCredential()),
             dataverseClient: new DataverseWebApiClient(
                 configuration, NullLogger<DataverseWebApiClient>.Instance, new UnusableCredential()),
             configuration: configuration,
-            logger: NullLogger<SpeAdminGraphService>.Instance,
-            tokenProvider: null);
-    }
-
-    private sealed class UnusedHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => throw new InvalidOperationException(
-            $"A method under test requested the '{name}' HttpClient. These tests supply the Graph " +
-            "client directly, so building one means the code took an unexpected path.");
+            logger: NullLogger<SpeAdminGraphService>.Instance);
     }
 
     private sealed class UnusableCredential : TokenCredential

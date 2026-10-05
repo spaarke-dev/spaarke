@@ -24,12 +24,12 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 /// source or config (NFR-06).</para>
 ///
 /// <para><b>Pattern.</b> Modeled on
-/// <see cref="Services.SpeAdmin.SpeAdminTokenProvider"/>'s per-authority MSAL confidential-client
-/// construction (<c>GetOrCreateMsalApp</c>: <c>WithAuthority</c> + Key-Vault-sourced credential, cached),
-/// per the ADR-007 constraint to reuse the established mechanism rather than fork a new one.</para>
+/// the former <c>SpeAdminTokenProvider</c>'s per-authority MSAL confidential-client construction
+/// (<c>GetOrCreateMsalApp</c>: <c>WithAuthority</c> + Key-Vault-sourced credential, cached — that type was
+/// removed 2026-10-04, when SPE Admin stopped authenticating as owning apps), per the ADR-007 constraint
+/// to reuse the established mechanism rather than fork a new one.</para>
 ///
-/// ADR-010: registered as a concrete singleton (no interface) — matches
-/// <see cref="Services.SpeAdmin.SpeAdminTokenProvider"/>; do not over-abstract.
+/// ADR-010: registered as a concrete singleton (no interface); do not over-abstract.
 /// </summary>
 public sealed class CiamGraphClientFactory
 {

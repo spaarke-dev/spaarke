@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-10-04 (by `context-handoff`, before an operator machine restart)
-> **Recovery**: read Quick Recovery, then **§0 (what changed 2026-10-03/04)**, then §1. Everything else is reference.
+> **Last Updated**: 2026-10-04 (late — SPE Admin made secret-free, §0.5)
+> **Recovery**: read Quick Recovery, then **§0.5 (the MI fix)**, then §0, then §1. Everything else is reference.
 
 ---
 
@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
-| **Status** | All code merged + deployed. **Container-type create fix now PROVEN live** (§0.1). Model 1 container type **created** |
+| **Status** | **SPE Admin is now secret-free** (§0.5) — code + tests green on the branch, **NOT yet merged or deployed**. Container-type create fix PROVEN live (§0.1). Model 1 container type created |
 | **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX rows, not from memory |
-| **Next Action** | 🔴 **Give the Model 1 config a real credential** (§0.2) — its Key Vault secret field holds the literal `null`, so **every container operation for that config will fail**. Then the operator's pending decisions in §0.4 |
-| **Blocked?** | Nothing is code-blocked. Open threads wait on operator decisions |
+| **Next Action** | Merge + deploy BFF and SPE Admin code page (§0.5), then the **operator steps** in §0.5: grant the BFF managed identity on the Model 1 registration, grant `SecurityEvents.Read.All` to the BFF MI, clear the `null` from the Model 1 config. Then UAT |
+| **Blocked?** | Nothing is code-blocked. Two Entra admin actions are the operator's (§0.5) |
 
 ### ✅ Starting a NEW / REMOTE session? Read this
 
@@ -30,6 +30,44 @@ the docs-only delta merges trivially, but a code change on a 1,000-commit-stale 
 ---
 
 ## 0. What changed 2026-10-03/04 — READ THIS
+
+### 0.5 ✅ SPE Admin made secret-free — the "MI issue" (2026-10-04, latest)
+
+**Supersedes the "fix now / fix properly" lines in §0.2 and offer (c) in §0.4.** Full rationale:
+[topology doc §6B](../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md).
+
+- **Decision**: do NOT federate owning apps to the BFF's MI. Microsoft requires MI and app in the **same
+  tenant** and allows **≤20 federated credentials per app** ⇒ 20-customer cap for Model 1, impossible for
+  Model 2. Instead: container work runs as **the BFF's own app-only identity** (`IGraphClientFactory.ForApp()`
+  — on Azure the UAMI `mi-bff-api-dev`, appId `5967251e…`, because `Graph__ManagedIdentity__Enabled=true`),
+  with access from an **`applicationPermissionGrant` on the registration**. Grant management + Register run
+  **delegated** as the signed-in admin (app-only `FileStorageContainerTypeReg.Selected` may only change
+  registrations the caller OWNS; delegated `Manage.All` is consented on the BFF app).
+- **Code**: `SpeAdminGraphService` — `GetClientForConfigAsync` → `ForApp()` + **fail-closed tenant guard**;
+  consuming-tenant ops → `…ForUserAsync`; grant create = documented **PUT** `…/applicationPermissionGrants/{appId}`
+  with **arrays** (old POST + first-element-as-string was the task-041 `apiNotFound`); update PATCHes whole
+  lists; results read from Graph's response. `RegisterContainerTypeAsync` (SharePoint REST + owning-app
+  secret) → `RegisterContainerTypeForUserAsync` (delegated grant; legacy names mapped, `AddAllPermissions`→`full`;
+  `sharePointAdminUrl` ignored). **Deleted** `SpeAdminTokenProvider` (dead: only reachable via an uncalled
+  method) + all Key Vault/secret plumbing + client caches. Config create no longer requires
+  `keyVaultSecretName`; dashboard sync no longer skips configs without one; config form field optional.
+- **Tests**: new `tests/integration/contract/SpeAdmin/SpeAdminIdentityAndGrantContractTests.cs` (18);
+  `GraphWireMockFixture.StubPut`; 13 contract tests' constructors updated; live fixture uses a stated
+  TEST-only owning-app credential; obsolete SharePoint-URL unit tests removed; `CredentialCensusTests` +
+  `CredentialGuardTests` SpeAdmin rows **removed** (ratchet tightened). **SpeAdmin filter 310/310, ArchTests
+  349/349**, BFF build 0/0, SPE Admin `vite build` OK.
+- **Verified live (read-only probe)**: dev type `Spaarke PAYGO 1` already grants the BFF MI **`full`**
+  (app + delegated) — dev loses nothing. MI app roles: has `FileStorageContainer.Selected` +
+  `FileStorageContainerTypeReg.Selected`; **lacks `SecurityEvents.Read.All`** (owning app had it).
+
+**🔔 Operator steps after deploy** (Entra admin actions — not done by Claude):
+
+1. **Grant the BFF MI on Model 1**: SPE Admin → Container Types → Spaarke Model 1 → **Consuming Tenants → Add**:
+   appId `5967251e-171c-46fe-a6c2-ef843c90309d`, application `full`, delegated `full`. Needs the SharePoint
+   Embedded Administrator role. Up to 1 h to propagate.
+2. **Grant `SecurityEvents.Read.All` (application) to `mi-bff-api-dev`** — or the Security tab will 403.
+3. **Clear `null`** from the Model 1 config's Key Vault Secret Name (now optional and unused).
+4. **Search**: the old owning app had `Files.ReadWrite.All`; the MI doesn't. Verify item search in UAT.
 
 ### 0.1 ✅ The container-type create fix is PROVEN
 
@@ -61,9 +99,8 @@ creates from the config's owning app `170c98e1`, which already owns `Spaarke PAY
   app with `ClientSecretCredential` only (:5698, :5886) — the string `"null"` goes to Key Vault, the
   lookup fails, and **every app-only operation for that config fails**. Container-type ops (delegated)
   still work; **listing/creating containers (app-only) does not**.
-- **Fix now**: add a client secret to `Spaarke SPE Model 1 Owner`, store it in Key Vault (e.g.
-  `spe-model1-owning-app-secret`), put that name in the config.
-- **Fix properly (r3, after cpo-r1)**: FIC support in `SpeAdminGraphService` — see topology doc §6B.
+- ~~Fix now: add a client secret…~~ / ~~Fix properly: FIC support…~~ — **SUPERSEDED by §0.5**: no secret
+  and no federated credential is needed; grant the BFF managed identity on the Model 1 registration instead.
 
 ### 0.3 Topology doc corrected (commit `cee118e95`, NOT yet on master)
 
@@ -88,13 +125,17 @@ is now **stale** against these corrections — refresh it from the markdown.
 |---|---|---|
 | a | **Remove the inert config-form fields** | `src/solutions/SpeAdminApp/src/components/settings/ContainerTypeConfig.tsx` — keys `maxStoragePerBytes`, `sharingCapability`, `isItemVersioningEnabled`, `delegatedPermissions`, `applicationPermissions`, consuming-app pair. Leave the Dataverse columns. Needs `node_modules` restored first |
 | b | **Create the Model 2 container type** | Name it **`Spaarke Model 2`** — ONE type for ALL Model 2 customers (R4), **not** per client. Needs a **multi-tenant** (`AzureADMultipleOrgs`) app registration; billing **User org**. Takes budget to 5 of 25 |
-| c | **FIC support in `SpeAdminGraphService`** | Agreed in principle; **after** `customer-provisioning-orchestration-r1` lands MI. Also needs the BFF's MI added as a federated credential on each owning app |
+| c | ~~FIC support in `SpeAdminGraphService`~~ | **DONE differently — §0.5.** Federating owning apps doesn't scale (same-tenant + 20-FIC limits); SPE Admin now uses the BFF's own MI + registration grants |
 | d | **Refresh the published artifact** | Stale — see §0.3 |
 
 Also done by the operator: **deleted the duplicate `Paygo` config** (same container type + owning app
 as `Spaarke PAYGO 1`). Verified first: no code references either config.
 
-⚠️ **If you use the LOCAL worktree**: `node_modules` is **absent everywhere** (0 directories). The
+ℹ️ 2026-10-04: `src/solutions/SpeAdminApp/node_modules` **is now installed** (the SPE Admin code page
+builds). Note `npx tsc --noEmit` reports **123 pre-existing errors** (shared libs + older screens; none from
+§0.5) — `vite build` does not type-check, so the code page has never been tsc-clean.
+
+⚠️ **If you use the LOCAL worktree**: `node_modules` was **absent everywhere** (0 directories). The
 worktree was wiped and recreated 2026-08-31, and node_modules is gitignored. **Any client build fails
 until** `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci` — it fails on most
 solutions here). Shared libs first (`Spaarke.UI.Components`, `Spaarke.Auth`), then the code pages.

@@ -279,16 +279,16 @@ public static class ConfigEndpoints
             return ValidationProblem("'containerTypeId' is required.", context.TraceIdentifier);
         }
 
-        if (string.IsNullOrWhiteSpace(request.KeyVaultSecretName))
+        // keyVaultSecretName is OPTIONAL since 2026-10-04: SPE Admin authenticates as the BFF's own
+        // identity and reads no credential from the config, so requiring a secret name only forced
+        // operators to type a placeholder (a config was saved with the literal "null"). Validated when given.
+        if (!string.IsNullOrEmpty(request.KeyVaultSecretName))
         {
-            return ValidationProblem("'keyVaultSecretName' is required.", context.TraceIdentifier);
-        }
-
-        // Validate Key Vault secret name format
-        var kvValidation = ValidateKeyVaultSecretName(request.KeyVaultSecretName);
-        if (kvValidation != null)
-        {
-            return ValidationProblem(kvValidation, context.TraceIdentifier);
+            var kvValidation = ValidateKeyVaultSecretName(request.KeyVaultSecretName);
+            if (kvValidation != null)
+            {
+                return ValidationProblem(kvValidation, context.TraceIdentifier);
+            }
         }
 
         try
