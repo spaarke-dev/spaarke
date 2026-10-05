@@ -716,6 +716,30 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - **The docs that claim "never creates a second container"** are corrected to match the fixed code.
    - **The creation guard's five surviving shapes** each get a bite: an absolute-URL raw POST, a class-level constant URL, a generic `PostAsJsonAsync<T>`, a cross-file PowerShell URL variable, and `-Meth Post`. D30's "fails closed on what it cannot judge" is made true, or it is reworded to exactly what is enforced.
 
+## Round 50 (2026-10-05). BINDING. Main-session decisions under round 15. Task 140, from its re-verification of `task/uac-r2-140-x1-v1c-v1`.
+
+1. **The grant-row expiry read defect is fixed on master NOW, as its own PR (option B).**
+   - The defect: since task 023, `/revoke` and re-grants over dated rows throw. `sprk_expiresdate` is DateOnly / TimeZoneIndependent, and the read does not handle that wire shape.
+   - The fix (`DataverseDateOnlyJsonConverter` plus `GrantRowWireTests`) has no schema dependency. It goes to master on a branch off master, through a PR, merged when the Router is green.
+   - Task 140 then merges on top: the same code, no conflict.
+   - Holding a live production defect behind 140's deploy gates is rejected.
+2. **A deleted issuing contact: the grant's provenance survives the delete, and the grant ends.** None of the options as framed.
+   - **Why not the framed options:**
+     - (C) `Restrict` would block deleting a contact, including privacy deletions.
+     - A cascade is ruled out by owner G2 (ii).
+     - (A) and (B) leave an undated grant that has outlived its issuer.
+   - **The fix, in task 140's schema script** (dry run / `-Apply` / `-Verify`, through the solution-membership helper):
+     - Add `sprk_grantedbycontactid`, a text column holding the issuing contact's GUID.
+     - Every write that sets or clears `sprk_grantedbycontact` sets or clears it in the same write (grant core, take-over, collapse).
+     - `-Apply` backfills it from the existing lookups.
+   - **R1:** a row whose `sprk_grantedbycontactid` is set while `sprk_grantedbycontact` is empty means the issuer was deleted. R1 deactivates the row and reports it.
+   - **Justification (CLAUDE.md §11):**
+     - *Existing:* the lookup, which `RemoveLink` erases.
+     - *Extension:* the lookup cannot outlive the row it points to.
+     - *Cost of doing nothing:* a deleted contact's grant becomes an indefinite, issuer-less grant.
+   - Tests and seeds: issuer deleted, take-over clears both, backfill.
+3. **The two unpinned guards get tests that bite:** V6, R2-ended in `Effective()`; and V11, the `Unknown()` guard for an unplanned issuer row.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
