@@ -639,30 +639,46 @@ public class ExternalAccessReconciliationTests
     }
 
     /// <summary>
-    /// The issuer's OWN row is undated too and internally issued, so this same run stamps it +90 — the contact-issued row is
-    /// judged against that, not against "undated confers nothing". Its twin: the issuer's own row is one R2 ends this run
-    /// (its organization is inactive), so it counts for nothing and the contact-issued row is ended.
+    /// The issuer's OWN row is judged as this same run leaves it, not as the scan read it. Three shapes, one input each:
+    /// <list type="bullet">
+    /// <item><c>stamped-by-R1</c> — the issuer's own row is undated and internally issued, so plain R1 stamps it +90 this run:
+    ///   the contact-issued row is judged at that date, not against "undated confers nothing".</item>
+    /// <item><c>ended-by-R2-undated</c> — the issuer's own row is undated and R2 ends it this run (its organization is inactive):
+    ///   a row this run DECIDES, so it is not "unknown" — it counts for nothing and the contact-issued row is ended.</item>
+    /// <item><c>ended-by-R2-dated</c> — the issuer's own row carries a LATER date (+200) and R2 ends it this run. Its date alone
+    ///   would cap the contact-issued row at +90; only knowing that R2 ends it decides the row is ended instead. This is the
+    ///   case that pins the R2 check in <c>Effective()</c> (verifier v1c-v1 seed V6): an undated issuer row counts for nothing
+    ///   whatever R2 does, so only a DATED one tells "R2 ends it" from "it confers until its date".</item>
+    /// </list>
     /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task R1_AnIssuersOwnUndatedRow_IsJudgedAsThisRunLeavesIt(bool issuersRowEndedByR2)
+    [InlineData("stamped-by-R1")]
+    [InlineData("ended-by-R2-undated")]
+    [InlineData("ended-by-R2-dated")]
+    public async Task R1_AnIssuersOwnRow_IsJudgedAsThisRunLeavesIt(string shape)
     {
-        var issuersRow = issuersRowEndedByR2
-            ? SeedGrant(expires: null, organization: InactiveOrg, organizationState: 1)
+        DateOnly? issuersExpiry = shape == "ended-by-R2-dated" ? Today.AddDays(200) : null;
+        var endedByR2 = shape != "stamped-by-R1";
+        var issuersRow = endedByR2
+            ? SeedGrant(expires: issuersExpiry, organization: InactiveOrg, organizationState: 1)
             : SeedGrant(expires: null);
-        Mirror(issuersRow, Issuer, Collaborate, issuedByContact: null, firm: issuersRowEndedByR2 ? InactiveOrg : null);
-        // The issuer-access read finds the firm readable, so the issuer's row reaches the decision — which must know that R2
-        // ends that row in this same run (the scan's join is what says the firm is inactive).
+        Mirror(issuersRow, Issuer, Collaborate, issuedByContact: null, firm: endedByR2 ? InactiveOrg : null, expires: issuersExpiry);
+        // The issuer-access read finds the firm ACTIVE (it was read at another moment than the scan's join, which is what says
+        // the firm is inactive), so the issuer's row reaches the decision — which must know that R2 ends that row in this run.
         _grants.OrganizationStates[InactiveOrg] = 0;
         var row = SeedContactIssued(issuer: Issuer, level: Collaborate);
 
         await RunAsync(writes: true);
 
-        if (issuersRowEndedByR2)
+        if (endedByR2)
         {
-            State(Grant(issuersRow)).Should().Be(1);
+            State(Grant(issuersRow)).Should().Be(1, "R2 ends the issuer's own row in this run");
             State(Grant(row)).Should().Be(1, "the issuer's only grant ends in this run, so the row it issued ends too");
+            Grant(row).Contains(ExternalAccessReconciliationJob.ExpiresDateAttribute).Should().BeFalse("an ended row is not also stamped");
+            AssertWroteOnly(row, "statecode", "statuscode");
+            ContactIssued().GetProperty("deactivated").GetInt32().Should().Be(1);
+            ContactIssuedRow(row).GetProperty("outcome").GetString().Should().Be("Deactivated");
+            ContactIssuedRow(row).GetProperty("issuerHeldUntil").ValueKind.Should().Be(JsonValueKind.Null);
         }
         else
         {
@@ -672,6 +688,41 @@ public class ExternalAccessReconciliationTests
         }
 
         AssertIssuerKept(row);
+    }
+
+    /// <summary>
+    /// The issuer's ONLY grant is an undated row this run neither planned nor is deciding — it was created after the scan, or it
+    /// lies beyond a truncated one (modelled the same way: the issuer-access read sees it, the scan never returned it). Its fate
+    /// is unknown, so the row it vouches for is NOT decided on a guess: left unchanged, reported Unresolved, the run partial —
+    /// tomorrow's tick decides it. Without the guard the unknown row reads as "confers nothing" and the dependent row is ENDED
+    /// on a guess (verifier v1c-v1 seed V11). The positive twin is <c>stamped-by-R1</c> above: the same undated row, planned by
+    /// this run, decides the dependent row at its date.
+    /// </summary>
+    [Theory]
+    [InlineData("created-after-the-scan")]
+    [InlineData("beyond-a-truncated-scan")]
+    public async Task R1_AnIssuersUndatedRowThisRunDidNotPlan_LeavesTheRowItIssuedUnchanged_AndTheRunPartial(string shape)
+    {
+        _grants.Seed(Issuer, Project, Collaborate, Today, issuedByContact: null).ExpiresDate = null; // never scanned
+        if (shape == "beyond-a-truncated-scan")
+            _dataverse.AlwaysMoreRecords = true;
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate);
+        var plain = SeedGrant(expires: null); // an ordinary undated row is still stamped
+
+        var result = await RunAsync(writes: true);
+
+        _dataverse.Writes.SelectMany(w => w.Updates).Should().NotContain(u => u.Id == row, "never ended on a guess, never stamped on one");
+        Grant(row).Contains(ExternalAccessReconciliationJob.ExpiresDateAttribute).Should().BeFalse();
+        State(Grant(row)).Should().Be(0);
+        ExpiryOf(plain).Should().Be(Default);
+        ContactIssued().GetProperty("unresolved").GetInt32().Should().Be(1);
+        ContactIssued().GetProperty("deactivated").GetInt32().Should().Be(0);
+        ContactIssuedRow(row).GetProperty("outcome").GetString().Should().Be("Unresolved");
+        _log.Entries.Should().Contain(e => e.Message.Contains("left UNCHANGED", StringComparison.Ordinal)
+            && e.Message.Contains("whose own date could not be decided", StringComparison.Ordinal));
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("contact-issued row(s) were left unchanged");
+        Heartbeat()["Status"].Should().Be(ExternalAccessReconciliationJob.StatusPartial);
     }
 
     /// <summary>
@@ -767,11 +818,11 @@ public class ExternalAccessReconciliationTests
         return row.Id;
     }
 
-    /// <summary>The same row as the Web API reads it (the issuer-access read), undated, with the SAME id as the scanned one.</summary>
-    private void Mirror(Guid id, Guid contact, int level, Guid? issuedByContact, Guid? firm = null)
+    /// <summary>The same row as the Web API reads it (the issuer-access read), with the SAME id and expiry (default: none) as the scanned one.</summary>
+    private void Mirror(Guid id, Guid contact, int level, Guid? issuedByContact, Guid? firm = null, DateOnly? expires = null)
     {
         var mirrored = _grants.Seed(contact, Project, level, Today, issuedByContact, id: id);
-        mirrored.ExpiresDate = null;
+        mirrored.ExpiresDate = expires;
         mirrored.OrganizationId = firm;
     }
 
