@@ -220,7 +220,8 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
   it('never writes the SPE pointer, and asks the BFF to attach each uploaded file to its new row', async () => {
     const webApi = makeWebApi(['doc-guid-1']);
     const authFetch = makeAuthFetch();
-    const service = new EntityCreationService(webApi, authFetch, 'https://bff.example');
+    // Batch-4 integration: the row is created through the BFF (task 147), then its file attached (task 166).
+    const service = new EntityCreationService(webApi, bffChildWriteFetch(webApi, authFetch), 'https://bff.example');
 
     const result = await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1]);
 
@@ -249,7 +250,8 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
           } as unknown as Response)
         : ({ ok: true, status: 200, json: async () => ({}) } as Response)
     ) as unknown as AuthenticatedFetchFn;
-    const service = new EntityCreationService(webApi, authFetch, 'https://bff.example');
+    // Batch-4 integration: the row is created through the BFF (task 147), then its file attached (task 166).
+    const service = new EntityCreationService(webApi, bffChildWriteFetch(webApi, authFetch), 'https://bff.example');
 
     const result = await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1]);
 
