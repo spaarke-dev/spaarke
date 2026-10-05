@@ -449,8 +449,9 @@ function Invoke-Step2_CreateResourceGroup {
 #
 # Per Q-E Architecture 1, per-customer Redis is DEPRECATED. Redis is now
 # provisioned per-environment via `scripts/Deploy-RedisCache.ps1`
-# (`spaarke-bff-redis-{env}`), and the BFF is wired to it via Key Vault
-# reference (`Redis-ConnectionString` in `spaarke-bff-{env}` App Settings).
+# (`spaarke-bff-redis-{env}`), and the BFF is wired to it with the plain
+# setting `Redis__Endpoint` and its managed identity (task 242: Azure
+# Managed Redis, access keys disabled -- there is no Redis-ConnectionString).
 #
 # The inline Redis-deploy block previously living in this Step 3 (alongside
 # Storage/KV/Service Bus output extraction) and the `Redis-ConnectionString`
@@ -535,9 +536,9 @@ function Invoke-Step4_PopulateKeyVault {
 
     # Secrets to set (connection strings from Bicep outputs, plus cross-references)
     # Note: `Redis-ConnectionString` is intentionally NOT set per customer
-    # (Q-E Architecture 1, FR-12). Redis is per-environment; the BFF reads
-    # `Redis-ConnectionString` from the platform Key Vault populated by
-    # `scripts/Deploy-RedisCache.ps1`. See deprecation header in Step 3.
+    # (Q-E Architecture 1, FR-12). Redis is per-environment and Entra-only
+    # (task 242): the BFF reads the plain setting `Redis__Endpoint` and signs
+    # in with its managed identity -- no secret. See deprecation header in Step 3.
     #
     # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R1,R2,R4):
     # Every secret name below is CANONICAL per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
