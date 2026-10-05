@@ -1,5 +1,5 @@
 /**
- * `sprk_todo_regarding_presave.js` (v1.3.0) — CREATE-mode staging bridge tests.
+ * `sprk_todo_regarding_presave.js` (v1.4.0) — CREATE-mode staging bridge tests.
  *
  * This web resource is the ONLY thing that gets the FR-26 core-ancestor stamp
  * onto a brand-new child record's INSERT. If it silently skips a stamp the row
@@ -35,23 +35,47 @@ interface SetCall {
  * form" and `getAttribute` returns null — which is the real Dataverse behaviour
  * and the trap `sprk_regardingrecordurl` fell into for two releases (SRFR-043).
  */
-function makeFormContext(fieldsOnForm: string[], formType = 1) {
+/**
+ * How a fake attribute answers `setSubmitMode` (v1.4.0, task 168):
+ * - 'spy'    — records the call (the real Dataverse attribute API);
+ * - 'absent' — the attribute has no `setSubmitMode` function at all;
+ * - 'throws' — `setSubmitMode` records the call, then throws.
+ */
+type SubmitModeBehaviour = 'spy' | 'absent' | 'throws';
+
+interface FakeAttribute {
+  setValue: (v: unknown) => void;
+  setSubmitMode?: (mode: string) => void;
+}
+
+function makeFormContext(fieldsOnForm: string[], formType = 1, submitMode: SubmitModeBehaviour = 'spy') {
   const calls: SetCall[] = [];
+  // setSubmitMode calls share `seq` with setValue, so "after its setValue" is observable.
+  const submits: SetCall[] = [];
   let seq = 0;
-  const attrs = new Map<string, { setValue: (v: unknown) => void }>();
+  const attrs = new Map<string, FakeAttribute>();
   for (const f of fieldsOnForm) {
-    attrs.set(f, {
+    const attr: FakeAttribute = {
       setValue: (v: unknown) => {
         calls.push({ seq: seq++, field: f, value: v });
       },
-    });
+    };
+    if (submitMode !== 'absent') {
+      attr.setSubmitMode = (mode: string) => {
+        submits.push({ seq: seq++, field: f, value: mode });
+        if (submitMode === 'throws') {
+          throw new Error('setSubmitMode unavailable');
+        }
+      };
+    }
+    attrs.set(f, attr);
   }
   const formContext = {
     ui: { getFormType: () => formType },
     data: { entity: { addOnSave: jest.fn() } },
     getAttribute: (name: string) => attrs.get(name) ?? null,
   };
-  return { formContext, calls };
+  return { formContext, calls, submits };
 }
 
 function execCtx(formContext: unknown) {
@@ -91,8 +115,8 @@ describe('sprk_todo_regarding_presave (FR-26 CREATE-mode staging)', () => {
     delete (window as any)[PENDING_GLOBAL];
   });
 
-  test('version is 1.3.0 (the ancestor-staging contract)', () => {
-    expect(presave.VERSION).toBe('1.3.0');
+  test('version is 1.4.0 (the ancestor-staging contract + submit mode for locked controls)', () => {
+    expect(presave.VERSION).toBe('1.4.0');
   });
 
   // -------------------------------------------------------------------------
@@ -371,5 +395,232 @@ describe('sprk_todo_regarding_presave (FR-26 CREATE-mode staging)', () => {
     presave.onLoad(execCtx(formContext));
     expect(formContext.data.entity.addOnSave).toHaveBeenCalledTimes(1);
     expect(formContext.data.entity.addOnSave).toHaveBeenCalledWith(presave.onSave);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.4.0 (unified-access-control-r2 task 168, owner round 8 item 3)
+//
+// The four sprk_regarding{core} controls are READ-ONLY on the to-do, event,
+// communication and analysis forms. A value this script stages onto a disabled
+// control must still ride the INSERT, so every lookup it stages or clears gets
+// setSubmitMode("always") AFTER its setValue. Without it a disabled control could
+// drop a staged stamp from the INSERT — a silent under-grant.
+// ---------------------------------------------------------------------------
+
+describe('sprk_todo_regarding_presave v1.4.0 — submit mode for locked controls', () => {
+  let errorSpy: jest.SpyInstance;
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    delete (window as any)[PENDING_GLOBAL];
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete (window as any)[PENDING_GLOBAL];
+  });
+
+  /** A communication pick whose matter stamp is derived, after an earlier project pick is cleared. */
+  function pendingCommunicationUnderMatter(): Record<string, unknown> {
+    return {
+      hostEntity: 'sprk_todo',
+      entityType: 'sprk_communication',
+      lookupAttribute: 'sprk_regardingcommunication',
+      recordId: COMM,
+      recordName: 'Re: discovery',
+      recordUrl: 'https://x/main.aspx?etn=sprk_communication&id=' + COMM,
+      recordNumber: 'COM-1',
+      clearLookups: ['sprk_regardingproject'],
+      ancestorStamps: [
+        {
+          entityType: 'sprk_matter',
+          entitySet: 'sprk_matters',
+          lookupAttribute: 'sprk_regardingmatter',
+          recordId: MATTER,
+        },
+      ],
+    };
+  }
+
+  function callsFor(list: SetCall[], field: string): SetCall[] {
+    return list.filter(c => c.field === field);
+  }
+
+  test('the chosen lookup gets setSubmitMode("always") after its setValue', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+
+    presave.onSave(execCtx(formContext));
+
+    const sets = callsFor(calls, 'sprk_regardingcommunication');
+    const subs = callsFor(submits, 'sprk_regardingcommunication');
+    expect(sets).toHaveLength(1);
+    expect(subs).toHaveLength(1);
+    expect(subs[0].value).toBe('always');
+    expect(subs[0].seq).toBe(sets[0].seq + 1);
+  });
+
+  test('each ancestor stamp gets setSubmitMode("always") after its setValue', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = {
+      ...pendingCommunicationUnderMatter(),
+      clearLookups: [],
+      ancestorStamps: [
+        {
+          entityType: 'sprk_matter',
+          entitySet: 'sprk_matters',
+          lookupAttribute: 'sprk_regardingmatter',
+          recordId: MATTER,
+        },
+        {
+          entityType: 'sprk_project',
+          entitySet: 'sprk_projects',
+          lookupAttribute: 'sprk_regardingproject',
+          recordId: PROJECT,
+        },
+      ],
+    };
+
+    presave.onSave(execCtx(formContext));
+
+    for (const field of ['sprk_regardingmatter', 'sprk_regardingproject']) {
+      const sets = callsFor(calls, field);
+      const subs = callsFor(submits, field);
+      expect(sets).toHaveLength(1);
+      expect(subs).toHaveLength(1);
+      expect(subs[0].value).toBe('always');
+      expect(subs[0].seq).toBe(sets[0].seq + 1);
+    }
+  });
+
+  test('each cleared lookup gets setSubmitMode("always") after its null setValue', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = {
+      ...pendingCommunicationUnderMatter(),
+      clearLookups: ['sprk_regardingproject', 'sprk_regardingworkassignment'],
+    };
+
+    presave.onSave(execCtx(formContext));
+
+    for (const field of ['sprk_regardingproject', 'sprk_regardingworkassignment']) {
+      const sets = callsFor(calls, field);
+      const subs = callsFor(submits, field);
+      expect(sets).toHaveLength(1);
+      expect(sets[0].value).toBeNull();
+      expect(subs).toHaveLength(1);
+      expect(subs[0].value).toBe('always');
+      expect(subs[0].seq).toBe(sets[0].seq + 1);
+    }
+  });
+
+  test('a lookup staged with an id that cleans to empty gets setSubmitMode("always") after its null setValue', () => {
+    // setLookupIfPresent's empty-id branch ("{}" strips to "") stages a NULL, exactly as a clear does. A
+    // disabled control must not drop that null from the INSERT either (task 168 r1, verifier item 3).
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = {
+      ...pendingCommunicationUnderMatter(),
+      clearLookups: [],
+      ancestorStamps: [
+        {
+          entityType: 'sprk_project',
+          entitySet: 'sprk_projects',
+          lookupAttribute: 'sprk_regardingproject',
+          recordId: '{}',
+        },
+      ],
+    };
+
+    presave.onSave(execCtx(formContext));
+
+    const sets = callsFor(calls, 'sprk_regardingproject');
+    const subs = callsFor(submits, 'sprk_regardingproject');
+    expect(sets).toHaveLength(1);
+    expect(sets[0].value).toBeNull();
+    expect(subs).toHaveLength(1);
+    expect(subs[0].value).toBe('always');
+    expect(subs[0].seq).toBe(sets[0].seq + 1);
+
+    // The same branch through the helper directly, and its return value.
+    const { formContext: single, calls: singleCalls, submits: singleSubs } = makeFormContext(['sprk_regardingmatter']);
+    expect(presave._internals.setLookupIfPresent(single, 'sprk_regardingmatter', '{}', '', 'sprk_matter')).toBe(true);
+    expect(singleCalls).toEqual([{ seq: 0, field: 'sprk_regardingmatter', value: null }]);
+    expect(singleSubs).toEqual([{ seq: 1, field: 'sprk_regardingmatter', value: 'always' }]);
+  });
+
+  test('NEGATIVE: no setSubmitMode for an attribute that is not on the form', () => {
+    const onForm = FULL_FORM.filter(f => f !== 'sprk_regardingmatter' && f !== 'sprk_regardingproject');
+    const { formContext, submits } = makeFormContext(onForm);
+    (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+
+    presave.onSave(execCtx(formContext));
+
+    expect(callsFor(submits, 'sprk_regardingmatter')).toHaveLength(0);
+    expect(callsFor(submits, 'sprk_regardingproject')).toHaveLength(0);
+    // The missing stamp column is still the FR-26 error (behaviour unchanged).
+    expect(errorSpy.mock.calls.some(c => String(c[0]).includes('sprk_regardingmatter'))).toBe(true);
+  });
+
+  test('NEGATIVE: UPDATE, read-only and disabled forms stage nothing and never call setSubmitMode', () => {
+    for (const formType of [2, 3, 4]) {
+      const { formContext, calls, submits } = makeFormContext(FULL_FORM, formType);
+      (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+      presave.onSave(execCtx(formContext));
+      expect(calls).toHaveLength(0);
+      expect(submits).toHaveLength(0);
+    }
+  });
+
+  test('NEGATIVE: the text fields are staged but get no setSubmitMode call', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM);
+    (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+
+    presave.onSave(execCtx(formContext));
+
+    for (const field of [
+      'sprk_regardingrecordid',
+      'sprk_regardingrecordname',
+      'sprk_regardingrecordurl',
+      'sprk_regardingrecordnumber',
+    ]) {
+      expect(callsFor(calls, field)).toHaveLength(1);
+      expect(callsFor(submits, field)).toHaveLength(0);
+    }
+  });
+
+  test('an attribute without a setSubmitMode function is still staged and returns true', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM, 1, 'absent');
+    (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+
+    presave.onSave(execCtx(formContext));
+
+    expect(submits).toHaveLength(0);
+    expect(lastValueFor(calls, 'sprk_regardingmatter')).toEqual([expect.objectContaining({ id: MATTER })]);
+    expect(lastValueFor(calls, 'sprk_regardingcommunication')).toEqual([expect.objectContaining({ id: COMM })]);
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    const { formContext: single } = makeFormContext(['sprk_regardingmatter'], 1, 'absent');
+    expect(presave._internals.setLookupIfPresent(single, 'sprk_regardingmatter', MATTER, '', 'sprk_matter')).toBe(true);
+    expect(presave._internals.clearLookupIfPresent(single, 'sprk_regardingmatter')).toBe(true);
+  });
+
+  test('a throwing setSubmitMode leaves the value staged: the stamp counts as staged and no "not on this form" error is logged', () => {
+    const { formContext, calls, submits } = makeFormContext(FULL_FORM, 1, 'throws');
+    (window as any)[PENDING_GLOBAL] = pendingCommunicationUnderMatter();
+
+    expect(() => presave.onSave(execCtx(formContext))).not.toThrow();
+
+    expect(callsFor(submits, 'sprk_regardingmatter')).toHaveLength(1);
+    expect(lastValueFor(calls, 'sprk_regardingmatter')).toEqual([expect.objectContaining({ id: MATTER })]);
+    expect(errorSpy).not.toHaveBeenCalled();
+    const summary = logSpy.mock.calls.find(c => String(c[0]).includes('Staged resolver fields for INSERT'));
+    expect(summary?.[1]).toEqual(expect.objectContaining({ ancestorStampsStaged: '1/1', lookupsCleared: '1/1' }));
+
+    const { formContext: single } = makeFormContext(['sprk_regardingmatter'], 1, 'throws');
+    expect(presave._internals.setLookupIfPresent(single, 'sprk_regardingmatter', MATTER, '', 'sprk_matter')).toBe(true);
+    expect(presave._internals.clearLookupIfPresent(single, 'sprk_regardingmatter')).toBe(true);
   });
 });

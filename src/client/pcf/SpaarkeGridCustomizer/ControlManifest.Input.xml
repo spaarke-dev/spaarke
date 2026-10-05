@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.0.0" display-name-key="Spaarke Grid Customizer" description-key="General-purpose Power Apps Grid Control customizer for custom cell rendering" control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.1.1" display-name-key="Spaarke Grid Customizer" description-key="Power Apps grid customizer: the regarding filing columns (the core-ancestor roots, the regarding pair, the other regarding lookups) are not editable; regarding links" control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
-    <!-- Grid customizers need a data-set element to work with Power Apps Grid Control -->
-    <data-set name="dataSet" display-name-key="Data Set" cds-data-set-options="displayCommandBar:false;displayViewSelector:false;displayQuickFind:false">
-    </data-set>
+    <!--
+      The Power Apps grid customizer contract (Microsoft Learn, "Customize the editable grid control"):
+      the grid passes EventName, and init fires that event with the cell renderer / editor overrides.
+      v1.1.0 (unified-access-control-r2 task 168 f1) replaced the earlier data-set element, which the
+      grid never used, with this property. v1.1.1 (task 168 v1, owner round 38) widened the lock from
+      the four roots to every filing column, read from config/regarding-filing-columns.json.
+    -->
+    <property name="EventName" display-name-key="EventName" description-key="End point to communicate with the Power Apps grid" of-type="SingleLine.Text" usage="input" required="true" />
     <resources>
       <code path="index.ts" order="1" />
       <css path="styles.css" order="1" />

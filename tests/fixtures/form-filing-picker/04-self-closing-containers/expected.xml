@@ -1,0 +1,52 @@
+<form headerdensity="HighWithControls">
+  <tabs>
+    <tab id="{10000000-0000-0000-0000-000000000004}" name="tab_04" verticallayout="true">
+      <labels><label description="General &amp; more" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections><section name="sprk_filing_picker" id="20cf54a5-4eca-3dfc-9737-1175346c1d61" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115"><labels><label description="RELATED RECORD" languagecode="1033" /></labels><rows><row><cell id="{52dd80cc-c9d0-bbe2-1eaa-024a096cbac0}" locklevel="0" colspan="1" rowspan="1" showlabel="false"><labels><label description="RELATED RECORD" languagecode="1033" /></labels><control id="sprk_regardingrecordtype1" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_regardingrecordtype" uniqueid="{73774f16-1b0d-0489-b420-a53673e68d2d}" /></cell></row></rows></section><section name="sprk_filing_hidden" id="6f27eb35-3b43-d70c-030c-c81cdf34d51f" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" visible="false"><labels><label description="FILING (HIDDEN)" languagecode="1033" /></labels><rows><row><cell id="{7012a6bf-00ed-ab71-b72e-9ca7692d6d68}" locklevel="0" colspan="1" rowspan="1"><labels><label description="Regarding Record Id" languagecode="1033" /></labels><control id="sprk_regardingrecordid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordid" disabled="false" /></cell></row><row><cell id="{949d7144-dc78-71a5-7541-af358cd42649}" locklevel="0" colspan="1" rowspan="1"><labels><label description="Link" languagecode="1033" /></labels><control id="sprk_regardingrecordurl" classid="{71716B6C-711E-476C-8AB8-5D11542BFB47}" datafieldname="sprk_regardingrecordurl" disabled="false" /></cell></row><row><cell id="{f1a19c19-c4e4-600d-0a47-15b3226131aa}" locklevel="0" colspan="1" rowspan="1"><labels><label description="Regarding Record Number" languagecode="1033" /></labels><control id="sprk_regardingrecordnumber" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordnumber" disabled="false" /></cell></row><row><cell id="{bf8aad89-ee88-811b-773f-e94ab38615c2}" locklevel="0" colspan="1" rowspan="1"><labels><label description="Regarding Communication" languagecode="1033" /></labels><control id="sprk_regardingcommunication" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingcommunication" disabled="false" /></cell></row></rows></section>
+            <section id="{20000000-0000-0000-0000-000000000004}" name="sec_04" showlabel="true" columns="1">
+              <labels><label description='Details' languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000001}">
+                    <labels><label description="Subject" languagecode="1033" /></labels>
+                    <control id="sprk_subject" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_subject" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000002}">
+                    <labels><label description="Regarding Matter" languagecode="1033" /></labels>
+                    <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000003}">
+                    <labels><label description="Regarding Project" languagecode="1033" /></labels>
+                    <control id="sprk_regardingproject" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingproject" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000004}" visible="false">
+                    <labels><label description="Regarding Record Type" languagecode="1033" /></labels>
+                    <control id="sprk_regardingrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingrecordtype" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000005}" visible="false">
+                    <labels><label description="Regarding Record Name" languagecode="1033" /></labels>
+                    <control id="sprk_regardingrecordname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_regardingrecordname" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <controlDescriptions><controlDescription forControl="{73774f16-1b0d-0489-b420-a53673e68d2d}"><customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}"><parameters><datafieldname>sprk_regardingrecordtype</datafieldname></parameters></customControl><customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}"><parameters><datafieldname>sprk_regardingrecordtype</datafieldname></parameters></customControl><customControl name="sprk_Spaarke.Controls.RegardingResolver" formFactor="0"><parameters><regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType><entity type="SingleLine.Text" static="true">sprk_event</entity><regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField><regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField><title type="SingleLine.Text" static="true">RELATED RECORD</title><showVersionFooter type="TwoOptions" static="true">true</showVersionFooter></parameters></customControl><customControl name="sprk_Spaarke.Controls.RegardingResolver" formFactor="2"><parameters><regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType><entity type="SingleLine.Text" static="true">sprk_event</entity><regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField><regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField><title type="SingleLine.Text" static="true">RELATED RECORD</title><showVersionFooter type="TwoOptions" static="true">true</showVersionFooter></parameters></customControl><customControl name="sprk_Spaarke.Controls.RegardingResolver" formFactor="1"><parameters><regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType><entity type="SingleLine.Text" static="true">sprk_event</entity><regardingRecordNumberField type="SingleLine.Text">sprk_regardingrecordnumber</regardingRecordNumberField><regardingRecordNameField type="SingleLine.Text">sprk_regardingrecordname</regardingRecordNameField><title type="SingleLine.Text" static="true">RELATED RECORD</title><showVersionFooter type="TwoOptions" static="true">true</showVersionFooter></parameters></customControl></controlDescription></controlDescriptions><events>
+    <event name="onload" application="false" active="false"><Handlers><Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{da368b68-c45a-4343-9ac0-9660e8e600f4}" enabled="true" parameters="" passExecutionContext="true" /></Handlers></event>
+  </events>
+  <formLibraries><Library name="sprk_todo_regarding_presave" libraryUniqueId="{0e346c10-1c98-2309-fdb1-8edb2e7d46e8}" /></formLibraries>
+</form>

@@ -82,7 +82,7 @@
 | **DrillThroughWorkspace** | `Spaarke.Controls` | 1.1.1 | Dataset PCF — expected to bind on subgrids or views, but zero matches | 2026-03-30 | Confirm whether deployed but unbound |
 | ~~**EmailProcessingMonitor**~~ | `Spaarke` | 1.1.0 | — | 2026-05-13 | **Deleted from source 2026-09-25**; remove from environments/solution |
 | **ScopeConfigEditor** | `Sprk` | 1.2.7 | Possibly field-level (column override on `sprk_aichatscope`?) | 2026-03-30 | Specialized editor — confirm binding |
-| **SpaarkeGridCustomizer** | `Spaarke.Controls` | 1.0.0 | Grid customizer — expected at entity default level, but zero matches | 2026-05-14 | Check MDA grid components |
+| **SpaarkeGridCustomizer** | `Spaarke.Controls` | 1.1.1 | Customizer control of the sprk_event and sprk_analysis home grids (the regarding filing columns not editable: roots, pair, non-root regarding lookups, from `config/regarding-filing-columns.json`; unified-access-control-r2 task 168, owner rounds 25 and 38), set by `scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1` — live apply is a manual gate (dev holds v1.0.0, unset) | 2026-10-05 | Deploy v1.1.1, then run the script (task 168 note §12.5 as amended by §13) |
 | **ThemeEnforcer** | `Spaarke` | 1.0.0 | Likely invoked at app load (e.g., via webresource JS), not bound on a form | 2026-03-13 | Plausibly active globally |
 | **UniversalDatasetGrid** | `Spaarke.UI.Components` | 2.3.0 | Dataset PCF — expected on subgrids in forms, but zero matches | 2026-05-13 | Confirm whether deployed but unbound |
 | **UpdateRelatedButton** | `Spaarke.Controls` | 1.0.0 | Lookup field control — expected on a form, but zero matches | 2026-05-14 | Confirm binding

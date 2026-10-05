@@ -1,5 +1,5 @@
 # Pack SpaarkeGridCustomizer Solution
-$version = "1.0.0"
+$version = "1.1.1"
 $solutionName = "SpaarkeGridCustomizerSolution"
 $controlName = "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
 
