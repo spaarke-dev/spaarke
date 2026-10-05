@@ -54,6 +54,8 @@ describe('WordAdapter.getCapabilities()', () => {
     expect(capabilities.canSaveAsEml).toBe(false);
     expect(capabilities.canAttachFile).toBe(false);
     expect(capabilities.canComposeEmail).toBe(false);
+    // Task 096: Word emails a document from its own Email tab (in-pane form, shared compose engine).
+    expect(capabilities.canEmailFromPane).toBe(true);
 
     // Word-only.
     expect(capabilities.canGetDocumentContent).toBe(true);
@@ -189,6 +191,8 @@ describe('OutlookAdapter.getCapabilities()', () => {
     expect(capabilities.canGetSender).toBe(true);
     expect(capabilities.canSaveAsEml).toBe(true);
     expect(capabilities.canComposeEmail).toBe(true);
+    // Task 096 (owner: "Outlook unchanged"): no in-pane Email tab — Send Email opens native compose.
+    expect(capabilities.canEmailFromPane).toBe(false);
 
     // Compose-only, so false in read mode.
     expect(capabilities.canInsertLink).toBe(false);

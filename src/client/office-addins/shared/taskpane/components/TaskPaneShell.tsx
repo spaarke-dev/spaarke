@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import type { HostType } from './TaskPaneHeader';
-import { getDefaultTab, type NavigationTab } from './TaskPaneNavigation';
+import { getDefaultTab, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import { TaskPaneToolbar } from './TaskPaneToolbar';
 import { TaskPaneFooter, type ConnectionStatus } from './TaskPaneFooter';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -58,6 +58,8 @@ export interface TaskPaneShellProps {
   title?: string;
   /** Type of Office host */
   hostType?: HostType;
+  /** Task 096: host capabilities for capability-gated tabs (the Word-only Email tab). */
+  tabCapabilities?: Partial<TabCapabilities>;
   /** Current user display name */
   userName?: string;
   /** Current user email */
@@ -127,6 +129,7 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   hostType = 'outlook',
+  tabCapabilities,
   userName,
   userEmail,
   isAuthenticated = false,
@@ -189,6 +192,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Single consolidated toolbar: logo + tabs (left) + overflow tools (right). */}
       <TaskPaneToolbar
         hostType={hostType}
+        {...(tabCapabilities ? { capabilities: tabCapabilities } : {})}
         showTabs={showNavigation}
         selectedTab={selectedTab}
         onTabChange={handleTabChange}

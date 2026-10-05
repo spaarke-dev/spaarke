@@ -214,10 +214,35 @@ module.exports = async (env, options) => {
           __dirname,
           '../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
         ),
+        // Task 096 (owner 2026-10-04: "use our shared UI components so it looks consistent"): the
+        // Word pane's Email tab mounts the SAME compose engine the Spaarke email page mounts
+        // (`EmailComposer`), through its pane wrapper `SendEmailPane` (ADR-045: every send UX goes
+        // through a thin wrapper over the one engine). Exact ($) match to the WRAPPER FILE only —
+        // never the `@spaarke/ui-components` barrel, which would pull in the library's Xrm-bound
+        // components (the ADR-012 Path A reason this package does not consume the barrel). The
+        // wrapper's import closure (22 files) has no Xrm/host dependency; its third-party imports
+        // (react, Fluent v9, lexical) resolve from THIS package's node_modules — see the first rule
+        // under `module.rules`.
+        '@spaarke/ui-components/send-email-pane$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
+        ),
       },
     },
     module: {
       rules: [
+        {
+          // Task 096: the aliased shared compose sources live outside this package, where no node_modules is
+          // installed in CI. Their bare imports resolve from THIS package's node_modules FIRST, so the shared
+          // engine binds to the add-in's own single copy of react / react-dom / Fluent / lexical (two React
+          // copies break hooks) even on a machine that has the shared library installed. Scoped to requests
+          // ISSUED by the shared source (Rule.resolve), so the add-in's own dependency resolution — including
+          // any nested package versions — is untouched.
+          include: path.resolve(__dirname, '../shared/Spaarke.UI.Components/src'),
+          resolve: {
+            modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
+          },
+        },
         {
           test: /\.tsx?$/,
           use: {

@@ -200,6 +200,15 @@ const useStyles = makeStyles({
   documentNameHint: {
     color: tokens.colorNeutralForeground2,
   },
+  // Task 095: "Save as new document" is a quiet secondary link, not an outlined button.
+  secondaryLink: {
+    alignSelf: 'flex-start',
+    minWidth: 'auto',
+    paddingLeft: 0,
+    paddingRight: 0,
+    color: tokens.colorBrandForegroundLink,
+    ':hover': { color: tokens.colorBrandForegroundLinkHover },
+  },
   documentNameLockedRow: {
     display: 'flex',
     flexDirection: 'column',
@@ -1832,11 +1841,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                     pane never shows two buttons with the identical label and effect at once. */}
                 {!error?.offerSaveAsNew && (
                   <Button
-                    appearance="outline"
+                    appearance="transparent"
                     size="small"
+                    className={styles.secondaryLink}
                     onClick={handleSaveAsNewInstead}
                     disabled={isSaving}
-                    style={{ alignSelf: 'flex-start' }}
                   >
                     Save as new document
                   </Button>

@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 4 (6-8): an "Email" tab in Word, built from the shared Communication compose components, sends the document as an attachment from the user's own mailbox and files the email against the record; the broken Graph sharing link leaves every Send Email path</title>
     <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New pane view + tab built from a shared component library, wiring to an existing BFF route that sends mail as the user (OBO), and removal of a failing link path; `.ts`/`.tsx`, build config, possibly `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -155,6 +155,26 @@
     <file>src/client/office-addins/shared/taskpane/components/views/EmailView.tsx</file>
     <file>projects/spaarkeai-word-add-in-r1/notes/096-email-tab.md</file>
   </outputs>
+
+  <notes>
+    Completed 2026-10-04 (subagent, wave UAT4-W1). Full record: notes/096-email-tab.md.
+    - Word Email tab (Save · To Do · Find · Email), gated on new capability canEmailFromPane (Word true, Outlook false);
+      task 086's Send Email row removed; Outlook's native Send Email unchanged.
+    - The "shared compose components" named in the background are the READING-PANE components; the email page's
+      form is EmailComposer (@spaarke/ui-components). The tab mounts it through a new thin shared wrapper
+      SendEmailPane (ADR-045 "new mount = new thin wrapper"), by exact webpack/jest alias to source; types via an
+      ambient shim (shared/types/spaarke-send-email-pane.d.ts). lexical 0.41.0 added to the add-in.
+    - Send = existing POST /api/communications/send, sendMode User, attachmentDocumentIds [documentId],
+      associations [related record, logical name], archiveToSpe false. No BFF change.
+    - No client path mints a sharing link; shareLinkService.ts + suite deleted; Outlook body links the Spaarke
+      document record.
+    - Gates: gated jest 75/75 suites, 1031/1031; lint 0; typecheck 68 total / 0 production (= CI pin); shared
+      wrappers.test 14/14; webpack build exit 0 (run twice — the second proved the scoped resolve change).
+    - Step 9.5: adr-check found an ADR-045 deviation (direct engine mount) → Path C (SendEmailPane). code-review:
+      1 Critical (server, escalated), W3/W4/W5/W6/W8 + S2/S4/S6/S7/S8 fixed; table in notes §8.
+    - OPEN: live send from Word (AC 10). Escalated: app-only attachment read + association with no caller-access
+      check on the send route (security); share-link route recommendation (notes §4); archiveToSpe default bug.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

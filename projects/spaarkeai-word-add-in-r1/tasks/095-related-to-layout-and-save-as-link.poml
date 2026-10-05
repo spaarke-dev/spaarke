@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 4 (2-5): a compact Related-to row (search icon, "+ New" beside the type pills, the label moves into the lookup box) and a saved file just "Save"s — the "Save as" choice becomes a secondary "Save as new document" link</title>
     <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx` (`RelatedToPicker.tsx`, `SaveFlow.tsx`, the Save-as section) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,6 +106,13 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Code complete 2026-10-04; see notes/095-related-to-and-save-as.md. Width: a released runtime API exists
+    (Office.extensionLifeCycle.taskpane.setWidth, TaskPaneApi 1.1), so +75 px was applied (web 405, Windows 395,
+    Mac 345); no released manifest setting. Gates: gated jest 74/74 suites, 1016/1016 tests, lint 0, typecheck 0 production.
+    Live acceptance (criterion 8) left open pending deploy.
+  </notes>
 
   <outputs>
     <file>src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
