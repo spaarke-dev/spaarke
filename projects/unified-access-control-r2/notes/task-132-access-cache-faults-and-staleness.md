@@ -919,8 +919,8 @@ files removed.** Guard = `PoaShareClientSingletonGuardTests` (30); behaviour = `
 | P1 | `ModifyAccessAsync`'s `finally` evicts only for a systemuser principal | **1** — C3 (b) `ModifyAccessAsync` | **5** — the Team modify cases | a conditional eviction |
 | P2 | `RevokeAccessAsync` evicts `Guid.Empty` instead of the record | **1** — C3 (b) `RevokeAccessAsync` ("the eviction is given (entitySetName, ?)") | **6** — every revoke case but the eviction-throws ones | the eviction's keys must be the write's |
 | P3 | `GrantAccessAsync` does not await the write before its `finally` evicts | **1** — C3 (b) `GrantAccessAsync` | **9** | the write completes before the eviction |
-| P4 | the eviction helper returns early for `sprk_playbooks` — a set no behaviour case uses | **1** — C3 (c) | **0** | a branch on an input the cases do not take: only the structural rule sees it (the N1 class, generalised) |
-| P5 | the eviction helper starts the invalidation and does not await it | **1** — C3 (c) | 3, timing-dependent (the un-awaited eviction races the assertion) | the structural rule is deterministic where the behaviour cases are a race |
+| P4 | the eviction helper returns early for `sprk_playbooks` — a set no behaviour case uses | **4** — C3 (c), and C3 (b) for all three writes (a helper with such a path is no eviction) | **0** | a branch on an input the cases do not take: only the structural rule sees it (the N1 class, generalised) |
+| P5 | the eviction helper starts the invalidation and does not await it | **4** — C3 (c), and C3 (b) for all three writes | 3, timing-dependent (the un-awaited eviction races the assertion) | the structural rule is deterministic where the behaviour cases are a race |
 | P6 | the verifier's item 7: `enum PoaSeedAction { GrantAccess, ModifyAccess, RevokeAccess }` + `PostAsJsonAsync(action.ToString(), payload)` in a BFF file | **1** — C6 (enum values) | — | item 7 |
 | P7 | an embedded resource in the BFF naming `RevokeAccess` | **2** — C6 (resource), T5 | — | resources and src/server configuration |
 | P8 | an unused `const string Route = "grantaccess"` in a BFF file (never loaded) | **1** — C6 (const, any case) | — | consts read by reflection |
@@ -933,9 +933,13 @@ files removed.** Guard = `PoaShareClientSingletonGuardTests` (30); behaviour = `
 | S12 | f1-v1's S12 re-run (a fourth client write) | **2** — C2, C4 | — | … and C2 / C4 |
 | S16 | f1-v1's S16 re-run (`"Revoke" + "Access"` folded) | **1** — C4 | — | … and the folded constant |
 | S17 | f1-v1's S17 re-run (an expression tree over the client) | **3** — C1 (by `ldtoken`), T1, per-writer | — | … and the `ldtoken` read |
+| P14 | **POSITIVE:** the eviction helper renamed everywhere in the seam (`EvictAfterShareWriteAsync` → `InvalidateAfterWriteAsync`) | **0** (30 / 30 green) | — | no helper name is bound — the eviction is found in the IL |
 
-All 19 seeds red; every one restored (`git status --porcelain` empty, `git diff --quiet HEAD` = 0, file touched). P6, P7
-and P8 were run twice — before and after C6 learned constant data — red both times; the table shows the final run.
+All 19 negative seeds red, the positive seed green; every one restored (`git status --porcelain` empty, `git diff --quiet`
+HEAD` = 0, file touched). Seeds were re-run whenever the rule they test changed afterwards, and the table shows the run on the
+FINAL code: P6, P7 and P8 before and after C6 learned constant data (red both times); N1-P5's guard runs after C3 (c)
+stopped naming the helper (N1-P3 unchanged; P4 / P5 went from 1 red to 4). The behaviour columns are from the first run —
+those tests did not change afterwards.
 
 **Item 11 — the live gates, as a script.** `projects/unified-access-control-r2/notes/task-132-live-gate.ps1` (operator
 tool, not product code): `Preflight` (read-only: the deploy-order precondition `systemuser.sprk_primarycontact`; the App
@@ -971,6 +975,29 @@ calls rather than re-implements); (2) extension — 133's script is that task's 
 established shape; (3) cost of doing nothing — criterion 21's live writes stay hand-typed, with no dry run and no
 recorded original owner to restore. No package, no plugin (ADR-002); fail closed unchanged (ADR-003).
 
-RESULTS_PARAGRAPH
+**Step 9.5 — code-review + adr-check over the round's diff (FULL / TEST-MODIFYING rigor).** Fixed during the round:
+(1) ADR-038 **B8** — C3 (c) as first written bound the seam's PRIVATE eviction helper by name through reflection
+(`GetMethods(NonPublic).Single(m => m.Name == …)`), the string binding B8 exists to stop; now the eviction is found in the
+IL (P14 proves no name is bound). Reading the compiled IL of non-public members is the existing arch-fitness practice
+(`IlCallScan`, accepted in f1-v1), not a behaviour test of a private; the control fixtures bind their own helpers by
+`nameof`. (2) C6 missed constant DATA (RVA fields) — added, seeds P12 / P13. (3) The disclosure said "computed from
+non-constant pieces", which `string.Join("", "Grant", "Access")` (constant pieces joined at run time) contradicts —
+reworded. Checked, no finding: ADR-038 B1 (no transport mock — the behaviour cases use the in-memory Web API server),
+B3 / B4 (no DI-registration or constructor tests); ADR-010 (no new interface); ADR-002 (no plugin); ADR-003 (no production
+logic change — fail-closed unchanged); §11.5 (`IlPathScan`, ~1,000 lines, has one reason to change — path analysis of a
+compiled body; the guard's compile-only fixtures moved to their own file). Accepted, with reason: the path analysis
+treats the await plumbing, `CancellationToken.None` and `string.Concat` as non-throwing (they fail only by running out of
+memory, which the model excludes and says so); a filter is assumed both to accept and to decline (over-approximation —
+it can only add paths).
+**Results (f1-v1c-v1, 2026-10-05), after every seed was restored.** Build: ArchTests 0 warnings / 0 errors (a
+no-incremental rebuild); BFF, BFF unit tests and `Sprk.Bff.Api.IntegrationTests` 0 / 0; `Spe.Integration.Tests` 0 errors
+and 5 CA2024 warnings, all in the untouched `AnalysisEndpointsIntegrationTests.cs` (pre-existing). Affected first:
+`PoaShareClientSingletonGuardTests` **30 / 0 / 0 in Debug and in Release** (22 before the round: the name-pinned C3 test
+replaced, 9 added); `AccessCacheInvalidationTests` + `DataverseRecordShare*` **66 / 0 / 0** (49 + 17 new cases). Then once,
+in full: NetArchTest **622 / 0 / 0** (614 + 8; run on the final code, after the last guard edit); BFF unit suite
+**15,453 passed / 0 failed / 54 skipped (15,507 = 15,490 + 17; 23 m 24 s)**; `Sprk.Bff.Api.IntegrationTests`
+**104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**. The three non-ArchTests suites ran
+on `6808d587c`, whose production code the later commits do not change (ArchTests and notes only). No contention failure
+this run. Production code since `137b088f5`: doc comments only — no IL change, no package, no publish-size or CVE delta.
 
 `.claude/**`: no edit needed.
