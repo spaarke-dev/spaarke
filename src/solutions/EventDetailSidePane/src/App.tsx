@@ -45,6 +45,7 @@ import {
   parseWebApiError,
   type DirtyFields,
 } from "./services/eventService";
+import { splitPartialSave } from "./services/partialSaveOutcome";
 import {
   useOptimisticUpdate,
   useRecordAccess,
@@ -517,11 +518,26 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
         setFooterMessage(createSuccessMessage(result.savedFields || []));
         console.log("[App] Save successful:", result.savedFields);
       } else {
-        // Show error message with rollback options
+        // Decision round 51 item 2: a PARTIAL save (the filing persisted through the BFF, the other fields failed) is
+        // saved for the filing — it is never rolled back or retried; only the fields that failed are.
+        const { persisted, failed } = splitPartialSave(fields, result.savedFields, buildSavePayload);
+        if (Object.keys(persisted).length > 0) {
+          optimistic.handleSaveSuccess(persisted, currentValues as unknown as Partial<IEventRecord>);
+          sendEventSaved(params.eventId, persisted);
+          setEditedFields((prev) => {
+            const next = new Set(prev);
+            for (const key of Object.keys(persisted)) {
+              next.delete(key);
+            }
+            return next;
+          });
+        }
+
+        // Show error message with rollback options (for the fields that failed only)
         const errorMsg = parseWebApiError(new Error(result.error));
         optimistic.handleSaveError(
           errorMsg,
-          fields,
+          failed,
           currentValues as unknown as Partial<IEventRecord>
         );
         setFooterMessage(createErrorMessageWithRollback(errorMsg));
