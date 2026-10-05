@@ -16,7 +16,7 @@ import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/Docu
 import { createXrmNavigationService } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
-import { getXrm } from '../../services/xrmProvider';
+import { getHostXrm } from '../../services/xrmProvider';
 import { authenticatedFetch } from '../../services/authInit';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 
@@ -147,7 +147,7 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
   }, []);
 
   const handleSearchUsers = React.useCallback(async (query: string) => {
-    const xrm = getXrm();
+    const xrm = getHostXrm();
     if (!xrm?.WebApi) return [];
     return searchUsersAsLookup(xrm.WebApi, query);
   }, []);

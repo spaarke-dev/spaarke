@@ -29,6 +29,7 @@
 import type { ResolvedColumn } from '../configResolution';
 import { exportCsv, csvFilename } from './csvExport';
 import { cleanGuid } from '../../../utils/guid';
+import { getXrm } from '../../../utils/xrmContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Handler context — what every default handler receives
@@ -100,31 +101,15 @@ export const DEFAULT_ACTION_META: Record<string, DefaultActionMeta> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Walk `window` → `window.parent` → … to locate the Xrm object (the Custom Page
- * iframe case). Mirrors the pattern in `XrmDataverseClient`. Returns `null` when
- * Xrm is not available (Storybook, Code Pages outside MDA, tests).
- *
- * The Xrm shape is intentionally untyped here — the framework consumes only the
- * tiny `Navigation.openForm` + `WebApi.deleteRecord` slice and pivots through
- * `any` casts at each call site to avoid pulling in a heavy ambient typing.
+ * Xrm resolution uses the shared cross-frame `getXrm()` walker
+ * (`utils/xrmContext.ts` — task 081 / C-8 converged this file's former local
+ * parent-chain walk onto it). The handlers below consume only the tiny
+ * `Navigation.openForm` / `Navigation.openAlertDialog` / `WebApi.deleteRecord`
+ * slice and pivot through an `any` view at each call site.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let w: any = typeof window !== 'undefined' ? (window as any) : null;
-  let depth = 0;
-  while (w && depth < 10) {
-    if (w.Xrm) {
-      return w.Xrm;
-    }
-    if (w.parent && w.parent !== w) {
-      w = w.parent;
-      depth++;
-      continue;
-    }
-    return null;
-  }
-  return null;
+function getXrmAny(): any {
+  return getXrm() ?? null;
 }
 
 /** Trigger a browser download from a `Blob`. SSR-safe (no-op if `document` is unavailable). */
@@ -157,7 +142,7 @@ function downloadBlob(blob: Blob, filename: string): void {
  * entity by reading `ctx.entityName` instead of the hard-coded `EVENT_ENTITY_NAME`.
  */
 export const defaultCreateFormHandler: DefaultHandler = async ctx => {
-  const xrm = getXrm();
+  const xrm = getXrmAny();
   if (!xrm?.Navigation?.openForm) {
     // eslint-disable-next-line no-console
     console.warn('[CommandBar] Xrm.Navigation.openForm not available. Cannot open new form.');
@@ -195,7 +180,7 @@ export const defaultCreateFormHandler: DefaultHandler = async ctx => {
  */
 export const defaultDeleteSelectedHandler: DefaultHandler = async ctx => {
   if (ctx.selectedIds.length === 0) return;
-  const xrm = getXrm();
+  const xrm = getXrmAny();
   if (!xrm?.WebApi?.deleteRecord) {
     // eslint-disable-next-line no-console
     console.warn('[CommandBar] Xrm.WebApi.deleteRecord not available. Cannot delete.');

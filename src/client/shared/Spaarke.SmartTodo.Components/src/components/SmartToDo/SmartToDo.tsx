@@ -182,6 +182,7 @@ const useStyles = makeStyles({
 
 const TodoEmptyState: React.FC = () => (
   <EmptyState
+    size="compact"
     heading="All caught up"
     description="No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here."
   />

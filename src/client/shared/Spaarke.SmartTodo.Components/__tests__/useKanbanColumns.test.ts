@@ -37,6 +37,9 @@
 
 jest.mock('@spaarke/ui-components', () => ({
   parseDueDate: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal').parseDueDate,
+  // task 081 (U5): bucketing now also uses the shared calendar-day helper.
+  daysBetweenLocalMidnight: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal')
+    .daysBetweenLocalMidnight,
 }));
 
 import { tokens } from '@fluentui/react-components';

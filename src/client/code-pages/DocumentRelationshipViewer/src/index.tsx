@@ -18,7 +18,7 @@
 
 import { createRoot } from 'react-dom/client';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
-import { resolveCodePageTheme, setupCodePageThemeListener, cleanGuid } from '@spaarke/ui-components';
+import { resolveCodePageTheme, setupCodePageThemeListener, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { resolveRuntimeConfig } from '@spaarke/auth';
 import { App } from './App';
 import { initializeAuth, getAuthProvider } from './services/authInit';
@@ -34,7 +34,10 @@ const params = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelop
 /* eslint-disable @typescript-eslint/no-explicit-any */
 if (!params.get('documentId')) {
   try {
-    const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+    // Shared cross-frame walker (task 081 / C-8). On a form-embedded web
+    // resource the frame carrying Xrm.WebApi is the form window, which is
+    // also the one carrying Xrm.Page. `any` view: typed XrmPageLike lacks `data`.
+    const xrm = getXrm() as any;
     if (xrm) {
       const formContext = xrm.Page;
       const entityId = cleanGuid(formContext?.data?.entity?.getId?.());

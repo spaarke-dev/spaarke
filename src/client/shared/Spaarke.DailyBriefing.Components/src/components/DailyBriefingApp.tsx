@@ -57,7 +57,14 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES, cleanGuid, EmptyState } from '@spaarke/ui-components';
+import {
+  SendEmailDialog,
+  RichFilePreviewDialog,
+  OOB_MODAL_SIZES,
+  cleanGuid,
+  EmptyState,
+  getXrm,
+} from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
@@ -112,6 +119,12 @@ const useStyles = makeStyles({
   emptyStateTimestamp: {
     color: tokens.colorNeutralForeground4,
     textAlign: 'center',
+  },
+  // The pre-081 local EmptyState used a 64px vertical band; the shared
+  // `EmptyState` default is 48px — this is the one spacing difference.
+  emptyStateBand: {
+    paddingTop: '64px',
+    paddingBottom: '64px',
   },
 });
 
@@ -294,34 +307,25 @@ function bulletToNotificationItem(bullet: NarrativeBulletResult, generatedAtUtc?
 export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _params, onBrowsePlaybooks }) => {
   const styles = useStyles();
 
-  // Resolve Xrm via frame-walking with polling for welcome screen timing.
-  // Xrm may not be available immediately when loaded as MDA welcome screen.
+  // Resolve Xrm via the shared cross-frame `getXrm()` walker (task 081 / C-8),
+  // polling for welcome-screen timing: Xrm may not be available immediately
+  // when loaded as the MDA welcome screen. Only the poll is local; each tick
+  // calls `getXrm()` afresh (it never caches). The former inline
+  // `w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm` chain sat inside ONE try, so a
+  // cross-origin parent threw before `top` was ever tried; `getXrm()` guards
+  // each frame separately.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [xrm, setXrm] = React.useState<any>(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any;
-      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-    } catch {
-      return null;
-    }
-  });
+  const [xrm, setXrm] = React.useState<any>(() => getXrm() ?? null);
 
   // Poll for Xrm if not available on mount (welcome screen / left nav timing)
   React.useEffect(() => {
     if (xrm?.WebApi) return; // Already available
     let cancelled = false;
     const interval = setInterval(() => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        const found = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-        if (found?.WebApi && !cancelled) {
-          setXrm(found);
-          clearInterval(interval);
-        }
-      } catch {
-        /* cross-origin */
+      const found = getXrm();
+      if (found?.WebApi && !cancelled) {
+        setXrm(found);
+        clearInterval(interval);
       }
     }, 500);
     // Stop polling after 30s
@@ -695,6 +699,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         />
         <div className={styles.scrollContent}>
           <EmptyState
+            className={styles.emptyStateBand}
             icon={<CheckmarkCircleRegular className={styles.emptyStateIcon} />}
             heading="You're all caught up!"
             description="No unread notifications. New activity across your matters and projects will appear here automatically."

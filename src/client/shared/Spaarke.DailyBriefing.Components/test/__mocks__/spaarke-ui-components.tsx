@@ -64,16 +64,21 @@ export const OOB_MODAL_SIZES = {
 };
 
 // ---------------------------------------------------------------------------
-// task 081 (C-11 / C-13): TldrSection.tsx now imports `formatRelativeTime`
-// and DailyBriefingApp.tsx now imports `EmptyState` from
-// `@spaarke/ui-components` (both hoisted off hand-rolled local copies).
-// Minimal stand-ins so ts-jest can type-check/mount against this test-local
-// mock, which is NOT the real package (see module header).
+// task 081 (C-8 / C-11 / C-13): DailyBriefing now imports `getXrm`,
+// `formatRelativeTime`, `parseDueDate`, `daysBetweenLocalMidnight` and
+// `EmptyState` from `@spaarke/ui-components`.
+//
+// `getXrm`, `formatRelativeTime` and the `dateLocal` helpers are the REAL implementations, re-exported
+// from the UI.Components TypeScript source (both are dependency-free pure
+// modules), so tests exercise the code under change and mock only at the
+// boundary (the `window.Xrm` object / the clock). Only the presentational
+// `EmptyState` stays a stub (the real one would pull a second Fluent/React
+// copy from the sibling package's node_modules).
 // ---------------------------------------------------------------------------
 
-export function formatRelativeTime(isoTimestamp: string): string {
-  return isoTimestamp;
-}
+export { getXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
+export { formatRelativeTime } from '../../../Spaarke.UI.Components/src/utils/relativeTime';
+export { parseDueDate, daysBetweenLocalMidnight } from '../../../Spaarke.UI.Components/src/utils/dateLocal';
 
 export interface EmptyStateProps {
   icon?: React.ReactElement;
@@ -81,6 +86,7 @@ export interface EmptyStateProps {
   description?: string;
   footer?: React.ReactNode;
   ariaLabel?: string;
+  size?: 'compact' | 'default';
 }
 
 export const EmptyState: React.FC<EmptyStateProps> = ({ heading, description, footer }) => (
@@ -103,6 +109,15 @@ export interface SectionRegistration {
   category: SectionCategory;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   factory: (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [k: string]: any;
+}
+
+// task 081: `dailyBriefingRegistration.browsePlaybooks.test.tsx` imports the
+// registration factory directly, whose type imports need these names.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type SectionFactoryContext = Record<string, any>;
+export interface ContentSectionConfig {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [k: string]: any;
 }

@@ -19,6 +19,9 @@ import type { SearchDomain } from '../../types';
 
 function createMockXrm() {
   return {
+    // WebApi stub: the shared getXrm() walker (task 081 / C-8) only accepts
+    // a frame whose Xrm.WebApi is present, as in a real Dataverse host.
+    WebApi: { retrieveMultipleRecords: jest.fn(), retrieveRecord: jest.fn() },
     Navigation: {
       navigateTo: jest.fn(),
     },

@@ -203,7 +203,7 @@ import {
 } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import type { IDataService } from "@spaarke/ui-components";
-import { cleanGuid, formatRelativeTime } from "@spaarke/ui-components";
+import { cleanGuid, formatRelativeTime, daysBetweenLocalMidnight } from "@spaarke/ui-components";
 import {
   logTelemetryError,
   TELEMETRY_HISTORY_LOAD_FAILURE,
@@ -422,19 +422,21 @@ const useStyles = makeStyles({
 
 /**
  * Format a timestamp into a short relative-time string for the MenuItem meta
- * line, e.g. "5 minutes ago", "yesterday", "2 months ago".
+ * line, e.g. "just now", "5m ago", "2h ago", "3d ago", "2w ago".
  *
- * Delegates to the shared `formatRelativeTime` (task 081 / C-13 — this was
- * one of five independently reimplemented "relative time ago" formatters,
- * converged onto `@spaarke/ui-components`). Returns `""` for an unparseable
- * timestamp, matching this function's previous contract.
+ * Delegates to the shared `formatRelativeTime` with `style: 'compact'` (task
+ * 081 / C-13 — this was one of five independently reimplemented "relative
+ * time ago" formatters, and already rendered this abbreviated form; its
+ * locale-date fallback after 7 days is replaced by week/month/year buckets).
+ * Returns `""` for an unparseable timestamp, matching this function's
+ * previous contract.
  */
 function formatRelative(timestamp: string): string {
   const ts = Date.parse(timestamp);
   if (Number.isNaN(ts)) {
     return "";
   }
-  return formatRelativeTime(timestamp);
+  return formatRelativeTime(timestamp, { style: "compact" });
 }
 
 /**
@@ -500,10 +502,8 @@ function resolveGroupLabel(timestamp: string, now: Date = new Date()): GroupLabe
   if (Number.isNaN(ts)) {
     return "Older";
   }
-  const date = new Date(ts);
-  const startOfDay = (d: Date): number =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  // Calendar days between local midnights — the shared U5 helper (task 081).
+  const diffDays = daysBetweenLocalMidnight(new Date(ts), now);
   if (diffDays <= 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   if (diffDays <= 7) return "This week";

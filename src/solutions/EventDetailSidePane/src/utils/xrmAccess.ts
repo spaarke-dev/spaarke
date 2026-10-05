@@ -1,9 +1,11 @@
 /**
  * Xrm Access Utilities for EventDetailSidePane
  *
- * Provides access to the Xrm global object from within a web resource iframe.
- * Tries window.parent.Xrm first (Custom Page in iframe), then window.Xrm.
+ * Provides access to the Xrm global object from within a web resource iframe,
+ * via the shared cross-frame walker in @spaarke/ui-components.
  */
+
+import { getXrm as getSharedXrm } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,23 +63,15 @@ export interface IXrmContext {
 }
 
 /**
- * Get the Xrm object from the window context.
- * Tries parent window first (web resource in iframe), then current window.
+ * Get the Xrm object (WebApi + Utility) for this side pane.
+ * Thin wrapper kept for this package's importers; the frame walk itself is
+ * the shared cross-frame walker (task 081 / C-8). Named `getSidePaneXrm`
+ * (was `getXrm`) so no second export shares the shared walker's name.
  */
-export function getXrm(): IXrmContext | null {
-  try {
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi && parentXrm?.Utility) {
-      return parentXrm as IXrmContext;
-    }
-
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.WebApi && windowXrm?.Utility) {
-      return windowXrm as IXrmContext;
-    }
-
-    return null;
-  } catch {
-    return null;
+export function getSidePaneXrm(): IXrmContext | null {
+  const xrm: any = getSharedXrm();
+  if (xrm?.WebApi && xrm?.Utility) {
+    return xrm as IXrmContext;
   }
+  return null;
 }

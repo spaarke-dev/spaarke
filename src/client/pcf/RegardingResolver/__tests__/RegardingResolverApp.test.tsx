@@ -293,6 +293,20 @@ const renderWithProvider = (ui: React.ReactElement): ReturnType<typeof render> =
 // Tests
 // -----------------------------------------------------------------------------
 
+/**
+ * Xrm.WebApi stub for every `window.Xrm` assigned below. The shared `getXrm()`
+ * walker (task 081 / C-8) only accepts a frame whose `Xrm.WebApi` is present —
+ * as it always is in a real Dataverse host — so a stub without it would read
+ * as "Xrm unavailable".
+ */
+const xrmWebApiStub = () => ({
+  retrieveRecord: jest.fn(),
+  retrieveMultipleRecords: jest.fn(),
+  createRecord: jest.fn(),
+  updateRecord: jest.fn(),
+  deleteRecord: jest.fn(),
+});
+
 beforeEach(() => {
   mockApplyResolverFields.mockClear();
   mockResolveRecordType.mockClear();
@@ -701,7 +715,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // independent and remains active.
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).Xrm = { Navigation: { navigateTo: navigateToMock } };
+      (window as any).Xrm = { WebApi: xrmWebApiStub(), Navigation: { navigateTo: navigateToMock } };
 
       // Note: readOnly hides the picker trigger, so we cannot populate
       // selectedTarget via the mock picker in this test. We assert instead
@@ -780,7 +794,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
       const originalXrm = w.Xrm;
-      w.Xrm = { Page: { data: { entity: { getId: () => '' } } } };
+      w.Xrm = { WebApi: xrmWebApiStub(), Page: { data: { entity: { getId: () => '' } } } };
       try {
         const { context } = buildContext();
         renderWithProvider(
@@ -894,7 +908,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
     test('valid selectedTarget → navigateTo called with exact page-input + navigation-options', async () => {
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).Xrm = { Navigation: { navigateTo: navigateToMock } };
+      (window as any).Xrm = { WebApi: xrmWebApiStub(), Navigation: { navigateTo: navigateToMock } };
 
       const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
       renderWithProvider(
@@ -970,7 +984,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
     test('navigateTo rejects → console.warn + no throw', async () => {
       const navigateToMock = jest.fn().mockRejectedValue(new Error('record deleted'));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).Xrm = { Navigation: { navigateTo: navigateToMock } };
+      (window as any).Xrm = { WebApi: xrmWebApiStub(), Navigation: { navigateTo: navigateToMock } };
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
       const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
@@ -1004,7 +1018,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const navigateToMock = jest.fn();
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).Xrm = { Navigation: { navigateTo: navigateToMock } };
+      (window as any).Xrm = { WebApi: xrmWebApiStub(), Navigation: { navigateTo: navigateToMock } };
 
       const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
       renderWithProvider(
@@ -1060,6 +1074,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Navigation: { navigateTo: navigateToMock },
         Page: {
           data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } },
@@ -1122,6 +1137,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Navigation: { navigateTo: navigateToMock },
         Page: {
           data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } },
@@ -1186,6 +1202,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Navigation: { navigateTo: navigateToMock },
         Page: {
           data: { entity: { getId: () => '' } },
@@ -1226,6 +1243,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Navigation: { navigateTo: navigateToMock },
         Page: {
           data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } },
@@ -1286,7 +1304,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
       const originalXrm = w.Xrm;
-      w.Xrm = { Page: { data: { entity: { getId: () => '' } } } };
+      w.Xrm = { WebApi: xrmWebApiStub(), Page: { data: { entity: { getId: () => '' } } } };
       return () => {
         if (originalXrm === undefined) {
           delete w.Xrm;
@@ -1304,7 +1322,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
       const originalXrm = w.Xrm;
-      w.Xrm = { Page: { data: { entity: { getId: () => `{${guid}}` } } } };
+      w.Xrm = { WebApi: xrmWebApiStub(), Page: { data: { entity: { getId: () => `{${guid}}` } } } };
       return () => {
         if (originalXrm === undefined) {
           delete w.Xrm;
@@ -1677,6 +1695,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const refreshMock = jest.fn().mockResolvedValue(undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           data: {
             entity: { save: saveMock, getId: () => '' },
@@ -1745,6 +1764,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const refreshMock = jest.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           data: {
             entity: { save: saveMock, getId: () => '' },
@@ -1792,6 +1812,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const refreshMock = jest.fn().mockResolvedValue(undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           ui: { getFormType: () => 2 },
           data: {
@@ -1837,6 +1858,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const refreshMock = jest.fn().mockResolvedValue(undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           ui: { getFormType: () => 1 },
           data: {
@@ -2140,6 +2162,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       });
 
       w.Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           getAttribute: (name: string) => attrs[name] ?? null,
@@ -2590,6 +2613,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       });
 
       w.Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           getAttribute: (name: string) => attrs[name] ?? null,
@@ -2821,6 +2845,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
         Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
       };
 
@@ -2859,7 +2884,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // selection. Name cell must remain hidden (no stale/placeholder render).
       const retrieveRecordMock = jest.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).Xrm = { Page: { data: { entity: { getId: () => '' } } } };
+      (window as any).Xrm = { WebApi: xrmWebApiStub(), Page: { data: { entity: { getId: () => '' } } } };
 
       const { context } = buildContext({
         regardingRecordNumberField: 'REAL-2026-123456.01',

@@ -4,7 +4,7 @@ import { QuickSummaryMetricCard } from "./QuickSummaryMetricCard";
 import { QUICK_SUMMARY_CARDS } from "./quickSummaryConfig";
 import { useQuickSummaryCounts } from "../../hooks/useQuickSummaryCounts";
 import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
-import { getXrm } from "../../services/xrmProvider";
+import { getHostXrm } from "../../services/xrmProvider";
 import type { IWebApi } from "../../types/xrm";
 
 export interface IQuickSummaryRowProps {
@@ -80,7 +80,7 @@ export const QuickSummaryRow: React.FC<IQuickSummaryRowProps> = ({
             // the 3 named OOB sizes; mapped onto `record` (85%x85%, nearest
             // fit) and flagged for the P7 visual review. See
             // notes/task-091-completion.md.
-            const xrm = getXrm();
+            const xrm = getHostXrm();
             if (!xrm?.Navigation?.navigateTo) {
               console.warn("[QuickSummaryRow] Xrm.Navigation.navigateTo is not available");
               return;

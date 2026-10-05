@@ -54,3 +54,44 @@ describe('formatDueDate', () => {
     expect(result).not.toMatch(/Overdue|today|tomorrow|in \d/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// task 081 (F4): a DateOnly due date (`YYYY-MM-DD`, e.g. Dataverse
+// `sprk_duedate`) is a calendar day. `new Date("2026-10-05")` is UTC midnight,
+// i.e. 8pm on Oct 4 in New York, so before the fix a task due TODAY read
+// "Overdue by 1d" and one due tomorrow read "Due today" in every US zone.
+// Run in a fixed negative-offset zone; restore TZ so other files in the same
+// jest worker are unaffected.
+// ---------------------------------------------------------------------------
+
+describe('formatDueDate — DateOnly values in America/New_York', () => {
+  const originalTz = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = 'America/New_York';
+  });
+  afterAll(() => {
+    process.env.TZ = originalTz;
+  });
+
+  // 9:00am local on Mon 2026-10-05.
+  const localNow = (): Date => new Date(2026, 9, 5, 9, 0, 0);
+
+  it('the zone override is in effect (guards the cases below)', () => {
+    expect(new Date(Date.UTC(2026, 9, 5)).getHours()).toBe(20);
+  });
+
+  it.each([
+    ['2026-10-02', 'Overdue by 3d'],
+    ['2026-10-04', 'Overdue by 1d'],
+    ['2026-10-05', 'Due today'],
+    ['2026-10-06', 'Due tomorrow'],
+    ['2026-10-08', 'Due in 3d'],
+    ['2026-10-12', 'Due in 7d'],
+  ])('%s at 9am on 2026-10-05 → %s (never hours)', (dateOnly, expected) => {
+    expect(formatDueDate(dateOnly, localNow())).toBe(expected);
+  });
+
+  it('a date-only value due today reads "Due today" late in the evening too', () => {
+    expect(formatDueDate('2026-10-05', new Date(2026, 9, 5, 23, 30))).toBe('Due today');
+  });
+});

@@ -37,6 +37,9 @@ const mockGetClientUrl = jest.fn<string, []>();
 
 beforeAll(() => {
   (window as Record<string, unknown>).Xrm = {
+    // WebApi stub: the shared getXrm() walker (task 081 / C-8) only accepts
+    // a frame whose Xrm.WebApi is present, as in a real Dataverse host.
+    WebApi: { retrieveMultipleRecords: jest.fn(), retrieveRecord: jest.fn() },
     Utility: {
       getGlobalContext: () => ({
         getUserId: mockGetUserId,

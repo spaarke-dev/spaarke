@@ -41,7 +41,7 @@
  * @see hooks/useKanbanColumns.ts (now imports the same parseDueDate)
  */
 
-import { parseDueDate } from '@spaarke/ui-components';
+import { parseDueDate, daysBetweenLocalMidnight } from '@spaarke/ui-components';
 import type { IKanbanTodoLike } from '../types/kanban';
 
 export { parseDueDate };
@@ -113,10 +113,9 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
   // for anything in the 0–3-day tier, including today.) Math.round absorbs the
   // ±1h DST skew that makes a "day" 23 or 25 hours. Colour tiers (`urgency`) are
   // UNCHANGED, so badge colours match the prior behaviour exactly.
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const startOfDue = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24));
+  // (task 081 / U5: the shared `daysBetweenLocalMidnight` replaces this
+  // function's former inline copy of the same local-midnight idiom.)
+  const diffDays = daysBetweenLocalMidnight(new Date(), dueDate);
 
   if (diffDays < 0) {
     return { label: 'Overdue', urgency: 'overdue' };

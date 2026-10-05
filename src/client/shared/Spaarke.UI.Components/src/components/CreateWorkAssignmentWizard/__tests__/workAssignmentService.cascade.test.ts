@@ -77,6 +77,8 @@ function makeDataService(
 function stubXrmUser(userId: string | null) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = {
+    // `WebApi` is required by the shared `getXrm()` walker (task 081 / C-8).
+    WebApi: {},
     Utility: {
       getGlobalContext: () => ({
         userSettings: { userId: userId },

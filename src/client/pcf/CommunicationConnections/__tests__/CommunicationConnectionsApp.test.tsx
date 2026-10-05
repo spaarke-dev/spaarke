@@ -40,6 +40,11 @@ jest.mock('@spaarke/ui-components', () => {
     TODO_REGARDING_CATALOG,
     cleanGuid: (id: string) => String(id).replace(/[{}]/g, '').toLowerCase(),
     resolveRecordDisplayNameFieldName: jest.fn().mockResolvedValue(null),
+    // task 081 (C-8): the App resolves Xrm through the shared cross-frame
+    // walker. Pass the REAL implementation through (from TS source) — the
+    // walker is not what these tests are about, and mocking it would hide a
+    // frame-walk regression.
+    getXrm: jest.requireActual('../../../shared/Spaarke.UI.Components/src/utils/xrmContext').getXrm,
     applyResolverFields: jest.fn().mockResolvedValue({ recordNumber: null, displayName: null }),
     // spaarke-modal-system P7 task 090 (FR-11/FR-18): CommunicationConnectionsApp.tsx
     // imports OOB_MODAL_SIZES from `@spaarke/ui-components` for its
@@ -190,6 +195,7 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
     const save = jest.fn().mockResolvedValue(undefined);
     const refresh = jest.fn().mockResolvedValue(undefined);
     (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
       Navigation: { navigateTo: jest.fn().mockResolvedValue(undefined) },
       Page: { data: { entity: { getId: () => HOST_ID, save }, refresh } },
     };
@@ -207,6 +213,7 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
   it('number Link opens the primary regarding record via navigateTo (modal, target 2) from the denorm URL', async () => {
     const navigateTo = jest.fn().mockResolvedValue(undefined);
     (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
       Navigation: { navigateTo },
       Page: { data: { entity: { getId: () => HOST_ID } } },
     };
@@ -304,6 +311,7 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
     const MATTER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
     const navigateTo = jest.fn().mockResolvedValue(undefined);
     (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
       Navigation: { navigateTo },
       Page: { data: { entity: { getId: () => HOST_ID } } },
     };

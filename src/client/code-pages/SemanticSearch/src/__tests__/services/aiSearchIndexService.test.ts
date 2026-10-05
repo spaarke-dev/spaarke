@@ -22,6 +22,9 @@ const ORG_URL = 'https://test-org.crm.dynamics.com';
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = {
+    // WebApi stub: the shared getXrm() walker (task 081 / C-8) only accepts
+    // a frame whose Xrm.WebApi is present, as in a real Dataverse host.
+    WebApi: { retrieveMultipleRecords: jest.fn(), retrieveRecord: jest.fn() },
     Utility: {
       getGlobalContext: () => ({
         getClientUrl: () => ORG_URL,

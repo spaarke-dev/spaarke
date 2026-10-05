@@ -54,12 +54,11 @@ jest.mock('@spaarke/ui-components', () => {
     // (deliberately avoiding the full barrel per the comment below) must
     // provide it too. Same brace-strip + lowercase behavior as the real impl.
     cleanGuid: (id: string | null | undefined) => (id ? id.replace(/[{}]/g, '').trim().toLowerCase() : ''),
-    // task 081 (C-8): `getWebApiSafe()`/`getUserIdSafe()` now resolve Xrm via
-    // the shared `getXrm()` walker instead of a local `locateXrm()` — this
-    // sparse mock must provide it too. jsdom's single-window test environment
-    // never exercises the parent/top branches (window.parent === window), so
-    // a window-only read matches `installXrm()`'s `window.Xrm` stub exactly.
-    getXrm: () => (window as unknown as { Xrm?: unknown }).Xrm,
+    // task 081 (C-8): `getWebApiSafe()`/`getUserIdSafe()` resolve Xrm via the
+    // shared `getXrm()` walker. Use the REAL implementation (from source — a
+    // dependency-free module, so the barrel-import issue above does not apply)
+    // and fake only the boundary: the `Xrm` object on window / window.parent.
+    getXrm: jest.requireActual('../../../../../Spaarke.UI.Components/src/utils/xrmContext').getXrm,
   };
 });
 
@@ -116,8 +115,8 @@ const makeFakeXrm = () => ({
 
 function installXrm(): void {
   // jsdom doesn't define window.Xrm by default; assigning to (window as any).Xrm
-  // is the canonical pattern used elsewhere in the codebase (see `getXrm()`
-  // in `xrmContext.ts`, read here via this file's `@spaarke/ui-components` mock).
+  // is the canonical pattern used elsewhere in the codebase; the real `getXrm()`
+  // (xrmContext.ts) reads it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = makeFakeXrm();
 }
@@ -198,6 +197,38 @@ describe('WorkspaceLayoutWidget (C-4 renderer seam)', () => {
       <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
     );
     expect(StubRenderer.mock.calls[0][0].launchData).toBeUndefined();
+  });
+
+  // task 081 (C-8 / F2): embedded in SpaarkeAi, Xrm lives on the PARENT frame.
+  // The widget must find it there through the shared walker and must NOT copy
+  // it onto `window.Xrm` (the pre-081 local walker did, which masked
+  // window.Xrm-only readers elsewhere).
+  it('resolves Xrm from the parent frame and does not write window.Xrm', () => {
+    const originalParent = window.parent;
+    Object.defineProperty(window, 'parent', { value: { Xrm: makeFakeXrm() }, writable: true, configurable: true });
+    try {
+      const StubRenderer = jest.fn().mockReturnValue(<div data-testid="stub-renderer" />);
+      setDefaultWorkspaceRenderer(StubRenderer as unknown as WorkspaceRenderer);
+
+      render(
+        <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
+      );
+
+      expect(screen.getByTestId('stub-renderer')).toBeTruthy();
+      expect(StubRenderer.mock.calls[0][0].userId).toBe(FAKE_USER_ID);
+      expect((window as unknown as { Xrm?: unknown }).Xrm).toBeUndefined();
+    } finally {
+      Object.defineProperty(window, 'parent', { value: originalParent, writable: true, configurable: true });
+    }
+  });
+
+  it('treats an Xrm without WebApi as no host (renders the no-Xrm state)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Xrm = { Utility: makeFakeXrm().Utility };
+    render(
+      <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
+    );
+    expect(screen.getByTestId('workspace-layout-widget-no-xrm')).toBeTruthy();
   });
 
   it('uses the injected renderer prop in preference to the registered default', () => {

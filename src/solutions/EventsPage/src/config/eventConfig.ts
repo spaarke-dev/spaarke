@@ -8,7 +8,7 @@
  * @see projects/events-workspace-apps-UX-r1/notes/Events-View-GUIDS.md
  */
 
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Type to Form GUID Mapping
@@ -215,7 +215,8 @@ export async function discoverEntityViews(entityName: string): Promise<IEventVie
   }
 
   try {
-    const xrm = (window as any).parent?.Xrm || (window as any).Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm();
     if (!xrm?.WebApi) {
       console.warn("[eventConfig] Xrm.WebApi not available for view discovery");
       return [];

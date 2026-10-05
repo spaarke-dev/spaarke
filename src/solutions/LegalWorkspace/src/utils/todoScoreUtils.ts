@@ -23,7 +23,10 @@
  */
 
 import type { ITodo } from '../types/entities';
-import { parseDueDate } from './dueLabelUtils';
+// Local-midnight parse for DateOnly due dates (task 081: the former local
+// `./dueLabelUtils` copy parsed `YYYY-MM-DD` as UTC midnight, a day early in
+// every US zone, and carried an unused copy of the 3/7/10 tier function).
+import { parseDueDate } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Types

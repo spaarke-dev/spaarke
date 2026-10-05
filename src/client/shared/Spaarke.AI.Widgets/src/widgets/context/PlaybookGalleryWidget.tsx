@@ -293,6 +293,7 @@ const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> 
  */
 const PlaybookGalleryEmptyState: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({ styles }) => (
   <EmptyState
+    size="compact"
     icon={<AppsRegular className={styles.emptyStateIcon} />}
     heading="No playbooks available"
     description="No AI playbooks have been configured for your workspace. Contact your administrator to enable playbooks."

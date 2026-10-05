@@ -60,6 +60,15 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXXL,
     flex: "1 1 auto",
   },
+  // Spacing of the pre-081 local NotificationPanel EmptyState, kept on top of
+  // the shared compact EmptyState (task 081 / C-11) so the panel looks as before.
+  emptyStateSpacing: {
+    paddingTop: "48px",
+    paddingBottom: "48px",
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+    gap: tokens.spacingVerticalM,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -157,6 +166,8 @@ export const NotificationPanel: React.FC<INotificationPanelProps> = ({
         {/* Notification list or empty state */}
         {!hasFilteredNotifications ? (
           <EmptyState
+            size="compact"
+            className={styles.emptyStateSpacing}
             icon={<AlertRegular style={{ color: tokens.colorNeutralForeground4 }} />}
             heading={hasAnyNotifications ? "No matching notifications" : "No notifications"}
             description={

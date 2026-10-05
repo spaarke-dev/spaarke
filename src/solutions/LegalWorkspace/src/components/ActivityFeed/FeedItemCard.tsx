@@ -32,7 +32,9 @@ import {
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
-import { RecordCardShell, CardIcon, createXrmNavigationService, formatRelativeTime } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, createXrmNavigationService, parseDueDate } from "@spaarke/ui-components";
+import { computeDueLabel, type DueUrgency } from "@spaarke/smart-todo-components";
+import { formatDueDate } from "@spaarke/daily-briefing-components/utils";
 
 // R3 FR-14 / OS-1 note:
 //   The legacy "Flag as To Do" button on the FeedItemCard wrote
@@ -67,16 +69,23 @@ function derivePriorityLevel(priority: number | undefined): PriorityLevel | null
 
 type UrgencyTier = "overdue" | "dueSoon" | "onTrack" | "neutral";
 
-function deriveUrgencyTier(dueDate: string | undefined): UrgencyTier {
-  if (!dueDate) return "neutral";
-  const due = new Date(dueDate);
-  if (isNaN(due.getTime())) return "neutral";
-  const diffDays = Math.ceil((due.getTime() - Date.now()) / 86400000);
-  if (diffDays < 0) return "overdue";
-  if (diffDays <= 3) return "dueSoon";
-  if (diffDays <= 10) return "onTrack";
-  return "neutral";
-}
+/**
+ * The feed card has four accent colours for the five canonical due-date tiers
+ * (`computeDueLabel` from `@spaarke/smart-todo-components` — owner decision
+ * 2026-10-03, 3/7/10 calendar days). Explicit mapping (task 081 / F6):
+ *   overdue → overdue (red) · 3d (0-3 days) → dueSoon (orange) ·
+ *   7d (4-7) and 10d (8-10) → onTrack (green) · none (11+ / no date) → neutral.
+ * This replaces a private copy of the boundaries (ceil of elapsed 24h periods
+ * over a UTC-midnight parse, which read a DateOnly due date of TODAY as
+ * overdue in every US zone).
+ */
+const FEED_URGENCY_TIER: Record<DueUrgency, UrgencyTier> = {
+  overdue: "overdue",
+  "3d": "dueSoon",
+  "7d": "onTrack",
+  "10d": "onTrack",
+  none: "neutral",
+};
 
 const URGENCY_ACCENT: Record<UrgencyTier, string> = {
   overdue: tokens.colorPaletteRedBorder2,
@@ -189,9 +198,16 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
     const TypeIconComponent = getTypeIcon(event.eventTypeName);
     const typeIconLabel = getTypeIconLabel(event.eventTypeName);
 
-    const dueDateText = event.sprk_duedate ? `Due: ${formatRelativeTime(event.sprk_duedate)}` : null;
-    const isDueOverdue = event.sprk_duedate ? new Date(event.sprk_duedate) < new Date() : false;
-    const urgencyTier = deriveUrgencyTier(event.sprk_duedate);
+    // `sprk_duedate` is a DateOnly calendar day, not an instant: day-granular
+    // label ("Due today" / "Due tomorrow" / "Due in 3d" / "Overdue by 2d" /
+    // "Due Oct 20") from the shared `formatDueDate`, never an elapsed-time
+    // phrase (task 081 / F4 — the elapsed formatter read a due date of today
+    // as "Due: 14 hours ago" in US zones). Tier from the canonical
+    // `computeDueLabel` over the local-midnight `parseDueDate`.
+    const dueDateText = formatDueDate(event.sprk_duedate);
+    const dueUrgency = computeDueLabel(parseDueDate(event.sprk_duedate)).urgency;
+    const isDueOverdue = dueUrgency === "overdue";
+    const urgencyTier = FEED_URGENCY_TIER[dueUrgency];
 
     // ── Handlers ──
 

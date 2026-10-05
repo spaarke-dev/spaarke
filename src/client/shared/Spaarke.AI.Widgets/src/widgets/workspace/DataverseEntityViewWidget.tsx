@@ -45,6 +45,7 @@ import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import {
   DataGrid,
   XrmDataverseClient,
+  getXrm,
   createMembershipResolver,
   type MembershipResolver,
   type DataGridHostContext,
@@ -147,31 +148,9 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Xrm frame-walk — copied from WorkspaceLayoutWidget pattern (intentionally
-// duplicated to keep this widget's bundle independent of LegalWorkspace's
-// xrmProvider helper).
-// ---------------------------------------------------------------------------
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-function locateXrm(): any | null {
-  if (typeof window !== 'undefined' && (window as any).Xrm?.WebApi) {
-    return (window as any).Xrm;
-  }
-  try {
-    const p = (window.parent as any)?.Xrm;
-    if (p?.WebApi) return p;
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    const t = (window.top as any)?.Xrm;
-    if (t?.WebApi) return t;
-  } catch {
-    /* cross-origin */
-  }
-  return null;
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
+// Xrm resolution — the shared cross-frame `getXrm()` from
+// `@spaarke/ui-components` (task 081 / C-8; this file previously carried its
+// own copy of the window/parent/top walk as a local `locateXrm`).
 
 // ---------------------------------------------------------------------------
 // Component
@@ -183,7 +162,7 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
   // XrmDataverseClient resolves Xrm lazily on each call — no constructor arg.
   // We still frame-walk here so the widget can show an empty state in dev
   // (where Xrm is not present) instead of crashing on the first BFF call.
-  const xrm = React.useMemo(() => locateXrm(), []);
+  const xrm = React.useMemo(() => getXrm() ?? null, []);
   const dataverseClient = React.useMemo(() => {
     if (!xrm?.WebApi) return null;
     return new XrmDataverseClient();

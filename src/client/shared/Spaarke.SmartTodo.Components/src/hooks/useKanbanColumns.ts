@@ -45,7 +45,7 @@
 
 import * as React from 'react';
 import { tokens } from '@fluentui/react-components';
-import { parseDueDate } from '@spaarke/ui-components';
+import { parseDueDate, daysBetweenLocalMidnight } from '@spaarke/ui-components';
 import type { IKanbanColumn, IKanbanDataverseService, IKanbanTodoLike, TodoColumn } from '../types/kanban';
 
 // ---------------------------------------------------------------------------
@@ -144,12 +144,8 @@ function assignColumnByDate(todo: IKanbanTodoLike): TodoColumn {
   const due = parseDueDate(todo.sprk_duedate);
   if (!due) return 'Future';
   // Compare day boundaries in LOCAL time so "today" matches the user's
-  // calendar, not UTC.
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / msPerDay);
+  // calendar, not UTC (shared U5 helper — task 081).
+  const diffDays = daysBetweenLocalMidnight(new Date(), due);
   if (diffDays <= 0) return 'Today'; // due today OR overdue
   if (diffDays === 1) return 'Tomorrow';
   return 'Future';

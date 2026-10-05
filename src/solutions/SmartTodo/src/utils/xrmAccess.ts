@@ -8,8 +8,7 @@
  * For basic Xrm access (getXrm, getWebApi) use ../services/xrmProvider.ts.
  */
 
-import { getXrm } from "../services/xrmProvider";
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -18,6 +17,7 @@ import { cleanGuid } from '@spaarke/ui-components';
  * Used for direct REST API calls that bypass Xrm.WebApi.
  */
 export function getClientUrl(): string | null {
+  // Shared cross-frame walker (task 081 / C-8).
   const xrm = getXrm() as any;
   if (!xrm) return null;
 
@@ -28,30 +28,6 @@ export function getClientUrl(): string | null {
     if (url) return url;
   } catch {
     /* unavailable */
-  }
-
-  // Fallback: walk frame hierarchy for Xrm.Utility
-  const framesToCheck: Array<Window | null> = [];
-  try {
-    framesToCheck.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    framesToCheck.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-  framesToCheck.push(window);
-
-  for (const frame of framesToCheck) {
-    try {
-      const ctx = (frame as any)?.Xrm?.Utility?.getGlobalContext?.();
-      const url = ctx?.getClientUrl?.();
-      if (url) return url;
-    } catch {
-      /* cross-origin or unavailable */
-    }
   }
   return null;
 }

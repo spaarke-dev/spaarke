@@ -19,7 +19,7 @@
  */
 
 import { registerCommandHandler, cleanGuid } from '@spaarke/ui-components';
-import { getXrm } from './xrmHelpers';
+import { getSidePanesXrm } from './xrmHelpers';
 import { EVENT_ENTITY_NAME } from './config';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ async function executeBulkStatusUpdate(
   statusLabel: string,
   additionalFields?: Record<string, unknown>
 ): Promise<boolean> {
-  const xrm = getXrm();
+  const xrm = getSidePanesXrm();
   if (!xrm?.WebApi) return false;
 
   const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
@@ -94,7 +94,7 @@ async function executeBulkStatusUpdate(
  * before deactivation).
  */
 async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<boolean> {
-  const xrm = getXrm();
+  const xrm = getSidePanesXrm();
   if (!xrm?.WebApi) return false;
 
   const cleanIds = eventIds.map(id => cleanGuid(id));

@@ -14,6 +14,7 @@ import {
   setupCodePageThemeListener,
   AppErrorBoundary,
   AppInsightsService,
+  getXrm,
 } from "@spaarke/ui-components";
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09):
@@ -83,9 +84,9 @@ function Root() {
    * would be a future enhancement).
    */
   const handleBrowsePlaybooks = React.useCallback(() => {
+    // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    const xrm = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
+    const xrm: any = getXrm() ?? null;
     const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
       xrm?.Navigation?.navigateTo;
     if (typeof navigateTo !== "function") {
