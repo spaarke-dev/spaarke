@@ -51,9 +51,10 @@ namespace Spaarke.ArchTests;
 /// each a Pending waiver owned by its fix task 159-166. A fix task resolves its entry ONLY by credit: make the
 /// route pass Rule A by a credited filter, a HandlerDecision or a SystemAdmin / SPE-admin AdminOnlyRoutes entry, delete
 /// its waiver, and set <c>ResolvedBy</c> to the task id and <c>ProofTest</c> to its behavioural deny test. A route the fix
-/// task DELETED resolves with <c>ResolvedBy</c> and a <c>ProofTest</c> that pins its absence (task 167 f2, main-session
-/// round 34 items 4-5). Either proof must RUN: a plain, unskipped xUnit <c>[Fact]</c>/<c>[Theory]</c> in a file a CI-run
-/// test project compiles (task 167 f2-v1, <see cref="ProofTestProjects"/>).</para>
+/// task DELETED resolves with <c>ResolvedBy</c>, a <c>ProofTest</c> that names its absence (task 167 f2, main-session
+/// round 34 items 4-5), and — the authority since task 167 f2-v2 (main-session round 52 item 3) — its verb and path absent
+/// from the endpoint table of the BFF booted as Development and as Production. Either proof must RUN: a plain, unskipped
+/// xUnit <c>[Fact]</c>/<c>[Theory]</c> in a file a CI-run test project compiles (task 167 f2-v1, <see cref="ProofTestProjects"/>).</para>
 ///
 /// <para><b>The public surface and its controls</b> (task 167 f1, f2-v1). Every anonymous route is pinned in
 /// <c>ExplicitlyAnonymousRoutes</c> WITH the compensating controls it carries — a rate-limit policy,
@@ -61,10 +62,17 @@ namespace Spaarke.ArchTests;
 /// (<see cref="EveryExplicitlyAnonymousRouteCarriesItsPinnedControl"/>); a rate-limit policy is applied only by a chain
 /// call the scanner reads (<see cref="RateLimitPoliciesAreAppliedOnlyOnAScannedChain"/>).</para>
 ///
-/// <para><b>Why source analysis and not endpoint reflection</b> (task 074, still true).
-/// <c>AddEndpointFilter</c> adds NOTHING to <c>EndpointBuilder.Metadata</c> — reflection yields only
-/// <c>IAuthorizeData</c> and <c>IAllowAnonymous</c>, exactly the authenticated-vs-anonymous distinction that
-/// produced every finding — and an app built in a test would not register config-gated routes at all.</para>
+/// <para><b>Why source analysis for credit, and the booted app for behaviour</b> (task 074; task 167 f2-v2, main-session
+/// round 52). <c>AddEndpointFilter</c> adds NOTHING to <c>EndpointBuilder.Metadata</c> — reflection yields only
+/// <c>IAuthorizeData</c> and <c>IAllowAnonymous</c>, exactly the authenticated-vs-anonymous distinction that produced every
+/// finding — so WHICH record a route decides on is read from source. What the guard claims about BEHAVIOUR is checked against
+/// the real BFF booted from its own <c>Program.cs</c> as Development and as Production (<see cref="BootedBff"/>,
+/// <c>RouteAuthorizationGuardTests.Runtime.cs</c>), with every mapping gate on: the scanned routes and the booted endpoint
+/// table agree route for route (<see cref="TheScannerAndTheBootedAppAgreeOnEveryRoute"/>); an anonymous principal satisfies
+/// no registered policy and no non-anonymous endpoint's policy (<see cref="NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime"/>);
+/// the anonymous surface is the pinned one at run time; no development-only route is mapped in Production
+/// (<see cref="NoDevelopmentOnlyRouteIsMappedInProduction"/>); and a retired sweep route is absent from both boots. Where a
+/// text rule remains, its header states what it cannot see.</para>
 ///
 /// <para><b>What this rule does NOT catch, stated plainly.</b> Presence is not correctness. A credited filter
 /// that authorizes the wrong id, a HandlerDecision seam that is called on the wrong record, and a Read check
@@ -405,9 +413,13 @@ public partial class RouteAuthorizationGuardTests
         return violations;
     }
 
+    /// <param name="mappedAtRunTime">Where the BOOTED BFF maps a route key, or null when it does not
+    /// (<see cref="MappedAtRunTime"/>). A retired entry is judged absent only by this (main-session round 52 item 3); without
+    /// it a retired entry cannot resolve.</param>
     private static List<string> LedgerViolations(
         IReadOnlyList<Assessment> routes, IReadOnlyList<Waiver> waivers, IReadOnlyList<SweepFinding> ledger,
-        Func<string, string?>? readTestFile = null, IReadOnlyList<AdminOnlyGroup>? adminOnly = null)
+        Func<string, string?>? readTestFile = null, IReadOnlyList<AdminOnlyGroup>? adminOnly = null,
+        Func<string, string?>? mappedAtRunTime = null)
     {
         readTestFile ??= ReadRepoFile;
         adminOnly ??= AdminOnlyRoutes;
@@ -437,7 +449,7 @@ public partial class RouteAuthorizationGuardTests
 
             if (!byKey.TryGetValue(entry.Route, out var a))
             {
-                violations.AddRange(RetiredEntryViolations(entry, label, routes, waived, readTestFile));
+                violations.AddRange(RetiredEntryViolations(entry, label, routes, waived, readTestFile, mappedAtRunTime));
                 continue;
             }
 
@@ -961,15 +973,23 @@ public partial class RouteAuthorizationGuardTests
     //   1. ResolvedBy is set (the deleting task) and the route carries no waiver;
     //   2. no live route has the SAME verb and path with only a parameter name or constraint changed — that is a
     //      RE-KEY, not a retirement;
-    //   3. ProofTest names an existing test method that pins the route's ABSENCE: its scope (the method, its attributes,
-    //      and the same-type members it names, e.g. a RetiredRoutes array or a MemberData source) pairs the retired VERB
-    //      with a PATH the retired template matches, and asserts absence — 404 / 405 on the request, or an empty / false
-    //      answer from the endpoint table. A test that names the route only to assert it is PRESENT (NotBe(404)), a
-    //      test of a different route, or one that never asserts absence does not pass.
+    //   3. THE ROUTE IS ABSENT FROM THE RUNNING APP (main-session round 52 item 3, task 167 f2-v2): neither the BFF booted as
+    //      Development nor the BFF booted as Production (BootedBff) maps the retired verb and path (parameter names and
+    //      constraints erased). This is the authority on absence. The guard no longer trusts a test's TEXT to tell it the
+    //      route is gone, so an assertion that never runs cannot make a still-mapped route look retired.
+    //   4. ProofTest names the regression test that keeps it gone. It must RUN (A PROOF TEST MUST RUN) and must name the
+    //      route's absence: its scope (the method, its attributes, and the same-type members it names, e.g. a RetiredRoutes
+    //      array or a MemberData source) pairs the retired VERB with a PATH the retired template matches, and asserts
+    //      absence — 404 / 405 on the request, or an empty / false answer from the endpoint table. A test that names the
+    //      route only to assert it is PRESENT (NotBe(404)), a test of a different route, or one that never asserts absence
+    //      does not pass.
+    //      LIMIT (stated, round 52): item 4 is read from text and only keeps the NAMED regression test honest. It does not
+    //      prove the assertion is reached — a goto, a false `if`, a swallowing try/catch or a never-invoked lambda around it
+    //      passes item 4 (known limit, owner round 56 class d). Item 3 decides whether the route is gone.
     // =============================================================================================
 
     private static IEnumerable<string> RetiredEntryViolations(SweepFinding entry, string label, IReadOnlyList<Assessment> routes,
-        IReadOnlyList<Waiver> waived, Func<string, string?> readTestFile)
+        IReadOnlyList<Waiver> waived, Func<string, string?> readTestFile, Func<string, string?>? mappedAtRunTime)
     {
         if (entry.ResolvedBy is null)
         {
@@ -993,6 +1013,18 @@ public partial class RouteAuthorizationGuardTests
                          + "and path with only a parameter name or constraint changed — the route was RE-KEYED, not retired. Do not "
                          + "re-key the entry: escalate for reconciliation (task 167 trigger 4).";
             yield break;
+        }
+
+        // Absence is judged at RUN TIME (round 52 item 3): the booted app's endpoint table, not a test's text.
+        if (mappedAtRunTime is null)
+        {
+            yield return $"{label}: the key is absent from the source scan, but the guard was given no booted app to confirm the route "
+                         + "is gone — a retired entry resolves only when the RUNNING BFF does not map it (round 52 item 3)";
+        }
+        else if (mappedAtRunTime(entry.Route) is { } mapped)
+        {
+            yield return $"{label}: the key is absent from the source scan, but the BOOTED BFF still maps it ({mapped}) — the route "
+                         + "is not retired, it is registered in a form the scanner does not read. Delete it, or restore the entry's waiver.";
         }
 
         var proofProblems = ProofTestViolations(entry, readTestFile).ToList();
@@ -1903,7 +1935,8 @@ public partial class RouteAuthorizationGuardTests
         Assert.Equal(30, bySeverity[Severity.Medium]);
         Assert.Equal(6, bySeverity[Severity.Low]);
 
-        var violations = LedgerViolations(RealAssessments.Value, Waivers, SweepFindings);
+        // A retired entry is judged absent by the BOOTED app's endpoint table (main-session round 52 item 3).
+        var violations = LedgerViolations(RealAssessments.Value, Waivers, SweepFindings, mappedAtRunTime: MappedAtRunTime);
         Assert.True(
             violations.Count == 0,
             "The sweep ledger is the closed set of the 82 findings (90 route keys). A fix task resolves its entry ONLY "
@@ -3397,6 +3430,14 @@ public partial class RouteAuthorizationGuardTests
     //   - `PendingRequirements` appears nowhere, and every `.Succeed(` is `context.Succeed(requirement)` inside such a
     //     handler's HandleRequirementAsync — the requirement it was handed, nothing else.
     // MAINTENANCE: a genuine need for any of these is a change to the authorization architecture (ADR-008), reviewed as such.
+    //
+    // THIS IS THE FAST FIRST CHECK, NOT THE PROOF (main-session round 52 item 1, task 167 f2-v2). Sign-in is PROVEN at run
+    // time by NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime: an anonymous principal, through the booted BFF's own
+    // authorization service and registered handlers, satisfies no policy and no endpoint — whatever shape the handler has.
+    // LIMITS of this text rule, stated exactly (known limits, owner round 56 class d): it matches `requirement` by NAME, so a
+    // lambda or local-function parameter of the same name passes it (the f2-v1 verifier's
+    // `ForEach(requirement => context.Succeed(requirement))`); and it cannot see a Succeed reached by reflection, `dynamic`,
+    // a method group or an [UnsafeAccessor]. Each such handler, once registered, fails the runtime proof.
     // =============================================================================================
 
     private static readonly Regex AuthorizationPipelineStage = new(
@@ -4009,7 +4050,7 @@ public partial class RouteAuthorizationGuardTests
 
     /// <summary>One request a presence assertion depends on: the client (named or made inline), its verb, the raw text of
     /// its first argument, and — for <c>SendAsync(request)</c> — the request-message variable.</summary>
-    private sealed record PresenceRequest(string? Client, string? Made, string Verb, string? PathText, string? Message);
+    private sealed record PresenceRequest(string? Client, string? Made, string Verb, string? PathText, string? Message, int At = 0);
 
     private static PresenceRequest RequestOf(Match call, string body, string bodyText)
     {
@@ -4023,7 +4064,8 @@ public partial class RouteAuthorizationGuardTests
             call.Groups["made"].Success ? call.Groups["made"].Value : null,
             verb,
             verb == "SEND" ? null : first,
-            verb == "SEND" && first is not null && Regex.IsMatch(first, @"^[A-Za-z_]\w*$") ? first : null);
+            verb == "SEND" && first is not null && Regex.IsMatch(first, @"^[A-Za-z_]\w*$") ? first : null,
+            call.Index);
     }
 
     /// <summary>
@@ -4076,23 +4118,38 @@ public partial class RouteAuthorizationGuardTests
     /// <summary>Whether <paramref name="request"/> is shown to be signed in — its client built by a signed-in factory or
     /// given a bearer by the method or by class setup, or its request message given one by the method — or is tied to an
     /// endpoint-table read of the SAME verb and path in the method.</summary>
-    private static bool HasPresenceEvidence(PresenceRequest request, string body, string bodyText, string setup)
+    private static bool HasPresenceEvidence(PresenceRequest request, string body, string bodyText, string setup, string? setupText = null)
     {
+        setupText ??= setup;
         if (request.Made is not null)
         {
             return SignedInClientFactory.IsMatch(request.Made);
         }
 
-        var scopes = new[] { body, setup };
-        if (request.Client is not null && scopes.Any(scope =>
-                Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(request.Client)}\s*=\s*[^;]*?{SignedInClientFactory}")
-                || Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(request.Client)}\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*=")))
+        // A bearer counts only when it IS a bearer and is the LAST word on that client's (or message's) Authorization header
+        // before the request (task 167 f2-v2, main-session round 52 item 4: `Authorization = null` never counts, nor does a
+        // bearer set and then cleared). The method's own assignments decide; when it makes none, the class setup's do.
+        if (request.Client is not null)
         {
-            return true;
+            var header = $@"(?<![\w.]){Regex.Escape(request.Client)}\s*!?\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*=(?![=>])";
+            var lastInBody = LastAuthorizationIsBearer(body, bodyText, header, request.At);
+            if (lastInBody is not null)
+            {
+                if (lastInBody.Value)
+                {
+                    return true;
+                }
+            }
+            else if (Regex.IsMatch(body[..Math.Min(request.At, body.Length)], $@"(?<![\w.]){Regex.Escape(request.Client)}\s*=\s*[^;]*?{SignedInClientFactory}")
+                     || Regex.IsMatch(setup, $@"(?<![\w.]){Regex.Escape(request.Client)}\s*=\s*[^;]*?{SignedInClientFactory}")
+                     || LastAuthorizationIsBearer(setup, setupText, header, setup.Length) == true)
+            {
+                return true;
+            }
         }
 
         if (request.Message is not null
-            && Regex.IsMatch(body, $@"(?<![\w.]){Regex.Escape(request.Message)}\s*\.\s*Headers\s*\.\s*Authorization\s*="))
+            && LastAuthorizationIsBearer(body, bodyText, $@"(?<![\w.]){Regex.Escape(request.Message)}\s*\.\s*Headers\s*\.\s*Authorization\s*=(?![=>])", request.At) == true)
         {
             return true;
         }
@@ -4127,12 +4184,37 @@ public partial class RouteAuthorizationGuardTests
         return false;
     }
 
+    /// <summary>A bearer credential: <c>new AuthenticationHeaderValue("Bearer", token)</c> — any qualification, or target-typed
+    /// <c>new("Bearer", token)</c> — whose token is not <c>null</c>, <c>default</c> or empty.</summary>
+    private static readonly Regex BearerHeaderValue = new(
+        @"^new\s*(?:(?:global::)?(?:System\s*\.\s*Net\s*\.\s*Http\s*\.\s*Headers\s*\.\s*)?AuthenticationHeaderValue\s*)?\(\s*""Bearer""\s*,\s*(?<token>[\s\S]+)\)$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex NoToken = new(
+        @"^(?:null|default|default\s*\(\s*string\s*\)|""""|(?:global::)?(?:System\s*\.\s*)?[Ss]tring\s*\.\s*Empty)\s*!?$", RegexOptions.Compiled);
+
+    /// <summary>Whether the LAST assignment matching <paramref name="assignment"/> in <c>code[..before]</c> assigns a bearer
+    /// (<see cref="BearerHeaderValue"/>, read from the raw <paramref name="text"/>); null when there is none.</summary>
+    private static bool? LastAuthorizationIsBearer(string code, string text, string assignment, int before)
+    {
+        var last = Regex.Matches(code[..Math.Min(before, code.Length)], assignment).LastOrDefault();
+        if (last is null)
+        {
+            return null;
+        }
+
+        var from = last.Index + last.Length;
+        var end = StatementEnd(code, from);
+        var value = BearerHeaderValue.Match(text[from..(end < 0 ? code.Length : end)].Trim());
+        return value.Success && !NoToken.IsMatch(value.Groups["token"].Value.Trim());
+    }
+
     /// <summary>The unit's code with every parsed method BODY blanked: what remains is class-level setup — field
     /// initializers and constructors — which applies to every test of the class. Another test method's body never
     /// does (xUnit builds a new instance per test), so a header one test sets lends nothing to the next.</summary>
-    private static string ClassSetupCodeOf(SourceUnit unit)
+    private static string ClassSetupCodeOf(SourceUnit unit, bool rawText = false)
     {
-        var chars = unit.Code.ToCharArray();
+        var chars = (rawText ? unit.Text : unit.Code).ToCharArray();
         foreach (var method in unit.Methods)
         {
             for (var i = method.BodyStart; i < method.BodyEnd; i++)
@@ -4155,6 +4237,16 @@ public partial class RouteAuthorizationGuardTests
     /// such evidence anywhere in the method exempted it, so an unused signed-in client beside an anonymous
     /// <c>NotBe(NotFound)</c> passed. When the asserted response cannot be traced, every request the method sends needs
     /// its own evidence.
+    /// <para><b>Task 167 f2-v2 (main-session round 52 item 4).</b> A bearer counts only when the LAST assignment to that
+    /// client's <c>DefaultRequestHeaders.Authorization</c> (or that message's <c>Headers.Authorization</c>) before the request
+    /// is <c>new AuthenticationHeaderValue("Bearer", token)</c> with a non-empty token — so <c>Authorization = null</c>, an empty
+    /// token, another scheme, or a bearer later set to null never counts. The run-time evidence (an
+    /// <c>EndpointTable.AssertMapped</c> / <c>Maps</c> read of the same verb and path — the booted app's
+    /// <c>EndpointDataSource</c>) is accepted as before and is the recommended proof.</para>
+    /// <para><b>Limits of this text rule, stated exactly</b> (known limits, owner round 56 classes d/e): it orders assignments by
+    /// position, not by control flow (a bearer set only under a false <c>if</c> counts); it does not see the header removed by
+    /// <c>DefaultRequestHeaders.Clear()</c> / <c>Remove("Authorization")</c>, added by <c>Add("Authorization", …)</c>, or set in
+    /// an object initializer; and it does not follow a client reassigned after its bearer was set.</para>
     /// </summary>
     private static List<string> AnonymousPresenceProofViolations(IEnumerable<SourceUnit> units)
     {
@@ -4162,6 +4254,7 @@ public partial class RouteAuthorizationGuardTests
         foreach (var unit in units)
         {
             string? setup = null;
+            string? setupText = null;
             foreach (var method in unit.Methods)
             {
                 var body = method.Body;
@@ -4179,12 +4272,13 @@ public partial class RouteAuthorizationGuardTests
                 // A header ANOTHER test sets on a shared field lends nothing (xUnit builds a new instance per test); class
                 // setup — field initializers and constructors — does.
                 setup ??= ClassSetupCodeOf(unit);
+                setupText ??= ClassSetupCodeOf(unit, rawText: true);
                 var bodyText = unit.Text[method.BodyStart..method.BodyEnd];
                 var all = ClientCall.Matches(body).Select(m => RequestOf(m, body, bodyText)).ToList();
                 foreach (var (index, notFound) in assertions)
                 {
                     var requests = RequestsBehind(body, bodyText, index) ?? all;
-                    if (requests.Count > 0 && requests.All(r => HasPresenceEvidence(r, body, bodyText, setup)))
+                    if (requests.Count > 0 && requests.All(r => HasPresenceEvidence(r, body, bodyText, setup, setupText)))
                     {
                         continue;
                     }
@@ -4297,6 +4391,42 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(Scan("        var rs = await Task.WhenAll(new[] { _httpClient!.GetAsync(\"/api/x\") });\n"
                           + "        rs.Should().AllSatisfy(r => { r.StatusCode.Should().NotBe(HttpStatusCode.NotFound); });",
             members: "    private readonly HttpClient? _httpClient = _fixture.CreateHttpClient();\n"));
+
+        // NEGATIVE (task 167 f2-v2, main-session round 52 item 4): a "bearer" that is no bearer, or not the last word on the
+        // header — the verifier's seed (`Authorization = null` on the client), a bearer set then nulled, null on the request
+        // message, an empty or null token, another scheme, and the constructor's bearer nulled by the test.
+        const string request = "        var r = await _client.GetAsync(\"/api/ai/scopes/personas\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);";
+        const string bearer = "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n";
+        foreach (var credential in new[]
+                 {
+                     "        _client.DefaultRequestHeaders.Authorization = null;\n",
+                     bearer + "        _client.DefaultRequestHeaders.Authorization = null;\n",
+                     "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"\");\n",
+                     "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", null!);\n",
+                     "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", string.Empty);\n",
+                     "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Basic\", \"dGVzdDp0ZXN0\");\n",
+                 })
+        {
+            Assert.Single(Scan(credential + request));
+        }
+
+        Assert.Single(Scan("        var request = new HttpRequestMessage(HttpMethod.Get, \"/api/x\");\n"
+                           + "        request.Headers.Authorization = null;\n"
+                           + "        var r = await _client.SendAsync(request);\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);"));
+        Assert.Single(Scan("        _client.DefaultRequestHeaders.Authorization = null;\n" + request,
+            members: "    private readonly HttpClient _client;\n    public PresenceTests(CustomWebAppFactory factory)\n    {\n"
+                     + "        _client = factory.CreateClient();\n" + bearer + "    }\n"));
+
+        // POSITIVE (f2-v2): a bearer that IS the last word — target-typed, fully qualified, re-set after a null.
+        foreach (var credential in new[]
+                 {
+                     "        _client.DefaultRequestHeaders.Authorization = new(\"Bearer\", \"t\");\n",
+                     "        _client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(\"Bearer\", Token);\n",
+                     "        _client.DefaultRequestHeaders.Authorization = null;\n" + bearer,
+                 })
+        {
+            Assert.Empty(Scan(credential + request));
+        }
     }
 
     // =============================================================================================
@@ -4519,7 +4649,12 @@ public partial class RouteAuthorizationGuardTests
 
     /// <summary>True when the registration sits in the then-branch of <c>if (&lt;env&gt;.IsDevelopment())</c> — braced or not,
     /// at any depth — and &lt;env&gt; is an IWebHostEnvironment / IHostEnvironment parameter of the enclosing method or an
-    /// <c>.Environment</c> property. A look-alike the guard cannot verify is recorded in <paramref name="problems"/>.</summary>
+    /// <c>.Environment</c> property. A look-alike the guard cannot verify is recorded in <paramref name="problems"/>.
+    /// <para>A TEXT check of where the mapping sits (task 167 f2-v1). Whether the control HOLDS is proven at run time
+    /// (main-session round 52 item 2): <see cref="NoDevelopmentOnlyRouteIsMappedInProduction"/> boots the real BFF as
+    /// Production and reads its endpoint table, and <see cref="NoServerCodeWritesTheHostEnvironmentName"/> bans an
+    /// <c>EnvironmentName</c> write in the compiled server code — the f2-v1 verifier's
+    /// <c>env.EnvironmentName = Environments.Development;</c> before the check is invisible to this method by design.</para></summary>
     private static bool IsMappedOnlyInDevelopment(RouteRegistration route, List<string> problems)
     {
         var unit = route.Unit;
@@ -5695,7 +5830,8 @@ public partial class RouteAuthorizationGuardTests
         // Simulate the integration state: the route is deleted (absent from the scan) and its waiver is gone. Nothing
         // here depends on whether the route is still on THIS branch, so the control survives the deletions landing.
         const string seededReason = "Seeded by the round-34 item 4 control: a waiver left behind on a deleted sweep route.";
-        List<string> Ledger(string route, string? resolvedBy, string? method, IReadOnlyList<Assessment>? routes = null, bool keepWaiver = false)
+        List<string> Ledger(string route, string? resolvedBy, string? method, IReadOnlyList<Assessment>? routes = null, bool keepWaiver = false,
+            Func<string, string?>? mappedAtRunTime = null, bool noBootedApp = false)
         {
             var assessments = routes ?? RealAssessments.Value.Where(a => a.Key != route).ToList();
             var waivers = Waivers.Where(w => w.Route != route).ToList();
@@ -5708,7 +5844,8 @@ public partial class RouteAuthorizationGuardTests
                 ? e with { ResolvedBy = resolvedBy, ProofTest = method is null ? null : $"{proofFile}::{method}" }
                 : e).ToList();
             var label = SweepFindings.Single(e => e.Route == route).SweepId + " " + route;
-            return LedgerViolations(assessments, waivers, ledger, Read)
+            return LedgerViolations(assessments, waivers, ledger, Read,
+                    mappedAtRunTime: noBootedApp ? null : mappedAtRunTime ?? (_ => null))
                 .Where(v => v.StartsWith(label + " ", StringComparison.Ordinal) || v.StartsWith(label + ":", StringComparison.Ordinal))
                 .ToList();
         }
@@ -5747,6 +5884,15 @@ public partial class RouteAuthorizationGuardTests
         var withTwin = RealAssessments.Value.Where(a => a.Key != "PUT /api/v1/events/{id:guid}").Concat(rekeyed).ToList();
         Assert.Contains(Ledger("PUT /api/v1/events/{id:guid}", "159", "DeletedRoutes_AreNotMapped_AndReachNothing", withTwin),
             v => v.Contains("RE-KEYED", StringComparison.Ordinal));
+
+        // NEGATIVE (task 167 f2-v2, main-session round 52 item 3) — absence is judged at RUN TIME: the scan no longer finds the
+        // key, the waiver is gone, ResolvedBy and a runnable absence proof are set — and the BOOTED app still maps the route
+        // (registered in a form the scanner does not read); and a ledger judged with no booted app at all.
+        Assert.Contains(Ledger("PUT /api/v1/events/{id:guid}", "159", "DeletedRoutes_AreNotMapped_AndReachNothing",
+                mappedAtRunTime: key => key == "PUT /api/v1/events/{id:guid}" ? "Production: PUT /api/v1/events/{id:guid}" : null),
+            v => v.Contains("the BOOTED BFF still maps it (Production: PUT /api/v1/events/{id:guid})", StringComparison.Ordinal));
+        Assert.Contains(Ledger("PUT /api/v1/events/{id:guid}", "159", "DeletedRoutes_AreNotMapped_AndReachNothing", noBootedApp: true),
+            v => v.Contains("was given no booted app", StringComparison.Ordinal));
     }
 
     // The f2 verifier's item 3 shapes (task 167 f2-v1), as a fixture: one runnable absence proof of S-79's
@@ -5875,7 +6021,7 @@ public partial class RouteAuthorizationGuardTests
             var ledger = SweepFindings.Select(e => e.Route == route ? e with { ResolvedBy = "161", ProofTest = $"{file}::{method}" } : e).ToList();
             var label = SweepFindings.Single(e => e.Route == route).SweepId + " " + route;
             return LedgerViolations(RealAssessments.Value.Where(a => a.Key != route).ToList(), Waivers.Where(w => w.Route != route).ToList(),
-                    ledger, read ?? Reading())
+                    ledger, read ?? Reading(), mappedAtRunTime: _ => null)
                 .Where(v => v.StartsWith(label + ":", StringComparison.Ordinal) || v.StartsWith(label + " ", StringComparison.Ordinal))
                 .ToList();
         }
