@@ -799,12 +799,7 @@ public sealed class DocumentContainerRelocator
         /// </summary>
         public (IReadOnlyList<ReplayStep>? Steps, string? Undecidable) After(RelocationWitness? witness)
         {
-            if (Steps.Count == 0)
-            {
-                return (null, "the source lists no version");
-            }
-
-            if (witness?.Version is { } version && System.Version.TryParse(version, out var witnessed)
+            if (Steps.Count > 0 && witness?.Version is { } version && System.Version.TryParse(version, out var witnessed)
                 && Steps.All(s => System.Version.TryParse(s.VersionId, out _)))
             {
                 var newer = Steps.Where(s => System.Version.Parse(s.VersionId) > witnessed).ToList();

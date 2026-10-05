@@ -2257,31 +2257,57 @@ public class DocumentContainerRelocatorTests
     }
 
     [Theory]
-    [InlineData(true)]  // two versions written after the move carry the same time
-    [InlineData(false)] // the witness recorded neither a numbered version nor a time
-    public async Task APostMoveHistoryWhoseOrderCannotBeDecided_IsHistoryUndecidable_AndTheRowAndTheSourceAreUntouched(bool sameTime)
+    [InlineData("same-time")]                // two versions written after the move carry the same time
+    [InlineData("no-witness-time")]          // the witness recorded neither a numbered version nor a time
+    [InlineData("a-version-without-time")]   // a version written after the move carries no time
+    [InlineData("no-later-version")]         // the content changed, yet no version is later than the witness
+    [InlineData("times-contradict-numbers")] // the current version is not the latest by time
+    public async Task APostMoveHistoryWhoseOrderCannotBeDecided_IsHistoryUndecidable_AndTheRowAndTheSourceAreUntouched(string history)
     {
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        if (history != "no-witness-time")
+        {
+            // The witness records the item's time (Graph lists no version at the move, except in the same-time case).
+            world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("memo.docx", Creator, null, 1234, "hash-1234", LastModified: Rig.Written);
+        }
+
         var rig = new Rig(world) { DeleteFails = (drive, item) => drive == CustomerAContainer && item == Item };
-        rig.Versions[(CustomerAContainer, Item)] = sameTime
+        rig.Versions[(CustomerAContainer, Item)] = history == "same-time"
             ? [new VersionInfoDto("v-a", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator }]
-            : []; // no version listed and the item reports no time: the witness has neither
+            : []; // no version listed: the witness has no version id (and, for no-witness-time, no time either)
         (await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true))
             .Complete.Should().BeFalse();
         world.Items[(CustomerAContainer, Item)] = world.ItemFacts(CustomerAContainer, Item)! with { Size = 2000, QuickXorHash = "source-edited" };
-        rig.Versions[(CustomerAContainer, Item)] = sameTime
-            ?
+        rig.Versions[(CustomerAContainer, Item)] = history switch
+        {
+            "same-time" =>
             [
                 new VersionInfoDto("v-a", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator },
                 new VersionInfoDto("v-b", null, EditedAt1, 1500, "Late Editor"),
                 new VersionInfoDto("v-c", null, EditedAt1, 2000, "Late Editor"),
-            ]
-            :
+            ],
+            "a-version-without-time" =>
+            [
+                new VersionInfoDto("1.0", null, default, 1500, "Late Editor"),
+                new VersionInfoDto("2.0", null, EditedAt2, 2000, "Late Editor"),
+            ],
+            "no-later-version" =>
+            [
+                new VersionInfoDto("1.0", null, Rig.Written.AddDays(-2), 1500, "Late Editor"),
+                new VersionInfoDto("2.0", null, Rig.Written.AddDays(-1), 2000, "Late Editor"),
+            ],
+            "times-contradict-numbers" =>
+            [
+                new VersionInfoDto("1.0", null, EditedAt2, 1500, "Late Editor"),
+                new VersionInfoDto("2.0", null, EditedAt1, 2000, "Late Editor"),
+            ],
+            _ =>
             [
                 new VersionInfoDto("1.0", null, EditedAt1, 1500, "Late Editor"),
                 new VersionInfoDto("2.0", null, EditedAt2, 2000, "Late Editor"),
-            ];
+            ],
+        };
         rig.DeleteFails = (_, _) => false;
 
         var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
