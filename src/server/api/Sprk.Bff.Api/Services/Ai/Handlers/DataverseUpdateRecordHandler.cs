@@ -67,6 +67,15 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// user-OBO; F3 on a move out of a secure root is asked AS THE CALLER (task 146 c1).
 /// After whichever path wrote the caller's update (the re-file's PATCH or the plain PATCH), the task 156 re-stamp runs,
 /// then the task 142 Assigned-To materializer (batch 4 integration).
+/// <b>Also (unified-access-control-r2 task 158):</b>
+/// (3) ACCEPTED (owner round 32, 2026-10-04 — unified-access-control-r2 task 158, owner rounds 6 and 31; the same reasoning
+/// as (1) and (2), recorded as Amendment A-UAC158, an extension of A-UAC146, in spaarke-ai-architecture-redesign-r1's spec):
+/// when the caller's own update files a work assignment or project under a SECURE matter or project, the record's recorded
+/// creator is first checked against the No Access list of the record and of every secure parent (app-only reads; walled
+/// or unverifiable refuses with nothing written), and after the caller's PATCH that record is secured in the same call
+/// through <see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/> — provisioning's own app-only steps, for the
+/// person who created the record (never the caller's choice of anyone else); nothing of the caller's own write runs
+/// app-only.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
@@ -85,6 +94,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
     private readonly IServiceScopeFactory? _scopes;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
@@ -93,6 +103,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -102,6 +113,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         // Task 146 r2: unconditionally registered (MetadataServiceExtensions) — no asymmetric registration (§10 F.1).
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        // Task 158 (owner round 6): a work assignment or project re-filed under a secure record is secured in the same
+        // call. Registered beside the restamper (AddCoreAncestorResolver, which AddToolFramework calls) — §10 F.1.
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _scopes = scopes;
     }
 
@@ -212,6 +226,17 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // Task 158 (owner round 6): re-filing a work assignment or project — whether the record it will be filed under
+            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure").
+            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken)
+                    .ConfigureAwait(false) is { } rootRefusal)
+            {
+                return LogOutcome(context, tablename, recordId,
+                    Error(tool, $"The update was NOT written: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
+                        rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                    stopwatch);
+            }
+
             // Task 147 r1c: a write that may move a CHILD row into or out of a secure record reads, BEFORE it, whether the
             // row is isolated — so a move OUT also takes the secure record's mirrored shares off (owner round 22) and
             // releases what is filed under it, exactly as the browser re-file routes do. One implementation:
@@ -280,12 +305,32 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     CancellationToken.None).ConfigureAwait(false);
             }
 
+            // Task 158 (owner round 6; §6.5 path B — see the class remarks): a work assignment or project the caller's own
+            // update filed under a secure matter or project is secured NOW, through provisioning's own steps, for the person
+            // who created it. Never thrown; an incomplete securing is reported, not hidden.
+            var secured = await _rootFiling
+                .SecureAfterWriteAsync(tablename, recordId, mapped.Item!.Columns, context.DecisionId.ToString("N"))
+                .ConfigureAwait(false);
+
             // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and
             // removes the previous one's unmodified auto access now. After the PATCH committed; never throws, never fails
             // this update (a non-root or a non-registry column is a no-op).
             await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
                 _scopes, tablename, recordId, mapped.Item!.Columns, grantorOid: null, _logger, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (secured is { IsComplete: false })
+            {
+                return LogOutcome(context, tablename, recordId,
+                    Error(tool,
+                        $"The update was written, but record {recordId:D} is now filed under a secure record and could not be made " +
+                        $"secure yet ({secured.ReasonCode}). " +
+                        (secured.CompletesAutomatically
+                            ? "It is retried automatically within a few minutes."
+                            : "Retrying will not change that on its own, so an administrator needs to review it."),
+                        secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt),
+                    stopwatch);
+            }
 
             var result = ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,

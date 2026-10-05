@@ -443,6 +443,7 @@ public static class FieldMappingEndpoints
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
         [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+        [FromServices] Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         IServiceScopeFactory scopes,
         // Task 166 (S-67): the caller's own rights decide — source Read via the OBO probe, children read and
         // written AS the caller (MSCRMCallerID impersonation). See the gate below.
@@ -611,7 +612,8 @@ public static class FieldMappingEndpoints
                 callerSystemUserId.Value,
                 logger,
                 ct,
-                scopes);
+                scopes,
+                rootFiling);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -967,7 +969,8 @@ public static class FieldMappingEndpoints
         Guid callerSystemUserId,
         ILogger logger,
         CancellationToken ct,
-        IServiceScopeFactory? scopes = null)
+        IServiceScopeFactory? scopes = null,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -992,6 +995,31 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
+                    // Task 158 (owner round 6): a work assignment or project this push files under a matter or project —
+                    // whether that record is secure must be readable, or this record is not written (fail closed; a
+                    // host without the gate refuses such a write too).
+                    if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(targetEntity))
+                    {
+                        var refusal = rootFiling is not null
+                            ? await rootFiling.CheckAsync(targetEntity, childRecordId, updatePayload, ct)
+                            : Sprk.Bff.Api.Services.Access.SecureRootInheritance.FilingColumnsOf(targetEntity.Trim().ToLowerInvariant())
+                                .Overlaps(updatePayload.Keys.Select(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn))
+                                ? Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                                    "whether the record it would be filed under is secure cannot be checked here")
+                                : null;
+                        if (refusal is not null)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {refusal.Reason} ({refusal.RefusalCode})."
+                            });
+                            continue;
+                        }
+                    }
+
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
                     await dataverseService.UpdateRecordFieldsAsync(
@@ -1003,6 +1031,11 @@ public static class FieldMappingEndpoints
                     // the same operation. A write that cannot move a stamp reads nothing; a child that fails is logged
                     // and repaired by the reconciliation job, and never fails this push.
                     await restamper.AfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, CancellationToken.None);
+
+                    // Task 158: a work assignment or project this push filed under a secure record is secured now (never
+                    // thrown; an incomplete securing is logged and the secure-root inheritance job completes it).
+                    if (rootFiling is not null)
+                        await rootFiling.SecureAfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, traceId: null);
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
                     // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry

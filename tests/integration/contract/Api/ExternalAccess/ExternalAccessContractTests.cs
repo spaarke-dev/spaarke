@@ -1048,6 +1048,23 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.AddSingleton(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                 () => noSecureRecords, RecordShares));
 
+            // Task 158 r1 (owner round 30): the share routes also fan out to the secure work assignments and projects filed
+            // under the record (both directions), and a fan-out that cannot run is now children_incomplete. The contract
+            // here is the routes' wire shape: the inheritance reads a Dataverse with no rows and an empty provenance ledger,
+            // so nothing is filed under anything. The fan-out itself is pinned in SecureRootInheritanceTests.
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureRootInheritance>();
+            services.AddScoped(_ => Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing());
+
+            // Task 158 r1c-v2 (round 39 item 2): the No Access guard also walks what a work assignment or project is filed
+            // under, through IGenericEntityService — here the same Dataverse with no rows, so nothing is filed under anything
+            // and only the record's own list applies (the production guard otherwise, over this fixture's deny list).
+            services.RemoveAll<SecureShareNoAccessGuard>();
+            services.AddScoped(sp => new SecureShareNoAccessGuard(
+                sp.GetRequiredService<ExternalParticipationService>(), sp.GetRequiredService<INoAccessListReader>(),
+                sp.GetRequiredService<IContactIdentityStore>(),
+                Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.NoFilingRows(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SecureShareNoAccessGuard>.Instance));
+
             // Fixed clock for grant-expiry decisions (task 097).
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);

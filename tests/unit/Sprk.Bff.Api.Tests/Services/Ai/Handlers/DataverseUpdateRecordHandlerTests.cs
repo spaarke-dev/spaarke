@@ -31,7 +31,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
 
     private DataverseUpdateRecordHandler CreateHandler() =>
         new(_dataverse.Object, _world.AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");

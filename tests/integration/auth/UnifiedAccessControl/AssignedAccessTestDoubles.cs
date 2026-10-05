@@ -118,9 +118,15 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
+        /// <summary>
+        /// Task 158 r1c-v1: only UPDATES fail (a create still lands) — e.g. a write-ahead row created, its share written, and
+        /// the confirmation of that row failing.
+        /// </summary>
+        public bool FailLedgerUpdates { get; set; }
+
         internal override Task UpdateLedgerAsync(Guid rowId, AssignedAccessLedgerWrite write, CancellationToken ct)
         {
-            if (FailLedgerWrites)
+            if (FailLedgerWrites || FailLedgerUpdates)
                 throw new HttpRequestException("Simulated ledger write failure.");
 
             lock (_gate)
@@ -131,6 +137,120 @@ internal static class AssignedAccessTestDoubles
             }
 
             return Task.CompletedTask;
+        }
+
+        // ── Task 158 r1 (owner round 30): the inherited-share provenance rows, in the same in-memory ledger ──────────────
+
+        /// <summary>The inherited-share rows held on one filed root (any state).</summary>
+        public IReadOnlyList<AssignedAccessLedgerRow> InheritedRowsOf(Guid rootId)
+        {
+            lock (_gate)
+                return Ledger.Where(r => RootIdOf(r) == rootId && InheritedSourceOf(r.SourceField) is not null).Select(Clone).ToList();
+        }
+
+        /// <summary>
+        /// Task 158 r1c-v2: runs at the start of every read of a filed record's inherited rows — a concurrent change landing
+        /// between two of a pass's reads.
+        /// </summary>
+        public Action? BeforeInheritedRead { get; set; }
+
+        internal override Task<IReadOnlyList<AssignedAccessLedgerRow>> ReadInheritedLedgerAsync(
+            ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
+        {
+            BeforeInheritedRead?.Invoke();
+            if (FailLedgerRead)
+                throw new HttpRequestException("Simulated ledger read failure.");
+            return Task.FromResult(InheritedRowsOf(rootId));
+        }
+
+        internal override Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ReadInheritedLedgerByParentAsync(
+            string parentTable, Guid parentId, CancellationToken ct)
+        {
+            if (FailLedgerRead)
+                throw new HttpRequestException("Simulated ledger read failure.");
+            var source = InheritedSourceField(parentTable, parentId);
+            lock (_gate)
+            {
+                // Task 158 final round (round 58 item 2): only rows still in force — the production query leaves Revoked out.
+                return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>(
+                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)
+                                       && r.State != AssignedAccessState.Revoked).Select(Clone).ToList(),
+                        InheritedByParentTruncated));
+            }
+        }
+
+        /// <summary>Task 158 r1c-v2: the by-parent read reports more rows than one pass reads (its <c>Truncated</c>).</summary>
+        public bool InheritedByParentTruncated { get; set; }
+
+        /// <summary>
+        /// Task 158 r1c-v1: runs just before an inherited-share create lands — a CONCURRENT pass creating the same row in the
+        /// window between this pass's read and its create (the race the alternate key settles).
+        /// </summary>
+        public Action<string>? BeforeInheritedCreate { get; set; }
+
+        /// <summary>Task 158 r1c-v1: inherited-share creates that lost the race to the alternate key (answered <c>null</c>).</summary>
+        public List<string> InheritedCreateConflicts { get; } = new();
+
+        internal override Task<Guid?> CreateInheritedLedgerAsync(
+            ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+            AssignedAccessLedgerWrite write, CancellationToken ct)
+        {
+            if (FailLedgerWrites)
+                throw new HttpRequestException("Simulated ledger write failure.");
+
+            var key = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal);
+            BeforeInheritedCreate?.Invoke(key);
+            lock (_gate)
+            {
+                // The production store's conflict path (the alternate key answered 412 and the row reads back): nothing is
+                // written over the row a concurrent pass created; the caller is told it did not record.
+                if (Ledger.Any(r => r.LedgerKey == key))
+                {
+                    InheritedCreateConflicts.Add(key);
+                    return Task.FromResult<Guid?>(null);
+                }
+
+                var row = new AssignedAccessLedgerRow
+                {
+                    Id = Guid.NewGuid(),
+                    LedgerKey = key,
+                    SourceField = InheritedSourceField(parentTable, parentId),
+                    ProjectId = rootType == ExternalGrantRootType.Project ? rootId : null,
+                    MatterId = rootType == ExternalGrantRootType.Matter ? rootId : null,
+                    WorkAssignmentId = rootType == ExternalGrantRootType.WorkAssignment ? rootId : null,
+                    SystemUserId = principal.Kind == DataversePrincipalKind.SystemUser ? principal.Id : null,
+                    SubjectTeamId = principal.Kind == DataversePrincipalKind.Team ? principal.Id : null,
+                };
+                Apply(row, write with { SystemUserId = null });
+                Ledger.Add(row);
+                Writes.Add(("create", key, write.State));
+                return Task.FromResult<Guid?>(row.Id);
+            }
+        }
+
+        /// <summary>
+        /// Task 158 r1c-v1: inserts an inherited-share row as a concurrent pass would have written it (no fault, no hook) —
+        /// the race seeds.
+        /// </summary>
+        public AssignedAccessLedgerRow SeedInheritedRow(
+            ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+            AssignedAccessLedgerWrite write)
+        {
+            var row = new AssignedAccessLedgerRow
+            {
+                Id = Guid.NewGuid(),
+                LedgerKey = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal),
+                SourceField = InheritedSourceField(parentTable, parentId),
+                ProjectId = rootType == ExternalGrantRootType.Project ? rootId : null,
+                MatterId = rootType == ExternalGrantRootType.Matter ? rootId : null,
+                WorkAssignmentId = rootType == ExternalGrantRootType.WorkAssignment ? rootId : null,
+                SystemUserId = principal.Kind == DataversePrincipalKind.SystemUser ? principal.Id : null,
+                SubjectTeamId = principal.Kind == DataversePrincipalKind.Team ? principal.Id : null,
+            };
+            Apply(row, write with { SystemUserId = null });
+            lock (_gate)
+                Ledger.Add(row);
+            return row;
         }
 
         internal override Task<AssignedRootSnapshot?> ReadRootAsync(
@@ -187,7 +307,9 @@ internal static class AssignedAccessTestDoubles
                 throw new HttpRequestException("Simulated scan failure.");
             lock (_gate)
             {
-                var roots = Ledger.Where(r => r.State != AssignedAccessState.Revoked)
+                // The production OData filter's predicate (task 158 r1): live rows, inherited-share provenance rows left out.
+                // AssignedAccessStoreODataTests pins the production filter itself over an evaluating Web API double.
+                var roots = Ledger.Where(r => r.State != AssignedAccessState.Revoked && InheritedSourceOf(r.SourceField) is null)
                     .Select(RootOf).Where(r => r is not null).Select(r => r!.Value).Distinct().ToList();
                 return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
             }
@@ -504,7 +626,10 @@ internal static class AssignedAccessTestDoubles
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
-        public FakeAssignedAccessStore Store { get; } = new();
+        /// <param name="store">Task 158 r1: a ledger shared with another component under test (the secure-root inheritance).</param>
+        public Harness(FakeAssignedAccessStore? store = null) => Store = store ?? new FakeAssignedAccessStore();
+
+        public FakeAssignedAccessStore Store { get; }
         public GrantTable Grants { get; } = new();
         public GrantPolicyTestDoubles.FlagStubParticipationService Participations { get; } = new(RootRecordFlags.None);
         /// <summary>The deny list; replace it to model an entry being deactivated (the wall lifted).</summary>
@@ -531,8 +656,26 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public IAccessibleRecordSetService? NoAccessCheckOverride { get; set; }
 
+        /// <summary>
+        /// Task 158 r1c-v2 (round 39 item 2): what the guard's filing walk reads — by default no row (a record filed under
+        /// nothing, so only its own No Access list applies); a host fixture passes its world.
+        /// </summary>
+        public Spaarke.Dataverse.IGenericEntityService Entities { get; set; } = NoFilingRows();
+
         public SecureShareNoAccessGuard Guard =>
-            new(Participations, DenyList, Identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+            GuardOverride ?? new(Participations, DenyList, Identities, Entities, NullLogger<SecureShareNoAccessGuard>.Instance);
+
+        /// <summary>Task 158 r1c-v2: a host fixture's own guard (its world, its deny list), used instead of <see cref="Guard"/>.</summary>
+        public SecureShareNoAccessGuard? GuardOverride { get; set; }
+
+        /// <summary>Task 158 r1c-v2: a host fixture's own share seam, used instead of <see cref="Shares"/>.</summary>
+        public Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? SharesOverride { get; set; }
+
+        /// <summary>
+        /// Task 158 r1c-v2 (round 47 item 1 (3)): the host's scopes, through which the materializer reaches the secure-root
+        /// inheritance's sharee-only pass after an assignment ended; <c>null</c> (no host) by default.
+        /// </summary>
+        public Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? Scopes { get; set; }
 
         /// <summary>
         /// Task 149 (batch 4 integration, the 142 x 149 merge-order obligation): the Dataverse rows the REAL secure-child
@@ -547,8 +690,8 @@ internal static class AssignedAccessTestDoubles
             Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, Shares, Guard);
 
         public AssignedAccessMaterializer Materializer => new(
-            Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, Shares, Children,
-            Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger);
+            Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)
@@ -599,4 +742,17 @@ internal static class AssignedAccessTestDoubles
     /// nothing to mark, so they are no-ops (and never throw).
     /// </summary>
     internal static AssignedAccessMaterializer InertMaterializer() => new Harness().Materializer;
+
+    /// <summary>
+    /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No
+    /// Access guard's filing walk then finds no parent, so only the record's own list applies (tests not about filing).
+    /// </summary>
+    internal static Spaarke.Dataverse.IGenericEntityService NoFilingRows()
+    {
+        var entities = new Moq.Mock<Spaarke.Dataverse.IGenericEntityService>();
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(new Microsoft.Xrm.Sdk.EntityCollection()));
+        return entities.Object;
+    }
 }

@@ -1987,6 +1987,10 @@ public class OfficeService : IOfficeService
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
         // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
         RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
+        // Task 158 r1: a caller walled off (or without the rights to create under) a secure record — 403; a secure create that
+        // could not be checked or completed (and was removed again) — 500.
+        RecordCreationFailureKind.SecureFilingRefused => StatusCodes.Status403Forbidden,
+        RecordCreationFailureKind.SecureFilingFailed => StatusCodes.Status500InternalServerError,
         _ => StatusCodes.Status500InternalServerError
     };
 

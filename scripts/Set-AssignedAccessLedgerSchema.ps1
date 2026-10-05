@@ -18,7 +18,8 @@
                      sprk_reason (Text 100), sprk_grantedlevel (Whole number), sprk_grantedexpiry (Date Only).
       (c) LOOKUPS    root: sprk_project / sprk_matter / sprk_workassignment (Delete = Cascade: a deleted root takes its
                      ledger rows); subject: sprk_subjectcontact (contact) / sprk_subjectorganization (sprk_organization)
-                     / sprk_subjectsystemuser (systemuser); grant: sprk_externalrecordaccess (Delete = RemoveLink).
+                     / sprk_subjectsystemuser (systemuser) / sprk_subjectteam (team — task 158 r1, owner round 30: a TEAM
+                     a secure parent's share was passed on to); grant: sprk_externalrecordaccess (Delete = RemoveLink).
                      Navigation properties = schema names (sprk_Project, sprk_SubjectContact, …) — what the BFF binds.
       (d) KEY        sprk_AssignedAccessLedgerKey on the BFF-computed single string sprk_ledgerkey
                      ({root}:{rootId}:{sourceField}:{contact|organization}:{subjectId}) — uniqueness without relying on a
@@ -28,10 +29,18 @@
                      or Delete on the table (only the BFF application user writes it); users read it through the BFF.
       (g) DATA       a data query selecting every column the BFF's LedgerSelect names answers.
 
+    TASK 158 r1 (owner round 30). The same ledger records the PROVENANCE of each share a secure matter / project passes
+    on to a secure work assignment or project filed under it: one row per (filed record, parent, principal), source
+    field `inherited:{parentTable}:{parentId}`, subject sprk_subjectsystemuser (a user) or sprk_subjectteam (a team),
+    the mask written in sprk_grantedlevel. The parent's unshare removes only an inherited share still unmodified.
+
     ⚠️ DEPLOY ORDER — BINDING. A BFF build carrying task 142 reads the ledger on EVERY materialization (the sync route,
     the L1 writers, the 5-minute job). In an environment without the table the read fails and every materialization
     reports `ledger-unreadable` and writes NOTHING (fail closed) — no outage of existing access, but no auto-grants.
-    Run -Apply, then -Verify (exit 0), then deploy the BFF.
+    A BFF build carrying task 158 r1 also reads the inherited-share rows WITH sprk_subjectteam on every /share-user,
+    /unshare-user and secure-root-inheritance pass, and before every /unsecure-project of a work assignment or project:
+    without the column those reads fail, every such fan-out answers children_incomplete and passes nothing on, and such
+    an unsecure stops before revoking anything (fail closed). Run -Apply, then -Verify (exit 0), then deploy the BFF.
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -78,8 +87,8 @@ $States = [ordered]@{
     100000004 = 'Skipped'; 100000005 = 'Declined'; 100000006 = 'Adopted'; 100000007 = 'Revoked'
 }
 $StringColumns = @(
-    @{ Name = 'sprk_ledgerkey';   Schema = 'sprk_LedgerKey';   Max = 200; Label = 'Ledger Key';   Description = 'BFF-computed uniqueness key: {root}:{rootId}:{sourceField}:{contact|organization}:{subjectId}. Carries the alternate key. Written only by the BFF.' }
-    @{ Name = 'sprk_sourcefield'; Schema = 'sprk_SourceField'; Max = 100; Label = 'Source Field'; Description = 'The "Assigned *" column (logical name) that named the subject.' }
+    @{ Name = 'sprk_ledgerkey';   Schema = 'sprk_LedgerKey';   Max = 200; Label = 'Ledger Key';   Description = 'BFF-computed uniqueness key: {root}:{rootId}:{sourceField}:{contact|organization|systemuser|team}:{subjectId}. Carries the alternate key. Written only by the BFF.' }
+    @{ Name = 'sprk_sourcefield'; Schema = 'sprk_SourceField'; Max = 100; Label = 'Source Field'; Description = 'The "Assigned *" column (logical name) that named the subject, or inherited:{parentTable}:{parentId} for a share a secure parent passed on (task 158).' }
     @{ Name = 'sprk_reason';      Schema = 'sprk_Reason';      Max = 100; Label = 'Reason';       Description = 'Why the row is in its state (skip reason, how an assignment ended, raised-from level and date). A stable code, never free text.' }
 )
 $Lookups = @(
@@ -89,6 +98,8 @@ $Lookups = @(
     @{ Name = 'sprk_subjectcontact';       Schema = 'sprk_SubjectContact';       Target = 'contact';                   Rel = 'sprk_contact_sprk_assignedaccess_subjectcontact';             Delete = 'RemoveLink'; Label = 'Subject Contact' }
     @{ Name = 'sprk_subjectorganization';  Schema = 'sprk_SubjectOrganization';  Target = 'sprk_organization';         Rel = 'sprk_sprk_organization_sprk_assignedaccess_subjectorg';       Delete = 'RemoveLink'; Label = 'Subject Organization' }
     @{ Name = 'sprk_subjectsystemuser';    Schema = 'sprk_SubjectSystemUser';    Target = 'systemuser';                Rel = 'sprk_systemuser_sprk_assignedaccess_subjectsystemuser';       Delete = 'RemoveLink'; Label = 'Subject User' }
+    # Task 158 r1 (owner round 30): the TEAM a secure parent's share was passed on to (inherited-share provenance).
+    @{ Name = 'sprk_subjectteam';          Schema = 'sprk_SubjectTeam';          Target = 'team';                      Rel = 'sprk_team_sprk_assignedaccess_subjectteam';                   Delete = 'RemoveLink'; Label = 'Subject Team' }
     @{ Name = 'sprk_externalrecordaccess'; Schema = 'sprk_ExternalRecordAccess'; Target = 'sprk_externalrecordaccess'; Rel = 'sprk_sprk_externalrecordaccess_sprk_assignedaccess_grant';    Delete = 'RemoveLink'; Label = 'Grant' }
 )
 $AllowedWriterRoles = @('System Administrator', 'System Customizer')
@@ -337,9 +348,10 @@ else {
 
 # ── (g) DATA query (what AssignedAccessStore.LedgerSelect needs) ──────────────────────────────────────────────
 Write-Host "`n(g) Data query"
+# Task 158 r1: the inherited-share select adds _sprk_subjectteam_value (AssignedAccessStore.InheritedLedgerSelect).
 $select = 'sprk_assignedaccessid,sprk_ledgerkey,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,' +
           '_sprk_subjectcontact_value,_sprk_subjectorganization_value,_sprk_subjectsystemuser_value,_sprk_externalrecordaccess_value,' +
-          'sprk_state,sprk_reason,sprk_grantedlevel,sprk_grantedexpiry'
+          'sprk_state,sprk_reason,sprk_grantedlevel,sprk_grantedexpiry,_sprk_subjectteam_value'
 $dataPath = "$EntitySet`?`$select=$select&`$top=1"
 if ($Apply) { Wait-DvRead $dataPath "$Table in data queries" | Out-Null; Report 'OK' 'the BFF ledger select answers' }
 elseif (Try-DvGet $dataPath) { Report 'OK' 'the BFF ledger select answers (task 142 reads will not 400)' }

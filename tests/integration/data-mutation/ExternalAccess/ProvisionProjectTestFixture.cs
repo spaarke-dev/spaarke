@@ -40,7 +40,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// carries (name, teamtype, isdefault). Dropping any predicate selects a decoy or the default team and a test goes red;
 /// see <see cref="RowsJsonFor"/>.</para>
 /// </remarks>
-public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
+public class ProvisionProjectTestFixture : WorkspaceTestFixture
 {
     private const string ProjectEntitySet = "sprk_projects";
     private const string MatterEntitySet = "sprk_matters";
@@ -118,6 +118,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Seeds a share that exists before the call (task 133: the pre-call share set compensation restores).</summary>
     public void SeedShare(Guid recordId, DataversePrincipalRef principal, string accessRightsCsv)
         => _shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
+
+    /// <summary>Task 158 r1: removes a share outside the BFF (a model-driven-app Share dialog, an import).</summary>
+    public void RemoveShare(Guid recordId, DataversePrincipalRef principal) => _shares.TryRemove((recordId, principal), out _);
+
+    /// <summary>Task 158 r1: the mask any principal's share on the record carries now (0 = no share).</summary>
+    public int ShareMaskOf(Guid recordId, DataversePrincipalRef principal)
+        => _shares.TryGetValue((recordId, principal), out var mask) ? mask : 0;
 
     /// <summary>The mask <paramref name="systemUserId"/>'s share on the record carries now (0 = no share).</summary>
     public int ShareMaskOf(Guid recordId, Guid systemUserId)
@@ -201,6 +208,49 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Task 143: the guard's flag/organization reads. Default: every record secure, no organizations.</summary>
     internal AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService NoAccessReads { get; private set; } =
         new(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
+
+    /// <summary>
+    /// Task 158 r1 (owner round 30): task 142's provenance ledger, in memory — where each share passed on to a filed secure
+    /// root came from. The REAL secure-root inheritance writes and reads it; reset per test.
+    /// </summary>
+    internal AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore InheritedLedger { get; private set; } = new();
+
+    /// <summary>
+    /// Task 158 r1c-v2 (round 47 item 1): task 142's materializer harness over the SAME ledger — its registry values
+    /// (<c>Store.Assign</c>), contact links (<c>LinkedContact</c>) and record flags (<c>Participations</c>) — whose materializer
+    /// the host's inheritance runs at once when a share it removes ends an Assigned-To row's coverage. Reset per test.
+    /// </summary>
+    internal AccessControl.AssignedAccessTestDoubles.Harness AssignedAccess { get; private set; } = null!;
+
+    /// <summary>
+    /// Task 158 r1c-v2: runs just before a revoke on a record lands (recorded first) — what the ledger says at the moment a
+    /// share is removed (round 47 item 2: the operator's Declined marker is already there). Reset per test.
+    /// </summary>
+    internal Action<Guid, DataversePrincipalRef>? OnRevoke { get; set; }
+
+    /// <summary>Task 158 r1c-v2: runs just before a ModifyAccess on a record lands (recorded first). Reset per test.</summary>
+    internal Action<Guid, DataversePrincipalRef>? OnModify { get; set; }
+
+    /// <summary>
+    /// Task 158 r1c-v2: runs just AFTER a GrantAccess on a record landed — a concurrent change between a pass's share and its
+    /// own checks of it (the parent unsecured or unshared, the provenance row ended). Reset per test.
+    /// </summary>
+    internal Action<Guid, DataversePrincipalRef>? OnGranted { get; set; }
+
+    /// <summary>
+    /// The materializer the host's inheritance holds: the harness's, over this host's share seam (so it reads the shares
+    /// the inheritance writes), this host's real No Access guard, and this host's scopes (round 47 item 1 (3): its
+    /// sharee-only pass reaches this host's inheritance).
+    /// </summary>
+    private Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer AssignedAccessMaterializerIn(
+        IServiceProvider sp, IDataverseRecordShareService shares)
+    {
+        AssignedAccess ??= new AccessControl.AssignedAccessTestDoubles.Harness(InheritedLedger);
+        AssignedAccess.SharesOverride = shares;
+        AssignedAccess.GuardOverride = sp.GetRequiredService<SecureShareNoAccessGuard>();
+        AssignedAccess.Scopes = sp.GetRequiredService<IServiceScopeFactory>();
+        return AssignedAccess.Materializer;
+    }
 
     /// <summary>Task 143 r1: systemusers whose task-141 link read FAILS (the guard then cannot verify them).</summary>
     internal HashSet<Guid> UnreadableLinkUsers { get; } = new();
@@ -298,6 +348,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>Task 150: an UPDATE setting <c>sprk_issecure</c> to true is accepted but NOT applied.</summary>
     public bool SecureFlagWriteNotApplied { get; set; }
+    /// Task 158 r1: the caller's AppendTo on any record the probe is asked about (G5 for a create INTO isolation — AppendTo
+    /// on each secure parent). Default false, as before: every pre-r1 contract keeps the rights it was written against.
+    /// </summary>
+    public bool CallerHoldsAppendTo { get; set; }
+
+    /// <summary>Task 158 r1: the caller's answer to a table-privilege check (G5's Create on the table).</summary>
+    public bool CallerHoldsCreatePrivilege { get; set; } = true;
 
     /// <summary>Principal whose share throws, to model a partial-share failure.</summary>
     public Guid? FailShareForPrincipal { get; set; }
@@ -645,6 +702,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SecureFlagReadsEmpty = false;
         SecureFlagWriteFails = false;
         SecureFlagWriteNotApplied = false;
+        CallerHoldsAppendTo = false;
+        CallerHoldsCreatePrivilege = true;
         FailShareForPrincipal = null;
         FailRevokeForPrincipal = null;
         StrictShareReadSucceeds = true;
@@ -653,6 +712,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         NoAccessReads = new AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
             defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
         UnreadableLinkUsers.Clear();
+        InheritedLedger = new AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        AssignedAccess = new AccessControl.AssignedAccessTestDoubles.Harness(InheritedLedger);
+        OnRevoke = null;
+        OnModify = null;
+        OnGranted = null;
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
         _childWorldMirrorsRoots = false;
@@ -688,9 +752,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             var recordShare = new RecordingRecordShareService(this);
             services.AddSingleton<IDataverseRecordShareService>(recordShare);
 
-            // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares.
+            // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares —
+            // scoped with THIS host's real No Access guard, as production registers it (ExternalAccessModule). Task 158 r1c:
+            // it was a singleton over a guard that walls nobody, so no mirror wall was ever exercised through this host.
             services.RemoveAll<SecureChildShareSynchronizer>();
-            services.AddSingleton(SecureChildShareWorld.SynchronizerOver(() => ChildWorld, recordShare));
+            services.AddScoped(sp => SecureChildShareWorld.SynchronizerOver(
+                () => ChildWorld, recordShare, sp.GetRequiredService<SecureShareNoAccessGuard>()));
 
             // Task 148: the REAL reconciler (real resolver, real synchronizer) over the same ChildWorld and recording shares;
             // the platform-cascade rows through this fixture's DataverseWebApiClient double, as in production.
@@ -704,6 +771,27 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 ? make()
                 : ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(
                     sp, sp.GetRequiredService<DataverseAccessDataSource>()));
+
+            // Task 158: the REAL secure-root inheritance — it reads what work assignments and projects are filed under
+            // through the same ChildWorld, and secures one through THIS host's provisioning (its DataverseWebApiClient
+            // double, its container stub, its recording shares). With the default world (no rows) it finds nothing filed
+            // under anything, so every existing provisioning / unsecure contract is unchanged.
+            services.RemoveAll<SecureRootInheritance>();
+            services.AddScoped(sp => new SecureRootInheritance(
+                SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object,
+                sp.GetRequiredService<DataverseWebApiClient>(),
+                sp.GetRequiredService<SpeFileStore>(),
+                recordShare,
+                sp.GetRequiredService<SecureChildReconciler>(),
+                sp.GetRequiredService<SecureChildShareSynchronizer>(),
+                sp.GetRequiredService<SecureShareNoAccessGuard>(),
+                InheritedLedger,
+                AssignedAccessMaterializerIn(sp, recordShare),
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<ILogger<SecureRootInheritance>>(),
+                // Batch-4 integration: provisioning's owner-change eviction and Make Secure file relocation, as in the host.
+                sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
+                sp.GetRequiredService<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>()));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -768,7 +856,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     : new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
             services.RemoveAll<SecureShareNoAccessGuard>();
             services.AddScoped(_ => new SecureShareNoAccessGuard(
-                NoAccessReads, NoAccessList, links.Object, NullLogger<SecureShareNoAccessGuard>.Instance));
+                NoAccessReads, NoAccessList, links.Object,
+                // Task 158 r1c-v2 (round 39 item 2): its filing walk reads what work assignments and projects are filed under
+                // through the same ChildWorld the inheritance reads.
+                SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object,
+                NullLogger<SecureShareNoAccessGuard>.Instance));
 
             // Capture logs in-memory so a test can assert the endpoint actually WROTE its warning.
             services.AddSingleton<ILoggerProvider>(Logs);
@@ -932,6 +1024,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         ChildWorld = SecureChildShareWorld.Standard(SecureBuId, SecureOwnerTeamId)
             .User(CallerSystemUserId, SecureChildShareWorld.GeneralBu);
         ChildWorld.Sequence = NextSequence;
+        // Task 158 r1: a row the isolated-create compensation deletes is gone from this fixture's Dataverse too.
+        ChildWorld.OnDeleted = (_, id) => _records.TryRemove(id, out SeededRecord? _);
         _childWorldMirrorsRoots = true;
         foreach (var record in _records.Values)
             MirrorIntoChildWorld(record);
@@ -952,6 +1046,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         else if (record.OwningUserId is { } user)
             ChildWorld.MoveOwner(logical, record.Id, DataversePrincipalRef.User(user));
         ChildWorld.Set(logical, record.Id, "sprk_issecure", record.IsSecure);
+
+        // Task 158: the record's own container — the secure-root inheritance reads it (with the owner) to tell an isolated
+        // record from one whose provisioning has not completed.
+        ChildWorld.Set(logical, record.Id, "sprk_containerid", record.ContainerId);
     }
 
     /// <summary>Extracts the GUID from an <c>/teams(guid)</c> OData bind value.</summary>
@@ -1483,8 +1581,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // Delete by a role (whoever owns the record), or by ownership (only while the caller owns it — read now).
             var deletes = _fixture.CallerHoldsDelete
                           || (_fixture.CallerDeletesWhatTheyOwn && _fixture.OwningUserOf(recordId) == CallerSystemUserId);
-            return Task.FromResult(deletes ? rights | AccessRights.Delete : rights);
+            if (deletes)
+                rights |= AccessRights.Delete;
+            // Task 158 r1: AppendTo on each secure parent (G5 for a create INTO isolation).
+            return Task.FromResult(_fixture.CallerHoldsAppendTo ? rights | AccessRights.AppendTo : rights);
         }
+
+        /// <summary>Task 158 r1: the caller's own table privilege (G5 Create), as the OBO probe would answer it.</summary>
+        public override Task<bool> CallerHoldsPrivilegeAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+            => Task.FromResult(_fixture.CallerHoldsCreatePrivilege);
 
         /// <summary>
         /// Task 061: who provisioning shares the record back to. <c>null</c> models "the caller's Dataverse identity
@@ -1521,6 +1627,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // conservative reading for a test that asserts what a share may carry.
             var mask = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
             _fixture._shares.AddOrUpdate((recordId, principal), mask, (_, existing) => existing | mask);
+            _fixture.OnGranted?.Invoke(recordId, principal);
             return Task.CompletedTask;
         }
 
@@ -1537,6 +1644,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 return Task.CompletedTask;
 
             _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
+            _fixture.OnRevoke?.Invoke(recordId, principal);
             _fixture._shares.TryRemove((recordId, principal), out _);
             return Task.CompletedTask;
         }
@@ -1565,6 +1673,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             ThrowIfWriteRefused(recordId, principal);
 
             _fixture.Modifies.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv, _fixture.NextSequence()));
+            _fixture.OnModify?.Invoke(recordId, principal);
             _fixture._shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
             return Task.CompletedTask;
         }

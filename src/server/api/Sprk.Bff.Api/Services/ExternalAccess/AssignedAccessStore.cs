@@ -137,6 +137,50 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Task 158 r1 (owner round 30): an inherited row whose principal already held the parent's mirror on the filed record
+    /// when it was passed on — direct access the parent's unshare never removes.
+    /// </summary>
+    public const string CoveredByExistingShare = "covered-by-existing";
+
+    /// <summary>Task 158 r1: the parent's share ended; the principal's access on the filed record was direct, so it is kept.</summary>
+    public const string KeptDirectShare = "kept-direct";
+
+    /// <summary>Task 158 r1: the parent's share ended; another secure parent of the filed record still passes it on, so it is kept.</summary>
+    public const string KeptOtherSource = "kept-other-source";
+
+    /// <summary>
+    /// Task 158 r1: the parent's share ended; removing it would leave nobody able to open the record (S5), so it is kept. Since
+    /// r1c-v1 the row stays <see cref="AssignedAccessState.Shared"/> with this reason (the share is still the one the rule
+    /// passed on): every later pass tries again, and removes it once someone else can open the record.
+    /// </summary>
+    public const string KeptLastReader = "kept-last-reader";
+
+    /// <summary>
+    /// Task 158 r1c-v1 (verifier item 1 — write-ahead provenance): the reason of an inherited-share row recorded BEFORE its
+    /// share is written (<see cref="AssignedAccessState.Shared"/>, <c>sprk_grantedlevel</c> = the mask about to be written,
+    /// optionally followed by <c>;raised-from-mask:N</c>). Confirmed — this marker dropped — once the share reads back. A
+    /// later pass that finds it unconfirmed decides from the live share: the mask in place → confirmed; the mask from before
+    /// → the write never landed (written again, never read as a removal); anything else → changed by someone else.
+    /// </summary>
+    public const string SharePending = "share-pending";
+
+    /// <summary>
+    /// Task 158 r1c-v2 (main-session round 47 item 1 (2), E-158-v1-1): an Assigned-To row that was
+    /// <see cref="AssignedAccessState.CoveredByExisting"/> is <see cref="AssignedAccessState.Skipped"/> with this reason when
+    /// the secure-root inheritance removes the share that covered it (its parent no longer passes it on). A KNOWN cause —
+    /// never <see cref="RemovedOutOfBand"/> → Declined — so the materializer decides the subject afresh at once: on a secure
+    /// record the assignee is suggested (owner A3). Written ahead of the removal; Skipped is re-evaluated every pass, so a
+    /// removal that then fails is recorded covered again.
+    /// </summary>
+    public const string CoveringShareEnded = "covering-share-ended";
+
+    /// <summary>
+    /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
+    /// had passed on ends with it (a row left Shared would later read as an operator's removal when it is secured again).
+    /// </summary>
+    public const string RecordUnsecured = "record-unsecured";
+
+    /// <summary>
     /// Prefix of a reason recording what a raised grant had before: its level AND the date the subject's access ran until
     /// (<c>raised-from:100000000@2026-10-13</c>, written by <see cref="RaisedFromLevel"/>). Both are put back when the
     /// assignment ends — the rule renews a raised grant like its own while the assignment lasts (owner A5), so restoring
@@ -213,6 +257,14 @@ public sealed class AssignedAccessLedgerRow
 
     [JsonPropertyName("_sprk_subjectsystemuser_value")]
     public Guid? SystemUserId { get; set; }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 30): the TEAM an inherited share was passed on to (a secure parent's team sharee). Read only
+    /// by <see cref="AssignedAccessStore.ReadInheritedLedgerAsync"/> / <see cref="AssignedAccessStore.ReadInheritedLedgerByParentAsync"/>
+    /// — the Assigned-To reads keep their own select, so they never depend on the column.
+    /// </summary>
+    [JsonPropertyName("_sprk_subjectteam_value")]
+    public Guid? SubjectTeamId { get; set; }
 
     [JsonPropertyName("_sprk_externalrecordaccess_value")]
     public Guid? GrantId { get; set; }
@@ -425,6 +477,151 @@ public class AssignedAccessStore
     internal virtual Task UpdateLedgerAsync(Guid rowId, AssignedAccessLedgerWrite write, CancellationToken ct)
         => _dataverse.UpdateAsync(EntitySet, rowId, BuildUpdatePayload(write), ct);
 
+    // ── Inherited shares (task 158 r1, owner round 30 — the provenance of a share passed on to a filed secure root) ─────
+
+    /// <summary>The source-field prefix of an inherited-share row: <c>inherited:{parentTable}:{parentId}</c>.</summary>
+    internal const string InheritedSourcePrefix = "inherited:";
+
+    private const string InheritedLedgerSelect = LedgerSelect + ",_sprk_subjectteam_value";
+
+    /// <summary>The source field naming the secure parent a share was passed on from.</summary>
+    public static string InheritedSourceField(string parentTable, Guid parentId)
+        => string.Create(CultureInfo.InvariantCulture,
+            $"{InheritedSourcePrefix}{parentTable.Trim().ToLowerInvariant()}:{parentId:D}");
+
+    /// <summary>The parent an inherited-share row's source field names, or <c>null</c> for any other row.</summary>
+    public static (string Table, Guid Id)? InheritedSourceOf(string? sourceField)
+    {
+        if (string.IsNullOrWhiteSpace(sourceField)
+            || !sourceField.Trim().StartsWith(InheritedSourcePrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var parts = sourceField.Trim()[InheritedSourcePrefix.Length..].Split(':');
+        return parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && Guid.TryParse(parts[1], out var id) && id != Guid.Empty
+            ? (parts[0].ToLowerInvariant(), id)
+            : null;
+    }
+
+    /// <summary>
+    /// The ledger key of an inherited-share row: <c>{root}:{rootId}:inherited:{parentTable}:{parentId}:{systemuser|team}:{id}</c>
+    /// — the same alternate key, so one row per (filed root, parent, principal).
+    /// </summary>
+    public static string InheritedLedgerKey(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal)
+        => string.Create(CultureInfo.InvariantCulture,
+            $"{ExternalGrantRoot.LogicalNameFor(rootType)}:{rootId:D}:{InheritedSourceField(parentTable, parentId)}:" +
+            $"{(principal.Kind == DataversePrincipalKind.Team ? "team" : "systemuser")}:{principal.Id:D}");
+
+    /// <summary>The principal an inherited-share row is about (a user or a team), or <c>null</c> for any other row.</summary>
+    public static DataversePrincipalRef? InheritedPrincipalOf(AssignedAccessLedgerRow row)
+        => InheritedSourceOf(row.SourceField) is null ? null
+            : row.SystemUserId is { } user && user != Guid.Empty ? DataversePrincipalRef.User(user)
+            : row.SubjectTeamId is { } team && team != Guid.Empty ? DataversePrincipalRef.Team(team)
+            : null;
+
+    /// <summary>The create payload of a new inherited-share row (the principal bound as a user or a team).</summary>
+    internal static Dictionary<string, object?> BuildInheritedCreatePayload(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+        AssignedAccessLedgerWrite write)
+    {
+        var (_, rootNav) = RootLookupFor(rootType);
+        var rootSet = ExternalGrantRoot.BindFor(rootType).EntitySet;
+        var source = InheritedSourceField(parentTable, parentId);
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = Truncate($"{source} → {(principal.Kind == DataversePrincipalKind.Team ? "team" : "systemuser")}:{principal.Id:D}", 200),
+            ["sprk_ledgerkey"] = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal),
+            ["sprk_sourcefield"] = source,
+            [$"{rootNav}@odata.bind"] = $"/{rootSet}({rootId:D})",
+        };
+
+        foreach (var (k, v) in BuildUpdatePayload(write with { SystemUserId = null }))
+            payload[k] = v;
+
+        if (principal.Kind == DataversePrincipalKind.Team)
+            payload["sprk_SubjectTeam@odata.bind"] = $"/teams({principal.Id:D})";
+        else
+            payload["sprk_SubjectSystemUser@odata.bind"] = $"/systemusers({principal.Id:D})";
+
+        return payload;
+    }
+
+    /// <summary>
+    /// Every live inherited-share row held on one filed root (any parent, any state). Exceptions propagate: an unread
+    /// provenance is never "nothing was inherited".
+    /// </summary>
+    internal virtual async Task<IReadOnlyList<AssignedAccessLedgerRow>> ReadInheritedLedgerAsync(
+        ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
+    {
+        var (valueColumn, _) = RootLookupFor(rootType);
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"{valueColumn} eq {rootId:D} and statecode eq 0 and startswith(sprk_sourcefield,'{InheritedSourcePrefix}')",
+            select: InheritedLedgerSelect,
+            cancellationToken: ct).ConfigureAwait(false);
+        return rows.Where(r => r.Id != Guid.Empty && InheritedSourceOf(r.SourceField) is not null).ToList();
+    }
+
+    /// <summary>
+    /// Every inherited-share row still IN FORCE passed on FROM one secure parent, on any filed root — the reverse fan-out of
+    /// the parent's unshare, and its unsecure's Step 4.5. At most <see cref="MaxScanRows"/>; one more reports <c>Truncated</c>
+    /// (never a silent prefix — the caller fails closed). Exceptions propagate.
+    /// </summary>
+    /// <remarks>Task 158 final round (main-session round 58 item 2, Step 4.5's by-parent ledger read): a
+    /// <see cref="AssignedAccessState.Revoked"/> row — one the reverse rule already ended — is left out IN THE QUERY, so a
+    /// parent's provenance history never counts toward the bound: a parent that once passed on more than the bound, all since
+    /// ended, would otherwise read as truncated on every call and its unsecure could never complete. An EMPTY state reads as
+    /// Skipped (re-evaluated, never trusted), so it stays in force. <c>AssignedAccessStoreODataTests</c> drives this filter over
+    /// an in-memory Web API that evaluates it.</remarks>
+    internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ReadInheritedLedgerByParentAsync(
+        string parentTable, Guid parentId, CancellationToken ct)
+    {
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"statecode eq 0 and sprk_sourcefield eq '{InheritedSourceField(parentTable, parentId)}' and " +
+                    $"(sprk_state eq null or sprk_state ne {(int)AssignedAccessState.Revoked})",
+            select: InheritedLedgerSelect,
+            top: MaxScanRows + 1,
+            cancellationToken: ct).ConfigureAwait(false);
+        var live = rows.Where(r => r.Id != Guid.Empty).ToList();
+        return live.Count > MaxScanRows ? (live.Take(MaxScanRows).ToList(), true) : (live, false);
+    }
+
+    /// <summary>
+    /// Creates an inherited-share row and answers its id — or <c>null</c> when a concurrent pass created the row for the same
+    /// (filed root, parent, principal) first (the alternate key answered 409/412 and the row reads back). Task 158 r1c-v1
+    /// (verifier item 1): the loser NEVER writes over that row — not a confirmed or pending share with a "covered by existing"
+    /// one, not an operator's Declined / Adopted with a share — because its decision was made on a read that did not see it.
+    /// The caller treats <c>null</c> as "not recorded" (the pass is incomplete and the next one decides on the row as it is).
+    /// Any other fault, or a conflict whose row cannot be read back, propagates.
+    /// </summary>
+    internal virtual async Task<Guid?> CreateInheritedLedgerAsync(
+        ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+        AssignedAccessLedgerWrite write, CancellationToken ct)
+    {
+        try
+        {
+            return await _dataverse.CreateAsync(
+                EntitySet, BuildInheritedCreatePayload(rootType, rootId, parentTable, parentId, principal, write), ct)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.PreconditionFailed
+                                                 or System.Net.HttpStatusCode.Conflict)
+        {
+            var key = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal);
+            var existing = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+                EntitySet, filter: $"sprk_ledgerkey eq '{key}'", select: InheritedLedgerSelect, top: 1, cancellationToken: ct)
+                .ConfigureAwait(false);
+            if (existing.FirstOrDefault() is not { } row)
+                throw;
+
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Inherited-share row {Key} was created concurrently ({RowId}); left as it is — the next pass " +
+                "decides on it.", key, row.Id);
+            return null;
+        }
+    }
+
     // ── Reads the materializer needs ───────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -575,12 +772,21 @@ public class AssignedAccessStore
     /// Roots that hold a live ledger row (any state but Revoked) — so an assignment cleared OUTSIDE the product (grid
     /// edit, import, flow) is still revisited. Exceptions propagate.
     /// </summary>
+    /// <remarks>
+    /// Task 158 r1: the inherited-share provenance rows (<see cref="InheritedSourcePrefix"/>) share this table but are not
+    /// Assigned-To rows — the materializer ignores them (no contact / organization subject), and they are left out of this
+    /// scan so they never count toward its <see cref="MaxScanRows"/> bound (an environment with many inherited shares would
+    /// otherwise truncate — and fail — the Assigned-To job's run). The OData filter is the ONE statement of that predicate
+    /// (task 158 r1c-v1, verifier item 5: an in-memory copy of it was removed — it could never differ, so nothing pinned
+    /// it); <c>AssignedAccessStoreODataTests</c> drives this method over an in-memory Web API that evaluates the filter.
+    /// </remarks>
     internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
     {
         var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
             EntitySet,
-            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked}",
-            select: "sprk_assignedaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
+            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
+                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))",
+            select: "sprk_assignedaccessid,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
             top: MaxScanRows + 1,
             cancellationToken: ct).ConfigureAwait(false);
 

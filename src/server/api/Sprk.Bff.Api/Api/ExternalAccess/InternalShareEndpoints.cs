@@ -263,6 +263,7 @@ public static class InternalShareEndpoints
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildShareSynchronizer secureChildShares,
         SecureShareNoAccessGuard noAccessGuard,
+        SecureRootInheritance relatedRoots,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -324,15 +325,27 @@ public static class InternalShareEndpoints
         // subject forms (the user, a contact that represents them, an organization that contact belongs to) and any
         // object form (this record, or an organization it references). An unanswerable check refuses too (ADR-003).
         // A non-secure record is not the wall's (Q4): the check answers NotSecure and the share proceeds as before.
-        var wall = await noAccessGuard.CheckAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, ct);
+        //
+        // Task 158 r1c-v2 (main-session round 39 item 2): a work assignment or project filed under a SECURE matter or project
+        // is secure itself (owner round 6), so a DIRECT share on it honours the No Access list of every secure record it is
+        // filed under as well as its own — the guard's ONE entry point (never a second copy of the parent walk). The same
+        // codes; the message says whose list, never which entry. A filing or parent that cannot be read refuses (ADR-003).
+        var wall = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, SecureWallRecordScope.AsFlagged, ct);
+        var wallList = wall.ParentTable is { } wallParent
+            ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(wallParent)} this record is filed under"
+            : wall.FilingUnreadable
+                ? "the No Access list of a secure record this record is filed under"
+                : "the No Access list for this record";
         if (wall.Outcome == SecureShareWallOutcome.Walled)
         {
             logger.LogWarning(
-                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on its No Access list " +
-                "(entries {EntryIds}) (caller {CallerOid}).",
-                root.Type, root.Id, systemUserId, string.Join(",", wall.EntryIds), callerOid);
+                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on the No Access list of " +
+                "{Where} (entries {EntryIds}) (caller {CallerOid}).",
+                root.Type, root.Id, systemUserId,
+                wall.ParentTable is { } p ? $"{p}:{wall.ParentId:D}" : "the record itself", string.Join(",", wall.EntryIds), callerOid);
             return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, SubjectNoAccessReasonCode,
-                "This person is on the No Access list for this record, so it was not shared with them.");
+                $"This person is on {wallList}, so it was not shared with them.");
         }
 
         if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
@@ -343,8 +356,7 @@ public static class InternalShareEndpoints
                 root.Type, root.Id, systemUserId, wall.Fault, callerOid);
             return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
                 NoAccessUnverifiableReasonCode,
-                "Whether this person is on the No Access list for this record could not be checked, so it was not " +
-                "shared with them. Try again.");
+                $"Whether this person is on {wallList} could not be checked, so it was not shared with them. Try again.");
         }
 
         // ── You may grant only what you hold (owner decision 2026-09-16) ──────
@@ -443,7 +455,8 @@ public static class InternalShareEndpoints
 
             // Still fanned out: a repeat of a share whose fan-out was incomplete is how a caller completes it.
             return await ChildrenIncompleteAfterShareAsync(
-                       secureChildShares, root, systemUserId, OutcomeUnchanged, current, httpContext, logger, callerOid, ct)
+                       secureChildShares, relatedRoots, root, systemUserId, OutcomeUnchanged, current, httpContext, logger,
+                       callerOid, ct)
                    ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                        systemUserId, RecordShareLevels.LevelForMask(current), current, OutcomeUnchanged, narrowed));
         }
@@ -498,7 +511,8 @@ public static class InternalShareEndpoints
 
         // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
         return await ChildrenIncompleteAfterShareAsync(
-                   secureChildShares, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger, callerOid, ct)
+                   secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
+                   callerOid, ct)
                ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                    systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
                    outcome, narrowed));
@@ -523,6 +537,7 @@ public static class InternalShareEndpoints
         ITenantCache cache,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -583,7 +598,7 @@ public static class InternalShareEndpoints
             // Still fanned out: the user may still hold a share on a child (an incomplete earlier unshare, or one made in
             // the model-driven app), and repeating the unshare is how a caller removes it.
             return await ChildrenIncompleteAfterUnshareAsync(
-                       secureChildShares, root, systemUserId, removed: false, httpContext, logger, callerOid, ct)
+                       secureChildShares, relatedRoots, root, systemUserId, removed: false, httpContext, logger, callerOid, ct)
                    ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
         }
 
@@ -596,13 +611,29 @@ public static class InternalShareEndpoints
             return lastReader;
         }
 
+        // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
+        // this user on this record become Declined, so no trigger shares again while the assignment persists; the same marker
+        // records the removal of a share a secure parent passed on (task 158, owner round 30). Ledger-only and never thrown.
+        // Task 158 r1c-v2 (main-session round 47 item 2, E-158-v1-2): written BEFORE the revoke — write-ahead, as the
+        // inherited-share provenance is — so a pass that reads the ledger after this point never mistakes the removal it is
+        // about to see for a share to give again. The rest of that race — a pass that read the row BEFORE this marker writing
+        // over it — is closed at integration by If-Match on every pass's ledger update (round 47 item 2, task 140's support).
+        // Task 158 final round (main-session round 58 item 2): a revoke that then fails, or is not confirmed, PUTS THE MARKER
+        // BACK in this same request (finally — a cancellation too). A share the operator did not actually remove is never on
+        // record as declined: a Declined row is ended by its parent's unshare WITHOUT removing the share, so the share would
+        // outlive its source. Put back while the share is in fact gone (the read-back alone failed), the next pass sees the
+        // removal itself and records it (the out-of-band rule) — the safe direction.
+        var marked = await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
+
         var entitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
         int? remaining = null;
         Exception? failure = null;
+        var confirmed = false;
         try
         {
             await recordShare.RevokeAccessAsync(entitySet, root.Id, DataversePrincipalRef.User(systemUserId), ct);
             remaining = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
+            confirmed = remaining == 0;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -612,6 +643,8 @@ public static class InternalShareEndpoints
         {
             await ImpersonatedRootSetSource.InvalidateAsync(
                 cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type), logger);
+            if (!confirmed)
+                await assignedAccess.RevertShareRemovedAsync(root.Type, root.Id, marked, CancellationToken.None);
         }
 
         if (failure is not null || remaining != 0)
@@ -629,14 +662,9 @@ public static class InternalShareEndpoints
             "[USER-SHARE] Caller {CallerOid} removed {SystemUserId}'s share on {RootType} {RootId} (it held mask {Previous}).",
             callerOid, systemUserId, root.Type, root.Id, current);
 
-        // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
-        // this user on this record become Declined, so no trigger shares again while the assignment persists. Ledger-only
-        // and never thrown: the removal above stands.
-        await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
-
         // ── Task 149: the root share is confirmed gone; now remove the user from its secure children ──
         return await ChildrenIncompleteAfterUnshareAsync(
-                   secureChildShares, root, systemUserId, removed: true, httpContext, logger, callerOid, ct)
+                   secureChildShares, relatedRoots, root, systemUserId, removed: true, httpContext, logger, callerOid, ct)
                ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: true));
     }
 
@@ -651,6 +679,7 @@ public static class InternalShareEndpoints
     /// </summary>
     private static async Task<IResult?> ChildrenIncompleteAfterShareAsync(
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         GrantExternalAccessEndpoint.GrantRootResolution root,
         Guid systemUserId,
         string rootOutcome,
@@ -661,8 +690,31 @@ public static class InternalShareEndpoints
         CancellationToken ct)
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
-        if (children.IsComplete)
+
+        // Task 158 (owner round 6: "the parent's sharees can see it"): the SECURE work assignments and projects filed under
+        // this matter or project are given the new sharee now (add-only), each with its provenance recorded (task 158 r1,
+        // owner round 30). A record filed under it that is not secure yet is the job's to secure, not this share's, so it
+        // is not counted; every other record left out is reported through children_incomplete, as 149's children are
+        // (round 30: "failures report through children_incomplete"). The record's own share stands either way.
+        var filed = await relatedRoots.PassSharesOnAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, httpContext.TraceIdentifier, ct);
+        var filedLeft = FiledRecordsLeft(filed);
+
+        if (children.IsComplete && filedLeft == 0)
             return null;
+
+        if (children.IsComplete)
+        {
+            logger.LogWarning(
+                "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is in place ({Outcome}), but {Left} secure record(s) " +
+                "filed under it were not given it yet: {Detail} (caller {CallerOid}). The secure-root inheritance job completes it.",
+                systemUserId, root.Type, root.Id, rootOutcome, filedLeft, filed.Detail, callerOid);
+            return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
+                $"The record was shared, but {filedLeft} of the secure work assignments and projects filed under it could not " +
+                "be given this person yet. They are updated automatically within a few minutes, or you can try again.",
+                systemUserId, children, ("outcome", rootOutcome), ("accessRightsMask", rootMask),
+                ("filedRecordsNotUpdated", filedLeft));
+        }
 
         logger.LogWarning(
             "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is in place ({Outcome}), but its secure children are " +
@@ -679,8 +731,18 @@ public static class InternalShareEndpoints
               "within a few minutes, or you can try again." + HeldSentence(children);
 
         return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("outcome", rootOutcome), ("accessRightsMask", rootMask));
+            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft));
     }
+
+    /// <summary>
+    /// Task 158 r1: the secure filed records a sharee-only pass left out — every incomplete record except one that is not
+    /// secure yet (the job secures it; a share is not that act), or 1 when the pass itself failed.
+    /// </summary>
+    private static int FiledRecordsLeft(SecureFiledRootsPass pass) =>
+        pass.Status == SecureFiledRootsStatus.Failed
+            ? Math.Max(1, pass.Results.Count)
+            : pass.Results.Count(r => !r.IsComplete && r.ReasonCode != SecureRootInheritance.ReasonNotYetSecure)
+              + (pass.Status == SecureFiledRootsStatus.Incomplete && pass.Results.Count == 0 ? 1 : 0);
 
     /// <summary>
     /// After a confirmed unshare on the root (or none to remove): removes the user from the root's secure children. The
@@ -688,6 +750,7 @@ public static class InternalShareEndpoints
     /// </summary>
     private static async Task<IResult?> ChildrenIncompleteAfterUnshareAsync(
         SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
         GrantExternalAccessEndpoint.GrantRootResolution root,
         Guid systemUserId,
         bool removed,
@@ -698,11 +761,46 @@ public static class InternalShareEndpoints
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
 
+        // Task 158 r1 (owner round 30): the reverse fan-out — the secure work assignments and projects this record's sharing
+        // gave the user lose it too, but ONLY where the provenance ledger says it came from here and the share is still the
+        // unmodified one passed on (a direct share, a raised one, or one another parent still justifies is kept).
+        var filed = await relatedRoots.PassUnshareOnAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, DataversePrincipalRef.User(systemUserId),
+            httpContext.TraceIdentifier, ct);
+
         // A HELD child does not keep the removed user: held children are only narrowed, and a principal its known roots do
         // not share is revoked from it. So for an unshare only children that could not be updated at all are incomplete.
-        if (children.IsComplete
-            || (children.Status != SecureChildShareSyncStatus.Failed && children.ChildrenNotUpdated == 0))
+        var childrenDone = children.IsComplete
+                           || (children.Status != SecureChildShareSyncStatus.Failed && children.ChildrenNotUpdated == 0);
+        if (childrenDone && filed.IsComplete)
             return null;
+
+        // Task 158 r1c-v1 (verifier item 3): records whose removed share their OTHER secure parents still pass on in part,
+        // where that part could not be given back yet — the opposite direction from a share not removed, so its own sentence.
+        var filedNotRegiven = filed.NotRegiven;
+        var filedNotEnded = filed.IsComplete ? 0 : filedNotRegiven > 0 && filed.NotDone == 0 ? 0 : Math.Max(filed.NotDone, 1);
+        var regivenSentence = filedNotRegiven == 0
+            ? string.Empty
+            : $" On {filedNotRegiven} secure work assignment(s) or project(s) filed under it, the access the other secure records " +
+              "they are filed under still give this person could not be given back yet; it is given back automatically within a " +
+              "few minutes.";
+
+        if (childrenDone)
+        {
+            logger.LogWarning(
+                "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but the inherited shares it " +
+                "had passed on were not all ended or given back: {Detail} (caller {CallerOid}). The secure-root inheritance job " +
+                "completes it.", systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
+            return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
+                (filedNotEnded == 0
+                    ? "This user's access to the record was removed."
+                    : "This user's access to the record was removed, but the access this record gave them on " +
+                      $"{filedNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
+                      "they may still open those. They are removed automatically within a few minutes, or you can try again.")
+                + regivenSentence,
+                systemUserId, children, ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
+                ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
+        }
 
         logger.LogWarning(
             "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but its secure children " +
@@ -720,8 +818,9 @@ public static class InternalShareEndpoints
               "updated yet, so they may still open those. They are removed automatically within a few minutes, or you can " +
               "try again.";
 
-        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated));
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + regivenSentence, systemUserId, children,
+            ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
+            ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
     }
 
     private const string ChildrenIncompleteTitle = "Related records not all updated";

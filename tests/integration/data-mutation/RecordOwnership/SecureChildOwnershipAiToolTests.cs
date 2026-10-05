@@ -301,14 +301,41 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     }
 
     [Fact]
-    public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsRefused_ItMustBeSecuredByProvisioning_Task158()
+    public async Task CreateRecord_AWorkAssignmentTheResolverPutsUnderTheSecureTeam_ButTheSecurePlanDoesNot_IsRefused_Task158r1()
     {
-        // Owner round 6: a work assignment under a secure root is itself secure — through provisioning (task 158), never
-        // a bare re-own by the Secure team. From chat it is refused, and nothing is created.
+        // Task 158 r1 (owner round 31 item 2): a work assignment filed under a SECURE record is created INTO isolation, by the
+        // plan SecureRootInheritance makes before the write (SecureRootInheritanceWriterTests drive it). This host's gate
+        // reads a Dataverse with no rows — the plan finds no secure parent — while the ownership resolver's world says the
+        // matter IS secure. The two cannot be reconciled at create time, so nothing is created (fail closed): never the
+        // pre-r1 "ordinary row of the caller's unit", which left a business-unit-visible window.
         var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain("NOT created").And.Contain("could not be decided consistently");
+        _user.Posts.Should().BeEmpty("never owned by the individual");
+        _appCreates.Should().BeEmpty("nothing is created when the two owners disagree");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AWorkAssignmentWhoseParentsFlagCannotBeRead_IsRefused_AndNothingIsCreated_Task158()
+    {
+        // Owner (task 158 constraint): "if the parent's flag cannot be read, refuse the create". The gate reads the matter
+        // app-only and finds its flag EMPTY (owner round 17 item 3: empty is never "not secure").
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                q.EntityName == "sprk_matter"
+                    ? new EntityCollection(new List<Entity> { new("sprk_matter", OrdinaryMatter) })
+                    : new EntityCollection());
+
+        var result = await CreateRecordHandler(rootFiling: SecureRootFilingGateFixtures.Over(entities.Object)).ExecuteChatAsync(
+            CreateContext("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        result.ErrorMessage.Should().Contain("NOT created");
         _appCreates.Should().BeEmpty();
         _user.Posts.Should().BeEmpty();
     }
@@ -600,12 +627,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     // Harness
     // =====================================================================================
 
+    /// <remarks>Task 158: the secure-root gate defaults to one over a Dataverse with no rows (nothing is found filed under
+    /// anything secure, so nothing is secured here); the securing itself is SecureRootInheritanceTests'.</remarks>
     private DataverseCreateRecordHandler CreateRecordHandler(
         IRecordOwnershipResolver? resolver = null,
-        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null) =>
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             resolver ?? _world.Resolver(), _appOnly.Object,
-            identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object);
+            identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
+            rootFiling ?? SecureRootFilingGateFixtures.NothingSecure());
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -620,10 +651,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
-                _user,
-                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
-                CreateLogger<DataverseUpdateRecordHandler>(),
-                _world.Resolver())
+                _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
+                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -658,7 +687,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     /// caller's held privileges, AppendTo per record, field-secured columns, rows the caller can see, and a record of
     /// every POST and PATCH made as the caller.
     /// </summary>
-    private sealed partial class ScriptedUserClient(Guid me) : IDataverseUserClient
+    /// <remarks>Internal (task 158): <c>SecureRootInheritanceWriterTests</c> drives the same chat tools over it.</remarks>
+    internal sealed partial class ScriptedUserClient(Guid me) : IDataverseUserClient
     {
         private static readonly Dictionary<string, string> EntitySets = new()
         {
@@ -671,6 +701,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
             ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
             ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
+            // Task 158 r1: the pair's type, and an org-typed lookup (a create's own No Access list).
+            ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -703,6 +735,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
             },
             ["sprk_communication"] = new[]
             {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
@@ -58,6 +59,34 @@ internal static class OwnedChildWrite
         "modifiedby", "modifiedon", "modifiedonbehalfby",
         "overriddencreatedon", "importsequencenumber",
     };
+
+    /// <summary>
+    /// Task 158: every column a mapped write sets, as <see cref="SecureRootFilingGate.CheckAsync"/> reads them — each lookup
+    /// as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, each cleared column as <c>null</c>, each plain value as written
+    /// (the polymorphic pair's id is a text column) — so the gate can tell what a work assignment or project will be filed
+    /// under.
+    /// </summary>
+    internal static IReadOnlyList<KeyValuePair<string, object?>> WritesOf(DataverseWriteItemMapper.MappedItem item)
+    {
+        var writes = new List<KeyValuePair<string, object?>>();
+        foreach (var lookup in item.Lookups)
+            writes.Add(new(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId)));
+        foreach (var column in item.ClearedColumns)
+            writes.Add(new(column, null));
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (property.Name.Contains('@') || property.Value.ValueKind == JsonValueKind.Null)
+                continue; // a lookup bind (taken above) or a clear (taken above)
+
+            writes.Add(new(property.Name, property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString()
+                : property.Value.GetRawText()));
+        }
+
+        return writes;
+    }
 
     /// <summary>The ownership parents a mapped row is filed under (resolver's definition — no per-table list).</summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(DataverseWriteItemMapper.MappedItem item) =>
@@ -209,15 +238,31 @@ internal static class OwnedChildWrite
         public DataverseUserResponse? ClientFailure { get; init; }
 
         /// <summary>
-        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a root
-        /// (task 158 secures a work assignment or project filed under a secure record) or a table outside the ownership
-        /// set (the Secure Record Owner role holds no Read on it). Nothing is created.
+        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a matter (a
+        /// root, made secure only through its own Make Secure; a work assignment or project is instead created as an
+        /// ordinary row and secured by provisioning, task 158) or a table outside the ownership set (the Secure Record
+        /// Owner role holds no Read on it). Nothing is created.
         /// </summary>
         public string? SecureFilingRefused { get; init; }
 
+        /// <summary>
+        /// Task 158 r1 (owner round 31): the secure-create plan's refusal — the stable code (an unreadable parent flag, the
+        /// caller walled off a secure parent or the record, the named team unresolved) and its reason. Nothing is created.
+        /// </summary>
+        public RecordOwnerResolution? PlanRefusal { get; init; }
+
+        /// <summary>Task 158 r1: the row was created INTO isolation by this plan — the writer completes it.</summary>
+        public SecureRootCreatePlan? Isolated { get; init; }
+
+        /// <summary>
+        /// Task 158 r1: the person an isolated create was made for (the caller, by the WhoAmI this create made — its
+        /// <c>sprk_createdbyperson</c>), whom completing it shares the row to; never asked a second time.
+        /// </summary>
+        public Guid? IsolatedFor { get; init; }
+
         public bool Succeeded =>
             CreatedId is not null
-            || (Denied is null && OwnerRefusal is null && ClientFailure is null && SecureFilingRefused is null);
+            || (Denied is null && OwnerRefusal is null && ClientFailure is null && SecureFilingRefused is null && PlanRefusal is null);
 
         public static readonly Outcome Allowed = new();
     }
@@ -230,6 +275,12 @@ internal static class OwnedChildWrite
     /// </summary>
     /// <param name="serverSetLookupColumns">Lookups the SERVER added to the row (e.g. the email draft's sender) — they
     /// name the caller themselves and cost no AppendTo check.</param>
+    /// <param name="planSecureCreate">Task 158 r1 (owner round 31): for a work assignment or project, the secure-create plan
+    /// (<see cref="SecureRootFilingGate.PlanCreateAsync"/>) — asked AFTER the caller's own G5 check above and given its
+    /// AppendTo check on the secure parents (the polymorphic pair is text, not a lookup the mapper checks), so a caller who
+    /// may not file under a secure record learns nothing more about it. A refusal creates nothing; an isolated plan creates
+    /// the row owned by the plan's named Secure Record Owners team with <c>sprk_issecure = true</c> in the create itself.
+    /// <c>null</c> for every other create.</param>
     internal static async Task<Outcome> CreateAsync(
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
@@ -238,7 +289,8 @@ internal static class OwnedChildWrite
         DataverseWriteItemMapper.MappedItem item,
         IReadOnlySet<string>? serverSetLookupColumns,
         Guid? callerObjectId,
-        CancellationToken ct)
+        CancellationToken ct,
+        SecureRootFilingGate? planSecureCreate = null)
     {
         var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
@@ -248,6 +300,37 @@ internal static class OwnedChildWrite
             .ConfigureAwait(false);
         if (!check.Succeeded)
             return check;
+
+        if (planSecureCreate is not null && SecureRootInheritance.Inherits(table))
+        {
+            // G5 for the secure parents themselves: AppendTo AS THE CALLER on each one the row will be filed under (a parent
+            // named by a typed lookup was checked above; one named by the pair was not) - asked by the plan before it says
+            // anything about them.
+            var checkedIds = item.Lookups.Select(l => l.RecordId).ToHashSet();
+            var plan = await planSecureCreate.PlanCreateAsync(table, WritesOf(item), me.SystemUserId, ct,
+                async (parents, token) =>
+                {
+                    var parentLookups = parents
+                        .Where(p => !checkedIds.Contains(p.Id))
+                        .Select(p => new DataverseWriteItemMapper.MappedLookup(
+                            "filed under", p.Table, SecureDesignationRemoval.EntitySetFor(p.Table), p.Id))
+                        .ToArray();
+                    var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, parentLookups, token).ConfigureAwait(false);
+                    return appendTo.Succeeded
+                        ? null
+                        : RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied,
+                            appendTo.Denied ?? "you do not have permission to file this record under the secure record it names");
+                }).ConfigureAwait(false);
+
+            if (plan.Refusal is { } refusal)
+                return new Outcome { PlanRefusal = refusal };
+
+            if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
+            {
+                var created = await CreateIntoIsolationAsync(appOnly, table, item, secureTeam, me.SystemUserId, ct).ConfigureAwait(false);
+                return created with { Isolated = plan, IsolatedFor = me.SystemUserId };
+            }
+        }
 
         // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
         // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
@@ -261,9 +344,19 @@ internal static class OwnedChildWrite
             return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
 
         // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
-        // set, config/secure-record-owner-role.json). A root filed under a secure record is task 158's (it is secured
-        // through provisioning, never a bare re-own); any other table would be refused by Dataverse (no Read).
-        if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
+        // set, config/secure-record-owner-role.json). A work assignment or project filed under a secure record is created
+        // into isolation above (task 158 r1, owner round 31 item 2) — reaching here with a Secure owner means the plan
+        // found no secure parent while the resolver did: the two cannot be reconciled now, so nothing is created (fail
+        // closed). Any other table would be refused by Dataverse (no Read).
+        if (owner.IsSecureOwner && SecureRootInheritance.Inherits(table))
+        {
+            return new Outcome
+            {
+                SecureFilingRefused = $"Whether this '{table}' is filed under a secure record could not be decided consistently " +
+                                      "(the records it names changed while it was being created). It was NOT created. Try again.",
+            };
+        }
+        else if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
         {
             return new Outcome
             {
@@ -279,6 +372,30 @@ internal static class OwnedChildWrite
         var fields = BodyFields(item.JsonBody);
         fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
         owner.StampCreatorOn(fields, table);
+
+        var id = Guid.NewGuid();
+        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
+        return new Outcome { CreatedId = id };
+    }
+
+    /// <summary>
+    /// Task 158 r1 (owner round 31 item 2): the app-only create of a work assignment or project — a ROOT — INTO isolation:
+    /// owned by the named Secure Record Owners team provisioning's own topology names (resolved by
+    /// <see cref="SecureRootInheritance.PlanCreateAsync"/>), flagged in the create itself. A root's own ownership is
+    /// provisioning's (task 144), never a child's resolver answer; provisioning's re-entry steps then complete it.
+    /// </summary>
+    private static async Task<Outcome> CreateIntoIsolationAsync(
+        IFieldMappingDataverseService appOnly, string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam,
+        Guid creatorPerson, CancellationToken ct)
+    {
+        var fields = BodyFields(item.JsonBody);
+        fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
+        fields["sprk_issecure"] = true;
+        // Batch-4 integration (146 c1-r1 x 158): the person who asked for it, stamped in the create itself as on every other
+        // app-only create (task 146 moved the stamp off the handlers into this writer), so provisioning's completion and any
+        // later resume share to that person.
+        if (RecordCreatorPerson.IsStamped(table))
+            RecordCreatorPerson.Bind(fields, creatorPerson);
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);

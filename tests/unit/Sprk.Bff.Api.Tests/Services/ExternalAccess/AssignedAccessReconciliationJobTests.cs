@@ -75,6 +75,26 @@ public class AssignedAccessReconciliationJobTests
         Result(result).GetProperty("candidates").GetInt32().Should().Be(2);
     }
 
+    /// <summary>
+    /// Task 158 r1: the inherited-share provenance rows (owner round 30) live in the same ledger table but are not
+    /// Assigned-To rows — a root that holds only such rows is not this job's candidate, so they never count toward its scan
+    /// bound (an environment with many inherited shares would otherwise truncate, and fail, every run).
+    /// </summary>
+    [Fact]
+    public async Task ARootHoldingOnlyInheritedShareProvenance_IsNotACandidate()
+    {
+        var assigned = AssignedMatter();
+        var filed = Guid.NewGuid();
+        await _h.Store.CreateInheritedLedgerAsync(ExternalGrantRootType.WorkAssignment, filed, "sprk_matter", Guid.NewGuid(),
+            DataversePrincipalRef.User(Guid.NewGuid()), new AssignedAccessLedgerWrite(AssignedAccessState.Shared, null, GrantedLevel: 1),
+            CancellationToken.None);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Result(result).GetProperty("candidates").GetInt32().Should().Be(1, $"only {assigned} has an Assigned-To column or row");
+    }
+
     [Fact]
     public async Task ASecondRun_OverUnchangedRoots_MakesZeroWrites()
     {

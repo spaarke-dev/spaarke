@@ -209,8 +209,15 @@ internal static class NoAccessEnforcementTestDoubles
             Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
             => DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, shares ?? Shares);
 
+        /// <summary>
+        /// Task 158 final round (round 58 item 1): the enforcer's reads of what is filed under a covered matter or project —
+        /// the same Dataverse the synchronizer reads (<see cref="ChildWorld"/>), as in production.
+        /// </summary>
+        public IGenericEntityService Entities() =>
+            DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object;
+
         public NoAccessShareEnforcer Enforcer => new(
-            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(),
+            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(),
             NullLogger<NoAccessShareEnforcer>.Instance);
     }
 }

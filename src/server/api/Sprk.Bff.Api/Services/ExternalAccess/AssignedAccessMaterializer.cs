@@ -139,7 +139,9 @@ public sealed record AssignedAccessListEntry(
 /// (A3 = prompt: <see cref="AssignedAccessState.PendingConfirmation"/>); an auto grant that existed before the record
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
 /// <item>No Access: a denied contact or organization gets nothing (the core's FR-23 check); a walled internal user on a
-/// secure record gets no share (task 143's guard, reused). An unreadable list or flag set writes nothing.</item>
+/// secure record gets no share (task 143's guard, reused) — on a work assignment or project filed under secure records,
+/// walled by the record's own list or any secure parent's (task 158 r1c-v2, round 39 item 2). An unreadable list or flag
+/// set writes nothing.</item>
 /// <item>Never lower: an existing grant that CONFERS access today (not merely statecode 0 — an expired row confers
 /// nothing) at Collaborate or above, or a share already carrying Collaborate's rights, is left untouched
 /// (<see cref="AssignedAccessState.CoveredByExisting"/>) — not raised, not renewed. A lower conferring one is raised; the
@@ -205,7 +207,13 @@ public sealed class AssignedAccessMaterializer
     private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AssignedAccessMaterializer> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
+    /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
+    /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
+    /// host (an unconditional framework service); <c>null</c> only for a materializer built without a host (unit harnesses),
+    /// which then leaves the parents' sharees to the secure-root inheritance job.</param>
     public AssignedAccessMaterializer(
         AssignedAccessStore store,
         DataverseWebApiClient dataverse,
@@ -220,8 +228,10 @@ public sealed class AssignedAccessMaterializer
         IOptions<MembershipOptions> membership,
         IConfiguration configuration,
         TimeProvider timeProvider,
-        ILogger<AssignedAccessMaterializer> logger)
+        ILogger<AssignedAccessMaterializer> logger,
+        IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _store = store;
         _dataverse = dataverse;
         _participations = participations;
@@ -507,6 +517,7 @@ public sealed class AssignedAccessMaterializer
         }
 
         // ── Assignments that ended (field cleared or changed — owner answer A4) ────────
+        var assignmentEnded = false;
         foreach (var row in ledger)
         {
             ct.ThrowIfCancellationRequested();
@@ -518,6 +529,7 @@ public sealed class AssignedAccessMaterializer
             if (stillAssignedHere)
                 continue;
 
+            assignmentEnded = true;
             try
             {
                 await EndAssignmentAsync(run, row, subject, desired.ContainsKey(subject), flags.Value, ct).ConfigureAwait(false);
@@ -536,6 +548,13 @@ public sealed class AssignedAccessMaterializer
         {
             await SyncChildrenAsync(run, ct).ConfigureAwait(false);
         }
+
+        // Task 158 r1c-v2 (main-session round 47 item 1 (3), E-158-v1-1's reverse direction): an assignment that ended on a
+        // work assignment or project may have taken away (or recorded as covered) access its secure parents pass on — the
+        // secure-root inheritance's SHAREE-ONLY pass gives the record what its secure parents pass on at once (never a
+        // provisioning; nothing for a record filed under no secure parent), rather than at that job's next run.
+        if (assignmentEnded && SecureRootInheritance.Inherits(run.Logical))
+            await PassParentShareesOnAsync(run, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: {Subjects} assigned subject(s), {Writes} write(s), {Failures} failure(s).",
@@ -580,6 +599,33 @@ public sealed class AssignedAccessMaterializer
             $"This record's access was updated, but {children.ChildrenLeftOutOfLine} of its {children.ChildrenInScope} related " +
             "records (documents, events, to-dos, communications) could not be updated yet " +
             $"({children.Status}). The scheduled safety net finishes it within a few minutes.");
+    }
+
+    /// <summary>
+    /// Round 47 item 1 (3): the secure-root inheritance's sharee-only pass for this record, resolved in its own scope (the
+    /// inheritance depends on this class, so it cannot be a constructor dependency). What it cannot give is the secure-root
+    /// inheritance job's to give (≤ 5 minutes) and is logged — never a failure of THIS rule's run.
+    /// </summary>
+    private async Task PassParentShareesOnAsync(Run run, CancellationToken ct)
+    {
+        if (_scopes is null)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: an assignment ended; no host scope to give its secure parents' sharees now — " +
+                "the secure-root inheritance job gives them.", run.Logical, run.RootId);
+            return;
+        }
+
+        using var scope = _scopes.CreateScope();
+        var pass = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .PassShareesToFiledRecordAsync(run.Logical, run.RootId, $"assigned-access:{run.RootId:N}", ct).ConfigureAwait(false);
+        if (!pass.IsComplete)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: an assignment ended, and its secure parents' sharees were not all given to it " +
+                "({Outcome}, {Code}); the secure-root inheritance job completes it.", run.Logical, run.RootId, pass.WireOutcome,
+                pass.ReasonCode);
+        }
     }
 
     /// <summary>The assigned subjects (registry order) and the fields that name each.</summary>
@@ -772,10 +818,14 @@ public sealed class AssignedAccessMaterializer
         if (current == 0)
         {
             // Task 143's enforcer removes a WALLED user's share on a secure record: a known cause, restored once the wall
-            // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks.
+            // is lifted (criterion 9). Any other removal was an operator's (the OOB MDA Share dialog) — it sticks. Task 158
+            // final round (main-session round 58 item 1): on a work assignment or project filed under a secure record the
+            // enforcer also removes it for a person on that PARENT's list, so the parents' lists are asked too — the guard's
+            // one entry point, as the suggestion below asks it.
             if (flags.IsSecure)
             {
-                var wall = await _noAccessGuard.CheckAsync(run.Logical, run.RootId, user, ct).ConfigureAwait(false);
+                var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
                 if (wall.Outcome == SecureShareWallOutcome.Walled)
                 {
                     await EnsureRowsAsync(run, subject, byField,
@@ -1059,8 +1109,11 @@ public sealed class AssignedAccessMaterializer
 
         if (flags.IsSecure)
         {
-            // Task 143's ONE write-time check, reused (never a second copy).
-            var wall = await _noAccessGuard.CheckAsync(run.Logical, run.RootId, user, ct).ConfigureAwait(false);
+            // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
+            // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
+            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
             {
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccess, user)
@@ -1686,12 +1739,55 @@ public sealed class AssignedAccessMaterializer
         return await ReadResidualTermsAsync(rootType, rootId, subject.Value, ct).ConfigureAwait(false);
     }
 
-    /// <summary><c>/unshare-user</c> removed a share: the subject's live rows naming that user become Declined. Never throws.</summary>
-    public Task<int> MarkShareRemovedAsync(ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, CancellationToken ct)
-        => MarkAsync(rootType, rootId, r => r.SystemUserId == systemUserId,
+    /// <summary>
+    /// <c>/unshare-user</c> is removing a share: the subject's live rows naming that user become Declined — written BEFORE the
+    /// revoke (task 158 r1c-v2, round 47 item 2). Returns every row it marked (or tried to: a write that threw may have
+    /// applied) as it was BEFORE the marker, so the route can put them back when its revoke is not confirmed
+    /// (<see cref="RevertShareRemovedAsync"/>). Never throws.
+    /// </summary>
+    public async Task<IReadOnlyList<AssignedAccessLedgerRow>> MarkShareRemovedAsync(
+        ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, CancellationToken ct)
+        => (await MarkRowsAsync(rootType, rootId, r => r.SystemUserId == systemUserId,
             r => r.State is AssignedAccessState.Shared or AssignedAccessState.CoveredByExisting or AssignedAccessState.Adopted
                 or AssignedAccessState.PendingConfirmation or AssignedAccessState.Skipped,
-            new AssignedAccessLedgerWrite(AssignedAccessState.Declined, AssignedAccessReason.RemovedByOperator), ct);
+            ShareRemovedMarker, ct).ConfigureAwait(false)).Attempted;
+
+    private static readonly AssignedAccessLedgerWrite ShareRemovedMarker =
+        new(AssignedAccessState.Declined, AssignedAccessReason.RemovedByOperator);
+
+    /// <summary>
+    /// Task 158 final round (main-session round 58 item 2): the operator's removal did NOT happen — its revoke failed or was not
+    /// confirmed — so every row <see cref="MarkShareRemovedAsync"/> marked is put back to the state and reason it held before.
+    /// A share the operator did not actually remove is never on record as declined (a Declined row is ended by its parent's
+    /// unshare WITHOUT removing the share, so the share would outlive its source). Never throws: a row that cannot be put back
+    /// is logged, and the route's answer (the removal was not confirmed) already asks the operator to try again.
+    /// </summary>
+    public async Task RevertShareRemovedAsync(
+        ExternalGrantRootType rootType, Guid rootId, IReadOnlyList<AssignedAccessLedgerRow> marked, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(marked);
+        try
+        {
+            foreach (var before in marked)
+            {
+                await _store.UpdateLedgerAsync(before.Id, new AssignedAccessLedgerWrite(before.State, before.Reason), ct)
+                    .ConfigureAwait(false);
+            }
+
+            if (marked.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[ASSIGNED-ACCESS] The share removal on {Type} {RootId} was not confirmed: {Count} Declined marker(s) put back.",
+                    rootType, rootId, marked.Count);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[ASSIGNED-ACCESS] The share removal on {Type} {RootId} was not confirmed, and its Declined marker(s) could not all " +
+                "be put back; the operator's retry of the unshare (the answer asks for one) settles them.", rootType, rootId);
+        }
+    }
 
     /// <summary>A manual <c>/grant</c> or <c>/invite-and-grant</c> landed on the subject: its live rows become Adopted. Never throws.</summary>
     public Task<int> MarkGrantAdoptedAsync(ExternalGrantRootType rootType, Guid rootId, Guid? contactId, Guid? organizationId,
@@ -1742,24 +1838,36 @@ public sealed class AssignedAccessMaterializer
         ExternalGrantRootType rootType, Guid rootId, Func<AssignedAccessLedgerRow, bool> about,
         Func<AssignedAccessLedgerRow, bool> eligible, AssignedAccessLedgerWrite write, CancellationToken ct)
     {
+        var (attempted, faulted) = await MarkRowsAsync(rootType, rootId, about, eligible, write, ct).ConfigureAwait(false);
+        return faulted ? 0 : attempted.Count;
+    }
+
+    /// <summary>
+    /// Marks every eligible row, and answers the rows it marked or tried to (as read, BEFORE the marker) and whether a read
+    /// or write faulted. Never throws.
+    /// </summary>
+    private async Task<(IReadOnlyList<AssignedAccessLedgerRow> Attempted, bool Faulted)> MarkRowsAsync(
+        ExternalGrantRootType rootType, Guid rootId, Func<AssignedAccessLedgerRow, bool> about,
+        Func<AssignedAccessLedgerRow, bool> eligible, AssignedAccessLedgerWrite write, CancellationToken ct)
+    {
+        var attempted = new List<AssignedAccessLedgerRow>();
         try
         {
             var ledger = await _store.ReadLedgerAsync(rootType, rootId, ct).ConfigureAwait(false);
-            var count = 0;
             foreach (var row in ledger.Where(r => about(r) && eligible(r)))
             {
+                attempted.Add(row); // before the write: one that threw may still have applied
                 await _store.UpdateLedgerAsync(row.Id, write, CancellationToken.None).ConfigureAwait(false);
-                count++;
             }
 
-            if (count > 0)
+            if (attempted.Count > 0)
             {
                 _logger.LogInformation(
                     "[ASSIGNED-ACCESS] {Count} ledger row(s) on {Type} {RootId} marked {State} ({Reason}).",
-                    count, rootType, rootId, write.State, write.Reason);
+                    attempted.Count, rootType, rootId, write.State, write.Reason);
             }
 
-            return count;
+            return (attempted, false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1768,7 +1876,7 @@ public sealed class AssignedAccessMaterializer
             _logger.LogError(ex,
                 "[ASSIGNED-ACCESS] Could not mark the ledger of {Type} {RootId} {State}; the operator's change stands.",
                 rootType, rootId, write.State);
-            return 0;
+            return (attempted, true);
         }
     }
 

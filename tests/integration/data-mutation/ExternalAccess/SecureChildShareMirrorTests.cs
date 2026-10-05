@@ -573,16 +573,16 @@ public class SecureChildShareMirrorTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
             _shares, _users.Client, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
-            world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(),
+            world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
             Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> Unshare(SecureChildShareWorld world, Guid user) =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("project", ProjectR, user),
-            _shares, _users.Client, _flags, _cache.Object,
-            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
-            world.Synchronizer(_shares), Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            _shares, _users.Client, _flags, _cache.Object, Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
+            world.Synchronizer(_shares), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), Context(),
+            NullLogger<Program>.Instance, CancellationToken.None);
 
     [Fact]
     public async Task ShareUser_OnASecureRoot_SharesEveryChild_AtTheSharedLevel()
@@ -1303,7 +1303,7 @@ public class SecureChildShareMirrorTests
             _identities.AddSystemUser(user, oid: null, email: null);
         return new SecureShareNoAccessGuard(
             new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false)),
-            _denyList, _identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+            _denyList, _identities, AssignedAccessTestDoubles.NoFilingRows(), NullLogger<SecureShareNoAccessGuard>.Instance);
     }
 
     /// <summary>

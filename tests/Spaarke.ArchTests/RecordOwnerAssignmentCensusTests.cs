@@ -433,6 +433,12 @@ public class RecordOwnerAssignmentCensusTests
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
+        new OwnerWriteEntry("RecordCreationService.cs", "IsolateProjectCreate", 1, OwnerWriteKind.Root,
+            "Task 158 r1 (owner round 31 item 2): a PROJECT (a root) filed under a secure record is created INTO isolation, " +
+            "owned by the named Secure Record Owners team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
+        new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
+            "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
+            "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
 
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
@@ -446,8 +452,9 @@ public class RecordOwnerAssignmentCensusTests
             "the snapshot taken before any write — the root move's own side effect, undone. Unsecure (task 148, owner round 13 " +
             "item 1): placed on the owner SecureChildReconciler resolved for a child of that root through " +
             "IRecordOwnershipResolver. Read back in both."),
-        new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
-            "Un-securing hands the ROOT back to a user (task 144 / F3)."),
+        new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureRecordAsync", 1, OwnerWriteKind.Root,
+            "Un-securing hands the ROOT back to a user (task 144 / F3). Task 158: the record's own steps moved from the " +
+            "handler into UnsecureRecordAsync, which also unsecures each alsoUnsecure related record an F3 holder names."),
         // WorkAssignmentEndpoints.CreateWorkAssignmentAsync: deleted with its route by task 166 (S-76; batch-4 integration).
 
         new OwnerWriteEntry("OutboxService.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,

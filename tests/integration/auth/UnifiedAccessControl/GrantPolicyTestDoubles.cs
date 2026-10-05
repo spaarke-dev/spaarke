@@ -334,6 +334,9 @@ internal static class GrantPolicyTestDoubles
             return row.sprk_noaccessentryid!.Value;
         }
 
+        /// <summary>Task 158 r1c-v1: an operator lifts one entry (removes it from the No Access list).</summary>
+        public void Lift(Guid entryId) => _entries.RemoveAll(e => e.Row.sprk_noaccessentryid == entryId);
+
         /// <summary>Task 143: a CONTACT subject denied on every record referencing an organization (ethical wall).</summary>
         public void DenyContactOnOrganization(Guid contactId, Guid objectOrganizationId)
             => _entries.Add(($"sprk_subjectcontact eq {contactId}", WithContact(OrganizationRow(objectOrganizationId), contactId)));

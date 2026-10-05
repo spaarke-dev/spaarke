@@ -75,7 +75,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
 
         return new RecordCreationService(
             entities.Object, new Mock<IFieldMappingDataverseService>().Object, ownership.Object,
-            IdentityNormalizationFixtures.WithContact(makersContact).Object, materializer ?? _h.Materializer,
+            IdentityNormalizationFixtures.WithContact(makersContact).Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), materializer ?? _h.Materializer,
             NullLogger<RecordCreationService>.Instance);
     }
 
@@ -170,7 +170,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         dataverse.Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(204, body: null));
         var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Scopes());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"sprk_matter","recordId":"{{{matter:D}}}","item":{"{{{Attorney1}}}":"{{{contact:D}}}"}}"""),
@@ -192,7 +192,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         dataverse.Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Fail(403, "0x80040220", "Principal user is missing prvWritesprk_matter"));
         var handler = new DataverseUpdateRecordHandler(dataverse.Object, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Scopes());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: $$$"""{"tablename":"sprk_matter","recordId":"{{{matter:D}}}","item":{"{{{Attorney1}}}":"x"}}"""),
@@ -219,7 +219,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_project","item":{"sprk_projectname":"New"}}"""),
@@ -243,7 +243,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Mock<IFieldMappingDataverseService>().Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_event","item":{"sprk_eventname":"Hearing"}}"""),
@@ -295,7 +295,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), appOnly.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Scopes());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), Scopes());
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: """{"tablename":"sprk_project","item":{"sprk_projectname":"New"}}"""),

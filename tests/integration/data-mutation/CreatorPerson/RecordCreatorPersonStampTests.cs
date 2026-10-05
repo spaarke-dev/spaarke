@@ -65,6 +65,7 @@ public class RecordCreatorPersonStampTests
         return new RecordCreationService(
             _entities.Object, _fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
             NullLogger<RecordCreationService>.Instance);
     }

@@ -431,11 +431,11 @@ public class NoAccessShareEnforcerTests
         NoAccessEnforcementReport? secondReport = null;
         var interleaved = new InterleavingShares(_h.Shares);
         var other = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, _h.Shares, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
         interleaved.BeforeFirstRevoke = async () =>
             secondReport = await other.EnforceEntryAsync(second, new[] { Tenant }, CancellationToken.None);
         var enforcer = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, interleaved, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(interleaved), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(interleaved), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var firstReport = await enforcer.EnforceEntryAsync(first, new[] { Tenant }, CancellationToken.None);
 
@@ -471,7 +471,7 @@ public class NoAccessShareEnforcerTests
             AfterFirstRead = async () => reportA = await _h.Enforcer.EnforceEntryAsync(entryA, new[] { Tenant }, CancellationToken.None),
         };
         var enforcerB = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, staleFirstRead, _h.Cache.Mock.Object,
-            _h.Lease, _h.ChildShares(staleFirstRead), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+            _h.Lease, _h.ChildShares(staleFirstRead), _h.Entities(), Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
 
         var reportB = await enforcerB.EnforceEntryAsync(entryB, new[] { Tenant }, CancellationToken.None);
 
@@ -578,7 +578,298 @@ public class NoAccessShareEnforcerTests
 
         await Enforce(entry);
 
-        _h.ChildWorld.QueriedTables.Should().BeEmpty("the fan-out runs only after a removal; the reconcile owns the rest");
+        // Task 158 final round (round 58 item 1): what is FILED UNDER the project (secure work assignments and projects) is
+        // read whether or not anything was removed on it — that is the wall's reach, not task 149's fan-out to its children.
+        _h.ChildWorld.QueriedTables.Should().OnlyContain(t => t == Project || t == "sprk_workassignment",
+            "the fan-out to the record's CHILDREN runs only after a removal; the reconcile owns the rest");
+        _h.ChildWorld.QueriedTables.Should().NotContain(new[] { "sprk_document", "sprk_event" });
+    }
+
+    // ── Task 158 final round (main-session round 58 item 1): the secure records FILED UNDER a walled record follow ─────
+
+    private const string Matter = "sprk_matter";
+    private const string WorkAssignment = "sprk_workassignment";
+    private static readonly Guid SecureMatter = Guid.Parse("15858158-5815-8158-1581-5815815815a1");
+    private static readonly Guid FiledWorkAssignment = Guid.Parse("15858158-5815-8158-1581-5815815815b1");
+    private static readonly Guid FiledProject = Guid.Parse("15858158-5815-8158-1581-5815815815b2");
+    private static readonly Guid MatterType = Guid.Parse("15858158-5815-8158-1581-5815815815c1");
+
+    /// <summary>
+    /// A secure matter with a secure work assignment filed under it (typed lookup) — both owned by the named team, the author
+    /// holding Write on both, the colleague reading both (so S5 does not stop a removal unless a test says so).
+    /// </summary>
+    private void SecureMatterWithAFiledWorkAssignment(bool filedFlaggedSecure = true)
+    {
+        _h.Participations.Flags[SecureMatter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Participations.RecordTables[SecureMatter] = Matter;
+        _h.Store.Rights[(Author, SecureMatter)] = AccessRights.Read | AccessRights.Write;
+        _h.Store.Rights[(Author, FiledWorkAssignment)] = AccessRights.Read | AccessRights.Write;
+        _h.ChildWorld = SecureChildShareWorld.Standard()
+            .SecureRoot(Matter, SecureMatter)
+            .Add(WorkAssignment, FiledWorkAssignment,
+                ("owningteam", new Microsoft.Xrm.Sdk.EntityReference("team", SecureChildShareWorld.SecureTeam)),
+                ("sprk_issecure", filedFlaggedSecure),
+                ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference(Matter, SecureMatter)));
+        _h.Shares.Seed(Matter, SecureMatter, User(Colleague), CollaborateMask);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Colleague), CollaborateMask);
+    }
+
+    /// <summary>A secure project filed under the secure matter by the polymorphic pair (its text id + its type row).</summary>
+    private void SecureProjectFiledUnderTheMatterByThePair(Guid? pairNames = null, string pairTypeName = Matter)
+    {
+        _h.Store.Rights[(Author, FiledProject)] = AccessRights.Read | AccessRights.Write;
+        _h.ChildWorld
+            .Add("sprk_recordtype_ref", MatterType, ("sprk_recordlogicalname", pairTypeName))
+            .Add(Project, FiledProject,
+                ("owningteam", new Microsoft.Xrm.Sdk.EntityReference("team", SecureChildShareWorld.SecureTeam)),
+                ("sprk_issecure", true),
+                ("sprk_regardingrecordid", (pairNames ?? SecureMatter).ToString("D")),
+                ("sprk_regardingrecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", MatterType)));
+        _h.Shares.Seed(Project, FiledProject, User(Colleague), CollaborateMask);
+    }
+
+    /// <summary>
+    /// Round 58 item 1: a person ADDED to a secure matter's No Access list loses their DIRECT share on the secure work
+    /// assignment filed under it, in the same enforcement — removed, confirmed gone, the colleague untouched.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnEntryOnASecureMatter_AlsoRemovesTheWalledPersonsShareOnASecureWorkAssignmentFiledUnderIt()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Shares.Seed(Matter, SecureMatter, User(Walled), CollaborateMask);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        report.Removed.Select(r => (r.RecordType, r.RecordId)).Should().BeEquivalentTo(new[]
+        {
+            (Matter, SecureMatter), (WorkAssignment, FiledWorkAssignment),
+        });
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("the wall reaches what is filed under it");
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
+        report.CoveredRecords.Should().Be(2);
+    }
+
+    /// <summary>
+    /// The pair: a secure project filed under the matter by its polymorphic regarding — reached too, even though the walled
+    /// person holds nothing on the matter itself (the filed records are reached whether or not the parent had a share).
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AnEntryOnASecureMatter_ReachesAProjectFiledUnderItByThePair_EvenWithNoShareOnTheMatter()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        SecureProjectFiledUnderTheMatterByThePair();
+        _h.Shares.Seed(Project, FiledProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        report.Removed.Should().ContainSingle().Which.Should().Be(new NoAccessRemovedShare(Walled, Project, FiledProject, CollaborateMask));
+        _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().BeNull();
+    }
+
+    /// <summary>An ORGANIZATION entry: a matter that references the organization is covered, and so is what is filed under it — once each.</summary>
+    [Fact]
+    public async Task Enforce_AnOrganizationEntry_ReachesWhatIsFiledUnderACoveredMatter_AndARecordCoveredTwiceOnce()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Participations.RecordOrganizations[SecureMatter] = new[] { Firm };
+        _h.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Participations.RecordTables[FiledWorkAssignment] = WorkAssignment;
+        _h.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { Firm }; // covered in its own right too
+        _h.Shares.Seed(Matter, SecureMatter, User(Walled), CollaborateMask);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectOrganization: Firm, modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        report.Removed.Select(r => r.RecordId).Should().BeEquivalentTo(new[] { SecureMatter, FiledWorkAssignment });
+        report.CoveredRecords.Should().Be(2, "the work assignment, covered and filed under a covered matter, is enforced once");
+    }
+
+    /// <summary>Owner S5 on a filed record: the walled person is the last one who can open it — the share is kept, and said so.</summary>
+    [Fact]
+    public async Task Enforce_OnARecordFiledUnderTheMatter_NeverRemovesItsLastReader()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        _h.Store.Person(Colleague, disabled: true); // the colleague cannot open it any more
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.NotEnforced.Should().Contain(new NoAccessNotEnforced(
+            WorkAssignment, FiledWorkAssignment, Walled, NoAccessEnforcementReason.LastPersonOnSecureRecord));
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>Fault: what is filed under the matter cannot be read — children-incomplete on the matter; the matter's removal stands.</summary>
+    [Fact]
+    public async Task Enforce_WhenWhatIsFiledUnderTheMatterCannotBeRead_IsChildrenIncomplete_AndTheMattersRemovalStands()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.ChildWorld.FailingQueriesOf(WorkAssignment);
+        _h.Shares.Seed(Matter, SecureMatter, User(Walled), CollaborateMask);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse("a wall not applied to everything filed under it is never complete");
+        report.Failures.Should().ContainSingle(f => f.Kind == "children-incomplete" && f.RecordId == SecureMatter);
+        report.Removed.Should().ContainSingle(r => r.RecordId == SecureMatter, "the matter's removal stands");
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>Fault on ONE filed record (its shares cannot be read): named on that record, and children-incomplete on the matter.</summary>
+    [Fact]
+    public async Task Enforce_WhenAFiledRecordsSharesCannotBeRead_IsAFailureThere_AndChildrenIncompleteOnTheMatter()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        _h.Shares.FailReadsOfRecord = (WorkAssignment, FiledWorkAssignment);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().Contain(f => f.Kind == "shares-unreadable" && f.RecordId == FiledWorkAssignment);
+        report.Failures.Should().Contain(f => f.Kind == "children-incomplete" && f.RecordId == SecureMatter);
+        report.Complete.Should().BeFalse();
+    }
+
+    /// <summary>A record filed under the matter whose filing TYPE cannot be read: nothing removed on a guess — reported.</summary>
+    [Fact]
+    public async Task Enforce_ARecordWhoseFilingTypeCannotBeRead_IsLeftAlone_AndReportedIncomplete()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        SecureProjectFiledUnderTheMatterByThePair();
+        _h.ChildWorld.FailingQueriesOf("sprk_recordtype_ref");
+        _h.Shares.Seed(Project, FiledProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().ContainSingle(f => f.Kind == "children-incomplete" && f.RecordId == SecureMatter);
+        _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>Q4: a record filed under the matter that is not secure yet is not the wall's (the inheritance job secures it first).</summary>
+    [Fact]
+    public async Task Enforce_ARecordFiledUnderTheMatterThatIsNotSecureYet_IsNotTheWalls()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.NotEnforced.Should().Contain(new NoAccessNotEnforced(
+            WorkAssignment, FiledWorkAssignment, null, NoAccessEnforcementReason.NotSecure));
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>Owner N5: an author without Write on the MATTER reaches nothing filed under it either.</summary>
+    [Fact]
+    public async Task Enforce_WhenTheAuthorLacksWriteOnTheMatter_NothingFiledUnderItIsTouched()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Store.Rights[(Author, SecureMatter)] = AccessRights.Read;
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Removed.Should().BeEmpty();
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+        _h.ChildWorld.QueriedTables.Should().NotContain(WorkAssignment, "nothing filed under it is even read");
+    }
+
+    /// <summary>A covered WORK ASSIGNMENT has nothing filed under it: a project whose pair names it is not reached.</summary>
+    [Fact]
+    public async Task Enforce_AnEntryOnAWorkAssignment_ReachesNothingWhosePairNamesIt()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        SecureProjectFiledUnderTheMatterByThePair(pairNames: FiledWorkAssignment, pairTypeName: WorkAssignment);
+        _h.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Shares.Seed(Project, FiledProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (WorkAssignment, FiledWorkAssignment), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        _h.Shares.MaskOf(Project, FiledProject, User(Walled)).Should().Be(CollaborateMask,
+            "a work assignment passes nothing on (a pair naming it is not filed under a secure record)");
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+    }
+
+    /// <summary>The bound: past <see cref="NoAccessShareEnforcer.MaxCoveredRecords"/> records in all, the report is truncated.</summary>
+    [Fact]
+    public async Task Enforce_MoreRecordsFiledUnderTheMatterThanOneCallCovers_IsTruncated()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        for (var i = 0; i < NoAccessShareEnforcer.MaxCoveredRecords; i++)
+        {
+            _h.ChildWorld.Add(WorkAssignment, Guid.NewGuid(), ("sprk_issecure", true),
+                ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference(Matter, SecureMatter)));
+        }
+
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Truncated.Should().BeTrue();
+        report.Complete.Should().BeFalse();
+        report.CoveredRecords.Should().Be(NoAccessShareEnforcer.MaxCoveredRecords);
+    }
+
+    /// <summary>
+    /// "Update Access" on a work assignment filed under a secure matter re-applies the MATTER's entries too (its list governs
+    /// every share on the work assignment — round 39 item 2), found through the one parent walk.
+    /// </summary>
+    [Fact]
+    public async Task EnforceForRecord_OnAWorkAssignmentFiledUnderASecureMatter_ReappliesTheMattersEntries()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var matterEntry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().ContainSingle(r => r.EntryId == matterEntry);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().BeNull("the matter's wall reaches it now");
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>What the work assignment is filed under cannot be read: nothing is re-applied — reported, never "done".</summary>
+    [Fact]
+    public async Task EnforceForRecord_WhenWhatTheRecordIsFiledUnderCannotBeRead_ReappliesNothing_AndSaysSo()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        _h.ChildWorld.FailingRowReadsOf(WorkAssignment, FiledWorkAssignment);
+        _h.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        _h.Store.AddEntry(subjectUser: Walled, objectRecord: (WorkAssignment, FiledWorkAssignment), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().ContainSingle().Which.Outcome.Should().Be(NoAccessEnforcementOutcome.Failed);
+        _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>More entries cover a secure parent than one call re-applies: reported (the 5-minute job enforces the rest).</summary>
+    [Fact]
+    public async Task EnforceForRecord_WhenMoreEntriesCoverTheMatterThanOneCallReapplies_IsReportedTruncated()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        for (var i = 0; i <= NoAccessShareEnforcer.MaxEntriesPerRecord; i++)
+            _h.Store.AddEntry(subjectUser: Guid.NewGuid(), objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var reports = await _h.Enforcer.EnforceForRecordAsync(WorkAssignment, FiledWorkAssignment, new[] { Tenant }, CancellationToken.None);
+
+        reports.Should().Contain(r => r.Failures.Any(f => f.Kind == "covering-entries-truncated"));
     }
 
     /// <summary>A lease that is granted, then found expired (or unreachable) when renewed.</summary>

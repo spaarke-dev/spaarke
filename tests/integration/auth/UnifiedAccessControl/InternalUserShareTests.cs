@@ -93,7 +93,8 @@ public class InternalUserShareTests
 
     public InternalUserShareTests()
     {
-        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, NullLogger<SecureShareNoAccessGuard>.Instance);
+        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
 
         _users.SeedPerson(UserId, "Ada Lovelace");
         _users.SeedPerson(OtherUserId, "Brook Okafor");
@@ -507,7 +508,7 @@ public class InternalUserShareTests
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
             _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
-            AssignedAccessTestDoubles.InertMaterializer(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccessTestDoubles.InertMaterializer(),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
@@ -1177,7 +1178,8 @@ public class InternalUserShareTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
             _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
-            _children.Synchronizer(_shares), _guard, AssignedAccess, AuthenticatedContext(), NullLogger<Program>.Instance,
+            _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess, AuthenticatedContext(),
+            NullLogger<Program>.Instance,
             CancellationToken.None);
 
     /// <summary>
@@ -1215,7 +1217,7 @@ public class InternalUserShareTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
             _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
-            AuthenticatedContext(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>

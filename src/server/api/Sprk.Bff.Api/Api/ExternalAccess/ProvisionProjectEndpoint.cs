@@ -557,7 +557,7 @@ public static class ProvisionProjectEndpoint
     // Handler
     // =========================================================================
 
-    private static async Task<IResult> ProvisionProjectAsync(
+    private static Task<IResult> ProvisionProjectAsync(
         ProvisionProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeFileStore speFileStore,
@@ -565,11 +565,71 @@ public static class ProvisionProjectEndpoint
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildReconciler secureChildren,
         DocumentContainerRelocator fileRelocator,
+        SecureRootInheritance relatedRoots,
         IConfiguration configuration,
         SecureShareNoAccessGuard noAccessGuard,
         IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         ILogger<Program> logger,
+        CancellationToken ct)
+        => ProvisionCoreAsync(
+            request,
+            ProvisioningCreator.Caller(callerAccessProbe, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+            httpContext.TraceIdentifier,
+            dataverseClient, speFileStore, recordShare, secureChildren, relatedRoots, configuration, noAccessGuard,
+            accessCacheInvalidator, fileRelocator, callerAccessProbe, httpContext, logger, ct);
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 (owner round 6): provisions a work assignment or project that is FILED UNDER a
+    /// secure matter or project — through THIS endpoint's own steps, never a second "make secure" implementation. There is
+    /// no caller: the person the record is secured for is the one who created it (<c>createdby</c> when that is a usable
+    /// person, otherwise the BFF-stamped <c>sprk_createdbyperson</c> — the RESUME rule, owner round 7 item 2), no colleague
+    /// is named, and the record need not arrive flagged: <c>sprk_issecure</c> is set as the first write (task 150's
+    /// Step 4.1), read back. Every other step, refusal and compensation is the endpoint's own.
+    /// </summary>
+    /// <returns>The endpoint's own result: 200 (provisioned, or its related records completed), 409
+    /// <c>already_provisioned</c> (nothing to do), or the refusal / failure it would answer a caller with.</returns>
+    internal static Task<IResult> ProvisionInheritedAsync(
+        SecureRecordRoot root,
+        Guid recordId,
+        string traceId,
+        DataverseWebApiClient dataverseClient,
+        SpeFileStore speFileStore,
+        IDataverseRecordShareService recordShare,
+        SecureChildReconciler secureChildren,
+        SecureRootInheritance relatedRoots,
+        IConfiguration configuration,
+        SecureShareNoAccessGuard noAccessGuard,
+        IMembershipCacheInvalidator accessCacheInvalidator,
+        DocumentContainerRelocator? fileRelocator,
+        ILogger logger,
+        CancellationToken ct)
+        => ProvisionCoreAsync(
+            new ProvisionProjectRequest(Guid.Empty, null, null, root.WireToken, recordId),
+            ProvisioningCreator.RecordedCreator,
+            traceId,
+            dataverseClient, speFileStore, recordShare, secureChildren, relatedRoots, configuration, noAccessGuard,
+            accessCacheInvalidator, fileRelocator, callerAccessProbe: null, httpContext: null, logger, ct);
+
+    private static async Task<IResult> ProvisionCoreAsync(
+        ProvisionProjectRequest request,
+        ProvisioningCreator creator,
+        string traceId,
+        DataverseWebApiClient dataverseClient,
+        SpeFileStore speFileStore,
+        IDataverseRecordShareService recordShare,
+        SecureChildReconciler secureChildren,
+        SecureRootInheritance relatedRoots,
+        IConfiguration configuration,
+        SecureShareNoAccessGuard noAccessGuard,
+        IMembershipCacheInvalidator accessCacheInvalidator,
+        DocumentContainerRelocator? fileRelocator,
+        // The HTTP caller's probe and request (null on task 158's inherited provisioning, which has no caller and sends no
+        // transition: the paths that ask the caller — Make Secure's floor and resume, the unflagged-resume creator rule —
+        // are never reached on it).
+        CallerRecordAccessProbe? callerAccessProbe,
+        HttpContext? httpContext,
+        ILogger logger,
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
@@ -602,7 +662,6 @@ public static class ProvisionProjectEndpoint
 
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
-        var traceId = httpContext.TraceIdentifier;
 
         logger.LogInformation(
             "[PROVISION] Starting secure provisioning: RecordType={RecordType}, RecordId={RecordId}, " +
@@ -702,6 +761,11 @@ public static class ProvisionProjectEndpoint
                 if (!pending.IsComplete)
                     return ChildrenIncomplete(pending, root, recordId, logger, traceId);
 
+                // ── Task 158: the work assignments and projects filed under it are secured too (owner round 6) ──
+                var pendingRoots = await relatedRoots.SecureFiledRootsUnderAsync(root.LogicalName, recordId, traceId, ct);
+                if (!pendingRoots.IsComplete)
+                    return RelatedRootsIncomplete(pendingRoots, root, recordId, logger, traceId);
+
                 // Round 26 item 3: the re-entry relocates the record's files again — a repeat call completes a
                 // files_incomplete (the relocator is idempotent: a moved file is InPlace, an owed step is settled first).
                 var pendingFiles = await FilesFollowAsync(
@@ -709,11 +773,12 @@ public static class ProvisionProjectEndpoint
                 if (pendingFiles.Error is not null)
                     return pendingFiles.Error;
 
-                if (pending.WroteAnything || pendingFiles.Summary.Moved > 0)
+                if (pending.WroteAnything || pendingRoots.WroteAnything || pendingFiles.Summary.Moved > 0)
                 {
                     logger.LogInformation(
                         "[PROVISION] {RecordType} {RecordId} was already provisioned; this call completed its related records " +
-                        "(reowned={Reowned}). TraceId={TraceId}", root.WireToken, recordId, pending.ChildrenReowned, traceId);
+                        "(reowned={Reowned}, filed records secured={Secured}). TraceId={TraceId}",
+                        root.WireToken, recordId, pending.ChildrenReowned, pendingRoots.Secured, traceId);
 
                     return TypedResults.Ok(new ProvisionProjectResponse(
                         BusinessUnitId: secureBuId,
@@ -727,7 +792,8 @@ public static class ProvisionProjectEndpoint
                         RecordId: recordId,
                         Resumed: true,
                         Children: SecureChildPassSummary.From(pending),
-                        ChildrenOnly: true)
+                        ChildrenOnly: true,
+                        FiledRecords: pendingRoots.Summary())
                     {
                         Files = pendingFiles.Summary,
                     });
@@ -900,7 +966,7 @@ public static class ProvisionProjectEndpoint
             // than they hold) — the share this run proves; the record's creator joins the colleague step, exactly as on the
             // forward path. Flagged or not: a Make Secure that failed after its first write is finished by the same call.
             var finish = await ResumeMakeSecureAsync(
-                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, httpContext, root, recordId, row,
+                dataverseClient, recordShare, callerAccessProbe!, noAccessGuard, httpContext!, root, recordId, row,
                 ownerTeamId, alreadyFlagged, logger, traceId, ct);
 
             if (finish.Error != null)
@@ -919,10 +985,11 @@ public static class ProvisionProjectEndpoint
             // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
             // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
             // on the route's Write gate. (Make Secure — round 33 item 1 — never reaches here: the branch above.)
-            if (!alreadyFlagged)
+            // Task 158's inherited provisioning has no caller: the person is the recorded creator by construction.
+            if (!alreadyFlagged && !creator.IsRecordedCreator)
             {
                 var unflaggedResumeRefusal = await RefuseUnflaggedResumeUnlessCreatorAsync(
-                    dataverseClient, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId, logger, traceId, ct);
+                    dataverseClient, callerAccessProbe!, httpContext!, root, recordId, row, ownerTeamId, logger, traceId, ct);
 
                 if (unflaggedResumeRefusal != null)
                     return unflaggedResumeRefusal;
@@ -937,32 +1004,38 @@ public static class ProvisionProjectEndpoint
 
             // ── RESUME: only the record's creator may name colleagues (task 133 verifier round 1) ──
             var colleagueRefusal = await RefuseResumeColleaguesUnlessCreatorAsync(
-                request, callerAccessProbe, httpContext, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
+                request, creator, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
 
             if (colleagueRefusal != null)
                 return colleagueRefusal;
 
-            // ── RESUME: that person must not be on the record's No Access list (task 143) ──
-            // Before the share, whoever ResolveResumeCreatorAsync named (createdby or sprk_createdbyperson). Nothing is
-            // written for a walled or unverifiable person; the record stays as the earlier run left it.
-            var resumeWall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, person.CreatorId, ct);
+            // ── RESUME: that person must not be on the record's No Access list (task 143), nor on that of any secure
+            // record it is filed under (owner round 31 item 1, task 158 r1) ──
+            // Before the share (and before the flag write below), whoever ResolveResumeCreatorAsync named (createdby or
+            // sprk_createdbyperson), asked about the record AS a secure record whatever its flag reads. Nothing is written
+            // for a walled or unverifiable person; the record stays as the earlier run left it.
+            var resumeWall = await CheckCreatorWallsAsync(noAccessGuard, root, recordId, person.CreatorId, ct);
             if (resumeWall.RefusesShare)
             {
                 var walled = resumeWall.Outcome == SecureShareWallOutcome.Walled;
                 logger.LogWarning(
                     "[PROVISION] RESUME of {RecordType} {RecordId} refused: its creator {CreatorId} is {State} the No " +
-                    "Access list ({Detail}). Nothing was written. TraceId={TraceId}",
-                    root.WireToken, recordId, person.CreatorId, walled ? "on" : "not provably off",
+                    "Access list of {Where} ({Detail}). Nothing was written. TraceId={TraceId}",
+                    root.WireToken, recordId, person.CreatorId, walled ? "on" : "not provably off", resumeWall.Where,
                     walled ? string.Join(",", resumeWall.EntryIds) : resumeWall.Fault, traceId);
+                var record = root.DisplayLabel.ToLowerInvariant();
+                var list = resumeWall.ParentTable is { } parentTable
+                    ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(parentTable)} it is filed under"
+                    : resumeWall.FilingUnreadable ? "the No Access list of a secure record it is filed under" : "its No Access list";
                 return Problem(
                     walled ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError,
                     walled ? "Conflict" : "Internal Server Error",
                     walled
-                        ? $"The person who created this {root.DisplayLabel.ToLowerInvariant()} is on its No Access list, so " +
-                          "provisioning will not share it to them, and nothing was changed. An administrator assigns the " +
-                          "record to the person who should hold it; that person then provisions it."
-                        : $"Whether the person who created this {root.DisplayLabel.ToLowerInvariant()} is on its No Access " +
-                          "list could not be checked, so nothing was changed. The same caller may try again.",
+                        ? $"The person who created this {record} is on {list}, so provisioning will not share it to them, " +
+                          "and nothing was changed. An administrator assigns the record to the person who should hold it; " +
+                          "that person then provisions it."
+                        : $"Whether the person who created this {record} is on {list} could not be checked, so nothing was " +
+                          "changed. The same caller may try again.",
                     traceId, (ReasonKey, ReasonResumeCreatorNoAccess));
             }
 
@@ -999,9 +1072,9 @@ public static class ProvisionProjectEndpoint
 
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
-                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, accessCacheInvalidator, httpContext, root,
-                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink,
-                makeSecure, logger, traceId, ct);
+                dataverseClient, recordShare, creator, noAccessGuard, accessCacheInvalidator, relatedRoots, root, recordId, row,
+                ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, makeSecure, logger,
+                traceId, ct);
 
             if (forward.Error != null)
                 return forward.Error;
@@ -1048,18 +1121,27 @@ public static class ProvisionProjectEndpoint
         // DocumentContainerRelocator (purpose MakeSecure; copy with history, verify, re-point, delete the source). After the
         // child pass, because the relocator derives each document's container from its (now secure) parents. Incomplete →
         // files_incomplete; the record stays flagged and provisioned and the re-entry branch above relocates again.
-        async Task<(SecureChildPassSummary? Summary, MakeSecureFilesSummary? Files, IResult? Error)> ChildrenFollowAsync(
-            string containerId)
+        //
+        // Task 158 (owner round 6): then the work assignments and projects FILED UNDER it (a matter or project) are made
+        // secure themselves — each through this endpoint's own steps (ProvisionInheritedAsync), for the person who created
+        // it — and this record's sharees are mirrored onto them (task 149's mechanism). They are roots of their own, so the
+        // child pass above never touches them. A filed record that cannot be secured is the same children_incomplete error.
+        async Task<(SecureChildPassSummary? Summary, MakeSecureFilesSummary? Files, SecureFiledRecordsSummary? Filed, IResult? Error)>
+            ChildrenFollowAsync(string containerId)
         {
             var pass = await secureChildren.ReconcileAsync(
                 root.LogicalName, recordId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, ct);
             if (!pass.IsComplete)
-                return (null, null, ChildrenIncomplete(pass, root, recordId, logger, traceId));
+                return (null, null, null, ChildrenIncomplete(pass, root, recordId, logger, traceId));
+
+            var filed = await relatedRoots.SecureFiledRootsUnderAsync(root.LogicalName, recordId, traceId, ct);
+            if (!filed.IsComplete)
+                return (null, null, null, RelatedRootsIncomplete(filed, root, recordId, logger, traceId));
 
             var files = await FilesFollowAsync(fileRelocator, pass, containerId, root, recordId, logger, traceId, ct);
             return files.Error is not null
-                ? (null, null, files.Error)
-                : (SecureChildPassSummary.From(pass), files.Summary, null);
+                ? (null, null, null, files.Error)
+                : (SecureChildPassSummary.From(pass), files.Summary, filed.Summary(), null);
         }
 
         // ── Steps 6 + 7: the record's own SPE container — kept when it already has one ──
@@ -1087,7 +1169,8 @@ public static class ProvisionProjectEndpoint
                 RecordId: recordId,
                 Resumed: resume,
                 SkippedPrincipals: skippedPrincipals,
-                Children: childSummary)
+                Children: childSummary,
+                FiledRecords: keptChildren.Filed)
             {
                 Files = keptChildren.Files,
             });
@@ -1155,7 +1238,8 @@ public static class ProvisionProjectEndpoint
             RecordId: recordId,
             Resumed: resume,
             SkippedPrincipals: skippedPrincipals,
-            Children: children.Summary)
+            Children: children.Summary,
+            FiledRecords: children.Filed)
         {
             Files = children.Files,
         });
@@ -1172,11 +1256,19 @@ public static class ProvisionProjectEndpoint
     /// completes it (the record is provisioned, so the already-provisioned branch runs the pass).
     /// </summary>
     private static async Task<(MakeSecureFilesSummary Summary, IResult? Error)> FilesFollowAsync(
-        DocumentContainerRelocator relocator, SecureChildReconcileReport pass, string containerId, SecureRecordRoot root,
+        DocumentContainerRelocator? relocator, SecureChildReconcileReport pass, string containerId, SecureRecordRoot root,
         Guid recordId, ILogger logger, string traceId, CancellationToken ct)
     {
         if (pass.IsolatedDocumentIds.Count == 0)
             return (MakeSecureFilesSummary.None, null);
+        if (relocator is null)
+        {
+            // Only a test composition of task 158's inherited provisioning omits it; production always registers it.
+            logger.LogWarning(
+                "[PROVISION] {RecordType} {RecordId}: no file relocator in this host, so its {Count} file(s) were not moved. " +
+                "TraceId={TraceId}", root.WireToken, recordId, pass.IsolatedDocumentIds.Count, traceId);
+            return (MakeSecureFilesSummary.None, null);
+        }
 
         var batch = await relocator.RelocateDocumentsAsync(
             pass.IsolatedDocumentIds, containerId, RelocationPurpose.MakeSecure, apply: true, ct);
@@ -1241,6 +1333,41 @@ public static class ProvisionProjectEndpoint
             ("childrenReowned", summary.Reowned),
             ("childrenRemaining", summary.Remaining),
             ("childTables", summary.Tables));
+    }
+
+    /// <summary>
+    /// Task 158 — the work assignments and projects filed under the record (a matter or project) were not all made secure
+    /// themselves. Answered as task 148's <see cref="ReasonChildrenIncomplete"/> (the client already classifies it: the
+    /// record is provisioned, calling again completes its related records), with <c>filedRecordsSecured</c>,
+    /// <c>filedRecordsRemaining</c> and <c>filedRecords</c> (each record not secured, with the reason code its own
+    /// provisioning answered) as extensions. Nothing done is undone; the secure-root inheritance job completes them too.
+    /// </summary>
+    private static IResult RelatedRootsIncomplete(
+        SecureFiledRootsPass pass, SecureRecordRoot root, Guid recordId, ILogger logger, string traceId)
+    {
+        var summary = pass.Summary();
+        var remaining = summary.Records.Where(r => r.IsOutstanding).ToList();
+
+        logger.LogError(
+            "[PROVISION] {RecordType} {RecordId} is secured, shared and its related records are isolated, but the work " +
+            "assignments / projects filed under it are not all secured: status={Status} secured={Secured} remaining={Remaining} " +
+            "({Records}) detail={Detail}. TraceId={TraceId}",
+            root.WireToken, recordId, pass.Status, summary.Secured, remaining.Count,
+            string.Join(", ", remaining.Select(r => $"{r.RecordType}:{r.RecordId:D}={r.Outcome}/{r.ReasonCode}")), pass.Detail,
+            traceId);
+
+        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but the work " +
+            $"assignments and projects filed under it are not all secure yet: {summary.Secured} secured, {remaining.Count} " +
+            "remaining" + (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            ". Each one is secured for the person who created it; one that cannot be (its creator is unknown or disabled, " +
+            "or a read failed) is listed with its own reason. No record is more exposed than before this call. Calling " +
+            "provisioning again (the same caller may) retries them; the secure-root inheritance job retries them regardless.",
+            traceId,
+            (ReasonKey, ReasonChildrenIncomplete),
+            ("filedRecordsSecured", summary.Secured),
+            ("filedRecordsRemaining", remaining.Count),
+            ("filedRecords", remaining));
     }
 
     /// <summary>
@@ -1504,10 +1631,10 @@ public static class ProvisionProjectEndpoint
     private static async Task<CreatorShareStep> MoveWithCreatorShareAsync(
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
-        CallerRecordAccessProbe callerAccessProbe,
+        ProvisioningCreator creator,
         SecureShareNoAccessGuard noAccessGuard,
         IMembershipCacheInvalidator accessCacheInvalidator,
-        HttpContext httpContext,
+        SecureRootInheritance relatedRoots,
         SecureRecordRoot root,
         Guid recordId,
         RootRow row,
@@ -1519,10 +1646,25 @@ public static class ProvisionProjectEndpoint
         string traceId,
         CancellationToken ct)
     {
-        // The creator is identified from their own token via WhoAmI (task 061) — never from the request body, so a
-        // caller cannot nominate someone else. Resolved before anything is written.
-        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        var resolved = await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
+        Guid? resolved;
+        if (creator.IsRecordedCreator)
+        {
+            // Task 158: an INHERITED provisioning has no caller. The person the record is secured for is the one who
+            // created it, decided by the RESUME rule (createdby when it is a usable person, else the BFF-stamped
+            // sprk_createdbyperson) — read-only, before anything is written; a refusal changes nothing.
+            var recorded = await ResolveResumeCreatorAsync(
+                dataverseClient, root, recordId, row, ownerTeamId, logger, traceId, ct, resuming: false);
+            if (recorded.Error != null)
+                return recorded;
+            resolved = recorded.CreatorId;
+        }
+        else
+        {
+            // The creator is identified from their own token via WhoAmI (task 061) — never from the request body, so a
+            // caller cannot nominate someone else. Resolved before anything is written.
+            resolved = await creator.CallerSystemUserIdAsync(ct);
+        }
+
         if (resolved is not { } creatorId || creatorId == Guid.Empty)
             return CreatorShareStep.Failed(CallerUnresolved(root, recordId, logger, traceId));
 
@@ -1533,8 +1675,9 @@ public static class ProvisionProjectEndpoint
         var callerHeldMask = 0;
         if (makeSecure)
         {
+            // Make Secure comes only from an HTTP caller (the inherited provisioning sends no transition).
             var floor = await ReadMakeSecureCallerFloorAsync(
-                callerAccessProbe, callerToken, root, recordId, creatorId, logger, traceId, ct);
+                creator.Probe!, creator.CallerToken, root, recordId, creatorId, logger, traceId, ct);
             if (floor.Error != null)
                 return CreatorShareStep.Failed(floor.Error);
 
@@ -1555,12 +1698,16 @@ public static class ProvisionProjectEndpoint
                 return CreatorShareStep.Failed(notCreator);
         }
 
-        // ── Owner N6 (task 143): a creator the record's No Access list walls off is refused BEFORE any change ──
-        // In task 133's order this is before Step 4.2 (the first write) and the share-first step, so nothing is moved,
-        // unlinked or shared. The message names no entry and no reason (the refusal contract).
-        var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, creatorId, ct);
+        // ── Owner N6 (task 143) + owner round 31 item 1 (task 158 r1): a creator walled off the record — by its OWN No
+        // Access list or by that of any secure record it is filed under — is refused BEFORE any change ──
+        // In task 133's order this is before Step 4.1 (the first write) and the share-first step, so nothing is flagged,
+        // moved, unlinked or shared. It never depends on the flag: on the inherited path the record is still unflagged
+        // here, and the record is asked about AS the secure record it is becoming (CheckForSecuringAsync). The message
+        // names no entry and no reason (the refusal contract).
+        var wall = await CheckCreatorWallsAsync(noAccessGuard, root, recordId, creatorId, ct);
         if (wall.RefusesShare)
-            return CreatorShareStep.Failed(CallerWallRefusal(root, recordId, creatorId, wall, logger, traceId));
+            return CreatorShareStep.Failed(
+                CallerWallRefusal(root, recordId, creatorId, wall, logger, traceId, creator.IsRecordedCreator));
 
         // The owner compensation would restore. Every Dataverse row has one; a row read without it is not one this
         // endpoint can safely move, because the move could not be undone.
@@ -2381,8 +2528,10 @@ public static class ProvisionProjectEndpoint
         if (floor.Error != null)
             return (Guid.Empty, null, floor.Error);
 
-        // A caller the No Access list walls off is refused before any change (owner N6), as on the forward path.
-        var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, callerId, ct);
+        // A caller the No Access list walls off is refused before any change (owner N6), as on the forward path — the
+        // record's own list AND every secure record it is filed under (task 158 r1, owner round 31 item 1; batch-4
+        // integration: the resume asks the same ONE check the forward path does).
+        var wall = await CheckCreatorWallsAsync(noAccessGuard, root, recordId, callerId, ct);
         if (wall.RefusesShare)
             return (Guid.Empty, null, CallerWallRefusal(root, recordId, callerId, wall, logger, traceId));
 
@@ -2442,24 +2591,32 @@ public static class ProvisionProjectEndpoint
     /// or that could not be checked. Refused before any change; the message names no entry and no reason.
     /// </summary>
     private static IResult CallerWallRefusal(
-        SecureRecordRoot root, Guid recordId, Guid callerId, SecureShareWallDecision wall, ILogger logger, string traceId)
+        SecureRecordRoot root, Guid recordId, Guid callerId, CreatorWallDecision wall, ILogger logger, string traceId,
+        bool recordedCreator = false)
     {
         var walled = wall.Outcome == SecureShareWallOutcome.Walled;
         logger.LogWarning(
             "[PROVISION] Refused to provision {RecordType} {RecordId}: its creator {CreatorId} is {State} the No Access " +
-            "list ({Detail}). Nothing was changed. TraceId={TraceId}",
-            root.WireToken, recordId, callerId, walled ? "on" : "not provably off",
+            "list of {Where} ({Detail}). Nothing was changed. TraceId={TraceId}",
+            root.WireToken, recordId, callerId, walled ? "on" : "not provably off", wall.Where,
             walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
 
+        // Task 158 r1 (owner round 31 item 1): the list may be a secure parent's; on the inherited provisioning (no caller)
+        // the person is the record's creator, never "you".
+        var record = root.DisplayLabel.ToLowerInvariant();
+        var who = recordedCreator ? $"The person who created this {record} is" : "You are";
+        var whose = recordedCreator ? $"the person who created this {record} is" : "you are";
+        var list = wall.ParentTable is { } parentTable
+            ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(parentTable)} it is filed under"
+            : wall.FilingUnreadable ? "the No Access list of a secure record it is filed under" : $"the No Access list for this {record}";
         return walled
             ? Problem(StatusCodes.Status403Forbidden, "Forbidden",
-                $"You are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} — directly, through " +
-                "an organization you belong to, or through an organization it references — so it cannot be made a " +
-                "secure record shared to you. Nothing was changed.",
+                $"{who} on {list} — directly, through an organization, or through an organization it references — so " +
+                $"it cannot be made a secure record shared to {(recordedCreator ? "them" : "you")}. Nothing was changed.",
                 traceId, (ReasonKey, ReasonCreatorNoAccess))
             : Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                $"Whether you are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} could not be " +
-                "checked, so provisioning stopped before changing anything. Try again.",
+                $"Whether {whose} on {list} could not be checked, so provisioning stopped before changing anything. " +
+                "Try again.",
                 traceId, (ReasonKey, ReasonCreatorNoAccessUnverifiable));
     }
 
@@ -2639,8 +2796,7 @@ public static class ProvisionProjectEndpoint
     /// </remarks>
     private static async Task<IResult?> RefuseResumeColleaguesUnlessCreatorAsync(
         ProvisionProjectRequest request,
-        CallerRecordAccessProbe callerAccessProbe,
-        HttpContext httpContext,
+        ProvisioningCreator creator,
         SecureRecordRoot root,
         Guid recordId,
         Guid createdBy,
@@ -2657,8 +2813,8 @@ public static class ProvisionProjectEndpoint
         if (named.Count == 0)
             return null;
 
-        var caller = await callerAccessProbe.GetCallerSystemUserIdAsync(
-            TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        // Task 158: an inherited provisioning has no caller (and names nobody) — an unknown caller, refused below.
+        var caller = await creator.CallerSystemUserIdAsync(ct);
 
         if (caller is not { } callerId || callerId == Guid.Empty)
         {
@@ -2744,12 +2900,24 @@ public static class ProvisionProjectEndpoint
         Guid ownerTeamId,
         ILogger logger,
         string traceId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool resuming = true)
     {
-        logger.LogWarning(
-            "[PROVISION] {RecordType} {RecordId} is owned by the Secure Record owner team {TeamId} with no container " +
-            "recorded: an earlier run stopped after the owner move. RESUMING. TraceId={TraceId}",
-            root.WireToken, recordId, ownerTeamId, traceId);
+        // Task 158: the same decision names the person an INHERITED forward provisioning secures the record for
+        // (resuming: false) — there is no caller to share to.
+        if (resuming)
+        {
+            logger.LogWarning(
+                "[PROVISION] {RecordType} {RecordId} is owned by the Secure Record owner team {TeamId} with no container " +
+                "recorded: an earlier run stopped after the owner move. RESUMING. TraceId={TraceId}",
+                root.WireToken, recordId, ownerTeamId, traceId);
+        }
+        else
+        {
+            logger.LogInformation(
+                "[PROVISION] {RecordType} {RecordId} is filed under a secure record and is secured with no caller (task " +
+                "158): it is shared to the person who created it. TraceId={TraceId}", root.WireToken, recordId, traceId);
+        }
 
         // ── 1. createdby ──
         var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
@@ -3325,11 +3493,15 @@ public static class ProvisionProjectEndpoint
             return (0, skipped);
 
         // ── Owner N6 (task 143): a walled colleague is SKIPPED with a per-person warning; the others are shared ──
-        // Asked before any colleague share is written. An unanswerable check skips that colleague too (ADR-003).
+        // Asked before any colleague share is written. An unanswerable check skips that colleague too (ADR-003). Task 158
+        // r1c-v2 (round 39 item 2): on a work assignment or project filed under secure records, the colleague honours every
+        // secure parent's No Access list too — the guard's ONE entry point, the record asked about as the secure record it
+        // is becoming.
         var allowed = new List<Guid>(colleagues.Count);
         foreach (var principalId in colleagues)
         {
-            var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, principalId, ct);
+            var wall = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+                root.LogicalName, recordId, principalId, SecureWallRecordScope.BeingSecured, ct);
             if (!wall.RefusesShare)
             {
                 allowed.Add(principalId);
@@ -3339,14 +3511,20 @@ public static class ProvisionProjectEndpoint
             var walled = wall.Outcome == SecureShareWallOutcome.Walled;
             logger.LogWarning(
                 "[PROVISION] Not sharing {RecordType} {RecordId} with named principal {PrincipalId}: {State} the No Access " +
-                "list ({Detail}). TraceId={TraceId}",
+                "list of {Where} ({Detail}). TraceId={TraceId}",
                 root.WireToken, recordId, principalId, walled ? "on" : "not provably off",
+                wall.ParentTable is { } parentTable ? $"{parentTable}:{wall.ParentId:D}" : $"{root.LogicalName}:{recordId:D}",
                 walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
+            var list = wall.ParentTable is { } walledParent
+                ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(walledParent)} this record is filed under"
+                : wall.FilingUnreadable
+                    ? "the No Access list of a secure record this record is filed under"
+                    : "the No Access list for this record";
             skipped.Add(walled
                 ? new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccess,
-                    "This person is on the No Access list for this record, so it was not shared with them.")
+                    $"This person is on {list}, so it was not shared with them.")
                 : new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccessUnverifiable,
-                    "Whether this person is on the No Access list for this record could not be checked, so it was not " +
+                    $"Whether this person is on {list} could not be checked, so it was not " +
                     "shared with them. Add them through Manage Access once it can be checked."));
         }
 
@@ -3608,6 +3786,128 @@ public static class ProvisionProjectEndpoint
     // =========================================================================
     // Private types
     // =========================================================================
+
+    /// <summary>
+    /// The No Access decision for the person a record is being secured for (task 158 r1): the outcome, the list that
+    /// decided it (<see cref="Where"/>, for the log), the parent table when it was a filed-under record's list
+    /// (<see cref="ParentTable"/>, for the message — which never names an entry), the matching entries and the fault.
+    /// </summary>
+    internal sealed record CreatorWallDecision(
+        SecureShareWallOutcome Outcome, string Where, string? ParentTable, IReadOnlyList<Guid> EntryIds, string? Fault)
+    {
+        /// <summary>Walled, or could not tell: the share — and so the provisioning — is refused.</summary>
+        public bool RefusesShare => Outcome is SecureShareWallOutcome.Walled or SecureShareWallOutcome.Unverifiable;
+
+        /// <summary>Task 158 r1c-v2: could not tell because what the record is filed under could not be read.</summary>
+        public bool FilingUnreadable { get; init; }
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 r1 (owner round 31 item 1): is the person a record is being secured for walled
+    /// off it — by the record's OWN No Access list, or by that of ANY secure matter or project it is filed under (the rule
+    /// the sharee mirror already applies)? Read-only; asked before provisioning's first write, on the caller's path and the
+    /// inherited path alike, and never dependent on the record's flag (the record is asked about as the secure record it is
+    /// becoming). Fail closed: a record whose parents cannot all be decided, or any guard answer that is not "not walled",
+    /// refuses. A <see cref="SecureShareWallOutcome.Walled"/> answer anywhere wins over an unverifiable one (it is final).
+    /// </summary>
+    internal static async Task<CreatorWallDecision> CheckCreatorWallsAsync(
+        SecureShareNoAccessGuard noAccessGuard,
+        SecureRecordRoot root,
+        Guid recordId,
+        Guid creatorId,
+        CancellationToken ct)
+    {
+        // Task 158 r1c-v2 (round 39 item 2): the guard's ONE entry point for "the record's list AND every secure parent's" —
+        // the record asked about as the secure record it is becoming; never a second copy of the parent walk here.
+        var decision = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+            root.LogicalName, recordId, creatorId, SecureWallRecordScope.BeingSecured, ct);
+        return new CreatorWallDecision(
+            decision.RefusesShare ? decision.Outcome : SecureShareWallOutcome.NotWalled,
+            decision.ParentTable is { } parentTable ? $"{parentTable}:{decision.ParentId:D}"
+                : decision.FilingUnreadable ? "a record it is filed under"
+                : decision.RefusesShare ? $"{root.LogicalName}:{recordId:D}" : "every list",
+            decision.ParentTable, decision.EntryIds, decision.Fault)
+        {
+            FilingUnreadable = decision.FilingUnreadable,
+        };
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 r1: the person an INHERITED provisioning of <paramref name="recordId"/> would
+    /// secure it for — the resume rule (<c>createdby</c> when a usable person, else <c>sprk_createdbyperson</c>) — read-only,
+    /// for a writer that must decide BEFORE its own write whether the record it files under a secure record can be secured
+    /// (round 31 item 1). <c>CreatorId</c> when one is named; otherwise the provisioning's own refusal code and detail.
+    /// </summary>
+    internal static async Task<(Guid? CreatorId, string? RefusalCode, string? Detail)> ResolveRecordedCreatorAsync(
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, ILogger logger, string traceId,
+        CancellationToken ct)
+    {
+        RootRow? row;
+        try
+        {
+            row = (await dataverseClient.QueryAsync<RootRow>(
+                root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: root.ProvisioningSelect, top: 1,
+                cancellationToken: ct)).FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[PROVISION] {RecordType} {RecordId} could not be read to name its creator.", root.WireToken, recordId);
+            return (null, ReasonCreatorNoAccessUnverifiable, "the record could not be read to name the person who created it");
+        }
+
+        if (row is null)
+            return (null, ReasonResumeCreatorUnavailable, "the record was not found");
+
+        var person = await ResolveResumeCreatorAsync(dataverseClient, root, recordId, row, Guid.Empty, logger, traceId, ct, resuming: false);
+        if (person.Error is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult problem)
+        {
+            var code = problem.ProblemDetails.Extensions.TryGetValue(ReasonKey, out var value) ? value?.ToString() : null;
+            return (null, code ?? ReasonResumeCreatorUnavailable, problem.ProblemDetails.Detail);
+        }
+
+        return person.Error is null
+            ? (person.CreatorId, null, null)
+            : (null, ReasonResumeCreatorUnavailable, "the person who created it could not be determined");
+    }
+
+    /// <summary>
+    /// WHO a provisioning secures the record for (task 158). <see cref="Caller"/>: the calling user, by WhoAmI on their
+    /// own token (task 061) — every HTTP call. <see cref="RecordedCreator"/>: the person who created the record, by the
+    /// RESUME rule (<c>createdby</c> when usable, else <c>sprk_createdbyperson</c>) — the inherited provisioning of a work
+    /// assignment or project filed under a secure record, which has no caller. Never a value from a request body.
+    /// </summary>
+    internal sealed class ProvisioningCreator
+    {
+        private readonly CallerRecordAccessProbe? _probe;
+        private readonly string? _callerToken;
+
+        private ProvisioningCreator(CallerRecordAccessProbe? probe, string? callerToken, bool isRecordedCreator)
+        {
+            _probe = probe;
+            _callerToken = callerToken;
+            IsRecordedCreator = isRecordedCreator;
+        }
+
+        /// <summary>True for the inherited provisioning: no caller; the record's creator is the person.</summary>
+        public bool IsRecordedCreator { get; }
+
+        /// <summary>The caller's probe (task 150's Make Secure floor read); <c>null</c> for the inherited provisioning.</summary>
+        public CallerRecordAccessProbe? Probe => _probe;
+
+        /// <summary>The caller's bearer token; <c>null</c> for the inherited provisioning.</summary>
+        public string? CallerToken => _callerToken;
+
+        /// <summary>The caller of an HTTP request, through their own bearer token.</summary>
+        public static ProvisioningCreator Caller(CallerRecordAccessProbe probe, string? callerToken) =>
+            new(probe ?? throw new ArgumentNullException(nameof(probe)), callerToken, isRecordedCreator: false);
+
+        /// <summary>No caller: the person who created the record (task 158).</summary>
+        public static ProvisioningCreator RecordedCreator { get; } = new(null, null, isRecordedCreator: true);
+
+        /// <summary>The caller's <c>systemuserid</c> — <c>null</c> when it cannot be established, or there is no caller.</summary>
+        public Task<Guid?> CallerSystemUserIdAsync(CancellationToken ct) =>
+            _probe is null ? Task.FromResult<Guid?>(null) : _probe.GetCallerSystemUserIdAsync(_callerToken, ct);
+    }
 
     /// <summary>What a read-back of the owner showed after an assignment.</summary>
     private enum OwnerMoveOutcome

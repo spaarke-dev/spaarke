@@ -46,10 +46,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// business-unit team — and records the caller in the table's Assigned-To / "for" column where one exists
 /// (<see cref="OwnedChildWrite.ForPersonColumns"/>). The creator is kept (a run-as-user create) only where the
 /// resolver's own rules keep it: per-user tables, unfiled communications/threads (E1/E2), and tables with no user/team
-/// ownership (<see cref="OwnedChildWrite.PathFor"/>); such a create filed under a SECURE record is refused. A root or a
-/// table outside the ownership set that would be owned by the Secure team is refused too (task 158 secures a work
-/// assignment or project filed under a secure record). The amendment is recorded in spaarke-ai-architecture-redesign-r1's
-/// spec and the task 146 note §13.
+/// ownership (<see cref="OwnedChildWrite.PathFor"/>); such a create filed under a SECURE record is refused. A table
+/// outside the ownership set that would be owned by the Secure team is refused too. A work assignment or project filed
+/// under a secure matter or project (task 158, owner rounds 6 and 31) is created INTO isolation — by the application, owned
+/// by the named Secure Record Owners team, flagged in the create, its <c>sprk_createdbyperson</c> the caller — after the
+/// as-caller pre-check (including AppendTo on each secure parent) and the caller's No Access check against every secure
+/// parent and the record itself; then provisioning's own re-entry steps share it to the caller (read back; a share that
+/// fails deletes the row again), give it its own container and its parents' sharees. No business-unit-visible window,
+/// and never a row nobody can open (S5). The amendment is recorded in spaarke-ai-architecture-redesign-r1's spec (A-UAC146)
+/// and the task 146 note §13; provisioning's app-only follow-on steps for a work assignment or project created under a
+/// secure record are its extension A-UAC158 (§6.5 path B, ACCEPTED by owner round 32, 2026-10-04; task 158 note §14).
 /// </para>
 /// <para>
 /// <b>The creator stamp (unified-access-control-r2 task 133; owner round 7 item 2; task 146 c1-r1).</b> A row the
@@ -140,6 +146,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly IServiceScopeFactory? _scopes;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after a root is
     /// created. Optional so a host composing the tool framework without the external-access module still resolves this
@@ -151,6 +158,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
@@ -164,6 +172,10 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         // Owner round 7 item 3: the caller's LINKED contact (task 141) names them in a contact-typed "for" column.
         // Unconditionally registered (MembershipModule), so no asymmetric registration (CLAUDE.md §10 F.1).
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        // Task 158 (owner round 6): a work assignment or project created under a secure matter or project is secured
+        // through provisioning's own steps. Registered beside the restamper by AddCoreAncestorResolver, which
+        // AddToolFramework calls too — no asymmetric registration (CLAUDE.md §10 F.1).
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
     }
 
     /// <inheritdoc />
@@ -320,21 +332,48 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                     return LogOutcome(context, tablename, MapClientError(tool, forFailure, startedAt), stopwatch);
                 }
 
+                // Task 158 r1 (owner round 31): a work assignment or project filed under a SECURE matter or project is
+                // created INTO isolation - owned by the named Secure Record Owners team, flagged in the create, for the
+                // caller (sprk_createdbyperson) - never as an ordinary row of the caller's business unit first. Decided
+                // before any write and after the caller's own G5 check: an unreadable parent flag, a caller without
+                // AppendTo on a secure parent, or a caller walled off (or not checkable against) the No Access list of a
+                // secure parent or of the record itself, refuses with nothing created.
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken).ConfigureAwait(false);
+                    CallerObjectId(context), cancellationToken, _rootFiling).ConfigureAwait(false);
+
+                if (owned.PlanRefusal is { } rootRefusal)
+                {
+                    return LogOutcome(context, tablename,
+                        Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
+                            rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+                        stopwatch);
+                }
+
+                // Created into isolation -> completed now: the caller's share (read back; a share that fails deletes the row
+                // again), its own container, its secure parents' sharees.
+                Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null;
+                if (owned.Isolated is not null && owned.CreatedId is { } isolatedRoot)
+                {
+                    // The same person the plan checked and the create stamped (sprk_createdbyperson; set with Isolated) —
+                    // never a second WhoAmI, whose failure would name nobody and remove a row its creator can open.
+                    secured = await _rootFiling.CompleteIsolatedCreateAsync(
+                            tablename, isolatedRoot, owned.IsolatedFor!.Value, context.DecisionId.ToString("N"))
+                        .ConfigureAwait(false);
+                }
 
                 // Task 142 (L1, owner Q5 + R3) on the owned path too (batch 4 integration): a project / matter / work
                 // assignment the application created gets its "Assigned *" contacts' grant or share now. After the create
                 // committed; never throws, never fails this create (a non-root table is a no-op).
-                if (owned.CreatedId is { } ownedId)
+                if (owned.CreatedId is { } ownedId && secured is not { RowRemoved: true })
                 {
                     await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
                         _scopes, tablename, ownedId, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
                         .ConfigureAwait(false);
                 }
 
-                return LogOutcome(context, tablename, OwnedCreateResult(tool, tablename, forMapped, owned, startedAt), stopwatch);
+                return LogOutcome(context, tablename,
+                    OwnedCreateResult(tool, tablename, forMapped, owned, startedAt, secured), stopwatch);
             }
 
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a
@@ -520,7 +559,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// row names), a secure-filing refusal, or the caller's own Dataverse error.</summary>
     private ToolResult OwnedCreateResult(
         AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, OwnedChildWrite.Outcome owned,
-        DateTimeOffset startedAt)
+        DateTimeOffset startedAt, Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null)
     {
         if (owned.ClientFailure is { } failure)
             return MapClientError(tool, failure, startedAt);
@@ -534,6 +573,47 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool,
                 $"The record was NOT created: its owner could not be decided — {reason?.Reason} ({reason?.RefusalCode}).",
                 reason?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        // Task 158 r1 (owner round 31 item 2): created into isolation, but it could not be shared to the caller — the row
+        // was deleted again, so the create is refused (never a row nobody can open).
+        if (secured is { RowRemoved: true })
+        {
+            return Error(tool,
+                $"The record was NOT created: a '{tablename}' filed under a secure record is created secure and shared to you, " +
+                $"and that share could not be made ({secured.ReasonCode}), so the new record was removed again. " +
+                "Nothing was created.",
+                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        // Created secure and shared to the caller, but a later step (its own container, its parents' sharees) did not
+        // complete — never reported as a plain success (ADR-003). Nobody outside its sharing sees it meanwhile; the
+        // secure-root inheritance job completes it within minutes.
+        // Created into isolation, NOT shared to the caller, and the delete failed too: say exactly that (task 158 r1).
+        // Task 158 r1c-v1 (verifier item 7): a self-heal is promised only when the job can deliver it — never after
+        // provisioning REFUSED (e.g. the caller walled off between the plan and the provisioning), which every run refuses again.
+        if (secured is { RowStranded: true })
+        {
+            return Error(tool,
+                $"Record {createdId:D} was created in '{tablename}' as a secure record, but it could not be shared to you and " +
+                $"could not be removed again ({secured.ReasonCode}). " +
+                (secured.CompletesAutomatically
+                    ? "It is shared to you automatically once that step succeeds (it is retried every few minutes); until then " +
+                      "only an administrator can open it."
+                    : "It will not be shared to you automatically: only an administrator can open it, and an administrator needs " +
+                      "to review and remove it."),
+                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        // (Shared to the caller means provisioning got past its refusals — every refusal comes before the creator's share — so
+        // what is left is a fault the job retries: the promise below holds.)
+        if (secured is { IsComplete: false })
+        {
+            return Error(tool,
+                $"Record {createdId:D} was created in '{tablename}' as a secure record shared to you, but securing it could not " +
+                $"be finished yet ({secured.ReasonCode}). It is completed automatically within a few minutes; " +
+                "until then only you (and the people already given access) can open it.",
+                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
         return ToolResult.Ok(

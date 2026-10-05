@@ -515,6 +515,9 @@ public class FieldMappingPushAuthorizationContractTests
             // a module boundary here (no child in these tests has descendants); the restamp is not this file's subject.
             builder.Services.AddSingleton(
                 new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);
+            // Batch-4 integration (task 158): a push that files a work assignment or project under a secure record secures
+            // it; no record in these tests is secure (a module boundary here).
+            builder.Services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();

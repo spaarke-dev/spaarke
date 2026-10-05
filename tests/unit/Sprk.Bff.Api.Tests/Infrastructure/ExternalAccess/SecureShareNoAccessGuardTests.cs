@@ -39,7 +39,7 @@ public class SecureShareNoAccessGuardTests
     }
 
     private SecureShareNoAccessGuard Guard() =>
-        new(_reads, _list, _identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+        new(_reads, _list, _identities, AssignedAccessTestDoubles.NoFilingRows(), NullLogger<SecureShareNoAccessGuard>.Instance);
 
     private Task<SecureShareWallDecision> Check() => Guard().CheckAsync(Project, Record, User, CancellationToken.None);
 

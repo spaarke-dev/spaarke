@@ -146,6 +146,24 @@ internal sealed class UpdateRecordActionCore
         // RecordOwnerUnresolvedException (ActionSeam returns it as a typed failure; the node executor fails the node).
         // The resolver is a singleton; it is resolved from the scope factory because this core's constructor is
         // frozen (task 031).
+        // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
+        // the record this update files it under is secure must be readable, or nothing is written — the same refusal as an
+        // unresolved owner (ActionSeam returns it as a typed failure; the node executor fails the node).
+        if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(input.EntityLogicalName))
+        {
+            using var gateScope = _scopeFactory.CreateScope();
+            var gate = gateScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
+            var refusal = gate is null
+                ? (Sprk.Bff.Api.Services.Access.SecureRootInheritance.FilingColumnsOf(input.EntityLogicalName.Trim().ToLowerInvariant())
+                        .Overlaps(updatePayload.Keys.Select(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn))
+                    ? RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                        "whether the record it would be filed under is secure cannot be checked here, so it was not written")
+                    : null)
+                : await gate.CheckAsync(input.EntityLogicalName, input.RecordId, updatePayload, cancellationToken).ConfigureAwait(false);
+            if (refusal is not null)
+                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, refusal);
+        }
+
         var parentChanges = ParentChangesOf(input, updatePayload);
         if (parentChanges.Count == 0)
         {
@@ -182,6 +200,7 @@ internal sealed class UpdateRecordActionCore
         // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
         // Assigned-To materializer (batch 4 integration — the write, then the restamp, then the materializer).
         await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
+        await SecureFiledRootAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
 
         // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
         // materializes the Assigned-To access now. After the PATCH committed; never throws and never fails this update.
@@ -253,6 +272,26 @@ internal sealed class UpdateRecordActionCore
         }
 
         return changes;
+    }
+
+    /// <summary>
+    /// Task 158 (owner round 6): a work assignment or project this update filed under a secure matter or project is secured
+    /// now, through provisioning's own steps (<see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/>). Never thrown:
+    /// an incomplete securing is logged and the secure-root inheritance job completes it. Costs nothing for any other table.
+    /// </summary>
+    private async Task SecureFiledRootAfterWriteAsync(string entityLogicalName, Guid recordId, IEnumerable<string> writtenKeys)
+    {
+        if (!Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(entityLogicalName))
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var gate = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
+        if (gate is not null)
+        {
+            await gate.SecureAfterWriteAsync(entityLogicalName, recordId, writtenKeys, traceId: null).ConfigureAwait(false);
+        }
     }
 
     // ---------------------------------------------------------------------------

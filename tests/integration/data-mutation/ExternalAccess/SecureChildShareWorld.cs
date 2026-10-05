@@ -223,6 +223,33 @@ internal sealed class SecureChildShareWorld
     /// <summary>True when the row exists.</summary>
     public bool Has(string table, Guid id) => _rows.ContainsKey((table, id));
 
+    /// <summary>Task 158 r1: every row delete, in order (the isolated-create compensation).</summary>
+    public List<(string Table, Guid Id)> Deletes { get; } = new();
+
+    /// <summary>Task 158 r1: a host harness removing its own copy of a deleted row.</summary>
+    public Action<string, Guid>? OnDeleted { get; set; }
+
+    /// <summary>Task 158 r1: deletes from this row fail (Dataverse refusing the compensation delete).</summary>
+    public bool DeletesFail { get; set; }
+
+    /// <summary>
+    /// Task 158 r1c-v1 (verifier item 2): deletes ANSWER success but the row survives — only a read-back can tell (the
+    /// shape task 133's "accepted, not applied" revoke double models for shares).
+    /// </summary>
+    public bool DeletesIgnored { get; set; }
+
+    /// <summary>Task 158 r1: an <see cref="IGenericEntityService.DeleteAsync"/> of this world.</summary>
+    public void Delete(string table, Guid id)
+    {
+        Deletes.Add((table, id));
+        if (DeletesFail)
+            throw new InvalidOperationException("Test: Dataverse refused the delete.");
+        if (DeletesIgnored)
+            return;
+        _rows.Remove((table, id));
+        OnDeleted?.Invoke(table, id);
+    }
+
     /// <summary>A row's current owner (team first, then user), or null.</summary>
     public DataversePrincipalRef? OwnerOf(string table, Guid id) =>
         !_rows.TryGetValue((table, id), out var row)
@@ -322,6 +349,7 @@ internal sealed class SecureChildShareWorld
         new(new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None),
             new GrantPolicyTestDoubles.SeamNoAccessListReader(),
             new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore(),
+            AssignedAccessTestDoubles.NoFilingRows(),
             NullLogger<SecureShareNoAccessGuard>.Instance);
 
     /// <summary>
@@ -339,6 +367,13 @@ internal sealed class SecureChildShareWorld
             .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
                 current().Update(table, id, fields);
+                return Task.CompletedTask;
+            });
+        entities
+            .Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, CancellationToken _) =>
+            {
+                current().Delete(table, id);
                 return Task.CompletedTask;
             });
         return entities;
@@ -464,14 +499,23 @@ internal sealed class SecureChildShareWorld
         {
             ConditionOperator.Equal => Same(actual, condition.Values.Single()),
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
-            // Batch-4 integration (round 46 item 2): the Make Secure file backstop lists rows whose ledger is set.
+            // Task 158 r1: the job's empty-flag scan, and the pair listing's spelling-independent LIKE.
+            ConditionOperator.Null => actual is null,
+            // Batch-4 integration (round 46 item 2) and task 158: rows whose ledger is set, and the inheritance's listings.
             ConditionOperator.NotNull => actual is not null,
+            ConditionOperator.Like => actual is string text && condition.Values.Single() is string pattern && Like(text, pattern),
             // Task 147: the reconciliation job's recent-changes pass filters on modifiedon. A row with no modifiedon
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };
     }
+
+    /// <summary>Dataverse LIKE: <c>%</c> any run, <c>_</c> one character, case-insensitive.</summary>
+    private static bool Like(string text, string pattern) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text,
+            "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
 
     private static bool Same(object? actual, object? expected) => (actual, expected) switch
     {

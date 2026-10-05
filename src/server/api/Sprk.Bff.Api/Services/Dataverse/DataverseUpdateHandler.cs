@@ -12,6 +12,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly IGenericEntityService _genericEntityService;
     private readonly CoreAncestorRestamper _restamper;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
@@ -19,12 +20,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         IGenericEntityService genericEntityService,
         CoreAncestorRestamper restamper,
         IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger)
     {
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -41,6 +44,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct)
     {
+        // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
+        // the record this write files it under is secure must be readable, or nothing is written (fail closed).
+        if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, rootRefusal);
+        }
+
         // Task 146: an EntityReference value onto a parent FILES a child table under a record — a reparent. The child's
         // owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when it
         // moves. A root's own lookups never reassign it (provisioning owns a root's ownership).
@@ -79,6 +89,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // that fails is logged and the reconciliation job repairs it; this record's own update stands.
         await _restamper.AfterWriteAsync(entityLogicalName, recordId, fields.Keys, CancellationToken.None)
             .ConfigureAwait(false);
+        // Task 158: a work assignment or project this write filed under a secure record is secured now (never thrown; an
+        // incomplete securing is logged and the secure-root inheritance job completes it).
+        await _rootFiling.SecureAfterWriteAsync(entityLogicalName, recordId, fields.Keys, traceId: null);
     }
 
     private async Task WriteAsync(

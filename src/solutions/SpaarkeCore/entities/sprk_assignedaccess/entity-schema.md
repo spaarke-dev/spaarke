@@ -39,13 +39,14 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 | Column | Type | Meaning |
 |---|---|---|
 | `sprk_ledgerkey` | Text 200 | **Uniqueness.** BFF-computed `{rootLogicalName}:{rootId}:{sourceField}:{contact|organization}:{subjectId}` (lower-case "D" GUIDs; `AssignedAccessStore.LedgerKey` — the ONE place it is computed). Carries alternate key `sprk_AssignedAccessLedgerKey`. |
-| `sprk_sourcefield` | Text 100 | The "Assigned *" column (logical name) that named the subject. |
+| `sprk_sourcefield` | Text 100 | The "Assigned *" column (logical name) that named the subject — or, on an inherited-share row (task 158 r1), `inherited:{parentTable}:{parentId}`: the secure matter / project whose share was passed on to the filed record. |
 | `sprk_project` / `sprk_matter` / `sprk_workassignment` | Lookup | The root — exactly one is set (same typed-root shape as `sprk_externalrecordaccess`). Nav props `sprk_Project` / `sprk_Matter` / `sprk_WorkAssignment`. Delete = **Cascade** (a deleted root takes its ledger). |
 | `sprk_subjectcontact` / `sprk_subjectorganization` | Lookup → `contact` / `sprk_organization` | The named subject — exactly one is set. Delete = RemoveLink. |
-| `sprk_subjectsystemuser` | Lookup → `systemuser` | The internal user a linked contact represents (a share, a suggested share, or an ineligible link). Delete = RemoveLink. |
+| `sprk_subjectsystemuser` | Lookup → `systemuser` | The internal user a linked contact represents (a share, a suggested share, or an ineligible link). On an inherited-share row (task 158 r1): the USER a secure parent's share was passed on to. Delete = RemoveLink. |
+| `sprk_subjectteam` | Lookup → `team` | **Task 158 r1 (owner round 30).** On an inherited-share row: the TEAM a secure parent's share was passed on to. Nav prop `sprk_SubjectTeam`. Delete = RemoveLink. |
 | `sprk_externalrecordaccess` | Lookup → `sprk_externalrecordaccess` | The grant row the rule wrote, raised or found covering. Delete = RemoveLink. |
 | `sprk_state` | Choice (local) | `AssignedAccessState` — see below. |
-| `sprk_reason` | Text 100 | A stable code (`AssignedAccessReason`): why Skipped (`restricted`, `organization-on-secure`, `no-access`, `ineligible`, `link-unreadable`, …), how an assignment ended (`access-removed`, `kept-other-field`, `kept-modified`, `kept-adopted`, `kept-secure-record`, `prior-level-restored`, `prior-level-restored-lapsed` (the earlier level and date were put back, but that date has passed — no access restored; if the rule's renewal had kept the grant alive past it, the restore ENDED the access), `assignment-ended`), how a removal happened (`removed-by-operator`, `removed-out-of-band`, `removed-by-no-access`, `dismissed`), or what a raise replaced (`raised-from:100000000@2026-10-13` — the earlier level AND the date the subject's access ran until, both put back when the assignment ends, because the rule renews a raised grant while it is assigned; `raised-from-mask:1`). |
+| `sprk_reason` | Text 100 | A stable code (`AssignedAccessReason`): why Skipped (`restricted`, `organization-on-secure`, `no-access`, `ineligible`, `link-unreadable`, …), how an assignment ended (`access-removed`, `kept-other-field`, `kept-modified`, `kept-adopted`, `kept-secure-record`, `prior-level-restored`, `prior-level-restored-lapsed` (the earlier level and date were put back, but that date has passed — no access restored; if the rule's renewal had kept the grant alive past it, the restore ENDED the access), `assignment-ended`), how a removal happened (`removed-by-operator`, `removed-out-of-band`, `removed-by-no-access`, `dismissed`), or what a raise replaced (`raised-from:100000000@2026-10-13` — the earlier level AND the date the subject's access ran until, both put back when the assignment ends, because the rule renews a raised grant while it is assigned; `raised-from-mask:1`). On an inherited-share row (task 158, rule 4) also `share-pending` (written ahead of its share), `covered-by-existing`, `kept-direct`, `kept-other-source`, `kept-last-reader`, `record-unsecured`. |
 | `sprk_grantedlevel` | Whole number | The grant level (`10000000x`) or share mask the BFF last wrote — compared to the live row to tell **unmodified** from modified. |
 | `sprk_grantedexpiry` | Date Only | The expiry the BFF last wrote (renewal per owner A5 updates it). |
 
@@ -69,6 +70,26 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 2. A row is written only when its values change: an unchanged root costs zero writes (idempotent).
 3. Rows are never deleted by the BFF and never deactivated; an ended assignment is `Revoked`, and a later re-assignment of
    the same subject on the same field reuses the row.
+4. **Inherited shares (task 158 r1, owner round 30 — `SecureRootInheritance`, not the materializer).** One row per (filed
+   secure work assignment / project, secure parent, principal), key
+   `{root}:{rootId}:inherited:{parentTable}:{parentId}:{systemuser|team}:{id}`. `Shared` = the rule wrote or raised the
+   share (`sprk_grantedlevel` = the mask written; `raised-from-mask:N` = what it held before); `Covered by existing` = the
+   principal already held the parent's mirror there (direct access, never removed by the rule); `Declined` = an operator
+   removed it on the filed record (`/unshare-user`, or found removed / narrowed outside the BFF — `removed-out-of-band`):
+   never re-added while the parent share persists; `Adopted` = an operator shared it on the filed record. On the parent's
+   unshare only an UNMODIFIED `Shared` share is removed (put back to `raised-from-mask` when it raised one), unless
+   another provenance justifies it (`kept-other-field`, `kept-other-source`); the row ends `Revoked`. The materializer
+   ignores these rows (they name no contact or organization); its operator markers (`MarkShareRemovedAsync` /
+   `MarkShareAdoptedAsync`) apply to them by user.
+   **Write-ahead (task 158 r1c-v1):** a row is written BEFORE its share — `Shared`, reason `share-pending` (then
+   `;raised-from-mask:N`), `sprk_grantedlevel` = the mask about to be written — and confirmed (the marker dropped) once
+   the share reads back; no share is ever written without its row. A `share-pending` row whose share is not in place is
+   written again by the next pass, never read as a removal. A create that loses the alternate-key race writes NOTHING over
+   the row (`AssignedAccessStore.CreateInheritedLedgerAsync` answers `null`; the pass is retried) — unlike rule 1's
+   Assigned-To rows. The record's LAST reader is kept with its row live (`Shared`, reason `kept-last-reader`, S5) and
+   removed by a later pass once someone else can open the record. `Skipped` + `removed-by-no-access` = the share was
+   removed by task 143's No Access enforcer (the person is on the filed record's list): passed on again once the wall is
+   lifted, never `Declined`.
 
 ## Security
 
@@ -93,7 +114,9 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 1. `pwsh scripts/Set-AssignedAccessLedgerSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run).
 2. `… -Apply`, then `… -Verify` (exit 0) and `mcp describe('tables/sprk_assignedaccess')`.
 3. Only then deploy a BFF carrying task 142. Without the table every materialization reads `ledger-unreadable` and writes
-   NOTHING (fail closed — no existing access is lost, but no auto-grant is made).
+   NOTHING (fail closed — no existing access is lost, but no auto-grant is made). A BFF carrying task 158 r1 also needs
+   `sprk_subjectteam` (the same script adds it): without it every `/share-user` / `/unshare-user` fan-out to filed secure
+   records answers `children_incomplete` and passes nothing on (fail closed).
 
 ### Verify live before relying on it
 

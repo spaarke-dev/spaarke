@@ -1002,6 +1002,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
                 _world.Resolver(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
                 scopes)
             .ExecuteChatAsync(
                 BuildChatInvocationContext(
