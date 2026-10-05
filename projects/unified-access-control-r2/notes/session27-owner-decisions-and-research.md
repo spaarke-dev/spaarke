@@ -931,6 +931,21 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - 036 once batch 4 is deployed (it can start alongside);
    - 090 last.
 
+## Round 60 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 150's integration lane, from its final verification (`task/uac-r2-150-integ-d`, ready to merge).
+
+1. **Wizard copy for `sdap.provision.caller_rights_unverifiable` stays as written (option a).**
+   - The wizard reads: "Which access you hold on this project could not be read, so securing it could not make sure you keep that access. Nothing was changed."
+   - The retry is offered by the host action, under the FR-31 copy rule (the message never advises trying again).
+   - The server and the ribbon keep round 53's full sentence.
+   - The wizards send no transition, so they do not receive this code today.
+2. **The release order for 150's ribbon versus task 144's migration (option b).**
+   - **The ribbon ships once the DEFAULT-TEAM part of 144's migration is complete:**
+     - the dry-run plan has no MIGRATE rows;
+     - the retired default team no longer holds the Secure Record Owner role.
+   - **The full `-Verify` exit 0 is run AFTER that,** once the ribbon's Make Secure "finish" has settled the NOT-ISOLATED rows. These are user-owned legacy records, records owned by a team outside the business unit, and flagged records left before the owner move.
+   - **Why:** the ribbon is the tool that finishes those rows. Gating it on their absence would require settling them by hand first, which is a circular order.
+   - **Docs that follow this answer:** the README, guide §7d.1, `Set-AccessRibbon.ps1` help and note §9 G-11. Updated at integration.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
