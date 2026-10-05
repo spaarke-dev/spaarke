@@ -1,32 +1,38 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04. 094 merged (PR #1284, `6932582b1`) and the add-in site redeployed (run 37220301006). BFF = `fb8280aee` (unchanged by 094). Waiting on the owner: re-upload package 1.1.1 (if not yet), then UAT round 4
+> **Last Updated**: 2026-10-04 (by context-handoff, before /compact). Branch head `b9a9d7f1f` (pushed, clean). 097 ⛔ awaiting the owner
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
-### ✅ Owner answers, 2026-10-01 (all actioned; the "Waiting on the OWNER" list below is SUPERSEDED for items 1–4)
-
-| # | Owner's words | Done |
-|---|---|---|
-| 1 | Drift on Secure Record Owner: *"yes can remove them if not needed"* | **Removed live**: 40 → 8, proven by probes; `-Verify` PASS. `notes/082-secure-owner-role.md` §4.1; snapshot `notes/082-role-before-strip-2026-10-01.json`; guide §5.4 updated; #1046 commented |
-| 2 | Hotmail guest: *"this is in dev and we'll change this"* | The owner changes the account; no task. UAC-r2: no census exception |
-| 3 | #1037: *"yes write the task"* | **Task 084** authored (validator PASS); TASK-INDEX row; #1037 commented. It folds in the new **#1075 / ISS-014** (the ribbon quick-save sends `sprk_matter` → 400 `OFFICE_002`; latent until 078's package is installed) |
-| 4 | Trusted-tenant list: *"yes proceed"* | UAC-r2's owner had already chosen (b). 141 proceeds, but **is not in their current batch**, so 083 stays blocked |
-
-All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
-
-### ▶️ NEXT: owner re-uploads package 1.1.1, then UAT round 4
-
 | Field | Value |
 |---|---|
-| **State** | PR #1124 merged `fb8280aee`. BFF on `spaarke-bff-dev` = `fb8280aee` (4/4 hashes, healthz, CORS; 9 route probes, 0 × 404). Add-in site = `fb8280aee` (run 37208025253); hosted Word manifest 1.0.10.0 with Open Spaarke |
-| **Owner** | Admin center → Integrated apps → update Spaarke with `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`, run 37208025253). Then UAT round 4: live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning. Record results in `notes/042-uat-round3-2026-10-03.md` (or a round-4 note) |
-| **Owner answers (2026-10-04) → task 094 ✅** | button only ever "Save"/"Saved"; name locked once in Spaarke (Save as new to rename); Save re-enables on Word content edits; saved state survives tab switch; collision Open = Open in Word (desktop trial) + Open in browser. Add to UAT round 4 |
-| **Then** | 042 → ✅ when UAT passes; 090 wrap-up with `/test-diet`. 083 still blocked on UAC-r2 141 |
-| **Caution** | `spaarke-bff-dev` is shared; another project's deploy can overwrite this build before UAT — re-check Kudu deployments if behaviour looks old |
+| **Task** | **097** — `/api/communications/send` authorization + archive id — ⛔ **BLOCKED, owner decision pending** (escalation trigger 3) |
+| **Why blocked** | UAC-r2 task 161 (#1100) already implements the same per-attachment Read + per-association AppendTo checks on the same files (`CommunicationRecordAuthorizationFilter`, on `origin/integ/uac-r2-batch4`, NOT on master). No 097 code was written. Full analysis: `notes/097-communications-send-authorization.md` |
+| **Question for the owner** | Options (note §4): **(1, recommended)** hold the Word Email tab (096) until UAC-r2's integration with 161 is on master + deployed; then 097 = the archive fix (on top of UAC-r2 task 146's edits) + the live check · (2) pull UAC-r2's branch in (not advised) · (3) build 097 here and reconcile with 161 (duplicates security code; needs UAC-r2 owner agreement) |
+| **Next Action** | Ask the owner the 097 question. Then: open a PR for round 4 — 095 always; 096 (Email tab) only if the owner allows it ahead of 161 (otherwise hold 096 by gating the tab off or keeping it out of the deploy — decide with the owner) → merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`) → ONE dev BFF deploy (owner already chose "once, with round 4 + 097"; 083 is merged but NOT deployed) via `/bff-deploy` → add-in site auto-deploys on master push → UAT round 5 |
+| **Re-upload?** | **No** for round 4: manifests unchanged, package stays 1.1.1 (095's +75 px width is a runtime call). Owner already has `C:\code_files\spaarke-addin-package\spaarke-addin-1.1.1.zip` |
+| **Main checkout** | `C:\code_files\spaarke` is on ANOTHER session's branch (`chore/portfolio-board-hygiene`). Never `git pull` there — `git fetch origin && git branch -f master origin/master` (memory: main-checkout-may-be-on-another-branch) |
+
+### State of every open item
+
+| Item | State |
+|---|---|
+| 083 (Office To Do defaults to its creator) | ✅ merged PR #1289 `c2ef1857b`; **not deployed** (waits for the single BFF deploy) |
+| 088–094 | ✅ merged (#1124 `fb8280aee`, #1284 `6932582b1`); BFF `fb8280aee` + add-in site `6932582b1` deployed; package 1.1.1 |
+| 095 (Related-to row, Save-as link, +75 px pane via `Office.extensionLifeCycle.taskpane.setWidth`) | ✅ on branch (`26a020004`), not in a PR. Its review was inline — run `code-review` + `adr-check` skills on the round-4 diff before the PR |
+| 096 (Word Email tab on shared `EmailComposer` via new wrapper `SendEmailPane`; `shareLinkService` deleted) | ✅ on branch (`26a020004`), not in a PR; shipping depends on the 097 decision. Decision row added to project CLAUDE.md (ADR-012 Path A narrowed) |
+| 097 | ⛔ blocked (above) |
+| 042 | 🔄 UAT rounds continue (round 4 recorded in `notes/042-uat-round4-2026-10-04.md`) |
+| 090 | 🔲 wrap-up with `/test-diet` after 042 |
+| Publish size | measured for 083 (+353 B). Round 4: 095 is client-only; 096 changed no BFF file → none owed unless 097 adds code |
+
+### Critical context
+- The Graph sharing link is refused for every SPE file ("not supported on CSP Container site"); 096 removed it from all pane paths. The share-link ROUTE and the shared composer's "Link" option still use it — recommendation in `notes/096-email-tab.md` §4 (owner not yet asked).
+- Archive bug (confirmed, unfixed): `CommunicationService.cs:2328-2343` writes `sprk_document` ids into `sprk_graphitemid` and the archive container into `sprk_graphdriveid`; fix = carry each source document's drive/item ids from the attachment fetch (`:2201-2222`). Conflicts with UAC-r2 task 146 on the same lines — do it after UAC-r2 lands.
+- Local add-in build needs the CI env values from `.github/workflows/deploy-office-addins.yml` (ADDIN_CLIENT_ID, TENANT_ID, BFF_API_CLIENT_ID, BFF_API_BASE_URL, ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL).
 
 ### Files modified this session (all committed and pushed)
 `scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·
