@@ -12,14 +12,7 @@ import {
   Text,
   mergeClasses,
 } from '@fluentui/react-components';
-import {
-  CheckmarkRegular,
-  SearchRegular,
-  AddRegular,
-  DismissRegular,
-  InfoRegular,
-  PersonSearchRegular,
-} from '@fluentui/react-icons';
+import { CheckmarkRegular, SearchRegular, AddRegular, DismissRegular, InfoRegular } from '@fluentui/react-icons';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import type { RelatedCandidate } from '../services/communicationSuggestionsService';
 import type { MatterTypeChoice } from '../services/matterTypeLookupService';
@@ -28,9 +21,9 @@ import type { MatterTypeChoice } from '../services/matterTypeLookupService';
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
- * Layout (feedback round 4):
- *   [ Related to  Matter Project Invoice … ]                         ← header + left chips
- *   [ search input ] [ Search ] [ + New ]                            ← search row (always visible)
+ * Layout (UAT round 4, task 095 — no "Related to" label):
+ *   [ Matter ] [ Project ] [ Invoice ]                      [ + New ]  ← left pills, "+ New" right
+ *   [ 🔍 Look up related Matter...                       ] [ 🔍 ]     ← lookup box + search icon button
  *   ┌ recommended auto-match cards ──────────────────────────────┐
  *   │ LITG-763955 : Litigation matter · Matter · 100% match  [✓]  │  ← blue check; green ✓ + × on select
  *   └────────────────────────────────────────────────────────────┘
@@ -57,14 +50,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalM,
   },
-  header: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, flexWrap: 'wrap' },
-  headerLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground2,
-    flexShrink: 0,
-  },
+  // Pills left, "+ New" pushed to the right end of the same row; wraps (never clips) at narrow widths.
+  header: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  newBtn: { marginLeft: 'auto', flexShrink: 0 },
   chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
   chip: {
     borderRadius: '999px',
@@ -408,13 +396,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Header: "Related to" + type chips, left-aligned next to the label. */}
+      {/* Pill row (task 095, owner 2026-10-04): no "Related to" label — the type pills are left-aligned and
+          "+ New" sits at the right end of the same row. */}
       <div className={styles.header}>
-        <div className={styles.headerLabel}>
-          <PersonSearchRegular aria-hidden="true" />
-          <Text weight="semibold">Related to</Text>
-        </div>
-        <div className={styles.chips} role="radiogroup" aria-label="Record type">
+        <div className={styles.chips} role="radiogroup" aria-label="Related to record type">
           {allowedTypes.map(type => {
             const selected = type === selectedType;
             return (
@@ -434,10 +419,26 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             );
           })}
         </div>
+        {onCreateRecord && !showCreate && (
+          <Button
+            appearance="subtle"
+            size="small"
+            className={styles.newBtn}
+            icon={<AddRegular />}
+            onClick={() => {
+              setShowCreate(true);
+              setCreateError(null);
+              setCreateWarning(null);
+            }}
+            disabled={disabled}
+          >
+            New
+          </Button>
+        )}
       </div>
 
-      {/* Search row. Clicking "New" turns this SAME row into the create form:
-          the input becomes the new-record name, Search→Create, New→Cancel. */}
+      {/* Lookup row. Clicking "New" turns this SAME row into the create form:
+          the input becomes the new-record name, the search icon becomes Create + Cancel. */}
       <div className={styles.searchRow}>
         <Input
           value={showCreate ? newName : query}
@@ -445,7 +446,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
           onKeyDown={e => {
             if (e.key === 'Enter') void (showCreate ? handleCreate() : runSearch());
           }}
-          placeholder={showCreate ? `New ${selectedType} name` : `Look up another ${selectedType}…`}
+          placeholder={showCreate ? `New ${selectedType} name` : `Look up related ${selectedType}...`}
           disabled={disabled || (showCreate && creating)}
           {...(showCreate ? {} : { contentBefore: <SearchRegular /> })}
           style={{ flexGrow: 1 }}
@@ -481,25 +482,14 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             </Button>
           </>
         ) : (
-          <>
-            <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
-              {searching ? <Spinner size="tiny" /> : 'Search'}
-            </Button>
-            {onCreateRecord && (
-              <Button
-                appearance="subtle"
-                icon={<AddRegular />}
-                onClick={() => {
-                  setShowCreate(true);
-                  setCreateError(null);
-                  setCreateWarning(null);
-                }}
-                disabled={disabled}
-              >
-                New
-              </Button>
-            )}
-          </>
+          <Button
+            appearance="subtle"
+            icon={searching ? <Spinner size="tiny" /> : <SearchRegular />}
+            onClick={() => void runSearch()}
+            disabled={disabled || searching}
+            aria-label="Search"
+            title="Search"
+          />
         )}
       </div>
 
