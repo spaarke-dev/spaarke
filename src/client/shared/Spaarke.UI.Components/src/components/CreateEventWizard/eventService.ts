@@ -16,6 +16,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { applyResolverFields, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -111,38 +112,25 @@ function _resolveLookupHint(entityLogicalName: string): string {
  * @returns Current user GUID (braces stripped, lowercased), or `null` if Xrm is unreachable.
  */
 function _tryGetCurrentUserId(): string | null {
-  const frames: Window[] = [window];
+  // Shared cross-frame walker (task 081 / C-8) — was a per-frame loop.
   try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = getXrm();
+    if (xrm?.Utility?.getGlobalContext) {
+      const ctx = xrm.Utility.getGlobalContext();
+      const userId = ctx?.userSettings?.userId;
+      if (typeof userId === 'string' && userId.trim() !== '') {
+        return cleanGuid(userId);
       }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
-      }
-    } catch {
-      // Cross-origin frame — skip
     }
+    if (typeof xrm?.Utility?.getUserId === 'function') {
+      const userId = xrm.Utility.getUserId();
+      if (typeof userId === 'string' && userId.trim() !== '') {
+        return cleanGuid(userId);
+      }
+    }
+  } catch {
+    /* defensive: a host getter threw */
   }
   return null;
 }

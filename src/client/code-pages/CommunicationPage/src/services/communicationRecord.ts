@@ -9,7 +9,7 @@
  */
 
 import type { ICommunicationRecord } from '../types/communication';
-import { resolveXrm } from './xrm';
+import { getXrm } from '@spaarke/ui-components';
 
 /** Columns fetched for the record. Keep in sync with `ICommunicationRecord`. */
 const SELECT_COLUMNS = [
@@ -45,7 +45,8 @@ function readFormatted(record: Record<string, unknown>, column: string): string 
  * @throws if Xrm is unavailable or the retrieve fails (caller surfaces the error).
  */
 export async function readCommunicationRecord(id: string): Promise<ICommunicationRecord> {
-  const xrm = resolveXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm();
   if (!xrm?.WebApi?.retrieveRecord) {
     throw new Error('[CommunicationPage] Xrm.WebApi is not available — cannot read the communication record.');
   }

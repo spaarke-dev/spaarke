@@ -128,31 +128,55 @@ const useStyles = makeStyles({
 
 const MONTH_ABBREVS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Due-date tier cutoffs converged on 3/7 days (task 081 / C-17, owner decision
-// 2026-10-03, audit item U6) — this previously used a 3/5-day split, the one
-// other due-date tier scheme in the codebase that disagreed with the
-// SmartTodo/`todoScoring.ts` 3/7/10-day canonical (this component has no
-// "10" band since it only has three badge colours, not five tiers).
+/**
+ * Canonical due-date tiers (owner decision 2026-10-03, C-17: 3/7/10 calendar
+ * days) — the SAME boundaries as `computeDueLabel` in
+ * `@spaarke/smart-todo-components` `utils/todoScoring.ts`:
+ *   overdue · '3d' = 0-3 days (day 3 included) · '7d' = 4-7 · '10d' = 8-10 · none = 11+.
+ *
+ * Kept inline rather than imported: `@spaarke/visuals` declares no `@spaarke/*`
+ * dependency (its package.json has only React/Fluent peer deps) and is
+ * bundled into the VisualHost PCF, so importing `@spaarke/smart-todo-components`
+ * would add that package and its `@spaarke/ui-components` dependency to the
+ * PCF bundle for one comparison chain. `daysUntilDue` is supplied by the caller.
+ *
+ * This card has three colours for the five tiers. Explicit mapping (task 081 / F6):
+ *   overdue, '3d' → red (danger) · '7d' → yellow (warning) · '10d', none → green (success).
+ * Before task 081 the red band ended below day 3 (day 3 was yellow, while
+ * `todoScoring` puts day 3 in its most-urgent tier) and yellow ended at day 5.
+ */
+type DueTier = 'overdue' | '3d' | '7d' | '10d' | 'none';
+
+function getDueTier(daysUntilDue: number, isOverdue: boolean): DueTier {
+  if (isOverdue || daysUntilDue < 0) return 'overdue';
+  if (daysUntilDue <= 3) return '3d';
+  if (daysUntilDue <= 7) return '7d';
+  if (daysUntilDue <= 10) return '10d';
+  return 'none';
+}
+
+const TIER_BADGE_COLOR: Record<DueTier, 'danger' | 'warning' | 'success'> = {
+  overdue: 'danger',
+  '3d': 'danger',
+  '7d': 'warning',
+  '10d': 'success',
+  none: 'success',
+};
+
 function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'danger' | 'warning' | 'success' {
-  if (isOverdue || daysUntilDue < 3) return 'danger'; // red: overdue or <3 days
-  if (daysUntilDue <= 7) return 'warning'; // yellow: 3-7 days
-  return 'success'; // green: 8+ days
+  return TIER_BADGE_COLOR[getDueTier(daysUntilDue, isOverdue)];
 }
 
 /**
- * Get urgency-based background color for the date column.
- * v1.4.7 — switched from `colorStatusXxxBackground2` (pastel tints) to
- * `colorPaletteXxxBackground2` so the date column tints align with the
- * donut/HSBar palette (same `colorPalette*` family the rest of Matter UI
- * uses). Reads cleanly in both light and dark mode.
+ * Get urgency-based background color for the date column (same tier mapping
+ * as the badge). v1.4.7 — `colorPaletteXxxBackground2` so the date column
+ * tints align with the donut/HSBar palette (same `colorPalette*` family the
+ * rest of Matter UI uses). Reads cleanly in both light and dark mode.
  */
 function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
-  if (isOverdue || daysUntilDue < 3) {
-    return { backgroundColor: tokens.colorPaletteRedBackground2 };
-  }
-  if (daysUntilDue <= 7) {
-    return { backgroundColor: tokens.colorPaletteYellowBackground2 };
-  }
+  const color = getDueBadgeAppearance(daysUntilDue, isOverdue);
+  if (color === 'danger') return { backgroundColor: tokens.colorPaletteRedBackground2 };
+  if (color === 'warning') return { backgroundColor: tokens.colorPaletteYellowBackground2 };
   return { backgroundColor: tokens.colorPaletteGreenBackground2 };
 }
 
@@ -181,7 +205,7 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
     [handleClick]
   );
 
-  // Urgency-based date column coloring: <3d red, 3-7d yellow, 8+d green
+  // Urgency-based date column coloring: overdue/0-3d red, 4-7d yellow, 8+d green
   const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
 
   // v1.4.8 — single-line "DD-MMM-YYYY" format (e.g., "01-JUL-2026") replaces

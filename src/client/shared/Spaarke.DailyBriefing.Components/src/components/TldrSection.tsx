@@ -242,9 +242,9 @@ function pickTldrEmoji(seed: string | null): string {
 }
 
 // formatRelativeTime hoisted to @spaarke/ui-components (task 081 / C-13) —
-// this previously hand-rolled past-tense-only minute/hour/day bucketing with
-// no week/month cap and no future-date handling, one of five independently
-// reimplemented copies of the same idiom.
+// this previously hand-rolled a past-tense-only "just now / Nm ago / Nh ago /
+// Nd ago" form with no week/month cap and no future handling; the shared
+// formatter's `style: 'compact'` renders the same abbreviated form.
 
 /**
  * R5 task 014 (FR-A5) — BINARY anchor resolution. Filters `itemRefs` down to the subset
@@ -450,7 +450,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
         </div>
       )}
       <div className={styles.footer}>
-        {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt)}</Text>}
+        {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt, { style: 'compact' })}</Text>}
         <Text size={200}>
           {tldr.categoryCount} categories, {tldr.priorityItemCount} priority items
         </Text>

@@ -190,13 +190,14 @@ const useStyles = makeStyles({
  * `FieldUpdateReconcileTab.tsx`, `TaskReconcileTab.tsx`) imports this exact
  * name from `@spaarke/ui-components`. New code should import `getXrm`.
  *
- * Note the previous local walker accepted ANY frame whose `.Xrm` was truthy
- * (no `WebApi` presence check); `getXrm` additionally requires `.WebApi` to
- * be present before accepting a frame. Xrm always provides `WebApi` and
- * `Utility` together on a real Dataverse host, so this does not change
- * behavior for this picker's `Utility.lookupObjects` use — only PolymorphicPicker's
- * own call site below is the actual behavior boundary; the three external
- * `getXrmForPicker()` call sites get the same widened (not narrowed) check.
+ * Note the acceptance check is NARROWED, not widened: the previous local
+ * walker accepted the first frame whose `.Xrm` was merely truthy, whereas
+ * `getXrm` also requires `.Xrm.WebApi` before accepting a frame (a frame
+ * with an `Xrm` that lacks `WebApi` is now skipped). On a real Dataverse
+ * host `WebApi` and `Utility` are always present together, so this picker's
+ * `Utility.lookupObjects` use and the three external `getXrmForPicker()`
+ * call sites resolve the same object as before; only an `Xrm` stub without
+ * `WebApi` (e.g. a test double) now resolves to `undefined`.
  */
 export const getXrmForPicker: () => XrmContext | undefined = getXrm;
 

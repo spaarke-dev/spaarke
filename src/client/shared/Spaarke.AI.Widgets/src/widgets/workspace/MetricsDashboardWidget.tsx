@@ -54,7 +54,7 @@ import {
   CheckboxUncheckedRegular,
   DocumentBulletListRegular,
 } from '@fluentui/react-icons';
-import { XrmDataverseClient } from '@spaarke/ui-components';
+import { XrmDataverseClient, getXrm } from '@spaarke/ui-components';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { getMetricsDashboardConfig, type MetricsDashboardConfig, type MetricsCard } from './metricsDashboardConfigs';
 
@@ -168,29 +168,9 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Xrm frame-walk
-// ---------------------------------------------------------------------------
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-function locateXrm(): any | null {
-  if (typeof window !== 'undefined' && (window as any).Xrm?.WebApi) {
-    return (window as any).Xrm;
-  }
-  try {
-    const p = (window.parent as any)?.Xrm;
-    if (p?.WebApi) return p;
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    const t = (window.top as any)?.Xrm;
-    if (t?.WebApi) return t;
-  } catch {
-    /* cross-origin */
-  }
-  return null;
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
+// Xrm resolution — the shared cross-frame `getXrm()` from
+// `@spaarke/ui-components` (task 081 / C-8; this file previously carried its
+// own copy of the window/parent/top walk as a local `locateXrm`).
 
 /** Pull the entity name out of `<fetch><entity name="…">…`. */
 function extractEntityName(fetchXml: string): string | null {
@@ -356,7 +336,7 @@ const DashboardCard: React.FC<{
 export const MetricsDashboardWidget: React.FC<WorkspaceWidgetProps<MetricsDashboardWidgetData>> = ({ data }) => {
   const styles = useStyles();
 
-  const xrm = React.useMemo(() => locateXrm(), []);
+  const xrm = React.useMemo(() => getXrm() ?? null, []);
   const dataverseClient = React.useMemo(() => {
     if (!xrm?.WebApi) return null;
     // XrmDataverseClient takes no constructor arg; resolves Xrm lazily.

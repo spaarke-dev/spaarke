@@ -7,7 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
-import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
 
 /**
  * Xrm.App.sidePanes type definition (subset needed)
@@ -24,7 +24,8 @@ interface IXrmNavigation {
 }
 
 /**
- * Get the Xrm.App.sidePanes object from window context
+ * Get the Xrm.App.sidePanes object from window context.
+ * Deliberately NOT the shared getXrm() walker (task 081 / C-8): it accepts the frame exposing App.sidePanes, not WebApi.
  */
 function getXrmSidePanes(): IXrmSidePanes | null {
   try {
@@ -51,27 +52,11 @@ function getXrmSidePanes(): IXrmSidePanes | null {
 }
 
 /**
- * Get the Xrm.Navigation object from window context
+ * Get the Xrm.Navigation object via the shared cross-frame walker (task 081 / C-8).
  */
 function getXrmNavigation(): IXrmNavigation | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.Navigation) {
-      return parentXrm.Navigation as IXrmNavigation;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.Navigation) {
-      return windowXrm.Navigation as IXrmNavigation;
-    }
-
-    return null;
-  } catch (error) {
-    console.error("[SidePaneService] Error accessing Xrm.Navigation:", error);
-    return null;
-  }
+  const navigation = getXrm()?.Navigation;
+  return navigation ? (navigation as unknown as IXrmNavigation) : null;
 }
 
 /**
@@ -124,8 +109,9 @@ const EVENT_MODAL_FORM_ID = "90d2eff7-6703-f111-8407-7ced8d1dc988";
  */
 export function openEventRecord(eventId: string): void {
   try {
+    // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+    const xrm: any = getXrm();
 
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[SidePaneService] Xrm.Navigation.navigateTo not available, falling back to openForm");

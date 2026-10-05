@@ -220,6 +220,23 @@ describe('xrmContext', () => {
       expect(getXrm()).toBeUndefined();
     });
 
+    // task 081 (C-8): several converged copies wrapped `w.Xrm ?? w.parent?.Xrm
+    // ?? w.top?.Xrm` in ONE try, so a cross-origin parent threw before `top`
+    // was ever tried. The shared walker guards each frame separately.
+    it('should still reach top.Xrm when reading parent.Xrm throws (cross-origin parent)', () => {
+      const crossOriginParent = {};
+      Object.defineProperty(crossOriginParent, 'Xrm', {
+        get() {
+          throw new DOMException('Blocked a frame with origin', 'SecurityError');
+        },
+      });
+      Object.defineProperty(window, 'parent', { value: crossOriginParent, writable: true });
+      setWindowTop({ Xrm: { WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' } } });
+
+      expect(() => getXrm()).not.toThrow();
+      expect((getXrm()?.WebApi as any).source).toBe('top');
+    });
+
     it('should be safe to call repeatedly (no caching) — re-acquires fresh each call', () => {
       // Task 001 spike lesson: consumers must re-read Xrm every poll rather
       // than caching a stale reference. getXrm() itself does no memoization,

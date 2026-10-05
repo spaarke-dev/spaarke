@@ -105,6 +105,9 @@ function installXrm(): jest.Mock {
   const navigateTo = jest.fn().mockResolvedValue(undefined);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = {
+    // `WebApi` is required by the shared `getXrm()` walker (task 081 / C-8),
+    // matching the real host shape where WebApi and Navigation coexist.
+    WebApi: {},
     Navigation: { navigateTo },
   };
   return navigateTo;

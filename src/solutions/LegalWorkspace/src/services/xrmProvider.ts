@@ -1,59 +1,29 @@
 /**
- * Xrm Provider — frame-walk utility for accessing Dataverse APIs from
- * a standalone HTML web resource (Custom Page).
+ * Xrm Provider — Dataverse API access for a standalone HTML web resource
+ * (Custom Page).
  *
  * Web resources run inside an iframe within the Dataverse shell. The Xrm
- * global is not directly available — we walk up the frame hierarchy to
- * find it on a parent or top window.
+ * global is not directly available — the shared cross-frame walker
+ * (`getXrm` in @spaarke/ui-components) finds it on a parent or top window.
  *
  * Per ADR-026: standalone HTML web resources use this pattern instead of
  * the PCF context.webAPI mechanism.
  */
 
-import { cleanGuid } from '@spaarke/ui-components';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-declare const Xrm: any;
-/* eslint-enable @typescript-eslint/no-explicit-any */
+import { cleanGuid, getXrm as getSharedXrm } from '@spaarke/ui-components';
 
 /**
- * Locate the Xrm global by walking the frame hierarchy.
- *
- * Priority: current window → parent window → top window.
+ * Locate the Xrm global (current window → parent → top).
  * Returns null if Xrm is not available (e.g., local dev server).
+ *
+ * Thin wrapper kept for this package's importers; delegates to the shared
+ * cross-frame walker (task 081 / C-8). It no longer writes `window.Xrm`.
+ * Named `getHostXrm` (was `getXrm`) so no second export shares the shared
+ * walker's name.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getXrm(): any | null {
-  // 1. Current window (direct embedding or test harness)
-  if (typeof Xrm !== "undefined" && Xrm?.WebApi) {
-    return Xrm;
-  }
-  // 2. Parent window (iframe in Custom Page)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi) {
-      // Expose on current window so child iframes can find it via
-      // window.parent.Xrm (general frame-walk pattern per ADR-026).
-      (window as any).Xrm = parentXrm;
-      return parentXrm;
-    }
-  } catch {
-    /* cross-origin — swallow */
-  }
-  // 3. Top window (nested iframes)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const topXrm = (window.top as any)?.Xrm;
-    if (topXrm?.WebApi) {
-      // Expose on current window so child iframes can find it
-      (window as any).Xrm = topXrm;
-      return topXrm;
-    }
-  } catch {
-    /* cross-origin — swallow */
-  }
-  return null;
+export function getHostXrm(): any | null {
+  return getSharedXrm() ?? null;
 }
 
 /**
@@ -62,7 +32,7 @@ export function getXrm(): any | null {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getWebApi(): any | null {
-  return getXrm()?.WebApi ?? null;
+  return getHostXrm()?.WebApi ?? null;
 }
 
 /**
@@ -70,7 +40,7 @@ export function getWebApi(): any | null {
  * Equivalent to PCF's context.userSettings.userId.
  */
 export function getUserId(): string {
-  const xrm = getXrm();
+  const xrm = getHostXrm();
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     // getUserId() returns GUID with braces: {xxxxxxxx-xxxx-...}

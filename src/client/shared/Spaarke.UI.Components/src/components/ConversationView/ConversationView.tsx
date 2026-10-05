@@ -81,6 +81,7 @@ import { MessageBubble } from './subcomponents/MessageBubble';
 import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
 import type { ConversationRenderItem, ConversationViewHandle, ConversationViewProps } from './ConversationView.types';
 import { thinScrollbarStyle } from '../../theme/scrollbar';
+import { daysBetweenLocalMidnight } from '../../utils/dateLocal';
 
 // ---------------------------------------------------------------------------
 // Styles (ADR-021 — semantic tokens only, no hardcoded colors)
@@ -600,13 +601,11 @@ function dayKey(date: Date): string {
 }
 
 function formatDayLabel(date: Date): string {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000);
+  // Calendar days between local midnights — the shared U5 helper (task 081).
+  const diffDays = daysBetweenLocalMidnight(date, new Date());
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
-  return startOfDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /**

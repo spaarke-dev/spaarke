@@ -36,6 +36,10 @@ module.exports = {
     // a file-scoped mapping resolves cleanly.
     '^@spaarke/ui-components/utils/adapters/oobModalSizes$':
       '<rootDir>/../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes',
+    // Same file-scoped pattern for the shared cross-frame Xrm walker
+    // (task 081 / C-8). xrmContext.ts has zero dependencies.
+    '^@spaarke/ui-components/utils/xrmContext$':
+      '<rootDir>/../../shared/Spaarke.UI.Components/src/utils/xrmContext',
     // Force a single React instance — mirror webpack.config.js. Without this,
     // jest resolves a second react copy from the shared lib's node_modules
     // and React-19 hooks throw "Cannot read properties of null (reading 'useState')".

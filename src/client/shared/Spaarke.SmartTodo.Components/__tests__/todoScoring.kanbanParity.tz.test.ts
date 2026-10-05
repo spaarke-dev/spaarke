@@ -30,6 +30,9 @@ process.env.TZ = 'America/New_York';
 // `SmartTodoWidget.test.tsx` / `Header.test.tsx` / `useKanbanColumns.test.ts`.
 jest.mock('@spaarke/ui-components', () => ({
   parseDueDate: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal').parseDueDate,
+  // task 081 (U5): bucketing now also uses the shared calendar-day helper.
+  daysBetweenLocalMidnight: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal')
+    .daysBetweenLocalMidnight,
 }));
 
 import { parseDueDate as canonicalParseDueDate } from '@spaarke/ui-components';

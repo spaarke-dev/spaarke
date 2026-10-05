@@ -10,6 +10,7 @@ import type {
   IFilePreviewServices,
   IOpenLinksResponse,
 } from '../../../../shared/Spaarke.UI.Components/dist/components/FilePreview';
+import { getXrm } from '../../../../shared/Spaarke.UI.Components/dist/utils/xrmContext';
 
 /**
  * Create an IFilePreviewServices adapter for the DocumentRelationshipViewer.
@@ -43,8 +44,8 @@ export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServi
 
     navigateToEntity: (params: { action: string; entityName: string; entityId: string; openInNewWindow?: boolean }) => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (window as any).Xrm;
+        // Shared cross-frame walker (task 081 / C-8).
+        const xrm = getXrm();
         if (xrm?.Navigation?.openForm) {
           xrm.Navigation.openForm({
             entityName: params.entityName,
@@ -65,8 +66,8 @@ export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServi
 
     copyDocumentLink: async (documentId: string): Promise<boolean> => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (window as any).Xrm;
+        // Shared cross-frame walker (task 081 / C-8).
+        const xrm = getXrm();
         const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
         const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${documentId}&pagetype=entityrecord`;
         await navigator.clipboard.writeText(url);

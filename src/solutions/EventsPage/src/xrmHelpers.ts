@@ -21,8 +21,13 @@
  * return the FIRST Xrm whose `App.sidePanes` is defined (the App.sidePanes
  * API is the only one EventsPage genuinely needs — `WebApi` and `Navigation`
  * are always there if `App.sidePanes` is).
+ *
+ * Deliberately NOT the shared `getXrm()` from `@spaarke/ui-components`: that
+ * walker accepts the first frame with `Xrm.WebApi`, this one the first with
+ * `Xrm.App.sidePanes` — a different contract. Renamed from `getXrm` by task
+ * 081 (C-8) so no two implementations share an exported name.
  */
-export function getXrm(): any | null {
+export function getSidePanesXrm(): any | null {
   const localXrm = (globalThis as any).Xrm;
   if (localXrm?.App?.sidePanes) {
     return localXrm;

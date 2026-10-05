@@ -43,6 +43,15 @@ Object.defineProperty(window, 'matchMedia', {
 // ---------------------------------------------------------------------------
 
 const mockXrm = {
+  // WebApi stub: the shared getXrm() walker (task 081 / C-8) only accepts a
+  // frame whose Xrm.WebApi is present, as in a real Dataverse host.
+  WebApi: {
+    retrieveRecord: jest.fn(),
+    retrieveMultipleRecords: jest.fn(),
+    createRecord: jest.fn(),
+    updateRecord: jest.fn(),
+    deleteRecord: jest.fn(),
+  },
   Navigation: {
     openForm: jest.fn(),
   },

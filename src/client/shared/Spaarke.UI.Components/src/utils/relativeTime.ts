@@ -1,93 +1,133 @@
 /**
- * relativeTime — locale-aware "N minutes/hours/days ago" formatting.
+ * relativeTime — "N minutes/hours/days ago" formatting for INSTANTS.
  *
  * Hoisted into `@spaarke/ui-components` (spaarke-ontology-platform-r1 task
- * 081 / C-13). Before this, the "format a timestamp as relative time" idiom
- * was independently reimplemented five times:
- *   - `Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx` (deleted by
- *     #1120, zero consumers — but the most-correct starting point: it used
- *     `Intl.RelativeTimeFormat`, guarded invalid dates, and handled future
- *     timestamps)
- *   - `src/solutions/LegalWorkspace/src/utils/formatRelativeTime.ts`
- *   - `src/solutions/LegalWorkspace/src/components/NotificationPanel/notificationTypes.ts`
- *   - `Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx`
- *   - `src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx`
- *     (`formatRelative`) and `.../workspace/ManageWorkspacesPane.tsx`
- *     (`formatModifiedOn`, which explicitly documented itself as "mirroring"
- *     the HistoryOverlay copy rather than sharing it)
+ * 081 / C-13). Before this, the idiom was independently reimplemented five
+ * times (LegalWorkspace `utils/formatRelativeTime.ts` and
+ * `NotificationPanel/notificationTypes.ts`, DailyBriefing `TldrSection.tsx`,
+ * SpaarkeAi `HistoryOverlay.tsx` and `ManageWorkspacesPane.tsx`). It starts
+ * from the deleted AI.Outputs `ChatSessionCard.tsx` version (62277d50a), the
+ * only one using `Intl.RelativeTimeFormat`.
  *
- * This implementation starts from the `ChatSessionCard.tsx` version
- * (62277d50a) and fixes its two documented weaknesses:
- *   1. Hard-coded `'en'` locale → resolves `navigator.language` (overridable
- *      via the `locale` param), so `Intl.RelativeTimeFormat` actually
- *      localizes for non-English users instead of always rendering English.
- *   2. Day/week/month buckets computed from elapsed 24h *periods* (`diffMs /
- *      86_400_000`) → now computed from CALENDAR-day differences via
- *      {@link daysBetweenLocalMidnight}. The elapsed-period version reads
- *      "yesterday at 11pm" as "10 hours ago" at 9am the next morning, instead
- *      of "yesterday" — the same local-midnight boundary bug `dateLocal.ts`
- *      exists to fix (task 084 / C-10's `todoScoring.ts` precedent). Sub-day
- *      buckets (second/minute/hour) stay elapsed-time based, since "how long
- *      ago" below a day genuinely is an elapsed-time question.
+ * NOT for date-only values. A Dataverse DateOnly column (e.g. a due date,
+ * `"2026-10-05"`) is a calendar day, not an instant: `new Date("2026-10-05")`
+ * is UTC midnight, i.e. the previous evening in every US zone, so an elapsed
+ * formatter would render a due date of today as "14 hours ago". Format those
+ * with a day-granular due label instead (`parseDueDate` from `dateLocal.ts`
+ * plus e.g. DailyBriefing's `formatDueDate`).
  *
- * Convergence note: the five former copies disagreed only in surface
- * FORMATTING (compact "Xm ago" vs prose "X minutes ago" vs a "Modified "
- * prefix vs a short calendar-date fallback for old items) — not in what a
- * caller needs ("how long ago was this"). None of that is a load-bearing
- * behavior difference, so callers that want their own prefix/suffix text
- * wrap this function's output (e.g. `` `Modified ${formatRelativeTime(iso)}` ``)
- * rather than reimplementing the date math. One exception was NOT cosmetic:
- * `LegalWorkspace/utils/formatRelativeTime.ts` returned `"just now"` for any
- * FUTURE timestamp (`diffMs < 0`) — including a due date days away — which
- * this function fixes by correctly rendering future dates via
- * `Intl.RelativeTimeFormat`'s "in N days" phrasing.
+ * ## Bucketing (what the function actually does)
+ *
+ * Let `elapsed` be |then - now|. Buckets are tried in this order:
+ *   1. elapsed < 60 s (past OR future) → "just now". Clock skew between the
+ *      server stamp and the browser must never read "in 3 seconds"; SpaarkeAi
+ *      FR-07 relies on "just now" for a freshly saved layout.
+ *   2. elapsed < 60 min → minutes, truncated ("1 minute ago" at 60-119 s).
+ *   3. elapsed < 24 h → hours, truncated ("23 hours ago" at 23h59m).
+ *      These sub-day buckets are ELAPSED-time based and run first, so
+ *      something stamped "yesterday at 11pm" reads "10 hours ago" at 9am —
+ *      not "yesterday".
+ *   4. Otherwise CALENDAR days between local midnights
+ *      ({@link daysBetweenLocalMidnight}), not elapsed 24h periods: something
+ *      stamped Saturday 11pm reads "2 days ago" at Monday 00:30 (25.5 h
+ *      elapsed), where 24h-period math would say "1 day ago".
+ *      |days| < 7 → days ("yesterday" / "tomorrow" in the long style).
+ *   5. |days| < 30 → weeks, ROUNDED (7-10 → 1, 11-17 → 2, 18-24 → 3,
+ *      25-29 → 4). Rounding rather than truncating keeps 13 days at
+ *      "2 weeks ago" and 28-29 days at "4 weeks ago".
+ *   6. |days| < 365 and rounded months < 12 → months (days / 30.4375, rounded,
+ *      minimum 1).
+ *   7. Otherwise → years (days / 365.25, rounded, minimum 1).
+ * Future instants use the same buckets with "in …" phrasing.
+ *
+ * ## Styles
+ *   - `'long'` (default): `Intl.RelativeTimeFormat` style `long`, numeric
+ *     `auto` → "5 minutes ago", "yesterday", "in 3 days", "last month".
+ *   - `'compact'`: style `narrow`, numeric `always` → "5m ago", "3h ago",
+ *     "1d ago", "2w ago", "2mo ago", "1y ago", "in 3d". This is the
+ *     abbreviated form the replaced feed / History / Tl;dr / Manage
+ *     Workspaces copies rendered for minutes, hours and days.
+ *
+ * ## Locale
+ * Defaults to `'en'`, NOT the browser language: every surrounding UI string
+ * is English, so a relative time must not switch language on its own
+ * ("Modified vor 5 Minuten"). Callers that localise their whole surface pass
+ * `locale` explicitly. "just now" is English-only; other locales get their
+ * own `Intl` "now".
  */
 
 import { daysBetweenLocalMidnight } from './dateLocal';
 
-/**
- * Format an ISO 8601 timestamp as a locale-aware relative-time string
- * (e.g. "5 minutes ago", "yesterday", "in 3 days", "2 months ago").
- *
- * Never throws: an unparseable `isoTimestamp` returns the input string
- * unchanged (mirrors the `ChatSessionCard.tsx` precedent) so a bad value is
- * visible instead of silently blank.
- *
- * @param isoTimestamp - ISO 8601 date string.
- * @param locale - BCP 47 locale tag. Defaults to `navigator.language` when
- *   available (browser contexts), falling back to `'en'` (e.g. Node/tests).
- *   Passing a locale explicitly never silently reverts to `'en'`.
- */
-export function formatRelativeTime(isoTimestamp: string, locale?: string): string {
-  const now = new Date();
-  const thenMs = new Date(isoTimestamp).getTime();
+/** Output style for {@link formatRelativeTime}. */
+export type RelativeTimeStyle = 'long' | 'compact';
 
+/** Options for {@link formatRelativeTime}. */
+export interface FormatRelativeTimeOptions {
+  /** BCP 47 locale tag. Default `'en'` (see module header). */
+  locale?: string;
+  /** `'long'` (default) or `'compact'` (see module header). */
+  style?: RelativeTimeStyle;
+}
+
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 3_600_000;
+const DAYS_PER_MONTH = 30.4375;
+const DAYS_PER_YEAR = 365.25;
+
+function createFormatter(locale: string, style: RelativeTimeStyle): Intl.RelativeTimeFormat {
+  const intlOptions: Intl.RelativeTimeFormatOptions =
+    style === 'compact' ? { style: 'narrow', numeric: 'always' } : { style: 'long', numeric: 'auto' };
+  try {
+    return new Intl.RelativeTimeFormat(locale, intlOptions);
+  } catch {
+    // Malformed locale tag (RangeError) — fall back rather than throw in render.
+    return new Intl.RelativeTimeFormat('en', intlOptions);
+  }
+}
+
+/**
+ * Format an ISO 8601 INSTANT as a relative-time string (e.g. "5 minutes ago",
+ * "yesterday", "in 3 days"; compact: "5m ago", "1d ago"). See the module
+ * header for the exact bucketing, styles and locale rules. Do not pass a
+ * date-only value (see module header).
+ *
+ * Never throws: an unparseable `isoTimestamp` is returned unchanged so a bad
+ * value is visible instead of silently blank.
+ */
+export function formatRelativeTime(isoTimestamp: string, options: FormatRelativeTimeOptions = {}): string {
+  const thenMs = new Date(isoTimestamp).getTime();
   if (Number.isNaN(thenMs)) {
     return isoTimestamp;
   }
 
-  const then = new Date(thenMs);
+  const locale = options.locale || 'en';
+  const style: RelativeTimeStyle = options.style || 'long';
+  const now = new Date();
   const diffMs = thenMs - now.getTime(); // negative = in the past
-  const diffSec = Math.round(diffMs / 1000);
-  const diffMin = Math.round(diffMs / (1000 * 60));
-  const diffHr = Math.round(diffMs / (1000 * 60 * 60));
+  const sign = diffMs < 0 ? -1 : 1;
+  const absMs = Math.abs(diffMs);
+  const rtf = createFormatter(locale, style);
 
-  const resolvedLocale = locale ?? (typeof navigator !== 'undefined' ? navigator.language : undefined) ?? 'en';
-  const rtf = new Intl.RelativeTimeFormat(resolvedLocale, { numeric: 'auto' });
+  if (absMs < MS_PER_MINUTE) {
+    return /^en\b/i.test(locale) ? 'just now' : rtf.format(0, 'second');
+  }
 
-  if (Math.abs(diffSec) < 60) return rtf.format(diffSec, 'second');
-  if (Math.abs(diffMin) < 60) return rtf.format(diffMin, 'minute');
-  if (Math.abs(diffHr) < 24) return rtf.format(diffHr, 'hour');
+  const absMinutes = Math.floor(absMs / MS_PER_MINUTE);
+  if (absMinutes < 60) return rtf.format(sign * absMinutes, 'minute');
 
-  // Calendar-day difference (local midnight to local midnight), not elapsed
-  // 24h periods — see module header.
-  const diffDays = daysBetweenLocalMidnight(now, then);
+  const absHours = Math.floor(absMs / MS_PER_HOUR);
+  if (absHours < 24) return rtf.format(sign * absHours, 'hour');
 
-  if (Math.abs(diffDays) < 7) return rtf.format(diffDays, 'day');
+  const days = daysBetweenLocalMidnight(now, new Date(thenMs));
+  const absDays = Math.abs(days);
+  // ≥ 24 h elapsed on the same calendar day only happens on a 25-hour DST
+  // day; stay in hours rather than render "today".
+  if (absDays === 0) return rtf.format(sign * absHours, 'hour');
+  if (absDays < 7) return rtf.format(days, 'day');
+  if (absDays < 30) return rtf.format(sign * Math.round(absDays / 7), 'week');
 
-  const diffWeeks = Math.trunc(diffDays / 7);
-  if (Math.abs(diffWeeks) < 4) return rtf.format(diffWeeks, 'week');
+  const absMonths = Math.max(1, Math.round(absDays / DAYS_PER_MONTH));
+  if (absDays < 365 && absMonths < 12) return rtf.format(sign * absMonths, 'month');
 
-  const diffMonths = Math.trunc(diffDays / 30);
-  return rtf.format(diffMonths, 'month');
+  return rtf.format(sign * Math.max(1, Math.round(absDays / DAYS_PER_YEAR)), 'year');
 }

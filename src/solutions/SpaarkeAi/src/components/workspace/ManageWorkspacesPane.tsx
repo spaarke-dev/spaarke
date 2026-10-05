@@ -172,7 +172,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES, formatRelativeTime } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, formatRelativeTime, getXrm } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -392,17 +392,15 @@ const useStyles = makeStyles({
 //     be redundant).
 //   - Unparseable / empty string → returns null. Defensive: don't render a
 //     broken date if the wire shape ever changes unexpectedly.
-//   - <60s ago → "Modified now" or "Modified N seconds ago" (FR-07 acceptance
-//     criterion: new layouts surface "just now" or near-equivalent relative
-//     time — satisfied by the shared formatter's `Intl.RelativeTimeFormat`
-//     "now").
-//   - older → "Modified {relative time}" (e.g., "Modified 5 minutes ago",
-//     "Modified yesterday", "Modified 2 months ago") via the shared
-//     `formatRelativeTime` (task 081 / C-13 — this previously hand-rolled its
-//     own minute/hour/day bucketing plus a locale-date fallback after 7 days,
-//     one of five independently reimplemented copies of the same idiom,
-//     explicitly noted below as "mirroring" the HistoryOverlay.tsx copy
-//     rather than sharing it).
+//   - |diff| < 60s (past or future, i.e. clock skew) → "Modified just now"
+//     (FR-07 acceptance criterion: new layouts surface "just now").
+//   - older → "Modified {compact relative time}" (e.g. "Modified 5m ago",
+//     "Modified 3h ago", "Modified 2d ago", "Modified 3w ago",
+//     "Modified 2mo ago") via the shared `formatRelativeTime` with
+//     `style: 'compact'` (task 081 / C-13 — this previously hand-rolled the
+//     same "Nm/Nh/Nd ago" form, mirroring the HistoryOverlay.tsx copy, with
+//     a locale-date fallback after 7 days that the shared formatter replaces
+//     with week/month/year buckets).
 // ---------------------------------------------------------------------------
 
 const UNIX_EPOCH_SENTINEL = 0;
@@ -414,7 +412,7 @@ function formatModifiedOn(iso: string): string | null {
   // Unix-epoch sentinel = "system layout, never modified" → no display.
   if (ts === UNIX_EPOCH_SENTINEL) return null;
 
-  return `Modified ${formatRelativeTime(iso)}`;
+  return `Modified ${formatRelativeTime(iso, { style: "compact" })}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,11 +425,9 @@ function formatModifiedOn(iso: string): string | null {
 // + templateFilter (task 102 — forces SpaarkeAi 6-template subset).
 // ---------------------------------------------------------------------------
 
-function getXrm(): unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  return w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
-}
+// Xrm is resolved via the shared cross-frame `getXrm()` from
+// `@spaarke/ui-components` (task 081 / C-8 — this file previously defined a
+// local `getXrm` with its own window/parent/top `??` chain).
 
 async function launchEditWizard(
   layout: WorkspaceLayoutDto,
