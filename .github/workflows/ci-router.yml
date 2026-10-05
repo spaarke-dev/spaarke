@@ -296,6 +296,9 @@ jobs:
       # i.e. repo-wide. Root cause was tier2's 6-minute unit-test budget (raised
       # to 30 in ci-tier2-advisory.yml in the same change), but the gate must
       # survive ANY future tier2 cancellation source, not just that one.
+      # (2026-10-05: the suite outgrew 30 minutes too — 48m50s for the BFF
+      # assembly alone — so tier2 now runs it as four parallel shards; see
+      # `full-unit-tests-shard` in ci-tier2-advisory.yml.)
       #
       # tier2 stays in `needs:` so the Router still sequences after it and the
       # decision summary below still reports its real result.

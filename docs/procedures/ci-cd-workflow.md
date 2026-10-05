@@ -526,7 +526,7 @@ Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compo
 |-----|---------|
 | `format` | `dotnet format whitespace --verify-no-changes` |
 | `lint` | Prettier (`src/client/**/*.{ts,tsx}`) + ESLint (`src/client/pcf`) |
-| `full-unit-tests` | The repo's one full-suite run (two-pass: all tests, then retry only pass-1 failures); Debug only (`FR-B07`); 30-min timeout as a runaway guard |
+| `full-unit-tests` | The repo's one full-suite run, as four parallel shards (`full-unit-tests-shard`: `api-office`, `api-insights-integration`, `api-seam`, `rest`; `rest` is the complement of the others, so every test runs exactly once). Each shard is two-pass (all tests, then retry only pass-1 failures); the `full-unit-tests` job aggregates the shard verdicts, and a shard with no verdict counts as a failure. Debug only (`FR-B07`); 40-min timeout per shard as a runaway guard (expected ~18 min) |
 | `adr-compliance` | The full NetArchTest suite again (non-blocking copy of Tier 1's `arch-tests`) |
 | `markdown-link-validator` | `scripts/validate-markdown-links.ps1` (short-circuits with a notice if the script is absent) |
 | `last-reviewed-stamp` | Verifies touched `.claude/skills/*/SKILL.md`, `.claude/constraints/*.md`, `docs/standards/*.md`, `docs/architecture/*.md`, `docs/procedures/*.md` carry a `Last Reviewed` stamp ≤ 365 days old |
@@ -836,7 +836,7 @@ gh run rerun {previous-run-id}
 | `tenant-isolation` | Tier 1 | An I1–I5 invariant broke (treat as a security incident, not a flake) | Run `dotnet test ... --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation"` locally |
 | `compose-fidelity-gate` | Tier 1 | A Compose corpus document round-trip lost fidelity | Download the `fidelity-gate-result` artifact for the per-document breakdown |
 | `format` / `lint` (Tier 2) | `ci-tier2-advisory.yml` | Formatting/lint violation | `dotnet format whitespace`; `npx prettier --write "src/client/**/*.{ts,tsx}"`; `cd src/client/pcf && npx eslint . --fix` |
-| `full-unit-tests` (Tier 2) | `ci-tier2-advisory.yml` | A unit test failed on both pass 1 and the pass-2 retry | Download the `tier2-unit-test-results-Debug` artifact |
+| `full-unit-tests` (Tier 2) | `ci-tier2-advisory.yml` | A unit test failed on both pass 1 and the pass-2 retry | Download the `tier2-unit-test-results-Debug-<shard>` artifact of the shard that failed |
 | legacy `security-scan`/`build-test`/`client-quality`/`code-quality` | `sdap-ci.yml` | Same classes as above, legacy job names | These no longer gate the merge (superseded by `CI / Router`), but a real red is still worth fixing |
 
 ### Viewing CI Logs
