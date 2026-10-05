@@ -1502,6 +1502,11 @@ INSIDE an incomplete H8 that names it in the run and will bind or remove it. Rec
 `projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md` (rewritten: "Observed, not
 changed" → "FIXED").
 
+> **CORRECTED in §14.1 (owner round 49 item 2).** The paragraph above held for the in-memory run only. The record named the
+> root container in the T6 gate's `JsonElement` evidence, which the Cosmos SDK's Newtonsoft serializer stores as
+> `{"valueKind":1}` — in production every re-entry found only the type, created a SECOND root container and left the first
+> UNBOUND. The record is now typed (`InterStepState.SpeContainerCreation`); see §14.
+
 **Docs corrected (verifier item 2):** note D19 (§12.15, the false claim marked and corrected), §12.16, the onboarding
 guide (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`: H8 row, the DAG — `H8 → H7`, the binding paragraph now explains the record
 and the resume, "only a bound container is handed to H7" is now true), the topology doc (the creation bullet names the
@@ -1705,7 +1710,10 @@ flagged shapes plus the passing forms (§13.5 b), so a regression in an analyser
 script, given `"spe-owning-app-x\n"` as `-SecretName` on dev (read-only), proceeds to its dry run (exit 0); unseeded it
 refuses before anything is read (exit 2). RED.
 
-### 13.9 Manual gates (main session; dev; live writes only with the owner's approval) — the CURRENT list
+### 13.9 Manual gates (main session; dev; live writes only with the owner's approval) — SUPERSEDED by §14.9
+
+> §14.9 is the current list: gate (d) as written here expected evidence fields that were not persisted (round 49), and
+> round 49 item 1 adds gate (e) (the operator-environment marker).
 
 From the repo root, `az login` as an operator who can read Dataverse and the vaults:
 
@@ -1790,9 +1798,13 @@ removed afterwards. `dotnet list … package --vulnerable --include-transitive` 
 
 - **D25 — H8's creation record is H8's own existing state** (`InterStepState.ContainerTypeId` + the T6 gate naming the root
   container), not a new `interStepState` key (design.md §6.2 locks the keys) and NOT the H7 hand-off. The pre-round-41
-  pending path wrote exactly these fields, so its runs resume without a shim.
+  pending path wrote exactly these fields, so its runs resume without a shim. **SUPERSEDED by D33 (round 49 item 2): the
+  gate's evidence did not survive Cosmos, so the "existing state" was not a record at all in production; and the
+  pre-round-41 runs' evidence was lost too — their record is `SpeContainerId`, moved at (5a).**
 - **D26 — the record is persisted immediately after creation**, before verification: only then can no failure, wait,
   crash or lost write make a re-entry create again. A creation that cannot be recorded is quarantined with both ids.
+  **Corrected by D34: "persisted" was true of the in-memory fake only; the record is now typed and the tests persist through
+  the production serializer. A fault with no answer is now recorded too (D35).**
 - **D27 — H7 depends on H8 in the DAG** (and checks H8's completion itself): H7 writes H8's container, which H8 hands off
   only once bound. During the replication wait H7, H10 and what follows wait; H9 and the other branches advance.
 - **D28 — unbound containers are in no dashboard view** (round 41 item 2; reverses D18). "Unattributed" = bound to this
@@ -1800,7 +1812,10 @@ removed afterwards. `dotnet list … package --vulnerable --include-transitive` 
 - **D29 — the Graph-total rule is ONE method** used by both searches, and the container search's response builder is
   proven directly — a host test cannot bite while the containers collection reports no total.
 - **D30 — the creation guard fails closed on what it cannot judge** (a held builder, an unresolvable POST URI in a script
-  that names the collection), and no binder-less language may name the collection at all.
+  that names the collection), and no binder-less language may name the collection at all. **REWORDED by D37 (round 49
+  item 2): as written this was not true — five shapes passed (an absolute URL whose `//` the comment stripper ate, a
+  class-level constant, a generic `PostAsJsonAsync<T>`, a cross-file PowerShell variable, `-Meth Post`). §14.3 states
+  exactly what the guard now judges and what it cannot.**
 - **D31 — the PowerShell secret-name rule is ONE module**, and every script that reads a config's secret judges the name
   first (the backfill did not).
 - **D32 — the endpoint's format check keeps `$`**: the policy (`\z`) runs right after it and decides; tightening the format
@@ -1810,3 +1825,420 @@ removed afterwards. `dotnet list … package --vulnerable --include-transitive` 
 
 Only the manual live gates of §13.9 (live writes: the config repair with a minted credential, the backfill `-Apply` /
 `-Bind`; the post-deploy probes; the next real L2 run) and f1's §11.16 (i)/(k). Nothing is deferred to another project.
+
+## 14. Follow-up round f2-v2 — owner round 49 (the re-verification of `task/uac-r2-165-f2-v1`) (2026-10-05)
+
+### 14.0 How the round reached the branch
+
+- Branch **`task/uac-r2-165-f2-v2`** from `task/uac-r2-165-f2-v1` @ `a25463b55` (the name was free). No push, PR or merge.
+- No `NOTE-FROM-MAIN.md`. Binding inputs: owner/main-session rounds 1-50 read from `work/unified-access-control-r2`.
+  **Round 49** is the main session's decision on this task's f2-v1 re-verification: item 1 (tenant-/type-wide routes only
+  in a Spaarke operator environment — §14.4) and item 2 (the verifier's criteria — §14.1-§14.3, §14.5). The verifier's
+  items map: 1, 8, 9 (H8 record lost in Cosmos) → §14.1; 2, 9 (non-OData faults) → §14.2; 3, 11 (guard holes) → §14.3;
+  10 (docs) → §14.5; 4-7 verified, nothing to do.
+- `.claude/**`: no edit needed (no `.claude` file names H8's record, the gate-evidence converter, the creation guard or the
+  operator marker).
+- 167 still not landed on this branch: amendment 3 — no waiver / ledger / GovernedFiles edits. No route added, renamed or
+  deleted; eight routes changed mechanism (§14.10).
+
+### 14.1 Verifier item 1 (HIGH) — the H8 resume record survives the production Cosmos serializer
+
+**Confirmed from code, exactly as reported.** `CosmosModule` builds the `CosmosClient` with
+`CosmosSerializationOptions { CamelCase }` and no custom serializer, so runs are persisted by the SDK's Newtonsoft-based
+default. `GateEntry.Evidence` is a `System.Text.Json.JsonElement?`; Newtonsoft writes the struct's one public property —
+`{"valueKind":1}` — and reads that back as a DEFAULT element (`ValueKind` Undefined). Measured through the SDK's own
+serializer (`BuildCosmosClient(…).ClientOptions.Serializer`, the production instance — not an equivalent): the evidence
+stored is `{"valueKind":1}`; `ReadRecordedCreation` returned (type, `b!root`) before the round trip and (type, null) after.
+Every re-entry therefore created a second root container and left the first unbound — round 41 item 1 was not met in
+production. The H8 tests passed only because their `FakeRepository` handed back the in-memory object.
+
+**Two further losses of the same root cause, found by this round's production-serializer test and fixed (scope found —
+the POML's "scope discovered during execution is added to this task"):**
+1. **Every gate's evidence** was lost the same way, and a run read back from Cosmos could not be serialized: STJ throws
+   `InvalidOperationException` writing an Undefined `JsonElement`, so **`GET /api/runs/{id}` failed for every run that had
+   passed a gate with evidence** (measured: STJ throws on the round-tripped run).
+2. **Dictionary keys were camel-cased.** The SDK's camelCase option is Newtonsoft's `CamelCasePropertyNamesContractResolver`
+   (`ProcessDictionaryKeys = true`): `HandlerRetryAttempts["H9"]` persisted as `"h9"`, so `HandlerOutcomeApplier` read 0 and
+   re-sent attempt 1 on every auto-retry — the same MessageId, which Service Bus duplicate detection drops (task 107's
+   counter never counted); `RunParameters.NonSecret` ("persisted verbatim") was not, for an upper-case key.
+
+**The fix (L2):**
+
+| Where | Change |
+|---|---|
+| `Models/SpeContainerCreationRecord.cs` (new) + `InterStepState.SpeContainerCreation` | H8's record as TYPED fields: `rootContainerId`, `additionalContainerIds`, `containerTypeInDoubtSince`, `rootContainerInDoubtSince`, `owningBusinessUnitId` (completion), `status`, `updatedAt`. The type stays `InterStepState.ContainerTypeId`. Round 49: "persisted as typed fields — never as JsonElement evidence". |
+| `H8SpeContainerTypeHandler.ReadRecordedCreation` | Reads ONLY the typed fields (an ArchTest forbids `Evidence` / `JsonElement` in it). |
+| (5a) `AdoptPreRound41HandOff` | A pre-round-41 run's evidence was lost too; its only record of the root container is the (unbound) `SpeContainerId` it wrote. That id is MOVED into the typed record (as the root, or as a further container to bind when the record names a different root) and withdrawn, before any write of the entry. |
+| `RecordCreationAsync` / `ApplyCreationRecord` / `MarkWaitingOnGateAsync` / `MarkCompleteAsync` | Write the typed record (completion: `status = bound`, `owningBusinessUnitId`); the record write uses `CancellationToken.None` (something was created). The merge-over-a-concurrent-write rule now refuses a document naming another type OR another root container than the one this entry started from. A bind that REMOVED the root container is recorded through this merge-safe write (before: a plain write a conflict could lose, leaving a deleted container on record — whose 404 reads as the replication wait). |
+| `Models/NewtonsoftJsonElementConverter.cs` (new) on `GateEntry.Evidence` | Evidence is written as its JSON and read back as that JSON (date-shaped strings stay strings). Old documents read back as `{"valueKind":1}` — a valid object. Evidence is the operator's record; nothing resumes from it. |
+| `Models/NewtonsoftVerbatimKeysDictionaryConverter.cs` (new) on `GateStates`, `HandlerRetryAttempts`, `RunParameters.NonSecret`/`.Secrets` | Keys persist verbatim; `HandlerRetryAttempts` compares case-insensitively so a run stored before the fix (`"h9"`) still counts. |
+| `Modules/CosmosModule.BuildCosmosClient` (internal) | THE construction of the client; DI calls it; tests take its `ClientOptions.Serializer` as the production serializer (building opens no connection). |
+| Tests | `Models/ProductionCosmosSerializer` (test helper over that serializer); the H8 `FakeRepository` stores the JSON the production serializer writes and every read deserializes a fresh run — the verifier's proof (AC30, AC31, AC32, AC35, AC36 red under round-41 code) is now the suite's own: seed L1 (the record field not persisted) reddens 17 tests. |
+
+### 14.2 Verifier item 2 (MEDIUM) — no fault after the container type exists leaves an orphan type or an unbound root
+
+**Confirmed:** `CreateAsync` caught only `ODataError`; an `HttpRequestException` (or `LinkedTimeout`'s
+`OperationCanceledException`, which the handler's `when (ex is not OperationCanceledException)` did not catch either)
+escaped after the type was created, the handler recorded nothing and called it "no confirmed external side effect", and a
+resume created a second undeletable type. A container POST that timed out after Graph created the container left it
+unrecorded and unbound.
+
+**The fix:**
+- **`GraphContainerTypeProvisioner.CreateAsync`** tracks the Graph call in flight and returns EVERY fault as a `Failure`,
+  never an exception: an `ODataError` is Graph's own answer (nothing in doubt); anything else — a dropped connection, a
+  client-side timeout, the caller's cancellation, a 2xx without an id — marks the write in flight
+  `ContainerTypeInDoubt` / `RootContainerInDoubt` and reports the type it created. `ProvisionAsync` can now throw only
+  before any Graph call (cert load), which the handler's diagnostic says.
+- **A resume with a recorded type** LISTS the type's containers (`$filter=containerTypeId eq …`, every page; a 404 — the
+  type not visible yet — is "none") and **adopts** one already there (the oldest; `Adopted`) instead of creating another;
+  the others (`AdditionalContainerIds`) are bound to the same root unit — or removed — in the bind step (7d), before the KV
+  write; one that is neither stays on record and quarantines the run. A failed list creates nothing (Resumable).
+- **A root container in doubt** (`rootContainerInDoubtSince`): within the replication window (`RootContainerInDoubtWindow`
+  = 24h) the provisioner creates nothing while the type lists no container (`RootContainerNotYetVisible` → WaitingOnGate);
+  after it, a container that never appeared was not created, and one is created.
+- **A container TYPE in doubt** (`containerTypeInDoubtSince`, no type recorded): QuarantineRequired
+  `spe-container-type-creation-in-doubt` (new code), and H8 creates no type — the owning app cannot LIST container types
+  app-only (403) and cannot delete one, so only an operator with a DELEGATED SharePoint Embedded admin token can tell. The
+  diagnostic is the procedure: `GET /storage/fileStorage/containerTypes`, look for the owning app; record a type found in
+  `interStepState.containerTypeId` (H8 then creates only a root container in it); clear the quarantine — the clear
+  (`ClearedAt` after the in-doubt time, H8's quarantine) is the confirmation, and a re-delivered dispatch before it creates
+  nothing.
+- **`BindNewContainerAsync`**: a DELETE answering 404 is "removed" (the container is gone), so a resume never loops on
+  binding a container that no longer exists.
+
+### 14.3 Verifier items 3 / 11 — the creation guard's five surviving shapes, and D30 made true to what is enforced
+
+All five bite now — as seeded snippets in the analyser tests AND as real files (seeds A1-A5, §14.8):
+
+| Shape | Why it passed | What the guard does now |
+|---|---|---|
+| Absolute URL in a C# raw POST (`"https://graph…/fileStorage/containers"`) | `StripComments` (`//[^\n]*`) erased everything after `https:` | A small C# LEXER (`LexCSharp`): regular, verbatim, interpolated (nested holes), raw (`"""`, `$$` holes) and char literals, line and block comments. A `//` inside a string is not a comment; comments are blanked with offsets kept. |
+| The URL in a class-level `const`, POSTed from a method | `EnclosingMethodBody` found no method around a field | Files are split into MEMBERS (`ParseMembers`: methods, ctors, properties, fields, constants, top-level statements as ONE body). A member holding a collection literal that does not POST but PROVIDES it as a value — a field / constant / property, or a method that is expression-bodied or RETURNS it — is a provider; every member in ANY file referencing a provider's name holds the collection too (to a fixpoint). |
+| `PostAsJsonAsync<object>(url, …)` | the generic argument defeated `CSharpPostSignal` | the POST signal accepts balanced generic arguments. |
+| A PowerShell URL variable defined in a dot-sourced helper | the posting script never named the collection | each script's context includes the files it dot-sources / imports (`. (Join-Path $PSScriptRoot '…')`, `. "$PSScriptRoot/…"`, `Import-Module ./…`, resolved and recursive); and a variable ANY script assigns the bare collection URL is the collection wherever it is used unassigned. |
+| `-Meth Post` | `-Method` was matched literally | any `-Me…` / `-Cu…` prefix (PowerShell binds an unambiguous prefix: `-Me` is `-Method`, `-Cu` `-CustomMethod`), `-Ur…` for `-Uri` (with a space or a colon), and an HttpClient `.PostAsync(`. |
+
+Also closed while there: a `using var r = await http.PostAsync("…/containers", c);` statement was blanked as if it were a
+using DIRECTIVE (only directives are now blanked); a collection URL spelled outside any member is OPAQUE; a holder that
+CALLS a member that POSTs (the URL passed along) is a create; a path that is just `"/containers"` / `$"{base}/containers"`
+in a file whose strings name fileStorage is the collection (the C# twin of the PowerShell `"$base/containers"` rule).
+Test projects (`*.Tests` under `src/`) are not scanned — they drive fake Graph transports that POST to the collection; the
+guard never scanned `tests/`.
+
+**D30, reworded to exactly what is enforced (D37):** the C# guard judges every `.cs` file under `src/` outside test
+projects: (1) every SDK `FileStorage` builder must chain straight into a member, and the containers COLLECTION builder only
+into `.GetAsync(` / `.PostAsync(` (optionally via `.WithUrl(…)`) — held, passed or constructed is refused; (2) a member
+that carries the collection URL — a string literal spelling `…fileStorage/containers` (or `/containers` alone in a file whose
+strings name fileStorage), or a reference to a member that provides it as its value, in any file — and POSTs, or calls a
+member that POSTs, is a create; (3) every create must call `BindNewContainerAsync(` in the same member, or be the verified
+H8 deferred binder; a collection URL outside any member is refused. The PowerShell guard judges every `.ps1`/`.psm1` under
+`scripts/` and `src/`: in a script that names the collection — itself, through a file it dot-sources, or through a variable
+some script assigns it — every POST whose URI is not provably another endpoint is a create, and must be followed by
+`Invoke-SpeContainerBindOrRemove` in the same function with the binding module dot-sourced; the Graph SDK cmdlet is a create
+anywhere. No other language under `src/` or `scripts/` may name the collection. **What the guard cannot see** (stated, not
+claimed): a URL assembled at run time from fragments none of which spells the collection (`…fileStorage/containers`, or
+`/containers` alone in a file that names fileStorage); a POST whose verb is not spelled in the member that carries the URL
+nor in a `src/` member it calls (an HTTP method read from configuration, a third-party client's own method name);
+reflection, dynamic dispatch, `Invoke-Expression`, code generated at build time. Each of those would need the collection
+spelled nowhere the guard reads — which is why the binder-less-language bans and the per-script fail-closed rule remain.
+
+### 14.4 Round 49 item 1 — tenant-wide and type-wide SPE admin routes only in a Spaarke operator environment
+
+- **`SpeAdminOptions.PlatformOperatorEnvironment`** (the existing options class, existing `ValidateOnStart` chain): default
+  `false`; a non-boolean value stops the host at startup (test).
+- **`SpeAdminTenantScopeFilter`** (the existing group filter; no new filter): a route marked `SpeAdminPlatformOperatorOnly`
+  (security alerts, secure score) OR `SpeAdminContainerTypeScope` (container-type permissions, consumers ×4, register) is
+  refused FIRST — with the deployment flag read before any I/O — unless the deployment is a Spaarke-operated environment
+  AND the caller's own business unit is the root: ONE `403 spe.admin.deny.platform_operator_required` for every other
+  caller (a customer environment's root admin; a leaf admin anywhere), nothing read. The existing type rule then still
+  requires the type to be the config's own and every config of it reachable (round 35 item 5's every-config rule keeps a
+  reach for a root admin: a config whose unit is outside the hierarchy — test).
+- **The other routes** whose answer could be read as tenant-wide were inventoried: every remaining `/api/spe` route is
+  per-config / per-container (trimmed by binding) or per-environment (this environment's Dataverse rows); the delegated
+  container-type routes (list / get / create types, settings, owners) act with the CALLER's own token — Graph authorizes them
+  by the caller's SharePoint Embedded administrator role and the BFF lends no identity — so they are not gated (recorded in
+  the topology doc).
+- **Deployment surface:** `model2-full.bicep` `param speAdminPlatformOperatorEnvironment bool = false` (the setting is
+  emitted only when true — a customer stamp does not carry it at all; compiled `model2-full.json` regenerated);
+  `dev.bicepparam` sets it true. `config/environments.json`: `dev` declares `speAdminPlatformOperatorEnvironment: true`, the
+  `_template` (customer) `false`. `scripts/Deploy-BffApi.ps1` (pre-deploy): declared true → the App Service setting is made
+  true on the slot(s) it deploys to (a swap carries it); declared false/absent and a live `true` → the deploy FAILS (a
+  customer environment must never carry it). `SpeAdminOperatorEnvironmentMarkerGuardTests` (ArchTest): the marker is named
+  only by the BFF and this deployment surface (never by the L2 control plane, the canonical app-settings catalog, the
+  customer / Model 1 Bicep), the registry declares it only for `dev`, the stack defaults to false and only `dev.bicepparam`
+  sets it.
+- **Docs:** topology doc (the routes, the marker, customer environments never carry it, the delegated routes) and the
+  customer deployment guide §6.5.4.
+- **Not decided here — named for the main session:** which environment is "Spaarke's own operator environment". Only `dev`
+  is known to be Spaarke-operated; the stopped `spaarke-bff-prod` ("demo" in `config/environments.json`) is the candidate.
+  Until it is named, it does not carry the marker (fail closed: its tenant-/type-wide routes refuse). Gate (e) carries the
+  exact change.
+- Observed, not changed (another project's): `az bicep build-params` on `dev.bicepparam` fails BCP332 on
+  `customerId = 'spaarkedev1'` (11 > the 8-char standard of `3293ee421`) — pre-existing on the base; the file's own header
+  says this stack does not describe the running dev environment.
+
+### 14.5 Verifier item 10 — the docs now say what the code does
+
+§13.1 (correction box), D25, D26, D30 (marked, superseded by D33-D37), the onboarding guide (H8 row; §7.5 "The replication
+wait and every other resume" rewritten: typed record, list-and-adopt, in-doubt handling, the operator procedure; change
+log), the topology doc (the H8 creation bullet; the guard's shapes), and
+`projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md` (round 49 header, the change
+table, the tests, a "Correction (round 49)" section saying what the code still cannot see, gate (d) reads the typed
+record). Gate (d) is rewritten in §14.9.
+
+### 14.6 Placement (CLAUDE.md §10) and new surface (CLAUDE.md §11)
+
+**Placement:** BFF — on existing surfaces only: the existing `/api/spe` group filter (`SpeAdminTenantScopeFilter`), the
+existing options class (`SpeAdminOptions`, existing `ValidateOnStart` chain), a doc comment on `SecurityEndpoints`. No new
+endpoint, filter class, policy, service, DI registration, job, package, Dataverse column or plugin (ADR-002). ONE new option
+member, `SpeAdmin:PlatformOperatorEnvironment`, decided by round 49 item 1 ("a BFF DEPLOYMENT setting … validated at
+startup … default false"). No AI type touched (ADR-013). L2 — H8's existing handler and provisioner seam, L2's existing
+models and `CosmosModule`. Deployment surface — the existing Bicep stack, `config/environments.json`,
+`scripts/Deploy-BffApi.ps1`. No csproj / props / package change (BFF, L2 or tests).
+
+| New | Existing (grep evidence) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `SpeContainerCreationRecord` + `InterStepState.SpeContainerCreation` | the T6 gate's evidence (lost in Cosmos); `SpeContainerId` (H7's hand-off — must never hold an unbound container); `ContainerTypeId` (type only) | a controlled extension of the existing enumerated `InterStepState` (the `ImportedSolutions` / `SpeContainerId` precedent); no existing typed field can carry an unbound root, further containers and in-doubt markers | every H8 resume creates a second root container and leaves the first unbound (verifier item 1; seed L1: 17 red) |
+| `NewtonsoftJsonElementConverter` | none — `grep JsonConverter` over `Models/`: only `StringEnumConverter` | an attribute on the existing property | every gate's evidence is `{"valueKind":1}` in Cosmos and `GET /api/runs/{id}` throws on a read-back run (seed L2: 7 red) |
+| `NewtonsoftVerbatimKeysDictionaryConverter<T>` | none | attributes on the existing dictionary properties | the retry counter never counts (`"H9"` → `"h9"`), every auto-retry is dropped as a duplicate; run-parameter keys lowered (seeds L15, L16) |
+| `CosmosModule.BuildCosmosClient` (internal) | the inline builder in `AddCosmosModule` | extraction of the same code | the tests cannot use the production serializer — the reason item 1 went unseen |
+| provision request `RootContainerCreationInDoubt`; outputs `AdditionalContainerIds`, `Adopted`; failure `ContainerTypeInDoubt`, `RootContainerInDoubt`; outcome `RootContainerNotYetVisible` | the provisioner seam's records (`ISpeContainerTypeProvisioner`), ONE implementation + the tests' fake | members of the existing records / one case of the existing outcome union | an orphan undeletable type or an unbound root after a fault with no answer (verifier item 2; seeds L6-L11, L18) |
+| `GraphContainerTypeProvisioner.ListContainersOfTypeAsync` (private) | the BFF's `SpeAdminGraphService.ListContainersPageAsync` (another assembly — L2 cannot reference the BFF) | private step of the existing `CreateAsync` | a resume cannot adopt a container created by a lost answer (seed L9) |
+| code `spe-container-type-creation-in-doubt` | `SpeContainerTypeRejectionCodes` | one constant in the existing class | a type that may exist is created again — undeletable, capped per tenant (seed L5) |
+| H8 `AdoptPreRound41HandOff`, `QuarantineClearedSince`, `ContainerTypeInDoubtDiagnostic`, `BindAdditionalContainersAsync`, `ApplyCreationRecord`, records `CreationUpdate` / `RecordedCreation`, `RootContainerInDoubtWindow` | the handler's own record/resume steps | handler-private | pre-round-41 runs lose their container (L3); adopted containers stay unbound (L12); the in-doubt rules cannot be applied |
+| `SpeAdminOptions.PlatformOperatorEnvironment` | `SpeAdminCallerScope.IsPlatformOperator` (root of THIS environment — every Model 1 customer has one) | a member of the existing options class (not a new options class) | a customer's root admin reads the whole tenant's security data and every customer's consuming apps of a shared type (round 49 item 1; seeds B1-B6) |
+| `SpeAdminTenantScopeFilter.RequireSpaarkeOperatorAsync`, `SpaarkeOperatorRequiredDetail`, ctor parameter | `RequirePlatformOperatorAsync` (kept, reused) | one private step in the existing filter | as above |
+| Bicep `speAdminPlatformOperatorEnvironment`; `environments.json` key; `Deploy-BffApi.ps1` pre-deploy block | the stack's `appSettings`; the registry's per-environment keys; the deploy script's CORS gate (the precedent) | parameters / keys / a step of the existing surfaces | round 49 requires the marker set "through the deployment scripts and Bicep"; without the check a customer environment could carry it unnoticed |
+| test helpers: `ProductionCosmosSerializer`; fixtures `AdminSurfaceCustomerEnvironmentHostFixture` / `…Unmarked…` / `…MalformedMarker…` (subclasses of the existing host) | `AdminSurfaceHostFixture` (unsealed, one virtual property) | subclasses | the marker's three states are unprovable through the real host |
+| ArchTest `SpeAdminOperatorEnvironmentMarkerGuardTests` | `CorsOriginRegistryTests` (registry precedent) | new guard class | customer provisioning could start emitting the marker unseen (seeds A12-A14) |
+
+**Complexity (§11.5):** `H8SpeContainerTypeHandler` grew by its own record/resume steps (one responsibility: drive H8's
+creation to a bound, persisted container exactly once, through every fault); `GraphContainerTypeProvisioner.CreateAsync`
+grew by the list-and-adopt step and the fault classification of the same calls. The creation guard grew a lexer and a member
+parser — test code, one responsibility (find every route to the collection).
+
+### 14.7 Tests added / changed this round — one-line justifications (test-scope criterion)
+
+All L2 tests: handler tests with hand-written fakes, the provisioner over a hand-written fake Graph transport, the
+serializer tests over the production serializer. BFF tests through the real host. No `Mock<HttpMessageHandler>`, no
+DI-registration test, no constructor null-check test (ADR-038).
+
+- **L2 `H8SpeContainerTypeHandlerTests`**: the `FakeRepository` persists through the production serializer (fresh object per
+  read; `StoredJson`; `Mutate` for an operator's write); AC22 asserts the typed record; AC35 uses the document a
+  pre-round-41 run really has (`{"valueKind":1}` evidence); AC36 typed + legacy; AC40 asserts the moved record; **AC41-AC50**
+  (§ customer-provisioning note): the record is typed in the stored JSON; root POST with no answer → recorded, the resume
+  waits; past the window → creates; adoption binds root + further containers before the hand-off; a further container
+  neither bound nor removed quarantines and is bound on resume; type in doubt → quarantined, a re-delivered dispatch creates
+  nothing, only the operator's clear lets a type be created; a type the operator recorded is resumed; a pre-round-41
+  hand-off next to a different typed root is bound too; a removal record survives a concurrent write; an unrecordable
+  in-doubt record is quarantined.
+- **L2 `GraphContainerTypeProvisionerBindTests`** (+10, one changed: the reuse test now lists the type first): the
+  verifier's probe (HttpRequestException on the root POST) → Failure with the type and the container in doubt; a
+  client-side timeout and the caller's cancellation → the same; a type POST with no answer (drop / 2xx without id) → type
+  in doubt; an `ODataError` → nothing in doubt; adoption of one / several across pages (oldest first); in-doubt root not
+  listed (200 empty / 404) → `RootContainerNotYetVisible`; a failed list creates nothing; a DELETE 404 is "removed".
+- **L2 `Models/ProvisioningRunProductionSerializerTests`** (8): fully-populated run round-trips unchanged; evidence
+  survives; a read-back run serializes for GET; a pre-converter document reads back; the typed record survives; the retry
+  counter keeps `"H12b"`; a legacy `"h9"` still counts; run-parameter keys verbatim.
+- **BFF `SpeAdminOperatorEnvironmentMarkerTests`** (4 classes, 34 cases): customer environment (marker false) — a root
+  admin gets the uniform 403 on all 8 routes, nothing read, not even `systemusers`; marker missing — the same; operator
+  environment — a leaf admin gets the 403 on all 8, a root admin reaches all 8 handlers; exactly these 8 routes carry the
+  rule; a non-boolean marker stops the host at startup.
+- **BFF changed**: `SpeAdminPerContainerScopeTests` (leaf admins on type routes now get the operator 403; the type-not-found
+  rule judged for a root admin; NEW `ARootAdmin_OnATypeAConfigOutsideTheHierarchyAlsoCarries_IsStill403Shared` keeps round
+  35 item 5's every-config rule provable; the leaf "passes the type rule" test is now its refusing counterpart);
+  `SpeAdminConfigSecretNameTests` (the type-wide route proven for a root admin — NEW
+  `ATypeWideCredentialRoute_ForARootAdminOfAnOperatorEnvironment_…_Is409`); `SpeAdminConfigAndBulkTenantScopeTests` (the
+  register host check judged for a root admin, and the positive test now asserts no SPE admin rule refused it — it had
+  passed vacuously). `AdminSurfaceHostFixture` starts as an operator environment (dev); three subclasses.
+- **ArchTests `SpeAdminContainerBindingGuardTests`**: lexer + member parser + providers + generic POST + PowerShell
+  includes / collection variables / abbreviations (§14.3); seeded snippets: +7 C# (absolute URL, class-level constant,
+  generic POST, URL from a helper, relative to a base, `using` declaration, top-level statements; strings-are-not-comments
+  and a nextLink caller that POSTs elsewhere pass), across-files, +4 PowerShell (`-Meth`, `-Ur:`/`-Me:`, `-CustomMethod`,
+  HttpClient) and the cross-file dot-sourced variable (resolved and unresolved); `TheDeferredBinderIsReal` pins the order
+  incl. the adopted-container bind and forbids `Evidence`/`JsonElement` in `ReadRecordedCreation`.
+- **ArchTests `SpeAdminOperatorEnvironmentMarkerGuardTests`** (3): who may name the marker; the registry declares it only
+  for `dev` (template false); the stack defaults false and only `dev.bicepparam` sets it.
+
+### 14.8 Seeding proofs (on the final code; `scratchpad/f2v2/seed.py`, session scratchpad)
+
+Each seed: ONE exact single-occurrence replacement (anchor found exactly once, LF or CRLF) or ONE set of added files; the
+named classes run (L2: H8 / provisioner / production-serializer / serializer-contract / DAG / H7 / outcome-applier; BFF:
+every `Auth.SpeAdmin` class; ArchTests: `SpeAdminContainerBindingGuardTests` + `SpeAdminOperatorEnvironmentMarkerGuardTests`);
+the source restored from a byte copy, MD5-checked and touched (added files deleted). `git status` was clean afterwards.
+**All 39 RED; none failed to compile.** Counts are DISTINCT failing test names (theory cases whose display names xUnit
+truncates with `···` collapse into one).
+
+| # | Seed | RED |
+|---|---|---|
+| L1 | the typed creation record does not survive the production serializer (`[Newtonsoft.Json.JsonIgnore]` on `SpeContainerCreation`) — **the verifier's item 1, as a field that does not persist** | 17: H8 AC22, AC30, AC31, AC32, AC35, AC36(typed), AC40-AC48; serializer: fully-populated round trip, typed record |
+| L2 | gate evidence stored as `{"valueKind":1}` again (converter removed) | 7: H8 AC1, AC22, AC41; serializer: pre-converter document, round trip, GET serialization, evidence |
+| L3 | a pre-round-41 hand-off withdrawn without being moved into the record | 4: AC35, AC36(legacy), AC40, AC48 |
+| L4 | a root container in doubt never waited for (the handler passes false) | AC42 |
+| L5 | a container type in doubt created again without the operator's clear | AC46 |
+| L6 | the provisioner does not report a container type in doubt | `AContainerTypePostWithNoAnswer_…(drops: True)` |
+| L7 | a non-OData fault escapes `CreateAsync` (only `ODataError` caught) — **the verifier's item 2** | 4: non-OData fault, client timeout, caller cancellation, type POST drop |
+| L8 | the provisioner does not report a root container in doubt | 3: non-OData fault, timeout, cancellation |
+| L9 | a container already in the recorded type is not adopted | 2: adopt one; several across pages |
+| L10 | the provisioner creates while a root container in doubt may still appear | 2: 200-empty / 404 |
+| L11 | a failure's type / in-doubt state is not recorded | 4: AC34, AC42, AC46, AC50 |
+| L12 | adopted further containers are not bound | 3: AC44, AC45, AC48 |
+| L13 | the removal record is not merge-safe | AC49 |
+| L14 | completion does not record the owning business unit | AC44 |
+| L15 | the retry counter's keys lowered again (verbatim converter removed) | 2: fully-populated round trip; `"H12b"` kept |
+| L16 | the retry counter case-sensitive (a legacy `"h9"` misses) | legacy-key test |
+| L17 | a DELETE that finds the container gone is not "removed" | `ARemovalThatFindsTheContainerAlreadyGone_CountsAsRemoved` |
+| L18 | the handler ignores `RootContainerNotYetVisible` | AC42 |
+| L19 | `ReadRecordedCreation` also reads gate evidence | ArchTest `TheDeferredBinderIsReal` |
+| B1 | the deployment marker is not checked | 12 distinct (16 cases): customer-environment and marker-missing root admins on all 8 routes |
+| B2 | the container-type routes are not under the operator rule | 19 distinct: customer / missing / leaf on the 6 type routes; the per-container leaf-admin type tests |
+| B3 | the filter is not given the deployment setting (`… || true`) | 12 distinct (16 cases) |
+| B4 | a missing marker defaults to true | 6 distinct (8 cases): marker-missing root admins |
+| B5 | the root check is skipped in an operator environment | 19 distinct: every leaf / unresolvable-unit refusal on the 8 routes |
+| B6 | the SpeAdmin options not validated on start | `AMarkerThatIsNotABoolean_StopsTheHostAtStartup` |
+| A6 | the lexer no longer knows string literals (a URL's `//` is a comment again) | C# analyser seeded snippets |
+| A7 | the C# guard no longer follows a provider | C# analyser seeded snippets |
+| A8 | the C# POST signal no longer accepts generic arguments | C# analyser seeded snippets |
+| A9 | the PowerShell guard does not read dot-sourced files | script analyser (cross-file, resolved) |
+| A10 | the PowerShell guard ignores variables another script assigns the collection | script analyser (cross-file, unresolved) |
+| A11 | the PowerShell POST signal no longer knows `-Meth` / `-CustomMethod` | script analyser |
+| A12 | the registry declares a second operator environment (`demo` true) | registry guard |
+| A13 | the Bicep stack defaults the marker to true | stack guard |
+| A1 | **the verifier's absolute-URL raw POST** as a new `.cs` under `src/` | `Every SPE container created anywhere in src/ is bound …` |
+| A2 | **the verifier's class-level constant URL** POSTed from a method, as a new `.cs` | same |
+| A3 | **the verifier's `PostAsJsonAsync<object>`** as a new `.cs` | same |
+| A4 | **the verifier's cross-file PowerShell variable** (a helper defining `$ContainersUri` + a script dot-sourcing it and POSTing `-Uri $ContainersUri`) as new scripts | `Every SPE container a script creates is bound …` |
+| A5 | **the verifier's `-Meth Post`** as a new script | same |
+| A14 | the canonical app-settings catalog names the operator marker | `The operator-environment marker is named only by …` |
+
+### 14.9 Manual gates (main session; dev; live writes only with the owner's approval) — the CURRENT list
+
+From the repo root, `az login` as an operator who can read Dataverse and the vaults:
+
+- **(b) first — config secret-name repair** (round 41 item 4; dev config `68f9a952…`): unchanged from §13.9 (b).
+- **(e) NEW — the Spaarke-operator marker (round 49 item 1) — BEFORE deploying this branch's BFF to dev** (otherwise dev's
+  root admins get the 403 on the 8 tenant-/type-wide routes until it is set — fail closed, not harmful):
+  1. read-only: `az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev -o json` and
+     `… --slot staging -o json` — filter for `SpeAdmin__PlatformOperatorEnvironment` in PowerShell (not a `--query` with
+     parentheses: the az.cmd shim breaks it — the Deploy-BffApi.ps1 note);
+  2. write (Entra-free, App Service config — the app restarts):
+     `az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings SpeAdmin__PlatformOperatorEnvironment=true`
+     and the same with `--slot staging` — or simply the next `scripts/Deploy-BffApi.ps1` run for `dev`, which now sets it
+     (dev is declared in `config/environments.json`);
+  3. verify: step 1 shows `true` on both slots.
+  4. **Spaarke's own operator environment** — once the main session names it (only `dev` is known to be Spaarke-operated; the
+     stopped `spaarke-bff-prod`, `demo` in the registry, is the candidate): add `"speAdminPlatformOperatorEnvironment": true`
+     to its `config/environments.json` entry (the key `Deploy-BffApi.ps1 -Environment` resolves), `param
+     speAdminPlatformOperatorEnvironment = true` to its `.bicepparam`, its name to
+     `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and set the App Service setting as in 2.
+  5. **Every customer BFF** (none deployed today besides the stopped prod/demo): step 1 must show NO such setting; a deploy
+     through `Deploy-BffApi.ps1` now fails if one carries it undeclared.
+- **(a) container binding gate — BLOCKS deploying this branch's BFF**: unchanged from §13.9 (a) (backfill dry run →
+  `-Apply` → the decided `-Bind` of the three dev test containers → `-Verify` exit 0).
+- **(c) probes after deploy** — as §13.9 (c), plus: as a root admin of dev, `GET $BFF/api/spe/security/score?configId=…`
+  does NOT answer `403 spe.admin.deny.platform_operator_required`; as a leaf admin it does.
+- **(d) the next real L2 provisioning run** — REWRITTEN (the evidence the old wording read did not persist):
+  0. the L2 deploy carrying this branch precedes the run (the typed record, the evidence and dictionary converters);
+     runs already in Cosmos read back unchanged (old evidence reads as `{"valueKind":1}`, old retry keys still count);
+  1. H8 completes WITHOUT `spe-root-business-unit-unresolved` (a 401/403 names the status — then L2's identity lacks a role
+     reading `businessunit` in the new environment);
+  2. `GET /api/runs/{id}?customerId=…` answers 200 (it threw on a run with gate evidence before round 49) and shows
+     `interStepState.speContainerCreation` = `{ status: "bound", rootContainerId: <= interStepState.speContainerId>,
+     owningBusinessUnitId: <the environment's root unit> }`; `GET …/storage/fileStorage/containers/{root}?$select=customProperties`
+     shows the stamp;
+  3. if the run hits the replication wait: `WaitingOnGate`, `interStepState.containerTypeId` set,
+     `speContainerCreation.rootContainerId` = the root container and `status = "replication-pending"`,
+     `interStepState.speContainerId` EMPTY, H7 not dispatched; after the wait exactly ONE container type owned by the
+     customer's BFF app (`GET /storage/fileStorage/containerTypes` with a DELEGATED SharePoint Embedded admin token — app-only
+     answers 403) and ONE root container in it, and only then is `speContainerId` set and H7 dispatched;
+  4. if the run is ever quarantined `spe-container-type-creation-in-doubt`: follow the diagnostic (delegated list of
+     container types for the owning app → record a found type in the run document's `interStepState.containerTypeId` →
+     `POST /api/runs/{id}/clear-quarantine?reason=…` → resume).
+- Still open from f1: §11.16 (i) deleted-container binding read, (k) dashboard per-config fields.
+
+### 14.10 Route authorization ledger input (task 167; still not landed — amendment 3, no waiver edits)
+
+No route added, renamed or deleted. Eight routes now answer to the Spaarke-operator rule FIRST (mechanism: the existing
+filter `SpeAdminTenantScopeFilter`; the deployment marker, then the root check; the configId and container-type rules after):
+
+| Route | Mechanism | Deny tests |
+|---|---|---|
+| `GET /api/spe/security/alerts`, `GET /api/spe/security/score` | filter — Spaarke-operator rule (marker + root) | `Sprk.Bff.Api.Tests.Auth.SpeAdmin.SpeAdminOperatorRoutes_InACustomerEnvironment_Tests.ARootAdminOfACustomerEnvironment_GetsTheUniform403_BeforeAnythingIsRead`, `…SpeAdminOperatorRoutes_InASpaarkeOperatedEnvironment_Tests.ALeafAdminOfAnOperatorEnvironment_GetsTheUniform403` |
+| `GET /api/spe/containertypes/{typeId}/permissions`, `GET`/`POST /api/spe/containertypes/{typeId}/consumers`, `PUT`/`DELETE /api/spe/containertypes/{typeId}/consumers/{appId}`, `POST /api/spe/containertypes/{typeId}/register` | filter — Spaarke-operator rule, then the container-type rule | the same two, plus `…SpeAdminPerContainerScopeTests.ARootAdmin_OnATypeAConfigOutsideTheHierarchyAlsoCarries_IsStill403Shared` |
+
+### 14.11 Suites (once, at the end, after every seed was restored)
+
+Run 2026-10-05 sequentially on the final source (`dcef29099`; later commits touch only this note, the POML and a test's doc
+comment), each suite in full, on a machine other sessions were also using. No contention failure.
+
+| Suite | Result |
+|---|---|
+| affected, during development (L2 H8 / provisioner / serializer / DAG / H7 / outcome-applier; BFF `Auth.SpeAdmin` + `SearchItemsTests`; ArchTests creation + marker guards) | green before seeding: 155 / 0 (L2 classes), 829 / 0 (BFF), 13 + 3 / 0 (ArchTests guards) |
+| full BFF unit suite `tests/unit/Sprk.Bff.Api.Tests` | **14,769 passed / 0 failed / 54 skipped (14,823)** — 22 m. (+36 vs f2-v1's 14,787: the 34 marker cases + 2 new tests.) |
+| NetArchTest `tests/Spaarke.ArchTests` | **365 passed / 0 failed / 0 skipped** (f2-v1: 362; +3 marker guard) |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | **104 passed / 0 failed / 0 skipped** |
+| `tests/integration/Spe.Integration.Tests` (full) | **403 passed / 0 failed / 25 skipped (428)** |
+| L2 `src/server/services/Sprk.Provisioning.ControlPlane.Tests` (full) | **1,630 passed / 0 failed / 1 skipped (1,631)** (f2-v1: 1,599 / 1,600; +31 = AC41-AC50 + the AC36 theory row, 12 provisioner cases, 8 serializer tests) |
+
+Code review / adr-check (FULL rigor, self-review against the changed files): ADR-001 (no new route; Minimal API untouched)
+✓ · ADR-002 (no plugin) ✓ · ADR-003 (fail closed: a missing marker refuses; a non-boolean stops the host; a type in doubt
+creates nothing until an operator acts; a root in doubt is waited for; an unrecordable in-doubt record is quarantined;
+every fault after a Graph write is recorded, never thrown; the guards refuse what they cannot follow) ✓ · ADR-004 (H8 stays
+idempotent per its key; a re-entry resumes, lists and adopts instead of creating) ✓ · ADR-007 (Graph SDK types stay in the
+provisioner) ✓ · ADR-008 (the operator rule is in the existing group filter, metadata-driven; no middleware, no
+per-handler check) ✓ · ADR-010 (no new DI registration; one options member on the existing options class) ✓ · ADR-019
+(the 403 is `ProblemDetailsHelper.Forbidden`, the existing shape) ✓ · ADR-028 (no auth flow changed; the BFF lends no
+identity to the delegated container-type routes) ✓ · ADR-038 (no banned pattern; the persistence proof uses the production
+serializer, not a hand-picked equivalent; BFF through the real host; L2 over hand-written fakes / transport) ✓ · ADR-052 (no
+background work added) ✓. No §6.5 path needed.
+
+### 14.12 Publish size and CVE (CLAUDE.md §10, hazards 1-4)
+
+Each side exported with `git archive` into a SHORT path (`src/server`, `config` — the BFF embeds
+`config/secure-record-owner-role.json` — and the root build files), no prior build output, `dotnet restore` + `dotnet
+publish -c Release --no-restore` exactly as `scripts/Deploy-BffApi.ps1`, zipped with PowerShell **`Compress-Archive`**
+(Optimal) over the publish folder, PDBs included:
+
+| Side | Commit | Path | Zip | Files | MSB3030 |
+|---|---|---|---|---|---|
+| fresh `origin/master` (fetched 2026-10-05) | `b4b58a361` | `C:\wt165xm` | **45.65 MB** (47,864,525 B) | 212 | 0 |
+| task base (`task/uac-r2-165-f2-v1`) | `a25463b55` | `C:\wt165xb` | **45.70 MB** (47,919,789 B) | 212 | 0 |
+| this branch | `dcef29099` (the final source) | `C:\wt165xn` | **45.70 MB** (47,920,676 B) | 212 | 0 |
+
+This round's own contribution (branch − base): **+887 B (0.00 MB)**. Branch vs fresh master: **+0.05 MB** (+56,151 B);
+`b4b58a361` is NOT an ancestor of this branch, so that figure also carries master's drift since the work branch's base.
+Ceiling 60 MB. Equal file counts, no MSB3030 — all three publishes complete. The three export directories were removed
+afterwards. `dotnet list … package --vulnerable --include-transitive`: **no vulnerable packages** (BFF and L2 Core); no
+`.csproj` / `.props` changed this round.
+
+### 14.13 Decisions (this round)
+
+- **D33 — H8's resume record is TYPED** (`InterStepState.SpeContainerCreation`, a controlled schema extension) and H8 never
+  resumes from gate evidence; a pre-round-41 run's record is the `SpeContainerId` it wrote, moved at (5a). Supersedes D25.
+- **D34 — persistence is proven through the PRODUCTION serializer** (`CosmosModule.BuildCosmosClient(…).ClientOptions.Serializer`),
+  not an equivalent: the H8 fake repository stores what Cosmos would and every read is a fresh deserialization. Corrects D26.
+- **D35 — every fault after a Graph write is a recorded outcome.** Graph's `ODataError` = nothing in doubt; anything else =
+  the write in flight is in doubt. A TYPE in doubt is QuarantineRequired until an operator's delegated check (app-only can
+  neither list nor delete container types — so H8 never creates a second one on a guess); a ROOT in doubt is waited for
+  through the 24h window; a recorded type is listed and a container already in it adopted (the others bound or removed)
+  before a root container is created.
+- **D36 — gate evidence and dictionary keys persist as written** (Newtonsoft converters on `GateEntry.Evidence` and the
+  run's dictionaries) — scope found by the production-serializer test: `GET /api/runs/{id}` threw on any run with gate
+  evidence, and the reconciler's retry counter never counted.
+- **D37 — D30 reworded to exactly what is enforced** (§14.3), naming what the guard cannot see; test projects under `src/`
+  are outside the C# guard (`tests/` always was).
+- **D38 — tenant-wide and type-wide SPE admin routes: a root admin of a Spaarke-operated environment only** (deployment
+  marker `SpeAdmin:PlatformOperatorEnvironment`, default false, validated on start; the uniform 403 first). The delegated
+  container-type routes are not gated (Graph decides by the caller's own role; the BFF lends no identity). Round 35 item 5's
+  every-config type rule stays (it still reaches a config whose unit is outside the hierarchy).
+- **D39 — the marker is set only through Spaarke's deployment surface** (Bicep param default false; `environments.json`
+  declaration; `Deploy-BffApi.ps1` sets it when declared and FAILS a deploy to an undeclared environment carrying it); an
+  ArchTest keeps customer provisioning from naming it.
+
+### 14.14 Not closed
+
+Only the manual live gates of §14.9 — (e) the marker on dev's two slots (an App Service configuration write), (b) the config
+repair with a minted credential, (a) the backfill `-Apply` / `-Bind`, (c) the post-deploy probes, (d) the next real L2 run —
+and f1's §11.16 (i)/(k). One decision input for the main session, not a code gap: which environment is "Spaarke's own operator
+environment" (only `dev` is known) — until it is named it does not carry the marker, so its tenant-/type-wide routes refuse
+(fail closed); gate (e) step 4 is the complete change. Nothing is deferred to another project.

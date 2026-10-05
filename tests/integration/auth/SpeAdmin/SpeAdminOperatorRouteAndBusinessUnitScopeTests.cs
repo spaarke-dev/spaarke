@@ -15,7 +15,9 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 ///   Security API app-only through a config's owning app, and Graph answers for the WHOLE Microsoft 365 tenant — in a
 ///   shared Model 1 tenant, every customer's. The configId cannot narrow that, so only an admin whose own business unit is
 ///   the root may call them, through the same check as the environment write rule; anyone else gets ONE 403 before
-///   anything is read, whatever config they name.</item>
+///   anything is read, whatever config they name. Owner round 49 item 1 adds the deployment marker: this host is a
+///   Spaarke-operated environment (<see cref="AdminSurfaceHostFixture"/>); the customer-environment and unmarked hosts are
+///   proven in <c>SpeAdminOperatorEnvironmentMarkerTests</c>.</item>
 ///   <item><b>The business-unit list is projected onto the caller's reach</b> (follow-up f2, verifier item 7). It returned
 ///   every unit in the environment, so a leaf admin read every other customer's unit name; it now holds the caller's own
 ///   unit and its descendants — exactly the units the caller may assign a config to.</item>
