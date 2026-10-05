@@ -34,8 +34,8 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] **142:** the concise `.claude/adr/ADR-034-user-record-membership.md` Amendment A4 (ACCEPTED in owner round 11). The exact text is in 142's note.
 - [ ] **166:** `.claude/skills/bff-deploy/SKILL.md` §9c. Move its smoke check off `GET /healthz/dataverse/doc/{id}`, which was an anonymous document read, onto `/healthz/dataverse`. The exact text is in 166's note. Also update the runbooks it lists (`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`, `051-operator-runbook.md`).
 - [ ] **160 (only if a production caller needs the SDK path):** a one-line ADR-028 A5 note that an SDK CallerId path satisfies A5's "equivalent refusal".
-- [ ] **161 (optional pointer):** `.claude/patterns/api/endpoint-filters.md`, add one line under the filter list: "`CommunicationRecordAuthorizationFilter` — per-record gate for `/api/communications` routes; one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny answer (task 161)."
-- [ ] **163:** `.claude/skills/add-reference-to-index/SKILL.md` line 176 — replace
+- [x] **161 (optional pointer):** DONE (sweep .claude commit). `.claude/patterns/api/endpoint-filters.md`, add one line under the filter list: "`CommunicationRecordAuthorizationFilter` — per-record gate for `/api/communications` routes; one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny answer (task 161)."
+- [x] **163:** DONE (sweep .claude commit). `.claude/skills/add-reference-to-index/SKILL.md` line 176 — replace
   `` - `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` — BFF API indexing service ``
   with
   `- (ReferenceIndexingService and /api/admin/knowledge/* were removed by unified-access-control-r2 task 163 — the scripts above are the only indexing path)`.

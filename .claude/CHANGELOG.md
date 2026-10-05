@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — Route-sweep integration: knowledge indexing pointer removed; communications filter pointer (unified-access-control-r2 tasks 161, 163)
+
+`.claude/skills/add-reference-to-index/SKILL.md` "Related" no longer points at `ReferenceIndexingService.cs`: task 163
+deleted it together with `/api/admin/knowledge/*`, so the scripts the skill lists are the only indexing path.
+`.claude/patterns/api/endpoint-filters.md` lists `CommunicationRecordAuthorizationFilter` (task 161) as a second
+per-record filter to read: one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny
+answer.
+
 ###### 2026-10-04 — ADR-034 Amendment A4: Assigned-To access is materialized as removable grants (unified-access-control-r2 task 142)
 
 `.claude/adr/ADR-034-user-record-membership.md` gains the A4 call-out, four MUST bullets and two MUST NOT bullets.
