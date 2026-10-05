@@ -961,6 +961,19 @@ The owner, verbatim: "it is important that we address issues that impact the qua
 2. **Interpretation xxxiv is ratified (option a):** N5 for filed records requires the entry author's Write on BOTH the walled parent and each filed record. An entry never strips access on a record its author cannot change.
 3. **Known limits** (class e/f): the verifier's surviving seeds V01, V07, V08 and V09, and the two LOW items. They are recorded in 158's note, and the 5-minute job covers each one.
 
+## Round 62 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Task 165, from its final verification (`task/uac-r2-165-h`, at the round cap).
+
+1. **The operator marker is bound to the App Service it is deployed to (option A; class a, fail-open).**
+   - **The defect:** `Deploy-BffApi.ps1` reads the marker by the `-Environment` LABEL, which defaults to `dev`. A deploy that names another App Service without `-Environment` would set `SpeAdmin__PlatformOperatorEnvironment=true` on it.
+   - **The fix:** when the marker is declared true, the script refuses unless `-AppServiceName` and `-ResourceGroupName` equal that registry entry's `appServiceName` / `resourceGroup`. Put this in the existing block or in `scripts/common/SpeAdminOperatorMarker.ps1`.
+   - **Test:** a seedable ArchTest case through the existing PowerShell driver (the marker is declared true, the App Service differs, the deploy refuses).
+   - **Rejected:** option (B), making `-Environment` mandatory, changes every existing dev invocation for no extra safety once (A) is in place. Option (C) leaves a fail-open path.
+2. **The stand-up recipe is corrected (class b).** Guide §6.5.4 and the comment on the `demo` entry in `config/environments.json` must say that the stand-up change also makes that registry entry reachable through `-Environment`, since `demo` is not in the `ValidateSet`. The same mismatch exists in the CORS comment and is fixed there too.
+3. **Known limits** (165 note §15.5):
+   - Class (d): a case-variant spelling of the registry key. The parse is case-insensitive and the ArchTest is case-sensitive.
+   - Class (f): no test proves the deploy exits on an invalid declaration. It fails closed anyway.
+4. **Done at integration** as part of the 165 merge (the lane is at its cap).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
