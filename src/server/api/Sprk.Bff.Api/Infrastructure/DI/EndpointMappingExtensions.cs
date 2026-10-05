@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
 using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
+using Sprk.Bff.Api.Infrastructure.HealthChecks; // CatalogHealthChecks.Tag (UAC-r2 task 167, round 34 item 7)
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -66,15 +67,20 @@ public static class EndpointMappingExtensions
         // never see a 429. See RateLimitingModule "health-probe".
         app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
-            Predicate = registration => !registration.Tags.Contains("catalog")
+            Predicate = registration => !registration.Tags.Contains(CatalogHealthChecks.Tag)
         }).AllowAnonymous()
             .RequireRateLimiting("health-probe");
 
         // FR-P0-04 catalog-reconciliation probe: Unhealthy on constants↔rows drift or
         // tool↔handler bijection violation. Verified green at gate task 014 after seeding.
+        // Every check on it is registered with CatalogHealthChecks.AddCatalogCheck, which memoizes
+        // its result for 30 s — one evaluation shared by every caller, a fault included — so this
+        // anonymous route costs at most one Dataverse read set per check per 30 s per instance,
+        // whatever the request rate (main-session round 34 item 7). A result can therefore be up
+        // to 30 s old: re-probe after the window when verifying a catalog seed.
         app.MapHealthChecks("/healthz/catalog", new HealthCheckOptions
         {
-            Predicate = registration => registration.Tags.Contains("catalog")
+            Predicate = registration => registration.Tags.Contains(CatalogHealthChecks.Tag)
         }).AllowAnonymous()
             .RequireRateLimiting("health-probe");   // owner rounds 12 item 1 + 14 item 1 (see /healthz above)
 

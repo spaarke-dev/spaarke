@@ -35,7 +35,8 @@ namespace Spaarke.ArchTests;
 /// as signed-in — so <c>NoRouteIsAnonymousByOmission</c> refuses it, whatever its waiver (task 167 r2/f1; the runtime
 /// FallbackPolicy answers it 401 since owner round 14). A group CONTINUATION statement counts only in the unbroken
 /// run right after the group's declaration; anywhere else — a nested or conditional block, after an intervening
-/// statement — it is a problem, never credited (task 167 f1). (3) A registration API outside
+/// statement — it is a problem, never credited (task 167 f1); in a method that RECEIVES the group it counts only when
+/// every call passing the group in is itself in such a run (task 167 f2). (3) A registration API outside
 /// the vocabulary — <c>.Map(...)</c>, <c>MapFallback*</c>, <c>MapHub&lt;T&gt;</c>, <c>MapControllers</c>, or any
 /// undeclared <c>Map*</c> call — would put routes beside the census, so
 /// <c>NoRouteIsRegisteredInAFormTheScannerCannotRead</c> refuses it (task 167 r1). What remains unseen is request
@@ -695,6 +696,62 @@ public partial class RouteAuthorizationGuardTests
         return p < 0 || code[p] is ';' or '{' or '}';
     }
 
+    /// <summary>Words that start a statement which can branch, loop, jump or declare — never part of an UNCONDITIONAL run
+    /// (task 167 f2). A run is the sequence of plain call/assignment statements that opens a block.</summary>
+    private static readonly IReadOnlySet<string> StatementKeywords = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "if", "else", "for", "foreach", "while", "do", "switch", "case", "default", "try", "catch", "finally",
+        "return", "throw", "goto", "break", "continue", "yield", "using", "lock", "fixed", "unsafe", "checked",
+        "unchecked", "await", "var", "new", "static", "const",
+    };
+
+    /// <summary>
+    /// The UNCONDITIONAL opening run of the block whose <c>{</c> is at <paramref name="open"/>: the consecutive statements
+    /// from the brace on that each start with an identifier which is not a <see cref="StatementKeywords"/> word and end at
+    /// a depth-zero <c>;</c> inside the block — plain calls and assignments. The run stops at the first statement that is
+    /// anything else (an <c>if</c>, a loop, a <c>return</c>, a nested block, a declaration), so every statement in it runs
+    /// whenever the block is entered (task 167 f2).
+    /// </summary>
+    private static List<(int Start, int End)> PlainStatementRun(string code, int open)
+    {
+        var run = new List<(int Start, int End)>();
+        var close = MatchClose(code, open);
+        if (close < 0)
+        {
+            return run;
+        }
+
+        var s = open + 1;
+        while (true)
+        {
+            s = SkipWs(code, s);
+            if (s >= close || !(char.IsLetter(code[s]) || code[s] == '_'))
+            {
+                return run;
+            }
+
+            var wordEnd = s;
+            while (wordEnd < code.Length && IsIdentChar(code[wordEnd]))
+            {
+                wordEnd++;
+            }
+
+            if (StatementKeywords.Contains(code[s..wordEnd]))
+            {
+                return run;
+            }
+
+            var end = StatementEnd(code, s);
+            if (end < 0 || end >= close)
+            {
+                return run;
+            }
+
+            run.Add((s, end));
+            s = end + 1;
+        }
+    }
+
     // =============================================================================================
     // CHAINS — the fluent calls after a registration or a MapGroup declaration
     // =============================================================================================
@@ -1226,12 +1283,21 @@ public partial class RouteAuthorizationGuardTests
         /// brace-less <c>if (cond) group.X();</c>, <c>var y = group.X();</c>, <c>return group.X();</c>, a call
         /// after an intervening statement — is a PROBLEM, never silently ignored: the remedy is to declare it on the
         /// <c>MapGroup(...)</c> chain (or directly after the declaration).</para>
+        ///
+        /// <para><b>A received group's run is only as unconditional as the CALLS that pass the group in</b> (task 167
+        /// f2, the f1 verifier's item 4). The run that opens a method with a <c>RouteGroupBuilder</c> parameter is
+        /// unconditional WITHIN that method; f1 then attached it to every caller's group without asking whether the call
+        /// itself ran — so <c>if (cond) SecureRead(docs);</c> credited <c>SecureRead</c>'s
+        /// <c>g.AddDocumentAuthorizationFilter("read")</c> to every route of <c>docs</c>, a filter that never runs. Now
+        /// such a continuation is credited only when EVERY call site binding the group sits in an unconditional run
+        /// itself — directly after the group's declaration, or (recursively) in the opening run of a method that
+        /// received it. Otherwise it is a problem and credits nothing.</para>
         /// </summary>
         private void AttachContinuations()
         {
             foreach (var unit in Units)
             {
-                var runStatements = UnconditionalContinuationStarts(unit);
+                var runs = RunsOf(unit);
 
                 foreach (Match m in MemberCall.Matches(unit.Code))
                 {
@@ -1265,7 +1331,8 @@ public partial class RouteAuthorizationGuardTests
                         continue;
                     }
 
-                    if (!runStatements.Contains(m.Index))
+                    var run = runs.FirstOrDefault(r => r.Start == m.Index && r.Receiver == receiver);
+                    if (run is null)
                     {
                         Problems.Add($"{unit.Path}:{unit.LineOf(m.Index)}: '{receiver}.{string.Join("().", shaped.Select(c => c.Name))}()' "
                                      + $"adds to group '{receiver}' outside the unbroken run of statements that directly follows "
@@ -1273,6 +1340,26 @@ public partial class RouteAuthorizationGuardTests
                                      + "conditional or skipped — an if/else, a loop, a lambda, an early return. It is NOT "
                                      + "credited. Declare it on the MapGroup(...) chain, or as a statement directly after it.");
                         continue;
+                    }
+
+                    // A run that opens a method RECEIVING the group is unconditional only within that method. Whether it
+                    // runs at all depends on the CALL that passes the group in (task 167 f2, the f1 verifier's item 4):
+                    // `if (cond) SecureRead(docs);` would otherwise lend SecureRead's first statements to every route of
+                    // 'docs'. So every call site that binds the group must itself sit in an unconditional run.
+                    if (run.ReceivedBy is not null)
+                    {
+                        var siteProblems = new List<string>();
+                        CollectConditionalBindings(run.ReceivedBy, receiver, 0, new HashSet<(MethodDecl, string)>(), siteProblems);
+                        if (siteProblems.Count > 0)
+                        {
+                            Problems.Add($"{unit.Path}:{unit.LineOf(m.Index)}: '{receiver}.{string.Join("().", shaped.Select(c => c.Name))}()' "
+                                         + $"opens {run.ReceivedBy.Name}, which RECEIVES the group, but not every call that passes the "
+                                         + "group in runs unconditionally, so it is NOT credited to any caller's routes: "
+                                         + string.Join("; ", siteProblems)
+                                         + ". Make each such call a statement directly after the group's declaration (or the first "
+                                         + "statements of a method that itself receives the group), or declare the call on the MapGroup(...) chain.");
+                            continue;
+                        }
                     }
 
                     foreach (var context in Resolve(unit, method, receiver, 0, m.Index))
@@ -1294,62 +1381,242 @@ public partial class RouteAuthorizationGuardTests
             => method?.Params.Any(p => p.Name == identifier && p.Type.Contains("RouteGroupBuilder", StringComparison.Ordinal)) == true;
 
         /// <summary>
-        /// The start index of every statement in an UNCONDITIONAL continuation run of <paramref name="unit"/>: for each
-        /// group declared here, the consecutive <c>variable.…;</c> statements that begin right after the declaration's
-        /// <c>;</c>; for each block-bodied method with a <c>RouteGroupBuilder</c> parameter, the consecutive
-        /// <c>parameter.…;</c> statements that begin right after the body's <c>{</c>. A run ends at the first token that
-        /// does not start another such statement on the SAME receiver.
+        /// One statement of an UNCONDITIONAL run on a group: <paramref name="Start"/> is the statement's first token,
+        /// <paramref name="CallNameIndex"/> the name of the call it makes on (or with) the group — the index a
+        /// <see cref="CallSite"/> records — and <paramref name="ReceivedBy"/> the method whose PARAMETER the run walks
+        /// (null for a run that follows a group's declaration).
         /// </summary>
-        private HashSet<int> UnconditionalContinuationStarts(SourceUnit unit)
+        private sealed record RunStatement(int Start, int CallNameIndex, string Receiver, MethodDecl? ReceivedBy);
+
+        private readonly Dictionary<SourceUnit, List<RunStatement>> _runs = new();
+
+        /// <summary>
+        /// Every statement in an UNCONDITIONAL run of <paramref name="unit"/>: for each group declared here, the
+        /// consecutive statements that begin right after the declaration's <c>;</c>; for each block-bodied method with a
+        /// <c>RouteGroupBuilder</c> parameter, the consecutive statements that begin right after the body's <c>{</c>. A
+        /// statement belongs to the run when it is <c>receiver.…;</c> (a chain on the group — a continuation, a
+        /// registration, or an extension call passing it on) or <c>[Type.]Name(…, receiver, …);</c> (a call that passes
+        /// the group on, task 167 f2). A run ends at the first token that starts anything else, so no <c>if</c>,
+        /// loop, lambda, <c>try</c>, <c>return</c> or unrelated statement can stand inside it.
+        /// </summary>
+        private List<RunStatement> RunsOf(SourceUnit unit)
         {
-            var starts = new HashSet<int>();
+            if (_runs.TryGetValue(unit, out var cached))
+            {
+                return cached;
+            }
+
+            var runs = new List<RunStatement>();
             var code = unit.Code;
 
-            void Walk(int from, string receiver)
+            bool IsWholeIdentifierAt(int p, string name)
+                => p + name.Length <= code.Length
+                   && string.CompareOrdinal(code, p, name, 0, name.Length) == 0
+                   && (p + name.Length == code.Length || !IsIdentChar(code[p + name.Length]));
+
+            void Walk(int from, string receiver, MethodDecl? receivedBy)
             {
                 var p = from;
                 while (true)
                 {
                     p = SkipWs(code, p);
-                    var afterName = p + receiver.Length;
-                    if (afterName > code.Length
-                        || string.CompareOrdinal(code, p, receiver, 0, receiver.Length) != 0
-                        || (afterName < code.Length && IsIdentChar(code[afterName])))
+                    if (p >= code.Length)
                     {
                         return;
                     }
 
-                    var dot = SkipWs(code, afterName);
-                    if (dot >= code.Length || code[dot] != '.')
+                    if (IsWholeIdentifierAt(p, receiver))
+                    {
+                        // receiver.Chain(...)...;
+                        var dot = SkipWs(code, p + receiver.Length);
+                        if (dot >= code.Length || code[dot] != '.')
+                        {
+                            return;
+                        }
+
+                        var (_, end, problem) = ParseChain(unit, dot);
+                        if (problem is not null || end >= code.Length || code[end] != ';')
+                        {
+                            return;
+                        }
+
+                        runs.Add(new RunStatement(p, SkipWs(code, dot + 1), receiver, receivedBy));
+                        p = end + 1;
+                        continue;
+                    }
+
+                    // [Qualifier.]*Name[<T>](..., receiver, ...);  — a call that passes the group on.
+                    var q = p;
+                    var nameIndex = -1;
+                    while (true)
+                    {
+                        var identStart = q;
+                        while (q < code.Length && IsIdentChar(code[q]))
+                        {
+                            q++;
+                        }
+
+                        if (q == identStart || char.IsDigit(code[identStart]))
+                        {
+                            return;
+                        }
+
+                        if (identStart == p && StatementKeywords.Contains(code[identStart..q]))
+                        {
+                            return;
+                        }
+
+                        nameIndex = identStart;
+                        var next = SkipWs(code, q);
+                        if (next < code.Length && code[next] == '.')
+                        {
+                            q = SkipWs(code, next + 1);
+                            continue;
+                        }
+
+                        q = next;
+                        break;
+                    }
+
+                    if (q < code.Length && code[q] == '<')
+                    {
+                        var closeAngle = MatchAngle(code, q);
+                        if (closeAngle < 0)
+                        {
+                            return;
+                        }
+
+                        q = SkipWs(code, closeAngle + 1);
+                    }
+
+                    if (q >= code.Length || code[q] != '(')
                     {
                         return;
                     }
 
-                    var (_, end, problem) = ParseChain(unit, dot);
-                    if (problem is not null || end >= code.Length || code[end] != ';')
+                    var close = MatchClose(code, q);
+                    var semicolon = close < 0 ? -1 : SkipWs(code, close + 1);
+                    if (close < 0 || semicolon >= code.Length || code[semicolon] != ';')
                     {
                         return;
                     }
 
-                    starts.Add(p);
-                    p = end + 1;
+                    var passesReceiver = SplitTopLevel(code, q + 1, close)
+                        .Select(span => code[span.Start..span.End].Trim())
+                        .Any(arg => arg == receiver || Regex.IsMatch(arg, $@"^[A-Za-z_]\w*\s*:\s*{Regex.Escape(receiver)}$"));
+                    if (!passesReceiver)
+                    {
+                        return;
+                    }
+
+                    runs.Add(new RunStatement(p, nameIndex, receiver, receivedBy));
+                    p = semicolon + 1;
                 }
             }
 
             foreach (var group in Groups.Where(g => ReferenceEquals(g.Unit, unit) && g.StatementEnd >= 0))
             {
-                Walk(group.StatementEnd + 1, group.Variable);
+                Walk(group.StatementEnd + 1, group.Variable, null);
             }
 
             foreach (var method in unit.Methods.Where(m => code[m.BodyStart] == '{'))
             {
                 foreach (var parameter in method.Params.Where(p => p.Type.Contains("RouteGroupBuilder", StringComparison.Ordinal)))
                 {
-                    Walk(method.BodyStart + 1, parameter.Name);
+                    Walk(method.BodyStart + 1, parameter.Name, method);
                 }
             }
 
-            return starts;
+            _runs[unit] = runs;
+            return runs;
+        }
+
+        /// <summary>
+        /// Adds a problem for every call of <paramref name="method"/> that binds its group parameter
+        /// <paramref name="parameter"/> from a statement OUTSIDE an unconditional run — recursively, when that run in turn
+        /// opens a method that received the group (task 167 f2). A call site the scanner cannot read is a problem too.
+        /// </summary>
+        private void CollectConditionalBindings(MethodDecl method, string parameter, int depth,
+            HashSet<(MethodDecl, string)> visiting, List<string> problems)
+        {
+            if (depth > 24)
+            {
+                problems.Add($"the binding chain into {method.Name} is too deep to follow");
+                return;
+            }
+
+            if (!visiting.Add((method, parameter)))
+            {
+                problems.Add($"{method.Name} passes the group '{parameter}' back into itself — a recursive binding is not followed");
+                return;
+            }
+
+            var parameterIndex = -1;
+            for (var k = 0; k < method.Params.Count; k++)
+            {
+                if (method.Params[k].Name == parameter)
+                {
+                    parameterIndex = k;
+                }
+            }
+
+            foreach (var site in CallSitesOf(method))
+            {
+                var at = $"{site.Unit.Path}:{site.Unit.LineOf(site.Index)}";
+                if (site.Problem is not null)
+                {
+                    problems.Add($"{at}: {site.Problem}");
+                    continue;
+                }
+
+                var argument = ArgumentFor(site, method, parameterIndex);
+                if (argument is null || !Regex.IsMatch(argument, @"^[A-Za-z_]\w*$"))
+                {
+                    problems.Add($"{at}: the argument bound to '{parameter}' of {method.Name} is not a variable");
+                    continue;
+                }
+
+                var statement = RunsOf(site.Unit).FirstOrDefault(r => r.CallNameIndex == site.Index && r.Receiver == argument);
+                if (statement is null)
+                {
+                    problems.Add($"{at}: the call passing '{argument}' to {method.Name} is not in the unbroken run of statements "
+                                 + $"that directly follows '{argument}''s declaration (or opens the method receiving it) — it "
+                                 + "may be conditional or skipped");
+                    continue;
+                }
+
+                if (statement.ReceivedBy is not null)
+                {
+                    CollectConditionalBindings(statement.ReceivedBy, argument, depth + 1, visiting, problems);
+                }
+            }
+
+            visiting.Remove((method, parameter));
+        }
+
+        /// <summary>The argument a call site passes for parameter <paramref name="parameterIndex"/> of
+        /// <paramref name="method"/> — named, positional, or the receiver of an extension call; null when absent.</summary>
+        private static string? ArgumentFor(CallSite site, MethodDecl method, int parameterIndex)
+        {
+            if (parameterIndex < 0)
+            {
+                return null;
+            }
+
+            var parameter = method.Params[parameterIndex];
+            var argument = site.Args.FirstOrDefault(a => a.Name == parameter.Name).Text;
+            if (argument is not null)
+            {
+                return argument;
+            }
+
+            var positional = site.Args.Where(a => a.Name is null).Select(a => a.Text).ToList();
+            if (site.ExtensionForm)
+            {
+                return parameterIndex == 0 ? site.Receiver : parameterIndex - 1 < positional.Count ? positional[parameterIndex - 1] : null;
+            }
+
+            return parameterIndex < positional.Count ? positional[parameterIndex] : null;
         }
 
         /// <summary>Every call site of <paramref name="method"/> in this set.</summary>
@@ -1518,21 +1785,7 @@ public partial class RouteAuthorizationGuardTests
                         continue;
                     }
 
-                    var parameter = method.Params[parameterIndex];
-                    string? argument = site.Args.FirstOrDefault(a => a.Name == parameter.Name).Text;
-                    if (argument is null)
-                    {
-                        var positional = site.Args.Where(a => a.Name is null).Select(a => a.Text).ToList();
-                        if (site.ExtensionForm)
-                        {
-                            argument = parameterIndex == 0 ? site.Receiver : parameterIndex - 1 < positional.Count ? positional[parameterIndex - 1] : null;
-                        }
-                        else
-                        {
-                            argument = parameterIndex < positional.Count ? positional[parameterIndex] : null;
-                        }
-                    }
-
+                    var argument = ArgumentFor(site, method, parameterIndex);
                     if (argument is null || !Regex.IsMatch(argument, @"^[A-Za-z_]\w*$"))
                     {
                         contexts.Add(new(Array.Empty<GroupNode>(), null,

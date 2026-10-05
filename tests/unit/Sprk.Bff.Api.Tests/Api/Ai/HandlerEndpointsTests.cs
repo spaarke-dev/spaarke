@@ -163,6 +163,9 @@ public class HandlerEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert - endpoint exists (not 404 for the endpoint itself, may be 404 for unknown handler)
         response.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);
+        // The anonymous "not 405" above can no longer fail: an anonymous request answers 401 for a missing route or a
+        // wrong verb alike (the authorization FallbackPolicy, UAC-r2 task 167). The endpoint table is the evidence (f2).
+        EndpointTable.AssertMapped(_factory, "GET", "/api/ai/handlers/GenericAnalysisHandler");
     }
 
     [Fact]

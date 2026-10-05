@@ -760,13 +760,27 @@ public partial class RouteAuthorizationGuardTests
     // tenant scope does not reach them. Credited, not flagged, yet worth attention (the task-167 note): the SPE
     // environment and dashboard routes (no BU scoping), the bulk status route (no starter check), and register
     // (an app token sent to a caller-chosen host) — task 165's amendment owns them.
+    //
+    // Each group DECLARES the one admin mechanism its routes carry; EveryAdminOnlyRouteCarriesItsGroupsMechanism fails
+    // on a route added to a group without it (task 167 f2). A SWEEP entry resolves through this set only when its group's
+    // mechanism is an admin POLICY — SystemAdminPolicy or SpeAdminPolicy (owner round 9 item 3; main-session round 34
+    // item 5, which lifted the old "/api/spe/ only" limit). A fix task resolving a sweep route by admin gating adds the
+    // route to its file's SystemAdmin/SPE group, deletes its waiver, and sets ResolvedBy + ProofTest.
     // =============================================================================================
 
-    private sealed record AdminOnlyGroup(string File, string Reason, IReadOnlyList<string> Routes);
+    /// <summary>One operator surface: its file, the ONE admin mechanism every route in it carries (one of
+    /// <see cref="AdminMechanisms"/>; pinned by <c>EveryAdminOnlyRouteCarriesItsGroupsMechanism</c>), why it is an
+    /// operator surface, and its routes. A file whose routes use two mechanisms has one group per mechanism.</summary>
+    private sealed record AdminOnlyGroup(string File, string Mechanism, string Reason, IReadOnlyList<string> Routes);
+
+    private const string SystemAdminPolicy = "RequireAuthorization(\"SystemAdmin\")";
+    private const string SpeAdminPolicy = "AddSpeAdminAuthorizationFilter";
+    private const string RagApiKeyCredential = "RequireAuthorization(AuthPolicies.RagApiKey)";
+    private const string RegistrationApproverRole = "AddRegistrationAuthorizationFilter";
 
     private static readonly IReadOnlyList<AdminOnlyGroup> AdminOnlyRoutes = new[]
     {
-        new AdminOnlyGroup("Api/Admin/JobsEndpoints.cs",
+        new AdminOnlyGroup("Api/Admin/JobsEndpoints.cs", SystemAdminPolicy,
             "Background-job inspection, history, trigger and enable/disable: the scheduler is an operator control "
             + "plane, behind SystemAdmin by owner decision Q6 (R3 task 020).",
             new[]
@@ -778,7 +792,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/admin/jobs/{jobId}/enable",
                 "POST /api/admin/jobs/{jobId}/disable",
             }),
-        new AdminOnlyGroup("Api/Admin/MembershipAdminEndpoints.cs",
+        new AdminOnlyGroup("Api/Admin/MembershipAdminEndpoints.cs", SystemAdminPolicy,
             "Membership-field discovery audit and metadata-cache refresh: tenant-wide configuration diagnostics "
             + "for operators, SystemAdmin by owner decision Q6 (R3 task 036).",
             new[]
@@ -786,17 +800,22 @@ public partial class RouteAuthorizationGuardTests
                 "GET /api/admin/membership/discovered/{entityType}",
                 "POST /api/admin/membership/refresh-metadata",
             }),
-        new AdminOnlyGroup("Api/Ai/RagEndpoints.cs",
-            "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts); "
-            + "bulk-index and its status are SystemAdmin index maintenance. The key holder controls the tenant "
-            + "partition (task-167 note).",
+        new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", RagApiKeyCredential,
+            "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts). The key "
+            + "holder controls the tenant partition (task-167 note).",
             new[]
             {
                 "POST /api/ai/rag/enqueue-indexing",
+            }),
+        new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", SystemAdminPolicy,
+            "bulk-index and its status are SystemAdmin index maintenance: re-indexing the tenant's whole corpus is an "
+            + "operator action, never a user's.",
+            new[]
+            {
                 "POST /api/ai/rag/admin/bulk-index",
                 "GET /api/ai/rag/admin/bulk-index/{jobId}/status",
             }),
-        new AdminOnlyGroup("Api/Insights/PrecedentAdminEndpoints.cs",
+        new AdminOnlyGroup("Api/Insights/PrecedentAdminEndpoints.cs", SpeAdminPolicy,
             "SME authoring and confirmation of Insights precedents (D-P3 phase 1): curation of tenant-wide "
             + "reference content behind the Admin/SystemAdmin app role.",
             new[]
@@ -804,7 +823,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/insights/admin/precedents",
                 "POST /api/insights/admin/precedents/{id:guid}/confirm",
             }),
-        new AdminOnlyGroup("Api/RegistrationEndpoints.cs",
+        new AdminOnlyGroup("Api/RegistrationEndpoints.cs", RegistrationApproverRole,
             "Approving or rejecting a demo-access request provisions or refuses an environment: an operator "
             + "decision behind the registration approver role.",
             new[]
@@ -812,7 +831,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/registration/requests/{id:guid}/approve",
                 "POST /api/registration/requests/{id:guid}/reject",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/AuditLogEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/AuditLogEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -820,7 +839,7 @@ public partial class RouteAuthorizationGuardTests
             {
                 "GET /api/spe/audit",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/BulkOperationEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/BulkOperationEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators. configId arrives in the BODY, so the tenant scope never fires (S-44, S-72, task "
@@ -831,7 +850,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/bulk/permissions",
                 "GET /api/spe/bulk/{operationId}/status",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/BusinessUnitEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/BusinessUnitEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -839,7 +858,7 @@ public partial class RouteAuthorizationGuardTests
             {
                 "GET /api/spe/businessunits",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ConfigEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ConfigEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators. The route param is 'id', so the tenant scope never fires on /{id} (S-45, "
@@ -852,7 +871,7 @@ public partial class RouteAuthorizationGuardTests
                 "PUT /api/spe/configs/{id:guid}",
                 "DELETE /api/spe/configs/{id:guid}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ConsumingTenantEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ConsumingTenantEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -863,7 +882,7 @@ public partial class RouteAuthorizationGuardTests
                 "PUT /api/spe/containertypes/{typeId}/consumers/{appId}",
                 "DELETE /api/spe/containertypes/{typeId}/consumers/{appId}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerColumnEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerColumnEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -874,7 +893,7 @@ public partial class RouteAuthorizationGuardTests
                 "PATCH /api/spe/containers/{containerId}/columns/{columnId}",
                 "DELETE /api/spe/containers/{containerId}/columns/{columnId}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerCustomPropertyEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerCustomPropertyEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -883,7 +902,7 @@ public partial class RouteAuthorizationGuardTests
                 "GET /api/spe/containers/{containerId}/customproperties",
                 "PUT /api/spe/containers/{containerId}/customproperties",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -899,7 +918,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/containers/{containerId}/archive",
                 "POST /api/spe/containers/{containerId}/unarchive",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerItemEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerItemEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -915,7 +934,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/containers/{id}/folders",
                 "POST /api/spe/containers/{id}/items/upload",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerPermissionEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerPermissionEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -926,7 +945,7 @@ public partial class RouteAuthorizationGuardTests
                 "PATCH /api/spe/containers/{containerId}/permissions/{permissionId}",
                 "DELETE /api/spe/containers/{containerId}/permissions/{permissionId}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypeEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypeEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators. /register sends an app token to a caller-chosen host (task-167 note; task 165 "
@@ -938,7 +957,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/containertypes",
                 "POST /api/spe/containertypes/{typeId}/register",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypePermissionEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypePermissionEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -949,7 +968,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/containertypes/{typeId}/owners",
                 "DELETE /api/spe/containertypes/{typeId}/owners/{permissionId}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypeSettingsEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/ContainerTypeSettingsEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -957,7 +976,7 @@ public partial class RouteAuthorizationGuardTests
             {
                 "PUT /api/spe/containertypes/{typeId}/settings",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/DashboardEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/DashboardEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators. Aggregates across ALL configs with no BU filter (task-167 note; task 165 "
@@ -967,7 +986,7 @@ public partial class RouteAuthorizationGuardTests
                 "GET /api/spe/dashboard/metrics",
                 "POST /api/spe/dashboard/refresh",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/EnvironmentEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/EnvironmentEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators. No business-unit scoping at all (task-167 note; task 165 amendment).",
@@ -979,7 +998,7 @@ public partial class RouteAuthorizationGuardTests
                 "PUT /api/spe/environments/{id:guid}",
                 "DELETE /api/spe/environments/{id:guid}",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/RecycleBinEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/RecycleBinEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -992,7 +1011,7 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/spe/containers/{containerId}/recyclebin/items/restore",
                 "POST /api/spe/containers/{containerId}/recyclebin/items/delete",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/SearchContainersEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/SearchContainersEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -1000,7 +1019,7 @@ public partial class RouteAuthorizationGuardTests
             {
                 "POST /api/spe/search/containers",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/SearchItemsEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/SearchItemsEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -1008,7 +1027,7 @@ public partial class RouteAuthorizationGuardTests
             {
                 "POST /api/spe/search/items",
             }),
-        new AdminOnlyGroup("Api/SpeAdmin/SecurityEndpoints.cs",
+        new AdminOnlyGroup("Api/SpeAdmin/SecurityEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
             + "SPE administrators.",
@@ -2551,10 +2570,14 @@ public partial class RouteAuthorizationGuardTests
     // ---------------------------------------------------------------------------------------------
     // MAINTENANCE. A closed set: do not add, drop or re-own an entry (owner round 9; task 167 trigger 4). An entry
     // resolves ONLY by credit. The fix task, in one diff:
-    //   1. makes the route pass Rule A by a credited filter or a HandlerDecision (or, for the admin-only SPE routes,
-    //      keeps its AdminOnlyRoutes entry while fixing the scope underneath);
+    //   1. makes the route pass Rule A by a credited filter or a HandlerDecision — or by an AdminOnlyRoutes entry in a
+    //      group gated by RequireAuthorization("SystemAdmin") or the SPE admin policy (main-session round 34 item 5);
     //   2. deletes the route's Pending waiver;
     //   3. sets ResolvedBy = its task id and ProofTest = "{repo-relative test file}::{deny test method}".
+    // A route DELETED under owner round 10 item 1 (no caller, not published — tasks 159, 160, 164) keeps its entry: the
+    // fix task deletes the waiver and sets ResolvedBy + a ProofTest that pins the route's ABSENCE (its verb + a path the
+    // template matches, asserted 404/405 signed in or absent from the endpoint table). Any other absent key still fails
+    // (main-session round 34 item 4; RetiredEntryViolations).
     // For an InsufficientDecision entry the guard cannot SEE a fix made inside an already-credited filter or
     // handler; that resolution is by declaration (ResolvedBy + ProofTest), reviewed at code review.
     // =============================================================================================
