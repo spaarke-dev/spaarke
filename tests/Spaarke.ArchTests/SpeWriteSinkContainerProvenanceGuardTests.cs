@@ -794,7 +794,9 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "while it still matches the WITNESS its ledger entry recorded when its copy was verified (size, and "
             + "quickXorHash or else its version — task 166 f1-v2, owner round 45 item 4): an entry without one never "
             + "deletes, and a source edited since is re-copied first, so a delete can never discard an edit or an "
-            + "unrelated file. The drive is never caller-named."),
+            + "unrelated file. A SOURCE delete runs only under the document's relocation lock, renewed and read back "
+            + "as this call's immediately before it (task 166 g, owner round 54 item 2: a move that lost its lock "
+            + "stops). The drive is never caller-named."),
 
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED

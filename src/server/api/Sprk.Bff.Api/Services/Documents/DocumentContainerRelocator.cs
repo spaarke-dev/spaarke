@@ -63,6 +63,10 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// only when it still matches the witness recorded at verification (round 45 item 4) — never compared with the
 /// document's CURRENT file, which its users may have edited since. The ledger and the version record are BFF-written only
 /// (field-level security from their creation, <c>scripts/Set-DocumentRelocationSchema.ps1</c>).</para>
+/// <para><b>One relocation per document, for as long as it runs</b> (owner rounds 37 and 54 item 2): the ADR-004 processing
+/// lock, taken per call under an owner id of its own, read back before anything runs, renewed by a heartbeat and confirmed
+/// again before every destructive step (the re-point, each ledger entry's settle, a source delete, the ledger write). A move
+/// that loses it stops there, reports <see cref="LockLostPrefix"/>, and never continues unlocked.</para>
 /// <para><b>Every step is logged with before / after ids</b> (<c>[DOCUMENT-RELOCATE]</c>).</para>
 /// <para><b>Placement</b> (CLAUDE.md §10; <c>.claude/constraints/bff-extensions.md</c>): in the BFF — it composes the
 /// BFF's own container decisions (<see cref="RecordContainerResolver"/>), its app-only SPE facade and its Dataverse
