@@ -4,7 +4,7 @@
     <title>Rule-body validation refuses invalid bodies at save</title>
     <phase>2 Policy and rule bodies</phase>
     <gate>020 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>A validation gate; if it is lenient, an unparseable rule body reaches the evaluator at runtime.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -193,4 +193,5 @@
       Each negative test was verified to fail with its fix reverted, using three separate mutation runs plus two arch-guard runs.</disposition>
     <test-run>BFF build (--no-incremental): 0 warnings, 0 errors. Signals-filtered: 274/274, three consecutive runs. This task's files: PolicyVersionValidatorTests 77, PredicateCompilerTests 76, RuleBodySchemaValidatorTests 53, SignalWriterTests 38. Arch guard: 7/7. The full suite, publish size, CVE scan and conflict-check are left to the main session.</test-run>
   </rework>
+  <closeout date="2026-10-05" by="main-session">COMPLETED. Final code f44f24c5f. Independent reviews: round 1 FAIL, round 2 FAIL, round 3 PASS-WITH-FINDINGS (no fail-open in about 60 probe inputs); every finding fixed. Full BFF unit suite on 0c332e3ac (f44f24c5f + docs): Failed 0, Passed 14541, Skipped 54, Total 14595, 25 m 14 s, 81 dotnet processes at start. Publish size (CLAUDE.md section 10; fresh worktrees at short paths, Compress-Archive Optimal, PDBs included, 212 files on every side): 3828ccff2^ 45.69 MB vs f44f24c5f 45.70 MB, +0.01 MB; branch vs fresh master 293fcd4c8 45.65 MB, +0.05 MB (that comparison includes master drift); ceiling 60 MB. No package references changed; dotnet list package --vulnerable --include-transitive found no vulnerable packages on either side. Conflict check: none of the 13 files appears in any open PR; #935 touches other files in Spaarke.ArchTests (soft). Found along the way: the same Json.Schema.Net race in the AI meta-schema validation, fixed in its own PR as task 096 (#1294). Product consequence, recorded for task 031: the live Path B body pins no field to one value, so its message template can carry no record values until a rule construct names the row that supplies them.</closeout>
 </task>
