@@ -610,6 +610,34 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
      - A C# lock-step test ties `config/regarding-filing-columns.json` `rootColumns` to `CoreAncestorResolver.CoreAncestorLookups`.
      - The picker derives `$RequiredPairColumns` from the shared list without the hard-coded exclusion, or fails with a clear message naming the column a table lacks.
 
+## Round 45 (2026-10-05). BINDING. Main-session decisions under round 15. Task 166 relocation, from its re-verification.
+
+1. **A moved file keeps its version history (option a, completed).**
+   - **Replay:** the relocator replays the source's prior versions into the copy through the BFF identity, oldest first, with the current content last.
+     - It lists versions app-only with the existing `SpeFileStore.ListFileVersionsAsync`.
+     - It adds ONE app-only facade method, `DownloadFileVersionAsync`, to the existing SpeFileStore facade.
+     - Each upload's size is checked.
+   - **Failure:** a failed replay deletes the copy and leaves the row and the source untouched (Failed, retried).
+   - **Original authorship:** Graph cannot set a version's author or date. So the relocation ledger records each replayed version's ORIGINAL author, date and size against the new version id. `GET /api/documents/{id}/versions` reports the original author and date from that record, so the history a user sees is unchanged.
+   - **Version limit:** when the target container's version limit is lower than the source's count, the relocator reports `versions-truncated` with counts. That is a stated outcome, never silent.
+   - Tests and seeds: replay order, a failure that deletes the copy, author/date mapping, truncation.
+2. **Each in-subtree row gets its OWN copy (as built; ratified).** Round 37 item 2 said "re-pointed to the copy". One shared copy is impossible while the unique key `sprk_graphitemid_uk` (on `sprk_graphitemid` alone) is active, and the key is correct. The note states this.
+3. **A `sprk_communicationattachment` row that names the moved file but is not linked to the document is classified by subtree (option a).** The rule follows the subtree of the record its communication is regarding:
+   - inside the secure record's subtree: re-key it to the copy, or report it pending;
+   - outside: keep it (the source stays for it);
+   - undecidable: pending.
+
+   This is the same split as round 37 item 2.
+4. **A repeat call deletes the source using the witness recorded at verification (option a).**
+   - The relocation ledger records the source's size and quickXorHash when the copy is verified. A later repeat call deletes the source only if it still matches that witness.
+   - If the source was edited after the move, it no longer matches. That is reported as `source-changed-after-move`, with the row id, and the source is not deleted.
+   - That case closes through the relocator's own re-entry: re-copy, verify, re-point. Never by a manual admin step.
+5. **The verifier's other items are closed in the same round:**
+   - Guards V6/F-C: real tests that fail when each guard is removed.
+   - The two client pointer-write shapes the guard and the FLS p4a scan miss (F-D).
+   - The gate name in the deploy-order text (F-E, 23a).
+   - **Integration note:** `IRelocatedFileIndexing` takes the last free slot under the ADR010 1:1-interface ceiling. At integration, register it without a 1:1 interface if ADR-010 allows; otherwise record the ceiling change in the PR's ADR block.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
