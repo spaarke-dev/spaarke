@@ -214,9 +214,11 @@ Describe "Source-level regression guards (A38c no-regress obligations)" {
         $rotateSecretsSource | Should Not Match 'az ad app credential reset[^\n]*BFF'
     }
 
-    It "Rotate-Secrets.ps1: Redis rotation branches are present and untouched (separate concern)" {
-        $rotateSecretsSource | Should Match 'function Rotate-RedisKey'
-        $rotateSecretsSource | Should Match 'az redis regenerate-keys'
+    It "Rotate-Secrets.ps1: no Redis key rotation (task 242: every Spaarke Redis is Entra-only, no key to rotate)" {
+        $rotateSecretsSource | Should Match 'Redis is not rotated here'
+        # NEGATIVE: the removed Redis branch must not come back
+        $rotateSecretsSource | Should Not Match 'function Rotate-RedisKey'
+        $rotateSecretsSource | Should Not Match 'az redis regenerate-keys'
     }
 
     It "Rotate-Secrets.ps1: both ServiceBus-ConnectionString gate sites are present (platform + per-customer)" {

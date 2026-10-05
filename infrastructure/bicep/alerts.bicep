@@ -10,8 +10,12 @@
 // Four alerts (mirroring docs §8 Alert Definitions FR-17 source of truth + FR-11 rotation):
 //   1. Hit-rate < 80% over 15 min     (scheduledQueryRule, App Insights)
 //   2. P95 latency > 100 ms over 5 min (scheduledQueryRule, App Insights)
-//   3. Memory > 80% of SKU over 15 min (metricAlert, Redis platform metric)
-//   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11
+//   3. Memory > 80% of SKU over 15 min (metricAlert, Azure Managed Redis platform metric)
+//   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11.
+//      NOT deployed for dev (T242b, 2026-10-05): the dev cache is Entra-only, there is no key to rotate.
+//
+// Alert 3 targets `Microsoft.Cache/redisEnterprise` (Azure Managed Redis — ADR-009 as amended by T242:
+// every Spaarke Redis is Managed Redis). It targeted the retired `Microsoft.Cache/Redis` type until T242b.
 //
 // Module shape mirrors `infrastructure/bicep/modules/redis.bicep`:
 //   @description params, defaults via `resourceGroup().location`,
@@ -23,7 +27,7 @@
 // PARAMETERS
 // =====================================================
 
-@description('Redis cache resource name (target for memory alert). Convention: `spaarke-bff-redis-{env}`.')
+@description('Azure Managed Redis cluster name (`Microsoft.Cache/redisEnterprise`, target for the memory alert). Convention: `spaarke-bff-redis-{env}`.')
 param redisCacheName string
 
 @description('Application Insights resource name (target for hit-rate + P95 KQL alerts). Convention: `spe-insights-{env}-67e2xz` (dev) / TBD other envs.')
@@ -73,7 +77,10 @@ var alertNamePrefix = 'redis-cache'
 
 // Resource IDs — derived from name params via `resourceId()` to keep the
 // module callable from any RG context (mirrors the redis.bicep output pattern).
-var redisCacheResourceId = resourceId('Microsoft.Cache/Redis', redisCacheName)
+var redisCacheResourceId = resourceId('Microsoft.Cache/redisEnterprise', redisCacheName)
+
+// Dev has no Redis key (T242b): the missed-rotation alert is not deployed there.
+var deployMissedRotationAlert = environment != 'dev'
 var appInsightsResourceId = resourceId('Microsoft.Insights/components', appInsightsName)
 
 // KQL — hit rate below threshold (mirrors docs §8 Alert 1 KQL, threshold parameterized).
@@ -205,7 +212,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
   location: 'global'
   tags: tags
   properties: {
-    description: 'Redis used memory above ${memoryPercentThreshold}% of SKU over 15 min — scale to next SKU. Source: Azure Monitor platform metric Microsoft.Cache/Redis/usedmemorypercentage.'
+    description: 'Redis used memory above ${memoryPercentThreshold}% of SKU over 15 min — scale to next SKU. Source: Azure Monitor platform metric Microsoft.Cache/redisEnterprise/usedmemorypercentage.'
     severity: alertSeverity
     enabled: true
     scopes: [
@@ -213,7 +220,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
     ]
     evaluationFrequency: 'PT5M'
     windowSize: 'PT15M'
-    targetResourceType: 'Microsoft.Cache/Redis'
+    targetResourceType: 'Microsoft.Cache/redisEnterprise'
     criteria: {
       'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
       allOf: [
@@ -221,7 +228,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
           name: 'MemoryUsageCriteria'
           criterionType: 'StaticThresholdCriterion'
           metricName: 'usedmemorypercentage'
-          metricNamespace: 'Microsoft.Cache/Redis'
+          metricNamespace: 'Microsoft.Cache/redisEnterprise'
           operator: 'GreaterThan'
           threshold: memoryPercentThreshold
           timeAggregation: 'Average'
@@ -241,7 +248,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 // ALERT 4 — RedisKeyRotation success absent >100 days (scheduled-query rule on App Insights) — FR-11
 // =====================================================
 
-resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
+resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = if (deployMissedRotationAlert) {
   name: '${alertNamePrefix}-rotation-missed-${environment}'
   location: location
   tags: tags
@@ -288,4 +295,4 @@ resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-
 output hitRateAlertId string = hitRateAlert.id
 output p95LatencyAlertId string = p95LatencyAlert.id
 output memoryAlertId string = memoryAlert.id
-output missedRotationAlertId string = missedRotationAlert.id
+output missedRotationAlertId string = deployMissedRotationAlert ? missedRotationAlert.id : ''

@@ -36,8 +36,16 @@
     Production and staging environments REJECT execution without an explicit
     `-Force` flag per NFR-05 — same gate as `Deploy-RedisCache.ps1`.
 
+    DEV IS NOT A TARGET (T242/T242b, 2026-10-05). The dev cache is Azure Managed
+    Redis with access keys disabled: the BFF and the L2 Worker sign in with their
+    managed identities through `Redis__Endpoint`, so there is no key and no
+    `Redis-ConnectionString` to rotate. Check it with
+    `Deploy-RedisCache.ps1 -Environment dev -VerifyOnly` instead. The Key Vault
+    secret `Redis-ConnectionString` stays in place unreferenced (secrets are never
+    deleted). Staging and prod entries are unchanged.
+
 .PARAMETER Environment
-    Target environment: dev, staging, or prod.
+    Target environment: staging or prod.
 
 .PARAMETER Force
     Required to target `prod` or `staging` environments per NFR-05. Without
@@ -59,26 +67,18 @@
     one-off targets or when staging/prod resource names are finalized by the
     operator. Schema:
         {
-          "dev":     { "redis": "...", "keyVault": "...", "appService": "...",
+          "staging": { "redis": "...", "keyVault": "...", "appService": "...",
                        "resourceGroup": "...", "bffResourceGroup": "...",
                        "bffHost": "...", "appInsightsConnectionString": "..." },
-          "staging": { ... },
           "prod":    { ... }
         }
 
 .EXAMPLE
-    pwsh ./scripts/Rotate-RedisKey.ps1 -Environment dev -WhatIf
+    pwsh ./scripts/Rotate-RedisKey.ps1 -Environment staging -Force -WhatIf
 
-    Plan-only run against dev. Prints the rotation plan; performs only read-only
-    `az` discovery calls; emits no Key Vault writes, no Redis regenerate-key
-    calls, no App Service restarts, no App Insights events.
-
-.EXAMPLE
-    pwsh ./scripts/Rotate-RedisKey.ps1 -Environment dev
-
-    Live rotation against dev — Secondary regenerate → KV upsert → BFF restart
-    → /healthz poll → Primary regenerate. On any healthz failure, rolls back KV
-    to CONN_OLD and restarts BFF.
+    Plan-only run against staging. Prints the rotation plan; performs only
+    read-only `az` discovery calls; emits no Key Vault writes, no Redis
+    regenerate-key calls, no App Service restarts, no App Insights events.
 
 .EXAMPLE
     pwsh ./scripts/Rotate-RedisKey.ps1 -Environment prod -Force
@@ -119,7 +119,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'staging', 'prod')]
+    # 'dev' was removed 2026-10-05 (T242b): the dev cache is Entra-only — no key to rotate.
+    [ValidateSet('staging', 'prod')]
     [string]$Environment,
 
     [switch]$Force,
@@ -142,22 +143,13 @@ if (($Environment -in @('prod', 'staging')) -and (-not $Force)) {
 
 # ---------------------------------------------------------------------------
 # Env-to-resource map
-#   - dev: confirmed (R1 baseline)
+#   - dev: removed 2026-10-05 (T242b) — Azure Managed Redis, access keys disabled.
 #   - staging / prod: TBD by operator. Provide values either by:
 #       (a) editing the $defaultMap block below, or
 #       (b) passing -ResourceMapFile <path>.
 #   The script fails pre-flight if any required slot is empty.
 # ---------------------------------------------------------------------------
 $defaultMap = @{
-    dev = @{
-        redis                       = 'spaarke-bff-redis-dev'
-        keyVault                    = 'spaarke-spekvcert'
-        appService                  = 'spaarke-bff-dev'
-        resourceGroup               = 'spe-infrastructure-westus2'
-        bffResourceGroup            = 'rg-spaarke-dev'
-        bffHost                     = 'spaarke-bff-dev.azurewebsites.net'
-        appInsightsConnectionString = ''   # Optional: set to enable App Insights event emission.
-    }
     staging = @{
         redis                       = 'spaarke-bff-redis-staging'
         keyVault                    = ''
@@ -185,7 +177,7 @@ if ($ResourceMapFile) {
     }
     Write-Verbose "Loading resource map override from $ResourceMapFile"
     $override = Get-Content -Raw -Path $ResourceMapFile | ConvertFrom-Json
-    foreach ($env in @('dev', 'staging', 'prod')) {
+    foreach ($env in @('staging', 'prod')) {
         if ($override.PSObject.Properties.Name -contains $env) {
             foreach ($prop in $override.$env.PSObject.Properties) {
                 $defaultMap[$env][$prop.Name] = $prop.Value
