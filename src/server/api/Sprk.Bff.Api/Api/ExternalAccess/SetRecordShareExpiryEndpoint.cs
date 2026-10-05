@@ -220,7 +220,9 @@ public static class SetRecordShareExpiryEndpoint
         // its cap) or revoked by it — overriding the operator's deliberate time bound, the harm managed_elsewhere exists to
         // prevent. So each one is taken over in the SAME transaction: the contact issuer is cleared and sprk_grantedby is
         // the caller (when the caller's systemuser resolves; an audit field never blocks the write — the core's rule).
-        var contactIssued = shares.Count(s => s.GrantedByContactId is not null);
+        // Session 27 round 50 item 2: "contact-issued" includes a share whose issuing contact was DELETED (its recorded
+        // provenance survives, the lookup does not), and the take-over clears that provenance in the same write.
+        var contactIssued = shares.Count(s => s.IsContactIssued);
         Guid? takeOverBy = null;
         if (contactIssued > 0
             && Guid.TryParse(
@@ -236,7 +238,7 @@ public static class SetRecordShareExpiryEndpoint
             .Select(s =>
             {
                 var fields = new Dictionary<string, object> { ["sprk_expiresdate"] = storedValue };
-                if (s.GrantedByContactId is not null)
+                if (s.IsContactIssued)
                     ExternalGrantLifecycle.AddInternalTakeOverFields(fields, takeOverBy);
                 return (s.Id, fields);
             })

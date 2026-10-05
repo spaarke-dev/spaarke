@@ -401,18 +401,20 @@ public static class GrantExternalAccessEndpoint
                 // Task 140: a systemuser (or the Assigned-To rule) CHANGING a row a contact issued takes the row over —
                 // the contact stamp is cleared, so the contact can no longer revoke a decision somebody else made (the
                 // contact-side revoke is scoped to rows whose contact issuer is the caller). The systemuser is recorded
-                // when it resolves; an audit field never blocks the write (the create path's rule).
-                if (contactIssuer is null && survivor.GrantedByContactId is not null)
+                // when it resolves; an audit field never blocks the write (the create path's rule). Session 27 round 50
+                // item 2: the lookup's recorded provenance (sprk_grantedbycontactid) is cleared in the same write, and a row
+                // whose issuing contact was DELETED (provenance only) is taken over the same way.
+                if (contactIssuer is null && survivor.IsContactIssued)
                 {
-                    update[$"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"] = null;
                     var takeOverBy = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
-                    if (Guid.TryParse(takeOverBy, out var takeOverSystemUserId))
-                        update[$"{ExternalGrantLifecycle.GrantedByNavigationProperty}@odata.bind"] = $"/systemusers({takeOverSystemUserId})";
+                    ExternalGrantLifecycle.AddInternalTakeOverBinds(
+                        update, survivor, Guid.TryParse(takeOverBy, out var takeOverSystemUserId) ? takeOverSystemUserId : null);
 
                     logger.LogInformation(
                         "[EXT-GRANT] Row {AccessRecordId} was issued by contact {IssuerContactId}; this change makes it " +
                         "the internal user's ({SystemUserId}) — the contact can no longer revoke it.",
-                        survivor.Id, survivor.GrantedByContactId, takeOverBy ?? "(unresolved)");
+                        survivor.Id, survivor.GrantedByContactId?.ToString() ?? $"{survivor.GrantedByContactProvenance} (deleted)",
+                        takeOverBy ?? "(unresolved)");
                 }
 
                 if (contactIssuer is null)
@@ -1138,10 +1140,13 @@ public static class GrantExternalAccessEndpoint
             payload["sprk_GrantedBy@odata.bind"] = $"/systemusers({systemUserId})";
         }
 
-        // Task 140: the contact issuer, on its own contact-typed lookup (sprk_grantedby can only reference a systemuser).
+        // Task 140: the contact issuer, on its own contact-typed lookup (sprk_grantedby can only reference a systemuser) —
+        // and, in the same write, its id as text (session 27 round 50 item 2): the lookup is emptied if the contact is ever
+        // deleted (RemoveLink), the provenance is not, so the reconciliation job can still end the grant it outlived.
         if (grantedByContactId is { } issuerContactId && issuerContactId != Guid.Empty)
         {
             payload[$"{ExternalGrantLifecycle.GrantedByContactNavigationProperty}@odata.bind"] = $"/contacts({issuerContactId})";
+            payload[ExternalGrantLifecycle.GrantedByContactIdAttribute] = ExternalGrantLifecycle.ContactIssuerProvenance(issuerContactId);
         }
 
         if (request.ExpiryDate.HasValue)

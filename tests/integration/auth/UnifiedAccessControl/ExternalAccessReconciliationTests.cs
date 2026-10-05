@@ -786,6 +786,94 @@ public class ExternalAccessReconciliationTests
         AssertIssuerKept(row);
     }
 
+    // ── R1 on a row whose issuing contact was DELETED (session 27 round 50 item 2) ─────────────────────────────────────
+    //
+    // The BFF writes the issuer's id as text (sprk_grantedbycontactid) beside the lookup, in the same write, every time; the
+    // lookup's Delete cascade is RemoveLink, so deleting the contact empties the lookup alone. "Recorded but the lookup is
+    // empty" therefore means the issuer was deleted — and an undated row in that shape ENDS (it may not outlive its issuer).
+
+    /// <summary>
+    /// One input apart: the issuing contact exists (lookup set) — R1 judges the row by that contact's own grant (+200, so the
+    /// default) — or it was DELETED (lookup empty, provenance kept) — the row ends, decided with no read, even though the
+    /// seeded issuer grant is still there, and is reported <c>IssuerDeleted</c>. A recorded value that is not even a GUID ends
+    /// the row too: provenance without its lookup is never read as "no contact issuer" (fail closed).
+    /// </summary>
+    [Theory]
+    [InlineData("issuer-exists")]
+    [InlineData("issuer-deleted")]
+    [InlineData("issuer-deleted-unparseable")]
+    public async Task R1_AContactIssuedUndatedRow_WhoseIssuingContactWasDeleted_IsDeactivated_AndReported(string shape)
+    {
+        _grants.Seed(Issuer, Project, Collaborate, Today.AddDays(200), issuedByContact: null);
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate,
+            issuerDeleted: shape != "issuer-exists",
+            provenance: shape == "issuer-deleted-unparseable" ? "not-a-guid" : null);
+
+        var result = await RunAsync(writes: true);
+
+        if (shape == "issuer-exists")
+        {
+            ExpiryOf(row).Should().Be(Default);
+            ContactIssuedRow(row).GetProperty("outcome").GetString().Should().Be("StampedDefault");
+            ContactIssued().GetProperty("issuerDeleted").GetInt32().Should().Be(0);
+            return;
+        }
+
+        State(Grant(row)).Should().Be(1);
+        Status(Grant(row)).Should().Be(2);
+        Grant(row).Contains(ExternalAccessReconciliationJob.ExpiresDateAttribute).Should().BeFalse("an ended row is not also stamped");
+        AssertWroteOnly(row, "statecode", "statuscode");
+        Grant(row).GetAttributeValue<string>(ExternalAccessReconciliationJob.GrantedByContactIdAttribute)
+            .Should().NotBeNullOrEmpty("the provenance is kept — it is the record of who issued the ended grant");
+        ContactIssued().GetProperty("issuerDeleted").GetInt32().Should().Be(1);
+        ContactIssued().GetProperty("deactivated").GetInt32().Should().Be(0, "a deleted issuer is reported as its own outcome");
+        ContactIssuedRow(row).GetProperty("outcome").GetString().Should().Be("IssuerDeleted");
+        BeforeStateFor(row).Should().ContainSingle().Which.Should().Contain("grantedByContact=(empty)")
+            .And.Contain("grantedByContactId=")
+            .And.Contain("was deleted");
+        Heartbeat()["R1ContactIssuedIssuerDeleted"].Should().Be(1);
+        result.Success.Should().BeTrue("a deleted issuer is a decided outcome, not a fault");
+    }
+
+    /// <summary>
+    /// A DATED row whose issuing contact was deleted stands until its date — exactly as a dated row whose issuer lost access by
+    /// any other route does (owner G2 (ii): no cascade). R1 decides undated rows only; it never ends a dated one.
+    /// </summary>
+    [Fact]
+    public async Task R1_ADatedRowWhoseIssuingContactWasDeleted_IsLeftUnchanged()
+    {
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate, issuerDeleted: true, expires: Today.AddDays(30));
+
+        await RunAsync(writes: true);
+
+        _dataverse.Writes.Should().BeEmpty();
+        State(Grant(row)).Should().Be(0);
+        ExpiryOf(row).Should().Be(Today.AddDays(30));
+    }
+
+    /// <summary>
+    /// A row ISSUED BY the grantee of a deleted issuer's row: its issuer's only grant is that row, which this run ends — so it
+    /// ends too, decided in the same run rather than left unresolved. (Were the deleted issuer's row not part of the run's
+    /// decisions, it would read as an undated row nobody planned, and this row would be left unchanged on a guess.)
+    /// </summary>
+    [Fact]
+    public async Task R1_ARowIssuedOnTheStrengthOfADeletedIssuersRow_EndsInTheSameRun()
+    {
+        var issuersRow = SeedContactIssued(issuer: IssuersIssuer, level: Collaborate, grantee: Issuer, issuerDeleted: true);
+        Mirror(issuersRow, Issuer, Collaborate, issuedByContact: IssuersIssuer);
+        _grants.RowsFor(Issuer).Single().GrantedByContactId = null; // the issuer's issuer was deleted (RemoveLink)
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate);
+
+        var result = await RunAsync(writes: true);
+
+        State(Grant(issuersRow)).Should().Be(1);
+        State(Grant(row)).Should().Be(1, "its issuer's only grant ends in this run");
+        ContactIssuedRow(issuersRow).GetProperty("outcome").GetString().Should().Be("IssuerDeleted");
+        ContactIssuedRow(row).GetProperty("outcome").GetString().Should().Be("Deactivated");
+        ContactIssued().GetProperty("unresolved").GetInt32().Should().Be(0);
+        result.Success.Should().BeTrue();
+    }
+
     /// <summary>Report-only: the contact-issued rows are decided and REPORTED — the same evidence a write pass would act on — and nothing is written.</summary>
     [Fact]
     public async Task R1_ContactIssued_InReportOnlyMode_IsDecidedAndReported_ButNothingIsWritten()
@@ -793,6 +881,7 @@ public class ExternalAccessReconciliationTests
         _grants.Seed(Issuer, Project, Collaborate, Today.AddDays(30), issuedByContact: null);
         var capped = SeedContactIssued(issuer: Issuer, level: Collaborate);
         var ended = SeedContactIssued(issuer: IssuersIssuer, level: Collaborate, grantee: Issuer);
+        var orphaned = SeedContactIssued(issuer: IssuersIssuer, level: Collaborate, grantee: Grantee, issuerDeleted: true);
 
         await RunAsync(writes: null);
 
@@ -800,20 +889,33 @@ public class ExternalAccessReconciliationTests
         ContactIssuedRow(capped).GetProperty("outcome").GetString().Should().Be("CappedByIssuer");
         ContactIssuedRow(capped).GetProperty("expiresDate").GetString().Should().Be(Today.AddDays(30).ToString("yyyy-MM-dd"));
         ContactIssuedRow(ended).GetProperty("outcome").GetString().Should().Be("Deactivated");
+        ContactIssuedRow(orphaned).GetProperty("outcome").GetString().Should().Be("IssuerDeleted");
         BeforeStateFor(capped).Should().ContainSingle().Which.Should().Contain("mode=report-only")
             .And.Contain($"after=[expiresDate={Today.AddDays(30):yyyy-MM-dd}");
         BeforeStateFor(ended).Should().ContainSingle().Which.Should().Contain("after=[statecode=1 statuscode=2");
+        BeforeStateFor(orphaned).Should().ContainSingle().Which.Should().Contain("after=[statecode=1 statuscode=2")
+            .And.Contain("was deleted");
     }
 
-    /// <summary>A contact-issued undated row: scanned by the job (SDK store), with its issuer, record, level and grantee.</summary>
-    private Guid SeedContactIssued(Guid issuer, int level, Guid? grantee = null, Guid? project = null)
+    /// <summary>
+    /// A contact-issued row (undated unless <paramref name="expires"/>): scanned by the job (SDK store), with its issuer, the
+    /// issuer's recorded provenance (as the BFF writes both, round 50 item 2), record, level and grantee.
+    /// <paramref name="issuerDeleted"/> models the contact's deletion: its RemoveLink cascade empties the lookup and leaves
+    /// the provenance; <paramref name="provenance"/> overrides the recorded text.
+    /// </summary>
+    private Guid SeedContactIssued(Guid issuer, int level, Guid? grantee = null, Guid? project = null,
+        bool issuerDeleted = false, string? provenance = null, DateOnly? expires = null)
     {
         var row = new Entity(GrantEntity, Guid.NewGuid());
         row["statecode"] = new OptionSetValue(0);
-        row[ExternalAccessReconciliationJob.GrantedByContactAttribute] = new EntityReference("contact", issuer);
+        if (!issuerDeleted)
+            row[ExternalAccessReconciliationJob.GrantedByContactAttribute] = new EntityReference("contact", issuer);
+        row[ExternalAccessReconciliationJob.GrantedByContactIdAttribute] = provenance ?? ExternalGrantLifecycle.ContactIssuerProvenance(issuer);
         row["sprk_contact"] = new EntityReference("contact", grantee ?? Grantee);
         row["sprk_project"] = new EntityReference("sprk_project", project ?? Project);
         row[ExternalAccessReconciliationJob.AccessLevelAttribute] = new OptionSetValue(level);
+        if (expires is { } e)
+            row[ExternalAccessReconciliationJob.ExpiresDateAttribute] = ExternalGrantLifecycle.ToSdkDateOnly(e);
         _dataverse.Add(row);
         return row.Id;
     }
@@ -975,7 +1077,8 @@ public class ExternalAccessReconciliationTests
     /// <summary>
     /// A small ROW STORE, not a FetchXML evaluator: it serves every row of the scanned table, pages it, and
     /// applies <c>BulkUpdateAsync</c> back into itself — so each rule is proven by the job's in-code decision
-    /// and a second run sees what the first one wrote.
+    /// and a second run sees what the first one wrote. It does honour the scan's <c>&lt;attribute&gt;</c> list: a row is
+    /// served with only the columns the FetchXML selects, as Dataverse serves it.
     /// </summary>
     private sealed class FakeDataverse : IGenericEntityService
     {
@@ -1011,7 +1114,27 @@ public class ExternalAccessReconciliationTests
             var page = int.Parse(doc.Root!.Attribute("page")!.Value, CultureInfo.InvariantCulture);
             var count = int.Parse(doc.Root!.Attribute("count")!.Value, CultureInfo.InvariantCulture);
             var all = Rows.TryGetValue(entityName, out var list) ? list : new List<Entity>();
-            var slice = all.Skip((page - 1) * count).Take(count).ToList();
+
+            // Each row is served PROJECTED to the attributes the FetchXML names (a link-entity's as "alias.name"), as
+            // Dataverse serves it — so a column the scan forgets to select is absent here too, and the rule that needs it
+            // goes red (round 50 item 2: the deleted-issuer rule reads sprk_grantedbycontactid). Writes still land on the
+            // stored rows.
+            var entity = doc.Descendants("entity").First();
+            var selected = entity.Elements("attribute").Select(a => a.Attribute("name")!.Value).ToHashSet(StringComparer.Ordinal);
+            foreach (var link in entity.Elements("link-entity"))
+            {
+                var alias = (string?)link.Attribute("alias");
+                foreach (var attribute in link.Elements("attribute"))
+                    selected.Add($"{alias}.{attribute.Attribute("name")!.Value}");
+            }
+
+            var slice = all.Skip((page - 1) * count).Take(count).Select(row =>
+            {
+                var served = new Entity(row.LogicalName, row.Id);
+                foreach (var attribute in row.Attributes.Where(a => selected.Contains(a.Key)))
+                    served[attribute.Key] = attribute.Value;
+                return served;
+            }).ToList();
 
             var collection = new EntityCollection(slice)
             {

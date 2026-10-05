@@ -72,7 +72,9 @@ public class RecordShareExpiryTests
     /// <remarks>
     /// Task 140 added <c>_sprk_grantedbycontact_value</c> (the contact-typed grant issuer, created by
     /// <c>scripts/Deploy-ExternalRecordAccessContactGrantor.ps1</c>). This list going red when it was first selected is
-    /// exactly the deploy-order hazard that script documents: the column must exist before a BFF that reads it.
+    /// exactly the deploy-order hazard that script documents: the column must exist before a BFF that reads it. Session 27
+    /// round 50 item 2 added <c>sprk_grantedbycontactid</c> (the issuer's id as text, created by the same script) under the
+    /// same gate.
     /// </remarks>
     private static readonly HashSet<string> LiveColumns = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -80,7 +82,7 @@ public class RecordShareExpiryTests
         "sprk_granteddate", "statecode", "statuscode",
         "_sprk_contact_value", "_sprk_organization_value", "_sprk_project_value",
         "_sprk_matter_value", "_sprk_workassignment_value", "_sprk_invoice_value",
-        "_sprk_grantedby_value", "_sprk_grantedbycontact_value", "_sprk_recordtype_value",
+        "_sprk_grantedby_value", "_sprk_grantedbycontact_value", "sprk_grantedbycontactid", "_sprk_recordtype_value",
         "createdon", "modifiedon", "ownerid"
     };
 
@@ -416,10 +418,12 @@ public class RecordShareExpiryTests
         var updates = SingleBulkUpdate().Updates.ToDictionary(u => u.id, u => u.fields);
 
         var takenOver = updates[contactIssued.Id];
-        takenOver.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedby" },
+        takenOver.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid", "sprk_grantedby" },
             "the take-over travels in the SAME write as the date — never a second, separately failing one");
         takenOver["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value,
             "DBNull.Value is the IGenericEntityService convention that CLEARS a column (a C# null would be skipped)");
+        takenOver["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value,
+            "the issuer's recorded provenance is cleared in the same write as its lookup (round 50 item 2)");
         var stamp = takenOver["sprk_grantedby"].Should().BeOfType<Microsoft.Xrm.Sdk.EntityReference>().Subject;
         stamp.LogicalName.Should().Be("systemuser");
         stamp.Id.Should().Be(CallerSystemUserId, "the changing internal user now owns the decision");
@@ -435,7 +439,33 @@ public class RecordShareExpiryTests
         var target = transaction.Requests.Cast<UpdateRequest>().Select(r => r.Target).Single(t => t.Id == contactIssued.Id);
         target.Attributes.Should().ContainKey("sprk_grantedbycontact");
         target["sprk_grantedbycontact"].Should().BeNull();
+        target.Attributes.Should().ContainKey("sprk_grantedbycontactid");
+        target["sprk_grantedbycontactid"].Should().BeNull();
         target.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_grantedby").Id.Should().Be(CallerSystemUserId);
+    }
+
+    /// <summary>
+    /// Session 27 round 50 item 2: a share whose issuing CONTACT WAS DELETED — the lookup emptied by its RemoveLink cascade,
+    /// the issuer's id still recorded in <c>sprk_grantedbycontactid</c> — is contact-issued all the same, so the internal
+    /// change takes it over too: the provenance cleared and the caller stamped, in the same write. Left recorded, the
+    /// reconciliation job would later read the operator's share as a deleted contact's. The twin is the test above (the
+    /// lookup still set): the one input is whether the contact still exists.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_TakesOverAShareWhoseIssuingContactWasDeleted()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        var orphaned = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+        orphaned.GrantedByContactId = null; // the contact was deleted: RemoveLink empties the lookup, the provenance stays
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        var fields = SingleBulkUpdate().Updates.Single(u => u.id == orphaned.Id).fields;
+        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid", "sprk_grantedby" });
+        fields["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value);
+        fields["sprk_grantedby"].Should().BeOfType<Microsoft.Xrm.Sdk.EntityReference>().Which.Id.Should().Be(CallerSystemUserId);
     }
 
     /// <summary>
@@ -453,8 +483,9 @@ public class RecordShareExpiryTests
 
         OkBody(result).UpdatedCount.Should().Be(1);
         var fields = SingleBulkUpdate().Updates.Single(u => u.id == contactIssued.Id).fields;
-        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact" });
+        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid" });
         fields["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value);
+        fields["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value);
         _table.SystemUserReads.Should().Equal(new[] { $"azureactivedirectoryobjectid eq {CallerOid}" },
             "the caller's systemuser was looked up — by its Entra object id — and found nothing");
     }
@@ -633,6 +664,8 @@ public class RecordShareExpiryTests
         {
             var row = Seed(contactId, organizationId, rootType, rootId, expires, stateCode);
             row.GrantedByContactId = grantedByContact;
+            // As the BFF writes it (round 50 item 2): the issuer's id as text beside the lookup.
+            row.GrantedByContactProvenance = grantedByContact is { } issuer ? ExternalGrantLifecycle.ContactIssuerProvenance(issuer) : null;
             row.GrantedBySystemUserId = grantedBySystemUser;
             return row;
         }

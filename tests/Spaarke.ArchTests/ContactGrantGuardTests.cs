@@ -151,7 +151,90 @@ public class ContactGrantGuardTests
         Assert.Matches(new Regex(@"Test-DvInSolution\s+-Membership\s+\$membership\s+-ComponentId\s+\$c\.Id\s+-TableMetadataId\s+\$c\['TableId'\]"), script);
 
         var subcomponents = Regex.Matches(script, @"\$components\.Add\(@\{[^}]*Type\s*=\s*(2|10|14)\s*;[^}]*\}\)");
-        Assert.Equal(2, subcomponents.Count); // the column (2) and its relationship (10)
+        Assert.Equal(3, subcomponents.Count); // the lookup (2), its relationship (10) and the provenance column (2, round 50 item 2)
         Assert.All(subcomponents, m => Assert.Contains("TableId = $tableId", m.Value, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 140 (session 27 round 50 item 2): the provenance column the BFF selects and writes is the one the schema script creates")]
+    public void TheProvenanceColumnAgreesWithTheSchemaScript()
+    {
+        var script = TextOf(SchemaScript);
+        string ScriptValue(string variable)
+        {
+            var m = Regex.Match(script, $@"^\${variable}\s*=\s*'([^']+)'", RegexOptions.Multiline);
+            Assert.True(m.Success, $"{SchemaScript} no longer declares ${variable}.");
+            return m.Groups[1].Value;
+        }
+
+        var column = ScriptValue("ProvenanceColumn");
+        var schemaName = ScriptValue("ProvenanceColumnSchemaName");
+
+        var lifecycle = TextOf(LifecycleFile);
+        var constant = Regex.Match(lifecycle, @"GrantedByContactIdAttribute\s*=\s*""([^""]+)""");
+        Assert.True(constant.Success, "ExternalGrantLifecycle.GrantedByContactIdAttribute was not found.");
+
+        Assert.Equal("sprk_grantedbycontactid", column);
+        Assert.Equal(column, constant.Groups[1].Value);
+        Assert.Equal(column, schemaName.ToLowerInvariant()); // a custom column's logical name is its schema name, lower-cased
+        Assert.StartsWith("sprk_", column, StringComparison.Ordinal);
+        // Every grant-row read selects it (a plain column: its logical name IS its $select name) — the deploy-order gate.
+        Assert.Matches(new Regex(@"RowSelect\s*=[^;]*\+\s*GrantedByContactIdAttribute\s*;", RegexOptions.Singleline), lifecycle);
+    }
+
+    /// <summary>The spellings a write of the contact-issuer LOOKUP takes in BFF source: the Web API bind key and the SDK attribute key.</summary>
+    private static readonly Regex LookupWrite = new(
+        @"(\{(ExternalGrantLifecycle\.)?GrantedByContactNavigationProperty\}@odata\.bind""|""sprk_GrantedByContact@odata\.bind""|\[(ExternalGrantLifecycle\.)?GrantedByContactAttribute|\[""sprk_grantedbycontact"")\]\s*=",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>The spellings a write of its PROVENANCE takes.</summary>
+    private static readonly Regex ProvenanceWrite = new(
+        @"(\[(ExternalGrantLifecycle\.)?GrantedByContactIdAttribute|\[""sprk_grantedbycontactid"")\]\s*=",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Session 27 round 50 item 2: <c>sprk_grantedbycontactid</c> means "the issuer was deleted" only while EVERY write that
+    /// sets or clears the issuer lookup sets or clears the provenance in the same write. The behavioural tests prove each
+    /// writer that exists (the contact grant's create, the grant core's take-over, set-record-share-expiry's take-over); this
+    /// keeps a NEW writer of the lookup from appearing without the provenance beside it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Exactly what this enforces</b> (text, per file, under <c>src/server</c>): a file that assigns the issuer lookup by
+    /// one of its four key spellings (<see cref="LookupWrite"/>) assigns the provenance (<see cref="ProvenanceWrite"/>) at least
+    /// as many times; and the files that assign the lookup are exactly the two known writers — so a regex that silently
+    /// stopped matching, or a writer added elsewhere, fails here and is reviewed. It does NOT see a key held in a variable or
+    /// built at run time, and it does not prove the two assignments reach the same request — the behavioural tests do.</para>
+    /// </remarks>
+    [Fact(DisplayName = "Task 140 (session 27 round 50 item 2): every writer of the issuer lookup also writes its provenance")]
+    public void EveryWriterOfTheIssuerLookupAlsoWritesItsProvenance()
+    {
+        var writers = new List<string>();
+        var unpaired = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(SourceScan.RepoRoot, "src", "server"), "*.cs", SearchOption.AllDirectories))
+        {
+            var code = SourceScan.CodeText(File.ReadAllLines(file));
+            var lookupWrites = LookupWrite.Matches(code).Count;
+            if (lookupWrites == 0)
+                continue;
+
+            var relative = SourceScan.Relative(file).Replace('\\', '/');
+            writers.Add(relative);
+            var provenanceWrites = ProvenanceWrite.Matches(code).Count;
+            if (provenanceWrites < lookupWrites)
+                unpaired.Add($"{relative}: {lookupWrites} write(s) of the issuer lookup, {provenanceWrites} of its provenance");
+        }
+
+        Assert.True(
+            unpaired.Count == 0,
+            "A write that sets or clears sprk_grantedbycontact must set or clear sprk_grantedbycontactid in the SAME write " +
+            "(session 27 round 50 item 2) — otherwise a row whose lookup was cleared by a take-over still records a contact, and " +
+            "the reconciliation job reads it as a DELETED issuer's grant and ends it:\n  " + string.Join("\n  ", unpaired));
+
+        Assert.Equal(
+            new[]
+            {
+                "src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs",
+                "src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs",
+            },
+            writers.OrderBy(w => w, StringComparer.Ordinal).ToArray());
     }
 }

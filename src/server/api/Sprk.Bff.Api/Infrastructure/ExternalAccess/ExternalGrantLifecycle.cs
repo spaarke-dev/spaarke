@@ -150,6 +150,24 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("_sprk_grantedbycontact_value")]
     public Guid? GrantedByContactId { get; set; }
 
+    /// <summary>
+    /// The issuing contact's id as TEXT (<c>sprk_grantedbycontactid</c>, session 27 round 50 item 2) — the grant's provenance,
+    /// which survives the contact's deletion. The lookup above cannot: its relationship's Delete cascade is RemoveLink, so
+    /// deleting the contact empties it. Written in the same write as the lookup, every time (set on a contact grant, cleared
+    /// on an internal take-over), so "recorded but the lookup is empty" means exactly "the issuer was deleted".
+    /// </summary>
+    /// <remarks>Read as text, never parsed on the wire: a value that is not a GUID must not fail every grant-row read (the
+    /// lesson of the TimeZoneIndependent expiry shape, task 140 note §12). The column is BFF-written (field-secured).</remarks>
+    [JsonPropertyName("sprk_grantedbycontactid")]
+    public string? GrantedByContactProvenance { get; set; }
+
+    /// <summary>
+    /// The row was issued by a CONTACT: its issuer lookup is set, or — once that contact was deleted — its recorded provenance
+    /// is. What an internal change takes over (both columns cleared in one write).
+    /// </summary>
+    [JsonIgnore]
+    public bool IsContactIssued => GrantedByContactId is not null || !string.IsNullOrWhiteSpace(GrantedByContactProvenance);
+
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
 }
@@ -347,13 +365,15 @@ internal static class ExternalGrantLifecycle
     // The two ISSUER columns (task 140): sprk_grantedby (systemuser, long-standing) and sprk_grantedbycontact (contact,
     // added by scripts/Deploy-ExternalRecordAccessContactGrantor.ps1). The contact-side routes decide "is this row the
     // caller's?" from the second, and /grant re-stamps a row a contact issued when a systemuser changes it, so both read
-    // paths need it. ⚠️ DEPLOY ORDER: the column must exist in the environment BEFORE a BFF carrying this select is
-    // deployed — Dataverse answers 400 to a $select naming an unknown attribute (task 140 notes §live gate).
+    // paths need it. Beside them, sprk_grantedbycontactid (session 27 round 50 item 2): the contact issuer's id as text, which
+    // outlives the contact — so an internal change takes over a row whose issuing contact was deleted too. ⚠️ DEPLOY ORDER:
+    // both columns must exist in the environment BEFORE a BFF carrying this select is deployed — Dataverse answers 400 to a
+    // $select naming an unknown attribute (task 140 notes §live gate).
     private const string RowSelect =
         "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
-        "_sprk_grantedby_value,_sprk_grantedbycontact_value";
+        "_sprk_grantedby_value,_sprk_grantedbycontact_value," + GrantedByContactIdAttribute;
 
     /// <summary>
     /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
@@ -368,24 +388,57 @@ internal static class ExternalGrantLifecycle
     /// <summary>The LOGICAL name of the contact-typed issuer lookup — what an SDK write (<c>IGenericEntityService</c>) addresses.</summary>
     internal const string GrantedByContactAttribute = "sprk_grantedbycontact";
 
+    /// <summary>
+    /// The contact issuer's id as TEXT — <c>sprk_grantedbycontactid</c> (session 27 round 50 item 2), a plain column, so its
+    /// logical name is also its Web API property and its <c>$select</c> name. Set and cleared in the SAME write as
+    /// <see cref="GrantedByContactAttribute"/>, every time; only a deletion of the contact (RemoveLink) empties the lookup
+    /// alone, which is how the reconciliation job knows the issuer was deleted. Created by
+    /// <c>scripts/Deploy-ExternalRecordAccessContactGrantor.ps1</c>.
+    /// </summary>
+    internal const string GrantedByContactIdAttribute = "sprk_grantedbycontactid";
+
     /// <summary>The LOGICAL name of the systemuser issuer lookup — what an SDK write addresses.</summary>
     internal const string GrantedByAttribute = "sprk_grantedby";
 
+    /// <summary>The ONE text form of a contact issuer's id in <see cref="GrantedByContactIdAttribute"/>: lower-case, hyphenated (<c>D</c>).</summary>
+    internal static string ContactIssuerProvenance(Guid issuerContactId)
+        => issuerContactId.ToString("D", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// The SDK-shaped (logical-name) fields that make an internal user's change of a CONTACT-issued row take it over
-    /// (session 27 round 34 item 3): the contact issuer is CLEARED and <c>sprk_grantedby</c> is stamped with the changing
-    /// systemuser, in the same write — so the contact can no longer revoke, or re-lengthen through its own re-grant, a
-    /// decision an internal user made. The grant core's Web API path does the same with <c>@odata.bind</c>
-    /// (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>, default mode).
+    /// (session 27 round 34 item 3): the contact issuer is CLEARED — the lookup AND its recorded provenance, in the same write
+    /// (round 50 item 2) — and <c>sprk_grantedby</c> is stamped with the changing systemuser, so the contact can no longer
+    /// revoke, or re-lengthen through its own re-grant, a decision an internal user made. The grant core's Web API path does
+    /// the same with <c>@odata.bind</c> (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>, default mode).
     /// </summary>
     /// <remarks>The systemuser is stamped when it resolves; an audit field never blocks the write (the core's rule) —
-    /// the contact stamp is cleared either way, because that is what protects the internal decision.</remarks>
+    /// the contact stamp is cleared either way, because that is what protects the internal decision. Applies equally to a
+    /// row whose issuing contact was deleted (<see cref="ExternalGrantRow.IsContactIssued"/>): it is the internal user's
+    /// from now on, so its provenance no longer names a contact.</remarks>
     internal static void AddInternalTakeOverFields(IDictionary<string, object> fields, Guid? changingSystemUserId)
     {
         ArgumentNullException.ThrowIfNull(fields);
         fields[GrantedByContactAttribute] = DBNull.Value; // IGenericEntityService: DBNull.Value CLEARS the column
+        fields[GrantedByContactIdAttribute] = DBNull.Value;
         if (changingSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
             fields[GrantedByAttribute] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", systemUserId);
+    }
+
+    /// <summary>
+    /// The Web API shape of <see cref="AddInternalTakeOverFields"/> — what the grant core's default mode adds to its PATCH when
+    /// it CHANGES a contact-issued row (<see cref="ExternalGrantRow.IsContactIssued"/>): the contact lookup unbound (only when
+    /// it is still bound — a deleted issuer's is already empty), its provenance cleared in the same write (round 50 item 2),
+    /// and <c>sprk_grantedby</c> bound to the changing systemuser when it resolved.
+    /// </summary>
+    internal static void AddInternalTakeOverBinds(IDictionary<string, object?> update, ExternalGrantRow row, Guid? changingSystemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.GrantedByContactId is not null)
+            update[$"{GrantedByContactNavigationProperty}@odata.bind"] = null;
+        update[GrantedByContactIdAttribute] = null;
+        if (changingSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+            update[$"{GrantedByNavigationProperty}@odata.bind"] = $"/systemusers({systemUserId})";
     }
 
     /// <summary>

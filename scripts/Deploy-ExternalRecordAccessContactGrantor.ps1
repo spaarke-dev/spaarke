@@ -2,8 +2,10 @@
 <#
 .SYNOPSIS
     Adds the contact-typed grant issuer column — sprk_externalrecordaccess.sprk_grantedbycontact, a lookup to contact —
-    and locks it with field-level security so ONLY the BFF can write it (unified-access-control-r2 task 140, #1063;
-    owner C4 / Q2, session 27). Dry run by default; -Apply writes; -Verify checks. Idempotent.
+    and its provenance sprk_grantedbycontactid (the issuer's id as text, which survives the contact's deletion), backfills
+    the provenance, and locks both with field-level security so ONLY the BFF can write them (unified-access-control-r2
+    task 140, #1063; owner C4 / Q2, session 27 rounds 42 and 50). Dry run by default; -Apply writes; -Verify checks.
+    Idempotent.
 
 .DESCRIPTION
     WHY. Task 140 lets a contact holding Collaborate or Full Access grant colleagues of their own organization access to
@@ -16,6 +18,13 @@
     grant (GrantExternalAccessEndpoint.BuildGrantPayload) — and clears it when an internal user changes a contact-issued
     row, so the contact can no longer revoke a decision somebody else made.
 
+    WHY THE SECOND COLUMN (session 27 round 50 item 2). The lookup's Delete cascade is RemoveLink, so deleting the issuing
+    contact EMPTIES it — and an undated grant that contact issued would then look internally issued, be stamped +90 by the
+    reconciliation job, and outlive its issuer. sprk_grantedbycontactid holds the issuer's id as text, written and cleared
+    by the BFF in the SAME write as the lookup, every time; so "recorded but the lookup is empty" means exactly "the issuer
+    was deleted", and the job ends such a row (ExternalAccessReconciliationJob, R1). Restrict (blocks privacy deletions) and
+    a cascade (owner G2 (ii)) were both ruled out.
+
     The script provisions, in order:
       (a) COLUMN     sprk_grantedbycontact (schema sprk_GrantedByContact) on sprk_externalrecordaccess: a lookup to
                      contact through the 1:N relationship sprk_contact_sprk_externalrecordaccess_grantedbycontact, cascade
@@ -23,26 +32,38 @@
                      issuing contact may move, share or delete a grant). The navigation property is the PascalCase schema
                      name, sprk_GrantedByContact — the bind name the BFF uses (asserted below). The target solution's
                      publisher must carry the sprk prefix (asserted before the create).
+      (a2) COLUMN    sprk_grantedbycontactid (schema sprk_GrantedByContactId) on sprk_externalrecordaccess: single-line
+                     text, MaxLength 100 (a GUID is 36), not required. Its logical name is also its Web API property —
+                     the name the BFF selects and writes (ExternalGrantLifecycle.GrantedByContactIdAttribute, asserted by
+                     ContactGrantGuardTests). Same prefix assertion.
       (b) PROFILES   the EXISTING "Spaarke BFF-Managed Field Readers" (every business unit's default team: everyone keeps
                      READING the issuer — Manage Access shows it) and "Spaarke BFF-Managed Field Writers" (the BFF
                      application user(s) ONLY) — created here if absent (task 133's script creates them first in dev).
-                     Members are associated BEFORE the column is secured. Any other writer-profile member is FAIL in
+                     Members are associated BEFORE the columns are secured. Any other writer-profile member is FAIL in
                      every mode (reported, never removed).
-      (c) FLS        the column becomes field-secured; readers read=4, writers read=4 create=4 update=4; any other
-                     profile that can create or update it (besides System Administrator) is FAIL. Without the lock, any
-                     user with Write on a grant row could name a contact as its issuer, and that contact could then
-                     revoke the grant from the external SPA.
-      (d) SOLUTION   the lookup, its relationship and both profiles are in -SolutionUniqueName (SpaarkeCore), decided
-                     by the shared scripts/common/DataverseSolutionMembership.ps1: paged, and a column or relationship
-                     counts as included when its table is in the solution with rootcomponentbehavior = 0 (as
-                     sprk_externalrecordaccess is in SpaarkeCore on spaarkedev1 -- it then has no row of its own, and
-                     AddSolutionComponent on it is a no-op).
+      (c) FLS        BOTH columns become field-secured; readers read=4, writers read=4 create=4 update=4; any other
+                     profile that can create or update either (besides System Administrator) is FAIL. Without the lock,
+                     any user with Write on a grant row could name a contact as its issuer (and that contact could then
+                     revoke the grant from the external SPA), or forge or erase the provenance the reconciliation job
+                     ends a deleted issuer's grant by.
+      (d) SOLUTION   the lookup, its relationship, the provenance column and both profiles are in -SolutionUniqueName
+                     (SpaarkeCore), decided by the shared scripts/common/DataverseSolutionMembership.ps1: paged, and a
+                     column or relationship counts as included when its table is in the solution with
+                     rootcomponentbehavior = 0 (as sprk_externalrecordaccess is in SpaarkeCore on spaarkedev1 -- it then
+                     has no row of its own, and AddSolutionComponent on it is a no-op).
       (e) PUBLISH    sprk_externalrecordaccess.
+      (f) BACKFILL   every row whose lookup names a contact records that contact's id in sprk_grantedbycontactid
+                     (lower-case, hyphenated — ExternalGrantLifecycle.ContactIssuerProvenance). -Apply writes each missing
+                     or different value with If-Match on the row's version (a row changed since it was read is reported
+                     and left for a re-run — never written over); the dry run counts them; -Verify FAILS while any row is
+                     not backfilled. Rows that record a provenance with an EMPTY lookup (a deleted issuer) are reported
+                     for information: they are what the reconciliation job ends.
 
-    ⚠️ DEPLOY ORDER. A BFF build carrying task 140 SELECTS this column on every grant-row read (/grant, /revoke,
-    /invite-and-grant, /set-record-share-expiry, the Assigned-To materializer, the contact routes). Dataverse answers 400
-    to a $select naming an unknown column, so those routes FAIL until (a) has run. Apply this script — and see -Verify
-    exit 0 — in an environment BEFORE deploying such a BFF (or the task-140 TrackingFieldTrio PCF) to it.
+    ⚠️ DEPLOY ORDER. A BFF build carrying task 140 SELECTS both columns on every grant-row read (/grant, /revoke,
+    /invite-and-grant, /set-record-share-expiry, the Assigned-To materializer, the contact routes, the reconciliation
+    job's scan). Dataverse answers 400 to a $select naming an unknown column, so those routes FAIL until (a) and (a2) have
+    run. Apply this script — and see -Verify exit 0 — in an environment BEFORE deploying such a BFF (or the task-140
+    TrackingFieldTrio PCF) to it.
 
     PREFIX SAFETY (FAILURE-MODES AP-13). Never create this column with mcp__dataverse__update_table: it has no publisher
     or solution parameter. This script writes under the MSCRM.SolutionUniqueName header and asserts the sprk_ prefix.
@@ -78,11 +99,16 @@
 
 .NOTES
     unified-access-control-r2 task 140 (#1063). Code: src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/
-    ExternalGrantLifecycle.cs (GrantedByContactNavigationProperty, RowSelect) — the names are pinned against this script
-    by tests/Spaarke.ArchTests/ContactGrantGuardTests.cs (TheIssuerColumnAgreesWithTheSchemaScript); the solution step
-    by SchemaScriptSolutionMembershipGuardTests. Schema doc: src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/
-    entity-schema.md. Shape: scripts/Set-RecordCreatorPersonSchema.ps1 (task 133). Auth: the operator's own az CLI
-    identity (System Administrator in the environment). No secrets.
+    ExternalGrantLifecycle.cs (GrantedByContactNavigationProperty, GrantedByContactIdAttribute, ContactIssuerProvenance,
+    RowSelect) — the names are pinned against this script by tests/Spaarke.ArchTests/ContactGrantGuardTests.cs
+    (TheIssuerColumnAgreesWithTheSchemaScript, TheProvenanceColumnAgreesWithTheSchemaScript); the solution step by
+    SchemaScriptSolutionMembershipGuardTests and ContactGrantGuardTests
+    (TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable). The behaviour the provenance serves is pinned by
+    tests/integration/auth/UnifiedAccessControl/ExternalAccessReconciliationTests.cs (R1_…WhoseIssuingContactWasDeleted…),
+    ContactGrantAuthorizationTests.cs and RecordShareExpiryTests.cs (the writes that set and clear it). Schema doc:
+    src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md. Shape:
+    scripts/Set-RecordCreatorPersonSchema.ps1 (task 133). Auth: the operator's own az CLI identity (System Administrator
+    in the environment — which reads and writes field-secured columns, as the backfill needs). No secrets.
 #>
 
 [CmdletBinding()]
@@ -109,6 +135,10 @@ $Column = 'sprk_grantedbycontact'
 $ColumnSchemaName = 'sprk_GrantedByContact'
 $ExpectedNavigationProperty = 'sprk_GrantedByContact'
 $TargetEntity = 'contact'
+# The provenance (session 27 round 50 item 2) — the BFF uses this exact name: ExternalGrantLifecycle.GrantedByContactIdAttribute.
+$ProvenanceColumn = 'sprk_grantedbycontactid'
+$ProvenanceColumnSchemaName = 'sprk_GrantedByContactId'
+$ProvenanceMaxLength = 100
 $Tables = @('sprk_externalrecordaccess')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
@@ -162,11 +192,20 @@ function New-Label([string]$Text) {
 
 $IsDryRun = -not $Apply.IsPresent
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot 'common/GrantProvenanceBackfill.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
     Write-Host ("  {0,-8} {1}" -f $State, $What) -ForegroundColor $color
     if ($State -in 'MISSING', 'FAIL') { $gaps.Add($What) }
+}
+
+# AP-13: a column is created only under a solution whose publisher carries the sprk prefix.
+function Assert-SprkPublisher {
+    $solutionRow = @((Invoke-DvGet "solutions?`$select=uniquename&`$expand=publisherid(`$select=customizationprefix)&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
+    if (-not $solutionRow -or $solutionRow.publisherid.customizationprefix -ne 'sprk') {
+        throw "Solution '$SolutionUniqueName' is not published under the 'sprk' prefix — refusing to create a column (AP-13)."
+    }
 }
 
 $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
@@ -189,10 +228,7 @@ foreach ($t in $Tables) {
     } elseif ($Verify) { Report 'MISSING' "$t.$Column" }
     elseif ($IsDryRun) { Report 'WOULD' "create $t.$Column (lookup -> $TargetEntity, relationship $(RelationshipSchemaName $t))" }
     else {
-        $solutionRow = @((Invoke-DvGet "solutions?`$select=uniquename&`$expand=publisherid(`$select=customizationprefix)&`$filter=uniquename eq '$SolutionUniqueName'").value) | Select-Object -First 1
-        if (-not $solutionRow -or $solutionRow.publisherid.customizationprefix -ne 'sprk') {
-            throw "Solution '$SolutionUniqueName' is not published under the 'sprk' prefix — refusing to create a column (AP-13)."
-        }
+        Assert-SprkPublisher
         Invoke-DvWrite POST 'RelationshipDefinitions' @{
             '@odata.type'        = 'Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'
             SchemaName           = (RelationshipSchemaName $t)
@@ -228,6 +264,40 @@ foreach ($t in $Tables) {
     elseif ($Verify) { Report 'MISSING' "relationship $(RelationshipSchemaName $t)" }
 }
 
+# ── (a2) PROVENANCE COLUMN (session 27 round 50 item 2) ─────────────────────────────────────────────────────
+Write-Host "`n(a2) $ProvenanceColumn on sprk_externalrecordaccess"
+$provAttrs = @{}
+foreach ($t in $Tables) {
+    $provPath = "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$ProvenanceColumn')?`$select=LogicalName,SchemaName,AttributeType,IsSecured,MetadataId"
+    $prov = Try-DvGet $provPath
+    if ($prov) {
+        if (-not $prov.LogicalName.StartsWith('sprk_')) { Report 'FAIL' "$t.$($prov.LogicalName) does not carry the sprk_ prefix (AP-13)" }
+        elseif ($prov.AttributeType -ne 'String') { Report 'FAIL' "$t.$ProvenanceColumn exists but is $($prov.AttributeType) — expected single-line text (String)" }
+        else {
+            $length = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$ProvenanceColumn')/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=MaxLength").MaxLength
+            if ($length -lt 36) { Report 'FAIL' "$t.$ProvenanceColumn holds $length characters — a contact id needs 36" }
+            else { Report 'OK' "$t.$ProvenanceColumn (text, $length)" }
+        }
+        $provAttrs[$t] = $prov
+    } elseif ($Verify) { Report 'MISSING' "$t.$ProvenanceColumn" }
+    elseif ($IsDryRun) { Report 'WOULD' "create $t.$ProvenanceColumn (text, MaxLength $ProvenanceMaxLength)" }
+    else {
+        Assert-SprkPublisher
+        Invoke-DvWrite POST "EntityDefinitions(LogicalName='$t')/Attributes" @{
+            '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
+            SchemaName    = $ProvenanceColumnSchemaName
+            DisplayName   = (New-Label 'Granted By (Contact) Id')
+            Description   = (New-Label 'The id of the CONTACT who issued this grant, as text — written and cleared by the BFF in the same write as Granted By (Contact), so it survives that contact''s deletion (the lookup''s Delete cascade empties the lookup). Set while the lookup is empty means the issuing contact was deleted: the reconciliation job ends such an undated grant. Field-secured; BFF-written only. unified-access-control-r2 task 140, session 27 round 50 item 2.')
+            RequiredLevel = @{ Value = 'None' }
+            MaxLength     = $ProvenanceMaxLength
+            FormatName    = @{ Value = 'Text' }
+        } @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName } | Out-Null
+        Report 'DONE' "created $t.$ProvenanceColumn"
+        $provAttrs[$t] = Wait-DvRead $provPath "$t.$ProvenanceColumn metadata"
+        Wait-DvRead "sprk_externalrecordaccesses?`$select=$ProvenanceColumn&`$top=1" "$t.$ProvenanceColumn in data queries" | Out-Null
+    }
+}
+
 # ── (b) PROFILES + MEMBERS ──────────────────────────────────────────────────────────────────────────────────
 Write-Host "`n(b) Field security profiles and members"
 function Ensure-Profile([string]$Name, [string]$Description) {
@@ -239,8 +309,8 @@ function Ensure-Profile([string]$Name, [string]$Description) {
     Report 'DONE' "created profile '$Name'"
     return $created.fieldsecurityprofileid
 }
-$readerId = Ensure-Profile $ReaderProfileName 'Read on columns ONLY the BFF writes (task 133 sprk_createdbyperson, task 150 sprk_issecure, task 140 sprk_externalrecordaccess.sprk_grantedbycontact). Associated with EVERY business unit default team, so every user keeps reading them — a secured column is HIDDEN from anyone without Read.'
-$writerId = Ensure-Profile $WriterProfileName 'Read/Create/Update on columns ONLY the BFF writes (task 133 sprk_createdbyperson, task 150 sprk_issecure, task 140 sprk_grantedbycontact). Members: the BFF application user(s) ONLY.'
+$readerId = Ensure-Profile $ReaderProfileName 'Read on columns ONLY the BFF writes (task 133 sprk_createdbyperson, task 150 sprk_issecure, task 140 sprk_externalrecordaccess.sprk_grantedbycontact + sprk_grantedbycontactid). Associated with EVERY business unit default team, so every user keeps reading them — a secured column is HIDDEN from anyone without Read.'
+$writerId = Ensure-Profile $WriterProfileName 'Read/Create/Update on columns ONLY the BFF writes (task 133 sprk_createdbyperson, task 150 sprk_issecure, task 140 sprk_grantedbycontact + sprk_grantedbycontactid). Members: the BFF application user(s) ONLY.'
 
 $bffUsers = @()
 foreach ($appId in $BffApplicationIds) {
@@ -282,36 +352,41 @@ if ($writerId) {
 }
 
 # ── (c) FIELD-LEVEL SECURITY ────────────────────────────────────────────────────────────────────────────────
+# Both columns, the same lock: the issuer lookup (a forged issuer could revoke the grant from the external SPA) and its
+# provenance (a forged one would end an undated grant as a "deleted issuer's"; an erased one would let a deleted issuer's
+# grant be stamped +90 instead of ended).
 Write-Host "`n(c) Field-level security"
 foreach ($t in $Tables) {
-    if (-not $attrs[$t]) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$Column and grant both profiles (after the column exists)"; continue }
+  foreach ($secured in @(@{ Column = $Column; Attr = $attrs[$t] }, @{ Column = $ProvenanceColumn; Attr = $provAttrs[$t] })) {
+    $col = $secured.Column
+    if (-not $secured.Attr) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$col and grant both profiles (after the column exists)"; continue }
 
-    if ($attrs[$t].IsSecured -eq $Secured) { Report 'OK' "$t.$Column is field-secured" }
-    elseif ($Verify) { Report 'MISSING' "$t.$Column is NOT field-secured — any user with Write on a grant could name a contact as its issuer, letting that contact revoke it" }
-    elseif ($IsDryRun) { Report 'WOULD' "secure $t.$Column" }
+    if ($secured.Attr.IsSecured -eq $Secured) { Report 'OK' "$t.$col is field-secured" }
+    elseif ($Verify) { Report 'MISSING' "$t.$col is NOT field-secured — any user with Write on a grant could forge or erase who issued it" }
+    elseif ($IsDryRun) { Report 'WOULD' "secure $t.$col" }
     else {
-        $typed = Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')"
+        $typed = Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$col')"
         $typed.IsSecured = $Secured
-        Invoke-DvWrite PUT "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')" $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
-        Report 'DONE' "secured $t.$Column"
+        Invoke-DvWrite PUT "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$col')" $typed @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
+        Report 'DONE' "secured $t.$col"
     }
 
     foreach ($spec in @(@{ Id = $readerId; Name = $ReaderProfileName; Create = 0; Update = 0 }, @{ Id = $writerId; Name = $WriterProfileName; Create = 4; Update = 4 })) {
-        if (-not $spec.Id) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "$($spec.Name) permission on $t.$Column"; continue }
-        $perm = @((Invoke-DvGet "fieldpermissions?`$select=fieldpermissionid,canread,cancreate,canupdate&`$filter=_fieldsecurityprofileid_value eq $($spec.Id) and entityname eq '$t' and attributelogicalname eq '$Column'").value) | Select-Object -First 1
+        if (-not $spec.Id) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "$($spec.Name) permission on $t.$col"; continue }
+        $perm = @((Invoke-DvGet "fieldpermissions?`$select=fieldpermissionid,canread,cancreate,canupdate&`$filter=_fieldsecurityprofileid_value eq $($spec.Id) and entityname eq '$t' and attributelogicalname eq '$col'").value) | Select-Object -First 1
         if ($perm) {
-            if ($perm.canread -eq 4 -and $perm.cancreate -eq $spec.Create -and $perm.canupdate -eq $spec.Update) { Report 'OK' "$($spec.Name) on $t.$Column" }
-            else { Report 'FAIL' "$($spec.Name) on $t.$Column is read=$($perm.canread) create=$($perm.cancreate) update=$($perm.canupdate); expected read=4 create=$($spec.Create) update=$($spec.Update)" }
+            if ($perm.canread -eq 4 -and $perm.cancreate -eq $spec.Create -and $perm.canupdate -eq $spec.Update) { Report 'OK' "$($spec.Name) on $t.$col" }
+            else { Report 'FAIL' "$($spec.Name) on $t.$col is read=$($perm.canread) create=$($perm.cancreate) update=$($perm.canupdate); expected read=4 create=$($spec.Create) update=$($spec.Update)" }
             continue
         }
-        if ($Verify) { Report 'MISSING' "$($spec.Name) on $t.$Column"; continue }
-        if ($IsDryRun) { Report 'WOULD' "grant $($spec.Name) on $t.$Column (read=4 create=$($spec.Create) update=$($spec.Update))"; continue }
+        if ($Verify) { Report 'MISSING' "$($spec.Name) on $t.$col"; continue }
+        if ($IsDryRun) { Report 'WOULD' "grant $($spec.Name) on $t.$col (read=4 create=$($spec.Create) update=$($spec.Update))"; continue }
         # Securing a column propagates asynchronously: a grant right after it may be refused 0x8004f508 "... is NOT
         # secured for entity fieldpermission" (task 141 live run 2026-10-02). Retry that one error; anything else throws.
         for ($attempt = 1; ; $attempt++) {
             try {
                 Invoke-DvWrite POST 'fieldpermissions' @{
-                    entityname = $t; attributelogicalname = $Column
+                    entityname = $t; attributelogicalname = $col
                     canread = 4; cancreate = $spec.Create; canupdate = $spec.Update
                     'fieldsecurityprofileid@odata.bind' = "/fieldsecurityprofiles($($spec.Id))"
                 } | Out-Null
@@ -319,17 +394,18 @@ foreach ($t in $Tables) {
             } catch {
                 $notYetSecured = "$($_.ErrorDetails.Message) $($_.Exception.Message)" -match '0x8004f508'
                 if (-not $notYetSecured -or $attempt -ge 12) { throw }
-                Write-Host "    $t.$Column not yet seen as secured by the field-permission service; retrying ($attempt/12)..."
+                Write-Host "    $t.$col not yet seen as secured by the field-permission service; retrying ($attempt/12)..."
                 Start-Sleep -Seconds 10
             }
         }
-        Report 'DONE' "granted $($spec.Name) on $t.$Column"
+        Report 'DONE' "granted $($spec.Name) on $t.$col"
     }
 
-    $writers = @((Invoke-DvGet "fieldpermissions?`$select=canupdate,cancreate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$t' and attributelogicalname eq '$Column' and (canupdate eq 4 or cancreate eq 4)").value)
+    $writers = @((Invoke-DvGet "fieldpermissions?`$select=canupdate,cancreate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$t' and attributelogicalname eq '$col' and (canupdate eq 4 or cancreate eq 4)").value)
     foreach ($w in $writers | Where-Object { $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' }) {
-        Report 'FAIL' "profile '$($w.fieldsecurityprofileid.name)' can also write $t.$Column — only the BFF may"
+        Report 'FAIL' "profile '$($w.fieldsecurityprofileid.name)' can also write $t.$col — only the BFF may"
     }
+  }
 }
 
 # ── (d) SOLUTION ────────────────────────────────────────────────────────────────────────────────────────────
@@ -347,6 +423,7 @@ else {
     foreach ($t in $Tables) {
         $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId
         if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId }) }
+        if ($provAttrs[$t]) { $components.Add(@{ Id = $provAttrs[$t].MetadataId; Type = 2; Label = "$t.$ProvenanceColumn"; TableId = $tableId }) }
         $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')?`$select=MetadataId"
         if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; TableId = $tableId }) }
     }
@@ -371,8 +448,56 @@ if ($Apply) {
     Write-Host "`nPublished $($Tables -join ', ')." -ForegroundColor Green
 }
 
+# ── (f) BACKFILL the provenance from the lookup (session 27 round 50 item 2) ─────────────────────────────────
+# Every row whose lookup names a contact must record that contact's id as text, so the record survives the contact's
+# deletion. The BFF writes both together from now on; this covers any row written before the provenance existed.
+Write-Host "`n(f) Backfill $ProvenanceColumn from $Column"
+# Reads every row a query matches, following @odata.nextLink past Dataverse's 5,000-row page.
+function Get-DvRows([string]$Path) {
+    $h = $headers.Clone(); $h['Prefer'] = 'odata.maxpagesize=5000'
+    $rows = [System.Collections.Generic.List[object]]::new(); $next = "$Api/$Path"
+    while ($next) {
+        $page = Invoke-RestMethod -Uri $next -Headers $h -Method Get
+        foreach ($r in @($page.value)) { $rows.Add($r) }
+        $next = $page.'@odata.nextLink'
+    }
+    , $rows
+}
+foreach ($t in $Tables) {
+    if (-not $attrs[$t]) {
+        # No row can name a contact issuer before the lookup exists; (a) already reports the column itself.
+        Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "backfill $t.$ProvenanceColumn (after $Column exists — no row can name a contact issuer before it)"
+        continue
+    }
+    if (-not $provAttrs[$t]) {
+        $named = Measure-DvRows "sprk_externalrecordaccesses?`$select=sprk_externalrecordaccessid&`$filter=_$($Column)_value ne null"
+        Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "backfill $t.$ProvenanceColumn on $named row(s) whose $Column names a contact (after (a2))"
+        continue
+    }
+
+    # Which rows, and the conditional write: scripts/common/GrantProvenanceBackfill.ps1 (exercised offline by
+    # GrantProvenanceBackfillScriptTests) — the lookup's contact in the ONE text form, If-Match on each row's version, a 412
+    # counted and left for a re-run, a row read without a version refused.
+    $named = Get-DvRows "sprk_externalrecordaccesses?`$select=sprk_externalrecordaccessid,_$($Column)_value,$ProvenanceColumn&`$filter=_$($Column)_value ne null"
+    $missing = @(Get-GrantProvenanceBackfill -Rows $named -LookupProperty "_$($Column)_value" -ProvenanceProperty $ProvenanceColumn)
+    if ($missing.Count -eq 0) { Report 'OK' "every row whose $Column names a contact records its id in $ProvenanceColumn ($($named.Count) row(s))" }
+    elseif ($Verify) { Report 'MISSING' "$($missing.Count) of $($named.Count) row(s) name a contact issuer but do not record its id in $ProvenanceColumn — run -Apply" }
+    elseif ($IsDryRun) { Report 'WOULD' "backfill $ProvenanceColumn on $($missing.Count) of $($named.Count) row(s) whose $Column names a contact" }
+    else {
+        $result = Invoke-GrantProvenanceBackfill -Items $missing -ProvenanceProperty $ProvenanceColumn `
+            -Patch { param($Path, $Body, $Extra) Invoke-DvWrite PATCH $Path $Body $Extra | Out-Null }
+        Report 'DONE' "backfilled $ProvenanceColumn on $($result.Written) row(s)"
+        if ($result.Changed -gt 0) { Report 'FAIL' "$($result.Changed) row(s) changed while being backfilled and were left as they are — re-run -Apply (it is idempotent)" }
+    }
+
+    # Information only: rows that record an issuer whose lookup is EMPTY — the issuing contact was deleted. The
+    # reconciliation job ends the undated ones (R1); a dated one stands until its date (owner G2 (ii): no cascade).
+    $orphaned = Measure-DvRows "sprk_externalrecordaccesses?`$select=sprk_externalrecordaccessid&`$filter=_$($Column)_value eq null and $ProvenanceColumn ne null"
+    Report 'INFO' "$orphaned row(s) record a contact issuer that was deleted (lookup empty, $ProvenanceColumn set)"
+}
+
 if ($Verify) {
-    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: sprk_grantedbycontact is in place and only the BFF can write it." -ForegroundColor Green; exit 0 }
+    if ($gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: sprk_grantedbycontact and sprk_grantedbycontactid are in place and backfilled, and only the BFF can write them." -ForegroundColor Green; exit 0 }
     Write-Host "`nVERIFY FAIL ($($gaps.Count)):" -ForegroundColor Red
     $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     exit 1

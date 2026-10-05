@@ -99,9 +99,12 @@ public class ContactGrantAuthorizationTests
         var row = _dataverse.RowsFor(Colleague).Should().ContainSingle().Subject;
         row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
         row.GrantedByContactId.Should().Be(Grantor, "the contact issuer is stamped");
+        row.GrantedByContactProvenance.Should().Be(Grantor.ToString("D"),
+            "its id is recorded as text in the SAME write, so the provenance outlives the contact (round 50 item 2)");
         row.GrantedBySystemUserId.Should().BeNull("sprk_grantedby is a systemuser lookup and stays empty");
         row.ExpiresDate.Should().Be(Today.AddDays(90));
         _dataverse.CreatePayloads.Single().Keys.Should().NotContain("sprk_GrantedBy@odata.bind");
+        _dataverse.CreatePayloads.Single()["sprk_grantedbycontactid"].Should().Be(Grantor.ToString("D"));
         _participations.Invalidations.Should().ContainSingle(i => i.Contacts.Contains(Colleague));
         AssertNoMembershipWrites();
     }
@@ -846,6 +849,56 @@ public class ContactGrantAuthorizationTests
         outcome.Refusal.Should().BeNull();
         row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
         row.GrantedByContactId.Should().BeNull("the contact can no longer revoke a decision an internal user made");
+        row.GrantedByContactProvenance.Should().BeNull("the recorded provenance is cleared with the lookup (round 50 item 2)");
+    }
+
+    /// <summary>
+    /// Session 27 round 50 item 2: a row whose issuing CONTACT WAS DELETED — its lookup emptied by RemoveLink, its id still
+    /// recorded in <c>sprk_grantedbycontactid</c> — is contact-issued all the same: an internal change takes it over (the
+    /// provenance cleared, the changing systemuser stamped, in the same write). The lookup is not re-sent (it is already
+    /// empty). Left recorded, the reconciliation job would later read the internal user's grant as a deleted contact's. The
+    /// twin is the take-over test below (the contact still exists): the one input is the lookup.
+    /// </summary>
+    [Fact]
+    public async Task CoreDefaultMode_ChangingARowWhoseIssuingContactWasDeleted_TakesItOver_AndClearsTheProvenance()
+    {
+        _dataverse.SystemUsersByOid[InternalUserOid] = SystemUserId;
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        row.GrantedByContactId = null; // the contact was deleted: RemoveLink empties the lookup; the provenance stays
+
+        var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
+            ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+
+        outcome.Refusal.Should().BeNull();
+        row.GrantedByContactProvenance.Should().BeNull();
+        row.GrantedBySystemUserId.Should().Be(SystemUserId, "the changing internal user now owns the decision");
+        var write = _dataverse.Updates.Should().ContainSingle("the take-over travels with the change").Subject;
+        write.Payload.Should().Contain("\"sprk_grantedbycontactid\":null")
+            .And.Contain($"\"sprk_GrantedBy@odata.bind\":\"/systemusers({SystemUserId})\"")
+            .And.NotContain("sprk_GrantedByContact@odata.bind", "an already-empty lookup is not unbound again");
+    }
+
+    /// <summary>
+    /// Round 50 item 2, the contact side: a row whose issuing contact was deleted is nobody's to change from the SPA — a
+    /// contact's grant to that grantee is refused 409 managed_elsewhere and the row is untouched (the issuer check reads the
+    /// LOOKUP, which no longer names anyone). The positive twin is <c>Grant_OnTheCallersOwnRow_AHigherRequestRaisesIt</c> (the
+    /// lookup names the caller); the other-issuer refusal is <c>Grant_ToAColleagueHoldingARowSomebodyElseIssued…</c>.
+    /// </summary>
+    [Fact]
+    public async Task Grant_OverARowWhoseIssuingContactWasDeleted_Is409ManagedElsewhere_AndTheRowIsUntouched()
+    {
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: OtherContactGrantor);
+        row.GrantedByContactId = null; // RemoveLink
+        var before = Snapshot(row);
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be((409, ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode));
+        Snapshot(row).Should().Be(before);
+        row.GrantedByContactProvenance.Should().Be(OtherContactGrantor.ToString("D"));
+        _dataverse.Updates.Should().BeEmpty();
     }
 
     /// <summary>The twin: an unchanged re-grant writes nothing, so the issuer stays the contact.</summary>
@@ -883,6 +936,7 @@ public class ContactGrantAuthorizationTests
         row.GrantedBySystemUserId.Should().Be(SystemUserId, "the changing internal user now owns the decision");
         var write = _dataverse.Updates.Should().ContainSingle("the take-over travels with the change, never as a second write").Subject;
         write.Payload.Should().Contain("\"sprk_GrantedByContact@odata.bind\":null")
+            .And.Contain("\"sprk_grantedbycontactid\":null")
             .And.Contain($"\"sprk_GrantedBy@odata.bind\":\"/systemusers({SystemUserId})\"")
             .And.Contain("\"sprk_accesslevel\"");
     }
@@ -919,6 +973,7 @@ public class ContactGrantAuthorizationTests
             _dataverse.BulkUpdates.Should().ContainSingle("ONE all-or-nothing transaction carries the date and the take-over");
             row.ExpiresDate.Should().Be(Today.AddDays(10));
             row.GrantedByContactId.Should().BeNull("the contact issuer is cleared in the same write");
+            row.GrantedByContactProvenance.Should().BeNull("…with its recorded provenance (round 50 item 2)");
             row.GrantedBySystemUserId.Should().Be(SystemUserId, "the changing internal user is stamped");
             grantorRow.GrantedByContactId.Should().BeNull("the grantor's own row was never contact-issued");
 
@@ -1563,6 +1618,14 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
                 {
                     case "sprk_expiresdate": row.ExpiresDate = DateOnly.FromDateTime((DateTime)value); break;
                     case "sprk_grantedbycontact": row.GrantedByContactId = LookupId(value, "contact"); break;
+                    case "sprk_grantedbycontactid":
+                        row.GrantedByContactProvenance = value switch
+                        {
+                            DBNull => null,
+                            string text => text,
+                            _ => throw new InvalidOperationException($"sprk_grantedbycontactid (text) was written as {value.GetType().Name} {value}."),
+                        };
+                        break;
                     case "sprk_grantedby": row.GrantedBySystemUserId = LookupId(value, "systemuser"); break;
                     default: throw new InvalidOperationException($"The fake does not model a bulk write of '{column}'.");
                 }
@@ -1590,6 +1653,9 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             ExpiresDate = expiry,
             StateCode = 0,
             GrantedByContactId = issuedByContact,
+            // As the BFF writes it (session 27 round 50 item 2): the issuer's id as text beside the lookup, in the same write.
+            // A test models the contact's DELETION by emptying the lookup alone (its RemoveLink cascade).
+            GrantedByContactProvenance = issuedByContact is { } issuer ? ExternalGrantLifecycle.ContactIssuerProvenance(issuer) : null,
             GrantedBySystemUserId = issuedBySystemUser,
             ETag = NextVersion(),
         };
@@ -1684,6 +1750,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             MatterId = BoundId(payload, "sprk_Matter@odata.bind"),
             WorkAssignmentId = BoundId(payload, "sprk_WorkAssignment@odata.bind"),
             GrantedByContactId = BoundId(payload, "sprk_GrantedByContact@odata.bind"),
+            GrantedByContactProvenance = payload.TryGetValue("sprk_grantedbycontactid", out var provenance) ? (string?)provenance : null,
             GrantedBySystemUserId = BoundId(payload, "sprk_GrantedBy@odata.bind"),
             AccessLevel = (int?)payload["sprk_accesslevel"],
             ExpiresDate = payload.TryGetValue("sprk_expiresdate", out var e) && e is string s ? DateOnly.Parse(s) : null,
@@ -1760,6 +1827,9 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
                     case "sprk_expiresdate": row.ExpiresDate = DateOnly.Parse(p.Value.GetString()!); break;
                     case "sprk_GrantedByContact@odata.bind":
                         row.GrantedByContactId = p.Value.ValueKind == JsonValueKind.Null ? null : IdIn(p.Value.GetString()!);
+                        break;
+                    case "sprk_grantedbycontactid":
+                        row.GrantedByContactProvenance = p.Value.ValueKind == JsonValueKind.Null ? null : p.Value.GetString();
                         break;
                     case "sprk_GrantedBy@odata.bind":
                         row.GrantedBySystemUserId = p.Value.ValueKind == JsonValueKind.Null ? null : IdIn(p.Value.GetString()!);
