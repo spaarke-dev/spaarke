@@ -67,7 +67,8 @@ public class EmailAnalysisIntegrationTests
             _nodeServiceMock.Object,
             _playbookOrchestratorMock.Object,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            _loggerMock.Object);
+            _loggerMock.Object,
+            TestRecordContainerResolver.ForBusinessUnitContainers("drive-123"));
     }
 
     #region Test Fixtures - Sample Email Documents

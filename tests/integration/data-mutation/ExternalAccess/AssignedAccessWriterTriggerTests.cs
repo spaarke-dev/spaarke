@@ -282,7 +282,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             .ReturnsAsync(DataverseUserResponse.Ok(200, Json("""{ "value": [] }""")));
         var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         appOnly.Setup(a => a.UpdateRecordFieldsAsync(
-                "sprk_project", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
+                "sprk_project", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>())) // task 166 (S-67): the push now writes AS the caller
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, id, _, _, _) =>
             {
                 // The created row names the contact in an "Assigned *" column (what the materializer reads back).
@@ -327,6 +328,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             new Dictionary<string, object?> { [Attorney1] = contact.ToString("D") },
             "sprk_project",
             new[] { project },
+            // Task 166 (S-67): the push writes each child AS the caller (MSCRMCallerID).
+            Guid.Parse("0000c166-0000-0000-0000-00000000ca11"),
             NullLogger.Instance,
             CancellationToken.None,
             Scopes());

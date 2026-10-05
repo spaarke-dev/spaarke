@@ -110,6 +110,17 @@ public sealed class NullRagService : IRagService
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    public Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DeleteSupersededFileChunksAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     public Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default)

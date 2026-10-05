@@ -40,6 +40,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -78,6 +79,124 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/compose/active-document", new { sessionId = "s" });
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    // ── Stored documents (unified-access-control-r2 task 166 r1, verifier items 10/21) ─────────────────────────
+    // A stored sprk_document is recorded only when the CALLER can read it (row read AS THE CALLER), and the recorded
+    // SPE pointer is that row's, never the body's. Unknown, unreadable and an unanswerable read are one 404.
+
+    private async Task<string> SeedOwnedSessionAsync()
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        await _fixture.Sessions.UpdateSessionCacheAsync(new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null)
+        { OwnerOid = TestSessionOwner.Oid });
+        return sessionId;
+    }
+
+    private void CallerReadOf(Guid documentId, DataverseUserResponse response)
+        => _fixture.DataverseUser
+            .Setup(d => d.GetAsync(ComposeActiveDocumentEndpoints.CallerDocumentReadPath(documentId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+    [Fact]
+    public async Task PostActiveDocument_AStoredDocumentTheCallerCanRead_RecordsTheRowsPointer_NotTheBodys()
+    {
+        var sessionId = await SeedOwnedSessionAsync();
+        var documentId = Guid.NewGuid();
+        CallerReadOf(documentId, DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new
+        {
+            sprk_documentid = documentId.ToString("D"),
+            sprk_documentname = "Row Name.docx",
+            sprk_graphitemid = "item-of-the-row",
+            sprk_graphdriveid = "drive-of-the-row",
+        })));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            documentId = documentId.ToString("D"),
+            speDriveItemId = "item-the-caller-chose",
+            speDriveId = "drive-the-caller-chose",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument!.SprkDocumentId.Should().Be(documentId.ToString("D"));
+        after.ActiveDocument.SpeDriveItemId.Should().Be("item-of-the-row", "a body pointer could name any item");
+        after.ActiveDocument.SpeDriveId.Should().Be("drive-of-the-row");
+        after.ActiveDocument.FileName.Should().Be("Row Name.docx");
+    }
+
+    public static TheoryData<string> UnreadableOutcomes => new() { "not-found", "forbidden", "read-fault", "read-throws" };
+
+    [Theory]
+    [MemberData(nameof(UnreadableOutcomes))]
+    public async Task PostActiveDocument_AStoredDocumentTheCallerCannotRead_IsTheUniform404_AndTheSessionIsUnchanged(string outcome)
+    {
+        var sessionId = await SeedOwnedSessionAsync();
+        var documentId = Guid.NewGuid();
+        var setup = _fixture.DataverseUser.Setup(d => d.GetAsync(
+            ComposeActiveDocumentEndpoints.CallerDocumentReadPath(documentId), It.IsAny<CancellationToken>()));
+        _ = outcome switch
+        {
+            "not-found" => setup.ReturnsAsync(DataverseUserResponse.Fail(404, "dataverse.not_found", "not found")),
+            "forbidden" => setup.ReturnsAsync(DataverseUserResponse.Fail(403, "dataverse.access_denied", "denied")),
+            "read-fault" => setup.ReturnsAsync(DataverseUserResponse.Fail(503, "dataverse.unavailable", "down")),
+            _ => (object)setup.ThrowsAsync(new HttpRequestException("network")),
+        };
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            documentId = documentId.ToString("D"),
+            speDriveItemId = "item-the-caller-chose",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument.Should().BeNull("nothing the caller cannot read may be recorded as their active document");
+    }
+
+    [Fact]
+    public async Task PostActiveDocument_AStoredDocumentIdThatIsNotAGuid_IsTheUniform404_AndNothingIsRead()
+    {
+        var sessionId = await SeedOwnedSessionAsync();
+        _fixture.DataverseUser.Invocations.Clear();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, documentId = "not-a-document-id" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _fixture.DataverseUser.Verify(
+            d => d.GetAsync(It.Is<string>(p => p.Contains("not-a-document-id")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PostActiveDocument_AWithdrawOfAStoredDocument_ReadsNoRow()
+    {
+        // A withdraw only clears a pointer already recorded (by a registration that WAS checked); it reads nothing.
+        var sessionId = await SeedOwnedSessionAsync();
+        var documentId = Guid.NewGuid();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, documentId = documentId.ToString("D"), visible = false });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.DataverseUser.Verify(
+            d => d.GetAsync(ComposeActiveDocumentEndpoints.CallerDocumentReadPath(documentId), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -127,7 +246,8 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 {
                     ExtractedText = extractedText,
                 },
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -196,7 +316,8 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
             {
                 new ChatSessionFile(fileA, "a.docx", docType, 256, $"{fileA}_s_0", DateTimeOffset.UtcNow),
                 new ChatSessionFile(fileB, "b.docx", docType, 256, $"{fileB}_s_0", DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -265,7 +386,8 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                     SizeBytes: 64,
                     SearchDocumentIdsCsv: $"{fileId}_s_0",
                     UploadedAt: DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid };
+            })
+        { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -320,7 +442,8 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid });
+            })
+        { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -377,7 +500,8 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }) { OwnerOid = TestSessionOwner.Oid });
+            })
+        { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -435,6 +559,12 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
 public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program>
 {
     public const string TenantId = "00000000-0000-0000-0000-0000000000dd";
+
+    /// <summary>
+    /// The caller-OBO Dataverse boundary (<see cref="IDataverseUserClient"/>) the stored-document registration reads
+    /// the row through (unified-access-control-r2 task 166 r1). Per-test setups key on the row path.
+    /// </summary>
+    public Mock<IDataverseUserClient> DataverseUser { get; } = new();
 
     /// <summary>The shared production ChatSessionManager over an in-memory tenant cache.</summary>
     public ChatSessionManager Sessions { get; } = new(
@@ -558,6 +688,9 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
             // (real production type over an in-memory tenant cache — not a mock of the CUT).
             services.RemoveAll<ChatSessionManager>();
             services.AddSingleton(Sessions);
+
+            services.RemoveAll<IDataverseUserClient>();
+            services.AddSingleton(DataverseUser.Object);
         });
     }
 

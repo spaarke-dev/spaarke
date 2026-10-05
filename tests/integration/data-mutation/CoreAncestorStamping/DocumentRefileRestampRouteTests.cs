@@ -64,6 +64,32 @@ public class DocumentRefileRestampRouteTests : IClassFixture<DocumentRefileResta
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _fixture.World.Patches.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// Batch-4 integration of task 166 (S-36): the route is KEPT for task 147's Compose re-file, on 166's condition — a
+    /// body naming a field that locates the document's file is refused before anything is read or written, even beside
+    /// a legitimate re-file. Only the BFF stamps the pointer (POST /{id}/file), as the application.
+    /// </summary>
+    [Theory(DisplayName = "Task 166 S-36 (kept PUT): a body naming a storage-pointer field is refused 400 and writes nothing")]
+    [InlineData("graphDriveId", "\"b!other-drive\"", "GraphDriveId")]
+    [InlineData("graphItemId", "\"01OTHERITEM\"", "GraphItemId")]
+    [InlineData("parentGraphItemId", "\"01PARENTITEM\"", "ParentGraphItemId")]
+    [InlineData("filePath", "\"https://contoso.sharepoint.com/x\"", "FilePath")]
+    [InlineData("hasFile", "true", "HasFile")]
+    public async Task Put_NamingAStoragePointerField_IsRefusedAndWritesNothing(string field, string json, string named)
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,AppendToAccess");
+        using var body = new StringContent(
+            $"{{\"matterLookup\":\"{MatterB}\",\"{field}\":{json}}}", System.Text.Encoding.UTF8, "application/json");
+
+        var response = await client.PutAsync($"/api/v1/documents/{Document}", body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadAsStringAsync();
+        problem.Should().Contain(Sprk.Bff.Api.Api.DataverseDocumentsEndpoints.PointerFieldRefusedReasonCode).And.Contain(named);
+        _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty("nothing is written when the body names the file's location");
+        _fixture.World.Patches.Should().BeEmpty();
+    }
 }
 
 /// <summary>Test host for <see cref="DocumentRefileRestampRouteTests"/>: the document fixture plus a <see cref="StampWorld"/>.</summary>

@@ -150,10 +150,11 @@ public static class AiPersistenceModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IPreferenceMemoryCapture,
             Sprk.Bff.Api.Services.Ai.PublicContracts.PreferenceMemoryCapture>();
 
-        // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
-        // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +
-        // NotificationService (AAD oid → systemuserid). Scoped: both dependencies are Singletons, so
-        // Scoped is safe; per-request usage from the governance endpoints.
+        // AIR2-052: memory-governance subject port (FR-B-03). Thin seam over the existing
+        // NotificationService (AAD oid → systemuserid). Its record-read half (an entity-type privilege
+        // check over IDataversePrivilegeChecker) was deleted with GET /api/memory/records by
+        // unified-access-control-r2 task 166. Scoped: the dependency is a Singleton, so Scoped is safe;
+        // per-request usage from the governance endpoints.
         services.AddScoped<IMemoryAccessAuthorizer, MemoryAccessAuthorizer>();
 
         // AIPU2-035's PromptLibraryService (Personal + Team template CRUD) was REMOVED with its six

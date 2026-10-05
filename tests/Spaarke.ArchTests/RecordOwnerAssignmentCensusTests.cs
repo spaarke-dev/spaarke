@@ -223,12 +223,8 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
-        new CensusEntry("WorkAssignmentEndpoints.cs", "sprk_workassignment", 1, Disposition.Waived,
-            "A ROOT, not a child: its ownership is provisioning's (task 144 / owner S6, never a bare re-own here). It "
-            + "cannot file under a matter today — the endpoint writes sprk_matterid, which sprk_workassignment does not "
-            + "have (live metadata 2026-10-02: the matter lookup is sprk_regardingmatter), so every MatterId-carrying "
-            + "create already fails. A work assignment filed under a SECURE matter becoming secure (S6 b) is task 158 (owner round 6).",
-            WaiverKind.Pending),
+        // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
+        // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
     };
 
     /// <summary>
@@ -452,8 +448,7 @@ public class RecordOwnerAssignmentCensusTests
             "IRecordOwnershipResolver. Read back in both."),
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
-        new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
-            "A work assignment (a ROOT) created owned by its assignee; S6 b (secure under a secure matter) is task 158 (owner round 6)."),
+        // WorkAssignmentEndpoints.CreateWorkAssignmentAsync: deleted with its route by task 166 (S-76; batch-4 integration).
 
         new OwnerWriteEntry("OutboxService.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
             "sprk_notificationoutbox — one row per recipient user."),

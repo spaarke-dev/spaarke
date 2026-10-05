@@ -878,7 +878,7 @@ public partial class RagService : IRagService
     }
 
     /// <inheritdoc />
-    public async Task<int> DeleteChunksBeyondCountAsync(
+    public Task<int> DeleteChunksBeyondCountAsync(
         string tenantId,
         string speFileId,
         int keepChunkCount,
@@ -891,6 +891,44 @@ public partial class RagService : IRagService
         // this method can only remove a TAIL, never the whole file.
         ArgumentOutOfRangeException.ThrowIfLessThan(keepChunkCount, 1);
 
+        return DeleteFileChunksWhereAsync(
+            tenantId, speFileId, keepChunkCount, onlyForDocumentId: null, searchIndexName,
+            "leftover chunk(s)", cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+        ArgumentException.ThrowIfNullOrEmpty(speFileId);
+
+        var document = string.IsNullOrWhiteSpace(onlyForDocumentId) ? null : onlyForDocumentId.Trim().ToLowerInvariant();
+        return DeleteFileChunksWhereAsync(
+            tenantId, speFileId, fromChunkIndex: 0, document, searchIndexName,
+            document is null ? "superseded chunks" : $"superseded chunks of document {document}", cancellationToken);
+    }
+
+    /// <summary>
+    /// The one deletion of a file's chunks by <c>speFileId</c> (shared by <see cref="DeleteChunksBeyondCountAsync"/> and
+    /// <see cref="DeleteSupersededFileChunksAsync"/>): chunks at or beyond <paramref name="fromChunkIndex"/>, optionally
+    /// only those attributed to <paramref name="onlyForDocumentId"/>, of THIS pipeline's id shape
+    /// (<c>{speFileId}_{chunkIndex}</c>), from the index <paramref name="searchIndexName"/> routes to. Throws when any
+    /// matching chunk could not be deleted.
+    /// </summary>
+    private async Task<int> DeleteFileChunksWhereAsync(
+        string tenantId,
+        string speFileId,
+        int fromChunkIndex,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        string what,
+        CancellationToken cancellationToken)
+    {
         // The SAME routing as IndexDocumentsBatchAsync, so the trim reaches the index the new chunks were written
         // to (the per-record index, or the tenant default) — not DeleteBySourceDocumentAsync's default-only client.
         var searchClient = string.IsNullOrWhiteSpace(searchIndexName)
@@ -898,7 +936,11 @@ public partial class RagService : IRagService
             : await _deploymentService.GetSearchClientAsync(tenantId, searchIndexName, cancellationToken);
 
         var filter =
-            $"tenantId eq '{EscapeFilterValue(tenantId)}' and speFileId eq '{EscapeFilterValue(speFileId)}' and chunkIndex ge {keepChunkCount}";
+            $"tenantId eq '{EscapeFilterValue(tenantId)}' and speFileId eq '{EscapeFilterValue(speFileId)}' and chunkIndex ge {fromChunkIndex}";
+        if (onlyForDocumentId is not null)
+        {
+            filter += $" and documentId eq '{EscapeFilterValue(onlyForDocumentId)}'";
+        }
 
         // Collect every id first and delete afterwards: paging with Skip over a set this method is deleting from
         // would silently step over rows.
@@ -937,9 +979,9 @@ public partial class RagService : IRagService
                 // Only ids of THIS pipeline's shape ({speFileId}_{chunkIndex}, FileIndexingService). Other writers
                 // store chunks for the same file under their own schemes (RagIndexingPipeline
                 // "{documentId}_{suffix}_{index}", the reference indexer "{sourceId}_ref_{index}"); those are not
-                // this file's leftovers and are never touched here.
+                // this file's chunks and are never touched here.
                 if (chunk is not null
-                    && chunk.ChunkIndex >= keepChunkCount
+                    && chunk.ChunkIndex >= fromChunkIndex
                     && string.Equals(chunk.Id, $"{speFileId}_{chunk.ChunkIndex}", StringComparison.Ordinal)
                     && seen.Add(chunk.Id))
                 {
@@ -956,8 +998,8 @@ public partial class RagService : IRagService
         if (idsToDelete.Count == 0)
         {
             _logger.LogDebug(
-                "No leftover chunks beyond {KeepChunkCount} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
-                keepChunkCount, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+                "No {What} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+                what, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
             return 0;
         }
 
@@ -981,13 +1023,13 @@ public partial class RagService : IRagService
         }
 
         _logger.LogInformation(
-            "Deleted {DeletedCount}/{TotalCount} leftover chunks beyond {KeepChunkCount} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
-            deletedCount, idsToDelete.Count, keepChunkCount, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+            "Deleted {DeletedCount}/{TotalCount} {What} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+            deletedCount, idsToDelete.Count, what, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
 
         if (deletedCount < idsToDelete.Count)
         {
             throw new InvalidOperationException(
-                $"{idsToDelete.Count - deletedCount} of {idsToDelete.Count} leftover chunk(s) could not be deleted " +
+                $"{idsToDelete.Count - deletedCount} of {idsToDelete.Count} {what} could not be deleted " +
                 $"from index {searchIndexName ?? "(tenant-default)"}.");
         }
 

@@ -2623,7 +2623,7 @@ public static class ProvisionProjectEndpoint
     ///
     /// <para><b>Which person</b> (owner round 7 item 2, option (a), 2026-10-02: "shares to createdby when it is a human,
     /// else to this column; still refuses when neither is a usable human"). <c>createdby</c> is the identity that sent
-    /// the create. For a row the BFF created APP-ONLY (Office quick-create, <c>POST /api/v1/work-assignments</c>) that
+    /// the create. For a row the BFF created APP-ONLY (Office quick-create; before task 166 deleted it, <c>POST /api/v1/work-assignments</c>) that
     /// is the BFF application user, and the person who asked for it is the BFF-stamped <c>sprk_createdbyperson</c>
     /// (<see cref="RecordCreatorPerson"/> — field-secured, writable only by the BFF). So a usable <c>createdby</c>
     /// wins; when it is absent, disabled or an application user the column is read, in its OWN query, so a BFF deployed

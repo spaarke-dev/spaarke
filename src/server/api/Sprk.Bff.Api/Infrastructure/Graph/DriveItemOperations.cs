@@ -332,6 +332,46 @@ public class DriveItemOperations
         }
     }
 
+    /// <summary>
+    /// Who CREATED a drive item (app-only Graph read of <c>id,name,createdBy</c>) — the evidence the document-pointer
+    /// check verifies before the BFF follows a <c>sprk_document</c> row's pointer as the application
+    /// (unified-access-control-r2 task 166 r2, owner round 23 item 1). Returns <see langword="null"/> when the item is
+    /// not in that drive (Graph 404). Deliberately NOT cached: it sits on an authorization path, so a stale or poisoned
+    /// cache entry would be a security defect rather than a slow page; every other fault throws (the caller refuses).
+    /// </summary>
+    public async Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+    {
+        try
+        {
+            // task 166 f1: size, file (hashes) and webUrl ride on the same read — the server-side pointer attach and the
+            // relocation copy verify against them; still one uncached call. lastModifiedDateTime (round 54 item 3) is the
+            // time a relocation's witness records when Graph lists no version.
+            var item = await _factory.ForApp().Drives[driveId].Items[itemId]
+                .GetAsync(
+                    req => req.QueryParameters.Select = new[] { "id", "name", "createdBy", "size", "file", "webUrl", "lastModifiedDateTime" },
+                    cancellationToken: ct);
+
+            if (item is null)
+            {
+                return null;
+            }
+
+            return new SpeItemCreator(
+                item.Name,
+                item.CreatedBy?.User?.Id,
+                item.CreatedBy?.Application?.Id,
+                item.Size,
+                item.File?.Hashes?.QuickXorHash,
+                item.WebUrl,
+                item.LastModifiedDateTime);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Item {ItemId} not found in drive {DriveId} (creator read)", itemId, driveId);
+            return null;
+        }
+    }
+
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)
     // =============================================================================
@@ -948,6 +988,79 @@ public class DriveItemOperations
         }
     }
 
+    /// <summary>
+    /// Download a SPECIFIC prior version's content using APP-ONLY (broker) authentication — the app-only twin of
+    /// <see cref="DownloadFileVersionAsUserAsync"/>. Returns <c>null</c> when the item or that version is not found.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 166, owner round 45 item 1: a relocation REPLAYS the source's version history into
+    /// its copy through the BFF identity, oldest first, so a moved file keeps its history. ⚠️ Performs NO authorization:
+    /// its only caller is <c>DocumentContainerRelocator</c>, which reads the source it is moving (a server-derived
+    /// relocation of a <c>sprk_document</c> row's own file).
+    /// </remarks>
+    public async Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+    {
+        // Not `using`: Activity.Current is the CALLER's span (ActivityCurrentDisposalGuardTests, #1084 follow-on).
+        var activity = Activity.Current;
+        activity?.SetTag("operation", "DownloadFileVersion");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+        activity?.SetTag("versionId", versionId);
+
+        _logger.LogInformation(
+            "Downloading version {VersionId} of file {ItemId} from drive {DriveId} (app-only)", versionId, itemId, driveId);
+
+        try
+        {
+            var stream = await _factory.ForApp().Drives[driveId].Items[itemId]
+                .Versions[versionId].Content
+                .GetAsync(cancellationToken: ct);
+
+            if (stream == null)
+            {
+                _logger.LogWarning("Failed to download version {VersionId} of file {ItemId} - stream is null", versionId, itemId);
+                return null;
+            }
+
+            return stream;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Version {VersionId} of file {ItemId} not found in drive {DriveId}", versionId, itemId, driveId);
+            return null;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Graph API error downloading file version (app-only): {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to download file version: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="VersionInfoDto"/> projection of one Graph version: id (= label), date, size and who wrote it
+    /// (display name; the person's or application's id server-side only).
+    /// </summary>
+    private static VersionInfoDto ToVersionInfo(DriveItemVersion v)
+        => new(
+            Id: v.Id!,
+            ETag: null,
+            LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+            Size: v.Size ?? 0,
+            LastModifiedBy: v.LastModifiedBy?.User?.DisplayName ?? v.LastModifiedBy?.Application?.DisplayName)
+        {
+            LastModifiedByUserId = v.LastModifiedBy?.User?.Id,
+            LastModifiedByApplicationId = v.LastModifiedBy?.Application?.Id,
+        };
+
     public async Task<string?> GetCurrentVersionIdAsUserAsync(
         HttpContext ctx,
         string driveId,
@@ -1052,11 +1165,7 @@ public class DriveItemOperations
             var mapped = versions.Value
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
+                .Select(ToVersionInfo)
                 .ToList();
 
             _logger.LogInformation(
@@ -1081,6 +1190,12 @@ public class DriveItemOperations
             throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
         }
     }
+
+    /// <summary>
+    /// The most pages <see cref="ListFileVersionsAsync"/> follows. A history longer than this is reported as not fully
+    /// enumerated (it throws), never returned cut: a relocation replays what it lists (task 166, owner round 54 item 4).
+    /// </summary>
+    internal const int MaxVersionPages = 500;
 
     /// <summary>
     /// Lists the versions of a file using APP-ONLY (broker) authentication.
@@ -1119,8 +1234,8 @@ public class DriveItemOperations
         {
             var graphClient = _factory.ForApp();
 
-            var versions = await graphClient.Drives[driveId].Items[itemId]
-                .Versions.GetAsync(cancellationToken: ct);
+            var versionsBuilder = graphClient.Drives[driveId].Items[itemId].Versions;
+            var versions = await versionsBuilder.GetAsync(cancellationToken: ct);
 
             if (versions?.Value == null)
             {
@@ -1129,14 +1244,29 @@ public class DriveItemOperations
                 return Array.Empty<VersionInfoDto>();
             }
 
-            var mapped = versions.Value
+            // Every page (task 166 f1-v2, owner round 45 item 1): a relocation replays the WHOLE history, so a long one
+            // must never be cut silently at the first page. Each follow-up request is the URL the server handed back. A
+            // listing that does not end within MaxVersionPages is never returned as if it were the whole history: it
+            // throws, and the relocation that asked fails (owner round 54 item 4, Sd).
+            var all = new List<DriveItemVersion>(versions.Value);
+            var pages = 1;
+            while (!string.IsNullOrEmpty(versions?.OdataNextLink))
+            {
+                if (pages >= MaxVersionPages)
+                {
+                    throw new InvalidOperationException(
+                        $"The versions of {itemId} could not be fully enumerated ({pages} pages read, more remain).");
+                }
+
+                versions = await versionsBuilder.WithUrl(versions.OdataNextLink).GetAsync(cancellationToken: ct);
+                all.AddRange(versions?.Value ?? []);
+                pages++;
+            }
+
+            var mapped = all
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
+                .Select(ToVersionInfo)
                 .ToList();
 
             _logger.LogInformation(

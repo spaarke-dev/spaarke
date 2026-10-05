@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings.Dtos;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.FieldMapping;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Api.FieldMappings;
 
@@ -67,6 +72,7 @@ public static class FieldMappingEndpoints
             .ProducesValidationProblem()
             .Produces(401)  // Unauthorized
             .Produces(404)  // Profile Not Found
+            .Produces(409)  // Parent lookup missing or ambiguous in relationship metadata (task 166 r1)
             .Produces(500); // Internal Server Error
     }
 
@@ -438,6 +444,12 @@ public static class FieldMappingEndpoints
         IFieldMappingDataverseService dataverseService,
         [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         IServiceScopeFactory scopes,
+        // Task 166 (S-67): the caller's own rights decide — source Read via the OBO probe, children read and
+        // written AS the caller (MSCRMCallerID impersonation). See the gate below.
+        CallerRecordAccessProbe probe,
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -450,6 +462,23 @@ public static class FieldMappingEndpoints
         if (validationErrors.Count > 0)
         {
             return Results.ValidationProblem(validationErrors);
+        }
+
+        // ── Task 166 (S-67): authorize the SOURCE as the caller, and establish who the caller IS, BEFORE anything ──
+        //
+        // This route read the source's mapped fields app-only, queried up to 500 children app-only, and PATCHed each
+        // one app-only — for any source id any signed-in caller named. It was latent only because a doubled
+        // `_…_value` wrap made the child query 400; fixing that bug without this gate would have made it a mass
+        // write over children of records the caller cannot see. So the gate and the fix land together, gate first:
+        //   (1) the caller must hold Read on the SOURCE record (CallerRecordAccessProbe, as the caller);
+        //   (2) the caller's systemuserid must resolve (WhoAmI on their own token), because every child read and
+        //       write below runs IMPERSONATED as that user — Dataverse then shows and writes only children THEY may.
+        // An unmapped source type, an unreadable or non-existent source, a missing token, an unresolvable caller and
+        // a probe fault are ONE 404, and no profile query, source read, child query or write has happened.
+        var callerSystemUserId = await AuthorizePushSourceAsync(request, probe, httpContext, logger, ct);
+        if (callerSystemUserId is null)
+        {
+            return SourceRecordNotFound();
         }
 
         try
@@ -492,13 +521,18 @@ public static class FieldMappingEndpoints
                 });
             }
 
-            // Step 2: Get source record field values
+            // Step 2: Get source record field values — AS THE CALLER (task 166 r2). The row-level Read gate above
+            // does not cover field-level security: an app-only read would return a secured source column the caller
+            // cannot read and copy it into children they CAN read. Impersonated, Dataverse returns such a column as
+            // null (the rule is then skipped), and a source the caller cannot read at all returns no row (404).
             var sourceFields = profile.Rules.Select(r => r.SourceField).Distinct().ToArray();
-            var sourceValues = await RetrieveSourceRecordValuesAsync(
-                dataverseService,
+            var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
+                impersonatedQuery,
+                entityService,
                 request.SourceEntity,
                 request.SourceRecordId,
                 sourceFields,
+                callerSystemUserId.Value,
                 ct);
 
             if (sourceValues is null)
@@ -507,19 +541,33 @@ public static class FieldMappingEndpoints
                     "Source record not found. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}",
                     request.SourceEntity, request.SourceRecordId);
 
-                return Results.Problem(
-                    detail: $"Source record '{request.SourceRecordId}' not found in entity '{request.SourceEntity}'.",
-                    statusCode: 404,
-                    title: "Source Record Not Found",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                return SourceRecordNotFound();
             }
 
-            // Step 3: Query all child records related to source (limit 500)
+            // Step 3a (task 166 r1, owner round 21 item 3): WHICH lookup on the target names the source is read from
+            // relationship metadata — the target's many-to-one relationships whose referenced entity is the source —
+            // instead of the `sprk_regarding{base}` naming convention, which sprk_invoice (it carries sprk_matter) does
+            // not follow. Exactly one lookup is required; none or several fail closed before any child is read.
+            var (parentLookup, parentLookupCount) = await ResolveParentLookupAsync(
+                impersonatedQuery, request.SourceEntity, request.TargetEntity, callerSystemUserId.Value, ct);
+            if (parentLookup is null)
+            {
+                logger.LogWarning(
+                    "Push refused: {TargetEntity} has {Count} lookup(s) to {SourceEntity} in relationship metadata; exactly "
+                    + "one is required to find the children. Nothing was read or updated.",
+                    request.TargetEntity, parentLookupCount, request.SourceEntity);
+                return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, parentLookupCount);
+            }
+
+            // Step 3: Query the child records related to source (limit 500) — AS THE CALLER (task 166), so a child
+            // they cannot read never enters the set, the counts, the errors or the field results.
             var childRecords = await QueryChildRecordsAsync(
-                dataverseService,
-                request.SourceEntity,
+                impersonatedQuery,
+                entityService,
+                parentLookup,
                 request.SourceRecordId,
                 request.TargetEntity,
+                callerSystemUserId.Value,
                 MaxChildRecordsPerPush,
                 ct);
 
@@ -560,6 +608,7 @@ public static class FieldMappingEndpoints
                 sourceValues,
                 request.TargetEntity,
                 childRecords.RecordIds,
+                callerSystemUserId.Value,
                 logger,
                 ct,
                 scopes);
@@ -607,6 +656,11 @@ public static class FieldMappingEndpoints
         {
             errors["sourceEntity"] = ["Source entity is required."];
         }
+        else if (!IsLogicalName(request.SourceEntity))
+        {
+            // Task 166 r1: entity names are interpolated into Dataverse queries and metadata paths.
+            errors["sourceEntity"] = ["Source entity must be a Dataverse logical name (letters, digits and underscores)."];
+        }
 
         if (request.SourceRecordId == Guid.Empty)
         {
@@ -617,68 +671,284 @@ public static class FieldMappingEndpoints
         {
             errors["targetEntity"] = ["Target entity is required."];
         }
+        else if (!IsLogicalName(request.TargetEntity))
+        {
+            errors["targetEntity"] = ["Target entity must be a Dataverse logical name (letters, digits and underscores)."];
+        }
 
         return errors;
     }
 
     /// <summary>
-    /// Retrieves field values from the source record.
+    /// The source-row query issued AS THE CALLER (task 166 r2): the mapped fields of exactly the authorized source row.
     /// </summary>
-    private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsync(
-        IFieldMappingDataverseService dataverseService,
-        string entityLogicalName,
-        Guid recordId,
+    /// <remarks>
+    /// <c>internal</c> so a test can pin the exact string. A rule field that is not a logical name is never interpolated
+    /// into the query (it reads as null, so its rule is skipped); the row's own id column is always selected, so the
+    /// <c>$select</c> is never empty.
+    /// </remarks>
+    internal static string BuildSourceRecordQuery(string sourceEntity, Guid sourceRecordId, IEnumerable<string> fields)
+    {
+        var select = fields.Where(IsLogicalName).Append($"{sourceEntity}id").Distinct(StringComparer.OrdinalIgnoreCase);
+        return $"$select={string.Join(",", select)}&$filter={sourceEntity}id eq {sourceRecordId:D}&$top=1";
+    }
+
+    /// <summary>
+    /// Retrieves the source record's mapped field values AS THE CALLER (task 166 r2) through the same impersonated seam
+    /// the child query uses — so field-level security applies: a secured column the caller cannot read comes back
+    /// null and its rule is skipped, instead of being copied into children the caller can read. No row (the caller
+    /// cannot read the source, or it does not exist) → <see langword="null"/> (the route's 404). No app-only fallback:
+    /// a fault propagates to the route's 500.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the app-only <c>IFieldMappingDataverseService.RetrieveRecordFieldsAsync</c> call. Values are converted
+    /// exactly as that method converts them (string, Int64 or double, bool, null, else raw JSON text), so the rule
+    /// engine sees the same shapes.
+    /// </remarks>
+    private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsCallerAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
+        string sourceEntity,
+        Guid sourceRecordId,
         string[] fields,
+        Guid callerSystemUserId,
         CancellationToken ct)
     {
+        var entitySet = await entityService.GetEntitySetNameAsync(sourceEntity, ct);
+        var rows = await impersonatedQuery.QueryAsync(
+            entitySet, BuildSourceRecordQuery(sourceEntity, sourceRecordId, fields), callerSystemUserId, ct);
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var row = rows[0];
+        var result = new Dictionary<string, object?>();
+        foreach (var field in fields)
+        {
+            result[field] = row.TryGetValue(field, out var value) ? ToClrValue(value) : null;
+        }
+
+        return result;
+    }
+
+    /// <summary>The JSON → CLR conversion the app-only field read applied (kept identical for the rule engine).</summary>
+    private static object? ToClrValue(System.Text.Json.JsonElement element) => element.ValueKind switch
+    {
+        System.Text.Json.JsonValueKind.String => element.GetString(),
+        System.Text.Json.JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+        System.Text.Json.JsonValueKind.True => true,
+        System.Text.Json.JsonValueKind.False => false,
+        System.Text.Json.JsonValueKind.Null => null,
+        System.Text.Json.JsonValueKind.Undefined => null,
+        _ => element.GetRawText(),
+    };
+
+    /// <summary>
+    /// The ONE "source not found" answer (task 166): an unknown source id, a source the caller cannot read, an
+    /// unmapped source type, a missing token, an unresolvable caller and a probe fault all return exactly this. It
+    /// names neither the id nor the entity, so the route cannot be used to learn which records exist.
+    /// </summary>
+    internal static IResult SourceRecordNotFound() =>
+        Results.Problem(
+            detail: "Source record not found.",
+            statusCode: 404,
+            title: "Source Record Not Found",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+
+    /// <summary>
+    /// Task 166 (S-67): the caller's Read on the push SOURCE, then the caller's systemuserid. Returns the
+    /// systemuserid to impersonate for every child read and write, or <see langword="null"/> — DENY — when any
+    /// step cannot establish it.
+    /// </summary>
+    /// <remarks>
+    /// Reuses, does not fork: the entity set comes from <see cref="EntityAccessFilter.TryResolveEntitySet"/> (a miss
+    /// denies — a type whose per-record access cannot be evaluated is a type this route must not push from), the
+    /// rights from <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/> under the existing <c>"read"</c> key,
+    /// and the identity from <see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/> (WhoAmI on the caller's
+    /// own token — the one identity path that cannot be fooled). The try covers the decision only.
+    /// </remarks>
+    private static async Task<Guid?> AuthorizePushSourceAsync(
+        PushFieldMappingsRequest request,
+        CallerRecordAccessProbe probe,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!EntityAccessFilter.TryResolveEntitySet(request.SourceEntity, out var sourceEntitySet))
+        {
+            logger.LogWarning(
+                "[FIELD-MAPPING-PUSH] Denied: source entity '{SourceEntity}' is not in EntityAccessFilter's map, so the "
+                + "caller's rights on it cannot be evaluated. Answered 404.", request.SourceEntity);
+            return null;
+        }
+
+        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         try
         {
-            return await dataverseService.RetrieveRecordFieldsAsync(entityLogicalName, recordId, fields, ct);
+            var rights = await probe.GetCallerRightsAsync(token, sourceEntitySet, request.SourceRecordId, ct);
+            if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
+            {
+                logger.LogWarning(
+                    "[FIELD-MAPPING-PUSH] Denied: caller holds {Rights} on {EntitySet}({SourceRecordId}); Read required. "
+                    + "Answered 404 — nothing read or written.", rights, sourceEntitySet, request.SourceRecordId);
+                return null;
+            }
+
+            var callerSystemUserId = await probe.GetCallerSystemUserIdAsync(token, ct);
+            if (callerSystemUserId is null || callerSystemUserId == Guid.Empty)
+            {
+                logger.LogWarning(
+                    "[FIELD-MAPPING-PUSH] Denied: the caller's Dataverse systemuserid could not be resolved, so children "
+                    + "cannot be read or written as the caller. Answered 404 (no app-only fallback).");
+                return null;
+            }
+
+            return callerSystemUserId;
         }
-        catch (Exception ex) when (ex.Message.Contains("404") || ex.Message.Contains("not found"))
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Record not found
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[FIELD-MAPPING-PUSH] The source authorization check faulted for {EntitySet}({SourceRecordId}); denying "
+                + "(404).", sourceEntitySet, request.SourceRecordId);
             return null;
         }
     }
 
+    /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record.</summary>
+    private const string ReadOperation = "read";
+
     /// <summary>
-    /// Queries child records related to the source record.
+    /// Builds the child-record query issued AS THE CALLER (task 166). <paramref name="parentLookupAttribute"/> is the
+    /// target's lookup LOGICAL name (from <see cref="ResolveParentLookupAsync"/>), and the <c>_…_value</c> wrap is
+    /// applied EXACTLY ONCE, here. The old path wrapped an already-wrapped name a second time
+    /// (<c>__sprk_regardingmatter_value_value</c>) — Dataverse answered 400 and the route always 500ed.
     /// </summary>
-    private static async Task<(Guid[] RecordIds, int TotalCount)> QueryChildRecordsAsync(
-        IFieldMappingDataverseService dataverseService,
+    /// <remarks><c>internal</c> so a test can pin the exact string — the double prefix must not come back.</remarks>
+    internal static string BuildChildRecordQuery(string parentLookupAttribute, Guid sourceRecordId, string targetEntity, int top)
+        => $"$filter=_{parentLookupAttribute}_value eq {sourceRecordId:D}"
+           + $"&$select={targetEntity}id&$top={top}";
+
+    /// <summary>
+    /// The relationship-metadata collection the parent lookup is resolved from: the TARGET's many-to-one
+    /// relationships (task 166 r1, owner round 21 item 3). <paramref name="targetEntity"/> has passed
+    /// <see cref="IsLogicalName"/>, so it cannot break out of the quoted key.
+    /// </summary>
+    internal static string ParentLookupMetadataPath(string targetEntity)
+        => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
+
+    /// <summary>The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed).</summary>
+    internal const string ParentLookupMetadataQuery = "$select=ReferencingAttribute,ReferencedEntity";
+
+    /// <summary>
+    /// Task 166 r1 (owner round 21 item 3): the target's ONE lookup that references the source entity, from
+    /// relationship metadata read AS THE CALLER (the same impersonated seam the child query uses). Returns the lookup's
+    /// logical name, or <see langword="null"/> with the number of matching lookups found (0 = none, &gt;1 = ambiguous) —
+    /// both fail closed: with no lookup the children cannot be found, and with several the route cannot know which
+    /// one names the parent, so it must not guess and write to children it may have chosen wrongly.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the <c>sprk_regarding{base}</c> naming convention (<c>DetermineParentLookupField</c>, deleted), which the
+    /// live "Matter to Invoice (Attorney Matrix)" profile broke: <c>sprk_invoice</c> carries <c>sprk_matter</c>, not
+    /// <c>sprk_regardingmatter</c>. Live metadata 2026-10-04 (read-only): sprk_workassignment, sprk_event and
+    /// sprk_reportcard each have exactly one lookup to sprk_matter (sprk_regardingmatter); sprk_invoice has exactly one
+    /// (sprk_matter). No schema change, no per-table convention, no deactivated profile. A metadata fault propagates
+    /// to the route's 500 — never to a guessed lookup.
+    /// </remarks>
+    internal static async Task<(string? Attribute, int Matches)> ResolveParentLookupAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
         string sourceEntity,
+        string targetEntity,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var relationships = await impersonatedQuery.QueryAsync(
+            ParentLookupMetadataPath(targetEntity), ParentLookupMetadataQuery, callerSystemUserId, ct);
+
+        var matches = relationships
+            .Where(r => r.TryGetValue("ReferencedEntity", out var referenced)
+                        && referenced.ValueKind == System.Text.Json.JsonValueKind.String
+                        && string.Equals(referenced.GetString(), sourceEntity, StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.TryGetValue("ReferencingAttribute", out var attribute)
+                         && attribute.ValueKind == System.Text.Json.JsonValueKind.String
+                ? attribute.GetString()
+                : null)
+            .Where(a => !string.IsNullOrWhiteSpace(a) && IsLogicalName(a!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return matches.Length == 1 ? (matches[0], 1) : (null, matches.Length);
+    }
+
+    /// <summary>A Dataverse logical name: letters, digits and underscores only (it is interpolated into OData).</summary>
+    internal static bool IsLogicalName(string value)
+        => value.Length is > 0 and <= 128 && value.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    /// <summary>Stable reason codes for the two parent-lookup refusals (task 166 r1).</summary>
+    internal const string ParentLookupMissingReasonCode = "field_mapping_parent_lookup_missing";
+    internal const string ParentLookupAmbiguousReasonCode = "field_mapping_parent_lookup_ambiguous";
+
+    /// <summary>
+    /// 409: the profile's target table has no lookup — or more than one — to the source in relationship metadata, so
+    /// the push cannot tell which children belong to this record. Nothing was read or updated. The source was already
+    /// authorized for the caller, so naming the two tables discloses nothing they could not see.
+    /// </summary>
+    private static IResult ParentLookupNotResolvable(string sourceEntity, string targetEntity, int matches) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Parent Lookup Not Resolvable",
+            detail: matches == 0
+                ? $"'{targetEntity}' has no lookup to '{sourceEntity}', so its records related to this one cannot be found. Nothing was updated."
+                : $"'{targetEntity}' has {matches} lookups to '{sourceEntity}', so which one names the parent is ambiguous. Nothing was updated.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.8",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = matches == 0 ? ParentLookupMissingReasonCode : ParentLookupAmbiguousReasonCode,
+            });
+
+    /// <summary>
+    /// Queries child records related to the source record, AS THE CALLER (task 166): Dataverse returns only the
+    /// children the caller may read, so a child they cannot see never reaches the counts, errors or field results.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the app-only <c>IFieldMappingDataverseService.QueryChildRecordIdsAsync</c> call (which also carried
+    /// the double-prefix bug). No app-only fallback: an impersonation fault surfaces as the route's 500, never as an
+    /// unscoped read.
+    /// </remarks>
+    private static async Task<(Guid[] RecordIds, int TotalCount)> QueryChildRecordsAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        IGenericEntityService entityService,
+        string parentLookupAttribute,
         Guid sourceRecordId,
         string targetEntity,
+        Guid callerSystemUserId,
         int maxRecords,
         CancellationToken ct)
     {
-        // Determine the parent lookup field based on source entity
-        // Convention: sprk_regarding{sourceEntity} without prefix (e.g., sprk_regardingmatter)
-        var parentLookupField = DetermineParentLookupField(sourceEntity);
+        var entitySet = await entityService.GetEntitySetNameAsync(targetEntity, ct);
+        var odataQuery = BuildChildRecordQuery(parentLookupAttribute, sourceRecordId, targetEntity, maxRecords + 1);
 
-        // Query child record IDs
-        var recordIds = await dataverseService.QueryChildRecordIdsAsync(
-            targetEntity,
-            parentLookupField,
-            sourceRecordId,
-            ct);
+        var rows = await impersonatedQuery.QueryAsync(entitySet, odataQuery, callerSystemUserId, ct);
+
+        var idColumn = $"{targetEntity}id";
+        var recordIds = rows
+            .Select(row => row.TryGetValue(idColumn, out var value)
+                           && value.ValueKind == System.Text.Json.JsonValueKind.String
+                           && Guid.TryParse(value.GetString(), out var id)
+                ? id
+                : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
 
         // Return with count (limit to maxRecords + 1 for checking if more exist)
         var limitedRecordIds = recordIds.Take(maxRecords + 1).ToArray();
         return (limitedRecordIds.Take(maxRecords).ToArray(), limitedRecordIds.Length);
-    }
-
-    /// <summary>
-    /// Determines the parent lookup field name based on the source entity.
-    /// </summary>
-    private static string DetermineParentLookupField(string sourceEntity)
-    {
-        // For standard regarding records, use the convention: _sprk_regarding{entitybasename}_value
-        // For example: sprk_matter -> _sprk_regardingmatter_value
-        //              account -> _sprk_regardingaccount_value
-        var entityBaseName = sourceEntity.Replace("sprk_", "");
-        return $"_sprk_regarding{entityBaseName}_value";
     }
 
     /// <summary>
@@ -694,6 +964,7 @@ public static class FieldMappingEndpoints
         Dictionary<string, object?> sourceValues,
         string targetEntity,
         Guid[] childRecordIds,
+        Guid callerSystemUserId,
         ILogger logger,
         CancellationToken ct,
         IServiceScopeFactory? scopes = null)
@@ -721,7 +992,10 @@ public static class FieldMappingEndpoints
 
                 if (updatePayload.Count > 0)
                 {
-                    await dataverseService.UpdateRecordFieldsAsync(targetEntity, childRecordId, updatePayload, ct);
+                    // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
+                    // so no app-only child write remains on this route.
+                    await dataverseService.UpdateRecordFieldsAsync(
+                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
                     updated++;
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this

@@ -98,9 +98,15 @@ Spaarke.Documents.Config = {
                 "managed identity. Use the document-id-keyed delete in " +
                 "Api/DocumentOperationsEndpoints.cs, which reads DriveId/ItemId off the authorized row.");
         },
-        // These two remain live: /api/v1/documents/{id} is document-id-keyed, i.e. it names a RECORD.
+        // GET /api/v1/documents/{id} remains live: it is document-id-keyed, i.e. it names a RECORD.
         getDocument: (docId) => `/api/v1/documents/${docId}`,
-        updateDocument: (docId) => `/api/v1/documents/${docId}`
+        updateDocument: () => {
+            // Never called in this file; kept so a stale caller fails loudly (unified-access-control-r2 task 166).
+            throw new Error(
+                "DocumentOperations.updateDocument is retired (unified-access-control-r2 task 166). " +
+                "PUT /api/v1/documents/{id} now serves the Compose re-file only: it refuses the SPE pointer " +
+                "fields and asks AppendTo on any new parent. Update document fields through the form (Xrm) instead.");
+        }
     },
 
     // File constraints
@@ -415,22 +421,13 @@ Spaarke.Documents.processFileUpload = async function (formContext, file) {
  * @param {string} driveId - Drive ID
  */
 Spaarke.Documents.updateDocumentAfterUpload = async function (formContext, file, uploadResult, driveId) {
-    try {
-        // Update form fields
-        formContext.getAttribute("sprk_hasfile").setValue(true);
-        formContext.getAttribute("sprk_filename").setValue(file.name);
-        formContext.getAttribute("sprk_filesize").setValue(file.size);
-        formContext.getAttribute("sprk_mimetype").setValue(file.type || "application/octet-stream");
-        formContext.getAttribute("sprk_graphitemid").setValue(uploadResult.id);
-        formContext.getAttribute("sprk_graphdriveid").setValue(driveId);
-
-        // Save the form
-        await formContext.data.save();
-
-    } catch (error) {
-        console.error("Error updating document after upload:", error);
-        throw new Error("File uploaded but failed to update document record. Please refresh the form.");
-    }
+    // ⚠️ unified-access-control-r2 task 166 f1 (owner round 21 item 1): a client NEVER writes a document's SPE pointer
+    // (sprk_graphitemid / sprk_graphdriveid) — the columns are field-secured, writable by the BFF identity only. The
+    // supported path is POST /api/v1/documents/{id}/file (the BFF verifies the file and stamps the pointer). This
+    // function is unreachable today (uploadFile above throws), and it no longer writes the pointer or the file flag.
+    throw new Error(
+        "Attaching a file from this form is not supported. Upload the file through the document upload wizard; " +
+        "the server attaches it to the document (POST /api/v1/documents/{id}/file).");
 };
 
 /**
@@ -650,13 +647,12 @@ Spaarke.Documents.processFileDelete = async function (formContext, silent = fals
             throw new Error("Failed to delete file from storage.");
         }
 
-        // Update Dataverse document record
-        formContext.getAttribute("sprk_hasfile").setValue(false);
+        // ⚠️ task 166 f1: the SPE pointer (sprk_graphitemid / sprk_graphdriveid) is BFF-written only (field-level
+        // security); the client never clears it either. Unreachable today: deleteFile above throws first. The
+        // supported delete (Api/DocumentOperationsEndpoints.cs) updates the row server-side.
         formContext.getAttribute("sprk_filename").setValue(null);
         formContext.getAttribute("sprk_filesize").setValue(null);
         formContext.getAttribute("sprk_mimetype").setValue(null);
-        formContext.getAttribute("sprk_graphitemid").setValue(null);
-        formContext.getAttribute("sprk_graphdriveid").setValue(null);
 
         // Save the form
         await formContext.data.save();

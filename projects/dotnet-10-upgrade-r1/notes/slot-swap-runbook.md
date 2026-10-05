@@ -65,7 +65,7 @@ The script publishes, zips, `az webapp deploy --type zip`, SHA-256 hash-verifies
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.net/healthz   # 200
 ```
-Then §9b OBO round-trip (JWT + OBO — exercises the **Graph 6.5 / Kiota 2.0** path landed in task 033), §9c `/healthz/dataverse/doc/{id}` (MI→Dataverse), §9d EXO mailbox (no 403 in `InboundPollingBackupService` logs if Email enabled), §9e browser MSAL regression. Confirm **FR-06 telemetry** (OTel→Azure Monitor is the sole path; classic App Insights SDK removed in task 014) is emitting.
+Then §9b OBO round-trip (JWT + OBO — exercises the **Graph 6.5 / Kiota 2.0** path landed in task 033), §9c `/healthz/dataverse` (MI→Dataverse; the former `/healthz/dataverse/doc/{id}` was retired 2026-10-03 by unified-access-control-r2 task 166), §9d EXO mailbox (no 403 in `InboundPollingBackupService` logs if Email enabled), §9e browser MSAL regression. Confirm **FR-06 telemetry** (OTel→Azure Monitor is the sole path; classic App Insights SDK removed in task 014) is emitting.
 
 ### A.5 — Rollback (dev, single site)
 

@@ -776,6 +776,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -806,12 +807,17 @@ public static class ExternalProjectDataEndpoints
         {
             var (driveId, itemId) = await storageResolver.GetSpePointersAsync(documentId, ct);
 
-            var versions = await fileStore.ListFileVersionsAsync(driveId, itemId, ct);
-            if (versions is null)
+            var listed = await fileStore.ListFileVersionsAsync(driveId, itemId, ct);
+            if (listed is null)
             {
                 return Results.Problem(statusCode: 404, title: "Not Found",
                     detail: "Document content is not available.");
             }
+
+            // unified-access-control-r2 task 166, owner round 45 item 1: a version a relocation replayed into a moved
+            // file reports its ORIGINAL author and date, so the history an external participant sees is unchanged.
+            var versions = await Sprk.Bff.Api.Services.Documents.RelocatedVersionHistory.WithOriginalAuthorshipAsync(
+                entityService, documentId, itemId, listed, logger, ct);
 
             // Project to the external contract. Graph pointers (driveId/itemId) are NEVER surfaced —
             // same rule the content-download route states explicitly.
@@ -824,9 +830,10 @@ public static class ExternalProjectDataEndpoints
                     VersionLabel = v.Id,
                     CreatedAt = v.LastModifiedDateTime.ToString("o"),
                     FileSizeBytes = v.Size,
-                    // CreatedByName is intentionally left null: VersionInfoDto does not carry
-                    // lastModifiedBy, and inventing an author is worse than omitting one. The client
-                    // types it optional and renders a dash. Widening VersionInfoDto is a separate change.
+                    // CreatedByName stays null on the EXTERNAL surface: an external participant has never been shown
+                    // who wrote a version, and task 166 f1-v2 (round 45 item 1: "the history a user sees is unchanged")
+                    // keeps it so — only the dates of replayed versions are the recorded originals. Showing internal
+                    // authors to external contacts is a disclosure decision of its own, not a side effect of a move.
                 })
                 .ToList();
 

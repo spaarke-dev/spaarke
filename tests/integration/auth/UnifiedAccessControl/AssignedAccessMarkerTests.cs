@@ -45,11 +45,14 @@ public class AssignedAccessMarkerTests
 
     private Task<IResult> Revoke(Guid accessRecordId) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
-            new RevokeAccessRequest(accessRecordId, Guid.Empty, Guid.Empty, ContainerId: null),
+            new RevokeAccessRequest(accessRecordId, Guid.Empty, Guid.Empty),
             _h.Grants,
             new SpeContainerMembershipService(Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
             _h.Participations,
             _h.Materializer,
+            // Task 166: the container is derived from the grant's root. Here the matter's derived container is the shared
+            // business-unit one, so the SPE step is skipped (this class tests the Assigned-To marker, not the container).
+            TestRecordContainerResolver.ForNonSecureRecord("sprk_matter", _matter),
             Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> Grant(Guid contactId) =>

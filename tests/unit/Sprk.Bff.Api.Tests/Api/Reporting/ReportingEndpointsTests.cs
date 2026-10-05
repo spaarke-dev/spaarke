@@ -73,9 +73,8 @@ public class ReportingEndpointsTests
 
     private static Mock<ReportingEmbedService> BuildEmbedServiceMock()
     {
-        // ReportingEmbedService is a sealed concrete class — cannot be Moq'd directly.
-        // Tests that need a controlled embed service response are handled via the internal
-        // handler reflection approach below.
+        // uac-r2 task 166 r1: ReportingEmbedService is unsealed with virtual methods (an ADR-010 test seam); the
+        // route contract is pinned through the real route group in ReportingCatalogBindingContractTests.
         return new Mock<ReportingEmbedService>(MockBehavior.Loose);
     }
 
@@ -125,18 +124,22 @@ public class ReportingEndpointsTests
     [Fact]
     public void CreateReportRequest_HasExpectedProperties()
     {
+        // uac-r2 task 166 r1 (option A): a new report is derived from a SOURCE catalog row; the client names no
+        // workspace, dataset or template — those come from the row the server reads as the caller.
         var type = typeof(CreateReportRequest);
-        type.GetProperty("WorkspaceId").Should().NotBeNull();
         type.GetProperty("Name").Should().NotBeNull();
-        type.GetProperty("DatasetId").Should().NotBeNull();
-        type.GetProperty("TemplateReportId").Should().NotBeNull();
+        type.GetProperty("SourceReportId").Should().NotBeNull();
+        type.GetProperty("PbiReportId").Should().BeNull(
+            "uac-r2 task 166 r2 (owner round 23 item 2): a client-named Power BI report is never registered — a new report is always a server-side clone");
+        type.GetProperty("WorkspaceId").Should().BeNull();
+        type.GetProperty("DatasetId").Should().BeNull();
     }
 
     [Fact]
     public void UpdateReportRequest_HasExpectedProperties()
     {
         var type = typeof(UpdateReportRequest);
-        type.GetProperty("WorkspaceId").Should().NotBeNull();
+        type.GetProperty("WorkspaceId").Should().BeNull("uac-r2 task 166 r1: the catalog row decides the workspace");
         type.GetProperty("Name").Should().NotBeNull();
 
         // Name is optional (nullable string)
@@ -148,7 +151,7 @@ public class ReportingEndpointsTests
     public void ReportingExportRequest_HasExpectedProperties()
     {
         var type = typeof(ReportingExportRequest);
-        type.GetProperty("WorkspaceId").Should().NotBeNull();
+        type.GetProperty("WorkspaceId").Should().BeNull("uac-r2 task 166 r1: the catalog row decides the workspace");
         type.GetProperty("ReportId").Should().NotBeNull();
         type.GetProperty("Format").Should().NotBeNull();
         type.GetProperty("FileName").Should().NotBeNull();

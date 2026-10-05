@@ -71,4 +71,31 @@ public class PowerBiOptions
     /// Environment variable: PowerBi__ApiUrl
     /// </summary>
     public string ApiUrl { get; set; } = "https://api.powerbi.com";
+
+    /// <summary>
+    /// The Power BI workspaces this deployment's report catalog may act on — the server-side allowed-workspace check
+    /// before embed, export, delete and clone (unified-access-control-r2 task 166 f1; owner round 25 item 6). A catalog row
+    /// whose <c>sprk_workspaceid</c> is not listed is "not in your catalog" (the uniform 404) and Power BI is never asked —
+    /// so a row forged before the catalog's pointer columns were field-secured cannot redirect an embed, export or delete
+    /// to another workspace the service principal can reach. EMPTY = the module refuses every report (503,
+    /// <c>sdap.reporting.config.workspaces_unconfigured</c>): fail closed, never "any workspace".
+    /// Environment variables: <c>PowerBi__AllowedWorkspaces__0__WorkspaceId</c>, optional
+    /// <c>PowerBi__AllowedWorkspaces__0__CustomerBusinessUnitId</c>.
+    /// </summary>
+    public List<AllowedPowerBiWorkspace> AllowedWorkspaces { get; set; } = [];
+}
+
+/// <summary>One workspace the catalog may act on (see <see cref="PowerBiOptions.AllowedWorkspaces"/>).</summary>
+public sealed class AllowedPowerBiWorkspace
+{
+    /// <summary>The Power BI workspace (group) id.</summary>
+    public Guid WorkspaceId { get; set; }
+
+    /// <summary>
+    /// Optional, for an environment that hosts several customers as business units (Model 1, owner round 20): the
+    /// customer's top-level business unit. When set, the workspace is allowed only for a caller whose business unit is
+    /// that unit or beneath it — one customer's users never reach another customer's workspace through a catalog row.
+    /// When unset, every caller of this deployment may use it (one customer per deployment).
+    /// </summary>
+    public Guid? CustomerBusinessUnitId { get; set; }
 }

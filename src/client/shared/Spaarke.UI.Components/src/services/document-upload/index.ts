@@ -52,7 +52,7 @@ export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationRe
 
 // Document Record Service (Dataverse CRUD)
 export { DocumentRecordService } from './DocumentRecordService';
-export type { DocumentRecordServiceOptions, EntityConfigResolver } from './DocumentRecordService';
+export type { DocumentRecordServiceOptions, EntityConfigResolver, DocumentFileAttacher } from './DocumentRecordService';
 
 // IDataverseClient implementation (Code Pages). The PCF-side PcfDataverseClient
 // was DELETED 2026-10-03 (reuse audit C-26): zero instantiation sites.

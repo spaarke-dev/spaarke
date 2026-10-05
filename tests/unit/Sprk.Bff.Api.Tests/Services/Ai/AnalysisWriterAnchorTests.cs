@@ -49,7 +49,9 @@ public class AnalysisWriterAnchorTests
         Mock.Of<INodeService>(),
         Mock.Of<IPlaybookOrchestrationService>(),
         new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), // task 146 (sweep integration)
-        Mock.Of<ILogger<AppOnlyAnalysisService>>());
+        Mock.Of<ILogger<AppOnlyAnalysisService>>(),
+        // Task 166 (batch-4 integration): every app-only download verifies the document's pointer first.
+        TestRecordContainerResolver.ForBusinessUnitContainers("drive-162"));
 
     private void ExtractableFile(DocumentEntity document)
     {

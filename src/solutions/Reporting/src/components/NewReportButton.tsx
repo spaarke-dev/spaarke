@@ -4,8 +4,8 @@
  *
  * Only rendered for Author and Admin users (canEditReports check).
  * Opens a Fluent v9 Dialog prompting for a report name, then calls
- * POST /api/reporting/reports to create a blank report bound to the
- * customer's semantic model (datasetId).
+ * POST /api/reporting/reports with the selected catalog report as the source: the BFF clones it (same workspace and
+ * semantic model, both derived server-side from the catalog row) and registers the copy (task 166 r1).
  *
  * On success:
  *   - Calls onReportCreated with the new catalog item
@@ -59,20 +59,14 @@ const useStyles = makeStyles({
 
 export interface NewReportButtonProps {
   /**
-   * The Power BI dataset (semantic model) ID to bind the new report to.
-   * Comes from the currently selected report's `datasetId` field or from
-   * the customer's default dataset config.
+   * The catalog report the new one is based on (unified-access-control-r2 task 166 r1). The BFF reads it as the
+   * user and clones its Power BI report in the same workspace and dataset — the client names neither.
+   * Comes from the currently selected report; null disables creation.
    */
-  datasetId: string | null;
-  /** Disabled state — mirrors toolbar disabled when no report is loaded. */
+  sourceReport: ReportCatalogItem | null;
+  /** Whether the button is disabled (e.g. while a token is loading). */
   disabled?: boolean;
-  /**
-   * Called after successful creation.
-   * App.tsx uses this to:
-   *   1. Add the new report to the catalog (refetch dropdown)
-   *   2. Select the new report
-   *   3. Switch to edit mode
-   */
+  /** Called with the new catalog item once the BFF has created and registered it. */
   onReportCreated: (newReport: ReportCatalogItem) => void;
 }
 
@@ -80,12 +74,8 @@ export interface NewReportButtonProps {
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * "New Report" button that opens a dialog for report name entry.
- * Creates a blank PBI report via the BFF and notifies the parent on success.
- */
 export const NewReportButton: React.FC<NewReportButtonProps> = ({
-  datasetId,
+  sourceReport,
   disabled = false,
   onReportCreated,
 }) => {
@@ -114,15 +104,15 @@ export const NewReportButton: React.FC<NewReportButtonProps> = ({
       setError("Please enter a report name.");
       return;
     }
-    if (!datasetId) {
-      setError("No dataset available. Select an existing report first to inherit its dataset.");
+    if (!sourceReport) {
+      setError("Select an existing report first — the new report is based on it.");
       return;
     }
 
     setCreating(true);
     setError(null);
 
-    const result = await createReport({ name: trimmedName, datasetId });
+    const result = await createReport({ name: trimmedName, sourceReportId: sourceReport.id });
 
     setCreating(false);
 
@@ -138,14 +128,14 @@ export const NewReportButton: React.FC<NewReportButtonProps> = ({
       id: result.data.reportId,
       name: result.data.name,
       embedUrl: result.data.embedUrl,
-      datasetId,
+      datasetId: sourceReport.datasetId,
       category: "Custom",
       isCustom: true,
     };
 
     setOpen(false);
     onReportCreated(newItem);
-  }, [reportName, datasetId, onReportCreated]);
+  }, [reportName, sourceReport, onReportCreated]);
 
   // Allow Ctrl+Enter / Enter in the text field to trigger creation
   const handleKeyDown = React.useCallback(

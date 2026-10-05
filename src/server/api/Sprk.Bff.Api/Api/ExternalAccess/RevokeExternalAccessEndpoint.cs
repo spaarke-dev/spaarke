@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -78,9 +79,15 @@ public static class RevokeExternalAccessEndpoint
         SpeContainerMembershipService speContainerMembership,
         ExternalParticipationService participations,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        // Task 166 (amendment b): the container is derived from the grant's ROOT — never from the request.
+        RecordContainerResolver containerResolver,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        // Task 166 r1: "today" for the remaining-grant overlap check (which grants still confer access). Optional so
+        // the many direct callers in tests keep compiling; resolved from DI on the route (registered unconditionally
+        // by ExternalAccessModule).
+        TimeProvider? timeProvider = null)
     {
         // ── Validation ───────────────────────────────────────────────────────
         if (request.AccessRecordId == Guid.Empty)
@@ -184,7 +191,8 @@ public static class RevokeExternalAccessEndpoint
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
         var (speOutcome, orgCleanup) = await RemoveSpeContainerPermissionsAsync(
-            speContainerMembership, dataverseClient, request, grantKey, logger, ct);
+            speContainerMembership, dataverseClient, containerResolver, request, grantKey,
+            ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), logger, ct);
 
         // ── Step 3: Invalidate the grant cache — the ONE routine (task 137) ───
         // Keyed on the REVOKED ROW's grantee (the same key Step 1 swept), not on request.ContactId: a contact grant
@@ -317,24 +325,62 @@ public static class RevokeExternalAccessEndpoint
     /// versions or by admins outside Spaarke — not the counterpart of a grant-time write. That is why
     /// <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> is the ordinary, healthy answer rather
     /// than a problem.</para>
+    ///
+    /// <para><b>WHICH container — task 166 (route-authorization sweep amendment (b)).</b> It used to be
+    /// <c>request.ContainerId</c>, a client-chosen value, while <c>DelegationRuleFilter</c> authorized the grant
+    /// row's ROOT — the same "authorized against one id, mutates another" shape as close-project (S-39). The field
+    /// is deleted and the container is derived from the grant's root through
+    /// <see cref="ProjectClosureEndpoint.DeriveRecordOwnContainerAsync"/>: a SECURE root's own container is cleaned;
+    /// a non-secure root's derived container is the SHARED business-unit container, which a single revoke must not
+    /// sweep (the grantee may hold other grants it serves), so that case is <c>NotAttempted</c>; an undecidable
+    /// container is <c>Failed</c> (→ the M2 500). Note the shipped Manage Access modal never sent a container, so
+    /// until this change secure-root revokes never cleaned up SPE at all.</para>
+    ///
+    /// <para><b>Overlap — task 166 r1.</b> Permissions are keyed by EMAIL, not by grant, so one person can hold the
+    /// same container permission on the strength of two grants on this root (a direct contact grant AND membership of
+    /// an organization granted the same root). Revoking one of them must not strip a permission the other still
+    /// justifies. So before removing, the root's REMAINING active, unexpired grants are read and every contact they
+    /// still entitle (direct grantees, and the active members of granted organizations) is kept. If that answer
+    /// cannot be established (a read fault, or more rows than one revoke may read) the removal proceeds for everyone
+    /// the revoked grant named — fail closed (ADR-003): an entitlement that cannot be verified is not honoured.</para>
     /// </remarks>
     private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
         RemoveSpeContainerPermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
+            RecordContainerResolver containerResolver,
             RevokeAccessRequest request,
             ExternalGrantKey grantKey,
+            DateOnly today,
             ILogger logger,
             CancellationToken ct)
     {
-        if (!request.ContainerId.HasValue)
+        var (derivedContainerId, decided) = await ProjectClosureEndpoint.DeriveRecordOwnContainerAsync(
+            containerResolver, ExternalGrantRoot.LogicalNameFor(grantKey.RootType), grantKey.RootId, logger, ct);
+
+        if (!decided)
+        {
+            logger.LogError(
+                "[EXT-REVOKE] The container of grant root {RootType} {RootId} could not be determined; the SPE "
+                + "permission cleanup cannot run and the grantee may RETAIN file access.",
+                grantKey.RootType, grantKey.RootId);
+            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null);
+        }
+
+        if (derivedContainerId is null)
         {
             logger.LogInformation(
-                "[EXT-REVOKE] No ContainerId provided — no SPE container permission to remove.");
+                "[EXT-REVOKE] Grant root {RootType} {RootId} is not a secure record with its own container — no "
+                + "record-owned container permission to remove.", grantKey.RootType, grantKey.RootId);
             return (SpeContainerRevokeOutcome.NotAttempted, null);
         }
 
-        var containerId = request.ContainerId.Value.ToString();
+        var containerId = derivedContainerId;
+
+        // ── Task 166 r1: who does ANOTHER live grant on this root still entitle? ──
+        // null = could not be established; the removal then proceeds for everyone (fail closed).
+        var stillEntitled = await ResolveStillEntitledContactsAsync(
+            dataverseClient, grantKey.RootType, grantKey.RootId, today, logger, ct);
 
         // ── Which grantee? The ROW decides, not the request ───────────────────
         //
@@ -360,7 +406,7 @@ public static class RevokeExternalAccessEndpoint
             }
 
             return await RemoveOrganizationMembersSpePermissionsAsync(
-                speContainerMembership, dataverseClient, containerId, organizationId, logger, ct);
+                speContainerMembership, dataverseClient, containerId, organizationId, stillEntitled, logger, ct);
         }
 
         // A CONTACT-grant row revoked without a ContactId on the request: the row names the grantee, but
@@ -371,12 +417,121 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] Contact-grant revoke with no ContactId on the request — no identity key to " +
                 "match; SPE container permission removal not attempted for container {ContainerId}.",
-                request.ContainerId);
+                containerId);
+            return (SpeContainerRevokeOutcome.NotAttempted, null);
+        }
+
+        if (stillEntitled is not null && stillEntitled.Contains(request.ContactId))
+        {
+            logger.LogInformation(
+                "[EXT-REVOKE] Contact {ContactId} is still entitled to {RootType} {RootId} through another active grant "
+                + "on it; their container permission on {ContainerId} is KEPT (task 166).",
+                request.ContactId, grantKey.RootType, grantKey.RootId, containerId);
             return (SpeContainerRevokeOutcome.NotAttempted, null);
         }
 
         return (await RemoveContactSpePermissionAsync(
             speContainerMembership, dataverseClient, request, containerId, logger, ct), null);
+    }
+
+    /// <summary>The most remaining grant rows on one root a single revoke reads for the overlap check.</summary>
+    internal const int MaxRemainingGrantsPerOverlapCheck = 200;
+
+    /// <summary>
+    /// Task 166 r1: the contacts that the root's REMAINING active, unexpired grants still entitle — each direct
+    /// contact grantee, and every active member of each granted organization — or <see langword="null"/> when that
+    /// set cannot be established (a read fault, more than <see cref="MaxRemainingGrantsPerOverlapCheck"/> rows, or an
+    /// organization whose membership cannot be read or exceeds its sweep bound).
+    /// </summary>
+    /// <remarks>
+    /// Runs AFTER Step 1, so the revoked grant's own rows are already inactive and are not counted. Expiry is applied
+    /// in memory with <see cref="ExternalParticipationService.ConfersAccessOn"/>, the one mirror of the read side's
+    /// predicate, so a lapsed grant keeps no one's permission. Organization membership is the statecode-active set the
+    /// revoke sweep itself uses (<see cref="ExternalOrganizationMembership"/>). <c>internal</c> for the tests.
+    /// </remarks>
+    internal static async Task<IReadOnlySet<Guid>?> ResolveStillEntitledContactsAsync(
+        DataverseWebApiClient dataverseClient,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        DateOnly today,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        List<ExternalGrantRow> remaining;
+        try
+        {
+            remaining = await ExternalGrantLifecycle.QueryActiveRowsForRootAsync(
+                dataverseClient, rootType, rootId, MaxRemainingGrantsPerOverlapCheck + 1, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-REVOKE] Could not read the remaining grants on {RootType} {RootId}; no permission is kept on the "
+                + "strength of another grant (fail closed).", rootType, rootId);
+            return null;
+        }
+
+        if (remaining.Count > MaxRemainingGrantsPerOverlapCheck)
+        {
+            logger.LogWarning(
+                "[EXT-REVOKE] {RootType} {RootId} has more than {Bound} remaining active grants; the overlap check "
+                + "cannot be completed, so no permission is kept on the strength of another grant (fail closed).",
+                rootType, rootId, MaxRemainingGrantsPerOverlapCheck);
+            return null;
+        }
+
+        var entitled = new HashSet<Guid>();
+        foreach (var row in remaining)
+        {
+            if (!ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today))
+            {
+                continue;
+            }
+
+            if (row.ContactId is { } contactId)
+            {
+                entitled.Add(contactId);
+                continue;
+            }
+
+            if (row.OrganizationId is not { } organizationId)
+            {
+                continue;
+            }
+
+            OrganizationMemberSet members;
+            try
+            {
+                members = await ExternalOrganizationMembership.QueryActiveMembersAsync(dataverseClient, organizationId, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "[EXT-REVOKE] Could not read the members of organization {OrganizationId}, which still holds a grant "
+                    + "on {RootType} {RootId}; the overlap check fails closed.", organizationId, rootType, rootId);
+                return null;
+            }
+
+            if (members.ExceededBound)
+            {
+                logger.LogWarning(
+                    "[EXT-REVOKE] Organization {OrganizationId} (still granted {RootType} {RootId}) exceeds the member "
+                    + "sweep bound; the overlap check fails closed.", organizationId, rootType, rootId);
+                return null;
+            }
+
+            entitled.UnionWith(members.ContactIds);
+        }
+
+        return entitled;
     }
 
     /// <summary>
@@ -478,6 +633,7 @@ public static class RevokeExternalAccessEndpoint
             DataverseWebApiClient dataverseClient,
             string containerId,
             Guid organizationId,
+            IReadOnlySet<Guid>? stillEntitled,
             ILogger logger,
             CancellationToken ct)
     {
@@ -523,11 +679,23 @@ public static class RevokeExternalAccessEndpoint
         var removed = 0;
         var notFound = 0;
         var failed = 0;
+        var retained = 0;
 
         var resolved = new List<(Guid ContactId, string Email)>();
 
         foreach (var memberContactId in memberSet.ContactIds)
         {
+            // Task 166 r1: a member another live grant on this root still entitles keeps their permission.
+            if (stillEntitled is not null && stillEntitled.Contains(memberContactId))
+            {
+                retained++;
+                logger.LogInformation(
+                    "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} is still entitled through "
+                    + "another active grant on this root; their permission on {ContainerId} is KEPT.",
+                    memberContactId, organizationId, containerId);
+                continue;
+            }
+
             // Per-member failure must NOT abort the loop (mirrors tasks 016/017): stopping early leaves
             // strictly MORE access in place. Every member gets an outcome, and the failures are counted.
             try
@@ -610,7 +778,8 @@ public static class RevokeExternalAccessEndpoint
             MembersEnumerated: memberSet.ContactIds.Count,
             PermissionsRemoved: removed,
             PermissionsNotFound: notFound,
-            Failed: failed);
+            Failed: failed,
+            RetainedByOtherGrant: retained);
 
         var outcome = AggregateOrgOutcome(summary);
 
@@ -651,6 +820,11 @@ public static class RevokeExternalAccessEndpoint
         if (summary.PermissionsRemoved > 0)
             return SpeContainerRevokeOutcome.PermissionRemoved;
 
+        // Task 166 r1: every enumerated member is still entitled through another live grant on this root — nobody's
+        // permission was even looked up, so "nobody held one" would be a claim this revoke never checked.
+        if (summary.MembersEnumerated > 0 && summary.RetainedByOtherGrant == summary.MembersEnumerated)
+            return SpeContainerRevokeOutcome.NotAttempted;
+
         // The member list was established (possibly empty) and nobody held a permission. Under the
         // broker-only model this is the ordinary, healthy answer — not a problem.
         return SpeContainerRevokeOutcome.NoPermissionFound;
@@ -662,8 +836,10 @@ public static class RevokeExternalAccessEndpoint
     /// <remarks>
     /// Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
     /// contact-email service: one column on one row, and the client is already injected (CLAUDE.md §11).
+    /// <c>internal</c> since task 166: project closure removes the revoked grantees' container permissions by the
+    /// SAME identity key, so it reuses this rather than a second copy.
     /// </remarks>
-    private static async Task<string?> ResolveContactEmailAsync(
+    internal static async Task<string?> ResolveContactEmailAsync(
         DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
     {
         var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(

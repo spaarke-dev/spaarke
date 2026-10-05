@@ -352,7 +352,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                 PersonLink("owninguser", root.OwnerAlias),
                 // Task 147 r1 (owner round 28 item 1): "every reader of who created it uses RecordCreatorPerson
                 // (createdbyperson, else createdby)". A root the BFF created as the application (Office quick-create,
-                // POST /api/v1/work-assignments) has the application as createdby; the person is sprk_createdbyperson.
+                // and the since-deleted POST /api/v1/work-assignments) has the application as createdby; the person is
+                // sprk_createdbyperson.
                 PersonLink(Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column, root.CreatorPersonAlias),
                 PersonLink("createdby", root.CreatorAlias)));
         }

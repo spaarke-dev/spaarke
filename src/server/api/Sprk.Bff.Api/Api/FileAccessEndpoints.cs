@@ -7,12 +7,12 @@ using Spaarke.Core.Utilities;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -1011,6 +1011,8 @@ public static class FileAccessEndpoints
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            // uac-r2 task 166 r1 (round 21 item 1b): the pointer's container is verified before the app-only download.
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -1047,6 +1049,10 @@ public static class FileAccessEndpoints
 
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
+
+            // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): followed AS THE APPLICATION, so the pointer must name a
+            //     container this document may use (409 document_storage_unverified otherwise, before any read).
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
 
             // 4. Download file stream from SPE using app-only auth
             var fileStream = await speFileStore.DownloadFileAsync(
@@ -1093,6 +1099,8 @@ public static class FileAccessEndpoints
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            // uac-r2 task 166 r1 (round 21 item 1b): the pointer's container is verified before the app-only download.
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             EmlToHtmlRenderer emlRenderer,
             ILogger<Program> logger,
             HttpContext context,
@@ -1127,6 +1135,10 @@ public static class FileAccessEndpoints
 
             // 3. Validate SPE pointers (driveId, itemId)
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+            // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): the pointer must name a container this document may use.
+            await containerResolver.EnsureDocumentPointerContainerAsync(
+                Guid.Parse(documentId), document.GraphDriveId, document.GraphItemId, ct);
 
             // 4. Download the .eml stream from SPE via the EXISTING facade (app-only, per ADR-007) — no new
             //    download method, no GraphServiceClient injection.

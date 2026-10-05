@@ -52,8 +52,8 @@ function lastCreatePayload(webApi: IWebApiWithCreate, callIndex = 0): Record<str
   return mock.mock.calls[callIndex][1];
 }
 
-const file1: ISpeFileMetadata = { id: 'item-1', name: 'file1.pdf', size: 100, webUrl: 'https://example/file1.pdf' };
-const file2: ISpeFileMetadata = { id: 'item-2', name: 'file2.pdf', size: 200, webUrl: 'https://example/file2.pdf' };
+const file1: ISpeFileMetadata = { id: 'item-1', name: 'file1.pdf', size: 100, webUrl: 'https://example/file1.pdf', driveId: 'b!drive-1' };
+const file2: ISpeFileMetadata = { id: 'item-2', name: 'file2.pdf', size: 200, webUrl: 'https://example/file2.pdf', driveId: 'b!drive-1' };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -213,6 +213,52 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
     }
     expect(result.linkedCount).toBe(2);
     expect(result.createdDocumentIds).toEqual(['doc-guid-1', 'doc-guid-2']);
+  });
+
+  // unified-access-control-r2 task 166 f1 (owner round 21 item 1 (i)): the client never writes the SPE pointer — the
+  // BFF attaches the uploaded file after verifying it.
+  it('never writes the SPE pointer, and asks the BFF to attach each uploaded file to its new row', async () => {
+    const webApi = makeWebApi(['doc-guid-1']);
+    const authFetch = makeAuthFetch();
+    const service = new EntityCreationService(webApi, authFetch, 'https://bff.example');
+
+    const result = await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1]);
+
+    const payload = lastCreatePayload(webApi);
+    for (const column of ['sprk_graphdriveid', 'sprk_graphitemid', 'sprk_hasfile', 'sprk_filepath']) {
+      expect(column in payload).toBe(false);
+    }
+    const attach = (authFetch as jest.Mock).mock.calls.find(([url]) => String(url).endsWith('/api/v1/documents/doc-guid-1/file'));
+    expect(attach).toBeDefined();
+    expect(attach![1].method).toBe('POST');
+    expect(JSON.parse(attach![1].body)).toEqual({ driveId: 'b!drive-1', itemId: 'item-1' });
+    expect(result.createdDocumentIds).toEqual(['doc-guid-1']);
+  });
+
+  it('removes a row whose file the BFF refuses to attach, reports it, and never profiles it', async () => {
+    const webApi = makeWebApi(['doc-guid-1']);
+    const deleteRecord = jest.fn().mockResolvedValue(undefined);
+    (webApi as unknown as { deleteRecord: jest.Mock }).deleteRecord = deleteRecord;
+    const authFetch = jest.fn().mockImplementation(async (url: string) =>
+      String(url).endsWith('/file')
+        ? ({
+            ok: false,
+            status: 409,
+            statusText: 'Conflict',
+            json: async () => ({ detail: 'The file is not stored where this document belongs.' }),
+          } as unknown as Response)
+        : ({ ok: true, status: 200, json: async () => ({}) } as Response)
+    ) as unknown as AuthenticatedFetchFn;
+    const service = new EntityCreationService(webApi, authFetch, 'https://bff.example');
+
+    const result = await service.createDocumentRecords('sprk_matters', 'matter-guid-1', 'sprk_Matter', [file1]);
+
+    expect(deleteRecord).toHaveBeenCalledWith('sprk_document', 'doc-guid-1');
+    expect(result.linkedCount).toBe(0);
+    expect(result.createdDocumentIds).toEqual([]);
+    expect(result.warnings.some(w => w.includes('file1.pdf'))).toBe(true);
+    const profiled = (authFetch as unknown as jest.Mock).mock.calls.some(([url]) => String(url).includes('/analyze'));
+    expect(profiled).toBe(false);
   });
 
   it('an empty additionalBinds array behaves identically to omitting the option', async () => {

@@ -10,7 +10,6 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
-using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -23,20 +22,21 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
-using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Tests.Mocks;
-using Sprk.Bff.Api.Infrastructure.Graph;
-using Spaarke.Dataverse;
-using Spaarke.Core.Auth;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -390,10 +390,10 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
         var emlBytes = Encoding.UTF8.GetBytes("From: a@x.com\r\nSubject: Re Acme\r\n\r\nbody");
         _fx.DataverseMock
-            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .Setup(d => d.GetDocumentAsync(ArchiveDocumentId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-eml-1",
+                Id = ArchiveDocumentId,
                 Name = "Re Acme",
                 GraphDriveId = "drive-1",
                 GraphItemId = "item-1",
@@ -408,7 +408,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
             $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
-            new { documentId = "doc-eml-1" });
+            new { documentId = ArchiveDocumentId });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<IngestArchiveResponse>();
@@ -424,6 +424,80 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         _fx.Sessions.PersistedSession!.UploadedFiles.Should().ContainSingle();
         _fx.Sessions.PersistedSession.UploadedFiles![0].ContentType.Should().Be("message/rfc822");
     }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenArchivePointerNamesAContainerTheDocumentMayNotUse_Returns409AndNeverDownloads()
+    {
+        // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): a caller who may read the archive row still
+        // must not get bytes the row's pointer names in a container this environment does not own.
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(ArchiveDocumentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = ArchiveDocumentId,
+                Name = "Re Acme",
+                GraphDriveId = "b!another-customers-container",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = ArchiveDocumentId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("code").GetString().Should().Be("document_storage_unverified");
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an unverified pointer must never be followed app-only");
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenTheRowsItemWasUploadedBySomeoneElse_Returns409AndNeverDownloads()
+    {
+        // unified-access-control-r2 task 166 r2 (owner round 23 item 1): the r1 check looked at the DRIVE only, so a
+        // Write holder could re-point sprk_graphitemid at any item in an accepted container. The item the route is
+        // about to download must be one the row's creator uploaded — asked about the exact (drive, item) it follows.
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(ArchiveDocumentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = ArchiveDocumentId,
+                Name = "Re Acme",
+                GraphDriveId = ChatDocumentEndpointsTestFixture.ArchiveBusinessUnitContainer,
+                GraphItemId = "item-someone-elses",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.PointerWorld.Items[(ChatDocumentEndpointsTestFixture.ArchiveBusinessUnitContainer, "item-someone-elses")] =
+            new Sprk.Bff.Api.Models.SpeItemCreator("payroll.xlsx", Guid.NewGuid().ToString("D"), null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = ArchiveDocumentId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("code").GetString().Should().Be("document_storage_unverified");
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an item the row's creator did not upload must never be followed app-only");
+    }
+
+    /// <summary>A real sprk_document id: the ingest verifies the pointer of the row it names (task 166 r1).</summary>
+    private static readonly string ArchiveDocumentId = "0e0e0e0e-0000-4000-8000-000000000166";
 
     [Fact]
     public async Task IngestFromDocument_WhenDocumentMissing_ReturnsNotFound()
@@ -479,7 +553,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             .Setup(d => d.GetEmailArchiveByCommunicationAsync(commId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-eml-1",
+                Id = ArchiveDocumentId,
                 Name = "Re Acme",
                 GraphDriveId = "drive-1",
                 GraphItemId = "item-1",
@@ -525,10 +599,10 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
         _fx.DataverseMock
-            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .Setup(d => d.GetDocumentAsync(ArchiveDocumentId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-eml-1",
+                Id = ArchiveDocumentId,
                 Name = "Re Acme",
                 GraphDriveId = "drive-1",
                 GraphItemId = "item-1",
@@ -544,7 +618,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
             $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
-            new { documentId = "doc-eml-1" });
+            new { documentId = ArchiveDocumentId });
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fx.SpeMock.Verify(
@@ -566,7 +640,8 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: uploadedFiles) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: uploadedFiles)
+        { OwnerOid = TestSessionOwner.Oid };
 
     private static MultipartFormDataContent BuildMultipartForm(string filename, string content)
     {
@@ -600,6 +675,17 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     // task 064 (E1c): the from-document ingest endpoint resolves a sprk_document → SPE pointers
     // (IDocumentDataverseService) and downloads the .eml (SpeFileStore). Both mockable so the
     // contract tests exercise the happy / not-found / not-archive branches deterministically.
+    /// <summary>The business-unit container the ingest tests' archive pointers name (task 166 r1 pointer check).</summary>
+    public const string ArchiveBusinessUnitContainer = "drive-1";
+
+    /// <summary>
+    /// The document-pointer world behind the REAL resolver (task 166 r2): "drive-1" is the root business unit's
+    /// container, and every item was uploaded by the document's creator unless a test records otherwise in
+    /// <see cref="TestRecordContainerResolver.DocumentPointerWorld.Items"/> (read live, so a per-test entry applies).
+    /// </summary>
+    internal TestRecordContainerResolver.DocumentPointerWorld PointerWorld { get; } =
+        new() { RootClaims = c => c == ArchiveBusinessUnitContainer };
+
     public Mock<IDocumentDataverseService> DataverseMock { get; } = new();
     public Mock<SpeFileStore> SpeMock { get; } = BuildSpeMock();
     // task 064 (E1c): the from-document ingest endpoint applies per-document authorization
@@ -738,6 +824,11 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // register the mockable facade (DownloadFileAsync setup per-test). Not exercised by upload tests.
         builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(SpeMock.Object);
 
+        // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the ingest follows the archive row's pointer
+        // as the application, so it verifies the pointer's container first. "drive-1" is a business-unit container of
+        // this test environment; any other container is not.
+        builder.Services.AddSingleton(PointerWorld.Build());
+
         // task 064 (E1c): the from-document ingest endpoint resolves the sprk_document via
         // IDocumentDataverseService — register the mock so the ingest contract tests drive it.
         builder.Services.AddSingleton<IDocumentDataverseService>(DataverseMock.Object);
@@ -807,6 +898,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         AuthzMock.Reset();
         CacheCalls.Clear();
         DurableBlobs.Clear();
+        PointerWorld.Items.Clear();
         Auth.IncludeTid = true;
         Auth.TenantId = UploadFakeAuthOptions.DefaultTenantId;
         ConfigureDefaults();

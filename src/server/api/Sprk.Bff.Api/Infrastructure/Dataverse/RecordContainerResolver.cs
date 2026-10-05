@@ -58,7 +58,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// back to the shared container — so there is no ADR-032 Null-Object question to answer here, because there
 /// is no acceptable null object.</para>
 /// </summary>
-public sealed class RecordContainerResolver
+public sealed partial class RecordContainerResolver
 {
     /// <summary>The stamped container column, on both the securable records and the business unit.</summary>
     private const string ContainerColumn = "sprk_containerid";
@@ -103,6 +103,25 @@ public sealed class RecordContainerResolver
     private readonly ILogger<RecordContainerResolver> _logger;
     private readonly CoreAncestorRestampQueue? _restampQueue;
 
+    /// <summary>
+    /// <c>Communication:ArchiveContainerId</c> — the one shared container that is not a business unit's; the
+    /// document-pointer check (task 166 r1 / r2) accepts it only on the communication-archive path.
+    /// </summary>
+    private readonly string? _archiveContainerId;
+
+    /// <summary>
+    /// The app-only Graph read of an item's creator — the document-pointer check's ITEM evidence (task 166 r2, owner
+    /// round 23 item 1). Null outside a host that registers SharePoint Embedded access: the check then refuses (an
+    /// item that cannot be verified is never followed).
+    /// </summary>
+    private readonly Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations? _speFiles;
+
+    /// <summary>
+    /// Every Entra application (client) id the BFF authenticates as — "the BFF identity" of owner round 23 item 1
+    /// (task 166 r2). See <see cref="BffApplicationIdsFrom"/>.
+    /// </summary>
+    private readonly IReadOnlySet<Guid> _bffApplicationIds;
+
     /// <param name="restampQueue">
     /// Where a <see cref="AncestorStaleCode"/> refusal enqueues the stale row (task 156). Registered unconditionally
     /// beside <see cref="CoreAncestorResolver"/>, so production always has it. Optional only so the many tests that never
@@ -113,12 +132,20 @@ public sealed class RecordContainerResolver
         ISecurableEntityRegistry securableEntities,
         IGenericEntityService entityService,
         ILogger<RecordContainerResolver> logger,
-        CoreAncestorRestampQueue? restampQueue = null)
+        CoreAncestorRestampQueue? restampQueue = null,
+        Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Configuration.CommunicationOptions>? communicationOptions = null,
+        Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations? speFiles = null,
+        Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
     {
         _securableEntities = securableEntities ?? throw new ArgumentNullException(nameof(securableEntities));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _restampQueue = restampQueue;
+        _archiveContainerId = communicationOptions?.Value?.ArchiveContainerId;
+        _speFiles = speFiles;
+        _bffApplicationIds = BffApplicationIdsFrom(configuration);
+        _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
+        _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
     }
 
     /// <summary>
@@ -443,6 +470,75 @@ public sealed class RecordContainerResolver
 
         return decision;
     }
+
+    /// <summary>
+    /// The record's OWN container — and ONLY its own: <see cref="ContainerDecisionOutcome.ResolvedSecure"/> when the
+    /// record itself is secure (<c>sprk_issecure</c> = true) and stamps a container; <see cref="ContainerDecisionOutcome.FailClosed"/>
+    /// when it is secure with no container, or when its flag is ABSENT (unknown is never "not secure");
+    /// <see cref="ContainerDecisionOutcome.Unresolved"/> when the record is not secure or its entity cannot be secure.
+    /// Never an ancestor's container, never a business-unit fallback (unified-access-control-r2 task 166 r1).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a second question.</b> <see cref="ResolveForRecordAsync(string, Guid, CancellationToken)"/> answers
+    /// "where does this record's CONTENT go?", and since task 155 a non-secure record filed under a secure root answers
+    /// with the ROOT's container (<c>ResolvedSecure</c>). That is right for storing content and wrong for REMOVING
+    /// access: project closure and the single-grant revoke strip the revoked grantees' permissions from "the record's
+    /// own container", and used against the content answer they would strip them from the secure ANCESTOR's container
+    /// — where the same people may still hold a grant on the ancestor itself. Container permissions are justified by
+    /// grants on the record that OWNS the container; this method answers exactly that.</para>
+    /// <para>Refusals that mean "this name is not an entity" propagate as in the forward resolution; a row read failure
+    /// propagates too (the callers fold any exception into "could not be determined").</para>
+    /// </remarks>
+    internal async Task<ContainerDecision> ResolveOwnContainerAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entityLogicalName))
+        {
+            throw new ArgumentException("Entity logical name is required.", nameof(entityLogicalName));
+        }
+
+        var normalizedEntity = NormalizeEntityName(entityLogicalName);
+        var securability = await _securableEntities.ClassifyEntityAsync(normalizedEntity, ct).ConfigureAwait(false);
+
+        if (securability == EntitySecurability.NotAnEntity)
+        {
+            throw UnknownEntity(entityLogicalName);
+        }
+
+        if (securability == EntitySecurability.NotSecurable)
+        {
+            // An entity that cannot carry sprk_issecure owns no isolated container.
+            return SecureContainerDecision.Decide(isSecure: false, ownContainerId: null, fallbackContainerId: null);
+        }
+
+        if (securability != EntitySecurability.Securable)
+        {
+            throw SecurabilityIndeterminate(normalizedEntity, recordId, securability);
+        }
+
+        var record = await ReadRecordAsync(
+            normalizedEntity, recordId, [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn], ct).ConfigureAwait(false);
+
+        if (!record.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+        {
+            _logger.LogWarning(
+                "[SECURE-CONTAINER] '{Attribute}' was ABSENT on {Entity} {RecordId}; whether it owns an isolated container "
+                + "cannot be determined, so its own-container decision FAILS CLOSED.",
+                SecurableEntityRegistry.SecureFlagAttribute, normalizedEntity, recordId);
+            return new ContainerDecision(ContainerDecisionOutcome.FailClosed, null);
+        }
+
+        return SecureContainerDecision.Decide(
+            isSecure: record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute),
+            ownContainerId: record.GetAttributeValue<string>(ContainerColumn),
+            fallbackContainerId: null);
+    }
+
+    // The document-pointer check (task 166 r1 / r2) lives in RecordContainerResolver.DocumentPointer.cs — the same type,
+    // split by reason-to-change (CLAUDE.md §11.5): it answers an identity-and-tenancy question about a row's pointer,
+    // not a record's container placement.
 
     /// <summary>
     /// Read the record being resolved, normalizing "does not exist" to the documented 404.

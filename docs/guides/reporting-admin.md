@@ -262,22 +262,26 @@ the identity they hang off is per customer, not shared.
 |--------|------|-------------|
 | GET | `/api/reporting/status` | Module gate + privilege level check |
 | GET | `/api/reporting/embed-token` | Generate embed token (Redis-cached) |
-| GET | `/api/reporting/reports` | List reports in workspace |
-| GET | `/api/reporting/reports/{id}` | Get single report |
-| POST | `/api/reporting/reports` | Create report (Author+) |
-| PUT | `/api/reporting/reports/{id}` | Update report catalog entry (Author+) |
-| DELETE | `/api/reporting/reports/{id}` | Delete report (Admin only) |
-| POST | `/api/reporting/export` | Export to PDF or PPTX |
+| GET | `/api/reporting/reports` | List the catalog entries (`sprk_report` rows) the caller can read, in an allowed workspace |
+| GET | `/api/reporting/reports/{id}` | Get one catalog entry the caller can read |
+| POST | `/api/reporting/reports` | Create a report: a server-side clone of a catalog entry the caller can read (Author+, `prvCreatesprk_Report`) |
+| PATCH | `/api/reporting/reports/{id}` | Rename a catalog entry, as the caller (Author+) |
+| DELETE | `/api/reporting/reports/{id}` | Delete a catalog entry as the caller; the Power BI report only for an unreferenced custom entry (Admin only) |
+| POST | `/api/reporting/export` | Export a catalog entry to PDF or PPTX (business-unit RLS identity) |
 
 All endpoints require authentication and the `sprk_ReportingAccess` security role claim. The module gate (404) fires before any auth check.
+
+Every `{id}` / `reportId` is the **`sprk_report` catalog row id** (never a Power BI id). The row is read **as the caller**; the Power BI report, workspace and dataset are derived from it server-side. Before any action the row's workspace must be one of `PowerBi:AllowedWorkspaces` (see [Environment Variables](#environment-variables)); an absent row, a row the caller cannot read and a row in a workspace this deployment may not act on are the same answer — 404 `sdap.reporting.deny.report_not_in_catalog` — and Power BI is never asked (unified-access-control-r2 task 166).
+
+**The catalog's Power BI pointer is BFF-written only.** `sprk_pbi_reportid`, `sprk_workspaceid`, `sprk_datasetid` and `sprk_iscustom` are field-secured (`scripts/Set-ReportCatalogFieldSecurity.ps1`): every user reads them, only the BFF identity (and System Administrators, by platform rule — e.g. `Deploy-ReportingReports.ps1` run by an operator) writes them. An Author can no longer redirect a catalog row to another Power BI report from the form or the Web API.
 
 ### Token Flow
 
 1. User opens the Reporting Code Page (`sprk_reporting` web resource).
 2. Code Page authenticates via `@spaarke/auth` bootstrap, acquires a BFF API access token.
-3. Code Page calls `GET /api/reporting/embed-token?workspaceId=...&reportId=...`.
-4. BFF checks Redis for a cached token; if absent, calls Power BI REST API using the service principal with the customer's SP profile header.
-5. BFF applies EffectiveIdentity (user UPN + BU role) for Row-Level Security.
+3. Code Page calls `GET /api/reporting/embed-token?reportId={catalog row id}` (no workspace id — the BFF derives it from the row).
+4. BFF reads the catalog row as the caller, checks the row's workspace against `PowerBi:AllowedWorkspaces`, then checks Redis for a cached token; if absent, calls the Power BI REST API using the service principal.
+5. BFF applies the EffectiveIdentity for Row-Level Security: username = the caller's **business unit id** (read server-side, WhoAmI as the caller), role `BusinessUnitFilter`. No business unit, no token (503).
 6. Embed token returned to Code Page; `powerbi-client-react` renders the report.
 7. At 80% of the token TTL, `report.setAccessToken()` refreshes the token seamlessly — no page reload.
 
@@ -326,6 +330,8 @@ All Power BI configuration is provided via environment variables. No workspace I
 | `PowerBi__AuthorityUrl` | No | Override the OAuth authority URL. Default: `https://login.microsoftonline.com/{TenantId}` |
 | `PowerBi__Scope` | No | OAuth scope. Default: `https://analysis.windows.net/.default` |
 | `PowerBi__ApiUrl` | No | Power BI REST API base URL. Default: `https://api.powerbi.com` |
+| `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` | Yes | A Power BI workspace (group) id this deployment's catalog may act on. List every customer workspace (`{n}` = 0, 1, …). **Empty = the module refuses every report** (503 `sdap.reporting.config.workspaces_unconfigured`) — fail closed, never "any workspace" (task 166, owner round 25 item 6). |
+| `PowerBi__AllowedWorkspaces__{n}__CustomerBusinessUnitId` | No | For an environment hosting several customers as business units (Model 1): the customer's top-level business unit. The workspace is then allowed only for callers in that unit or beneath it. Omit for a one-customer deployment. |
 | `Reporting__ModuleEnabled` | Yes | Set to `true` to enable the module at the BFF level (mirrors `sprk_ReportingModuleEnabled` in Dataverse) |
 
 ### Deployment Script Variables
@@ -384,9 +390,9 @@ pac org assign-user --environment https://{org}.crm.dynamics.com --user user@dom
 
 ### Row-Level Security (Business Unit Filtering)
 
-All embed tokens include an `EffectiveIdentity` with the user's UPN and a BU-based RLS role (`BU_{businessunit-id}`). The Power BI datasets contain an RLS role named `BusinessUnitFilter` that filters data to the user's business unit and its children via a DAX expression on `USERNAME()`.
+Every embed token **and every export** carries an `EffectiveIdentity` whose **username is the caller's business unit id** (lowercase GUID, read server-side from the caller's own Dataverse user — WhoAmI as the caller) and whose role is **`BusinessUnitFilter`**, on the report's dataset. The Power BI datasets define the `BusinessUnitFilter` RLS role, whose DAX filters rows to the business unit `USERNAME()` names (and its children). A caller whose business unit cannot be read gets no token and no export (503 `sdap.reporting.rls.identity_unavailable`).
 
-This is enforced by the BFF — users cannot bypass BU filtering from the client side.
+This is enforced by the BFF — users cannot bypass BU filtering from the client side. (The earlier `businessunit`/`bu` token claim and `BU_{businessunit-id}` role were never produced by any token; task 166 replaced them with the server-computed identity.)
 
 ---
 

@@ -106,6 +106,10 @@ function makeAuthenticatedFetch(uploadOutcomes: Array<{ status: number; body: Re
     if (url.includes('/analyze')) {
       return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
     }
+    if (url.includes('/api/v1/documents/') && url.endsWith('/file')) {
+      // The BFF attach (task 166 f1): it stamps the pointer server-side and echoes it.
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ alreadyAttached: false }) };
+    }
     const outcome = uploadOutcomes[uploadCallIndex] ?? uploadOutcomes[uploadOutcomes.length - 1];
     uploadCallIndex++;
     return {
@@ -221,11 +225,15 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     // targeting the sprk_todos entity set with the real todo id.
     expect(docPayload['sprk_RelatedToDo@odata.bind']).toBe('/sprk_todos(todo-guid-123)');
 
-    // Carries the upload result's identity fields.
-    expect(docPayload['sprk_graphitemid']).toBe('drive-item-1');
-    expect(docPayload['sprk_graphdriveid']).toBe('drive-1');
-    expect(docPayload['sprk_hasfile']).toBe(true);
+    // The upload result's identity goes to the BFF attach (task 166 f1) — the create payload never carries the
+    // SPE pointer, which is field-secured and written by the BFF only.
+    for (const column of ['sprk_graphitemid', 'sprk_graphdriveid', 'sprk_hasfile', 'sprk_filepath']) {
+      expect(column in docPayload).toBe(false);
+    }
     expect(docPayload['sprk_documentname']).toBe('brief.pdf');
+    const attach = authenticatedFetch.mock.calls.find(([url]: [string]) => url.endsWith('/api/v1/documents/doc-guid-x/file'));
+    expect(attach).toBeDefined();
+    expect(JSON.parse((attach as [string, RequestInit])[1].body as string)).toEqual({ driveId: 'drive-1', itemId: 'drive-item-1' });
   });
 
   it('withFiles_fallsBackToLiteralNavProp_whenDiscoveryReturnsNoEntries', async () => {

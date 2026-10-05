@@ -5,13 +5,13 @@
  * Visible to all roles (Viewer, Author, Admin).
  * Uses a Fluent v9 Menu anchored to a Button to present PDF / PPTX options.
  *
- * Flow:
+ * Flow (unified-access-control-r2 task 166 r1 — aligned with the BFF):
  *   1. User clicks "Export to PDF" or "Export to PPTX"
- *   2. POST /api/reporting/export is called with { reportId, format }
- *   3. BFF starts Power BI ExportToFile and polls for completion
- *   4. Frontend polls GET /api/reporting/export/{exportId}/status
- *   5. On completion the file is downloaded via a hidden <a> tag
- *   6. Errors are shown inline via a MessageBar
+ *   2. POST /api/reporting/export is called with { reportId (catalog row id), format }
+ *   3. The BFF runs Power BI ExportToFile to completion and returns the FILE in the response
+ *      (there is no export id and no status route — the client used to poll one that never existed)
+ *   4. The file is downloaded via a hidden <a> tag over an object URL
+ *   5. Errors are shown inline via a MessageBar
  *
  * PBI exports can take 30-60 seconds — a Spinner with elapsed-time text
  * is shown while the export is in progress.
@@ -43,18 +43,7 @@ import {
   ChevronDownRegular,
 } from "@fluentui/react-icons";
 import type { ExportFormat, ExportStatus } from "../types/reporting";
-import { exportReport, getExportStatus } from "../services/reportingApi";
-import { getBffBaseUrl } from "../config/runtimeConfig";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** How often to poll for export status (ms) */
-const POLL_INTERVAL_MS = 3_000;
-
-/** Maximum total wait time before giving up (ms) — 5 minutes */
-const POLL_TIMEOUT_MS = 5 * 60_000;
+import { exportReport } from "../services/reportingApi";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent design tokens only, no hard-coded colors (ADR-021)
@@ -105,18 +94,13 @@ function formatLabel(format: ExportFormat): string {
   return format === "PDF" ? "PDF" : "PowerPoint (PPTX)";
 }
 
-/** File extension for each export format. */
-function formatExtension(format: ExportFormat): string {
-  return format === "PDF" ? "pdf" : "pptx";
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 /**
  * Split-style menu button for exporting a report to PDF or PPTX.
- * Polls the BFF for export completion and triggers a browser download.
+ * Waits for the BFF's export (which returns the file) and triggers a browser download.
  */
 export const ExportButton: React.FC<ExportButtonProps> = ({
   reportId,
@@ -133,45 +117,14 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Refs for cleanup
-  const pollTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref for the elapsed-time counter (cleared on completion and on unmount)
   const elapsedTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = React.useRef<number>(0);
-
-  // ---------------------------------------------------------------------------
-  // Cleanup on unmount
-  // ---------------------------------------------------------------------------
 
   React.useEffect(() => {
     return () => {
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
     };
   }, []);
-
-  // ---------------------------------------------------------------------------
-  // Download helper
-  // ---------------------------------------------------------------------------
-
-  const triggerDownload = React.useCallback(
-    (downloadUrl: string, fileName: string) => {
-      const a = document.createElement("a");
-      // If the URL is relative, make it absolute using the BFF base
-      a.href = downloadUrl.startsWith("http")
-        ? downloadUrl
-        : `${getBffBaseUrl()}${downloadUrl}`;
-      a.download = fileName;
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    },
-    []
-  );
-
-  // ---------------------------------------------------------------------------
-  // Polling loop
-  // ---------------------------------------------------------------------------
 
   const stopElapsedTimer = React.useCallback(() => {
     if (elapsedTimerRef.current) {
@@ -180,61 +133,22 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
     }
   }, []);
 
-  const pollForCompletion = React.useCallback(
-    async (exportId: string, format: ExportFormat) => {
-      const elapsed = Date.now() - startTimeRef.current;
+  // ---------------------------------------------------------------------------
+  // Download helper — the BFF returned the file itself
+  // ---------------------------------------------------------------------------
 
-      if (elapsed >= POLL_TIMEOUT_MS) {
-        stopElapsedTimer();
-        setExportStatus("failed");
-        setError("Export timed out. Please try again.");
-        return;
-      }
-
-      const result = await getExportStatus(exportId);
-
-      if (!result.ok) {
-        stopElapsedTimer();
-        setExportStatus("failed");
-        setError(`Export failed: ${result.error}`);
-        return;
-      }
-
-      const { status, downloadUrl, fileName } = result.data;
-
-      setExportStatus(status);
-
-      if (status === "completed") {
-        stopElapsedTimer();
-        const resolvedFileName =
-          fileName ?? `report.${formatExtension(format)}`;
-        if (downloadUrl) {
-          triggerDownload(downloadUrl, resolvedFileName);
-        }
-        // Reset after a brief delay so the user sees "completed"
-        setTimeout(() => {
-          setExportStatus(null);
-          setActiveFormat(null);
-          setElapsedSeconds(0);
-          setError(null);
-        }, 2_000);
-        return;
-      }
-
-      if (status === "failed") {
-        stopElapsedTimer();
-        setError("Export failed. Please try again.");
-        return;
-      }
-
-      // Still running or pending — schedule next poll
-      pollTimerRef.current = setTimeout(
-        () => pollForCompletion(exportId, format),
-        POLL_INTERVAL_MS
-      );
-    },
-    [stopElapsedTimer, triggerDownload]
-  );
+  const triggerDownload = React.useCallback((blob: Blob, fileName: string) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = fileName;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Give the browser a moment to start the download before releasing the URL.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Export handler
@@ -246,33 +160,35 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
 
       setError(null);
       setActiveFormat(format);
-      setExportStatus("pending");
+      setExportStatus("running");
       setElapsedSeconds(0);
-      startTimeRef.current = Date.now();
 
-      // Start elapsed-time counter
+      // Elapsed-time counter — a Power BI export can take 30-60 seconds
       elapsedTimerRef.current = setInterval(() => {
         setElapsedSeconds((s) => s + 1);
       }, 1_000);
 
-      const initResult = await exportReport(reportId, format);
+      const result = await exportReport(reportId, format);
+      stopElapsedTimer();
 
-      if (!initResult.ok) {
-        stopElapsedTimer();
+      if (!result.ok) {
         setExportStatus("failed");
-        setError(`Could not start export: ${initResult.error}`);
+        setError(`Export failed: ${result.error}`);
         return;
       }
 
-      setExportStatus("running");
+      triggerDownload(result.data.blob, result.data.fileName);
+      setExportStatus("completed");
 
-      // Begin polling
-      pollTimerRef.current = setTimeout(
-        () => pollForCompletion(initResult.data.exportId, format),
-        POLL_INTERVAL_MS
-      );
+      // Reset after a brief delay so the user sees "downloaded"
+      setTimeout(() => {
+        setExportStatus(null);
+        setActiveFormat(null);
+        setElapsedSeconds(0);
+        setError(null);
+      }, 2_000);
     },
-    [reportId, exportStatus, pollForCompletion, stopElapsedTimer]
+    [reportId, exportStatus, stopElapsedTimer, triggerDownload]
   );
 
   // ---------------------------------------------------------------------------

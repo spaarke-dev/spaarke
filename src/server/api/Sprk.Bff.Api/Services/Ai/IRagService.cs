@@ -185,6 +185,31 @@ public interface IRagService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes the chunks of a SUPERSEDED SharePoint Embedded item — one whose document now names ANOTHER item (a file
+    /// moved between containers by <c>DocumentContainerRelocator</c>, unified-access-control-r2 task 166 f1-v1, owner
+    /// round 37 item 1). The document's new item is indexed under its own ids (<c>{newItemId}_{index}</c>), so the old
+    /// item's chunks would otherwise stay searchable under the document, naming an item it no longer has.
+    /// </summary>
+    /// <remarks>
+    /// <para>Never for the item that was just written — that is <see cref="DeleteChunksBeyondCountAsync"/>'s job, and its
+    /// structural rule (a file is never left without chunks) is unchanged. This method removes chunks of an item NO
+    /// document should be found by any more.</para>
+    /// <para>Scoped by tenant and <paramref name="speFileId"/>; when <paramref name="onlyForDocumentId"/> is set, only the
+    /// chunks attributed to that <c>sprk_document</c> (lower-case, as the indexer writes it) — the source item is still
+    /// another record's file, so the chunks naming THAT record stay. Only ids of the file pipeline's shape
+    /// (<c>{speFileId}_{chunkIndex}</c>) are deleted. Routing as <see cref="DeleteChunksBeyondCountAsync"/>: a non-empty
+    /// <paramref name="searchIndexName"/> through the allow-list, null to the tenant default.</para>
+    /// </remarks>
+    /// <returns>Number of chunks deleted (zero when there were none).</returns>
+    /// <exception cref="System.InvalidOperationException">Any matching chunk could not be deleted — the caller retries.</exception>
+    Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generate an embedding for text content.
     /// Uses caching when available.
     /// </summary>

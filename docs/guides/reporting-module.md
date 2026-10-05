@@ -151,13 +151,15 @@ To save changes to the current report, click the **Save** button in the Reportin
 
 ### Save As (Create a Copy)
 
-To save your changes as a new report without affecting the original:
+To create a new report based on the one you are viewing:
 
 1. Click the **Save As** button in the Reporting toolbar.
 2. Enter a name for the new report.
 3. Click **Save**.
 
-The new report is created in your organization's workspace and added to the **Custom** category in the report dropdown with a copy of the original's content. The original report is unchanged.
+The server makes a copy of the **saved** version of the report you are viewing (a server-side clone of that catalog entry's Power BI report, in the same workspace) and adds it to the **Custom** category in the report dropdown. The original report is unchanged.
+
+> ⚠️ **Save As does not carry unsaved edits.** It copies the report as last saved — any changes you made in edit mode and did not **Save** are not in the copy. To keep them in a new report, **Save** first, then **Save As**; or Save As first and make the changes in the new copy. (Since unified-access-control-r2 task 166 the server never registers a report the browser names: every new report is a server-side clone of a catalog report you can read.)
 
 Custom reports are marked internally so administrators can distinguish them from standard product reports.
 

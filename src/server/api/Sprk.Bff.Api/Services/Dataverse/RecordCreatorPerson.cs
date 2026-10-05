@@ -10,15 +10,15 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </summary>
 /// <remarks>
 /// <para><b>Why the column exists.</b> <c>createdby</c> is the identity that sent the create. For a row the BFF creates
-/// APP-ONLY — Office quick-create (<c>Services/Office/RecordCreationService</c>) and
+/// APP-ONLY — Office quick-create (<c>Services/Office/RecordCreationService</c>), and before task 166 deleted it,
 /// <c>POST /api/v1/work-assignments</c> — that is the BFF application user, not the person who asked for the record,
 /// and <c>createdonbehalfby</c> is empty (verified live 2026-10-01). Secure provisioning's RESUME shares a stranded
 /// secure record to the person who created it; for those rows it had nobody to share to and could only refuse.
 /// This column is that person, persisted.</para>
 ///
 /// <para><b>Who writes it.</b> Only the BFF: every BFF create path of the three tables stamps it — the app-only paths
-/// in the create payload itself (Office quick-create: the Office caller; <c>POST /api/v1/work-assignments</c>: the
-/// endpoint's caller, resolved by WhoAmI), and the chat create (<c>dataverse.create_record</c>), which task 146 moved to
+/// in the create payload itself (Office quick-create: the Office caller; the deleted <c>POST /api/v1/work-assignments</c>
+/// stamped its caller, resolved by WhoAmI, so rows it created carry the column too), and the chat create (<c>dataverse.create_record</c>), which task 146 moved to
 /// create-as-the-app (owner round 7 item 3), in that create's payload too (<c>OwnedChildWrite.CreateAsync</c>; task 133's
 /// interim app-only follow-up update was removed at the batch 4 integration, so there is one stamp). It is field-secured
 /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every user can READ it (the reader profile sits on every

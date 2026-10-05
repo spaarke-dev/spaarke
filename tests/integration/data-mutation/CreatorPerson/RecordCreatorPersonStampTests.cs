@@ -35,7 +35,6 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CreatorPerson;
 public class RecordCreatorPersonStampTests
 {
     private static readonly Guid Caller = Guid.Parse("aaaaaaaa-0000-0000-0000-0000000000c1");
-    private static readonly Guid Assignee = Guid.Parse("aaaaaaaa-0000-0000-0000-0000000000a5");
     private static readonly Guid Team = Guid.Parse("dddddddd-0000-0000-0000-00000000000d");
     private static readonly Guid SourceRecord = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
     private static readonly Guid SomeoneElse = Guid.Parse("eeeeeeee-0000-0000-0000-00000000000e");
@@ -141,63 +140,8 @@ public class RecordCreatorPersonStampTests
         PersonOf(_created.Single()).Id.Should().Be(Caller, "the source record's creator is not this record's creator");
     }
 
-    // =====================================================================================
-    // POST /api/v1/work-assignments — WorkAssignmentEndpoints
-    // =====================================================================================
-
-    /// <summary>The WhoAmI seam, substituted: the caller resolves to <see cref="Caller"/>, nobody, or a throw.</summary>
-    private sealed class WhoAmI : CallerRecordAccessProbe
-    {
-        private readonly Func<Guid?> _answer;
-
-        public WhoAmI(Func<Guid?> answer)
-            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
-            => _answer = answer;
-
-        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
-            => Task.FromResult(_answer());
-    }
-
-    private Task<IResult> CreateWorkAssignmentAsync(Func<Guid?> whoAmI)
-    {
-        var http = new DefaultHttpContext();
-        http.Request.Headers.Authorization = "Bearer user-token";
-        return WorkAssignmentEndpoints.CreateWorkAssignmentAsync(
-            new CreateWorkAssignmentRequest("Review the draft", Assignee),
-            _entities.Object,
-            new NotificationService(_entities.Object, NullLogger<NotificationService>.Instance),
-            new WhoAmI(whoAmI),
-            http,
-            NullLogger<Program>.Instance,
-            CancellationToken.None);
-    }
-
-    [Fact]
-    public async Task WorkAssignmentCreate_RecordsTheCallerAsTheCreatorPerson()
-    {
-        var result = await CreateWorkAssignmentAsync(() => Caller);
-
-        result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Created<CreateWorkAssignmentResponse>>();
-        var row = _created.Single(e => e.LogicalName == "sprk_workassignment");
-        PersonOf(row).Should().BeEquivalentTo(new EntityReference("systemuser", Caller),
-            "the caller is who asked for it — never the request body, never the assignee");
-        row["ownerid"].Should().BeEquivalentTo(new EntityReference("systemuser", Assignee));
-    }
-
-    /// <summary>
-    /// The caller's identity cannot be established (WhoAmI answers nobody, or throws): refused 403 BEFORE the create.
-    /// An app-created row with nobody recorded is exactly what a resume could only refuse.
-    /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WorkAssignmentCreate_WhenTheCallerCannotBeIdentified_CreatesNothing(bool throws)
-    {
-        var result = await CreateWorkAssignmentAsync(() => throws ? throw new InvalidOperationException("OBO failed") : (Guid?)null);
-
-        var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
-        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(WorkAssignmentEndpoints.CreatorUnresolvedReasonCode);
-        _created.Should().BeEmpty("nothing is created without the person who asked for it");
-    }
+    // POST /api/v1/work-assignments (WorkAssignmentEndpoints) no longer exists: task 166 deleted the route as caller-less
+    // (sweep finding S-76, owner round 10 item 1; absence pinned by DeadRouteRetirementTests), so the work-assignment
+    // stamp tests that drove its handler went with it. Work assignments are created through the MDA and the Create Work
+    // Assignment wizard, which run as the user (createdby is the person).
 }

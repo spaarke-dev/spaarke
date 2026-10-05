@@ -317,6 +317,11 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
 
             services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
             services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
+            // Batch-4 integration (task 166): every app-only attachment download first verifies the document's pointer.
+            // The seeded attachments live in "b!drive-161", which this world's business unit stamps; the pointer check is
+            // not this host's subject (DocumentPointerContainerCheckTests is).
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>();
+            services.AddSingleton(TestRecordContainerResolver.ForBusinessUnitContainers("b!drive-161"));
 
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);

@@ -117,6 +117,8 @@ public class RefilePathRestampTests
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterB },
             "sprk_event",
             [Event],
+            // Task 166 (S-67): the push writes each child AS the caller (MSCRMCallerID).
+            Guid.Parse("0000c166-0000-0000-0000-00000000ca11"),
             NullLogger.Instance,
             CancellationToken.None);
 
@@ -148,6 +150,8 @@ public class RefilePathRestampTests
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterB },
             "sprk_event",
             [Event],
+            // Task 166 (S-67): the push writes each child AS the caller (MSCRMCallerID).
+            Guid.Parse("0000c166-0000-0000-0000-00000000ca11"),
             NullLogger.Instance,
             CancellationToken.None);
 

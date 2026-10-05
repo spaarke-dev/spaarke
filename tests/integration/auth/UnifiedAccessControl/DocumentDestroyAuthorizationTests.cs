@@ -166,38 +166,30 @@ public class DocumentDestroyAuthorizationTests
     // H2 — the mutate/disclose pair on /api/v1/documents/{id}
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task PutDataverseDocument_ForCallerWithoutWriteRight_IsDeniedAndWritesNothing()
+    /// <summary>
+    /// ✅ RE-BASED BY uac-r2 TASK 166 (sweep finding F0) and again at the batch-4 integration — was
+    /// <c>PutDataverseDocument_ForCallerWithoutWriteRight_IsDeniedAndWritesNothing</c> and its Write-holder twin.
+    /// The whole-entity body let a Write-holder rewrite the SPE pointers (<c>sprk_graphdriveid</c> /
+    /// <c>sprk_graphitemid</c>) that app-only downloads trust. Task 166's branch deleted the route as caller-less; at
+    /// integration it had a caller (task 147 r1's Compose document association), so it is KEPT on 166's condition:
+    /// without Write on the row the filter denies it, and WITH Write a body naming a storage-pointer field is refused
+    /// before anything is written. Either way no caller rewrites the pointer.
+    /// </summary>
+    [Theory]
+    [InlineData("ReadAccess", HttpStatusCode.Forbidden)]
+    [InlineData("ReadAccess,WriteAccess", HttpStatusCode.BadRequest)]
+    public async Task PutDataverseDocument_NoCallerRewritesTheStoragePointer(string rights, HttpStatusCode expected)
     {
-        using var client = _fixture.CreateClientWithRights("ReadAccess");
+        using var client = _fixture.CreateClientWithRights(rights);
 
         var response = await client.PutAsJsonAsync(
-            $"/api/v1/documents/{DocumentId}", new { name = "renamed-by-anyone.pdf" });
+            $"/api/v1/documents/{DocumentId}",
+            new { name = "renamed.pdf", graphDriveId = "b!another-container", graphItemId = "01OTHERITEM" });
 
+        response.StatusCode.Should().Be(expected,
+            "a Read-only caller is stopped by the row's Write gate; a Write-holder by the pointer-field refusal");
         _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty(
-            "H2: the PUT was app-only tamper by GUID — any authenticated caller could rewrite any " +
-            "document row's fields");
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-
-        var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("sdap.access.deny.insufficient_rights");
-        body.Should().NotContain("unknown_operation",
-            "an unknown_operation denial would mean the \"write\" key is missing — which denies the " +
-            "callers who legitimately hold Write too");
-    }
-
-    [Fact]
-    public async Task PutDataverseDocument_ForCallerWithWriteRight_IsAllowedAndWrites()
-    {
-        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
-
-        var response = await client.PutAsJsonAsync(
-            $"/api/v1/documents/{DocumentId}", new { name = "renamed-by-owner.pdf" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        _fixture.UpdatedDataverseDocumentIds.Should().ContainSingle()
-            .Which.Should().Be(DocumentId.ToString());
+            "the PUT is the one route that wrote a document row's fields by GUID; it never writes the SPE pointer");
     }
 
     /// <summary>

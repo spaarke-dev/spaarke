@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -36,6 +37,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly INodeService _nodeService;
     private readonly IPlaybookOrchestrationService _playbookOrchestrator;
+    // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): every app-only download below follows a
+    // sprk_document row's pointer, so the pointer's container is verified first (fail closed).
+    private readonly RecordContainerResolver _containerResolver;
     // Direct-Action (ADR-043) profiling seams — optional so unit construction without them falls
     // back to the legacy node path; present at runtime whenever the compound AI gate that also
     // constructs this service is on (GitHub #919 convergence / Fix Option 3).
@@ -85,6 +89,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IPlaybookOrchestrationService playbookOrchestrator,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AppOnlyAnalysisService> logger,
+        RecordContainerResolver containerResolver,
         IActionResolver? actionResolver = null,
         IActionRunner? actionRunner = null)
     {
@@ -100,6 +105,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _toolHandlerRegistry = toolHandlerRegistry;
         _nodeService = nodeService;
         _playbookOrchestrator = playbookOrchestrator;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _actionResolver = actionResolver;
         _actionRunner = actionRunner;
         _logger = logger;
@@ -271,7 +277,15 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             // Mark as pending before processing
             await UpdateSummaryStatusAsync(documentId, SummaryStatusPending, cancellationToken);
 
-            // 4. Download file from SPE using app-only auth
+            // 4. Verify the row's pointer names a container this document may use (task 166 r1, fail closed),
+            //    then download file from SPE using app-only auth
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    documentId, document.GraphDriveId, document.GraphItemId, cancellationToken))
+            {
+                await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, "Document storage could not be verified");
+            }
+
             _logger.LogInformation(
                 "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId})",
                 documentId, document.GraphDriveId, document.GraphItemId);
@@ -1523,6 +1537,13 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
         try
         {
+            // task 166 r1 (owner round 21 item 1b): verify the row's pointer before following it app-only.
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
+            {
+                return string.Empty;
+            }
+
             using var fileStream = await _speFileOperations.DownloadFileAsync(
                 document.GraphDriveId,
                 document.GraphItemId,

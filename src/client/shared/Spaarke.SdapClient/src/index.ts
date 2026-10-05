@@ -28,4 +28,5 @@ export type {
   ParentEntityContext,
   IndexFileRequest,
   IndexFileResult,
+  AttachDocumentFileResult,
 } from './types';

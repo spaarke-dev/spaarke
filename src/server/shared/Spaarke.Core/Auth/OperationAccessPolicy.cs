@@ -229,6 +229,18 @@ public static class OperationAccessPolicy
         // "finance.attach_invoice" (which names an invoice): reusing either would misdescribe the act in every deny
         // log. Resource = the regarding record, in the entity set Dataverse's own metadata names for its type.
         ["event.attach_regarding"] = AccessRights.AppendTo,
+        // "memory.pin_matter" — AppendTo on the MATTER a pinned-memory item names: the body matterId of
+        // POST /api/memory/pins and PUT /api/memory/pins/{pinId} (PinnedMemoryEndpoints.AuthorizePinMatterAsync).
+        // Added by unified-access-control-r2 task 166 (findings S-43 / S-68). A pin carrying a matter id is not
+        // private to its author: PinnedContextRepository.GetByMatterAsync returns every user's pins for the matter
+        // and ContextBinder injects them into the prompt of everyone who chats on it as "authoritative context".
+        // Writing one ATTACHES content to the matter, so it costs the same right Dataverse asks of a record other
+        // records are attached to — AppendTo, not Write (pinning does not modify the matter's own fields) and not
+        // Read (a reader of a matter is not thereby entitled to steer every colleague's AI context on it).
+        // A separate key rather than "entity.associate_document": a pin is not a document, and two acts sharing a
+        // key would make every deny log misdescribe one of them and couple their rights forever.
+        // Resource = the matter, in sprk_matters, asked of the CALLER through CallerRecordAccessProbe.
+        ["memory.pin_matter"] = AccessRights.AppendTo,
 
         // ========================================================================
         // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
@@ -254,8 +266,10 @@ public static class OperationAccessPolicy
         // these routes are unavailable, not merely degraded, if RPA is misconfigured. Live RPA
         // verification is owned by task 034; see the RPA-FALLBACK log marker.
 
-        // "write" — mutation of the authorized record's own fields (PUT /api/v1/documents/{id}), and
-        // the checkout family, which mints an EDITABLE url and moves the record's lock state.
+        // "write" — mutation of the authorized record's own fields, and the checkout family, which mints an
+        // EDITABLE url and moves the record's lock state. (Its first consumer, PUT /api/v1/documents/{id}, is the Compose
+        // re-file since unified-access-control-r2 task 147; task 166 S-36 made it refuse the SPE pointer fields, and task
+        // 146 asks AppendTo on any new parent.)
         // Deliberately not Write|Create: these change an existing row, they do not create one.
         ["write"] = AccessRights.Write,
 

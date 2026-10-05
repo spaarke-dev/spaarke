@@ -62,6 +62,20 @@ public sealed class ComposeUploadProjectionSeamTests : IClassFixture<ComposeFide
     private const string DocBinaryResource = "doc-upload-binary";
     private const int DocCacheVersion = 1;
 
+    /// <summary>
+    /// A REAL chat session owned by the authenticated caller (<see cref="TestSessionOwner.Oid"/>). Since uac-r2 task
+    /// 166 (S-64) <c>POST /api/compose/upload</c> returns a session's retained bytes only to the session's OWNER — a
+    /// made-up session id is the uniform 404, exactly like expired bytes.
+    /// </summary>
+    private async Task<string> CreateCallerOwnedSessionAsync()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager>();
+        var session = await sessions.CreateSessionAsync(
+            ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
+        return session.SessionId;
+    }
+
     [Fact]
     public async Task Upload_RealDocx_ReturnsProjectionMatchingLoadPathShape_AndPreservesContentForSave()
     {
@@ -74,7 +88,7 @@ public sealed class ComposeUploadProjectionSeamTests : IClassFixture<ComposeFide
             new Paragraph(new Run(new Text("This is the body of the uploaded document.")))
             { ParagraphId = new HexBinaryValue("AAAA0002") });
 
-        var sessionId = $"session-{Guid.NewGuid():N}";
+        var sessionId = await CreateCallerOwnedSessionAsync();
         var documentId = $"doc-{Guid.NewGuid():N}";
         var tenantId = ComposeFidelitySeamFixture.TestTenantId;
 
@@ -130,7 +144,7 @@ public sealed class ComposeUploadProjectionSeamTests : IClassFixture<ComposeFide
         _fixture.ResetBoundaries();
 
         var garbage = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02, 0x03 }; // ZIP magic, not a real docx
-        var sessionId = $"session-{Guid.NewGuid():N}";
+        var sessionId = await CreateCallerOwnedSessionAsync();
         var documentId = $"doc-{Guid.NewGuid():N}";
         var tenantId = ComposeFidelitySeamFixture.TestTenantId;
 

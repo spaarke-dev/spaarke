@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -28,6 +29,7 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly ITextChunkingService _chunkingService;
     private readonly IRagService _ragService;
     private readonly ILogger<FileIndexingService> _logger;
+    private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
@@ -37,18 +39,23 @@ public sealed class FileIndexingService : IFileIndexingService
     /// <param name="chunkingService">Text chunking service.</param>
     /// <param name="ragService">RAG indexing service.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
+    /// <param name="containerResolver">
+    /// Verifies a <c>sprk_document</c> row's pointer before the app-only download (unified-access-control-r2 task 166 r1).
+    /// </param>
     public FileIndexingService(
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         ITextChunkingService chunkingService,
         IRagService ragService,
-        ILogger<FileIndexingService> logger)
+        ILogger<FileIndexingService> logger,
+        RecordContainerResolver containerResolver)
     {
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _chunkingService = chunkingService;
         _ragService = ragService;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     /// <inheritdoc />
@@ -138,6 +145,17 @@ public sealed class FileIndexingService : IFileIndexingService
             _logger.LogDebug(
                 "Starting app-only file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
+
+            // task 166 r1 (owner round 21 item 1b): a request that names a sprk_document follows that row's
+            // pointer, so the pointer's container is verified before the app-only download (fail closed; an id that
+            // is not a GUID is refused). A request with NO document id carries a pointer the server built itself — an
+            // orphan file the BFF just uploaded, or the API-key service route — and follows no row.
+            if (!string.IsNullOrWhiteSpace(request.DocumentId)
+                && !await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    request.DocumentId, request.DriveId, request.ItemId, cancellationToken))
+            {
+                return FileIndexingResult.Failed("Document storage could not be verified");
+            }
 
             // Download via app-only authentication
             await using var stream = await _speFileOperations.DownloadFileAsync(

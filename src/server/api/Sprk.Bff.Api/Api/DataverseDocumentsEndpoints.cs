@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
@@ -91,7 +93,14 @@ public static class DataverseDocumentsEndpoints
         .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();
 
-        // PUT /api/v1/documents/{id} - Update document
+        // PUT /api/v1/documents/{id} — the document re-file and field update. KEPT at the batch-4 integration although
+        // task 166 (sweep finding S-36, owner round 10 item 1) had retired it as caller-less: since task 147 r1 (owner
+        // round 28 item 1) the Compose document association re-files through it (SpaarkeAi documentAssociationWrite.ts),
+        // so the "no caller" premise of the retirement no longer holds. It is kept under the condition 166 itself set for
+        // any body-bound document update: (1) AppendTo on every new parent, asked as the caller (task 146,
+        // AuthorizeRefileTargetsAsync below), and (2) the RESOURCE-NAMING fields are refused — GraphDriveId / GraphItemId /
+        // ParentGraphItemId / FilePath / HasFile name the drive item GET /{id}/download streams as the application, and
+        // only the BFF stamps them (POST /{id}/file; field-level security, scripts/Set-DocumentPointerFieldSecurity.ps1).
         documentsGroup.MapPut("/{id}", async (
             string id,
             [FromBody] UpdateDocumentRequest request,
@@ -117,6 +126,26 @@ public static class DataverseDocumentsEndpoints
                 }
 
                 logger.LogInformation("Updating document {DocumentId}", id);
+                // Task 166 S-36 (kept route, batch-4 integration): the storage pointer is never caller-chosen.
+                var pointerFields = ResourceNamingFieldsIn(request);
+                if (pointerFields.Count > 0)
+                {
+                    logger.LogWarning(
+                        "Document update {DocumentId} refused: the body names storage-pointer field(s) {Fields}", id,
+                        string.Join(", ", pointerFields));
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Validation Error",
+                        detail: "A document's file location is set only by the server. Remove "
+                            + string.Join(", ", pointerFields) + " from the request.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["reasonCode"] = PointerFieldRefusedReasonCode,
+                            ["fields"] = pointerFields,
+                            ["traceId"] = traceId,
+                        });
+                }
+
 
                 // Check if document exists
                 var existingDocument = await dataverseService.GetDocumentAsync(id);
@@ -247,6 +276,32 @@ public static class DataverseDocumentsEndpoints
         .AddDocumentAuthorizationFilter("write")
         .RequireAuthorization();
 
+        // The pointer columns' other doors: the PUT above refuses them, and the MDA form / Xrm.WebApi door is closed by
+        // owner round 21 item 1: the client no
+        // longer writes them (it calls POST /{id}/file below), field-level security makes them writable by the BFF
+        // identity only (scripts/Set-DocumentPointerFieldSecurity.ps1, a main-session live step), and every app-only
+        // download verifies the pointer (RecordContainerResolver, interim then strict).
+
+        // POST /api/v1/documents/{id}/file — attach the file a client just uploaded to the document it just created
+        // (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i), ADR-002 WP-3). The client creates the row
+        // WITHOUT a pointer; the BFF verifies, then stamps sprk_graphdriveid / sprk_graphitemid as the application —
+        // the only identity the pointer columns' field-level security lets write them. Write on the row is required
+        // as the caller (the route filter); the handler then requires that the row has no file yet (or this same one),
+        // that the caller created it, that the file sits in the container DERIVED for the row, and that the caller
+        // uploaded it (DocumentContainerRelocator.AttachFileAsync).
+        documentsGroup.MapPost("/{id}/file", AttachDocumentFileAsync)
+            .WithName("AttachDocumentFile")
+            .WithDescription("Attaches the file the caller uploaded to the document the caller created; the BFF verifies "
+                + "the file's container and uploader and stamps the document's storage pointer server-side.")
+            .Produces<AttachDocumentFileResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .AddDocumentAuthorizationFilter("write")
+            .RequireAuthorization();
+
         // DELETE /api/v1/documents/{id} - Delete document
         documentsGroup.MapDelete("/{id}", async (
             string id,
@@ -325,6 +380,8 @@ public static class DataverseDocumentsEndpoints
             string id,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            // uac-r2 task 166 r1 (round 21 item 1b): the pointer's container is verified before the app-only download.
+            RecordContainerResolver containerResolver,
             DocumentTelemetry documentTelemetry,
             ILogger<Program> logger,
             HttpContext context,
@@ -396,6 +453,12 @@ public static class DataverseDocumentsEndpoints
                     "Downloading file for document {DocumentId}: DriveId={DriveId}, ItemId={ItemId}",
                     id, document.GraphDriveId, document.GraphItemId);
 
+                // Step 3b (uac-r2 task 166 r1, owner round 21 item 1b): the row's pointer is followed AS THE APPLICATION,
+                // so it must point into a container this document may use — refused (409) otherwise, before any read.
+                await containerResolver.EnsureDocumentPointerContainerAsync(
+                    Guid.TryParse(id, out var pointerDocumentId) ? pointerDocumentId : Guid.Empty, document.GraphDriveId,
+                    document.GraphItemId, ct);
+
                 // Step 4: Download file stream from SPE using app-only auth
                 var fileStream = await GraphCallScope.Run(
                     () => speFileStore.DownloadFileAsync(
@@ -442,6 +505,13 @@ public static class DataverseDocumentsEndpoints
                     fileDownloadName: fileName,
                     enableRangeProcessing: true); // Support partial downloads for large files
             }
+            catch (SdapProblemException ex) when (ex.Code == RecordContainerResolver.DocumentStorageUnverifiedCode)
+            {
+                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, "storage_unverified");
+                return TypedResults.Problem(
+                    statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                    extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = traceId });
+            }
             catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Graph API error downloading file for document {DocumentId}", id);
@@ -466,6 +536,7 @@ public static class DataverseDocumentsEndpoints
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict) // uac-r2 task 166 r1: the file pointer's container is not verified
         .Produces(StatusCodes.Status500InternalServerError)
         .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();
@@ -541,6 +612,15 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        // GATED 2026-10-03 by unified-access-control-r2 task 166 (sweep finding S-66). This is the twin of
+        // GET /api/v1/containers/{containerId}/documents below — same app-only GetDocumentsByContainerAsync,
+        // same SPE pointers in the result — and it was hidden from task 074's guard by a Permanent
+        // "COLLECTION READ … result trimming" waiver, although the caller picks ONE container and no trimming
+        // exists. The SAME filter now decides it, reading the container id from the QUERY instead of the route:
+        // Read on the container's owning record, as the caller, or the uniform 403. A missing containerId is the
+        // filter's 400 (no resolver, no Dataverse call). The handler's Guid.TryParse type bug is deliberately
+        // NOT fixed here (task 078 note §4 owns it) — the gate holds whatever that bug's state.
+        .AddContainerDocumentAuthorizationFilter(queryParameter: "containerId")
         .RequireAuthorization();
 
         // GET /api/v1/containers/{containerId}/documents - List documents in a container (alternative endpoint)
@@ -810,4 +890,103 @@ public static class DataverseDocumentsEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
+
+    /// <summary>The reason code of every refused file attach (one code; the detail says which check refused).</summary>
+    internal const string AttachRefusedCode = "document_file_attach_refused";
+
+    /// <summary>
+    /// POST /api/v1/documents/{id}/file — see the route's comment. Internal so the test assembly runs the real handler.
+    /// </summary>
+    /// <summary>
+    /// The reason code of PUT /api/v1/documents/{id}'s refusal of a body that names a storage-pointer field (task 166
+    /// S-36's condition for keeping a body-bound document update; batch-4 integration).
+    /// </summary>
+    internal const string PointerFieldRefusedReasonCode = "sdap.documents.pointer_field_refused";
+
+    /// <summary>
+    /// The resource-naming fields a caller set on a document update body: the columns that name the drive item the BFF
+    /// follows AS THE APPLICATION (sprk_graphdriveid / sprk_graphitemid / sprk_parentgraphitemid / sprk_filepath) and
+    /// sprk_hasfile, which the BFF writes WITH the pointer. Empty when none is set.
+    /// </summary>
+    internal static IReadOnlyList<string> ResourceNamingFieldsIn(UpdateDocumentRequest request)
+    {
+        var named = new List<string>();
+        if (request.GraphDriveId is not null) named.Add(nameof(UpdateDocumentRequest.GraphDriveId));
+        if (request.GraphItemId is not null) named.Add(nameof(UpdateDocumentRequest.GraphItemId));
+        if (request.ParentGraphItemId is not null) named.Add(nameof(UpdateDocumentRequest.ParentGraphItemId));
+        if (request.FilePath is not null) named.Add(nameof(UpdateDocumentRequest.FilePath));
+        if (request.HasFile is not null) named.Add(nameof(UpdateDocumentRequest.HasFile));
+        return named;
+    }
+
+    internal static async Task<IResult> AttachDocumentFileAsync(
+        string id,
+        [FromBody] AttachDocumentFileRequest? request,
+        [FromServices] Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator relocator,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var traceId = context.TraceIdentifier;
+        if (!Guid.TryParse(id, out var documentId) || documentId == Guid.Empty)
+        {
+            return ProblemDetailsHelper.ValidationError("Document ID must be a valid GUID");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.DriveId) || string.IsNullOrWhiteSpace(request.ItemId))
+        {
+            return ProblemDetailsHelper.ValidationError("driveId and itemId (the uploaded file's) are required");
+        }
+
+        try
+        {
+            var result = await relocator.AttachFileAsync(
+                documentId, CallerResolution.ResolveObjectId(context.User), request.DriveId, request.ItemId, ct);
+
+            if (result.Outcome == Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.Attached)
+            {
+                return TypedResults.Ok(new AttachDocumentFileResponse(
+                    documentId, result.DriveId!, result.ItemId!, result.AlreadyAttached));
+            }
+
+            var status = result.Outcome switch
+            {
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.InvalidRequest => StatusCodes.Status400BadRequest,
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheCreator => StatusCodes.Status403Forbidden,
+                Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.NotTheUploader => StatusCodes.Status403Forbidden,
+                _ => StatusCodes.Status409Conflict,
+            };
+
+            return TypedResults.Problem(
+                statusCode: status,
+                title: "File Not Attached",
+                detail: result.Detail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = AttachRefusedCode,
+                    ["reasonCode"] = result.Outcome.ToString(),
+                    ["traceId"] = traceId,
+                });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: nothing was attached unless the final write succeeded.
+            logger.LogError(ex, "Attaching a file to document {DocumentId} failed", documentId);
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "The file could not be attached to the document.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
 }
+
+/// <summary>The file a client uploaded (the drive and item ids the upload route returned). Task 166 f1.</summary>
+public sealed record AttachDocumentFileRequest(string? DriveId, string? ItemId);
+
+/// <summary>The attached pointer. <paramref name="AlreadyAttached"/>: this same file was attached before (idempotent).</summary>
+public sealed record AttachDocumentFileResponse(Guid DocumentId, string DriveId, string ItemId, bool AlreadyAttached);
