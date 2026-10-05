@@ -173,7 +173,10 @@ organization, project, recordtype, workassignment (+ system) — no contact-type
 ```
 (From pwsh, pass the ids as an array if invoking with `-File`.) Then read the column back
 (`EntityDefinitions(LogicalName='sprk_externalrecordaccess')/Attributes(LogicalName='sprk_grantedbycontact')`): prefix `sprk_`,
-target `contact`, `IsSecured` true, in SpaarkeCore. ⚠️ **Merge gate:** this code selects the column on EVERY grant-row read —
+target `contact`, `IsSecured` true, in SpaarkeCore. **Since round v1c-v2 (session 27 round 50 item 2) the same two commands
+also create, secure and BACKFILL `sprk_grantedbycontactid`** (§13); read it back too
+(`…/Attributes(LogicalName='sprk_grantedbycontactid')`: `AttributeType` String, MaxLength 100, `IsSecured` true, in SpaarkeCore),
+and `-Verify`'s step (f) must report every row whose lookup names a contact as recording its id. ⚠️ **Merge gate:** this code selects the column on EVERY grant-row read —
 it must not deploy to an environment where (a) has not run (POML step 1: "code that binds the new lookup must not merge before
 (c) passes"). Since round v1c-v1 the reconciliation job's grant scan also selects the column (R1's contact-issued rule, §12.1):
 before (a) runs, that scan fails every tick — fail-safe (the run is recorded failed and writes nothing) — the same gate.
@@ -512,3 +515,170 @@ Live (read-only) this round: the `sprk_externalrecordaccesses` row read (wire sh
 formatted-value Prefer header), three attribute-metadata reads (`sprk_expiresdate`; `sprk_contactorganization.sprk_startdate/
 sprk_enddate`), and an attempted metadata read of task 142's `sprk_assignedaccess.sprk_grantedexpiry` (the table does not exist
 live yet; its schema script declares DateOnly behaviour). No live write.
+
+## 13. Fix round v1c-v2 (2026-10-05) — re-verification of `task/uac-r2-140-x1-v1c-v1`; session 27 round 50
+
+Branch `task/uac-r2-140-x1-v1c-v2`, created from `task/uac-r2-140-x1-v1c-v1` @ `55d84c474`. Binding decisions read from
+`work/unified-access-control-r2` @ `2cc4f3d2b` (rounds 1–52). **Round 50 is task 140's own** (the main session's answers to
+this re-verification): item 1 (the TZI read fix on master as its own PR) is another lane's; **item 2 (provenance survives a
+deleted issuer) and item 3 (the two unpinned guards) are closed here**.
+
+| # | Item | Outcome |
+|---|---|---|
+| 1 | V6 — the R2 check in `Effective()` was pinned by no test (its twin seeded the issuer's R2-ended row UNDATED, which counts for nothing whatever R2 does) | **Closed.** `R1_AnIssuersOwnRow_IsJudgedAsThisRunLeavesIt` is now a 3-shape theory: `stamped-by-R1`, `ended-by-R2-undated` (kept: it pins `Unknown()`'s R2 exclusion — the earlier J5), and the new **`ended-by-R2-dated`**: the issuer's own row carries +200 and R2 ends it this run (the issuer reader sees the firm active, as the test already set up). Only knowing R2 ends it decides "deactivate" over "+90". **Seed V6** (the check made runtime-false) → **1 red** (exactly that case); restored. |
+| 2 | V11 — the `Unknown()` guard was pinned by no test | **Closed.** New theory `R1_AnIssuersUndatedRowThisRunDidNotPlan_LeavesTheRowItIssuedUnchanged_AndTheRunPartial` (`created-after-the-scan`; `beyond-a-truncated-scan`): the issuer's only grant is an undated row the issuer reader sees but the scan never returned. Asserted: no write for the row, no expiry, still active, `unresolved` 1 / `deactivated` 0, outcome `Unresolved`, the "whose own date could not be decided" log line, `Success=false`, the "left unchanged" message, heartbeat `partial`; an ordinary undated row in the same run is still stamped. Positive twin: `stamped-by-R1` above (the same row, planned). **Seed V11** (`|| Unknown(r)` made runtime-false; deleting it outright is CS8321 — an unused local function — so the opaque form is the seed) → **2 red** (both shapes); restored. |
+| 3–16 | Verifier confirmations (seeds V1–V5, V7–V10, V12, V13, the SPA seed; no tautological race tests) | No behaviour they describe was changed; every suite re-run below. |
+| 17–21 | Live facts (TZI wire shape, optimistic concurrency, DateOnly-behaviour DTOs unaffected, no live write, the column still absent) | Unchanged. Re-confirmed read-only this round through the schema script's dry run and `-Verify` (§13.1) — `sprk_grantedbycontact` and `sprk_grantedbycontactid` both absent live (no name collision for the new column). |
+| 22–28 | Suites / publish of the previous round | Re-run on this round's final code (§13.5, §13.6). |
+| 29–42 | POML well-formed; round 42 items 1 and 2 as implemented; round 34 item 3; earlier verifier items 3–8 | Unchanged and still met (the round-42 behaviour is extended, not altered — see round 50 item 2). |
+| 43 | "Tests and seeds per case" not met for the R2-ended check and the `Unknown()` guard | **Met** — items 1 and 2. |
+| R50.2 | **A deleted issuing contact: the grant's provenance survives the delete, and the grant ends** (BINDING) | **Implemented** — §13.1. |
+
+### 13.1 Round 50 item 2 — `sprk_grantedbycontactid` (the rule as built)
+
+- **The column.** `sprk_externalrecordaccess.sprk_grantedbycontactid` — single-line text (100), the issuing contact's id in ONE
+  text form (`ExternalGrantLifecycle.ContactIssuerProvenance` = `Guid.ToString("D")`, lower-case). Field-secured with the same two
+  profiles as the lookup (a forged value would end an undated grant; an erased one would let a deleted issuer's grant be stamped).
+  Selected on every grant-row read (`RowSelect`) and by the job's scan — **the same deploy-order gate G-140-1**.
+- **Every write that sets or clears the lookup sets or clears it in the same write.** Set: the contact grant's create
+  (`BuildGrantPayload`). Cleared: the grant core's internal take-over (now `ExternalGrantLifecycle.AddInternalTakeOverBinds`,
+  moved beside the SDK twin `AddInternalTakeOverFields`, which `set-record-share-expiry` uses) — and a row whose issuing contact
+  was already deleted (provenance only, `ExternalGrantRow.IsContactIssued`) is taken over the same way, so a later R1 never reads
+  an internal user's grant as a deleted contact's. **The collapses write neither column** (they only deactivate), so nothing
+  there pairs; the contact-mode PATCH of the caller's own row writes neither. Pinned behaviourally per writer and, for any NEW
+  writer, by `ContactGrantGuardTests.EveryWriterOfTheIssuerLookupAlsoWritesItsProvenance` (text, per file, with its limits stated
+  in the test: four key spellings; the writer set is exactly the two files, so a regex that stopped matching or a writer added
+  elsewhere fails).
+- **R1.** An UNDATED active row whose provenance is set while the lookup is empty — only a deletion (RemoveLink) leaves that shape
+  — is DEACTIVATED with no read and reported `IssuerDeleted` (count in `contactIssued.issuerDeleted`, per-row line, heartbeat
+  `r1ContactIssuedIssuerDeleted`); its provenance is kept; it counts for nothing as another row's issuer grant and is part of the
+  run's decided set (a row its grantee issued is ended in the same run, not left Unresolved). A provenance that is not even a GUID
+  ends the row too (fail closed: provenance without its lookup is never read as "no contact issuer"). A DATED row whose issuer was
+  deleted stands until its date — owner G2 (ii), no cascade; R1 decides undated rows only. Report-only decides and reports it.
+- **The schema script** (`scripts/Deploy-ExternalRecordAccessContactGrantor.ps1`): new step **(a2)** creates the column (prefix
+  assertion shared with (a) — AP-13), **(c)** secures BOTH columns, **(d)** adds it to SpaarkeCore through the membership helper
+  with its `TableId`, new step **(f)** BACKFILLS it from the lookup — `-Apply` writes each missing/different value with `If-Match`
+  on the row's version (a 412 is reported and left for a re-run; a row read without a version is refused), the dry run counts,
+  `-Verify` FAILS while any row lacks it, and rows recording a deleted issuer are reported for information. The decision and the
+  write rule live in `scripts/common/GrantProvenanceBackfill.ps1` (dot-sourced) so they run offline.
+- **Live, read-only, this round** (spaarkedev1, operator az identity): the dry run (with `-BffApplicationIds`) reports (a) WOULD,
+  (a2) WOULD create `sprk_grantedbycontactid (text, MaxLength 100)`, (b) all OK, (c) WOULD for both columns, (d) both profiles
+  OK, (f) WOULD — "nothing was written"; `-Verify` exits 1 listing the six gaps (both columns, the relationship, both locks, the
+  backfill). No live write.
+
+### 13.2 Placement + justification (CLAUDE.md §10 / §11) — new surface this round
+
+Placement: BFF + the schema script that already owns this table's task-140 columns. No new endpoint, DI registration, option,
+job, PCF or package. **One new COLUMN** (owner-decided, round 50 item 2).
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| Column `sprk_grantedbycontactid` | the lookup `sprk_grantedbycontact` | The lookup cannot outlive the row it points to (RemoveLink empties it; Restrict blocks privacy deletions; a cascade is ruled out by G2 (ii)) — round 50's own justification | A deleted contact's undated grant looks internally issued and R1 stamps it +90 — an indefinite, issuer-less grant |
+| `ExternalGrantRow.GrantedByContactProvenance` + `IsContactIssued`; `ExternalGrantLifecycle.GrantedByContactIdAttribute`, `ContactIssuerProvenance` | the one row shape; `GrantedByContactAttribute` | extended in place | The column cannot be read, written or compared in one text form |
+| `ExternalGrantLifecycle.AddInternalTakeOverBinds` | the core's inline Web API take-over binds | MOVED from the core, beside the SDK twin, so both pairings live in one file (the guard pins the writer set) | The core's take-over clears the lookup and leaves the provenance; R1 later ends an internal user's grant as a "deleted issuer's" |
+| `ContactIssuedUndated.IssuerDeleted`, `ContactIssuedOutcome.IssuerDeleted`, the report/heartbeat count | R1's contact-issued resolution | It IS R1 (no new rule, schedule or job) | Round 50 item 2 unimplemented |
+| `scripts/common/GrantProvenanceBackfill.ps1` | the schema script; `DataverseSolutionMembership.ps1` (another concern) | Part of the script, extracted only so its decision and write rule can be exercised offline (the script needs a live token end to end) | The backfill would first run untested at a live `-Apply` |
+
+§11.5: `ExternalAccessReconciliationJob.cs` grows ~65 lines of R1's own decision (one more outcome for one row class) — cohesive,
+same reason to change.
+
+### 13.3 Tests (KEEP paths) and what each pins
+
+- `ExternalAccessReconciliationTests` +8 cases: the dated R2 twin (V6); the unplanned-issuer-row theory ×2 (V11); the
+  deleted-issuer theory ×3 (`issuer-exists` twin, `issuer-deleted`, `issuer-deleted-unparseable`); a dated deleted-issuer row left
+  unchanged; a row issued on the strength of a deleted issuer's row ends in the same run; report-only also reports `IssuerDeleted`.
+  The fake now serves each row **projected to the FetchXML's `<attribute>` list**, as Dataverse does — so the scan's select is
+  pinned by behaviour (a column it stops selecting is absent and the rule goes red: seed P7).
+- `ContactGrantAuthorizationTests` +2 and 3 extended: the create records the provenance in the same payload; the core take-over
+  clears both; a deleted issuer's row is taken over (provenance cleared, systemuser stamped, the empty lookup not re-sent); a
+  contact's grant over a deleted issuer's row is 409 `managed_elsewhere`, row untouched. The in-memory table models the column on
+  create, PATCH and SDK bulk writes (and throws on an unmodelled shape).
+- `RecordShareExpiryTests` +1 and 2 extended: the transaction carries both clears (through the REAL transaction builder); a
+  deleted issuer's share is taken over.
+- `GrantProvenanceBackfillScriptTests` (new, 4): runs `GrantProvenanceBackfill.ps1` in `pwsh` over rows shaped as the Web API
+  serves them, with a recording PATCH: which rows (missing / different / other casing; a recorded one and an empty-lookup one
+  untouched; the text form equals the BFF's `ContactIssuerProvenance`); `If-Match` = each row's version, one PATCH per row, body
+  = the provenance only, a 412 counted and not retried; any other failure stops it; no version → nothing sent.
+- `ContactGrantGuardTests` +2 facts, 1 updated: provenance column ↔ script ↔ `RowSelect`; every writer of the lookup writes the
+  provenance (census of writers); the script's subcomponents are now 3 (lookup, relationship, provenance column).
+
+### 13.4 Perturbation record (each seed alone, affected tests run, file restored and touched; trees verified byte-identical)
+
+Filter for BFF seeds: `ExternalAccessReconciliationTests` + `ContactGrant*` + `GrantRowWire*` + `RecordShareExpiry*` (190 before
+round 50 item 2's tests, 198 after).
+- **V6** the R2 check in `Effective()` runtime-false → 1 red (`ended-by-R2-dated`).
+- **V11** `|| Unknown(r)` runtime-false → 2 red (both shapes of the new theory).
+- **P1** the create stops writing the provenance → 1 red (the create test).
+- **P2** the Web API take-over stops clearing it → 3 red (the three core take-over tests).
+- **P3** the core's take-over condition back to "lookup set" → 1 red (the deleted issuer's take-over).
+- **P4** the SDK take-over stops clearing it → 4 red (three `RecordShareExpiryTests` + the cross-surface theory's take-over twin).
+- **P5** `set-record-share-expiry` takes over only rows whose lookup is set → 1 red (the deleted issuer's share).
+- **P6** R1 ignores the provenance → 4 red (deleted theory ×2, the chain, report-only).
+- **P7** the scan stops selecting the provenance → 4 red (the same four, through the projecting fake).
+- **P8** deleted-issuer rows left out of the run's decided set → 1 red (the chain: the dependent row would be left Unresolved).
+- **P9** reported as plain `Deactivated` → 4 red.
+- **P10** an unparseable provenance read as "no issuer" → 1 red (`issuer-deleted-unparseable`).
+- **P11** R1 also ends a DATED deleted-issuer row → 1 red (the dated test).
+
+Backfill helper (filter `GrantProvenanceBackfill*`, 4): **B1** recorded rows not skipped → 1; **B2** text form not normalised → 1;
+**B3** case-insensitive compare → 1; **B4** `If-Match` dropped → 1; **B5** every failure counted as "changed" → 1; **B6** the
+no-version refusal removed → 1; **B7** empty-lookup rows not skipped → 1.
+
+ArchTests (filter `ContactGrantGuardTests`, 8): **A1** the SDK provenance clear removed → 1 (the pairing guard); **A2** a third
+writer of the lookup added in `SetRecordShareExpiryEndpoint` → 1 (the census); **A3** the script's column renamed → 1 (the
+agreement fact); **A4** the script's provenance component dropped from (d) → 1 (the subcomponent count).
+
+### 13.5 Suite results (the final code; full runs once, at the end; other agents were running suites concurrently)
+
+Affected first: the 212-test set (`ExternalAccessReconciliationTests`, `ContactGrant*`, `GrantRowWire*`, `RecordShareExpiry*`,
+`GrantProvenanceBackfill*`, `ColleagueByEmail*`, `BulkUpdateTransaction*`) **212/212**; `ContactGrantGuardTests` +
+`SchemaScriptSolutionMembership*` **12/12**.
+
+Full runs, once, on the final code (BFF source = `6f85d67cb`; the final commit adds only the note, the POML and docs):
+- **BFF unit suite** (`tests/unit/Sprk.Bff.Api.Tests`, which compiles `tests/integration/auth/**`): **15550 passed, 1 failed,
+  54 skipped (15605)** — +15 over v1c-v1's 15590, exactly this round's new tests (8 + 2 + 1 + 4). The one failure,
+  `StandaloneChatContextEndpointsTests.GetStandaloneContext_WithSprkDocument_Returns200_WithEmptyContextFields`, is contention:
+  the request was aborted by the client after 2 m 47 s (`TaskCanceledException` / "The client aborted the request") while a
+  publish and three other suites ran on the machine; code this round does not touch. Its isolated re-run (the whole class):
+  **19/19 passed**.
+- **ArchTests** (`tests/Spaarke.ArchTests`): **607/607** (+2: the new facts).
+- **Sprk.Bff.Api.IntegrationTests**: **104/104**. **Spe.Integration.Tests**: **403 passed, 25 skipped, 0 failed (428)**.
+- No client code changed this round (the external SPA and the PCF are untouched).
+
+### 13.6 Publish size (CLAUDE.md §10 item 4) and CVE
+
+Fresh trees exported from the commits (BFF + shared + config + root build files) to SHORT paths, `dotnet publish -c Release`,
+zipped with PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy\api-publish\*` (incl. PDBs):
+
+| Tree | Commit | Files (PDBs) | Bytes | MB |
+|---|---|---|---|---|
+| `C:\wt140v2m` — this round's base | `55d84c474` | 212 (4) | 48,282,235 | 46.05 |
+| `C:\wt140v2b` — this round | `6f85d67cb` (the BFF source of the final commit) | 212 (4) | 48,283,101 | 46.05 |
+
+This round: **+866 bytes (+0.00 MB)**; 212 = 212 files. With §12.5, the whole task: 46.00 → 46.05 MB (+0.05 MB). ≤ 60 MB. No
+package added or changed. `dotnet list package --vulnerable --include-transitive` (BFF): **no vulnerable packages**. Both trees
+removed after measuring.
+
+### 13.7 Quality gates (Step 9.5, FULL rigor) — this round's diff
+
+- **code-review** — no Critical. W1 (deploy order, extends §5): `RowSelect` and the job's scan now also name
+  `sprk_grantedbycontactid` — the same gate G-140-1, whose `-Apply` creates it and `-Verify` checks it. W2: the pwsh-driven test
+  needs PowerShell 7 on the PATH (present on the windows-latest CI runners); its absence fails, never skips. W3: the Web API
+  take-over sends the lookup's unbind only when the lookup is still bound (a deleted issuer's is already empty) — a no-op unbind
+  is avoided rather than relied on. W4: a System Administrator who clears only the lookup by hand makes R1 end that undated row —
+  the fail-closed direction; the column pair is field-secured against everyone else.
+- **adr-check** — compliant: ADR-002 (no plugin; the invariant lives in the BFF's writers and the job), 003 (fail closed: an
+  unparseable provenance ends the row, the backfill refuses a versionless write and stops on any non-412 fault, R1 still never
+  writes on a fault), 010 (no new registration), 036 (the job's shape unchanged; no throw from `ExecuteAsync`), 038 (no
+  `Mock<HttpMessageHandler>`, no DI/ctor tests; one-input twins; the script test runs the real helper), 052 (placement unchanged),
+  AP-13 (the column is created by the script under the sprk publisher, never by MCP).
+
+### 13.8 Manual gates (unchanged in kind; G-140-1's content grows)
+
+- **G-140-1** — the same two commands as §5 (`-Apply`, then `-Verify` exiting 0) now also create, secure and backfill
+  `sprk_grantedbycontactid`; read both columns back as §5 says.
+- **G-140-2** — unchanged (§6), after G-140-1 and this branch's BFF.
+
+### 13.9 `.claude/` edits
+
+None required by this round (§12.7's FAILURE-MODES recommendation still stands, unchanged).
