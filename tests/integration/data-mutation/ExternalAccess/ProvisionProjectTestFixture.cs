@@ -646,9 +646,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             var recordShare = new RecordingRecordShareService(this);
             services.AddSingleton<IDataverseRecordShareService>(recordShare);
 
-            // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares.
+            // Task 149: the REAL synchronizer, over the test's ChildWorld (read at call time) and the recording shares —
+            // scoped with THIS host's real No Access guard, as production registers it (ExternalAccessModule). Task 158 r1c:
+            // it was a singleton over a guard that walls nobody, so no mirror wall was ever exercised through this host.
             services.RemoveAll<SecureChildShareSynchronizer>();
-            services.AddSingleton(SecureChildShareWorld.SynchronizerOver(() => ChildWorld, recordShare));
+            services.AddScoped(sp => SecureChildShareWorld.SynchronizerOver(
+                () => ChildWorld, recordShare, sp.GetRequiredService<SecureShareNoAccessGuard>()));
 
             // Task 148: the REAL reconciler (real resolver, real synchronizer) over the same ChildWorld and recording shares;
             // the platform-cascade rows through this fixture's DataverseWebApiClient double, as in production.

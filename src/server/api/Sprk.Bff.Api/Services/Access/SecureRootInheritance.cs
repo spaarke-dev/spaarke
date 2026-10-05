@@ -61,8 +61,11 @@ public enum SecureRootInheritOutcome
     Failed,
 }
 
-/// <summary>A matter or project a work assignment or project is filed under, and whether it is isolated.</summary>
-public sealed record SecureFilingParent(string Table, Guid Id, bool Isolated, string? Name = null);
+/// <summary>
+/// A secure matter or project a work assignment or project is filed under. Whether it is ISOLATED is not carried: every
+/// consumer that depends on it (the mirror, the reverse rule) reads it from the synchronizer at the moment it acts.
+/// </summary>
+public sealed record SecureFilingParent(string Table, Guid Id, string? Name = null);
 
 /// <summary>What the inheritance did to one record.</summary>
 public sealed record SecureRootInheritResult(
@@ -1616,7 +1619,12 @@ public sealed class SecureRootInheritance
         try
         {
             var flag = await ReadParentAsync(parent, parentId, ct).ConfigureAwait(false);
-            if (flag is null || flag.Value.Flag != true)
+
+            // A record that is not (or no longer) there, or reads NOT secure, passes nothing on — and its filed records are
+            // not read at all (a share on an ordinary matter costs no read of what is filed under it). An EMPTY flag is never
+            // "not secure" (owner round 17 item 3): its filed records are listed and each is decided — unverifiable, nothing
+            // written, reported — never skipped as "nothing to pass on".
+            if (flag is null || flag.Value.Flag == false)
                 return SecureFiledRootsPass.NotApplicable($"{parent} {parentId:D} is not secure");
 
             filed = await ListFiledRootsAsync(new[] { (parent, parentId) }, ct).ConfigureAwait(false);
@@ -1917,7 +1925,7 @@ public sealed class SecureRootInheritance
         var secure = new List<SecureFilingParent>();
         foreach (var (table, id) in named.Distinct())
         {
-            (bool? Flag, bool Isolated, string? Name)? parent;
+            (bool? Flag, string? Name)? parent;
             try
             {
                 parent = await ReadParentAsync(table, id, ct).ConfigureAwait(false);
@@ -1938,34 +1946,24 @@ public sealed class SecureRootInheritance
             }
 
             if (parent.Value.Flag == true)
-                secure.Add(new SecureFilingParent(table, id, parent.Value.Isolated, parent.Value.Name));
+                secure.Add(new SecureFilingParent(table, id, parent.Value.Name));
         }
 
         return new SecureParentsAnswer(secure, unknown);
     }
 
-    /// <summary>A matter's or project's flag, whether it is isolated and its name, or <c>null</c> when it does not exist.</summary>
-    private async Task<(bool? Flag, bool Isolated, string? Name)?> ReadParentAsync(string table, Guid id, CancellationToken ct)
+    /// <summary>A matter's or project's flag and its name, or <c>null</c> when it does not exist.</summary>
+    private async Task<(bool? Flag, string? Name)?> ReadParentAsync(string table, Guid id, CancellationToken ct)
     {
         var nameColumn = string.Equals(table, Matter, StringComparison.OrdinalIgnoreCase) ? "sprk_mattername" : "sprk_projectname";
-        var query = Query(table, new[] { IsSecureColumn, OwningTeamColumn, nameColumn });
+        var query = Query(table, new[] { IsSecureColumn, nameColumn });
         query.TopCount = 1;
         query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
         var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (row is null)
             return null;
 
-        var flag = row.GetAttributeValue<bool?>(IsSecureColumn);
-        var owner = row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
-        var isolated = false;
-        if (flag == true && owner is { } team)
-        {
-            var secureTeam = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct)
-                .ConfigureAwait(false);
-            isolated = secureTeam.TeamId == team;
-        }
-
-        return (flag, isolated, row.GetAttributeValue<string>(nameColumn));
+        return (row.GetAttributeValue<bool?>(IsSecureColumn), row.GetAttributeValue<string>(nameColumn));
     }
 
     private readonly ConcurrentDictionary<Guid, string?> _recordTypes = new();

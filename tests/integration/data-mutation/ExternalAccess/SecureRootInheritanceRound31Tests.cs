@@ -782,6 +782,62 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
     }
 
+    /// <summary>
+    /// The mirror's No Access guard on a filed ROOT (task 149's rule): the matter's sharee is on the work assignment's own No
+    /// Access list — never given it, and nothing is recorded as passed on.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_NeverPassesOnASharee_WhoIsOnTheFiledRecordsNoAccessList()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Colleague, workAssignment);
+
+        await _job.RunAsync();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "walled off the filed record");
+        Provenance(workAssignment).Should().NotContain(r => r.SystemUserId == Colleague && r.State == AssignedAccessState.Shared);
+    }
+
+    /// <summary>
+    /// A share on an ORDINARY matter passes nothing on, and reads nothing of what is filed under it (the pass stops at the
+    /// matter's flag) — the share route's cost is the share.
+    /// </summary>
+    [Fact]
+    public async Task SharingOnAnOrdinaryMatter_ReadsNothingFiledUnderIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, isSecure: false);
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+        World.QueriedTables.Clear();
+
+        await ShareAsync("matter", matter, Colleague);
+
+        World.QueriedTables.Should().NotContain("sprk_workassignment", "nothing filed under an ordinary matter is read");
+        _fixture.SharesOn(workAssignment).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Owner round 17 item 3 on the share route: a share on a matter whose flag is EMPTY cannot decide what is owed to the
+    /// records filed under it — reported (children_incomplete), never read as "not secure, nothing to pass on".
+    /// </summary>
+    [Fact]
+    public async Task SharingOnAMatterWhoseFlagIsEmpty_ReportsTheFiledRecordsAsNotUpdated()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, isSecure: false);
+        World.Set("sprk_matter", matter, "sprk_issecure", null);
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+
+        var (status, code, body) = Problem(await ShareAsync("matter", matter, Colleague));
+
+        status.Should().Be(500);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().BeGreaterThan(0);
+        _fixture.SharesOn(workAssignment).Should().BeEmpty("nothing is written on an undecided answer");
+    }
+
     // ══ The job — resumable, and blind to nothing ══════════════════════════════════════════════════════════════════════
 
     /// <summary>

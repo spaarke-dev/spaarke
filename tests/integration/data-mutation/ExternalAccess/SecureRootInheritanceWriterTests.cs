@@ -403,6 +403,42 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     }
 
     /// <summary>
+    /// Owner round 31 item 2: the named Secure Record Owners team cannot be resolved in this environment (no Secure Record
+    /// business unit answers) — a create that would be made INTO isolation is refused (<c>secure_owner_team_unresolved</c>),
+    /// nothing created: never an isolated row owned by nobody, never an ordinary row instead.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheSecureOwnerTeamCannotBeResolved_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        _fixture.SecureBuMatchCount = 0;
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(RecordOwnerRefusal.SecureOwnerTeamUnresolved);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The plan never creates INTO isolation for nobody: asked for a create under a secure matter with no person to secure
+    /// it for, it refuses (<c>creator_unresolved</c>) — the gate every writer calls, asked directly.
+    /// </summary>
+    [Fact]
+    public async Task ThePlan_ForACreateUnderASecureMatterForNobody_Refuses()
+    {
+        var (secure, _) = Matters();
+
+        var plan = await _gate.PlanCreateAsync("sprk_workassignment",
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", secure) },
+            Guid.Empty, CancellationToken.None);
+
+        plan.Isolated.Should().BeFalse();
+        plan.Refusal.Should().NotBeNull();
+        plan.Refusal!.RefusalCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorUnresolved);
+    }
+
+    /// <summary>
     /// Owner round 31 item 1, chat create: whether the caller is on the secure matter's No Access list cannot be checked (the
     /// list cannot be read) — refused (<c>creator_no_access_unverifiable</c>), nothing created (ADR-003).
     /// </summary>
@@ -489,7 +525,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
     private readonly List<Entity> _officeCreates = new();
 
-    private RecordCreationService OfficeCreator(Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null)
+    private RecordCreationService OfficeCreator(
+        Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities
@@ -547,7 +584,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         return new RecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
             IdentityNormalizationFixtures.NoLinkedContact(), _gate,
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<RecordCreationService>.Instance,
-            _officeProbe.Object, new HttpContextAccessor { HttpContext = CallerRequest() });
+            _officeProbe.Object, new HttpContextAccessor { HttpContext = withBearerToken ? CallerRequest() : new DefaultHttpContext() });
     }
 
     /// <summary>
@@ -659,6 +696,28 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         result.Succeeded.Should().BeFalse();
         result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
         result.Failure.Code.Should().Be("caller_cannot_file_under_parent");
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// G5, Office: the request carries no bearer token, so the caller's own rights cannot be asked — refused (500 kind,
+    /// <c>caller_rights_unverifiable</c>), nothing created (ADR-003: never "allowed" because it could not be checked).
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheCallersRightsCannotBeChecked_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+
+        var result = await OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), withBearerToken: false)
+            .CreateAsync(new RecordCreationRequest
+            {
+                EntityType = QuickCreateEntityType.Project, Name = "Lease review", CallerUserId = "oid",
+                OwnerSystemUserId = Creator.ToString("D"), SourceEntityLogicalName = "sprk_matter", SourceRecordId = secure,
+            });
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
+        result.Failure.Code.Should().Be(RecordCreationService.CallerRightsUnverifiable);
         _officeCreates.Should().BeEmpty();
     }
 

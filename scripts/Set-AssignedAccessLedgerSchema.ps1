@@ -38,8 +38,9 @@
     the L1 writers, the 5-minute job). In an environment without the table the read fails and every materialization
     reports `ledger-unreadable` and writes NOTHING (fail closed) — no outage of existing access, but no auto-grants.
     A BFF build carrying task 158 r1 also reads the inherited-share rows WITH sprk_subjectteam on every /share-user,
-    /unshare-user and secure-root-inheritance pass: without the column those reads fail, every such fan-out answers
-    children_incomplete and passes nothing on (fail closed). Run -Apply, then -Verify (exit 0), then deploy the BFF.
+    /unshare-user and secure-root-inheritance pass, and before every /unsecure-project of a work assignment or project:
+    without the column those reads fail, every such fan-out answers children_incomplete and passes nothing on, and such
+    an unsecure stops before revoking anything (fail closed). Run -Apply, then -Verify (exit 0), then deploy the BFF.
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com

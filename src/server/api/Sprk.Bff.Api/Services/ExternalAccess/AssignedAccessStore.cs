@@ -744,7 +744,7 @@ public class AssignedAccessStore
         var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
             EntitySet,
             filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
-                    $"not startswith(sprk_sourcefield,'{InheritedSourcePrefix}')",
+                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))",
             select: "sprk_assignedaccessid,sprk_sourcefield,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value",
             top: MaxScanRows + 1,
             cancellationToken: ct).ConfigureAwait(false);

@@ -292,6 +292,14 @@ it does not re-open design.
   client exposed, stamp columns only, and values derived from the data, never from the caller. A refused PATCH re-stamps
   nothing. This amendment covers only that re-stamp. Record: `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`,
   "Owner round 8".
+- ⚠️ **Amendment A-UAC158 (2026-10-04, owner round 32): securing a work assignment or project the tools file under a
+  SECURE record.** Beside A-UAC156 above (owner round 8 item 1) and the re-file owner step folded into path B (owner round
+  13 item 7), the same "✅ MUST run user-OBO" rule and FR-P0-10 are amended, CLAUDE.md §6.5 **path B, ACCEPTED by the
+  owner** in unified-access-control-r2 owner round 32 (task 158 Q2, "Path B: secure inline"), extending Amendment
+  A-UAC146: when `dataverse.update_record` re-files a work assignment or project under a secure matter or project, it
+  runs provisioning's app-only steps inline, right after the caller's own (still user-OBO) PATCH, for the record's
+  recorded creator; `dataverse.create_record` creates such a record INTO isolation (A-UAC146's G5 create) and completes it
+  through the same steps. Full text: "Amendment A-UAC158" under ADR Tensions below.
 
 ### Existing Patterns to Follow
 - Prompted executor: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/` (ActionRunner + PromptSchemaRenderer)
