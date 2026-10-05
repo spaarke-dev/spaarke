@@ -1,29 +1,19 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-05. Round 4 merged (PR #1292 `293fcd4c8`) and live; dev BFF deployed from master `293fcd4c8` (carries 083); next = UAT round 5
+> **Last Updated**: 2026-10-05. UAT round 5 (098/099/100) merged #1301 `91a16326e` and deployed to dev; next = owner UAT round 6
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
-> **2026-10-05: task 100 ✅ DONE in the working tree — UNCOMMITTED** (sub-agent run; the main session commits).
-> Record: `notes/100-create-record-fields.md`. Schema verified live (invoice Assigned To = `sprk_assignedto1`; no
-> escalation). BFF: `practiceAreaId`/`projectTypeId`/`assignedToContactId` + invoice description; `/search/{list}`
-> (generalized matter-types route); `GET /quickcreate/defaults`; Read gate on the posted contact. Pane:
-> `CreateRecordForm` + shared `LookupField` (`@spaarke/ui-components/lookup-field` alias), `useCreateRecordFormData`,
-> `referenceListService.ts` (replaces `matterTypeLookupService.ts`). Gates green (build 0/0, ArchTests 349, jest
-> 77/1075, lint 0, tsc 0 prod, publish +15,634 B). NEXT: commit; deploy BFF + add-in; live checks (§11 of the note).
-> `scripts/check-task-status-drift.ps1` parses only 5 index rows here (pre-existing format mismatch; 099 shows the same).
-
 | Field | Value |
 |---|---|
-| **Task** | **Round 4 merged** — PR #1292 `293fcd4c8` (095 + 096 held off + switch + review fixes, `notes/042-uat-round4-2026-10-04.md` §5). Add-in site redeploys from the master push |
-| **Owner decision 2026-10-04** | *"yes we can follow your recommendation - ensure we have this fully documented"* → the send-route authorization is UAC-r2 task 161's (one implementation); the Word Email tab (096) is held OFF until 161 is on master + deployed; 097 = the archive fix (after UAC-r2 146) + live checks, later |
-| **Next Action** | DONE: 1) switch `ADDIN_EMAIL_TAB_ENABLED` (default off), 2) code-review + adr-check (no Critical; fixes in §5 of the round-4 note), 3) build/jest/lint/typecheck green. 4) PR #1292 merged `293fcd4c8`. 7) UAC-r2 informed (owner relayed the 097 note; they will report back when 161/146 are done). 5) Dev BFF deployed 2026-10-05 from master `293fcd4c8` (owner: "deploy bff.api now BUT ensure that updated to master"): 45.65 MB, 4/4 critical files SHA-256 match, /healthz 200, office todo/save/search + communications/send all 401 unauthenticated. 6) Add-in site deployed from `293fcd4c8` (deploy-office-addins success). NEXT: 8) UAT round 5. Pending owner: spec.md ADR-012 Tensions row amendment (round-4 note §5) |
-| **Re-upload?** | **No** for round 4: manifests unchanged, package stays 1.1.1 (095's +75 px width is a runtime call). Owner already has `C:\code_files\spaarke-addin-package\spaarke-addin-1.1.1.zip` |
-| **Main checkout** | `C:\code_files\spaarke` is on ANOTHER session's branch (`chore/portfolio-board-hygiene`). Never `git pull` there — `git fetch origin && git branch -f master origin/master` (memory: main-checkout-may-be-on-another-branch) |
-
+| **Task** | **UAT round 5 shipped to dev** — PR #1301 merged `91a16326e` (tasks 098, 099, 100); dev BFF deployed from master `91a16326e` (45.66 MB, 4/4 SHA-256, /healthz 200; new routes `/api/office/search/{practice-areas,project-types,matter-types}`, `/api/office/quickcreate/defaults`, `/api/office/quickcreate/{type}` all 401 unauthenticated); add-in site deployed `91a16326e`. Package unchanged (1.1.1) — no re-upload |
+| **Next Action** | Owner runs **UAT round 6** on round 5: create one Matter / Project / Invoice from the pane with every field; clear Assigned To on a Matter (assigns you) and an Invoice (stays empty); walk the post-save flow (confirmation + Profile/Refresh; Save only after an edit). Record results, close 099/100 live criteria. |
+| **Waiting on others** | UAC-r2: task 161 (+146) → then 097 (flip `ADDIN_EMAIL_TAB_ENABLED`, archive fix, live checks); retiring the now-unused `POST /api/documents/{id}/share-link` + its UAC tests (`notes/098-share-link-route-refusal.patch`). |
+| **098 reach** | The composer's record-link change lives in `@spaarke/ui-components`; it reaches users only when each consumer is rebuilt + deployed (Email code page, SpaarkeAi Console, DocumentUploadWizard, TrackingFieldTrio / Communication PCFs). Not deployed by this project yet. |
+| **Main checkout** | `C:\code_files\spaarke` may be on another session's branch — check first; never `git pull` there unless it is on master and clean (memory: main-checkout-may-be-on-another-branch) |
 ### State of every open item
 
 | Item | State |
@@ -323,7 +313,7 @@ No task is in progress, and nothing is half-applied.
 
 ## 📜 HISTORY — ✅ MERGED TO MASTER — **DONE 2026-09-30**
 
-> **Last Updated**: 2026-09-30 (post-merge + owner decisions on 065 / 066)
+> **Last Updated**: 2026-10-05. UAT round 5 (098/099/100) merged #1301 `91a16326e` and deployed to dev; next = owner UAT round 6
 
 | Field | Value |
 |---|---|
@@ -558,7 +548,7 @@ neither breaks the build, so the compiler will not catch it.
 
 ## 🔵 NEXT — every remaining task is gated on an OWNER DECISION or on UAC-r2 #1029
 
-> **Last Updated**: 2026-09-30 (077 closed; task-execute Step 11 transition)
+> **Last Updated**: 2026-10-05. UAT round 5 (098/099/100) merged #1301 `91a16326e` and deployed to dev; next = owner UAT round 6
 
 | Field | Value |
 |---|---|
@@ -1005,7 +995,7 @@ the local figure disagrees with CI (80 vs 74 at the same commit). Pin the CI num
 ---
 
 
-> **Last Updated**: 2026-09-21 — **056's gate is GREEN (two defects, both proven on real CI runs). Task 058 conflict-check DONE (soft warn, proceed). 057/059/060 still not started.**
+> **Last Updated**: 2026-10-05. UAT round 5 (098/099/100) merged #1301 `91a16326e` and deployed to dev; next = owner UAT round 6
 
 ---
 
