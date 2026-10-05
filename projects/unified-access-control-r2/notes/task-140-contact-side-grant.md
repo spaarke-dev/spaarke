@@ -190,6 +190,10 @@ the colleague's grant cache is invalidated under every tenant (task 137), so rem
 Fresh trees exported with `git archive` to SHORT paths (`C:\wt140m` = base `6b685f0d4`, `C:\wt140b` = branch `1a8953d4a`), each
 `dotnet publish -c Release`, zipped with PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy\api-publish\*`
 (incl. PDBs): **base 46.00 MB, branch 46.03 MB, delta +0.03 MB, 212 = 212 files.** ≤ 60 MB. No package added to the BFF.
+**Re-measured in r-final (§11)** after that round's BFF changes, the same way from fresh exported trees at SHORT paths
+(`C:\wt140m2` = base `6b685f0d4`, `C:\wt140b2` = branch `fdf24ee4f`, the last commit touching `src/`): **base 46.00 MB, branch
+46.03 MB, delta +0.03 MB, 212 = 212 files (4 PDBs each)**, Compress-Archive Optimal incl. PDBs. `dotnet list package --vulnerable
+--include-transitive` (BFF): no vulnerable packages; no .NET package changed since the base.
 `dotnet list package --vulnerable --include-transitive` (BFF): no vulnerable packages. External SPA `npm audit --omit=dev`:
 4 moderate, no high (prod dependencies unchanged by this task; only devDependencies added).
 
@@ -220,3 +224,77 @@ Fresh trees exported with `git archive` to SHORT paths (`C:\wt140m` = base `6b68
 ## 10. `.claude/` edits needed (main-session only)
 
 None required by this task.
+
+## 11. Fix round r-final (2026-10-04, after the machine restart) — verifier r1 items 1–15
+
+Branch `task/uac-r2-140-x1-v1c`, created from `wip/uac-r2-140-x1-v1-restart` @ `c1210b9da` (the previous agent's
+"saved before a machine restart" commit, unverified). Session 27 rounds 1–36 read from `work/unified-access-control-r2`.
+
+| # | Item | Outcome |
+|---|---|---|
+| 1 | The WIP commit | **Kept in full, after review.** It built clean, and its affected tests were green (252/252 over ContactGrant / RecordShareExpiry / BulkUpdateTransaction / GrantPolicy / GrantorCeiling / GrantLifecycle) before any change. What it carried: the scoped colleague-by-email read (items 5/13), the no-disclosure by-id path (items 4/14), the schema script on the shared membership helper (items 3/12), the `.NOTES` fix (item 7), the set-record-share-expiry take-over code (items 2/6) and `IGenericEntityService.BulkUpdateAsync` clearing a column on `DBNull.Value` (UpdateAsync's convention). What it lacked, added here: tests + seeds for the take-over, the core's systemuser stamp under test, the script pin, the by-id equal-reads rule, the SPA type errors, docs, this record. |
+| 2 | Round 34 item 3 (BINDING) — internal take-over outside the core | **Closed.** `SetRecordShareExpiryEndpoint` adds, for every share whose `sprk_grantedbycontact` is set, `sprk_grantedbycontact = DBNull.Value` (clear) and `sprk_grantedby = EntityReference(systemuser, caller)` to that share's fields in the ONE `ExecuteTransactionRequest` (`ExternalGrantLifecycle.AddInternalTakeOverFields`); the caller's systemuser is read only when such a share exists; an unresolvable caller still clears the contact issuer (the core's "an audit field never blocks the write" rule). Writers enumerated (every BFF write to `sprk_externalrecordaccesses`): the core (take-over existed; its stamp now under test), set-record-share-expiry (added), and the DEACTIVATING writers `/revoke`, project closure and the reconciliation job — an inactive row is outside every contact path (the contact's grant, list and revoke change only ACTIVE rows it issued), so nothing there can be re-lengthened or revoked by the contact. Non-product writes: live read-only 2026-10-04, `prvWritesprk_ExternalRecordAccess` is held by System Administrator, System Customizer and Service Writer only — no Spaarke role — so no ordinary internal Write holder can change a grant row outside the BFF. Docs: uac-access-control.md, entity-schema.md (writer row + column note). |
+| 3 | `-Verify` false negative (G-140-1 could never pass) | **Closed.** Step (d) decides through `scripts/common/DataverseSolutionMembership.ps1` (`Get-DvSolutionMembership` paged, `Test-DvInSolution -TableMetadataId`); the column and relationship carry their table's MetadataId. Live read-only probe (2026-10-04): SpaarkeCore 374 components over all pages, 87 tables with subcomponents; `sprk_externalrecordaccess` (fbeb1369-…) is a Direct row; a column of that table (the existing `sprk_grantedby`, f23aba4f-…) has NO own row and reads `ViaTable` — exactly the shape the new column will have. Dry run (read-only) re-run green on the helper: (b) OK, (d) both profiles OK. Pinned by `SchemaScriptSolutionMembershipGuardTests` (helper use) and the new `ContactGrantGuardTests.TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable` (each type-2/10 component carries `TableId`, the call passes `-TableMetadataId`, no own `solutioncomponents` read). Also: a comma-joined `-BffApplicationIds` (pwsh `-File`) is split. |
+| 4 | By-id path leaked another organization's contact email; existence oracle | **Closed.** Every by-id refusal (unknown id, inactive contact, active contact of another organization) is ONE 422 worded "This person …"; the stored email is never read into a message (only a VERIFIED colleague's address may label a later managed_elsewhere message). This round also makes the WORK identical: the contact lookup AND the membership read run for every id, so the reads done do not tell the caller whether the id names a contact. Tests: the 2-shape theory (other-organization, inactive) compares status, code and detail with an unknown id and asserts the secret email never appears and the same reads ran. |
+| 5 | Email lookup was system-wide | **Closed.** `ExternalParticipationService.FindConferringMembersByEmailAsync`: ONE read of the `sprk_contactorganization` rows of the grantor's conferring organizations (chunks of 25, every chunk read, `@odata.nextLink` followed) whose expanded contact is active and uses the email; re-decided in code by `ProjectColleaguesByEmail` (the task-109 conferring rule, active contact, case-insensitive trimmed email). >1 COLLEAGUE → 409 "more than one person in your organization"; an outsider is never counted or mentioned. Query live-verified read-only on spaarkedev1 (the production `$filter`/`$select`/`$expand`, incl. an escaped quote). The DTO and bff-client comments now say what the code does. **On the wire**: new `ColleagueByEmailWireTests` (3) run the REAL service over an in-memory ASP.NET Core server (ADR-038 §7's B1 replacement, as `OrganizationMembershipReadTests` does): the server receives EXACTLY the builder's `$filter` (a term appended at the call site goes red), its `$select`/`$expand`/page-size preference, every page is read, the live row shape is projected, a faulted page is `Failed` (never "nobody"), and chunks carry their own exact filters. **The full ArchTests run found the WIP's new junction read tripping task 109's guard** (`ExternalAccessQueryIntegrityGuardTests.MembershipJunctionQueriesUseTheWallSafeFilterBuilder`: "a sprk_contactorganizations query builds its $filter inline"). Not an inline filter — a third direction the guard did not know — so the guard was EXTENDED, not bypassed: `BuildColleagueByEmailFilter` is accepted as the (organizations, email) → colleagues builder, must be found (not vacuous), and its body is held to the wall rule (names `WallMembershipStateClause`, no `sprk_startdate`/`sprk_enddate`). |
+| 6 | Take-over did not cover every internal writer | = item 2. |
+| 7 | `.NOTES` cited a non-existent test | **Closed** (`ContactGrantGuardTests.TheIssuerColumnAgreesWithTheSchemaScript`; the solution step → `SchemaScriptSolutionMembershipGuardTests`). |
+| 8 | Six pre-existing `tsc --noEmit` errors | **Fixed, not filed.** `mock-data.ts` ×3: event mocks used `_sprk_projectid_value` (sprk_event's project lookup is `sprk_regardingproject`) → `_sprk_regardingproject_value`. `OutsideCounselDashboard.tsx` ×2: a REAL display defect — every Recent Activity / Upcoming item read that non-existent column and so named its project "Unknown Project"; items now carry the project id and the name comes from the project rows the page already loads (the page is not routed today, so it was latent); the inert `$select` corrected. Shared `EntityCreationService.ts` ×1: the SPA's ambient `@spaarke/sdap-client` shim lacked `DriveItem` (the shared service began importing it). `npm run typecheck` added; `tsc --noEmit` exits 0. Also fixed the one pre-existing lint WARNING (`DocumentLibrary` effect missing `projectId`): `npm run lint` now reports 0 problems. New vitest `OutsideCounselDashboard.projectName.test.tsx` (seeded red, restored green). |
+| 9–11 | Verifier's green runs / seeds / compliance | Re-run here — see suite results below. |
+| 12 | POML step 1(c) / G-140-1 could not pass | = item 3 (code defect closed). The operator `-Apply` + `-Verify` remain the pending manual gate (exact commands in §5). |
+| 13 | POML step 4 email scope | = item 5. |
+| 14 | No-oracle intent | = item 4. |
+| 15 | Pending live gates | Unchanged and NOT counted as failures: G-140-1 (operator schema `-Apply` then `-Verify`, §5) and G-140-2 (criterion 21 manual live gate, §6). |
+
+### r-final perturbation record (each seed alone, affected tests run, file restored + touched)
+BFF (filter ContactGrant* + RecordShareExpiry* + BulkUpdateTransaction*, 119 tests; each seed alone; every one went red, each restored and touched; 119/119 after):
+- **T1** set-record-share-expiry take-over call disabled → 3 red: `RecordShareExpiryTests.SetShareExpiry_TakesOverEveryContactIssuedShare_InTheSameTransaction_AndOnlyThose`, `…_WhenTheCallersSystemUserDoesNotResolve_StillClearsTheContactIssuer`, `ContactGrantAuthorizationTests.RecordShareExpiry_ByAnInternalWriteHolder_TakesTheContactIssuedRowOver_SoTheContactCanNeitherLengthenNorRevokeIt(True)`.
+- **T2** take-over helper does not stamp `sprk_grantedby` → 2 red (TakesOver…, the cross-surface theory True).
+- **T3** take-over helper does not clear `sprk_grantedbycontact` → 3 red (TakesOver…, StillClears…, cross-surface True).
+- **T4** the core's take-over does not stamp the systemuser → 1 red: `CoreDefaultMode_ChangingAContactIssuedRow_StampsTheChangingSystemUser_InTheSameWrite`.
+- **T5** `BuildBulkUpdateTransaction` skips a `DBNull.Value` instead of clearing → 2 red: `BulkUpdateTransactionTests.BuildBulkUpdateTransaction_WhenAFieldValueIsDBNull_ClearsThatColumnInTheSameTransaction`, `SetShareExpiry_TakesOver…` (its real-builder half).
+- **S4a** by-id other-organization refusal echoes the contact's email → 1 red: `Grant_ById_OfANonColleague_IsTheSameAnswerAsAnUnknownId_AndNeverShowsTheirEmail("other-organization")`.
+- **S4b** by-id inactive refusal echoes the stored email → 1 red: the same theory ("inactive").
+- **S12** membership read skipped when the id names no active contact (the work-done oracle) → 2 red: the same theory, both shapes (85-test ContactGrant filter).
+- **S5** the old system-wide email lookup reinstated in front of the scoped read → 2 red: `Grant_ByEmail_WhenAnOutsiderSharesTheColleaguesAddress_GrantsTheColleague`, `Grant_ByAnEmailTwoActiveColleaguesShare_Is409Ambiguous` (message no longer says "in your organization").
+- **S6** projection keeps an inactive contact → 2 red: `Grant_ByEmail_AnInactiveContactAtTheSameAddress_IsNotCounted`, `ProjectColleaguesByEmail_KeepsOnlyActiveContactsAtTheAddressWithAConferringMembership`.
+- **S7** projection ignores the email → 8 red (every by-email test, incl. the 2-plane new-person theory).
+- **S8** only the first organization chunk read → 1 red: `Grant_ByEmail_ForAGrantorInManyOrganizations_ReadsEveryOrganization`.
+- **S9** email literal not escaped → 1 red: `BuildColleagueByEmailFilter_NamesTheOrganizations_AndEscapesTheEmail`.
+- **S10** a colleague-read fault folded into "nobody" → 1 red: `Grant_WhenTheGranteeLookupCannotBeRead_Is503("email")`.
+- **S11** conferring-membership rule dropped from the projection → 1 red: `ProjectColleaguesByEmail_Keeps…`.
+- **W1** a date term APPENDED after the builder call in `ReadColleagueMembershipRowsAsync` (the guard's documented blind spot) → 2 red: `ColleagueByEmailWireTests.TheRead_SendsExactlyTheBuiltFilter_ReadsEveryPage_AndProjectsTheLiveShape`, `…_IsReadInChunks_EachWithItsOwnExactFilter` (88-test filter incl. ContactGrant*).
+- **W4** the read stops after the first page → 2 red: `TheRead_SendsExactlyTheBuiltFilter…`, `AFaultedPage_IsUnreadable_NeverNobody_EvenAfterAMatchOnAnEarlierPage`.
+
+ArchTests (filter ContactGrantGuardTests + SchemaScriptSolutionMembershipGuardTests, 8 tests):
+- **SC1** the script's own `solutioncomponents?` read reinstated → 2 red (the helper guard + `TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable`).
+- **SC2** the column component loses its `TableId` → 1 red (`TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable`).
+- **SC3** `GrantedByContactAttribute` misnamed → 1 red (`TheIssuerColumnAgreesWithTheSchemaScript`).
+- **W2** the colleague read's `$filter` inlined at the call site → 1 red (`Task 109: membership-junction queries build their $filter, never inline it`).
+- **W3** a date term added INSIDE `BuildColleagueByEmailFilter` → 1 red (the same guard, its new builder-body check).
+
+External SPA (vitest): the dashboard's `withProjectName` removed → `OutsideCounselDashboard.projectName.test.tsx` red; restored → 13/13.
+
+Seeds that change logic use a runtime-opaque condition (`Environment.GetEnvironmentVariable(...) is not null`), not a literal `if (false)` (CS0162 is an error here).
+
+### r-final suite results
+Affected first (each green before the full runs): ContactGrant* 85/85 (was 73 before the WIP + this round), ColleagueByEmailWireTests
+3/3, RecordShareExpiry* 27/27, BulkUpdateTransaction* 7/7; ContactGrantGuardTests + SchemaScriptSolutionMembershipGuardTests +
+ExternalAccessQueryIntegrityGuardTests 8/8 (filtered).
+
+Full runs, once, at the end (other agents were running suites concurrently):
+- **BFF unit suite** (`tests/unit/Sprk.Bff.Api.Tests`, compiles `tests/integration/auth/**`) on the final code (`76720ca78`):
+  **15497 passed, 1 failed, 54 skipped (15552)**. The one failure, `SpeAdmin.SearchItemsTests.SearchItems_WithToken_WhitespaceQuery_Returns400`,
+  is contention — that suite makes a real outbound call (session 27 round 16 item 5) — and its isolated re-run is **7/7 passed**.
+  An earlier full run on `fdf24ee4f` (all BFF source final; before the 3 wire tests): **15495 passed, 0 failed, 54 skipped**.
+- **ArchTests** (`tests/Spaarke.ArchTests`): **603/603** on the final code. (A first full run on `fdf24ee4f` was 602/1 — the task-109
+  junction guard flagged the WIP's colleague read; fixed as recorded in item 5, re-run green.)
+- **Sprk.Bff.Api.IntegrationTests**: **104/104**. **Spe.Integration.Tests**: **403 passed, 25 skipped, 0 failed (428)**.
+- **External SPA**: `npm install --legacy-peer-deps --no-audit --no-fund` OK; `npm run typecheck` (tsc --noEmit) **0 errors**;
+  `npm test` (vitest) **13/13**; `npm run lint` **0 problems** (0 errors, 0 warnings); `npm run build` (vite) green.
+- Shared UI / TrackingFieldTrio: not touched this round (no rebuild needed).
+- Publish size (CLAUDE.md §10) re-measured: base 46.00 MB → branch 46.03 MB, +0.03 MB, 212 = 212 files (§7). No vulnerable BFF package.
+
+Live (read-only) this round: the colleague-by-email query run against spaarkedev1 with the production filter/select/expand; the
+SpaarkeCore membership probe (§11 item 3); the privilege read on `prvWritesprk_ExternalRecordAccess`; the schema script's dry run.
+No live write. The column is still absent live (dry run: "WOULD create").
