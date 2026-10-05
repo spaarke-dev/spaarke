@@ -616,6 +616,14 @@ documented deviation.
 
 **Alternatives considered for ADR-028** (presented to, and accepted by, the owner alongside the approval above): (B) amend ADR-028 A4 to permit a second shared factory per dedicated identity — rejected as premature; only one such identity exists today, and generalizing the rule before a second case justifies it risks writing a rule for a shape not yet seen. (C) comply — would require going through `ManagedIdentityCredentialFactory`, a `DefaultAzureCredential` factory keyed to the sysadmin UAMI, by adding a parameter for an alternate config-key pair — rejected because that would re-introduce a BRANCH into the one place code-review found must have none (F7).
 
+| ADR | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| **ADR-009** | "MUST use `IDistributedCache` for cross-request caching"; "MUST NOT add L1 cache without profiling proof" | Task 096 (PR #1294, fixing issue #1295 outside the ontology code) adds an in-process, cross-request cache of each AI tool schema's meta-schema verdict in `Draft202012MetaSchemaValidator`. The verdict must be serialized under one process-wide lock (Json.Schema.Net is not thread-safe), and both validation sites run on **every chat message** | **A — project-scoped exception (✅ APPROVED by owner 2026-10-05)** | The cache holds the result of a pure function of the schema text (valid flag + error list): no store data, nothing per tenant or user, so there is nothing to keep consistent across instances. Profiling proof is in the PR: 0.12–0.19 ms per small schema and 15–108 ms per 32 KB schema uncached, about 0.1–7 µs cached; without the cache chat turns queue on the lock. Capped at 1,024 entries / 2,000,000 characters; past the cap it evaluates under the lock (still correct). A Redis round trip would cost more than the evaluation it replaces |
+
+**Alternatives considered for ADR-009**: (B) amend ADR-009 to allow in-process memoization of pure functions — not
+proposed from a single case; (C) comply — either no cache (correct, but every chat turn serializes on the lock) or a
+Redis-backed verdict cache (a network round trip to avoid a microsecond lookup, plus a new dependency on the hot path).
+
 ---
 
 ## 7. Success criteria
