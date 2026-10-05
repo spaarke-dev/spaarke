@@ -97,7 +97,7 @@
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | Fixes relocated to their own PRs: C-10→084, C-5→085, C-19→086, C-22→088, C-23→[#1114](https://github.com/spaarke-dev/spaarke/pull/1114). C-21: owner chose **delete** (in 086) |
-| 🔲 081 | [On-branch cleanup the worklist needs (C-8, C-11, C-13, C-17)](081-duplication-cleanup.poml) | FULL | sonnet/high | 084 | — | C-13 waits for **084 merged**; C-17 = **3/7/10 days** (owner) |
+| 🔄 081 | [On-branch cleanup the worklist needs (C-8, C-11, C-13, C-17)](081-duplication-cleanup.poml) | FULL | sonnet/high | 084 | — | C-13 waits for **084 merged**; C-17 = **3/7/10 days** (owner)  — **2026-10-05: own PR to master [#1309](https://github.com/spaarke-dev/spaarke/pull/1309)** (round 3; reviews 1-2 FAILED); SmartTodo palette everywhere; 38 packages build; third independent review running |
 | ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
 | ✅ 084 | [To-Do scorer, own PR (C-10)](084-todo-scorer-own-pr.poml) | FULL | sonnet/high | — | I | [PR #1118](https://github.com/spaarke-dev/spaarke/pull/1118) **merged** `b5b0c0ce0`. **Live bug.** Merge first; 081 depends on it |
