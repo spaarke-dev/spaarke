@@ -118,12 +118,6 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(newTodo as unknown as T, 600);
   }
 
-  // PATCH /api/v1/external/events/:id (update event)
-  const updateEvent = path.match(/^\/api\/v1\/external\/events\/([^/]+)$/);
-  if (method === 'PATCH' && updateEvent) {
-    return delay(undefined as unknown as T, 300);
-  }
-
   // PATCH /api/v1/external/todos/:id (update to-do — NEW, R3 task 007)
   const updateTodoPath = path.match(/^\/api\/v1\/external\/todos\/([^/]+)$/);
   if (method === 'PATCH' && updateTodoPath) {

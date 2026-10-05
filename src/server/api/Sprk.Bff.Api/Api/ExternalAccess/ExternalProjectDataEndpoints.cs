@@ -73,8 +73,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// deliberately do NOT select, accept, or return sprk_todoflag. To-dos remain exclusively on
 /// sprk_todo via /todos. If a future change makes these two surfaces overlap again, that is the
 /// regression FR-29 existed to prevent — keep them disjoint.
-/// PATCH /events/{id} was NOT restored: the only client caller (web-api-client.updateEvent) has
-/// zero call sites, so there is no consumer to justify the write surface (CLAUDE.md §11).
+/// PATCH /events/{id} was NOT restored: its only client wrapper (web-api-client.updateEvent) had zero call sites
+/// and was deleted (spaarke-ontology-platform-r1 task 097), so there is no consumer to justify the write surface
+/// (CLAUDE.md §11).
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.

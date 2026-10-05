@@ -729,63 +729,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         throw new InvalidOperationException("Failed to extract entity ID from create response");
     }
 
-    public async Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
-    {
-
-        var filterQuery = activeOnly ? "$filter=statecode eq 0&" : "";
-        var url = $"sprk_eventtypes?{filterQuery}$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate&$orderby=sprk_name asc";
-
-        _logger.LogDebug("Getting event types (activeOnly={ActiveOnly})", activeOnly);
-
-        try
-        {
-            var response = await SendGetAsync(url, ct);
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-            if (data == null)
-                return Array.Empty<EventTypeEntity>();
-
-            return data.Value.Select(MapToEventTypeEntity).ToArray();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting event types");
-            throw;
-        }
-    }
-
-    public async Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
-    {
-
-        var url = $"sprk_eventtypes({id})?$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate";
-
-        _logger.LogDebug("Getting event type: {Id}", id);
-
-        try
-        {
-            var response = await SendGetAsync(url, ct);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogDebug("Event type not found: {Id}", id);
-                return null;
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
-            if (data == null) return null;
-
-            return MapToEventTypeEntity(data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting event type {Id}", id);
-            throw;
-        }
-    }
-
     // ========================================
     // Field Mapping Operations (Events and Workflow Automation R1)
     // ========================================
@@ -1889,26 +1832,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? Guid.Parse(cbId.GetString()!) : null,
             CreatedByName = data.TryGetValue("_createdby_value@OData.Community.Display.V1.FormattedValue", out var cbName) && cbName.ValueKind != JsonValueKind.Null
                 ? cbName.GetString() : null
-        };
-    }
-
-    private EventTypeEntity MapToEventTypeEntity(Dictionary<string, JsonElement> data)
-    {
-        return new EventTypeEntity
-        {
-            Id = data.TryGetValue("sprk_eventtypeid", out var id) && id.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(id.GetString()!) : Guid.Empty,
-            Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
-                ? name.GetString()! : string.Empty,
-            EventCode = data.TryGetValue("sprk_eventcode", out var code) && code.ValueKind != JsonValueKind.Null
-                ? code.GetString() : null,
-            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
-                ? desc.GetString() : null,
-            StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
-            RequiresDueDate = data.TryGetValue("sprk_requiresduedate", out var rdd) && rdd.ValueKind != JsonValueKind.Null
-                ? rdd.GetInt32() : null,
-            RequiresBaseDate = data.TryGetValue("sprk_requiresbasedate", out var rbd) && rbd.ValueKind != JsonValueKind.Null
-                ? rbd.GetInt32() : null
         };
     }
 

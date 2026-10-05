@@ -998,33 +998,6 @@ public class UpdateEventRequest
 }
 
 /// <summary>
-/// Event Type entity model (sprk_eventtype)
-/// </summary>
-public class EventTypeEntity
-{
-    /// <summary>Event Type ID (sprk_eventtypeid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_name) - Primary field</summary>
-    public required string Name { get; set; }
-
-    /// <summary>Event code (sprk_eventcode)</summary>
-    public string? EventCode { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>State code: Active (0), Inactive (1)</summary>
-    public int StateCode { get; set; }
-
-    /// <summary>Requires due date: No (0), Yes (1)</summary>
-    public int? RequiresDueDate { get; set; }
-
-    /// <summary>Requires base date: No (0), Yes (1)</summary>
-    public int? RequiresBaseDate { get; set; }
-}
-
-/// <summary>
 /// Event Log entity model (sprk_eventlog)
 /// </summary>
 public class EventLogEntity

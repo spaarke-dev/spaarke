@@ -15,7 +15,6 @@
  *   GET   /api/v1/external/projects/{id}/organizations        → project organizations
  *   POST  /api/v1/external/projects/{id}/events               → create event
  *   POST  /api/v1/external/projects/{id}/todos                → create to-do (NEW)
- *   PATCH /api/v1/external/events/{id}                        → update event
  *   PATCH /api/v1/external/todos/{id}                         → update to-do (NEW)
  *
  * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
@@ -328,7 +327,7 @@ async function createRecord<TBody, TResult = TBody>(bffPath: string, body: TBody
 /**
  * Make a PATCH (update) request to the BFF API.
  *
- * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/events")
+ * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/todos")
  * @param id       Record GUID to update
  * @param body     Partial record payload with fields to update
  */
@@ -572,19 +571,6 @@ export interface CreateEventPayload {
 }
 
 /**
- * Payload for updating an existing Event record via the Web API.
- * All fields are optional — only provided fields are updated (PATCH semantics).
- */
-export interface UpdateEventPayload {
-  /** Event display name */
-  sprk_name?: string;
-  /** ISO date string for the due date */
-  sprk_duedate?: string;
-  /** Event status option set value */
-  sprk_status?: number;
-}
-
-/**
  * Create a new Event record in Dataverse via the Power Pages Web API.
  *
  * Requires the authenticated user to have Create table permission on
@@ -604,19 +590,6 @@ export async function createEvent(projectId: string, payload: CreateEventPayload
   };
 
   return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
-}
-
-/**
- * Update an existing Event record in Dataverse via the Power Pages Web API.
- *
- * Uses PATCH semantics — only the fields included in `payload` are modified.
- * The Bearer token is automatically included by `bffApiCall`.
- *
- * @param eventId  Dataverse GUID of the sprk_event record to update
- * @param payload  Partial event fields to update
- */
-export async function updateEvent(eventId: string, payload: UpdateEventPayload): Promise<void> {
-  return updateRecord<UpdateEventPayload>('/api/v1/external/events', eventId, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -727,7 +700,6 @@ export const webApiClient = {
   // Events
   getEvents,
   createEvent,
-  updateEvent,
   // To-Dos (NEW)
   getProjectTodos,
   createTodo,

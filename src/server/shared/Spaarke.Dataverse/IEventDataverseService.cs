@@ -1,7 +1,7 @@
 namespace Spaarke.Dataverse;
 
 /// <summary>
-/// Event management, event logs, and event type operations.
+/// Event management and event log operations.
 /// Part of the IDataverseService composite (ISP segregation).
 /// </summary>
 public interface IEventDataverseService
@@ -25,6 +25,4 @@ public interface IEventDataverseService
     Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default);
     Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default);
     Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default);
-    Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default);
-    Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default);
 }

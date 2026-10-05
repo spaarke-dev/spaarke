@@ -2171,18 +2171,6 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventLogAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("GetEventTypesAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
-    public Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("GetEventTypeAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
     // ========================================
     // Field Mapping Operations (Events and Workflow Automation R1)
     // NOTE: Field-mapping routes to DataverseWebApiService (GraphModule DI); like the event methods above,
