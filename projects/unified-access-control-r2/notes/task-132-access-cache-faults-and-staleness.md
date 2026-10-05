@@ -1046,6 +1046,14 @@ ArchTests green, and the comments said neither could exist:
 `tests/Spaarke.ArchTests/PoaShareClientSingletonGuardTests.cs`, over the same compiled scan set as C1 (every `src`
 assembly the BFF runs or that can name the client; each must load):
 
+> **[CORRECTED in round g, main-session rounds 55 / 56 — §16.9.]** C7 bans the LIST of APIs in its row below, not the
+> mechanism. Verifier seed V (`Microsoft.VisualBasic.Interaction.CallByName` with a run-time name) and seed M
+> (`ModuleHandle.ResolveMethodHandle` + `MethodBase.GetMethodFromHandle`, run by `EnumerableQuery` compiling a hand-built
+> `Expression.Call`) reached `DataverseWebApiService.RevokeAccessAsync` with all 625 ArchTests green. Round 55 moved the
+> eviction into the write itself, so those routes now evict (behaviour tests V and M); C7 stays as defence in depth and
+> claims only its list. C7's test is renamed `NoCompiledCodeReferencesTheListedReflectionApis`. The original text is kept
+> below for the record.
+
 | # | Rule (test) | What it enforces |
 |---|---|---|
 | C7 | `NoCompiledCodeChoosesOrInvokesAMethodByReflection` | No reference (`call` / `callvirt` / `newobj` / `ldftn` / `ldvirtftn` / `jmp` / `ldtoken`, so lambdas, method groups and expression trees too) to an API that **chooses a method by reflection** — a method or member lookup on `Type` / `TypeInfo` / `IReflect` (`GetMethod(s)`, `GetMember(s)`, `GetDefaultMembers`, `FindMembers`, `GetMemberWithSameMetadataDefinitionAs`, `GetInterfaceMap`, `DeclaredMethods` / `DeclaredMembers`, `GetDeclaredMethod(s)`, `DeclaringMethod`), their extension spellings (`RuntimeReflectionExtensions`, `TypeExtensions`, `PropertyInfoExtensions`, `EventInfoExtensions`), a `Module` lookup by name or metadata token, a property's or event's accessor methods, a name-based `Expression.Call`, `RuntimeMethodHandle.FromIntPtr`; that **invokes reflectively** — `MethodBase.Invoke` (methods and constructors), `InvokeMember`, `Delegate.CreateDelegate`, `MethodInfo.CreateDelegate`, `MethodInvoker` / `ConstructorInvoker`, `RuntimeMethodHandle.GetFunctionPointer`, `Marshal.GetDelegateForFunctionPointer`, compiling an expression tree, a `dynamic` member access (the C# run-time binder); or that **runs code the compiled scan cannot read** — `System.Reflection.Emit`, an assembly loaded at run time (`Assembly.Load*` / `LoadFrom` / `LoadFile` / `UnsafeLoadFrom`, `AssemblyLoadContext.LoadFrom*`, `AppDomain.Load` / `ExecuteAssembly*` / `CreateInstance*`, `Activator.CreateInstanceFrom` / `CreateInstance(string assembly, …)`). On ANY type — so on the Dataverse service types and on any Type obtained from them, however obtained (`typeof`, `GetType()` on the client, a type parameter, a type found by enumeration): where the Type came from no longer matters. **Not banned**, because none of it reaches a method: reading properties, fields and attributes, a type's name, constructing by type (`Activator.CreateInstance(Type)`), embedded resources, an expression tree a LINQ provider translates. Today the scan set makes **zero** banned references (the BFF's reflection is `GetProperties` / `GetValue`, `GetCustomAttributes`, `Assembly.GetTypes`, `Activator.CreateInstance(Type)`), so no exemption exists; a future need is a review decision named in the guard, and the reflected type must not be a Dataverse service type. |
@@ -1055,7 +1063,9 @@ assembly the BFF runs or that can name the client; each must load):
 Why bans and not a provenance analysis: a rule that follows where a `Type` came from (`typeof`, `GetType()`, a type
 parameter, a field, a collection, DI's `GetService(Type)`) can always be routed around one more hop; a ban on the
 mechanism cannot. It costs nothing today (zero references) and makes round 48 (b)'s "or on a Type obtained from them"
-true without having to trace anything.
+true without having to trace anything. **[CORRECTED in round g: "a ban on the mechanism cannot" is false — a list of APIs
+is not the mechanism, and seeds V and M went around it. That is round 55's reason for moving the eviction into the
+write (§16.9).]**
 
 **Controls** (`CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam`; compile-only fixtures in
 `PoaShareClientSingletonGuardControls.cs`): **seed U verbatim** — the earlier rules C1, C4 and C6 asserted to PASS it
@@ -1128,7 +1138,10 @@ or invoked by reflection, on any type, and no code the scan cannot read (C7). **
 a route that uses none of those mechanisms — above all a raw HTTP call whose action URL exists only at run time
 (assembled from pieces none of which is the action name, or read from a live store no repository file holds); native
 code; code outside the scan set (it cannot name the client and does not run in the BFF). POA writes made outside the BFF
-(MDA, flows, scripts) are the TTL-bounded out-of-band row (§9, owner R3/R4).
+(MDA, flows, scripts) are the TTL-bounded out-of-band row (§9, owner R3/R4). **[CORRECTED in round g: (3) is false as
+written — C7 bans a list of APIs, not every way to choose or invoke a method by reflection (seeds V, M); the L2 projects'
+"T6 only" coverage missed a Unicode-escaped attribute (seed U5); and since round 55 the eviction is made by
+`DataverseWebApiService`'s own share writes, not the seam, so C3 analyses the client. The true statement is §16.9's.]**
 
 **Placement / justification (CLAUDE.md §10 / §11).** No production surface: the production edits are doc comments only
 (`IDataverseRecordShareService.cs`, `IMembershipCacheInvalidator.cs`; the diff is `///` lines only), so no IL change, no
@@ -1167,3 +1180,143 @@ WebApplicationFactory requests cancelled after 3-4 minutes ("Error while copying
 eval harness) while the machine ran 87 `dotnet` processes at 88 % CPU (other agents' suites) — the 19 re-run in
 isolation **19 / 0 / 0**, and a second full run **15,453 passed / 0 failed / 54 skipped (15,507; 20 m 52 s)**: contention,
 not this round (its production edits are doc comments only). No package change: no publish-size or CVE delta.
+
+### 16.9 Round g — the eviction moves into the share write (2026-10-05; `task/uac-r2-132-g` from `task/uac-r2-132-f1-v1c-v2` @ `837220b9d`)
+
+**Binding.** Main-session rounds 48 and **55** (work/unified-access-control-r2 note, read through round 58), and **owner
+round 56** (relayed in `NOTE-FROM-MAIN.md`, not committed): fix (a) runtime, (b) compounding-maintainability and (c)
+performance defects; record (d) adversarial-only guard bypasses, (e) rare fail-closed edges and (f) minor seeding requests
+as Known limits; build no new machinery for (d)-(f); keep rounds 1-55; **this is the lane's last fix round.** Round 55
+is the decision for this round: (1) move the eviction INTO the share-write primitive; (2) the IL guards stay as defence in
+depth, and every comment says only what is TRUE; (3) the Unicode-escaped `[UnsafeAccessor]` outside the scan set (seed U5)
+is caught by scanning the compiled IL of EVERY `src/server` project. No live call and no live write this round.
+
+**Items (verifier f1-v1c-v2 numbering) — class (owner round 56) and what was done.**
+
+| # | Item | Class | Done |
+|---|---|---|---|
+| 1 | Rounds 48 + 55 owed | — | Round 55 (1)-(3) implemented below; round 48 (a)-(d) stand (UnsafeAccessor ban now over every `src/server` assembly; the reflection ban is C7's list; claims corrected; gate script unchanged). |
+| 2 | C7 false negative, seed V (VB late binder) | (d) as a guard gap; the **eviction** gap behind it was (a) | Closed at the root (round 55): a late-bound call of the client's write now evicts — **behaviour test** `ShareWrite_InvokedByALateBinderFromARunTimeName_StillEvictsThatRecord` (seed V adapted). No new ban (round 55 "not more bans"; round 56 (d)); recorded in Known limits. |
+| 3 | C7 false negative, seed M (token + LINQ provider) | as item 2 | Closed at the root: **behaviour test** `ShareWrite_ResolvedFromItsMetadataTokenAndRunByALinqProvider_StillEvictsThatRecord` (seed M adapted). Known limit for C7. |
+| 4 | Comments contradict code | (b) | Fixed everywhere the claim lived: the guard header (rewritten: where the eviction lives, then exactly what each rule checks, then what is not enforced), the C7 section / doc / test name (`NoCompiledCodeReferencesTheListedReflectionApis`) / message, `IlCallScan` remarks, `DataverseRecordShareService` remarks (it no longer evicts; points at the guard header for the list), `IMembershipCacheInvalidator` remarks, the `AccessCacheInvalidationTests.Shares` summary, the controls' C7 summary, §16.8 (corrections appended, original kept), the f1-v1c-v1 POML outcome (correction appended); plus every other comment/doc that said "the POA seam evicts": `caching-architecture.md` (write-path eviction row, residual row 4), `uac-access-control.md`, `membership-resolution-pattern.md`, `CachedAccessDataSource`, `MembershipCacheInvalidator`, `ImpersonatedRootSetSource`, two test-double remarks. |
+| 5 | Recommended bans (late binders, handle/token APIs, non-ldtoken Expression.Call) | (d) | Not built — superseded by round 55 (the structural fix) and owner round 56 (no new machinery for (d)). Known limit. |
+| 6 | Seed U5 (Unicode-escaped UnsafeAccessor in the L2 Worker) | (d) | Round 55 item 3 decided the fix, kept per round 56: **C8 now reads the compiled custom-attribute table of every `src/server` project's assembly** (8 projects; the L2 Worker and L2 test project are built for it). Seed U5 re-run: C8 red, T6 green (T6's claim corrected to "the text as written"). |
+| 7 | Gate script | met | No change. |
+| 8 | UnsafeAccessor ban inside the scan set | met | C8 re-implemented (one mechanism over every assembly, replacing the reflection walk); seed U and the two other shapes stay as controls. |
+| 9 | Only `///` changed last round | info | This round changes production IL (below): publish size measured (§16.9 results). |
+| 10, 11 | Suites, other checks | met | Re-run in full below. |
+| 12, 13, 14 | Criteria not met (= items 2-4, 6) | as above | As above. |
+| 15 | Criterion 21 (G-2) + G-1 | live | Unchanged: `notes/task-132-live-gate.ps1`, commands in §12, a manual gate for the main session. |
+| 16 | Criterion 17 reviewer approval | PR time | Unchanged: paragraph in §15.3. |
+
+**The fix (round 55 item 1).**
+- `Spaarke.Dataverse` gains ONE hook, `IRecordShareWriteObserver` (`OnRecordShareWrittenAsync(entitySetName, recordId,
+  RecordShareWrite write, ct)`), and the `RecordShareWrite` kind (Grant / Modify / Revoke) it is told about — one file,
+  `IRecordShareWriteObserver.cs`.
+- `DataverseWebApiService`: `GrantAccessAsync` / `ModifyAccessAsync` / `RevokeAccessAsync` build their payloads as before
+  and send through ONE private method, `SendShareWriteAsync`, which makes the POST in a `try` and, in the `finally`, calls
+  `NotifyShareWrittenAsync(entitySetName, recordId, write)` — on every path (returned, refused, thrown, cancelled), on
+  `CancellationToken.None`; an observer that throws is caught and logged (`[ACCESS-EVICT] The share-write observer threw
+  …`) and never changes the write's outcome. The observer is a **required** constructor argument (public and protected
+  constructors), so no host gets a client that silently tells nobody.
+- BFF: `IMembershipCacheInvalidator : IRecordShareWriteObserver`, with a **default interface member** forwarding the
+  notification to `InvalidateRecordShareChangeAsync(entitySetName, recordId, "share:{grant|modify|revoke}", ct)` — so the
+  real invalidator, the Null peer and every test double are observers with no new class. `MembershipModule` registers
+  `IRecordShareWriteObserver` → the registered `IMembershipCacheInvalidator`, **unconditionally** (real with Redis, the Null
+  peer with the in-memory cache — ADR-032 symmetric, §F.1); `GraphModule` passes it to the client.
+- `DataverseRecordShareService` stops evicting (a pure pass-through; its constructor takes only the client) — **one
+  eviction path, one eviction per write.**
+
+**The guards (round 55 item 2).** They stay as defence in depth; the guard header now states, in order, where the
+eviction lives, exactly what each rule checks, and what is not enforced. Changes: **C3** re-targeted from the seam (which
+no longer evicts) to the client — the client methods the three writes reach that make an HTTP send are its share-write
+senders, and an `IlPathScan` every-path analysis proves each awaits the send and then calls the notification for its own
+`entitySetName` / `recordId` and awaits it; the notification is found in the IL (a client method that calls
+`IRecordShareWriteObserver.OnRecordShareWrittenAsync` for its own record on every path). `IlPathScan` gains one option,
+`OpeningKeysFromSource` (the send carries no key parameter; the obligation is keyed by the sender's own). The seam pin
+(old C3 (a)) and its control are removed (nothing in the seam to pin). **C1, C2, T1** keep task 060's single seam (their
+messages no longer claim eviction). **C4-C6, T2-T5** reject a POA write around `DataverseWebApiService` named by a
+constant, metadata, constant data or configuration. **C7** bans exactly its list. **C8** / **T6** below.
+
+**C8 over every `src/server` project (round 55 item 3).** `UnsafeAccessorsIn(dll)` reads each assembly's custom-attribute
+table with `System.Reflection.Metadata` (no load, no dependency resolution): every row — type, member, parameter, return
+value, generic parameter, assembly, module — whose attribute type is `System.Runtime.CompilerServices.UnsafeAccessor*`,
+whatever the source spelled. `ServerProjectAssemblies()` finds each `src/server` csproj's newest
+`bin/{configuration}/{tfm}/**/{AssemblyName}.dll` (the Web SDK projects build to `linux-x64/`; ref / publish excluded) and
+the test FAILS, naming the project, if one is not built. The new `BuildServerProjectsForCompiledScans` target in
+`Spaarke.ArchTests.csproj` builds the L2 Worker and L2 test project (the ProjectReferences and the Cosmos target build the
+rest). The controls (seed U and two other shapes) read the ArchTests assembly's own DLL the same way. This REPLACES the
+reflection-based `CompiledUnsafeAccessors` (one mechanism, not two). Side effect, verified: `CosmosProvisioningSecretGuardTests`
+now also finds the built Worker and scans it — green.
+
+**Over-engineering check (owner round 56 item 2).**
+- *Built and REVERTED:* a refusal in the client's private generic POST of any share-write URL (and its 10-spelling test
+  theory) — it closed only a reflection-into-a-private route (class (d)); recorded as a Known limit instead.
+- *Not built:* more C7 bans (item 5); escape decoding in T6 (round 55 item 3 puts U5 on the compiled scan).
+- *New surface, each against CLAUDE.md §11:* **`IRecordShareWriteObserver` + `RecordShareWrite`** — (1) existing:
+  `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync` (BFF) — `Spaarke.Dataverse` cannot reference the BFF, and
+  the seam that called it evicted only for its own callers; (2) extension: the smallest inversion point — the BFF's existing
+  invalidator implements it through a default member (no BFF class); the enum names the write for the correlation id; (3)
+  cost of doing nothing: any call of the client's writes that skips the seam (seeds S5, U, R, V, M) leaves the record's root
+  sets (2 min) and snapshots (60 s) stale — an unshare that keeps access. **One DI registration** (forwarding,
+  unconditional) and **one required constructor parameter**: the wiring itself. **`IlPathScan.OpeningKeysFromSource`**
+  (8 lines): the existing analyser cannot key an HTTP send. **The metadata scan** replaces the reflection walk (not
+  additive). **The ArchTests build target**: C8 must read assemblies that are not referenced.
+- No package, no new service class, no endpoint, option, job or column.
+
+**Seeds (real tree; each written into the real file, built, run, restored by `git checkout HEAD` / removal, `git diff
+--quiet HEAD` asserted, restored file touched).** Behaviour = `AccessCacheInvalidationTests` (58); guard =
+`PoaShareClientSingletonGuardTests` (30).
+
+| # | Seed | Behaviour red | Guard red | Proves |
+|---|---|---|---|---|
+| S1 | **the observer call removed** from the client's `finally` (round 55's named seed) | **40 / 58** (every write x kind x outcome, cancellation, observer fault, Redis fault, exactly-once, composition, V, M) | **2 / 30** (C3 a, C3 b) | the eviction lives in the write |
+| S2 | notify BEFORE the send | 6 (exactly-once-after-the-write) | 1 (C3 a) | ordering |
+| S3 | notify twice | 19 (12 observer-told-once, 6 exactly-once, 1 composition) | 0 — by design (a second notification is not a missing one) | exactly one eviction per write |
+| S4 | the client's `catch` around the observer removed | 12 (observer fault) | 0 | an observer fault never fails the write |
+| S6 | `GraphModule` passes a Null invalidator instead of the registered observer | 1 (the BFF's own composition) | 0 | the production wiring |
+| U5 | verifier seed U5's shape: `[System.Runtime.CompilerServices.Unsafe\u0041ccessor(…Unsafe\u0041ccessorKind.Field, Name = "_value")] internal static extern ref int ValueOf(Box box);` in the L2 Worker | — | 1 (C8: `Sprk.Provisioning.ControlPlane.Worker.dll: …ProbeU5.ValueOf: [UnsafeAccessorAttribute]`); T6 green, as documented | round 55 item 3 |
+| S8 | seed N1's shape in the client: a `sprk_playbooks` branch that sends and returns before the `try` | **0** (no case takes it) | 1 (C3 a) | why the structural rule stays |
+| S9 | the notification returns early for one entity set | 0 | 2 (C3 a, C3 b) | the notification is checked on every path |
+| S10 | a fourth client write `ShareReadAsync` naming GrantAccess | — | 2 (C2; C4's vacuity) | C1 knows every POA write by name |
+
+Not seeded (class f): the seam re-adding an eviction of its own (it has no invalidator to call; S3 turns the same
+exactly-once test red for both routes).
+
+**Step 9.5 (code-review + adr-check; FULL / TEST-MODIFYING).** ADR-002 no plugin. ADR-003: the write's outcome is
+unchanged on every path; an eviction failure falls back to the TTLs, as before. ADR-010: the new interface is a genuine
+seam (dependency inversion across the shared-library boundary); the BFF's 1:1-interface ceiling counts BFF-assembly
+interfaces only (green). ADR-032: symmetric (the observer registration is unconditional; the invalidator behind it is real
+or Null by `Redis:Enabled`). ADR-038: no transport double (an in-memory TestServer); no DI-registration test — the
+composition test performs a share write through the BFF-composed client and asserts the eviction it causes; no reflection
+into a private (seeds V and M call the PUBLIC write; the IL guard's controls are test-owned fixtures). CLAUDE.md §11.5: the
+guard file stays one cohesive class (one invariant: how a POA write reaches Dataverse and evicts). Pre-existing,
+outside this task (reported, not fixed): `CosmosProvisioningSecretGuardTests` resolves each L2 DLL by its DIRECTORY name,
+so the L2 Api (assembly `Sprk.Provisioning.ControlPlane`) is never loaded by it.
+
+**Placement (CLAUDE.md §10).** In place: `Spaarke.Dataverse` (the client + one hook file) and the BFF's existing
+invalidator / DI modules / seam. No new endpoint, service class, option, job, column, PCF or package; no plugin.
+
+**Results (round g).** Build: BFF, ArchTests, BFF unit tests and Sprk.Bff.Api.IntegrationTests 0 warnings / 0 errors; Spe.Integration.Tests 0 errors and the 5 pre-existing CA2024 warnings in the untouched AnalysisEndpointsIntegrationTests.cs. Affected first: AccessCacheInvalidationTests 58 / 0 / 0 (its share-write section is 40 cases — the client's 31 replacing the seam's 31, plus exactly-once x6, the composition case, seeds V and M); with the seven construction sites' classes and MembershipOptionsTests 125 / 0 / 0; PoaShareClientSingletonGuardTests 30 / 0 / 0 (33 minus the old C3's 5 cases plus the new C3's 2) — 39 / 0 / 0 with CosmosProvisioningSecretGuardTests, and 52 / 0 / 0 with Adr038TestBanGuardTests and the ADR-010 tests. Then ONCE in full, on 36d232967 (this round's production and test code; d7245d9b0 only fixes one Spe test's construction): NetArchTest 622 / 0 / 0 (625 - 5 + 2); Sprk.Bff.Api.IntegrationTests 104 / 0 / 0; BFF unit suite 15,343 passed / 119 failed / 54 skipped (15,516 = 15,507 + 9; 1 h 2 m) — every failure a WebApplicationFactory request cancelled after 3-6 minutes ("Error while copying content to a stream") while the machine ran about 108 dotnet processes (other agents' suites); the 113 failing methods re-run in isolation 168 / 0 / 0 (the name filter also matches their sibling theory cases): contention, as in round f1-v1c-v1. Spe.Integration.Tests: the full run stopped on a compile error in DataverseRecordShareRoundTripTests (a target-typed construction the sweep had missed), fixed in d7245d9b0, then 403 passed / 0 failed / 25 skipped (428). Publish size (CLAUDE.md §10): base 837220b9d vs head d7245d9b0, each exported fresh with git archive to a short path (C:\w132gb, C:\w132gh), dotnet publish -c Release, zipped with Compress-Archive (Optimal): 46.01 MB / 212 files vs 46.01 MB / 212 files, delta -26 bytes, PDBs included. No package change, so no CVE delta.
+
+## Known limits (owner round 56 — recorded, not fixed)
+
+- **(d) C7 is a list.** A late binder (seed V), a method resolved from a handle or metadata token and run by a LINQ provider
+  (seed M), and any reflection API not on C7's list pass it. The eviction no longer depends on it (round 55).
+- **(d) A POA write that does not go through the three share writes** — a raw HTTP call whose action name exists only at
+  run time, including one assembled from the client's private members reached by reflection (its generic POST helper,
+  request builder or `HttpClient`) — is not notified. The guards stop such a call only when its action name is a constant,
+  metadata, constant data or deployed configuration (C4-C6, T2-T5).
+- **(d) Code that replaces the client's observer by reflection** (writing its private field) silences the notification.
+- **(d) A direct reflective call of the private `SendShareWriteAsync`** can pass a payload addressed to a record other than
+  the one it notifies for.
+- **(d) C3 follows method bodies**: a send moved into a lambda the sender hands elsewhere is not analysed (a client whose
+  only send moved there fails C3's precondition; one among others would not).
+- **(d) T6 reads the text as written**: a Unicode-escaped identifier, or an alias from a package's build files or a source
+  generator, is not text. C8 reads the compiled attribute in every `src/server` assembly.
+- **(d) C1 / T1 / per-writer rules know the client's writes by name**; a share write through a fourth public client method
+  that does not name an action itself would be outside the single-seam rule — it would still evict (it sends through the
+  notifying sender) and C3 would analyse it.
+- **(f) Verifier item 5's bans** (VB late binders, `MethodBase.GetMethodFromHandle`, `ModuleHandle.ResolveMethodHandle`,
+  `GetRuntimeMethodHandleFromMetadataToken`, an `Expression.Call` built from a non-`ldtoken` `MethodInfo`) — not built.
+- **(f)** No seed re-adds an eviction to the seam (see S3).
