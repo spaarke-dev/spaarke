@@ -718,13 +718,13 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 - `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`. `PCF` selects every PCF; `PCF/<folder>` selects one (bare PCF folder names are not accepted — `DocumentRelationshipViewer` is both a PCF and a code page). `PCF` alone does not build the shared libraries the PCFs import; on a clean checkout use `-Component SharedLibs, PCF`.
 
 **Build Order:**
-1. Shared libraries (`Spaarke.Auth`, `Spaarke.SdapClient`, `Spaarke.UI.Components`)
-2. Vite solutions (20 projects in `src/solutions/`)
-3. Webpack code pages (4 projects in `src/client/code-pages/`)
-4. PCF controls — **one at a time, production mode**. Every git-tracked `src/client/pcf/<name>/package.json` with a `build:prod` script is a PCF (the same discovery rule as `.github/workflows/pcf-build-prod-nightly.yml`); each gets `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod`, and is judged from its output by `PcfBuildResult.psm1` (`pcf-scripts` exits 0 when webpack fails). Each PCF is its own summary row (`PCF/<name>`), so a failure names the control; discovering zero PCFs is a `FAILED` row. *(Until 2026-10 this step ran one aggregate dev-mode `npm run build` at `src/client/pcf`; it never worked from a clean checkout — TS5083 on the controls' relative tsconfig `extends`, then out-of-memory building every control in one process — and nothing consumed its `src/client/pcf/out` output.)*
+1. Shared libraries (14 packages in `src/client/shared/`, in dependency order; the `$SharedLibs` list in the script is authoritative)
+2. Vite solutions (19 projects in `src/solutions/`)
+3. Webpack code pages (3 projects in `src/client/code-pages/`)
+4. PCF controls — **one at a time, production mode**. Every git-tracked `src/client/pcf/<name>/package.json` with a `build:prod` script is a PCF (the same discovery rules as `.github/workflows/pcf-build-prod-nightly.yml`: git-tracked, exactly one folder level deep, and an unparseable `package.json` is a reported error in both, never a silent drop); each gets `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod`, and is judged from its output by `PcfBuildResult.psm1` (`pcf-scripts` exits 0 when webpack fails). Each PCF is its own summary row (`PCF/<name>`), so a failure names the control; discovering zero PCFs is a `FAILED` row, and so is a `-Component` name that matches nothing (e.g. `PCF/Nope`), so the script exits non-zero. *(Until 2026-10 this step ran one aggregate dev-mode `npm run build` at `src/client/pcf`; it never worked from a clean checkout — TS5083 on the controls' relative tsconfig `extends`, then out-of-memory building every control in one process — and nothing consumed its `src/client/pcf/out` output.)*
 5. External SPA (`src/client/external-spa/`)
 
-**Requires PowerShell 7 (`pwsh`)**: the file contains non-ASCII characters without a BOM, which Windows PowerShell 5.1 mis-decodes into parse errors (true before 2026-10 as well).
+**PowerShell 7 (`pwsh`) is recommended** (`Deploy-Release.ps1` runs it under `pwsh`). The file is ASCII-only, so Windows PowerShell 5.1 parses it too; keep it ASCII-only (no BOM needed).
 
 ---
 

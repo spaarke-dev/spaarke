@@ -4,12 +4,12 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (8 packages in src/client/shared/ -- Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-       NOTE: Spaarke.DailyBriefing.Components and Spaarke.LegalWorkspace are intentionally excluded --
-       they're source-only libs (tsc --noEmit) with @spaarke peerDependencies; type-check happens via
-       the consumer's tsc pass.
+    1. Shared libraries (14 packages in src/client/shared/, in dependency order -- the $SharedLibs list
+       below is authoritative; it includes Spaarke.DailyBriefing.Components)
+       NOTE: Spaarke.LegalWorkspace is intentionally excluded -- it is a source-only lib (tsc --noEmit)
+       with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
-    3. Webpack code pages (4 projects in src/client/code-pages/)
+    3. Webpack code pages (3 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
     5. External SPA (src/client/external-spa/)
 
@@ -21,7 +21,9 @@
     every git-tracked src/client/pcf/<name>/package.json that declares a `build:prod` script is a
     PCF; each one ALWAYS gets `npm install` and then `npm run build:prod`, and is judged from its
     OUTPUT by scripts/PcfBuildResult.psm1 (pcf-scripts exits 0 when webpack fails). Each PCF is its
-    own row in the summary, so a failure names the control. Finding zero PCFs is a FAILED row.
+    own row in the summary, so a failure names the control. Finding zero PCFs is a FAILED row, as is
+    a package.json that cannot be parsed. A -Component name that matches nothing (e.g. PCF/Nope) is
+    also a FAILED row, so a typo cannot exit 0.
     (Until 2026-10 this step ran one aggregate dev-mode `npm run build` over all controls at
     src/client/pcf; that never worked from a clean checkout - TS5083 on the controls' relative
     tsconfig `extends`, then out-of-memory building every control in one process.)
@@ -155,6 +157,8 @@ $WebpackCodePages = @(
 
 # --- Results Tracking ---
 $Results = [System.Collections.ArrayList]::new()
+# -Component names that selected at least one component (used to fail on a name that matches nothing).
+$MatchedFilters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 function Invoke-ComponentBuild {
     param(
@@ -173,19 +177,26 @@ function Invoke-ComponentBuild {
 
     # Filter check: if -Component was specified, only build matching components
     if ($Component -and $Component.Count -gt 0) {
-        if (-not ($SelectBy | Where-Object { $_ -in $Component })) {
+        $hit = @($SelectBy | Where-Object { $_ -in $Component })
+        if ($hit.Count -eq 0) {
             return
         }
+        foreach ($h in $hit) { $null = $MatchedFilters.Add($h) }
     }
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    if (-not (Test-Path $BuildPath)) {
-        Write-Host "  SKIP  $Name - directory not found: $BuildPath" -ForegroundColor Yellow
+    # -LiteralPath everywhere: a folder named like Br[1] is a wildcard to plain -Path and would be
+    # reported as not found.
+    if (-not (Test-Path -LiteralPath $BuildPath)) {
+        # A PCF was discovered from git ls-files, so a missing folder is a real failure, not a skip.
+        $missingStatus = if ($Category -eq 'PCF Controls') { "FAILED" } else { "SKIPPED" }
+        $missingColor = if ($missingStatus -eq 'FAILED') { 'Red' } else { 'Yellow' }
+        Write-Host "  $($missingStatus.Substring(0,4))  $Name - directory not found: $BuildPath" -ForegroundColor $missingColor
         $null = $Results.Add([PSCustomObject]@{
             Component = $Name
             Category  = $Category
-            Status    = "SKIPPED"
+            Status    = $missingStatus
             Duration  = "0.0s"
             Detail    = "Directory not found"
         })
@@ -197,7 +208,7 @@ function Invoke-ComponentBuild {
         Write-Host " - $BuildPath" -ForegroundColor DarkGray
 
         try {
-            Push-Location $BuildPath
+            Push-Location -LiteralPath $BuildPath
 
             # Install dependencies.
             # NOTE (2026-05-13): Many Vite solutions have drifted package-lock.json
@@ -224,11 +235,11 @@ function Invoke-ComponentBuild {
                 $needsInstall = $true
                 Write-Host "        installing..." -ForegroundColor DarkGray
             }
-            elseif (-not (Test-Path $nodeModulesPath)) {
+            elseif (-not (Test-Path -LiteralPath $nodeModulesPath)) {
                 $needsInstall = $true
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
             }
-            elseif ((Test-Path $packageJsonPath) -and (Get-Item $packageJsonPath).LastWriteTime -gt (Get-Item $nodeModulesPath).LastWriteTime) {
+            elseif ((Test-Path -LiteralPath $packageJsonPath) -and (Get-Item -LiteralPath $packageJsonPath).LastWriteTime -gt (Get-Item -LiteralPath $nodeModulesPath).LastWriteTime) {
                 $needsInstall = $true
                 Write-Host "        installing (package.json newer than node_modules -- sibling-dep drift)..." -ForegroundColor DarkGray
             }
@@ -368,8 +379,9 @@ foreach ($cp in $WebpackCodePages) {
 Write-Host ""
 
 # --- Step 4: PCF Controls ---
-# One PCF at a time, production mode, same discovery rule as .github/workflows/pcf-build-prod-nightly.yml:
-# a git-tracked src/client/pcf/<name>/package.json with a build:prod script. (The old single aggregate
+# One PCF at a time, production mode, same discovery rules as .github/workflows/pcf-build-prod-nightly.yml:
+# a git-tracked src/client/pcf/<name>/package.json (exactly one level deep) with a build:prod script;
+# an unparseable package.json is an error in both, never a silent drop. (The old single aggregate
 # dev-mode `npm run build` at src/client/pcf never worked from a clean checkout and ran out of memory;
 # nothing consumes its src/client/pcf/out output, so it is gone.)
 $pcfStepSelected = (-not $Component) -or [bool]($Component | Where-Object { $_ -eq 'PCF' -or $_ -like 'PCF/*' })
@@ -432,6 +444,24 @@ Write-Host "Step 5/5: External SPA" -ForegroundColor White
 Write-Host "--------------------------------------" -ForegroundColor DarkGray
 Invoke-ComponentBuild -Name "ExternalSPA" -BuildPath "$RepoRoot\src\client\external-spa" -Category "External SPA"
 Write-Host ""
+
+# --- Unmatched -Component names ---
+# A name that selected nothing (typo, or a PCF/<name> that does not exist) must not exit 0.
+if ($Component -and $Component.Count -gt 0) {
+    $sharedNames = @($SharedLibs | ForEach-Object { $_.Name })
+    foreach ($req in $Component) {
+        if ($MatchedFilters.Contains($req)) { continue }
+        if ($SkipSharedLibs -and $req -in $sharedNames) { continue }   # skipped on purpose
+        Write-Host "  FAIL  -Component '$req' matched no component" -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = "filter:$req"
+            Category  = "Filter"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = "-Component '$req' matched no component"
+        })
+    }
+}
 
 # --- Summary ---
 $totalStopwatch.Stop()
