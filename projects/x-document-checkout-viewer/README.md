@@ -1,5 +1,7 @@
 # Document Check-Out/Check-In Viewer
 
+> **Portfolio**: [Project #1268](https://github.com/spaarke-dev/spaarke/issues/1268) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2025-12-18
 >
 > **Status**: In Progress

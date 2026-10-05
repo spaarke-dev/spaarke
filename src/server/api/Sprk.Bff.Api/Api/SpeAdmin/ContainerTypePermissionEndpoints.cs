@@ -245,7 +245,7 @@ public static class ContainerTypePermissionEndpoints
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
     ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
     ///   404 Not Found   — Container type with the given typeId was not found in Graph API.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> GetContainerTypePermissionsAsync(
         string typeId,

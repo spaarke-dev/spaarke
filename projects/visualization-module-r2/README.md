@@ -1,5 +1,7 @@
 # Visualization Framework R2
 
+> **Portfolio**: [Project #1245](https://github.com/spaarke-dev/spaarke/issues/1245) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Ready for Implementation
 > **Priority**: High
 > **Created**: 2026-01-02

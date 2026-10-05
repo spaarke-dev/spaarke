@@ -1,5 +1,7 @@
 # Spaarke External Access Platform — Custom SPA + Entra External ID (R1)
 
+> **Portfolio**: [Project #1234](https://github.com/spaarke-dev/spaarke/issues/1234) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Quick Links**: [plan.md](plan.md) · [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) · [spec.md](spec.md) · [design.md](design.md)
 
 ## Overview

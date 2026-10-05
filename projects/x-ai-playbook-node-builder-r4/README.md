@@ -1,5 +1,7 @@
 # AI Playbook Builder R2
 
+> **Portfolio**: [Project #1259](https://github.com/spaarke-dev/spaarke/issues/1259) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 Complete the node-based Playbook execution pipeline end-to-end — from visual canvas design through AI orchestration to formatted output in the Analysis Workspace. Production-quality implementation replacing all stub code with fully functioning Dataverse-backed scope resolution, parallel node execution, and formatted markdown output.
 
 ## Quick Links

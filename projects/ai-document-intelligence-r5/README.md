@@ -1,5 +1,7 @@
 # AI Document Intelligence R5: RAG Pipeline & Document Discovery
 
+> **Portfolio**: [Project #1132](https://github.com/spaarke-dev/spaarke/issues/1132) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Planning
 > **Created**: January 2026
 > **Prerequisite**: R4 Complete (Playbook Scope System)

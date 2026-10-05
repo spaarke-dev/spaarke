@@ -3,7 +3,7 @@
 > **Last Updated**: 2026-08-19
 > **Status**: 🌱 **SEED** — assessment complete, **not scoped, not execution-ready**. No worktree, no spec, no tasks.
 > **Predecessors**: [`sdap-bff.api-test-suite-repair`](../sdap-bff.api-test-suite-repair/) (r1, closed 2026-06-01) → [`sdap.bff.api-test-suite-repair-r2`](../sdap.bff.api-test-suite-repair-r2/) (r2, closed 2026-06-01)
-> **Portfolio**: [Issue #794](https://github.com/spaarke-dev/spaarke/issues/794) under [Epic #427 — Code Quality](https://github.com/spaarke-dev/spaarke/issues/427)
+> **Portfolio**: [Project #1178](https://github.com/spaarke-dev/spaarke/issues/1178) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
 > **Tracking**: [#794](https://github.com/spaarke-dev/spaarke/issues/794) (this project) · [#790](https://github.com/spaarke-dev/spaarke/issues/790) + [#795](https://github.com/spaarke-dev/spaarke/issues/795) (siblings — **do not wait on this project**)
 
 ## One-liner
