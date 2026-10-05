@@ -48,7 +48,7 @@ Same rule as `.github/workflows/pcf-build-prod-nightly.yml`, PR #1285):
   now ASCII-only, so Windows PowerShell 5.1 parses it too (12 non-ASCII dashes/arrows in a BOM-less file gave 10 parse
   errors). Verified with #1123 merged: 14/14 shared libs + 19/19 PCFs pass.
 - `master-deploy` SKILL.md: F-2's "until diagnosed" follow-up was stale (F-2 itself records the 2026-06-11 fix); now
-  points at the 2026-10-05 clean-checkout fixes as well.
+  points at this PR's clean-checkout fixes as well, and notes that a full run takes over an hour.
 - `scripts/Deploy-PCFWebResources.ps1` **deleted** and dropped from `Deploy-AllWebResources.ps1`: it only ever pushed
   `UniversalQuickCreate`, deleted 2026-06-22 by `pcf-orphan-cleanup-r1`, from a hard-coded path that no longer exists.
 

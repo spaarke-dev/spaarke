@@ -173,7 +173,7 @@ The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi 
 
 **Fallback** (Node script remains a safety net): `node scripts/master-deploy/build-all-vite-solutions.mjs` — calls `npm run build` per solution serially. Use if the PS1 ever exhibits new failure modes.
 
-**Clean-checkout fixes landed 2026-10-05 (PR #1286)**: Step 1 built `Spaarke.Events.Components` / `Spaarke.SmartTodo.Components` before the `Spaarke.UI.Components` they depend on (a clean checkout stopped at Step 1), and the PCF step was one aggregate dev-mode build that never worked from a clean checkout. Both fixed; verified 14/14 shared libs + 19/19 PCFs from a fresh worktree. Run it with `pwsh`.
+**Clean-checkout fixes (PR #1286)**: Step 1 built `Spaarke.Events.Components` / `Spaarke.SmartTodo.Components` before the `Spaarke.UI.Components` they depend on (a clean checkout stopped at Step 1), and the PCF step was one aggregate dev-mode build that never worked from a clean checkout. Both fixed; verified 14/14 shared libs + 19/19 PCFs from a fresh worktree. The full run takes over an hour (each PCF installs and builds on its own).
 
 ### F-3: `dotnet publish --no-restore` fails inside `Deploy-BffApi.ps1`
 
