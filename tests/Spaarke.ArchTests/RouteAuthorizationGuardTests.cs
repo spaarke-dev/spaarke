@@ -2669,7 +2669,11 @@ public partial class RouteAuthorizationGuardTests
 
     private static readonly Regex AddAuthorizationCall = new(@"(?<![\w.])(?:\w+\s*\.\s*)?AddAuthorization\s*\(", RegexOptions.Compiled);
 
-    private static readonly Regex AddPolicyCall = new(@"\.\s*AddPolicy\s*\(", RegexOptions.Compiled);
+    /// <summary><c>.AddPolicy(</c> — and the AuthorizationBuilder's <c>.AddDefaultPolicy(</c> / <c>.AddFallbackPolicy(</c>, which
+    /// register a named policy AND make it the default / fallback policy (task 167 f2-v1: before, neither was read, so
+    /// <c>AddAuthorizationBuilder().AddDefaultPolicy("x", permissive)</c> made every bare RequireAuthorization() public and
+    /// <c>AddFallbackPolicy</c> replaced the pinned fallback unseen).</summary>
+    private static readonly Regex AddPolicyCall = new(@"\.\s*Add(?<slot>Default|Fallback)?Policy\s*\(", RegexOptions.Compiled);
 
     /// <summary>Registration calls whose own <c>AddPolicy</c> is NOT an authorization policy: the rate limiter's and
     /// CORS's. Every other <c>.AddPolicy(</c> in BFF + shared code is catalogued as an authorization registration —
@@ -2774,6 +2778,13 @@ public partial class RouteAuthorizationGuardTests
 
                 var nameText = unit.Text[args[0].Start..args[0].End];
                 var requires = PolicyBuilderRequiresAuthenticatedUser(unit.Text[args[1].Start..args[1].End], shadowed);
+                if (p.Groups["slot"].Success)
+                {
+                    // AddDefaultPolicy / AddFallbackPolicy also SET the default / fallback slot.
+                    var slot = new PolicyRegistration(p.Groups["slot"].Value, unit.Path, line, requires);
+                    (p.Groups["slot"].Value == "Default" ? defaults : fallbacks).Add(slot);
+                }
+
                 var name = ResolveRegistrationName(nameText, unit, constants, allConstants);
                 if (name is null)
                 {
@@ -3280,6 +3291,20 @@ public partial class RouteAuthorizationGuardTests
         Assert.False(SystemAdminIsSignIn(Catalog(proven,
             "        services.AddAuthorizationBuilder().AddPolicy(\"systemAdmin\", p => p.RequireAssertion(_ => true));\n")));
 
+        // NEGATIVE (task 167 f2-v1): the AuthorizationBuilder's AddDefaultPolicy registers a named policy AND replaces the
+        // DEFAULT — a permissive one makes every bare RequireAuthorization() public; under SystemAdmin's name it is also a
+        // second registration. A proven one is accepted as a default override.
+        var permissiveDefault = Catalog(proven, "        services.AddAuthorizationBuilder().AddDefaultPolicy(\"open\", p => p.RequireAssertion(_ => true));\n");
+        Assert.False(Assert.Single(permissiveDefault.DefaultOverrides).RequiresAuthenticatedUser);
+        Assert.Single(AnonymousByOmissionViolations(
+            ScanText("Api/Fake/Default.cs", new[] { "        app.MapGet(\"/api/zz\", Get).RequireAuthorization();" }), permissiveDefault));
+        Assert.False(SystemAdminIsSignIn(Catalog(proven,
+            "        services.AddAuthorizationBuilder().AddDefaultPolicy(\"SystemAdmin\", p => p.RequireAuthenticatedUser());\n")));
+        var provenDefault = Catalog(proven, "        services.AddAuthorizationBuilder().AddDefaultPolicy(\"signed-in\", p => p.RequireAuthenticatedUser());\n");
+        Assert.True(Assert.Single(provenDefault.DefaultOverrides).RequiresAuthenticatedUser);
+        Assert.Empty(AnonymousByOmissionViolations(
+            ScanText("Api/Fake/Default.cs", new[] { "        app.MapGet(\"/api/zz\", Get).RequireAuthorization();" }), provenDefault));
+
         // POSITIVE: a route naming the policy in another case reaches the ONE registration (as it does at runtime).
         Assert.Empty(AnonymousByOmissionViolations(ScanText("Api/Fake/Admin.cs",
             new[] { "        app.MapGet(\"/api/zz/admin\", Get).RequireAuthorization(\"systemadmin\");" }), Catalog(proven)));
@@ -3378,7 +3403,8 @@ public partial class RouteAuthorizationGuardTests
         @"(?<![\w])(?:IAuthorizationPolicyProvider|DefaultAuthorizationPolicyProvider|IPolicyEvaluator|PolicyEvaluator|IAuthorizationEvaluator"
         + @"|DefaultAuthorizationEvaluator|IAuthorizationHandlerProvider|DefaultAuthorizationHandlerProvider|IAuthorizationHandlerContextFactory"
         + @"|DefaultAuthorizationHandlerContextFactory|IAuthorizationMiddlewareResultHandler|AuthorizationMiddlewareResultHandler"
-        + @"|DefaultAuthorizationService)(?![\w])",
+        + @"|DefaultAuthorizationService)(?![\w])"
+        + @"|\bnew\s+(?:[\w.]+\.)?AuthorizationOptions\s*\(",   // a fresh options object registered in place of the configured one
         RegexOptions.Compiled);
 
     private static string BaseListOf(SourceUnit unit, TypeDecl type)
@@ -3539,6 +3565,7 @@ public partial class RouteAuthorizationGuardTests
                      ("public sealed class Result : IAuthorizationMiddlewareResultHandler { }", "IAuthorizationMiddlewareResultHandler"),
                      ("public static class R { public static void A(IServiceCollection s) => s.AddSingleton<IAuthorizationService, Mine>(); }", "registers an IAuthorizationService"),
                      ("public sealed class Mine : IAuthorizationService { }", "implements IAuthorizationService"),
+                     ("public static class O { public static void A(IServiceCollection s) => s.AddSingleton(Options.Create(new AuthorizationOptions())); }", "AuthorizationOptions"),
                  })
         {
             Assert.Contains(Of(source), v => v.Contains(why, StringComparison.Ordinal));
@@ -3668,6 +3695,13 @@ public partial class RouteAuthorizationGuardTests
 
                 var end = isSetter ? MatchClose(code, s.Index + s.Length - 1) : AssignmentEnd(code, s.Index + s.Length);
                 assignments.Add((unit, s.Index, end < 0 ? "<unreadable>" : Squash(code[(s.Index + s.Length)..end])));
+            }
+
+            // AuthorizationBuilder.AddFallbackPolicy(name, …) sets the fallback too (task 167 f2-v1) — never the pinned form.
+            foreach (Match f in Regex.Matches(code, @"\.\s*AddFallbackPolicy\s*\("))
+            {
+                var close = MatchClose(code, f.Index + f.Length - 1);
+                assignments.Add((unit, f.Index, "AddFallbackPolicy(" + (close < 0 ? "<unreadable>" : Squash(code[(f.Index + f.Length)..close])) + ")"));
             }
         }
 
@@ -3881,6 +3915,13 @@ public partial class RouteAuthorizationGuardTests
                 "public static class B { public static void A(IServiceCollection s) { s.AddAuthorizationBuilder()"
                 + ".SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build()); } }") }),
             v => v.Contains("it must be exactly", StringComparison.Ordinal));
+
+        // NEGATIVE (task 167 f2-v1): AuthorizationBuilder.AddFallbackPolicy(name, …) REPLACES the fallback beside the pinned
+        // assignment — a second setting, and never the pinned form.
+        var replaced = FallbackPolicyViolations(Module("            ApplyFallbackPolicy(options);", helper
+            + "    public static void Open(IServiceCollection s) { s.AddAuthorizationBuilder().AddFallbackPolicy(\"open\", p => p.RequireAssertion(_ => true)); }\n"));
+        Assert.Contains(replaced, v => v.Contains("is set 2 times", StringComparison.Ordinal));
+        Assert.Contains(replaced, v => v.Contains("FallbackPolicy = AddFallbackPolicy(", StringComparison.Ordinal));
 
         // NEGATIVE (task 167 f2, the f1 verifier's item 9): applied CONDITIONALLY — the call or the assignment sits under
         // an if, after an early return, or in a lambda that never runs; or the helper assigns it conditionally.
