@@ -4,6 +4,9 @@
 > **Branch**: `task/uac-r2-166` from `work/unified-access-control-r2` @ `e6dd48b43`; **r1**: `task/uac-r2-166-r1` (§18);
 > **r2**: `task/uac-r2-166-r2` (§19); **f1**: `task/uac-r2-166-f1` (§20)
 > **Rigor**: FULL (bff-api, auth, security; TEST-MODIFYING override applies)
+> **Outcome (g, 2026-10-05)**: owner round 54 built and the f1-v2 verification closed (§23): a FRESH Write check for a
+> post-move edit, a renewed relocation lock, post-move versions ordered by time (`history-undecidable` otherwise), a biting
+> test for every fail-closed branch; §22's seeding claims corrected. Owner round 56 applied (last fix round; known limits §23.12).
 > **Outcome (f1, 2026-10-04)**: round 21 item 1 (i)–(iii) and round 25 item 6 are BUILT (§20): the BFF pointer-attach
 > route and every client pointer writer moved to it (7 PCF bundles rebuilt with `npm run build:prod`); the ONE
 > `DocumentContainerRelocator` (round 26 item 3) and the legacy migration job + its dry-run / `-Apply` / `-Verify`
@@ -1616,9 +1619,12 @@ Read-only cross-check after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_
 > item 4 (a repeat call deletes the source by the WITNESS recorded at verification; a source edited after the move is
 > `source-changed-after-move` and closed by the relocator's own re-entry — F-A), item 5 (F-C guard tests, the two F-D
 > client shapes, the F-E gate name; the ADR-010 integration note).
-> **Outcome**: every item is closed in code, tests, scripts and docs, each new check seeded. What is left is LIVE writes
-> only — the schema script (now two columns, secured from creation), the FLS script (now four columns) and the migration,
-> each dry run / `-Apply` / `-Verify`, exact commands in §22.11. No decision is requested.
+> **Outcome**: every item is closed in code, tests, scripts and docs. ~~each new check seeded~~ — **CORRECTED by g
+> (owner round 54 item 4, §23.6):** that was NOT true. Six fail-closed branches added here (Sk, Sq, Si, Sm, Sj, Sw), the
+> version-list paging (Sd) and the Unknown → never-delete witness branch (Sk) had no test: the f1-v2 verification seeded
+> each away and all 273 targeted tests stayed green. g adds a test for each and seeds it red (§23.8). What is left is LIVE
+> writes only — the schema script (now two columns, secured from creation), the FLS script (now four columns) and the
+> migration, each dry run / `-Apply` / `-Verify`, exact commands in §22.11. No decision is requested.
 > `NOTE-FROM-MAIN.md`: none in the worktree.
 
 ## 22.1 Binding inputs as applied
@@ -1649,13 +1655,14 @@ Read-only cross-check after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_
 | 12 | ADR010 1:1-interface ceiling (informational) | Round 45 item 5's integration note, §22.12 |
 | 13 | Criterion — round 26 item 3 / round 40 item 1, every post-flag failure closable by retry or job | **Met.** A source-pending entry now settles on the repeat call whatever the document became (witness), and an edited source is closed by the relocator's own re-copy. What still needs a person is unchanged and stated: a ledger the BFF cannot read, a document whose container cannot be derived, a file not verifiably the row's own, an attachment row whose communication's filing cannot be derived (round 45 item 3: pending), and an entry without a witness (only a hand-written ledger lacks one; the column is BFF-written and secured from creation) |
 | 14 | Criterion — round 37 item 2 split for attachment rows | **Met** (item 2) |
-| 15 | Criterion — seeding | **Met**: 23 server seeds in 12 builds, 6 client/script seeds; every seed red with a test no other seed of its build turns red (§22.9) |
+| 15 | Criterion — seeding | ~~**Met**~~ **Not met as claimed — corrected by g (§23.6)**: the 23 server seeds in 12 builds and 6 client/script seeds below were each red, but six new fail-closed branches (Sk, Sq, Si, Sm, Sj, Sw) and the version-list paging (Sd) had NO seed and NO test; the f1-v2 verification seeded each away with every targeted test green (§22.9) |
 | 16 | Criterion — §21.2 item 11 "every statically writable shape" | **Met for the enumerated shapes, and the claim is corrected**: the guard's remarks now LIST the shapes it detects; a key built at run time (concatenation, a loop over names, a value returned by another module's function) is not statically detectable and the field-level security lock is the control for it (§22.7) |
 
 ## 22.3 Round 45 item 1 — a moved file keeps its version history
 
 - **The replay.** `ReadHistoryAsync` lists the source's versions app-only (`SpeFileStore.ListFileVersionsAsync`, now
-  `virtual`, and now following `@odata.nextLink` so a long history is never cut at one page), orders them oldest first
+  `virtual`, and now following `@odata.nextLink` so a long history is never cut at one page — **untested here; g adds the
+  test, §23.6**), orders them oldest first
   (by version number, else by date), and makes one step per version: every PRIOR version through the ONE new app-only
   facade method `SpeFileStore.DownloadFileVersionAsync` (→ `DriveItemOperations.DownloadFileVersionAsync`, the app-only
   twin of `DownloadFileVersionAsUserAsync`; not on `ISpeFileOperations` — no route reads a version app-only), the current
@@ -1728,7 +1735,8 @@ Read-only cross-check after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_
   (now secure) document. Every edit is carried (nothing is lost; its author is in the version record), but the last one
   becomes the CURRENT content only when its author may write the document NOW — Dataverse's own answer for that person,
   `IAccessDataSource.GetUserAccessAsync(authorObjectId, documentId)` (RetrievePrincipalAccess, app-only for the named
-  principal; the EXISTING registered service). Otherwise — no Write, an app-only write, an answer that cannot be had
+  principal; the EXISTING registered service — **superseded by g, owner round 54 item 1 (§23.3): that registration is
+  the 60-second `CachedAccessDataSource`; the answer is now read FRESH**). Otherwise — no Write, an app-only write, an answer that cannot be had
   (ADR-003) — the edits go into the history before the document's own current content, which stays current
   (`EditIsCurrent = false`). This is the round-45 re-copy made safe, not a new path: the re-copy, verify and re-point are
   as decided; only which content ends current is decided fail-closed.
@@ -1804,7 +1812,8 @@ ctor-null tests. No package, endpoint, option, job, PCF or plugin.
 - **Relocator members** (`ReadHistoryAsync`, `RecordReplayAsync`, `RecopyChangedSourcesAsync`, `MayWriteAsync`,
   `CompareWithWitnessAsync` / `Compare`, `RelocationWitness`, `OldestFirst`) and one constructor dependency — the EXISTING,
   unconditionally registered Scoped `IAccessDataSource` (type activation; no registration change). Extensions of the ONE
-  relocation service (round 26 item 3).
+  relocation service (round 26 item 3). **Superseded by g (§23.3, §23.7):** the registration now passes the UNCACHED
+  `DataverseAccessDataSource`.
 - **Outcome / report vocabulary**: `SourceChangedAfterMove`, `VersionsTruncated` (records; on the outcome, the batch
   result, the job report and the driver script) — round 45's stated outcomes.
 - **`VersionInfoDto.LastModifiedBy`** (+ two `[JsonIgnore]` ids) — the projection round 45 says the route reports; an
@@ -1815,7 +1824,12 @@ ctor-null tests. No package, endpoint, option, job, PCF or plugin.
 ## 22.9 Seeding (2026-10-05; restored from byte copies, files touched; no `SEED-166V2` marker remains)
 
 Targeted set: relocator, migration job, facade, RAG trim, pointer check, attach, version-route auth, external contract
-(270–271 tests). Every seed bit; within each build every seed turned red at least one test no other seed of that build did.
+(270–271 tests). Every seed LISTED BELOW bit; within each build every seed turned red at least one test no other seed of
+that build did. **Corrected by g (owner round 54 item 4, §23.6):** "every seed bit" was true only of the seeds below. The
+six fail-closed branches f1-v2 added in the replay and the witness (Sk: Unknown → never delete; Sq: a faulted version
+list; Si: an unprovable witness; Sm: a replay upload on another item; Sj: the per-version size bound; Sw: a copy whose
+versions cannot be listed) and the version-list paging (Sd) were never seeded and had no test; the f1-v2 verification
+seeded each away with the whole targeted set green. §23.8 seeds each against the test g adds for it.
 
 | Build | Seed | What it breaks | Red |
 |---|---|---|---|
@@ -1892,7 +1906,8 @@ sprk_relocationpending IS NOT NULL` (only sources kept for another record may re
   read as none. Controls: the FLS script's `-Verify` (p3) and gate 24's read-only cross-check above.
 - **Integration notes — task 150's lane:** `DocumentContainerRelocator` gains a constructor dependency, the existing
   Scoped `IAccessDataSource` (type activation — nothing to change for a DI caller; a test that `new`s the relocator passes
-  one). `DocumentRelocationBatchResult` gains `SourceChangedAfterMove` and `VersionsTruncated` (stated; `Complete` is
+  one). **Updated by g (§23.11):** `DocumentsModule` now constructs it with the uncached `DataverseAccessDataSource`
+  (still nothing to change for a DI caller). `DocumentRelocationBatchResult` gains `SourceChangedAfterMove` and `VersionsTruncated` (stated; `Complete` is
   unchanged in meaning); add them to the Make Secure `files_incomplete` / success report. A Make Secure request now replays
   each file's history — its duration grows with the history it carries.
 - **Integration note — round 45 item 5:** `IRelocatedFileIndexing` (f1-v1) holds the last free slot under
@@ -1908,3 +1923,274 @@ sprk_relocationpending IS NOT NULL` (only sources kept for another record may re
 - **Live writes (by design, main session):** gates 23a, 23, 24, 25 (§22.11) and §20.11's others. Nothing was written
   live, and this round made no live access at all.
 - Nothing else is owed by task 166.
+
+# g (2026-10-05): owner round 54 built; the f1-v2 verification's F-1 – F-5 closed; owner round 56 applied
+
+> **Branch**: `task/uac-r2-166-g` from `task/uac-r2-166-f1-v2` @ `966f88a21` (baseSha).
+> **Inputs (BINDING)**: rounds 1–58 on `work/unified-access-control-r2` (read at `0caca7e3e`, re-read at `6532bb494` when
+> the main session's `NOTE-FROM-MAIN.md` arrived); rounds 37, 45 and 54 re-read in full. **Round 54 is this verification's
+> answer**: item 1 (a post-move edit becomes current only on a FRESH Write check), item 2 (the relocation lock lasts as long
+> as the move), item 3 (no intermediate edit is dropped), item 4 (every fail-closed branch tested; §22's claims corrected;
+> the F-3 header). **Owner round 56** (relayed by `NOTE-FROM-MAIN.md`, read and NOT committed) sets the bar from now on:
+> classify every finding (a)–(f), fix (a)–(c), record (d)–(f) as known limits, build nothing new for (d)–(f), and this is
+> the LAST fix round for this lane. Round 54 was decided before round 56, so it stands and is built (round 56: "rounds
+> 1–55 stand"); the class of each item is in §23.2 and the known limits are in §23.12.
+> **Outcome**: every (a)–(c) item is closed in code and tests; every new check, and each of the seven branches the
+> verifier found untested, has a test that its seed turns red (28 seeds, each alone in its own build, §23.8). §22's two
+> seeding claims are corrected in place. No live access was made; nothing new is owed live (the §22.11 gates stand
+> unchanged). No decision is requested.
+
+## 23.1 Binding inputs as applied
+
+| Decision | Implemented |
+|---|---|
+| Round 54 item 1 — the LAST post-move edit becomes current only when its author holds Write NOW; that check is read FRESH, never from the 60-second `CachedAccessDataSource`; app-only / unknown / faulted = not current; test: a stale cached Write answer cannot make an edit current, seeded | §23.3 |
+| Round 54 item 2 — the relocation lock is RENEWED while the relocation runs (heartbeat, bounded interval); a move whose renewal fails stops before its next destructive step (re-point or source delete) and reports `lock-lost`, never continuing unlocked; test: a second relocator cannot start a move while the first holds a renewed lock, seeded | §23.4 |
+| Round 54 item 3 — a witness with no version id, or a non-numeric id: order the post-move versions by their timestamps; undecidable → `history-undecidable`, row and source untouched (retried); never silently only the latest | §23.5 |
+| Round 54 item 4 — a biting test for Sk, Sq, Si, Sm, Sj, Sw, Sd and the Unknown → never-delete witness branch; §22's "each new check seeded" / "every seed bit" corrected; the F-3 header corrected | §23.6, §23.8, corrections in §22 |
+| Round 45 items 1 and 4 (the parts the verifier found untested: paging, the failure branches, Unknown → never delete) | §23.6 |
+| Round 45 items 2, 3, 5 and round 37 items 1–3 | Verified MET by the f1-v2 verification; unchanged (the lock and settle changes keep every round-37 behaviour: the full targeted set is green) |
+| Owner round 56 — classify, fix (a)–(c), record (d)–(f), no new machinery for (d)–(f), last round | §23.2 (class per item), §23.12 (known limits) |
+
+## 23.2 The verifier's 14 items — class (owner round 56) and what changed
+
+| # | Item | Class | Closure |
+|---|---|---|---|
+| 1 | Rounds 37, 45, 54 owed | — | §23.1 |
+| 2 | **F-1** — Sk, Sq, Si, Sm, Sj, Sw untested | (b) important fail-closed behaviour (no data loss, no unprovable delete) with no behaviour test | One test or theory each (§23.6); each seeded red alone (§23.8) |
+| 3 | **F-2** — the version-list paging untested; a cut listing would lose history silently | (b), guarding an (a) data-loss path | `DocumentVersionListPagingTests` drives the REAL `DriveItemOperations.ListFileVersionsAsync` through a scripted Kiota `IRequestAdapter` (the `SpeContainerPagingTests` precedent; no `Mock<HttpMessageHandler>`): two pages, three pages, one page = one request, a listing that never ends. The listing is BOUNDED (`MaxVersionPages` = 500): past it, it throws "could not be fully enumerated" and the relocation that asked fails, reported — never returned cut (and never an endless loop holding a renewed lock). Seeds Sd, Sd2 red |
+| 4 | **F-3** — the KEEP-path header said "byte-identical" | (b) comment contradicts code | Rewritten: "unless it still matches the WITNESS recorded when its copy was verified … never compared with the document's current file", plus the lock rule |
+| 5 | **F-4** — a fixed 10-minute lock with no renewal | (a) two moves of one document could race on a real path (a long history + a Make Secure retry or the migration pass) | Round 54 item 2, §23.4 |
+| 6 | **F-5** — `History.After` dropped intermediate post-move edits without a numeric witness | (a) data loss, rare (Graph listed no version at the move, or non-numeric ids) | Round 54 item 3, §23.5 |
+| 7 | Verified MET by the verifier's seeds | — | Unchanged; the full targeted set (309) is green |
+| 8 | The verifier's runs on `966f88a21`; its worktree `C:\wvh166` | — | Recorded. This round's runs §23.9. `C:\wvh166` is the verifier's; this lane did not touch it |
+| 9 | Hygiene | — | Holds: POML parses as XML; `NOTE-FROM-MAIN.md` read, never staged; no `.claude/`, `TASK-INDEX.md` or `current-task.md` change; no live write, no live access; no script changed (they default to dry run) |
+| 10 | Round 45 items 2, 3, 5 met; 1 and 4 met except the untested branches | — | The untested branches are tested (§23.6) |
+| 11 | Criterion — seeding | (b) | **Met** (§23.8): 28 seeds, each alone in its own build; every one turns red the test written for it, none missing |
+| 12 | Criterion — round 45 item 4 as tested | (b) | `ASourceThatCannotBeComparedWithItsWitness_IsNeverDeleted` (faulted / not-found / empty version list) — seed Sk turns all three red |
+| 13 | Criterion — round 45 item 1 "never silent" | (b) | The paging tests — seeds Sd / Sd2 red |
+| 14 | Criterion — §22's claims | (b) | Corrected in place in §22 (header Outcome, §22.2 item 15, §22.3, §22.4, §22.8, §22.9, §22.12), each marked "corrected by g" / "superseded by g" |
+
+## 23.3 Round 54 item 1 — the Write check that makes a post-move edit current is read FRESH
+
+- **Where the stale answer came from.** `IAccessDataSource` resolves to `CachedAccessDataSource` (`SpaarkeCore`), which keeps
+  each `(user, resource)` answer for 60 seconds; the relocator took `IAccessDataSource` by type activation. A Write answer
+  read just before Make Secure could therefore be served after it and make a non-writer's edit current.
+- **The wiring.** `DocumentsModule` constructs the relocator with the UNCACHED `DataverseAccessDataSource` (the typed-client
+  registration `AddSpaarkeCore` already makes, and that `CachedAccessDataSource` wraps):
+  `services.AddScoped(sp => ActivatorUtilities.CreateInstance<DocumentContainerRelocator>(sp, sp.GetRequiredService<DataverseAccessDataSource>()))`.
+  No service is added; the relocator's own registration changes from type activation to this factory.
+- **The rule, in the relocator itself** (`MayWriteAsync`): whatever source it is given, an answer PRODUCED BEFORE THE
+  QUESTION was asked is not a right. `AccessSnapshot.CachedAt` is when the answer was read — `DataverseAccessDataSource`
+  stamps its Dataverse read, `CachedAccessDataSource` returns the time it CACHED the answer — so `CachedAt < asked` is a
+  cached answer → not current (fail closed). Compared on the system clock, the clock both stamp with. Not a person /
+  app-only / no answer / a fault → not current, as before.
+- **Test** `AStaleCachedWriteAnswer_CannotMakeAPostMoveEditCurrent`: the REAL `CachedAccessDataSource` over an in-memory
+  distributed cache answers Write for the editor; the underlying answer is then revoked (Make Secure); a precondition
+  asserts the cache still answers Write; the repeat call must keep the edit in the history (`EditIsCurrent = false`, the
+  document's own content current). Seed R1 → red.
+- **Why the wiring has no test of its own**: asserting what `DocumentsModule` resolves is a DI-registration assertion
+  (ADR-038 B3, banned). The binding behaviour — a cached answer never makes an edit current — is the relocator's own,
+  tested rule; the wiring makes production answers fresh, so a writer's edit is not needlessly kept as history.
+
+## 23.4 Round 54 item 2 — the relocation lock lasts as long as the move
+
+- **The lease** (`DocumentContainerRelocator.RelocationLease`, private): each relocation call takes the ADR-004 processing
+  lock under an owner id of its OWN (a new GUID per call), READS IT BACK as its own before anything runs, renews it every
+  `RelocationLockRenewInterval` (2 minutes; each renewal lasts `RelocationLockDuration`, 10 minutes) on the relocator's
+  `TimeProvider`, and releases it only while it is still its own.
+- **Confirmed before every destructive step**: the re-point (else the copy is removed, the row and the source untouched,
+  `Failed` with `lock-lost: …`); each ledger entry's settle (its re-keys and move-alongs); the source delete (else the
+  source is kept, pending); the ledger write-back (else the stored ledger is left as it was — writing it unlocked could
+  overwrite what another relocation now records). Between replay steps the move checks the heartbeat's verdict without a
+  round trip and stops at the next version (the partial copy removed). A lost lease never counts as held again, and every
+  later step of that call reports `lock-lost` and writes nothing. Every step is idempotent: the repeat call redoes what is
+  owed.
+- **The read-back closes two lock-store gaps for the relocator (#984; not widened to other callers):** `IdempotencyService`'s
+  acquire is check-then-set and fails OPEN on a cache fault. A fail-open take does not read back as ours → nothing runs;
+  two takers that both passed the check-then-set are told apart (the last writer's owner is what reads back; the other
+  stops before its first destructive step).
+- **Owner-checked release**: a relocation that lost its lock never removes the lock another relocation now holds.
+- **One instance, one move per document**: the relocator records its leases by document; a second move of the same
+  document on the same instance is refused even if the lock store stops excluding.
+- **The lock store, extended — no new interface** (`IIdempotencyService`): `RenewProcessingLockAsync(eventId, ownerId,
+  duration)` (a default method answering `false`: a store that cannot renew can never confirm a lock, so the caller stops)
+  and `ReleaseProcessingLockAsync(eventId, ownerId)` (default: the ownerless release). `IdempotencyService` implements both:
+  a renewal rewrites the lock only when it reads back as the owner's and FAILS CLOSED on a cache fault (unlike the
+  acquire); the owner release removes only the owner's lock.
+- **Tests**: `ASecondRelocator_CannotStartAMove_WhileTheFirstStillHoldsItsRenewedLock` (two relocators over the REAL
+  `IdempotencyService` and ONE expiring cache on a `FakeTimeProvider`: the first pauses in its replay for 12 minutes —
+  past one lock — while its heartbeat renews; the second is refused; the first completes and releases),
+  `AMoveWhoseHeartbeatFindsTheLockLost_StopsItsCopyAtTheNextVersion`,
+  `AMoveThatLosesItsLock_StopsBeforeTheRepoint_RemovesItsCopy_AndTouchesNothingElse`,
+  `ARepeatCallThatLosesItsLock_ReKeysNothing_DeletesNothing_AndLeavesTheLedger`,
+  `ALockLostRightBeforeTheSourceDelete_KeepsTheSource`, `ALockLostBeforeTheSettledLedgerIsWritten_LeavesTheStoredLedger`,
+  `ARelocationWhoseLockWasTakenOver_NeverReleasesTheNewHoldersLock`, `ALockStoreThatAnswersTakenWithoutHoldingTheLock_RunsNothing`
+  (the real store over a faulting cache), `OneRelocator_NeverRunsTwoMovesOfOneDocumentAtOnce_EvenWhenItsLockStoreStopsExcluding`;
+  and the store's `ProcessingLockRenewalTests` (5: a renewal extends past the first expiry; without one the lock expires
+  and another owner takes it; a renewal of another owner's / nobody's / an ownerless lock is refused and writes nothing; a
+  renewal on a faulting cache is refused; an owner release leaves another owner's lock).
+
+## 23.5 Round 54 item 3 — no intermediate edit is dropped
+
+- **The witness records a time.** `RelocationWitness` gains `Modified`: the time of the content it witnessed — the current
+  version's `lastModifiedDateTime`, or, when Graph lists no version, the item's own `lastModifiedDateTime`
+  (`SpeItemCreator.LastModified`, read in the same uncached `GetItemCreatorAsync` call). A ledger without it still parses.
+- **`History.After(witness)`**: by version NUMBER when the witness's version and every listed id are numbers (every version
+  above the witnessed one; none above it = the witnessed version was changed in place, so its current content is the only
+  content after the witness and nothing exists to drop); otherwise by TIME — every version written after the witness's
+  time, in time order. The f1-v2 fallback to "the current content alone" is gone.
+- **`history-undecidable`** when that order cannot be decided — the witness has neither a numbered version nor a time; a
+  version carries no time; two versions written after the move carry the same time; the content changed yet no version is
+  later than the witness; or the current content is not the latest version by time: the re-copy does not run, the row and
+  the source are untouched, the ledger entry stays owed, the outcome is `RelocationPending` with a
+  `history-undecidable: …` line naming the reason, and a repeat call retries.
+- **Tests**: `AnEditAtTheOldLocation_WhoseVersionIdsAreNotNumbers_CarriesEveryVersionWrittenAfterTheMove_InTimeOrder` (two
+  post-move versions, both carried; the reported history in time order with original authorship),
+  `AWitnessRecordedWithoutAVersion_StillCarriesEveryVersionWrittenAfterTheMove_ByTheirTimes`, and the theory
+  `APostMoveHistoryWhoseOrderCannotBeDecided_IsHistoryUndecidable_AndTheRowAndTheSourceAreUntouched` (5 cases, one per
+  undecidable condition).
+
+## 23.6 Round 54 item 4 — every fail-closed branch tested; §22 corrected
+
+| Verifier seed | Branch | Test (all in `DocumentContainerRelocatorTests` unless named) |
+|---|---|---|
+| Sk | the witness cannot be compared (hashless witness; the source's version list faults, is not found, or is empty) → never deleted | `ASourceThatCannotBeComparedWithItsWitness_IsNeverDeleted` (3 cases) |
+| Sq | the source's version list faults / is not found → the move fails before a byte moves (never the current content alone) | `ASourceWhoseVersionsCannotBeListed_IsNeverMoved_SoNoHistoryIsSilentlyLost` (2) |
+| Si | an unprovable witness (no hash, no version listed) → the move never starts | `ASourceThatCouldNeverBeProvedUnchanged_IsNeverMoved` |
+| Sj | a PRIOR version above the single-request bound → fails before a byte moves | `APriorVersionLargerThanASingleRequestCopy_FailsTheMove_BeforeAByteMoves` |
+| Sm | a replay upload landing on another item → fails; the stray item and the partial copy removed | `AReplayedVersionWrittenToAnotherItem_FailsTheMove_AndRemovesBothItems` |
+| Sw | the copy's versions cannot be listed (fault / none) → the copy removed, the row never re-pointed | `ACopyWhoseVersionsCannotBeListed_IsRemoved_AndTheRowIsNeverRepointed` (2) |
+| Sd | the version listing follows every page | `DocumentVersionListPagingTests` (4) |
+
+§22 is corrected in place: the header's "each new check seeded", §22.2 item 15's "Met", §22.9's "every seed bit" (true only
+of the seeds listed there), §22.3's paging line, §22.4 / §22.8 / §22.12's "the EXISTING registered `IAccessDataSource`".
+The relocator test file's KEEP-path header (F-3) now states the witness rule and the lock rule.
+
+## 23.7 Placement (CLAUDE.md §10) and component justification (§11; owner round 56 item 2's over-engineering check)
+
+**Placement: in BFF**, in the existing types (the relocation is the BFF's; the lock store is the BFF's ADR-004 store).
+ADR-002: no plugin. ADR-003: every new decision fails closed (a lost or unconfirmed lock writes nothing; a cached answer is
+not a right; an undecidable history moves nothing; an unending listing fails the move). ADR-004: the existing processing
+lock, extended. ADR-007: no Graph type leaks (`SpeItemCreator` gains a `DateTimeOffset?`). ADR-010: no new interface
+(the 1:1 ceiling is unchanged); one registration changes from type activation to a factory. ADR-013: no AI type.
+ADR-038: no `Mock<HttpMessageHandler>` (the Kiota adapter is the SDK's own boundary), no DI or ctor-null assertion,
+`TimeProvider` (`FakeTimeProvider`) for time. No package, endpoint, option, job, column, PCF or plugin.
+
+- **`IIdempotencyService.RenewProcessingLockAsync` / `ReleaseProcessingLockAsync(eventId, ownerId)`** + their
+  `IdempotencyService` implementations — Existing: the acquire / ownerless release of the same store (no renewal, no owner
+  check on release); Extension: extended in place (default methods, so every other implementer compiles unchanged);
+  Cost of nothing: a move longer than 10 minutes runs unlocked and a second relocation copies and re-points the same
+  document (F-4), or a relocation that lost its lock deletes the new holder's lock.
+- **`RelocationLease`** (private nested class of the relocator, no registration) — Existing: none in the relocator (a bare
+  acquire/release pair); Extension: it IS the relocator's acquire/release, given an owner, a read-back, a heartbeat and a
+  verdict; Cost of nothing: no renewal and no "stop before the next destructive step" (round 54 item 2).
+- **`RelocationWitness.Modified` + `SpeItemCreator.LastModified`** (+ `lastModifiedDateTime` in the existing uncached item
+  read) — Existing: the witness's version id; Extension: one field each, one more selected property on the same call;
+  Cost of nothing: with no numbered version the post-move edits cannot be ordered, so every such source stays
+  `history-undecidable` forever instead of being carried (round 54 item 3).
+- **`DriveItemOperations.MaxVersionPages`** (a constant bound) — Existing: the unbounded paging loop; Extension: one
+  bound in that loop; Cost of nothing: a listing that never ends loops forever while the heartbeat keeps the document
+  locked.
+- **`LockLostPrefix`, `HistoryUndecidablePrefix`** — report codes beside the existing `source-changed-after-move` /
+  `index-pending` (round 54 names them).
+- **`DocumentsModule`** — the relocator's existing registration, now a factory passing the uncached source (no new
+  registration).
+- Nothing was built for a (d)–(f) item.
+
+## 23.8 Seeding (2026-10-05; one seed per build, 28 builds; byte copies restored and touched; no `SEED166G` marker remains)
+
+Harness: each seed edits one or more lines, builds `tests/unit/Sprk.Bff.Api.Tests`, runs the targeted set (309 tests:
+relocator, migration job, facade, RAG trim, pointer check, attach, version-route auth, external contract, lock renewal,
+version paging), records the red tests, restores. Every seed turned red the test(s) written for it; none missing.
+
+| Seed | What it breaks | Red |
+|---|---|---|
+| R1 | the CachedAt freshness rule off | `AStaleCachedWriteAnswer_CannotMakeAPostMoveEditCurrent` |
+| R2a | no heartbeat | `ASecondRelocator_CannotStartAMove_…`, `AMoveWhoseHeartbeatFindsTheLockLost_…` |
+| R2b | no confirmation before the re-point | `AMoveThatLosesItsLock_StopsBeforeTheRepoint_…`, `ARelocationWhoseLockWasTakenOver_…` |
+| R2c | no confirmation per ledger entry | `ARepeatCallThatLosesItsLock_…`, `ALockLostRightBeforeTheSourceDelete_…`, `ALockLostBeforeTheSettledLedgerIsWritten_…` |
+| R2d | no confirmation before the source delete | `ALockLostRightBeforeTheSourceDelete_KeepsTheSource` |
+| R2e | no confirmation before the ledger write | `ALockLostBeforeTheSettledLedgerIsWritten_LeavesTheStoredLedger` |
+| R2f | the lease releases ownerless | `ARelocationWhoseLockWasTakenOver_NeverReleasesTheNewHoldersLock` |
+| R2g | no read-back at the take | `ALockStoreThatAnswersTakenWithoutHoldingTheLock_RunsNothing` (+5 lock tests) |
+| R2h | the settle continues after a lost lock (index step) | `ALockLostRightBeforeTheSourceDelete_KeepsTheSource` (index assertion) |
+| R2i | the replay continues after the heartbeat lost the lock | `AMoveWhoseHeartbeatFindsTheLockLost_StopsItsCopyAtTheNextVersion` |
+| R2k | a second lease of one document on one instance accepted | `OneRelocator_NeverRunsTwoMovesOfOneDocumentAtOnce_…` |
+| R3a | the f1-v2 fallback (current content only) | both carry-every-version tests + 4 undecidable cases |
+| R3b / R3c / R3d / R3e / R3f | each undecidable condition allowed | its own theory case (same-time / times-contradict-numbers / no-witness-time / a-version-without-time / no-later-version) |
+| Sk | `Unknown` falls through to the delete | `ASourceThatCannotBeComparedWithItsWitness_IsNeverDeleted` (3) |
+| Sq | a faulted source version list read as empty | `ASourceWhoseVersionsCannotBeListed_…(faults: True)` |
+| Si | an unprovable witness accepted | `ASourceThatCouldNeverBeProvedUnchanged_IsNeverMoved` |
+| Sj | the per-version size bound off | `APriorVersionLargerThanASingleRequestCopy_…` |
+| Sm | an upload on another item accepted | `AReplayedVersionWrittenToAnotherItem_…` |
+| Sw | an unlistable copy accepted | `ACopyWhoseVersionsCannotBeListed_…` (2) |
+| Sd | version-list paging off (`while (false && …)`) | `AHistoryOnTwoPages_…`, `AHistoryOnThreePages_…`, `AListingThatDoesNotEnd_…` |
+| Sd2 | the page bound off | `AListingThatDoesNotEnd_IsNeverReturnedAsTheWholeHistory` |
+| I1 | a faulted renewal read as renewed | `ARenewal_WhenTheCacheFaults_IsRefused_NotAssumed`, `ALockStoreThatAnswersTaken…` |
+| I2 | a renewal ignores the owner | `ARenewal_OfALockAnotherOwnerHolds_…`, `WithoutARenewal_TheLockExpires_…` |
+| I3 | a release ignores the owner | `AnOwnersRelease_RemovesOnlyItsOwnLock` |
+
+The verifier's earlier seeds (S1–S21, V5/V6/V8, the client and script seeds) are unaffected: their tests are unchanged
+and green.
+
+## 23.9 Gates (this round, final code `53325bc6a`)
+
+| Gate | Result |
+|---|---|
+| Affected tests | the targeted set (filter `DocumentContainer`, `DocumentVersionAuthorization`, `ExternalAccessContract`, `DocumentPointer`, `DocumentFileAttach`): **309 passed, 0 failed** (273 at base; +36: relocator +27 cases, `ProcessingLockRenewalTests` 5, `DocumentVersionListPagingTests` 4); the relocator class run 5 times in a row, green each time (the two time-driven tests are stable) |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **14,711 total: 14,657 passed, 54 skipped, 0 failed** (27 m 47 s; +36 vs f1-v2's 14,675) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **406 passed, 0 failed** |
+| Sprk.Bff.Api.IntegrationTests (full) | **104 passed, 0 failed** |
+| Spe.Integration.Tests (full) | **405 total: 380 passed, 25 skipped (environment-gated `SkippableFact`s), 0 failed** |
+| `dotnet list package --vulnerable --include-transitive` | `Sprk.Bff.Api` has no vulnerable packages |
+| Formatting | the pre-commit `dotnet format` ran on every staged `.cs` file; every changed `.cs` file is CRLF |
+| Publish size (CLAUDE.md §10) | base `966f88a21` **45.765 MB** (47,988,516 bytes) vs branch `53325bc6a` **45.772 MB** (47,995,924 bytes) = **+0.007 MB** (+7,408 bytes); 212/212 files; both from FRESH short-path trees (an archive of each commit extracted into `C:\wt166gm` / `C:\wt166gb`, removed afterwards), `dotnet publish -c Release`, PowerShell `Compress-Archive -CompressionLevel Optimal`, PDBs included. No package |
+| Client builds | none needed: no client source changed |
+
+## 23.10 Manual live gates
+
+None new. §22.11's gates 23a (schema), 23 (FLS), 24 (migration), 25 (strict rule) stand unchanged and pending (main
+session). No script changed. Nothing was read or written live this round.
+
+## 23.11 Found, decisions recorded, integration notes, `.claude`
+
+- **Decisions recorded (within round 54, no owner question):** freshness is enforced by the relocator's own rule as well
+  as by the wiring (the rule is the testable guarantee; ADR-038 B3 bans asserting the wiring). In the version-number
+  path, "no version above the witnessed one" means the witnessed version was changed in place, so its current content is
+  carried (nothing else exists after the witness). A version listing past 500 pages fails the move (reported, retried).
+- **Integration — the lock store:** `IIdempotencyService` gains two DEFAULT methods; only the relocator calls them, so
+  every other implementer and every Moq mock of the interface is unaffected. A branch that edits `IdempotencyService.cs`
+  merges textually (the new members sit before `IsStaleLockOf`).
+- **Integration — task 150's lane and 147's `SecureChildReconciliationJob` (round 46 item 2):** they resolve the
+  relocator from DI unchanged (the registration is now a factory). A Make Secure request that replays a long history now
+  holds its lock for the whole move; a retry meanwhile gets `Failed` "another relocation of this document is running, or
+  its lock could not be confirmed" (incomplete, retried) — never a second copy. Pending lines may now also read
+  `lock-lost: …` and `history-undecidable: …` (both incomplete, both settled by a repeat call); the batch result's shape is
+  unchanged.
+- **Integration — round 45 item 5:** this round adds NO interface; `IRelocatedFileIndexing` still holds the last slot
+  under the ADR010 1:1-interface ceiling (§22.12).
+- **Task 167's guard:** no route added, deleted or re-gated.
+- **`.claude` edit (main session only):** none new; §12's `bff-deploy/SKILL.md:50` edit still stands.
+
+## 23.12 Known limits (owner round 56: one line each; no fix round)
+
+- **(e)** The `DocumentsModule` wiring (uncached access source) has no test of its own — a DI-registration assertion is
+  banned (ADR-038 B3); reverting it only degrades toward fail-closed (a writer's post-move edit kept as history), never
+  toward exposure, because the relocator's own tested rule refuses a cached answer.
+- **(e)** The CachedAt rule compares clocks: with a CACHED source shared across instances, an answer cached on an instance
+  whose clock runs ahead by more than the entry's age could pass it; production passes the uncached source, so this needs
+  a misconfiguration.
+- **(e)** `IdempotencyService`'s renewal and owner release are read-then-write, like its acquire (#984): a lock that
+  expires exactly between a renewal's read and write could overwrite a new taker's lock; the other taker then fails its
+  next confirmation and stops before its next destructive step (last writer wins) — fail closed. The store's fail-open
+  acquire (#984) is unchanged for its other callers.
+- **(e)** A version history longer than 500 pages fails its move (reported, retried, never cut); no SPE history comes near.
+- **(e)** A `history-undecidable` source stays owed for as long as Graph keeps returning version metadata whose order
+  cannot be decided; each repeat call reports it with the reason, and nothing is lost meanwhile.
+
+## 23.13 Not closed
+
+- **Live writes (by design, main session):** §22.11's gates 23a, 23, 24, 25 and §20.11's others. Nothing was written live,
+  and this round made no live access at all.
+- Nothing else is owed by task 166. Per owner round 56 this was the lane's last fix round; no (a)–(c) item remains.
