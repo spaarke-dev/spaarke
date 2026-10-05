@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04 (by context-handoff, before /compact). Branch head `b9a9d7f1f` (pushed, clean). 097 ⛔ awaiting the owner
+> **Last Updated**: 2026-10-04 (by context-handoff, before /compact). Owner decided 097 (option 1); next = the Email-tab switch, then the round-4 PR
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,10 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **097** — `/api/communications/send` authorization + archive id — ⛔ **BLOCKED, owner decision pending** (escalation trigger 3) |
-| **Why blocked** | UAC-r2 task 161 (#1100) already implements the same per-attachment Read + per-association AppendTo checks on the same files (`CommunicationRecordAuthorizationFilter`, on `origin/integ/uac-r2-batch4`, NOT on master). No 097 code was written. Full analysis: `notes/097-communications-send-authorization.md` |
-| **Question for the owner** | Options (note §4): **(1, recommended)** hold the Word Email tab (096) until UAC-r2's integration with 161 is on master + deployed; then 097 = the archive fix (on top of UAC-r2 task 146's edits) + the live check · (2) pull UAC-r2's branch in (not advised) · (3) build 097 here and reconcile with 161 (duplicates security code; needs UAC-r2 owner agreement) |
-| **Next Action** | Ask the owner the 097 question. Then: open a PR for round 4 — 095 always; 096 (Email tab) only if the owner allows it ahead of 161 (otherwise hold 096 by gating the tab off or keeping it out of the deploy — decide with the owner) → merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`) → ONE dev BFF deploy (owner already chose "once, with round 4 + 097"; 083 is merged but NOT deployed) via `/bff-deploy` → add-in site auto-deploys on master push → UAT round 5 |
+| **Task** | **Next: the Email-tab hold switch, then the round-4 PR** (097 decided by the owner — option 1, note §6) |
+| **Owner decision 2026-10-04** | *"yes we can follow your recommendation - ensure we have this fully documented"* → the send-route authorization is UAC-r2 task 161's (one implementation); the Word Email tab (096) is held OFF until 161 is on master + deployed; 097 = the archive fix (after UAC-r2 146) + live checks, later |
+| **Next Action** | 1) Add build setting `ADDIN_EMAIL_TAB_ENABLED` (default **off**), injected like `ORG_URL` in `src/client/office-addins/webpack.config.js` + `.github/workflows/deploy-office-addins.yml`; Word's `canEmailFromPane` = Word AND the setting (adapter capability; tests for on/off). 2) Run `code-review` + `adr-check` skills on the round-4 diff (095's review was inline). 3) Build add-in with the CI env values; gated jest; lint; typecheck. 4) Commit, open a PR (095 + 096-held + switch), merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`). 5) ONE dev BFF deploy via `/bff-deploy` (owner already chose this; carries 083) — confirm with the owner first only if another project's deploy is mid-flight. 6) Add-in site auto-deploys on the master push. 7) Tell UAC-r2 that the Word Email tab waits on 161 and that this project owns the archive fix after their 146. 8) UAT round 5 |
 | **Re-upload?** | **No** for round 4: manifests unchanged, package stays 1.1.1 (095's +75 px width is a runtime call). Owner already has `C:\code_files\spaarke-addin-package\spaarke-addin-1.1.1.zip` |
 | **Main checkout** | `C:\code_files\spaarke` is on ANOTHER session's branch (`chore/portfolio-board-hygiene`). Never `git pull` there — `git fetch origin && git branch -f master origin/master` (memory: main-checkout-may-be-on-another-branch) |
 
@@ -24,7 +23,7 @@
 | 088–094 | ✅ merged (#1124 `fb8280aee`, #1284 `6932582b1`); BFF `fb8280aee` + add-in site `6932582b1` deployed; package 1.1.1 |
 | 095 (Related-to row, Save-as link, +75 px pane via `Office.extensionLifeCycle.taskpane.setWidth`) | ✅ on branch (`26a020004`), not in a PR. Its review was inline — run `code-review` + `adr-check` skills on the round-4 diff before the PR |
 | 096 (Word Email tab on shared `EmailComposer` via new wrapper `SendEmailPane`; `shareLinkService` deleted) | ✅ on branch (`26a020004`), not in a PR; shipping depends on the 097 decision. Decision row added to project CLAUDE.md (ADR-012 Path A narrowed) |
-| 097 | ⛔ blocked (above) |
+| 097 | ⛔ waits on UAC-r2 161 (+146) reaching master and dev; then: flip `ADDIN_EMAIL_TAB_ENABLED` on, archive fix, live checks (note §6) |
 | 042 | 🔄 UAT rounds continue (round 4 recorded in `notes/042-uat-round4-2026-10-04.md`) |
 | 090 | 🔲 wrap-up with `/test-diet` after 042 |
 | Publish size | measured for 083 (+353 B). Round 4: 095 is client-only; 096 changed no BFF file → none owed unless 097 adds code |

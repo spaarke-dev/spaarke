@@ -127,6 +127,7 @@
     Word Email tab until UAC-r2 is on master; re-scope 097 to the archive fix (after UAC lands) and the live
     check. All acceptance criteria are OPEN. Details:
     notes/097-communications-send-authorization.md.
+    OWNER DECISION 2026-10-04 (option 1): "yes we can follow your recommendation - ensure we have this fully documented". The authorization is UAC-r2 task 161's (one implementation). The Word Email tab (096) is held off by a build setting (ADDIN_EMAIL_TAB_ENABLED, default off) until 161 is on master and deployed. 097 is re-scoped to the archive fix (after UAC-r2 task 146 lands on the same lines) plus the live checks. Full record: notes/097-communications-send-authorization.md section 6.
   </notes>
 
   <execution>

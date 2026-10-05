@@ -99,3 +99,38 @@ Communication files)
 No source or test edits, no reproduce-first test, no seeded control, no build or test run, no CVE check, no
 publish-size measurement. code-review and adr-check were not run because no code changed (task-execute
 Step 9.5 skips when nothing changed). Every acceptance criterion is OPEN.
+
+## 6. Owner decision (2026-10-04): option 1
+
+The owner, on the §4 question: *"yes we can follow your recommendation - ensure we have this fully documented"*
+
+**The decision, in full:**
+
+1. **The `/api/communications/send` authorization is UAC-r2's.** Task 161 (#1100) is the one implementation. This
+   project does not build a second one. 097's authorization criteria are met when 161 is on master, by 161's own
+   contract tests (`CommunicationRecordAuthorizationContractTests`, 36 seeded removals).
+2. **The Word Email tab (096) is held until 161 is on master AND deployed to the environment.** The code stays (it
+   is merged with round 4); the tab is switched OFF by a build setting, so 095 and 083 can ship now.
+   - **Mechanism (next action):** a build setting `ADDIN_EMAIL_TAB_ENABLED`, injected like `ORG_URL`
+     (`webpack.config.js` + `deploy-office-addins.yml`), default **off**; the adapter's `canEmailFromPane`
+     capability is `true` only in Word **and** with the setting on. With it off, Word shows Save · To Do · Find and
+     no Email tab, and no Send Email row (096 removed task 086's row, whose sharing link always failed on SPE — so
+     nothing working is taken away). Outlook is unaffected (native compose).
+   - **Release:** flip the setting on in `deploy-office-addins.yml` in the same change that records 161's merge +
+     deploy; no code change.
+3. **097 is re-scoped** to: (a) the archive fix — `ArchiveOutboundAttachmentsAsync` writes `sprk_document` ids into
+   `sprk_graphitemid` and the archive container into `sprk_graphdriveid`; it must carry each source document's drive
+   and item ids from the attachment fetch — done on master **after** UAC-r2 lands (UAC-r2 task 146 edits the same
+   lines); (b) the live checks: the Word tab sends the user's own document, and a foreign document id is refused with
+   `sdap.access.deny.communication.send`.
+4. **Coordination:** UAC-r2 is told that this project depends on 161 for the Word Email tab and owns the archive fix
+   after 146 (so the two do not collide).
+
+**Order:**
+
+| Step | Owner of the step | Gate |
+|---|---|---|
+| Email tab switch (default off) | this project, now | — |
+| Round-4 PR (095 + 096-held) → merge → ONE dev BFF deploy (083 + round 4) → add-in site | this project | owner go for the BFF deploy (given: "once, with round 4 + 097") |
+| 161 (+146) to master and deployed | UAC-r2 | UAC-r2's own verification |
+| Flip `ADDIN_EMAIL_TAB_ENABLED` on; archive fix; live checks | this project (097) | 161 on master + deployed |
