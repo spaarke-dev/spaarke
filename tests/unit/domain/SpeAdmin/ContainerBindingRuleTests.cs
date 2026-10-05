@@ -242,6 +242,37 @@ public sealed class ContainerBindingRuleTests
     }
 
     [Fact]
+    public void TheContainerSearch_ReportsGraphsTotal_OnlyThroughTheSharedRule()
+    {
+        // Owner round 41 item 5 — the f2 verifier's seed V14 (the container search forwarding Graph's total although a
+        // further page exists) stayed green through the host because the containers collection reports no total today.
+        // The endpoint's own response builder is therefore proven here, with a page that DOES carry a total.
+        static Sprk.Bff.Api.Infrastructure.Graph.SpeAdminGraphService.ContainerSearchPage Page(string? next, long total = 7) =>
+            new(new[]
+                {
+                    new Sprk.Bff.Api.Infrastructure.Graph.SpeAdminGraphService.SearchContainerResult("a", "A", null, TypeT),
+                    new Sprk.Bff.Api.Infrastructure.Graph.SpeAdminGraphService.SearchContainerResult("b", "B", null, TypeT),
+                },
+                total, next);
+        var both = new HashSet<string>(StringComparer.Ordinal) { "a", "b" };
+        var platformOperator = new SpeAdminContainerTrim(both, IsPlatformOperator: true);
+
+        var complete = Sprk.Bff.Api.Api.SpeAdmin.SearchContainersEndpoints.BuildResponse(Page(next: null), platformOperator);
+        complete.TotalCount.Should().Be(7);
+        complete.Items.Select(i => i.Id).Should().Equal("a", "b");
+
+        Sprk.Bff.Api.Api.SpeAdmin.SearchContainersEndpoints.BuildResponse(Page(next: "page-2"), platformOperator)
+            .TotalCount.Should().BeNull("a further page may hold unbound or another environment's containers");
+        Sprk.Bff.Api.Api.SpeAdmin.SearchContainersEndpoints.BuildResponse(Page(next: null), new SpeAdminContainerTrim(both, IsPlatformOperator: false))
+            .TotalCount.Should().BeNull("only a platform operator gets Graph's total");
+
+        var trimmed = Sprk.Bff.Api.Api.SpeAdmin.SearchContainersEndpoints.BuildResponse(
+            Page(next: null), new SpeAdminContainerTrim(new HashSet<string>(StringComparer.Ordinal) { "a" }, IsPlatformOperator: true));
+        trimmed.Items.Select(i => i.Id).Should().Equal("a");
+        trimmed.TotalCount.Should().BeNull("a hit was removed from the page");
+    }
+
+    [Fact]
     public void AContainerBoundToAUnitTheHierarchyDoesNotHold_IsExcluded()
     {
         AttributeContainer(SpeContainerBinding.BoundTo(Guid.Parse("f0000000-0000-0000-0000-0000000000ff")), TypeT, Configs, Hierarchy)

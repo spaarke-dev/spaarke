@@ -968,6 +968,31 @@ public sealed class H8SpeContainerTypeHandlerTests
     }
 
     [Fact]
+    public async Task AC39_ARecordNeverOverwritesAnotherCreationsRecord_TheNewOneIsQuarantinedInstead()
+    {
+        // A concurrent write that recorded a DIFFERENT container type: merging over it would orphan THAT creation.
+        var run = BuildRun();
+        var concurrent = BuildRun();
+        concurrent.InterStepState.ContainerTypeId = "eeeeeeee-0000-0000-0000-00000000000e";
+        var repo = new FakeRepository(run, etag: "etag-39",
+            scripted: (call, _) => call == 1
+                ? new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(concurrent, "etag-39-other"))
+                : null);
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.Verified("active");
+        var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.CreationRecordNotPersisted);
+        failure.Diagnostic.Should().Contain("eeeeeeee-0000-0000-0000-00000000000e");
+        repo.ETagsUsed.Should().ContainSingle("the other creation's record is never written over");
+        verifier.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task AC38_ACreationThatCannotBeRecorded_IsQuarantined_NamingBothIds_AndGoesNoFurther()
     {
         var run = BuildRun();
