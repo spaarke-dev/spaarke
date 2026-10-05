@@ -256,12 +256,18 @@ public class CatalogHealthMemoContractTests : IClassFixture<CustomWebAppFactory>
         };
         var probe = Probe(inner, clock);
 
-        var caller = probe(CancellationToken.None);
-        await inner.Entered.Task.WaitAsync(Safety);
-        caller.IsCompleted.Should().BeFalse();
-        clock.Advance(Bound);
-        (await caller.WaitAsync(Safety)).Description.Should().Contain("did not complete within");
-        gate.Set();   // release the worker
+        try
+        {
+            var caller = probe(CancellationToken.None);
+            await inner.Entered.Task.WaitAsync(Safety);
+            caller.IsCompleted.Should().BeFalse();
+            clock.Advance(Bound);
+            (await caller.WaitAsync(Safety)).Description.Should().Contain("did not complete within");
+        }
+        finally
+        {
+            gate.Set();   // release the blocked worker, whatever the outcome
+        }
     }
 
     // =============================================================================================
