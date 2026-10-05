@@ -982,6 +982,18 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - Since round 55, every share write made through `DataverseWebApiService` evicts by itself. 148's child share mirroring and removal are therefore covered without any change.
    - Child OWNER changes (re-own on secure/unsecure, the job) still call `InvalidateRecordOwnerChangeAsync`, using `CancellationToken.None`. This is checked and tested at the 132 merge (the "148 × 132 child evictions" item).
 
+## Round 64 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. The 150 + 166 merges and the Make Secure relocation wiring (integ `9fec61fec`).
+
+1. **`PUT /api/v1/documents/{id}` is KEPT,** although 166 deleted it as having no caller.
+   - **Why:** round 28 makes it Compose's document re-file route (147).
+   - **What it keeps:** 146's AppendTo check. Any body that names a storage-pointer field is refused with 400 `sdap.documents.pointer_field_refused` before any write (round 21's F0).
+   - **PR text:** it is not in the "routes the sweep deleted" list.
+2. **Documents whose file cannot be found never block Make Secure.**
+   - They are reported as `filesUnresolvable` and are never moved, re-pointed or deleted. That includes archive rows holding a document GUID, word-add-in-r1's archive bug.
+   - Otherwise a record with one such row would answer `files_incomplete` forever.
+3. **The backstop also settles isolated documents whose file is still in a shared business-unit container,** as well as those with an open ledger step. A failed copy is never written to the ledger, and this is the only way it gets finished (round 46 item 2's intent).
+4. **Known limit (class e):** a repeat call whose only work was an owed source delete answers 409 "already provisioned". The work is done; the message does not say so.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
