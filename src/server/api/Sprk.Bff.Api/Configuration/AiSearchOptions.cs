@@ -44,7 +44,8 @@ public class AiSearchOptions
     /// <summary>
     /// Name of the SPEC §3.4 derived intelligence index that holds Observations and
     /// Precedents. The D-P7 universal ingest pipeline writes emitted Observations here
-    /// via <c>ReferenceIndexingService.IndexIntoAsync</c> + an Observation schema mapper.
+    /// (the observation index upserter; the generic <c>ReferenceIndexingService.IndexIntoAsync</c> path this
+    /// comment used to name had no caller and was removed by unified-access-control-r2 task 163).
     /// Default matches SPEC §3.4 / D-P2 naming (<c>spaarke-insights-index</c>).
     /// </summary>
     public string InsightsIndexName { get; init; } = "spaarke-insights-index";

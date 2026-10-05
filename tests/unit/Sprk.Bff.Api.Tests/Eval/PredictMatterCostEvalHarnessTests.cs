@@ -219,13 +219,24 @@ public class PredictMatterCostEvalHarnessTests : IClassFixture<PredictMatterCost
                 .ReturnsAsync(InsightsAgentResult.Declined(decline, cacheHit: false, processingTimeMs: 88));
         }
 
-        // Invoke the endpoint
+        // Invoke the endpoint.
+        //
+        // Task 163 (unified-access-control-r2): the subject id must be a GUID (the route filter authorizes the
+        // subject matter as the caller). The golden tuples carry display ids ("M-FIXTURE-001"), so each is mapped to a
+        // stable GUID used for BOTH the subject and the matterId parameter. Parameters pass task 164's SHARED
+        // playbook-parameter policy (owner round 16 item 3), a declared allow-list: the tuples' tuning keys
+        // (lookBackYears, currency, matterType) are on none of its lists — no predict-matter-cost node consumes them
+        // (its prompt inputs are liveFacts / cohortObservations / precedents, resolved by earlier nodes) — so only the
+        // subject's own record parameter is sent. The golden dataset itself is unchanged (it is evaluation input).
+        var subjectMatterId = SubjectGuidFor(matterId);
+        var parameters = new Dictionary<string, string> { ["matterId"] = subjectMatterId.ToString() };
+
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new
         {
             question = PredictMatterCostPlaybookId.ToString(),
-            subject = $"matter:{matterId}",
-            parameters = tuple.Parameters
+            subject = $"matter:{subjectMatterId}",
+            parameters
         };
 
         var response = await client.PostAsJsonAsync("/api/insights/ask", request);
@@ -419,6 +430,10 @@ public class PredictMatterCostEvalHarnessTests : IClassFixture<PredictMatterCost
     // -------------------------------------------------------------------------
     // Tuple → facade mock builders
     // -------------------------------------------------------------------------
+
+    /// <summary>A stable GUID per golden-tuple matter id (task 163: the /ask subject must be a GUID).</summary>
+    private static Guid SubjectGuidFor(string fixtureMatterId) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(fixtureMatterId)));
 
     private static InferenceArtifact BuildArtifactFromTuple(GoldenTuple tuple, string matterId)
     {
@@ -738,6 +753,24 @@ public class PredictMatterCostEvalHarnessFixture : WebApplicationFactory<Program
 
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
+
+            // Task 163: /ask accepts a raw playbook GUID only when it is bound as insights-ask, and authorizes
+            // Read on the subject matter as the caller. The harness models predict-matter-cost bound as
+            // insights-ask and a caller who can read the subject — it measures answer quality, not access.
+            var routing = new Mock<IConsumerRoutingService>(MockBehavior.Loose);
+            routing
+                .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                    new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
+            services.RemoveAll<IConsumerRoutingService>();
+            services.AddSingleton(routing.Object);
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
+            // Task 163 (owner round 16 item 1): the route reads the playbook's node list to decide whether Write on the
+            // subject is needed; predict-matter-cost writes nothing, so its shape keeps the reader's Read sufficient.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.INodeService>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Api.Ai.RouteSweepNodeShapes.NonPersistingNodeService());
 
             services.RemoveAll<IHostedService>();
 

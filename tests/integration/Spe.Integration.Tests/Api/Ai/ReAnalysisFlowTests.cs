@@ -463,10 +463,8 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(MockBehavior.Loose).Object);
 
-            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
-            // Register its missing dependency stubs so DI can construct it.
+            // ITextChunkingService stub (formerly registered for ReferenceIndexingService, deleted by task 163).
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(MockBehavior.Loose).Object);
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
 
             // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(MockBehavior.Loose).Object);

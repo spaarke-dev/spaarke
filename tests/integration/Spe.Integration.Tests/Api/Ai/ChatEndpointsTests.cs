@@ -804,10 +804,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(Moq.MockBehavior.Loose).Object);
 
-            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
-            // Register its missing dependency stubs so DI can construct it.
+            // ITextChunkingService stub (formerly registered for ReferenceIndexingService, deleted by task 163).
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(Moq.MockBehavior.Loose).Object);
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
 
             // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(Moq.MockBehavior.Loose).Object);

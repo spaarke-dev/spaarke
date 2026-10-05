@@ -108,16 +108,10 @@ public class I2_AiSearchTenantIdFilterTests
     /// <c>projects/customer-provisioning-orchestration-r1/notes/task-064-deviations.md</c>).
     /// </para>
     /// <para>
-    /// <b>ReferenceIndexingService.cs</b> — <c>DeleteForSourceAsync</c> uses a
-    /// <c>schemaMapper.BuildSourceFilter(sourceId)</c> helper to build the
-    /// filter (sourceId-scoped deletes during re-indexing). The mapper (in a
-    /// different file) is the filter author; the call-site file does not
-    /// contain <c>tenantId eq</c>. Reviewer obligation: verify the schema
-    /// mapper for each target index composes the filter with tenantId
-    /// scoping when the index is per-tenant. Filed as a baseline audit finding
-    /// for task 065 — the schema mapper's exact filter shape needs the audit
-    /// sweep to confirm.
+    /// <b>ReferenceIndexingService.cs</b> — its waiver was REMOVED with the file (unified-access-control-r2
+    /// task 163 deleted the service with its only consumer, /api/admin/knowledge/*).
     /// </para>
+
     /// <para>
     /// <b>RecordMatchService.cs</b> — queries <c>spaarke-records-index</c> to suggest Dataverse
     /// record matches for inbound attachments. Waived 2026-08-26 on an explicit owner ruling that
@@ -153,7 +147,6 @@ public class I2_AiSearchTenantIdFilterTests
     {
         "src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/ResilientSearchClient.cs",
         "src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/InternalIndexProvider.cs",
-        "src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs",
         // Single-tenant deployment waiver — see the RecordMatchService paragraphs above.
         // Remove before spaarke-records-index serves more than one tenant.
         "src/server/api/Sprk.Bff.Api/Services/RecordMatching/RecordMatchService.cs",

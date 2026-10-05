@@ -93,6 +93,19 @@ public class PredictMatterCostPlaybookTests
                 new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
             NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 
+    // Task 163 — the run guard reads the playbook's node list on a cache MISS. predict-matter-cost writes nothing, so its
+    // shape here is the repo playbook's: no node that can write references the subject's {{matterId}}.
+    private readonly Mock<INodeService> _nodeServiceMock = NodeServiceWith(
+        new PlaybookNodeDto { SprkExecutortype = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.LiveFact, ConfigJson = "{\"subject\":\"matter:{{matterId}}\"}" },
+        new PlaybookNodeDto { SprkExecutortype = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AgentService, ConfigJson = "{\"tenantId\":\"{{tenantId}}\"}" });
+
+    private static Mock<INodeService> NodeServiceWith(params PlaybookNodeDto[] nodes)
+    {
+        var mock = new Mock<INodeService>();
+        mock.Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(nodes);
+        return mock;
+    }
+
     private InsightsOrchestrator CreateSut() => new(
         _httpContextAccessorMock.Object,
         _cacheMock.Object,
@@ -102,6 +115,7 @@ public class PredictMatterCostPlaybookTests
         _consumerRoutingMock.Object,
         _ragServiceMock.Object,
         BuildAssistantHandler(),
+        _nodeServiceMock.Object,
         NullLogger<InsightsOrchestrator>.Instance);
 
     private sealed class TestOptionsMonitor<T> : Microsoft.Extensions.Options.IOptionsMonitor<T>

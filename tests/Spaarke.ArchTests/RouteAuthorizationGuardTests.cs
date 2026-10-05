@@ -950,8 +950,17 @@ public class RouteAuthorizationGuardTests
     //            had a waiver, so the count alone moves. Deny proof:
     //            Sprk.Bff.Api.IntegrationTests.Api.Dataverse.DataverseProxyRoutesRemovedTests.
     //
-    // 120 -> 118 (2026-10-04, sweep integration of unified-access-control-r2 task 164, owner round 10 item 1; written as
-    // 120 -> 118 on the task branch from a different 120). A DOWNWARD move:
+    // 120 -> 119 (2026-10-04, sweep integration of unified-access-control-r2 task 163; written as 120 -> 119 on the task
+    // branch). A DOWNWARD move:
+    //
+    //   163  -1  Api/Ai/AdminKnowledgeEndpoints.cs DELETED with all three of its routes (POST
+    //            /api/admin/knowledge/index-references, POST and DELETE /index-reference/{knowledgeSourceId})
+    //            under owner round 10 item 1 — no caller in the repo and in no published API description.
+    //            The file was NOT in GovernedFiles, so there is no entry to remove. Api/Ai/KnowledgeBaseEndpoints.cs
+    //            lost four routes in the same task but keeps GET /indexes/health, so it is still counted.
+    //
+    // 119 -> 117 (2026-10-04, sweep integration of unified-access-control-r2 task 164, owner round 10 item 1; written as
+    // 120 -> 118 on task 164's own branch, and 119 -> 117 on task 163's fix round that merged it). A DOWNWARD move:
     //
     //   164  -1  Api/Ai/PromptLibraryEndpoints.cs DELETED — all six /api/ai/prompts routes retired (no caller in
     //            the repo, not in any published API description; sweep findings #56 and #57). Never governed.
@@ -964,7 +973,7 @@ public class RouteAuthorizationGuardTests
     //
     // Reconcile at integration: sibling sweep tasks (159-169) move this count too; the merged value is the
     // master count after every retired and added file, recounted, not a sum of deltas.
-    private const int ExpectedEndpointFileCount = 118;
+    private const int ExpectedEndpointFileCount = 117;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

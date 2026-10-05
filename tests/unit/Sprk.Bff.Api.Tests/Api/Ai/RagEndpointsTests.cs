@@ -1,7 +1,9 @@
 using System.Reflection;
 using FluentAssertions;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -53,7 +55,20 @@ public sealed class RagEndpointsTests
             ?? throw new InvalidOperationException(
                 $"Handler '{MethodName}' not found on RagEndpoints via reflection — signature change?");
 
-        var task = (Task<IResult>)method.Invoke(null, new object[] { request, ragService, cancellationToken })!;
+        // Task 163: the handler now also takes the per-row trim seam, the HttpContext (the caller's tenant
+        // and principal) and a logger factory. These tests return no rows, so the trim seam is never asked
+        // (Strict mock proves it) and the caller's token tenant equals the options tenant.
+        var aiAuthorization = new Mock<IAiAuthorizationService>(MockBehavior.Strict);
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim("tid", TenantId), new Claim("oid", "00000000-0000-0000-0000-0000000000aa") }, "test")),
+        };
+
+        var task = (Task<IResult>)method.Invoke(null, new object[]
+        {
+            request, ragService, aiAuthorization.Object, httpContext, NullLoggerFactory.Instance, cancellationToken,
+        })!;
         return await task;
     }
 
@@ -141,9 +156,12 @@ public sealed class RagEndpointsTests
         captured!.SearchIndexName.Should().BeNullOrWhiteSpace(
             "when request.SearchIndexName is null/whitespace, the endpoint MUST NOT introduce a non-empty value " +
             "into the options (NFR-02 backward-compat — existing 2-tier resolver chain must remain unchanged).");
-        ReferenceEquals(captured, request.Options).Should().BeTrue(
-            "when SearchIndexName is null/whitespace, the endpoint should pass the caller's options reference verbatim " +
-            "(no defensive copy) to keep the hot path allocation-free.");
+        // Task 163 changed the former ReferenceEquals(captured, request.Options) assertion: the options are now
+        // ALWAYS rebuilt (the partition is the token's tenant and the caller principal is attached), so the
+        // caller's object can no longer pass through verbatim. What NFR-02 protects — no index name introduced,
+        // every other field preserved — is asserted instead.
+        captured.TenantId.Should().Be(TenantId);
+        captured.TopK.Should().Be(request.Options.TopK);
     }
 
     /// <summary>

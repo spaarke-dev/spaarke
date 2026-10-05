@@ -250,6 +250,16 @@ public class InsightsToolIntegrationTests : IClassFixture<IntegrationTestFixture
 
         // Smoke matrix represents the HAPPY PATH — non-2xx is a Sev-1 finding to capture
         // in task-030-smoke-evidence.md. The xUnit failure surfaces it loudly.
+        //
+        // unified-access-control-r2 task 163: the endpoint now authorizes Read on the SUBJECT record as the
+        // caller before any Insights work, and answers an unreadable or absent subject with a uniform 404
+        // (reasonCode sdap.access.deny.record_unavailable). A 404 here therefore means the smoke token's user
+        // cannot read that matrix subject in the target environment — fix the token or the subject, not the
+        // endpoint.
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.NotFound,
+            $"{smokeCase.Id}: uniform 404 — the bearer token's user has no Read on subject '{smokeCase.Subject}' " +
+            "(task 163 record gate). Use a smoke user who can read the matrix subjects.");
         response.StatusCode.Should().Be(
             HttpStatusCode.OK,
             $"{smokeCase.Id}: smoke matrix expects 200; errorCode={problem?.ErrorCode ?? "(none)"}; " +

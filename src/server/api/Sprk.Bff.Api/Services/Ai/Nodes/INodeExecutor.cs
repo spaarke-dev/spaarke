@@ -375,4 +375,24 @@ public static class ExecutorSideEffects
     /// side-effecting (fail closed).
     /// </summary>
     public static bool IsSideEffecting(ExecutorType executorType) => !ReadOnly.ContainsKey(executorType);
+
+    /// <summary>
+    /// THE "can a run write to the record a parameter names" rule (unified-access-control-r2 task 164, owner round 16
+    /// item 3): true when a node that can write — a side-effecting executor, or one with no executor type
+    /// (unclassifiable, fail closed) — references <paramref name="parameterName"/> anywhere in its ConfigJson
+    /// (<see cref="PlaybookParameterPolicy.ReferencesParameter"/>; e.g. <c>matter-health-single</c>'s UpdateRecord
+    /// <c>recordId: {{matterId}}</c>).
+    /// </summary>
+    /// <remarks>
+    /// Moved here unchanged from <c>PlaybookAuthorizationFilter.RecordParameterOperation</c> (which now delegates to it)
+    /// so the route filters (Api/Filters) and the Insights run guard (Services/Ai/Insights, task 163 — owner round 16
+    /// item 1, the subject's own key) apply ONE rule.
+    /// </remarks>
+    public static bool CanWriteThroughParameter(IReadOnlyCollection<PlaybookNodeDto> nodes, string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+
+        return nodes.Any(n => (n.SprkExecutortype is not { } executorType || IsSideEffecting(executorType))
+                              && PlaybookParameterPolicy.ReferencesParameter(n.ConfigJson, parameterName));
+    }
 }

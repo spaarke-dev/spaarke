@@ -61,7 +61,7 @@ public sealed partial class ReferenceRetrievalService
     // Semantic configuration name — matches the reference index definition.
     // Uses the same config name as the knowledge index (both created with the same schema).
     // Must match the semantic configuration defined on the spaarke-rag-references index by the ingest
-    // pipeline (Add-ReferenceToIndex.ps1 / ReferenceIndexingService). Verified 2026-07-27 against the
+    // pipeline (Add-ReferenceToIndex.ps1; formerly also ReferenceIndexingService, removed by task 163). Verified 2026-07-27 against the
     // live spaarkedev1 index: the config is "rag-references-semantic-config" — the previous
     // "knowledge-semantic-config" literal (the OLDER knowledge-index convention) 400'd every reference
     // query with "Unknown semantic configuration", silently zeroing grounding (caught, logged, ungrounded).
@@ -302,8 +302,9 @@ public sealed partial class ReferenceRetrievalService
         // sentinel. spaarke-rag-references is the ONLY index this service queries, and every
         // golden reference document in it (KNW-001..KNW-011) is seeded tenantId="system" by
         // design (org-wide, tenant-agnostic reference content — see
-        // KnowledgeDocumentSchemaMapper's "mirroring the original golden-reference convention"
-        // comment). Without this OR-clause, an unconditional tenantId eq '{options.TenantId}'
+        // the "mirroring the original golden-reference convention" note on the former
+        // KnowledgeDocumentSchemaMapper, removed by task 163; the scripts/ai-search ingest scripts
+        // seed the same value). Without this OR-clause, an unconditional tenantId eq '{options.TenantId}'
         // filter excludes every golden reference for any real caller tenant, silently zeroing
         // grounding (NFR-06; see projects/ai-advanced-capabilities-nda-r1/notes/tenant-pin-analysis.md).
         // "system" is the ONLY shared/cross-tenant value this filter ever admits — it is the

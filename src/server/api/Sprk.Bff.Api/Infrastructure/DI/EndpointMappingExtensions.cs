@@ -328,14 +328,11 @@ public static class EndpointMappingExtensions
             app.MapRecordMatchingAdminEndpoints();
         }
 
-        // Admin endpoints that depend on Analysis services (ReferenceIndexingService).
-        // MapBuilderScopeAdminEndpoints removed 2026-07-07 (redesign-r1 task 050) with the
-        // AiPlaybookBuilder estate — builder-scope import had no surviving consumer.
-        if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
-            app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-        {
-            app.MapAdminKnowledgeEndpoints();
-        }
+        // MapAdminKnowledgeEndpoints (/api/admin/knowledge/*) REMOVED 2026-10-03 by unified-access-control-r2
+        // task 163 with AdminKnowledgeEndpoints.cs and its only service, ReferenceIndexingService: owner round
+        // 10 item 1 (no caller in the repo, in no published API description). The three routes let any
+        // signed-in user write into, re-embed or wipe the SHARED reference grounding index (sweep findings
+        // #20, #21, #49). MapBuilderScopeAdminEndpoints was removed earlier (redesign-r1 task 050).
 
         app.MapWorkspaceEndpoints();
         app.MapWorkspaceLayoutEndpoints();
