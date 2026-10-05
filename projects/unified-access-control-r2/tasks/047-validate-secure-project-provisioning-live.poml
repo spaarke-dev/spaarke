@@ -149,4 +149,9 @@ THE `SecureProject__BusinessUnitName` SETTING IS ABSENT ON PURPOSE-BY-ACCIDENT. 
   </acceptance-criteria>
 
   <notes>Assert INEQUALITY against the shared container, not presence of a value — the cascade populates the field with shared storage, so "a container id is set" is exactly the false positive to avoid. Depends on 046 for the ownership half to mean anything.</notes>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 047)">
+    <verdict>MERGED into the batch-4 deploy live gates. No separate work remains in this task. &lt;status&gt; stays pending until the absorbing gate passes; the task is then marked completed together with it, citing that gate's evidence.</verdict>
+    <amendment n="1" title="Evidence">Partly met by live data: dev has 1 secure project (65a3fab2...) with its own container (b!MVasATu_...), which differs from every business-unit container, owned by team 6eabc7f9.... The refusals are covered offline (ProvisionRecordedContainerTests.cs:314-470).</amendment>
+    <amendment n="2" title="Closing gate">Live session B (batch-4 and sweep deploy to dev): one wizard provisioning; the new container differs from every business-unit container; the secure team owns it; a 409 on re-post. Fix or delete the stale lines in secure-project-creation.spec.ts:71,120-134 as part of that gate. When it passes, mark this task completed.</amendment>
+  </amendments>
 </task>

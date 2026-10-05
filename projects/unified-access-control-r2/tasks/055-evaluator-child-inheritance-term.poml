@@ -4,7 +4,7 @@
     <title>Evaluator inheritance term: child records take their core ancestor's rights (FR-27)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires 054 (service-request access / ISS-003) + Phase 1 tasks 032/037/038 (evaluator with vetoes + deny store) merged</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core authorization evaluator change (.cs, auth tags); the inheritance term IS the access decision for six entity classes.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,4 +93,9 @@
   <notes>spec.md FR-27; design.md §4.5. Child-module registration that EXPOSES this term on the fetch seam is task 056.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 055)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Superseded: the core-ancestor stamp already gives children their parent's access (GetTodoRootAsync reads the stamp, ExternalDataService.cs:488-523; the documents and invoices modules scope by parent). An evaluator term would duplicate the stamp, a duplicate mechanism.</amendment>
+    <amendment n="2" title="Known limit">A No Access entry aimed at a single child record is not evaluated (no per-child block). 154 offers only root types, so no realistic entry can target a child. 090 corrects the docs that overstate per-child blocking.</amendment>
+  </amendments>
 </task>

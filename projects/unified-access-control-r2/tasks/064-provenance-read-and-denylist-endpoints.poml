@@ -13,7 +13,7 @@
     <parallel-group>phase4-wave4</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Api/ExternalAccess/** and Infrastructure/ExternalAccess/** — exclusive zone; must not run concurrently with 063.</parallel-reason>
-    <deps>063, 060, 032, 038, 041, 042, 105</deps>
+    <deps>063, 060, 032, 038, 041, 042, 105, 154</deps>
     <tags>bff-api, auth, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -143,5 +143,12 @@ ADDITIONAL ACCEPTANCE (closed set):
 - (h) for a contact: an entry naming an organization the contact is an ACTIVE member of is returned as "via member organization"; one naming an organization of an inactive membership is absent.
 Consumers: 067 (entries tier), 153 (summary tier, including the Organization and Contact banners). Task 154's standard subgrids read the table directly: if O2 removes table Read from core users they show nothing to non-administrators, and 154 must read through this task's routes instead — tell the orchestrator. Depends on 143 for the systemuser subject and the enforcement state; if 143 has not landed, ship the read with those two marked "unavailable" (never defaulted to "enforced") and tell the orchestrator.</amendment>
         <amendment n="140-provenance" date="2026-10-04" source="task 140 handoff (notes/task-140-contact-side-grant.md) -- BINDING">Task 140 adds a SECOND issuer to grant rows: `sprk_externalrecordaccess.sprk_grantedbycontact` (lookup to contact, field-secured, written only by the BFF contact-grant routes), beside `sprk_grantedby` (systemuser). The provenance read must return, for every grant row, WHO issued it: the internal user (sprk_grantedby) or the contact (sprk_grantedbycontact), with display name; exactly one is set on a row 140 wrote. The issuer is read from that ONE column (already in GrantExternalAccessEndpoint.RowSelect as `_sprk_grantedbycontact_value`); today TrackingFieldTrio v1.0.35 shows it through `IAccessGrantRecord.grantedByContactName`. Do NOT add a second provenance mechanism.</amendment>
+  </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 064)">
+    <verdict>KEEP, NARROWED to the single per-record No Access read (owner round 59 item 3: 064's single per-record read feeds 153 and 067). It is the one source both consumers read.</verdict>
+    <amendment n="1" title="Server: lift the lookup, do not add one">Extract the lookup NoAccessShareEnforcer.EnforceForRecordAsync already does (NoAccessShareEnforcer.cs:284-300: GetReferencedOrganizationIdsAsync, fail closed when organisations are unreadable, then NoAccessEnforcementStore.ReadActiveEntryIdsCoveringAsync with its Truncated flag) into ONE store method, roughly ReadCoveringEntriesAsync(entity, recordId) returning (entryIds, truncated, unreadable). The enforcer and the new route both call it.</amendment>
+    <amendment n="2" title="One route">GET .../{entity}/{id}/no-access for project, matter and work assignment only, gated by the existing RecordRouteAccessAuthorizationFilter with a Read key and an operation-specific refusal text (in place of the 'add content' text at :309). Every Read caller gets {secure, noAccess}, each applies / does not apply / unknown (153's banner). Callers who also hold Write also get the entry rows, read with the existing ReadEntryAsync per id and capped by MaxEntriesPerRecord (067's list). The Write check uses the same probe the filter already called. The task brings its own tests.</amendment>
+    <amendment n="3" title="Cut">The provenance report endpoint; the deny-list add/remove routes (superseded by 154's form and 143's /no-access/enforce, NoAccessEnforceEndpoint.cs:55); the per-entry enforcement state; any per-record method on NoAccessListReader; organization and contact record support (153's Organization/Contact banners are cut).</amendment>
+    <amendment n="4" title="Dependencies">Soft dependency on 154's id normalisation, so the string-equality record clause (NoAccessEnforcementStore.cs:189) matches stored ids; 154 is added to deps. 153 and 067 depend on this task.</amendment>
   </amendments>
 </task>

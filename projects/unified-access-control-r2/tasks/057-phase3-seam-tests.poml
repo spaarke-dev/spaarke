@@ -4,7 +4,7 @@
     <title>Phase 3 seam test suite: inheritance end-to-end + negative authorization cases (FR-26/FR-27)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires 052, 055, 056 merged</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** — FULL unconditionally per CLAUDE.md §8 TEST-MODIFYING override.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,4 +85,8 @@
   <notes>ADR-038 §7 classifier: these are MAINTAIN-class (they pin the shipped access contract). spec.md FR-26/27, FR-21/22/23 interplay.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 057)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">No subject left: 055 is cut and 056 deferred, and the stamp path is already tested (029). Its scenarios go with 056 (#1072).</amendment>
+  </amendments>
 </task>

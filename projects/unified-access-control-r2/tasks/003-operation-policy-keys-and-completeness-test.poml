@@ -159,4 +159,9 @@
       <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 003.</criterion>
     </acceptance-criteria-amended>
   </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 003)">
+    <verdict>MERGED into 130's live gate. No separate work remains in this task. &lt;status&gt; stays pending until the absorbing gate passes; the task is then marked completed together with it, citing that gate's evidence.</verdict>
+    <amendment n="1" title="Evidence">Already met by 130 (7c5c4e8a0, in integ and in the dev BFF 5e1fdcc0b): the finance summary route checks the matter (FinanceEndpoints.cs:81-82). No defect remains.</amendment>
+    <amendment n="2" title="Closing gate">Live session A item 1: a non-admin with Read on a matter gets 200 on the finance summary; without Read, 403. When 130's live gate passes, mark this task completed with it.</amendment>
+  </amendments>
 </task>

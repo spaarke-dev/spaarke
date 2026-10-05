@@ -142,4 +142,9 @@ Related: tasks 060, 061, 063, 065 (the "+ User" picker consumes this surface), 0
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 114)">
+    <verdict>KEEP (owner round 59 item 5), with its owner decision on the licence proxy and Assigned-To.</verdict>
+    <amendment n="1" title="Scope">'+ User' sharing works for a licensed user who is flagged external, instead of 422 user_not_internal (owner ruling 2026-09-18, #1003). The POML's citation is stale: the rule now sits in ClassifyEligibility (InternalShareEndpoints.cs:1050-1059), and 142's AssignedAccessMaterializer (:1366-1370) applies the same rule. Change BOTH consumers so there is one rule.</amendment>
+    <amendment n="2" title="Owner gate before execution">Decide (1) whether 'enabled person' is an acceptable proxy for 'licensed', and (2) whether Assigned-To follows the same rule. Asked in the batch-5 decision round; do not guess.</amendment>
+  </amendments>
 </task>

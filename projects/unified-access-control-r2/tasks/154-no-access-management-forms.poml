@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits the sprk_noaccessentry main form and its single form library `sprk_noaccessentry_postsave.js` (shared with 143; whichever of the two reaches it first creates it — see escalation (g)), `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md` (edited by 143), the live Organization and Contact main forms (153 registers its banner library on them afterwards), and security roles ("Spaarke Core User"). Run after 143's server work and 064, before 153 and before 143's form steps.</parallel-reason>
-    <deps>143, 064</deps>
+    <deps>143</deps>
     <tags>dataverse, solution, fields, pcf, frontend, fluent-ui, webresource, security, auth, testing</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <origin>Owner round 3b (notes/session27-owner-decisions-and-research.md:79-83): "a way to ADD users/contacts/organizations to the No Access list of a record or an organization; a way to SEE who is on it", and "how is No Access enforced and surfaced at the ORGANIZATION level (does sprk_organization carry the components?)". Disposition row 5 and O2 (notes/session27-ux-research-ethical-wall-secure.md:71, :75-76). Absorbs 143's form dependency.</origin>
@@ -69,7 +69,6 @@ WHAT EXISTS TODAY (research note :18-36, checked live against spaarkedev1 2026-1
     </relevant-files>
     <dependencies>
       <dependency task="143" status="pending (server + schema steps only)">Supplies `sprk_subjectsystemuser`, the three-subject malformed-row rule, the enforce endpoint, the form library this task extends (or co-creates, escalation (g)), and the N5 outcome this task displays. 143's form steps and live gate run AFTER this task, on this task's form (143 amendment n="UX").</dependency>
-      <dependency task="064" status="pending">Deny-list endpoints (record-level management through Manage Access) and their entry validation, which is the server-side owner of the entry shape for BFF writes.</dependency>
       <dependency task="067" status="pending (coordination)">Manage Access is the record-level surface for Write-holders. This task does not duplicate it on project, matter or work-assignment forms.</dependency>
       <dependency task="153" status="pending (downstream)">Registers its banner library on the Organization and Contact forms after this task, and its copy points at the NO ACCESS section built here.</dependency>
     </dependencies>
@@ -313,4 +312,11 @@ The organization-level answer the owner asked for lands in entity-schema.md (ste
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist. Load the fluent-v9-component skill before step 3.</protocol>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 154)">
+    <verdict>KEEP, REDUCED (owner round 59 items 4 and 8). Runs FIRST in batch 5: it closes a class (a) fail-open defect (a record id typed with braces creates a wall that walls nothing) and a disclosure defect (every core user reads every Reason).</verdict>
+    <amendment n="1" title="Scope">Entry form with all fields and both scripts registered (143's on-save enforcement is not registered on any form today). A save-time id check in the existing sprk_noaccessentry_postsave.js normalises and refuses a non-canonical sprk_objectrecordid. Server half: the reader's existing malformed-row rule rejects a non-canonical id (NoAccessListReader.cs:596 / :330), so an entry written by Web API or import shows as malformed instead of silently walling nothing. Also: quick-create off; 3 subgrids; one view; one menu entry (escalation c: which app); O2 (remove Read from Spaarke Core User, Read/Write for the access-administrator role); doc fixes (entity-schema.md:104, :139, :237).</amendment>
+    <amendment n="2" title="Record picker: REUSE, do not build">Kept, because pasting record GUIDs is not usable and is how the silent-wall defect arises. Reuse the EXISTING polymorphic record picker (RegardingResolver / PolymorphicPicker, as the filing forms use it). Do NOT build the new ObjectRecordPicker PCF. The display-name column sprk_objectrecordname is kept ONLY if the picker cannot show the record without it.</amendment>
+    <amendment n="3" title="Cut">The ObjectRecordPicker PCF; the 'Incomplete Entries' view and its seed test; the extra views; sprk_objectrecordname unless the picker needs it.</amendment>
+    <amendment n="4" title="Dependencies">No longer depends on 064: the deny-list add/remove endpoints it needed are cut, and 154 now runs before 064 (064 soft-depends on 154's id normalisation). Depends on 143 (server work merged).</amendment>
+  </amendments>
 </task>

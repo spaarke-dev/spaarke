@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-022 (#1001) — a stale snapshot of the grant rows must not let the duplicate collapse SHORTEN access</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Grant write path (.cs, Api/ExternalAccess); tags bff-api/auth; modifies tests; the primary fix reaches into the shared Dataverse client.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -143,4 +143,9 @@ Related: tasks 010 (convergence semantics), 023 (the match path's expiry write),
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 112)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Rare and toward less access: it needs pre-existing duplicate rows plus a concurrent change in the same moment, and the result is less access, never more. The fix (concurrency in the shared client) is bigger than the problem.</amendment>
+    <amendment n="2" title="Known limit (class e)">A stale snapshot can let the duplicate collapse keep a row another operator just shortened or revoked (ISS-022 / #1001). With 140's If-Match now available, it can be revisited cheaply if it ever occurs.</amendment>
+  </amendments>
 </task>

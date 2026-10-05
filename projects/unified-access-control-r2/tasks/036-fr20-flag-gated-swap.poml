@@ -236,4 +236,11 @@
       <trigger>If task 142 or 143 is not complete when this task is otherwise ready, STOP. Do not enable the flag in any environment, and do not merge a default of true.</trigger>
     </escalation-amended>
   </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 036)">
+    <verdict>KEEP (owner, round 59 item 1). Build at least what is needed so internal users in Teams or the external app put core records at no risk. Class (a) security, owner-mandated (C9/D1). This block sets the rights SHAPE; every other obligation in the earlier amendments stands (flag, contact-grants union, NFR-01 no-fallback, NFR-03 Truncated, NFR-04 canary).</verdict>
+    <amendment n="1" title="Read set">Dataverse decides which records an internal user sees, through the impersonated root set (FR-20, IImpersonatedRootSetSource, registered at ExternalAccessModule.cs:266 with no consumer today), behind the flag. The impersonated set confers Read.</amendment>
+    <amendment n="2" title="Writes: per-record checks on EVERY write route">Every write route in the external/Teams surface (create to-do, upload, create event, and every other write there) checks the caller's real Dataverse rights on the target record through the existing CallerRecordAccessProbe before writing. No write relies on the fixed Read|Write|Create grant (AccessibleRecordSetService.cs:1646-1647, :482). This is the review's cheaper shape and replaces a per-root rights map on the read set (2026-09-30 amendment n=1).</amendment>
+    <amendment n="3" title="Reuse, no new mechanisms">Truncation reuses the existing Capped / CapCeiling (AccessibleRecordSetService.cs:246-251). The runbook goes in docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, not in a new file.</amendment>
+    <amendment n="4" title="Owner gates and order">The ADR-034 amendment (CLAUDE.md 6.5 path B) is put to the owner with the task. Starts once batch 4 is deployed (it can start alongside that deploy); live gate (i)-(v) runs in live session B. AccessibleRecordSetService.cs does not overlap the other batch-5 KEEPs.</amendment>
+  </amendments>
 </task>

@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project (project CLAUDE.md).</parallel-reason>
-    <deps>036</deps>
+    <deps></deps>
     <tags>bff-api, dataverse, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
     <origin>Register ISS-002 / GitHub #963 — kept in the project under the owner's 2026-09-15 rule: material (this project's surface; :1034 is authorization-adjacent).</origin>
@@ -72,4 +72,10 @@
   <notes>Register ISS-002; GitHub #963 (label unified-access-control-r2). Task 036 adds a Truncated flag to AccessibleRecordSet for the evaluator's 5,000 cap — reuse its surfacing shape if 036 has landed; do not wait for it otherwise.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 105)">
+    <verdict>KEEP, SLIMMED (owner round 59 item 5). Class (a): silently incomplete data.</verdict>
+    <amendment n="1" title="Scope">External-app lists (documents, to-dos, events, contacts) show every row or say plainly that the list was cut short. GetCollectionAsync (ExternalDataService.cs:1143-1169) follows @odata.nextLink up to a cap; the hard-coded $top=200 at :217/587/606/1133 and the SPA's own 200 (web-api-client.ts:400) are addressed; the response gains an optional 'truncated' field and the SPA shows a small banner.</amendment>
+    <amendment n="2" title="Corrections">The 'authorization-adjacent' premise is false: the read feeds display only. The dependency on 036 was artificial and is removed (deps now empty); 105 defines its own optional truncated field instead of reusing a 036 shape. It can run now (batch-5 step 1).</amendment>
+    <amendment n="3" title="Cut">Anything beyond paging to a cap, the truncated field and the banner.</amendment>
+  </amendments>
 </task>

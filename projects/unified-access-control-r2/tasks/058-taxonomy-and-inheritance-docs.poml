@@ -13,7 +13,7 @@
     <parallel-group>phase3-wave6</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Touches docs/ only — disjoint from task 057 (tests/) in the same wave.</parallel-reason>
-    <deps>056</deps>
+    <deps></deps>
     <tags>documentation</tags>
     <estimated-effort>2 hours</estimated-effort>
   </metadata>
@@ -78,4 +78,9 @@
   <notes>spec.md FR-26/27; design.md §4.3/§4.5.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 058)">
+    <verdict>MERGED into 090 (the docs pass). No separate work remains in this task. &lt;status&gt; stays pending until the absorbing gate passes; the task is then marked completed together with it, citing that gate's evidence.</verdict>
+    <amendment n="1" title="Scope carried into 090">A docs section on parents vs children, how inheritance works through the core-ancestor stamp, and that a matter does not inherit from its project (uac-access-control.md has no child or stamp section); correct the No Access schema doc's per-child blocking claim. The 056 gate no longer applies (056 is deferred).</amendment>
+    <amendment n="2" title="Closing gate">Marked completed when 090 completes.</amendment>
+  </amendments>
 </task>

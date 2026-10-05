@@ -4,7 +4,7 @@
     <title>Evaluator versioning + point-in-time replay over Dataverse field audit (FR-32 read half)</title>
     <phase>5 Attestation</phase>
     <gate>blocked — requires 087 merged (event backbone + coverage boundary documented)</gate>
-    <status>pending</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs: replay reuses the live evaluator; a versioning mistake silently rewrites history.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,4 +97,9 @@
   <notes>spec.md FR-32, success criterion 9 ("replay a historical date"). Do NOT bump effort down: temporal reconstruction correctness is the hard part; xhigh is justified as complex-but-fully-specified brownfield work.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 088)">
+    <verdict>DEFERRED TO A NEW PROJECT by owner round 59 item 2. Status set to deferred. Tracked by GitHub issue #1303. This is a new capability, not a defect, so it is not built in UAC-r2.</verdict>
+    <amendment n="1" title="Why">Nobody is asking for historical access answers today; the new abstraction is the over-engineering owner round 56 warns against. FR-32 point-in-time replay (success criterion 9) stays formally UNMET in UAC-r2. Dataverse audit keeps accumulating, so no data is lost.</amendment>
+    <amendment n="2" title="Dependencies">087 and 055 are cut: a future replay reconstructs from Dataverse audit and the core-ancestor stamp.</amendment>
+  </amendments>
 </task>

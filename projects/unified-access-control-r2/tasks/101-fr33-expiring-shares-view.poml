@@ -63,4 +63,9 @@
   <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10.3.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 101)">
+    <verdict>KEEP (owner round 59 item 3). Cheap, requested, configuration only.</verdict>
+    <amendment n="1" title="Scope">Two Dataverse views of external shares: soonest-expiring first, and expiring within 30 days. Write the definitions into the existing views-schema.md / entity-schema.md (designed at entity-schema.md:151-161, never applied; a savedquery search found no such view live). The owner applies the views in the maker portal (live session C). No code.</amendment>
+    <amendment n="2" title="Order">Batch-5 step 1, in parallel with 113, 114 and 105.</amendment>
+  </amendments>
 </task>

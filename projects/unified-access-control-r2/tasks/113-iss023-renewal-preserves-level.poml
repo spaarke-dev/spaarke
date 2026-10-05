@@ -143,4 +143,10 @@ PREMISE RECORD — verified against source at HEAD on 2026-09-19 while authoring
 - ALREADY SATISFIED, in part. The renewal route's no-level property is already pinned implicitly at RecordShareExpiryTests.cs:132-133, which asserts fields.Count == 1 and ContainsKey("sprk_expiresdate") with the message "the change writes the expiry and nothing else — level, grantee and state stay as they were". Strong, but unnamed and count-based, and the lapsed-row case (:141) does not assert it. Strengthen and name; do not rebuild.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 113)">
+    <verdict>KEEP, NARROWED TO ISS-028 (#1008) (owner round 59 item 5). Class (a): a refused request mutates data, and the fix is tiny.</verdict>
+    <amendment n="1" title="Scope">Move the ADR-003 conferral/refusal check above the level write in GrantExternalAccessEndpoint (on current code the write is at :362-374 and the refusal at :420-421), so a re-grant answered with 409 'did not take effect' changes nothing. Add one failing-first test: re-adding an expired person at a DIFFERENT level with no new expiry returns 409 and leaves the level unchanged.</amendment>
+    <amendment n="2" title="Cut">The ISS-023 (#1002) half is already met: the renewal route writes only sprk_expiresdate (SetRecordShareExpiryEndpoint.cs:215), pinned by RecordShareExpiryTests.cs:133 and GrantorCeilingTests.cs:232. #1002 was closed 2026-10-05 citing those tests. No ISS-023 work remains here.</amendment>
+    <amendment n="3" title="Order">Batch-5 step 1, in parallel with 114, 105 and 101. 113 and 114 both touch grant/share tests: check for conflicts.</amendment>
+  </amendments>
 </task>

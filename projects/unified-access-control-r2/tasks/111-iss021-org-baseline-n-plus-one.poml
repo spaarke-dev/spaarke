@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-021 (#1000) — the org-baseline read is an unbounded N+1 on the authorization hot path</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Evaluator hot path (.cs); tags bff-api/auth; modifies tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -132,4 +132,9 @@ Related: tasks 042 (the seam), 043 (the term + the single-snapshot invariant), 1
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load every file in knowledge/files. Follow task-execute's mandatory pre-execution checklist. Step 9.5 (code-review + adr-check) is required at FULL rigor.</protocol>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 111)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">No measurable impact (fails class c): the loop runs only on workforce contact-only sign-ins (never CIAM, :1252; never internal users), over realistically one membership; dev has 2 memberships in total. Task 132's cache work did not touch it.</amendment>
+    <amendment n="2" title="Known limit">The org-baseline read is one read per active organisation membership (AccessibleRecordSetService.cs:1919-1950), ISS-021 / #1000.</amendment>
+  </amendments>
 </task>

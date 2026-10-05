@@ -160,4 +160,9 @@ status was changed on the index alone.</status-note>
     task 141's live gate passes. The main session owns that status change.
     </a18-closure>
   </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 013)">
+    <verdict>MERGED into 141 G-8. No separate work remains in this task. &lt;status&gt; stays pending until the absorbing gate passes; the task is then marked completed together with it, citing that gate's evidence.</verdict>
+    <amendment n="1" title="Evidence">Already met by 141's single ContactBindingDecision. Only criterion 6 is open, and it is 141's G-8.</amendment>
+    <amendment n="2" title="Closing gate">Live session A item 2: 141's G-7/G-8 (sign in as test.user@demo.spaarke.com) and the G-1b decision on the stale Demo 1 row. When G-8 passes, mark this task completed with it.</amendment>
+  </amendments>
 </task>

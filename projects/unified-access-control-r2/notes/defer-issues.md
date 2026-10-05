@@ -25,7 +25,7 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | DEF-001 — FR-33 expiry | #961 | **In project** | Tasks 097 / 098 / 100 ✅; 099, 101, **107** open |
 | ISS-001 — group double-count | #962 | Handed off — not material | The only consumer is `RagService` (AI search trimming — out of scope, finding A-21); `Services/Ai/` internals belong to `spaarke-ai-architecture-redesign-r2` (`projects/INDEX.md`) |
 | ISS-002 — `$top=200` truncation | #963 | **In project** | Task **105** |
-| ISS-003 — requester PATCH on SR to-dos | #964 | **In project** — blocked on the owner's product question | Task **054**, amended 2026-09-15 (its fourth-root premise contradicts task 028's ruling) |
+| ISS-003 — requester PATCH on SR to-dos | #964 | ✅ **R59 (2026-10-05): CLOSED as a known limit** — task 054 cut; fails closed, nothing can trigger it; #964 closed with that reason. *Was:* **In project** — blocked on the owner's product question | Task **054**, amended 2026-09-15 (its fourth-root premise contradicts task 028's ruling) |
 | ISS-004 — org-revoke N+1 | #968 | ✅ Done | Task 024 |
 | ISS-005 — `BulkUpdateAsync` not atomic | #970 | ✅ Done | Task 096 |
 | ISS-006 — singleton `LastException` | #971 | Handed off — not material; **no confirmed owner** | No access-control path branches on exception text (grep of `ExternalAccess/**`, `Auth/**`, `PlaybookSharingService`); `AssociateAsync` callers are AI + Insights only; `BulkUpdateAsync` guarded by task 096 |
@@ -42,16 +42,22 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
 | ISS-019 — junction query failure removes the deny veto's org axis | #998 | **In project** — ✅ **gate ANSWERED (D-2, 2026-09-19); task 109 authored as the single implementing task** | Task **109**, which now carries ISS-019 + ISS-020 + ISS-026's read guard as **ONE CHANGE** (task 110 became the verifier that closes #999 against 109's tests). 🔴 Corrected 2026-09-18: this entry's own suggested fix — a *second* query (`QueryActiveOrgIdsOutcomeAsync`) for the veto path — would **re-introduce the two-snapshot hazard task 043 deliberately removed** by hoisting ONE junction read. The right shape is one read projecting `sprk_enddate`, returning an outcome plus two named sets. Pre-dates task 043; 043 briefly documented the property as HELD using a double that throws where the real path does not |
-| ISS-020 — date-ended membership still confers | #999 | **In project** — ✅ **FULLY DECIDED 2026-09-19** | **Implemented by task 109**; task **110** (authored 2026-09-19) is the verifier that checks ISS-020's own criteria against 109's tests and closes #999 — it implements nothing, because a second query would re-introduce the two-snapshot hazard task 043 removed. **Owner**: *"if an external user is removed from an organization then that external user must be reassigned access"* → **bound the ADDITIVE path**. ✅ **(2) DECIDED — NO**: an org-keyed **ethical wall KEEPS binding a former member**; the veto subject stays on `statecode` alone and deliberately over-matches (FR-23 `spec.md:86`; `AccessibleRecordSetService.cs:550-554`). ✅ **(3)** count + list date-ended-but-active rows **before** deploy — part 1 removes live access. ✅ **(4)** the deactivation writer is **D-1 option B**, one shared scheduled job (also serves ISS-026 and the rescoped #974). The dilemma **dissolved**: it was an artifact of `$select`ing bare ids, not a real conflict — one READ can serve both with two named sets |
-| ISS-021 — org-baseline N+1 on the hot path | #1000 | **In project** | Task **111** (queued 2026-09-18). N is currently 0 (no org holds a standing grant), so the shape is wrong but the cost is not yet paid |
-| ISS-022 — a stale snapshot can shorten access | #1001 | **In project** | Task **112** (queued 2026-09-18). Task **106** Step 9.5 (code-review F5). The election key is now a MUTABLE column; V1's fix does not cover it, and the revoke-race half is pre-existing |
-| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | **In project** — ✅ **decided 2026-09-18; design chosen (D-7 option 1)** | Task **113**. ✅ **Owner D-7 = option 1: pin what exists, NO contract change** — `AccessLevel` stays non-nullable. The rule *already holds* on the renewal route: `SetRecordShareExpiryEndpoint.cs:213-216` writes **only** `sprk_expiresdate`; the gap is that nothing pins it. 🔴 **Task 099 MUST gain the level constraint** — its criteria never mention level, so as specified it shows a date picker while the server changes the level. ⚠️ **ISS-028 folds into this task** (same endpoint, same region). Rejected: "infer renewal from row state" — **clock-dependent** (same payload = set at 23:59Z, renew at 00:01Z) and reminders fire *before* expiry, so the ordinary renewal hits a live key and is misclassified. **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected |
+| ISS-020 — date-ended membership still confers | #999 | ✅ **R59 (2026-10-05): CLOSED as met** by task 109 (PR #1093); task 110 cut as a task; #999 closed. *Was:* **In project** — ✅ **FULLY DECIDED 2026-09-19** | **Implemented by task 109**; task **110** (authored 2026-09-19) is the verifier that checks ISS-020's own criteria against 109's tests and closes #999 — it implements nothing, because a second query would re-introduce the two-snapshot hazard task 043 removed. **Owner**: *"if an external user is removed from an organization then that external user must be reassigned access"* → **bound the ADDITIVE path**. ✅ **(2) DECIDED — NO**: an org-keyed **ethical wall KEEPS binding a former member**; the veto subject stays on `statecode` alone and deliberately over-matches (FR-23 `spec.md:86`; `AccessibleRecordSetService.cs:550-554`). ✅ **(3)** count + list date-ended-but-active rows **before** deploy — part 1 removes live access. ✅ **(4)** the deactivation writer is **D-1 option B**, one shared scheduled job (also serves ISS-026 and the rescoped #974). The dilemma **dissolved**: it was an artifact of `$select`ing bare ids, not a real conflict — one READ can serve both with two named sets |
+| ISS-021 — org-baseline N+1 on the hot path | #1000 | **R59 (2026-10-05): task 111 CUT — known limit** (no measurable impact; fails class (c)). #1000 left open for the main session to close or re-home. *Was:* **In project** | Task **111** (queued 2026-09-18). N is currently 0 (no org holds a standing grant), so the shape is wrong but the cost is not yet paid |
+| ISS-022 — a stale snapshot can shorten access | #1001 | **R59 (2026-10-05): task 112 CUT — known limit (class e)** (rare, toward less access; revisit cheaply with 140's If-Match if it ever occurs). #1001 left open for the main session to close or re-home. *Was:* **In project** | Task **112** (queued 2026-09-18). Task **106** Step 9.5 (code-review F5). The election key is now a MUTABLE column; V1's fix does not cover it, and the revoke-race half is pre-existing |
+| ISS-023 — a duplicate collapse can lower the effective LEVEL | #1002 | ✅ **R59 (2026-10-05): CLOSED as met** — `SetRecordShareExpiryEndpoint.cs:215`, pinned by `RecordShareExpiryTests.cs:133` + `GrantorCeilingTests.cs:232`; #1002 closed. ISS-028 stays open under task 113. *Was:* **In project** — ✅ **decided 2026-09-18; design chosen (D-7 option 1)** | Task **113**. ✅ **Owner D-7 = option 1: pin what exists, NO contract change** — `AccessLevel` stays non-nullable. The rule *already holds* on the renewal route: `SetRecordShareExpiryEndpoint.cs:213-216` writes **only** `sprk_expiresdate`; the gap is that nothing pins it. 🔴 **Task 099 MUST gain the level constraint** — its criteria never mention level, so as specified it shows a date picker while the server changes the level. ⚠️ **ISS-028 folds into this task** (same endpoint, same region). Rejected: "infer renewal from row state" — **clock-dependent** (same payload = set at 23:59Z, renew at 00:01Z) and reminders fire *before* expiry, so the ordinary renewal hits a live key and is misclassified. **Pre-existing** (task 010): 106 cannot change level outcomes, because the requested level is written to whichever row is elected |
 | ISS-024 — external licensed user refused as "not internal" | #1003 | **In project** — ✅ **owner decided 2026-09-18** | Task **114** (queued 2026-09-18). Found by task 063; the owner has ruled an external **licensed** user is treated the same as an internal one. ⚠️ The stale surface is SHIPPED CODE plus an **asserting** contract test, not a POML |
 | ISS-025 — the drift check cannot see an index row with no POML | #1004 | **In project** — ✅ **owner approved queuing 2026-09-18** | Task **116**. Found 2026-09-18 by creating the condition: six index rows with no POML, and `scripts/check-task-status-drift.ps1` printed both counts and still said "No drift". The mirror of a guard it already has. ⚠️ Re-verified by hand 2026-09-18: **111 POMLs / 111 index rows, zero orphans in BOTH directions** — no live drift, only a blind instrument |
 | ISS-026 — a DEACTIVATED organization still confers access | #1006 | **In project** — ✅ **owner decided 2026-09-18** **SPLIT ACROSS TWO TASKS, authored 2026-09-19.** *"Check statecode and deactivate if org is inactive"* — a **read guard** AND a **write action**. **Read guard → task 109**, because it touches the same junction query 109 is already rewriting as a single snapshot; putting it in the job would split one query's correctness across two tasks and re-introduce the hazard task 043 removed. **Write action → task 117**, the one shared scheduled reconciliation job that also serves ISS-020 part 4 and D-1 option B for #974 — designed once, as required. Nothing in the repo writes the junction today (verified: all 13 `sprk_contactorganization` hits under `src/server` are reads, projections or comments) |
 | ISS-027 — the To Do wizard silently DISCARDS uploaded files | #1007 | **In project** — ✅ **owner decided 2026-09-18** | Task **119** (authored 2026-09-19). *"Fix; To Do needs files."* The only one of the three a **user** can notice. Shows a files step promising association, then never reads `context.uploadedFiles`. ⚠️ This issue's body cites `matterService.ts:243-248` as the precedent — **wrong lines** (that is the BU cascade comment); the real sequence is `:357` → `:375` → `:394` from `CreateMatterWizard.tsx:501-508`. Correction posted to #1007. Link column confirmed as `sprk_relatedtodo` (`Models.cs:214`), and the **409 "No storage container is configured"** path is live-reachable (3 of 6 BUs have `sprk_containerid` unset) |
 | ISS-029 — the drift parser keeps the wrong line for eight ids | #1009 | **In project** — folded into task **116** | Found 2026-09-19 while authoring 116. `$map[$id] = …` (`check-task-status-drift.ps1:80`) is last-write-wins, and the row regex matches **119 lines for 111 distinct ids** — the second hit for 036/064/082/088/093/094/095/107 is a **reference** row from the dependency or accuracy-audit table, whose `**` marker reads as *open*. Green by luck: all eight are open on both sides today. Distinct from ISS-025 — that is the missing comparison, this is the parser feeding it, and the parser must be settled first |
-| ISS-028 — a 409 saying "did not take effect" has already written the level | #1008 | **In project** — ✅ **owner decided 2026-09-18** | **Folds into task 113.** *"Fix."* Write at `GrantExternalAccessEndpoint.cs:260`, ADR-003 refusal at `:306-319` — wrong order. Bites only when expiry is absent AND level differs; pre-existing, not from task 106 |
+| ISS-028 — a 409 saying "did not take effect" has already written the level | #1008 | **R59 (2026-10-05): task 113 is narrowed to this issue alone.** *Was:* **In project** — ✅ **owner decided 2026-09-18** | **Folds into task 113.** *"Fix."* Write at `GrantExternalAccessEndpoint.cs:260`, ADR-003 refusal at `:306-319` — wrong order. Bites only when expiry is absent AND level differs; pre-existing, not from task 106 |
+| DEF-002 — contact routes for a matter's/WA's children (task 056) | #1072 | **Deferred to a new project** (owner round 59) | New capability, no consumer screens yet. Entry below |
+| DEF-003 — evaluator versioning + point-in-time replay (task 088) | #1303 | **Deferred to a new project** (owner round 59) | 🔴 FR-32 / success criterion 9 stay formally UNMET in UAC-r2; Dataverse audit keeps accumulating. Entry below |
+| DEF-004 — attestation seam tests + docs (task 089) | #1304 | **Deferred to a new project** (owner round 59) | Follows DEF-003. Entry below |
+| DEF-005 — upload collision pre-flight probe (task 094) | #1305 | **Deferred to a new project** (owner round 59) | Speed-up; no data loss today. Entry below |
+| DEF-006 — document multi-association (task 095) | #1306 | **Deferred to a new project** (owner round 59) | New capability. Entry below |
+| ISS-031 — duplicate record-target authorization filters | #1307 | **Future project** — class (b) maintainability (owner round 56/59) | Found via task 170 (cut). Entry below |
 
 > Portfolio board: issues are not on it — the `gh` token lacks the `project` scope
 > (`gh auth refresh -s read:project,project`).
@@ -200,7 +206,7 @@ paging) is the real work, and these call sites feed shipped SPA views.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | ✅ **Closed 2026-10-05 (owner round 59): known limit, fails closed.** Task 054 cut; #964 closed |
 | **Urgency** | someday (latent — zero service requests exist in dev) |
 | **Filed** | 2026-09-09 |
 | **Source** | Task 028, after the owner ruled service requests internal-only |
@@ -649,7 +655,7 @@ leaving the additive callers on the existing empty-on-fault overload.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project**; 🔔 **question formally put to the owner 2026-09-18, still UNDECIDED** |
+| **Status** | ✅ **Closed 2026-10-05 (owner round 59): met by task 109 (PR #1093).** Task 110 cut as a task; #999 closed |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-17 |
 | **Source** | Filed onto task 043 by task 020; decided-and-recorded in 043 (notes §4.1), sharpened by 043's code-review finding H-3 |
@@ -681,7 +687,7 @@ over-grant to every stale member of that firm. And fixing it properly *changes w
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project** |
+| **Status** | **Known limit (owner round 59, 2026-10-05).** Task 111 cut: no measurable impact. #1000 open pending main-session close |
 | **Urgency** | someday |
 | **Filed** | 2026-09-17 |
 | **Source** | Task 043 Step 9.5 code-review finding M-3 |
@@ -715,7 +721,7 @@ with `Capped` surfaced per NFR-03 — the same treatment the membership walk alr
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project** |
+| **Status** | **Known limit, class (e) (owner round 59, 2026-10-05).** Task 112 cut. #1001 open pending main-session close |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 |
 | **Source** | Task 106 Step 9.5 code-review finding F5 |
@@ -749,7 +755,7 @@ optimistic concurrency at all. A re-read immediately before the collapse narrows
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project**; ✅ **owner decision received 2026-09-18** (below) |
+| **Status** | ✅ **Closed 2026-10-05 (owner round 59): met by existing code + tests.** #1002 closed; ISS-028 (#1008) stays open under task 113 |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-18 |
 | **Source** | Task 106 Step 9.5 — code-review finding F10, adr-check W3 |
@@ -1068,6 +1074,107 @@ U+FFFF; 🔲 is U+1F532).
 **Estimated effort**: small. **Blockers**: none. **Home**: folded into **task 116**, whose POML already
 carries it as an acceptance criterion and an escalation trigger — 116 must make the
 status-row-vs-reference-row decision before it can diff sets. If 116 ships first, this needs its own task.
+
+---
+
+### DEF-002 — Contacts cannot work with a matter's or work assignment's children (task 056)
+
+| Field | Value |
+|---|---|
+| **Status** | Deferred to a new project (owner round 59, 2026-10-05) |
+| **Urgency** | next-round (owner called contact coverage of children "CRITICAL" in C10) |
+| **Filed** | 2026-09-30 (as #1072); deferred 2026-10-05 |
+| **Source** | Session-26 defect C10; task 056; scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md) row 056 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1072 |
+
+New external module registrations so contacts can reach a matter's or work assignment's events, communications,
+memos, analyses and documents (today events and upload exist only under projects,
+`ExternalProjectDataEndpoints.cs:106-222`). **Deferred, not cut:** a new capability with no consumer yet. No external
+screen shows these children, and the Documents widget is a read-only grid. Ship it with the SPA screens that use it.
+055 is cut (children inherit through the core-ancestor stamp), so a future 056 scopes by the stamp. 057's scenarios
+move with it.
+
+---
+
+### DEF-003 — Evaluator versioning + point-in-time access replay (task 088, FR-32 read half)
+
+| Field | Value |
+|---|---|
+| **Status** | Deferred to a new project (owner round 59, 2026-10-05) |
+| **Urgency** | someday (no consumer asking) |
+| **Filed** | 2026-10-05 |
+| **Source** | Task 088; scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md) row 088 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1303 |
+
+"Who could see record X on date D, and why": an `EvaluatorVersion`, injectable evaluator inputs, and a replay entry
+point over Dataverse field audit. 🔴 **FR-32 point-in-time replay, and success criterion 9, remain formally UNMET in
+UAC-r2** (the owner accepted this in round 59). **No data is lost:** Dataverse auditing has been on for every access
+table since 2026-09-10. 087 (the custom append log) is cut, so a future replay reconstructs from Dataverse audit.
+
+---
+
+### DEF-004 — Attestation seam tests + architecture docs (task 089, FR-32 closure)
+
+| Field | Value |
+|---|---|
+| **Status** | Deferred to a new project (owner round 59, 2026-10-05) |
+| **Urgency** | someday |
+| **Filed** | 2026-10-05 |
+| **Source** | Task 089; scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md) row 089 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1304 |
+
+Tests and docs for DEF-003, so it follows DEF-003. Task 090 records one known-gap line (FR-32 unmet) in the
+architecture docs instead.
+
+---
+
+### DEF-005 — Upload collision: ask before the bytes move (task 094)
+
+| Field | Value |
+|---|---|
+| **Status** | Deferred to a new project (owner round 59, 2026-10-05) |
+| **Urgency** | someday |
+| **Filed** | 2026-10-05 |
+| **Source** | Task 094; scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md) row 094 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1305 |
+
+A pre-flight, record-keyed `(entity, recordId, name)` existence probe, so the user is asked before a large upload
+(up to 250 MB) moves its bytes; plus "Use existing" once DEF-006 lands. **No data loss today:** the server refuses
+duplicates (`93d5e673e`) and the two-option 409 dialog exists (`09025ab39`). It is a speed-up that needs a new endpoint.
+
+---
+
+### DEF-006 — Document ↔ record multi-association via an intersection entity (task 095)
+
+| Field | Value |
+|---|---|
+| **Status** | Deferred to a new project (owner round 59, 2026-10-05) |
+| **Urgency** | someday |
+| **Filed** | 2026-10-05 |
+| **Source** | Task 095; scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md) row 095 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1306 |
+
+One document filed to several matters or projects (owner chose an intersection entity, not native N:N). Today a
+document has two lookup slots per record type. Needs schema work and a product decision on whether a link grants access.
+
+---
+
+### ISS-031 — Two record-target authorization filters do the same job (FinanceAuthorizationFilter vs RecordRouteAccessAuthorizationFilter)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **future project** (class (b) maintainability under owner round 56; owner round 59 item 7) |
+| **Urgency** | next-round (after UAC-r2 tasks 165–167 land) |
+| **Filed** | 2026-10-05 |
+| **Source** | Scope review [`notes/batch5-scope-review-2026-10-05.md`](batch5-scope-review-2026-10-05.md), side finding 1 (found via task 170, which round 59 cut) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1307 |
+
+`FinanceAuthorizationFilter` (through `AuthorizationService.GetCallerRecordAccessAsync` → `IAccessDataSource`) and
+`RecordRouteAccessAuthorizationFilter` (through `CallerRecordAccessProbe.GetCallerRightsAsync`; task 159's
+fixed-entity-set overload at `EventEndpoints.cs:97/133/150`) answer the same question with different denial shapes.
+Renaming the first (task 170) would have hidden the duplication. **Suggested fix:** converge on one filter and update
+`RouteAuthorizationGuardTests`'s recognised-filter list in the same change. Not now: the route-sweep tasks are in
+flight on the same routes.
 
 ---
 

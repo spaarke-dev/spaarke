@@ -4,7 +4,7 @@
     <title>Service-request access: close the ISS-003 to-do over-denial — explicitly NOT a fourth accessible root set (FR-27)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires Phase 1 (FR-19 evaluator, FR-20 impersonated root sets) merged</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs in Infrastructure/ExternalAccess — changes what every external caller can reach.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -118,4 +118,9 @@ AMENDED 2026-09-15 (register triage); the amendment was PROMOTED OUT OF THIS NOT
 - Tasks 055 and 056 were written to consume the retired fourth root set; both were repaired by task 115 at the same time. Re-read them as repaired, not as remembered.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 054)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Nothing can trigger it: no SPA screen edits service-request to-dos, dev has 0 service requests, the root set is project, matter and work assignment only (AccessibleRecordSetService.cs:369-370), and the service-requests module returns nothing to CIAM. Building it would be new machinery with no consumer.</amendment>
+    <amendment n="2" title="Known limit (class e)">A workforce requester cannot PATCH a to-do parented to their own service request through the external route; it fails closed (denied). The model-driven app still works under Dataverse security. ISS-003 / #964 closed 2026-10-05 with this reason.</amendment>
+  </amendments>
 </task>

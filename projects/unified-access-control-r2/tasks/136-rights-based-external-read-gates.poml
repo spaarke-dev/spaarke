@@ -233,4 +233,9 @@ Related: tasks 029, 032, 037, 039, 042, 070, 107, 131, 135, 137, 138, 140 (conta
         037/039 criterion-5 live gates), criterion 16 publish size (main session).
     </outcome>
   </execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 136)">
+    <verdict>KEEP, GATE ONLY (owner round 59 item 5: live session only). No build work remains.</verdict>
+    <amendment n="1" title="Code status">Met and on origin/master: 700763023 is an ancestor of origin/master and the integ branch, and dev runs it (AccessibleRecordSetService.cs:664/1735/2044; HoldsReadOnProject on 7 routes; /me reads ReadableProjects).</amendment>
+    <amendment n="2" title="Owns the combined CIAM session">Live session A item 3: a Restricted project shows no list or download; a Secure project with only an organisation's grant shows nothing; a direct grant is readable; adding a No Access entry blocks access, and removing it restores access after the cache timeout. That session closes 135's gate, 136, 037 and 039 together: mark all four completed and update their TASK-INDEX rows in one change. Status stays pending until then.</amendment>
+  </amendments>
 </task>

@@ -4,7 +4,7 @@
     <title>Append access events from every grant/deny state-change path (FR-32 write half)</title>
     <phase>5 Attestation</phase>
     <gate>blocked — requires 086 (table) + 060/063/064 (the write paths to hook) merged</gate>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-adjacent .cs across grant/revoke/share/deny endpoints; a missed hook is a silent attestation gap.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,4 +99,8 @@
   <notes>spec.md FR-32; design.md §7. The coverage-boundary doc line (BFF hooks vs field audit) is load-bearing for 088.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 087)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">Dataverse audit is the source. Auditing has been ON for every access table since 2026-09-10 (task-086-access-event-schema.md:183-191), and it also sees edits made in the model-driven app. A second append-only log beside it is a duplicate mechanism, and a failed log write would fail every grant. The sprk_accessevent table exists only in Deploy-AccessEventEntity.ps1 and is not deployed; 090 carries the doc correction.</amendment>
+  </amendments>
 </task>
