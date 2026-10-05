@@ -30,15 +30,24 @@
 .PARAMETER Out
     Where to write the merged RibbonDiff.xml (normally back over the unpacked export before packing).
 
+.PARAMETER SecureTransitionDeployed
+    Task 150 (UX amendment acceptance (b); owner R3b / F7): include "Make Secure". Pass it ONLY when the target
+    environment's BFF carries task 148's provisioning transition (existing children follow the record), round 26 item
+    3's file relocation (task 166's DocumentContainerRelocator, wired at integration) AND its scheduled backstop (round 46
+    item 2: task 147's SecureChildReconciliationJob settling pending Make Secure relocations, writes on), which ship in
+    the same release as Make Secure. Without it every sprk.Access.<entity>.MakeSecure.*
+    node is removed from the instantiated template, so Make Secure is absent while Update Access and Remove Secure ship.
+
 .EXAMPLE
     pwsh ./Merge-AccessRibbon.ps1 -ExportedRibbonDiff ./export/Entities/sprk_Project/RibbonDiff.xml `
-        -Entity sprk_project -Out ./export/Entities/sprk_Project/RibbonDiff.xml
+        -Entity sprk_project -Out ./export/Entities/sprk_Project/RibbonDiff.xml -SecureTransitionDeployed
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $ExportedRibbonDiff,
     [Parameter(Mandatory)] [ValidateSet('sprk_project', 'sprk_matter', 'sprk_workassignment')] [string] $Entity,
-    [Parameter(Mandatory)] [string] $Out
+    [Parameter(Mandatory)] [string] $Out,
+    [switch] $SecureTransitionDeployed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +55,23 @@ $ErrorActionPreference = 'Stop'
 $templatePath = Join-Path $PSScriptRoot 'access-group.template.xml'
 $templateText = (Get-Content -Raw -LiteralPath $templatePath).Replace('{{entity}}', $Entity)
 [xml] $template = $templateText
+
+# Task 150: Make Secure is release-gated (acceptance (b)) - removed here unless the transition is deployed.
+$makeSecurePrefix = "sprk.Access.$Entity.MakeSecure."
+$makeSecureButtonId = "sprk.Access.$Entity.Form.MakeSecure"
+if (-not $SecureTransitionDeployed) {
+    $gated = @($template.SelectNodes('//*[@Id]') | Where-Object {
+            $id = $_.GetAttribute('Id')
+            $id.StartsWith($makeSecurePrefix) -or $id -eq $makeSecureButtonId
+        })
+    # Five: the menu button, the command, the command's reference to its enable rule, the enable rule, the label.
+    if (@($gated).Count -ne 5) {
+        throw "Expected 5 Make Secure nodes in the template (button, command, rule reference, rule, label), found $(@($gated).Count)."
+    }
+    foreach ($node in $gated) {
+        [void] $node.ParentNode.RemoveChild($node)
+    }
+}
 
 [xml] $ribbon = Get-Content -Raw -LiteralPath $ExportedRibbonDiff
 $root = $ribbon.DocumentElement
@@ -111,6 +137,11 @@ if ($lost.Count -gt 0) {
     throw "The merge dropped existing command(s): $($lost -join ', '). Nothing should be imported."
 }
 
+$menuItems = @(([xml] (Get-Content -Raw -LiteralPath $Out)).SelectNodes(
+        "//*[local-name()='Button' and starts-with(@Id, 'sprk.Access.$Entity.Form.')]") |
+    ForEach-Object { $_.GetAttribute('Id').Substring("sprk.Access.$Entity.Form.".Length) })
+
 Write-Host "Merged the Access group into $Entity -> $Out"
 Write-Host "Commands before: $($before -join ', ')"
 Write-Host "Commands after : $($after -join ', ')"
+Write-Host "Access menu    : $($menuItems -join ', ')$(if (-not $SecureTransitionDeployed) { '   (Make Secure withheld: -SecureTransitionDeployed not given)' })"

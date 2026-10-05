@@ -25,7 +25,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <see cref="ResolveAsync"/> before any mutation; <c>SecureRecordIsolationCensusJob</c> re-checks the same
 /// invariants on a schedule, because a Change-BU happens between provisioning calls and no BFF code can block it
 /// (no plugins, ADR-002). <c>RecordOwnershipResolver</c> and the registration guard read the same two config keys
-/// through the SDK and raw-HTTP seams they already had.</para>
+/// through the SDK and raw-HTTP seams they already had. The <c>can-manage-access</c> gate, asked for a record's owner
+/// (task 150, round 46 item 4), tells the named team apart from any other owner through <see cref="IdentifyAsync"/> —
+/// <see cref="ResolveAsync"/>'s own first two steps.</para>
 ///
 /// <para><b>Placement</b> (CLAUDE.md §10/§11): a static helper beside <see cref="SecureContainerDecision"/>, not a
 /// DI-registered service — it is three reads on the <see cref="DataverseWebApiClient"/> the provisioning endpoint
@@ -126,56 +128,18 @@ public static class SecureRecordOwnerTeam
     {
         ArgumentNullException.ThrowIfNull(dataverseClient);
 
-        var buName = BusinessUnitName(configuration);
-        var teamName = OwnerTeamName(configuration);
+        // 1 + 2. WHICH team: the business unit by name, then its named owner team (IdentifyAsync — one rule for every
+        //        caller that needs to know which team that is).
+        var identity = await IdentifyAsync(dataverseClient, configuration, ct).ConfigureAwait(false);
         var result = new SecureOwnerTeamResolution(
-            SecureOwnerTeamStatus.BusinessUnitUnreadable, buName, null, teamName, null,
-            Array.Empty<Guid>(), Array.Empty<Guid>(), null);
+            identity.Refusal ?? SecureOwnerTeamStatus.BusinessUnitUnreadable, identity.BusinessUnitName,
+            identity.BusinessUnitId, identity.OwnerTeamName, identity.OwnerTeamId,
+            Array.Empty<Guid>(), Array.Empty<Guid>(), identity.Fault);
+        if (!identity.IsIdentified)
+            return result;
 
-        // 1. The business unit, by name. $top=2: one row is the answer, two make ambiguity a state we can refuse.
-        List<IdRow> businessUnits;
-        try
-        {
-            businessUnits = await dataverseClient.QueryAsync<IdRow>(
-                BusinessUnitEntitySet, filter: BusinessUnitFilter(buName), select: "businessunitid,name",
-                top: 2, cancellationToken: ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return result with { Status = SecureOwnerTeamStatus.BusinessUnitUnreadable, Fault = ex };
-        }
-
-        if (businessUnits.Count == 0)
-            return result with { Status = SecureOwnerTeamStatus.BusinessUnitNotFound };
-        if (businessUnits.Count > 1)
-            return result with { Status = SecureOwnerTeamStatus.BusinessUnitAmbiguous };
-        if (businessUnits[0].businessunitid is not { } buId || buId == Guid.Empty)
-            return result with { Status = SecureOwnerTeamStatus.BusinessUnitNotFound };
-
-        result = result with { BusinessUnitId = buId };
-
-        // 2. The NAMED owner team. Never the default team: isdefault eq false is in the filter, and a missing or
-        //    duplicated named team refuses rather than falling back to anything.
-        List<IdRow> teams;
-        try
-        {
-            teams = await dataverseClient.QueryAsync<IdRow>(
-                TeamEntitySet, filter: NamedOwnerTeamFilter(buId, teamName), select: "teamid,name",
-                top: 2, cancellationToken: ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return result with { Status = SecureOwnerTeamStatus.OwnerTeamUnreadable, Fault = ex };
-        }
-
-        if (teams.Count == 0)
-            return result with { Status = SecureOwnerTeamStatus.OwnerTeamNotFound };
-        if (teams.Count > 1)
-            return result with { Status = SecureOwnerTeamStatus.OwnerTeamAmbiguous };
-        if (teams[0].teamid is not { } teamId || teamId == Guid.Empty)
-            return result with { Status = SecureOwnerTeamStatus.OwnerTeamNotFound };
-
-        result = result with { OwnerTeamId = teamId, OwnerTeamName = teams[0].name ?? teamName };
+        var teamId = identity.OwnerTeamId!.Value;
+        var buId = identity.BusinessUnitId!.Value;
 
         // 3. Zero members, of any principal kind. An unreadable count is NOT zero.
         List<IdRow> members;
@@ -224,11 +188,92 @@ public static class SecureRecordOwnerTeam
         return result with { Status = SecureOwnerTeamStatus.Resolved };
     }
 
+    /// <summary>
+    /// WHICH team is the Secure Record owner team — the business unit by its configured name, then its NAMED, non-default
+    /// owner team — WITHOUT the two invariants <see cref="ResolveAsync"/> also proves (no members, no users). For a caller
+    /// that must tell that team apart from another owner (task 150, round 46 item 4: the Access ribbon's "finished?"
+    /// question), not one that assigns to it: only <see cref="ResolveAsync"/>'s <see cref="SecureOwnerTeamStatus.Resolved"/>
+    /// may be used to assign. Steps 1 and 2 of <see cref="ResolveAsync"/>, which calls this — one rule, never a copy.
+    /// </summary>
+    /// <remarks>Never throws for a Dataverse fault: an unreadable, absent or ambiguous answer is a refusal carried on the
+    /// result (<see cref="SecureOwnerTeamIdentity.Refusal"/>), with the fault. Ambiguity is never resolved by picking one.</remarks>
+    internal static async Task<SecureOwnerTeamIdentity> IdentifyAsync(
+        DataverseWebApiClient dataverseClient,
+        IConfiguration configuration,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverseClient);
+
+        var buName = BusinessUnitName(configuration);
+        var teamName = OwnerTeamName(configuration);
+        var identity = new SecureOwnerTeamIdentity(
+            SecureOwnerTeamStatus.BusinessUnitUnreadable, buName, null, teamName, null, null);
+
+        // 1. The business unit, by name. $top=2: one row is the answer, two make ambiguity a state we can refuse.
+        List<IdRow> businessUnits;
+        try
+        {
+            businessUnits = await dataverseClient.QueryAsync<IdRow>(
+                BusinessUnitEntitySet, filter: BusinessUnitFilter(buName), select: "businessunitid,name",
+                top: 2, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return identity with { Refusal = SecureOwnerTeamStatus.BusinessUnitUnreadable, Fault = ex };
+        }
+
+        if (businessUnits.Count == 0)
+            return identity with { Refusal = SecureOwnerTeamStatus.BusinessUnitNotFound };
+        if (businessUnits.Count > 1)
+            return identity with { Refusal = SecureOwnerTeamStatus.BusinessUnitAmbiguous };
+        if (businessUnits[0].businessunitid is not { } buId || buId == Guid.Empty)
+            return identity with { Refusal = SecureOwnerTeamStatus.BusinessUnitNotFound };
+
+        identity = identity with { BusinessUnitId = buId };
+
+        // 2. The NAMED owner team. Never the default team: isdefault eq false is in the filter, and a missing or
+        //    duplicated named team refuses rather than falling back to anything.
+        List<IdRow> teams;
+        try
+        {
+            teams = await dataverseClient.QueryAsync<IdRow>(
+                TeamEntitySet, filter: NamedOwnerTeamFilter(buId, teamName), select: "teamid,name",
+                top: 2, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return identity with { Refusal = SecureOwnerTeamStatus.OwnerTeamUnreadable, Fault = ex };
+        }
+
+        if (teams.Count == 0)
+            return identity with { Refusal = SecureOwnerTeamStatus.OwnerTeamNotFound };
+        if (teams.Count > 1)
+            return identity with { Refusal = SecureOwnerTeamStatus.OwnerTeamAmbiguous };
+        if (teams[0].teamid is not { } teamId || teamId == Guid.Empty)
+            return identity with { Refusal = SecureOwnerTeamStatus.OwnerTeamNotFound };
+
+        return identity with { Refusal = null, OwnerTeamId = teamId, OwnerTeamName = teams[0].name ?? teamName };
+    }
+
+    /// <summary>
+    /// Whether a record whose <c>owningbusinessunit</c> is <paramref name="owningBusinessUnitId"/> is owned INSIDE the Secure
+    /// Record business unit <paramref name="secureBusinessUnitId"/> — by the named owner team or by any OTHER team there (in
+    /// practice the retired default team, before task 144's migration). <c>null</c> when the record was read without its
+    /// owning business unit: that cannot be told. The ONE rule behind provisioning's <c>owned_by_other_secure_team</c>
+    /// refusal and the <c>can-manage-access</c> owner answer (task 150, round 53 item 2), so the Access ribbon hides Make
+    /// Secure on exactly the records that refusal would answer.
+    /// </summary>
+    internal static bool? IsInSecureBusinessUnit(Guid? owningBusinessUnitId, Guid secureBusinessUnitId) =>
+        owningBusinessUnitId is { } bu && bu != Guid.Empty ? bu == secureBusinessUnitId : null;
+
     /// <summary>Escapes a string for an OData single-quoted literal.</summary>
     internal static string EscapeODataStringLiteral(string value) => value.Replace("'", "''");
 
-    /// <summary>The columns the four reads project. One DTO; each read fills the columns it selected.</summary>
-    private sealed class IdRow
+    /// <summary>
+    /// The columns the four reads project. One DTO; each read fills the columns it selected. Internal (not private) so a
+    /// test can answer the reads through the client's virtual <c>QueryAsync</c> seam (ADR-038 §4).
+    /// </summary>
+    internal sealed class IdRow
     {
         [JsonPropertyName("businessunitid")]
         public Guid? businessunitid { get; set; }
@@ -279,6 +324,24 @@ public enum SecureOwnerTeamStatus
 
     /// <summary>The BU-user read faulted — NOT read as zero.</summary>
     BusinessUnitUsersUnreadable
+}
+
+/// <summary>
+/// The outcome of <see cref="SecureRecordOwnerTeam.IdentifyAsync"/>: WHICH team is the Secure Record owner team, or why it
+/// could not be told (a <see cref="SecureOwnerTeamStatus"/> refusal of steps 1–2, with the fault behind an unreadable one).
+/// Not an assignment target: the invariants are <see cref="SecureRecordOwnerTeam.ResolveAsync"/>'s.
+/// </summary>
+internal sealed record SecureOwnerTeamIdentity(
+    SecureOwnerTeamStatus? Refusal,
+    string BusinessUnitName,
+    Guid? BusinessUnitId,
+    string OwnerTeamName,
+    Guid? OwnerTeamId,
+    Exception? Fault)
+{
+    /// <summary>True when exactly one business unit and exactly one named owner team were found.</summary>
+    public bool IsIdentified =>
+        Refusal is null && BusinessUnitId is { } bu && bu != Guid.Empty && OwnerTeamId is { } team && team != Guid.Empty;
 }
 
 /// <summary>The outcome of <see cref="SecureRecordOwnerTeam.ResolveAsync"/>.</summary>

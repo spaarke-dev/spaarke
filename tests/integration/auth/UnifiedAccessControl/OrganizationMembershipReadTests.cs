@@ -726,6 +726,64 @@ public class OrganizationMembershipReadTests
         (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject, "reactivation restores access — no data repair");
     }
 
+    // ── Task 150 (round 26 item 2(a)): an EMPTY sprk_issecure over the REAL flag read ─────────────────
+    //
+    // EmptySecureFlagFailsClosedTests pins the row mapping (FlagsFrom). These pin the WIRE PATH: the production
+    // GetRootRecordFlagsAsync deserializing a row whose field-secured flag the BFF identity could not read, whichever
+    // shape Dataverse sends it in, and the read-time evaluator acting on the answer. A call site that defaulted the
+    // flag before the mapping (`row.sprk_issecure ?? false`) passes every mapping test and fails these.
+
+    public static TheoryData<string> EmptySecureFlagShapes => new() { "omitted", "null" };
+
+    public static TheoryData<string, string> EmptySecureFlagShapesOnBothPlanes => new()
+    {
+        { "omitted", "ciam" },
+        { "omitted", "workforce" },
+        { "null", "ciam" },
+        { "null", "workforce" },
+    };
+
+    private static EmptyFlagShape ShapeOf(string shape)
+        => shape == "omitted" ? EmptyFlagShape.Omitted : EmptyFlagShape.Null;
+
+    [Theory]
+    [MemberData(nameof(EmptySecureFlagShapes))]
+    public async Task GetRootRecordFlagsAsync_TheRealReadOfAnEmptySecureFlag_IsUnreadable(string shape)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        dataverse.EmptySecureFlags[DirectProject] = ShapeOf(shape);
+        var participations = RealParticipationService(dataverse);
+
+        var flags = await participations.GetRootRecordFlagsAsync(
+            AccessibleRecordSetService.ProjectEntity, new[] { DirectProject, CurrentOrgProject }, CancellationToken.None);
+
+        flags[DirectProject].Should().Be(RootRecordFlags.Unreadable,
+            $"a flag {shape} on the wire is a masked value, and unknown is the fail-closed answer (round 17 item 3)");
+        flags[CurrentOrgProject].IsUnreadable.Should().BeFalse("control: a row whose flag reads false is mapped as stored");
+        flags[CurrentOrgProject].IsSecure.Should().BeFalse();
+
+        var flagRead = dataverse.Requests.Single(r => r.Collection == "sprk_projects");
+        flagRead.Select.Split(',').Should().Contain("sprk_issecure", "the flag was asked for — it came back empty");
+    }
+
+    [Theory]
+    [MemberData(nameof(EmptySecureFlagShapesOnBothPlanes))]
+    public async Task ComposeAsync_ARecordWhoseSecureFlagReadsEmptyOnTheWire_IsSuppressed(string shape, string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject,
+            "control: with its flag readable the directly granted project is accessible");
+
+        dataverse.EmptySecureFlags[DirectProject] = ShapeOf(shape);
+        var masked = await world.ProjectIdsAsync(plane);
+
+        masked.Should().NotContain(DirectProject,
+            $"{plane}: an empty flag is Unreadable — every contact-sourced right on the record is removed");
+        masked.Should().Contain(CurrentOrgProject, "only the record whose flag came back empty is affected");
+    }
+
     // ── Task 137 r2: the PRODUCTION organization-member page read, over the transport ─────────────────
 
     private static readonly Guid FanOutOrg = Guid.Parse("0f000000-0000-0000-0000-000000000137");
@@ -1021,6 +1079,16 @@ public class OrganizationMembershipReadTests
             "builder emits it — a date term appended at the call site would narrow the ethical wall (D-2 part 2, D-10)");
     }
 
+    /// <summary>The two shapes a masked (field-secured, unreadable) <c>sprk_issecure</c> arrives in.</summary>
+    private enum EmptyFlagShape
+    {
+        /// <summary>The property is absent from the row.</summary>
+        Omitted,
+
+        /// <summary>The property is present with a JSON null.</summary>
+        Null,
+    }
+
     private sealed record MembershipSpec(Guid OrganizationId, DateOnly? Start, DateOnly? End);
 
     private sealed record GrantSpec(Guid ProjectId, Guid? OrganizationId);
@@ -1276,15 +1344,34 @@ public class OrganizationMembershipReadTests
                     var ids = Regex.Matches(filter, @"sprk_projectid eq ([0-9a-fA-F-]{36})")
                         .Select(m => m.Groups[1].Value)
                         .Distinct();
-                    await WriteValueAsync(context, ids.Select(id => new Dictionary<string, object?>
+                    await WriteValueAsync(context, ids.Select(id =>
                     {
-                        ["sprk_projectid"] = id,
-                        ["sprk_issecure"] = false,
-                        ["sprk_accesspermission"] = 100000000,
-                        // Task 137: the root's own state rides the flag read (the live column, Active = 0).
-                        ["statecode"] = InactiveProjects.Contains(Guid.Parse(id)) ? 1 : 0,
-                        ["_sprk_assignedlawfirm1_value"] = null,
-                        ["_sprk_assignedlawfirm2_value"] = null,
+                        var row = new Dictionary<string, object?>
+                        {
+                            ["sprk_projectid"] = id,
+                            ["sprk_issecure"] = false,
+                            ["sprk_accesspermission"] = 100000000,
+                            // Task 137: the root's own state rides the flag read (the live column, Active = 0).
+                            ["statecode"] = InactiveProjects.Contains(Guid.Parse(id)) ? 1 : 0,
+                            ["_sprk_assignedlawfirm1_value"] = null,
+                            ["_sprk_assignedlawfirm2_value"] = null,
+                        };
+
+                        // Task 150: a field-secured column the caller cannot read is masked — Dataverse leaves the
+                        // property out of the row, or returns it as null. Both shapes are served as they arrive live.
+                        if (EmptySecureFlags.TryGetValue(Guid.Parse(id), out var shape))
+                        {
+                            if (shape == EmptyFlagShape.Omitted)
+                            {
+                                row.Remove("sprk_issecure");
+                            }
+                            else
+                            {
+                                row["sprk_issecure"] = null;
+                            }
+                        }
+
+                        return row;
                     }));
                     return;
 
@@ -1313,6 +1400,12 @@ public class OrganizationMembershipReadTests
 
         /// <summary>Task 137: projects whose own <c>statecode</c> is Inactive.</summary>
         public HashSet<Guid> InactiveProjects { get; } = new();
+
+        /// <summary>
+        /// Task 150 (round 26 item 2(a)): projects whose <c>sprk_issecure</c> comes back EMPTY, in the given shape —
+        /// what field-level security does to a column the reading identity may not read. Absent: <c>false</c>.
+        /// </summary>
+        public Dictionary<Guid, EmptyFlagShape> EmptySecureFlags { get; } = new();
 
         /// <summary>Task 137 r2: each organization's ACTIVE member contacts (the organization -> members read).</summary>
         public Dictionary<Guid, Guid[]> OrganizationMembers { get; } = new();

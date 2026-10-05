@@ -258,16 +258,34 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool CallerHoldsWrite { get; set; } = true;
 
     /// <summary>
-    /// When true, the caller's rights include Delete — a Full Access holder, or an administrator (task 150: owner round
-    /// 3b F3, who may REMOVE the secure designation).
+    /// When true, the caller's rights include Delete on every record, WHOEVER owns it — a Full Access holder, or an
+    /// administrator whose security role grants Delete at business-unit or organization depth (task 150: owner round 3b F3,
+    /// who may REMOVE the secure designation). Delete held by a ROLE.
     /// </summary>
     public bool CallerHoldsDelete { get; set; }
 
     /// <summary>
+    /// Task 150 (round 53 item 3): Delete held by OWNERSHIP — a security role granting Delete at USER depth, so the probe
+    /// answers Delete only for a record whose CURRENT owning user (the seeded row, read at the moment of the probe) is the
+    /// caller. Unlike <see cref="CallerHoldsDelete"/> it is gone once the record is moved to the Secure Record owner team,
+    /// so a fixture can tell a caller who held Full Access by owning the record from one who held it by a role — and a
+    /// floor read after the owner move would miss the former.
+    /// </summary>
+    public bool CallerDeletesWhatTheyOwn { get; set; }
+
+    /// <summary>
     /// Task 150 r2 (verifier F6): the SECOND rights probe of a record THROWS. The first is the route's Write gate; the
-    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3).
+    /// second is the unsecure endpoint's own Full Access check (owner round 3b F3) — or, on Make Secure, the caller's
+    /// effective-rights floor (round 46 item 1).
     /// </summary>
     public bool FullAccessProbeThrows { get; set; }
+
+    /// <summary>
+    /// Task 150 (round 46 item 1): the SECOND rights probe of a record answers <see cref="AccessRights.None"/> — what the
+    /// real probe answers when it cannot answer (deliberately indistinguishable from "no rights") — while the first, the
+    /// route's Write gate, answered Write.
+    /// </summary>
+    public bool FollowUpRightsProbeAnswersNone { get; set; }
 
     /// <summary>
     /// Task 150: every root read returns <c>sprk_issecure</c> EMPTY (JSON null) — what Dataverse answers for a
@@ -612,7 +630,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
         CallerHoldsDelete = false;
+        CallerDeletesWhatTheyOwn = false;
         FullAccessProbeThrows = false;
+        FollowUpRightsProbeAnswersNone = false;
         SecureFlagReadsEmpty = false;
         SecureFlagWriteFails = false;
         SecureFlagWriteNotApplied = false;
@@ -1437,12 +1457,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             _fixture.DelegationProbes.Add((entitySet, recordId));
             if (_fixture.FullAccessProbeThrows && earlierProbes >= 1)
                 throw new HttpRequestException("Dataverse 503: simulated failure of RetrievePrincipalAccess.");
+            if (_fixture.FollowUpRightsProbeAnswersNone && earlierProbes >= 1)
+                return Task.FromResult(AccessRights.None);
 
             var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
                 : AccessRights.Read;
 
-            return Task.FromResult(_fixture.CallerHoldsDelete ? rights | AccessRights.Delete : rights);
+            // Delete by a role (whoever owns the record), or by ownership (only while the caller owns it — read now).
+            var deletes = _fixture.CallerHoldsDelete
+                          || (_fixture.CallerDeletesWhatTheyOwn && _fixture.OwningUserOf(recordId) == CallerSystemUserId);
+            return Task.FromResult(deletes ? rights | AccessRights.Delete : rights);
         }
 
         /// <summary>

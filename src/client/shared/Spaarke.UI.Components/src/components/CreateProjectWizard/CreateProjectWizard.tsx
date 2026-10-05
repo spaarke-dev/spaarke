@@ -595,6 +595,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           );
 
           provisioningSucceeded = provisionResult.success;
+          // Round 29: per-person warnings (named colleagues the server did not share to). The wizard names none today,
+          // so none arrive; a host that does shows them with its other warnings.
+          if (provisionResult.warnings && provisionResult.warnings.length > 0)
+            warnings.push(...provisionResult.warnings);
 
           if (!provisionResult.success) {
             // Non-fatal for the WIZARD — the project record exists either way. What the failure left

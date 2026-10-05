@@ -88,6 +88,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// as the forward path (owner round 10 item 10; task 150 verifier c1 item 4) — before any write; a flagged one stays on
 /// the Write gate.</para>
 ///
+/// <para><b>RESUME through Make Secure</b> (<c>transition: "make-secure"</c>; task 150, round 40 items 1 and 2). The form's
+/// Make Secure command finishes such a record with the forward Make Secure path's rules, minus the move it no longer
+/// needs: the CALLER is identified (WhoAmI) and their effective rights read in the same step, checked against the No
+/// Access list and shared at the creator's level — never lower than the access they held, by share, ownership or role
+/// (round 46 item 1) — and that share is the one proven; the record's creator is shared to beside them, named in
+/// <c>skippedPrincipals</c> when they are not. So a Make Secure that failed after its first write is finished by the same
+/// caller from the same command, flagged or not, and whoever runs it keeps access on both paths (round 40 item 2 removed
+/// the asymmetry; round 46 item 3 confirmed the full forward rule set). Without the transition a resume keeps F8 above:
+/// the creator only.</para>
+///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
 /// restores the access state every earlier refusal already leaves (the creator's own). Ownership means the record's AND
 /// that of the rows its owner move cascades to (SharePoint document locations and documents on a project or matter):
@@ -267,6 +277,13 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonPrincipalNoAccessUnverifiable = "sdap.provision.principal_no_access_unverifiable";
 
     /// <summary>
+    /// Task 150 (round 33 items 1 and 5): a named colleague — or, on Make Secure, the record's creator — whose share could
+    /// not be written. Reported per person in <c>skippedPrincipals</c> (never silent), the others still shared; the
+    /// record stays secured and shared to the caller, who adds the person through Manage Access.
+    /// </summary>
+    internal const string ReasonPrincipalShareFailed = "sdap.provision.principal_share_failed";
+
+    /// <summary>
     /// The owner PATCH was sent but its outcome could not be read back. A share to the creator was issued — read back
     /// when the read works (<c>creatorShareConfirmed: true</c>), otherwise issued without confirmation. The next call
     /// resumes a record the team now owns — unless it keeps its own container (<c>containerKept: true</c>), which the
@@ -365,6 +382,19 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonNotRecordCreator = "sdap.provision.not_record_creator";
 
     /// <summary>
+    /// Task 150 (round 33 item 1): <see cref="ProvisionProjectRequest.Transition"/> for the form's Make Secure command —
+    /// securing an EXISTING record (task 148's surface). That path is held to the route's Write gate only (owner R3b):
+    /// the creator rule of owner round 10 item 10 (<see cref="ReasonNotRecordCreator"/>) belongs to the wizards'
+    /// create-then-secure path, which sends no transition. On it the record's creator is shared to as well
+    /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27); and the
+    /// caller is shared at the creator's level on the forward path AND on a resume (round 40 item 2,
+    /// <see cref="ResumeMakeSecureAsync"/>), never lower than the access they held before the call — by share, ownership or
+    /// role (<see cref="MakeSecureCallerMask"/>, round 46 item 1). Matched exactly (ordinal): the value relaxes a gate, so no
+    /// near-miss spelling is read as it.
+    /// </summary>
+    internal const string TransitionMakeSecure = "make-secure";
+
+    /// <summary>
     /// Task 150 (owner round 10 item 10): whether the caller created the unflagged record could not be checked — its
     /// <c>createdby</c> user or its <c>sprk_createdbyperson</c> could not be read. Refused before any write (500); the
     /// same caller may call again once the read works. A column this environment lacks (<c>sprk_createdbyperson</c>
@@ -372,6 +402,16 @@ public static class ProvisionProjectEndpoint
     /// but 403 with <c>creatorState: column-missing</c>: deterministic until an administrator applies the schema.
     /// </summary>
     internal const string ReasonRecordCreatorUnverifiable = "sdap.provision.record_creator_unverifiable";
+
+    /// <summary>
+    /// Task 150 (round 53 item 1, for round 46 item 1): on Make Secure (<see cref="TransitionMakeSecure"/>) the caller's
+    /// EFFECTIVE rights on the record could not be read — the probe threw, or it answered without the Write the route's
+    /// gate admitted — so the share they keep could not be floored on them (<see cref="ReadMakeSecureCallerFloorAsync"/>).
+    /// Refused before any write (500); the same caller may call again. A provisioning code (round 26 item 1: codes are
+    /// namespaced by endpoint) — owner F3's <see cref="SecureDesignationRemoval.PermissionUnverifiableReasonCode"/> is the
+    /// unsecure endpoint's. The wizards' create-then-secure path reads no floor, so it never answers this code.
+    /// </summary>
+    internal const string ReasonCallerRightsUnverifiable = "sdap.provision.caller_rights_unverifiable";
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
@@ -425,6 +465,32 @@ public static class ProvisionProjectEndpoint
     /// rights.
     /// </summary>
     internal static readonly int CreatorAccessMask = RecordShareLevels.MaskForRightsCsv(CreatorAccessRights);
+
+    /// <summary>The Full Access level's mask (Collaborate + Delete) — the highest a Make Secure caller's share is kept at.</summary>
+    private static readonly int FullAccessMask = RecordShareLevels.MaskForRightsCsv(RecordShareLevels.FullAccessRights);
+
+    /// <summary>
+    /// Task 150 (round 40 item 2; round 46 item 1): the share a Make Secure caller ends with, given what they held — the
+    /// creator's level (<see cref="CreatorAccessMask"/>), and never LOWER than a level they already held: a Full Access
+    /// holder keeps Delete (and so stays one of the people owner F3 lets remove the designation). <paramref name="heldMask"/>
+    /// is what they held BEFORE the call by any route — their explicit share, and their EFFECTIVE rights
+    /// (<see cref="MakeSecureHeldMask"/>: ownership or a security role too, as F3 itself decides Full Access). Nothing beyond
+    /// Full Access is kept — a secure record's sharee never holds Assign (it leaves the Secure Record business unit only
+    /// through the unsecure endpoint), which is why the wizards' creator share is EXACTLY the creator's level.
+    /// </summary>
+    internal static int MakeSecureCallerMask(int heldMask) => (heldMask & FullAccessMask) | CreatorAccessMask;
+
+    /// <summary>
+    /// Task 150 (round 46 item 1): the Full Access rights (Collaborate plus Delete) a caller holds EFFECTIVELY — Dataverse's
+    /// own answer (<c>RetrievePrincipalAccess</c>, asked as the caller), so held through an explicit share, through owning
+    /// the record, or through a security role alike — as the share mask those rights would be. Owner F3 decides "Full
+    /// Access" from exactly this answer (<see cref="SecureDesignationRemoval.FullAccess"/>), so a caller who held Delete by
+    /// ownership or by role before Make Secure keeps it, through an explicit Full Access share, exactly as one who held it
+    /// by share does. Rights no share level carries (Create, Assign) are never in the result.
+    /// </summary>
+    internal static int MakeSecureHeldMask(AccessRights effectiveRights) =>
+        RecordShareLevels.Intersect(
+            new RecordShareRights(RecordShareLevels.FullAccessRights, FullAccessMask), effectiveRights).AccessRightsMask;
 
     /// <summary>
     /// The columns Step 1 reads from <c>sprk_project</c> — the project row of <see cref="SecureRecordRoot"/>.
@@ -495,6 +561,29 @@ public static class ProvisionProjectEndpoint
         var target = ResolveRoot(request);
         if (!target.Ok)
             return ProblemDetailsHelper.ValidationError(target.Error ?? "A record to provision is required.");
+
+        // Task 150 (round 33 item 1): which surface asks. Omitted = the wizards' create-then-secure path (creator rule);
+        // make-secure = the form's Make Secure command (Write gate). Anything else is refused before any read or write: an
+        // unrecognised value never falls back to either rule, and only the exact token relaxes the creator rule.
+        bool makeSecure;
+        if (request.Transition is null)
+            makeSecure = false;
+        else if (string.Equals(request.Transition, TransitionMakeSecure, StringComparison.Ordinal))
+            makeSecure = true;
+        else
+            return ProblemDetailsHelper.ValidationError($"Transition must be '{TransitionMakeSecure}' or omitted.");
+
+        // Make Secure names no colleagues: it shares to the caller and to the record's creator, nobody else. A Write holder
+        // who did not create the record (round 33 item 1 admits them) would otherwise widen its explicit access list through
+        // the application identity, skipping the eligibility and grantor checks Manage Access applies — the reason a
+        // resume refuses colleagues from anyone but the creator (task 133 verifier round 1). People are added through
+        // Manage Access. Refused before any read or write.
+        if (makeSecure && request.SharePrincipalIds is { Count: > 0 })
+        {
+            return ProblemDetailsHelper.ValidationError(
+                "Make Secure shares the record to you and to the person who created it, and names nobody else: add other " +
+                "people through Manage Access once it is secure. Nothing was changed.");
+        }
 
         var root = SecureRecordRoot.For(target.Type);
         var recordId = target.Id;
@@ -777,7 +866,25 @@ public static class ProvisionProjectEndpoint
         }
 
         Guid creatorId;
-        if (resume)
+        Guid? recordCreatorToShare = null;
+        if (resume && makeSecure)
+        {
+            // ── RESUME through Make Secure (round 40 items 1 and 2): the forward Make Secure path's rules ──
+            //
+            // The caller is identified, checked against the No Access list and shared at the creator's level (never lower
+            // than they hold) — the share this run proves; the record's creator joins the colleague step, exactly as on the
+            // forward path. Flagged or not: a Make Secure that failed after its first write is finished by the same call.
+            var finish = await ResumeMakeSecureAsync(
+                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, httpContext, root, recordId, row,
+                ownerTeamId, alreadyFlagged, logger, traceId, ct);
+
+            if (finish.Error != null)
+                return finish.Error;
+
+            creatorId = finish.CallerId;
+            recordCreatorToShare = finish.RecordCreator;
+        }
+        else if (resume)
         {
             // ── RESUME of an UNFLAGGED record: only its creator (owner round 10 item 10; task 150 verifier c1 item 4) ──
             //
@@ -786,7 +893,7 @@ public static class ProvisionProjectEndpoint
             // path's first write and nothing clears it on failure; before task 150 provisioning required it; and the
             // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
             // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
-            // on the route's Write gate.
+            // on the route's Write gate. (Make Secure — round 33 item 1 — never reaches here: the branch above.)
             if (!alreadyFlagged)
             {
                 var unflaggedResumeRefusal = await RefuseUnflaggedResumeUnlessCreatorAsync(
@@ -852,11 +959,24 @@ public static class ProvisionProjectEndpoint
         }
         else
         {
+            // ── FORWARD, Make Secure (round 33 item 1): who created the record, read BEFORE any write ──
+            // The caller is shared to as on every forward run; the creator, when a usable person other than the caller,
+            // is shared to as well (owner round 27: "the person who created this record … will keep access"). A creator
+            // that cannot be read refuses — never secured with its creator possibly locked out (ADR-003).
+            if (makeSecure)
+            {
+                var creatorRead = await ResolveMakeSecureCreatorAsync(dataverseClient, root, recordId, row, logger, traceId, ct);
+                if (creatorRead.Error != null)
+                    return creatorRead.Error;
+
+                recordCreatorToShare = creatorRead.CreatorId;
+            }
+
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
                 dataverseClient, recordShare, callerAccessProbe, noAccessGuard, accessCacheInvalidator, httpContext, root,
-                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger,
-                traceId, ct);
+                recordId, row, ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink,
+                makeSecure, logger, traceId, ct);
 
             if (forward.Error != null)
                 return forward.Error;
@@ -864,13 +984,15 @@ public static class ProvisionProjectEndpoint
             creatorId = forward.CreatorId;
         }
 
-        // ── Named colleagues: only once the creator's share is proven ─────────
+        // ── Named colleagues: only once the share this run proves is in place ─────────
+        // That share is creatorId's: the caller's on the forward path and on a Make Secure resume, the record creator's on
+        // a resume without the transition (F8).
         int additionalShared;
         IReadOnlyList<ProvisionSkippedPrincipal> skippedPrincipals;
         try
         {
             (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
-                recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
+                recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger, traceId, ct);
         }
         finally
         {
@@ -1305,6 +1427,7 @@ public static class ProvisionProjectEndpoint
         Guid ownerTeamId,
         bool keepsOwnContainer,
         string? sharedContainerToUnlink,
+        bool makeSecure,
         ILogger logger,
         string traceId,
         CancellationToken ct)
@@ -1314,25 +1437,29 @@ public static class ProvisionProjectEndpoint
         var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         var resolved = await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
         if (resolved is not { } creatorId || creatorId == Guid.Empty)
-        {
-            logger.LogError(
-                "[PROVISION] Could not resolve the calling user's systemuserid for {RecordType} {RecordId}. Refusing " +
-                "before any change: the record could not be shared back to its creator. TraceId={TraceId}",
-                root.WireToken, recordId, traceId);
+            return CreatorShareStep.Failed(CallerUnresolved(root, recordId, logger, traceId));
 
-            return CreatorShareStep.Failed(Problem(
-                StatusCodes.Status403Forbidden, "Forbidden",
-                "The calling user's Dataverse identity could not be established, so the record could not be shared " +
-                "back to them. Provisioning stopped before changing anything: the record's ownership and shares are " +
-                "as they were, and the same caller may retry.",
-                traceId, (ReasonKey, ReasonCreatorUnresolved)));
+        // ── Make Secure (round 46 item 1): the caller's EFFECTIVE rights before the call, in the same step as WhoAmI ──
+        // The floor their share is kept at (a Full Access holder by share, ownership or role keeps Delete). Read before any
+        // write; a read that fails refuses — never a floor of "nothing", which would narrow them (ADR-003). The wizards'
+        // path makes no such read: their creator's share is EXACTLY the creator's level.
+        var callerHeldMask = 0;
+        if (makeSecure)
+        {
+            var floor = await ReadMakeSecureCallerFloorAsync(
+                callerAccessProbe, callerToken, root, recordId, creatorId, logger, traceId, ct);
+            if (floor.Error != null)
+                return CreatorShareStep.Failed(floor.Error);
+
+            callerHeldMask = floor.HeldMask;
         }
 
         // ── Owner round 10 item 10 (task 150): an UNFLAGGED record is secured only for the person who created it ──
         //
         // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
         // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
-        if (row.sprk_issecure != true)
+        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the Write gate (owner R3b).
+        if (row.sprk_issecure != true && !makeSecure)
         {
             var notCreator = await RefuseUnlessRecordCreatorAsync(
                 dataverseClient, root, recordId, row, creatorId, logger, traceId, ct);
@@ -1346,25 +1473,7 @@ public static class ProvisionProjectEndpoint
         // unlinked or shared. The message names no entry and no reason (the refusal contract).
         var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, creatorId, ct);
         if (wall.RefusesShare)
-        {
-            var walled = wall.Outcome == SecureShareWallOutcome.Walled;
-            logger.LogWarning(
-                "[PROVISION] Refused to provision {RecordType} {RecordId}: its creator {CreatorId} is {State} the No Access " +
-                "list ({Detail}). Nothing was changed. TraceId={TraceId}",
-                root.WireToken, recordId, creatorId, walled ? "on" : "not provably off",
-                walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
-
-            return CreatorShareStep.Failed(walled
-                ? Problem(StatusCodes.Status403Forbidden, "Forbidden",
-                    $"You are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} — directly, through " +
-                    "an organization you belong to, or through an organization it references — so it cannot be made a " +
-                    "secure record shared to you. Nothing was changed.",
-                    traceId, (ReasonKey, ReasonCreatorNoAccess))
-                : Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                    $"Whether you are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} could not be " +
-                    "checked, so provisioning stopped before changing anything. Try again.",
-                    traceId, (ReasonKey, ReasonCreatorNoAccessUnverifiable)));
-        }
+            return CreatorShareStep.Failed(CallerWallRefusal(root, recordId, creatorId, wall, logger, traceId));
 
         // The owner compensation would restore. Every Dataverse row has one; a row read without it is not one this
         // endpoint can safely move, because the move could not be undone.
@@ -1410,6 +1519,14 @@ public static class ProvisionProjectEndpoint
                 "before the call, which cannot be told apart. TraceId={TraceId}",
                 root.WireToken, recordId, traceId);
         }
+
+        // Round 40 item 2 / round 46 item 1: a Make Secure caller is shared at the creator's level, never LOWER than what they
+        // held before the call — their effective rights read above (share, ownership or role), the pre-call share when it
+        // could be read, and what a later read shows — so a Full Access holder who runs Make Secure keeps Full Access. The
+        // wizards' creator gets EXACTLY the creator's level (null: the default target).
+        Func<int, int>? shareTarget = makeSecure
+            ? held => MakeSecureCallerMask(held | (preCreatorMask ?? 0) | callerHeldMask)
+            : null;
 
         // ── A record that keeps its own container moves only after share-first (task 133 r1) ──
         if (keepsOwnContainer && preCreatorMask is null)
@@ -1488,7 +1605,7 @@ public static class ProvisionProjectEndpoint
         // ── Step 4.5: SHARE-FIRST ────────────────────────────────────────────
         if (preCreatorMask is { } knownPreMask)
         {
-            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
+            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
             wroteCreatorShare = first.WriteAttempted;
             creatorShareProven = first.Proven;
 
@@ -1567,18 +1684,23 @@ public static class ProvisionProjectEndpoint
             // The PATCH may have landed. Whatever happened, the creator's share must be in place (S5). It is PROVEN by
             // the same complete read every other share write on this path uses (task 133 verifier round 1) — a share
             // proven before the move is not assumed to have survived it (live gate (b)).
-            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
+            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
             var shareConfirmed = ensured.Proven;
             var shareIssued = ensured.Proven;
 
             if (!shareConfirmed)
             {
                 // The read or the write failed. Issue the share without a read to confirm it: leaving no share risks a
-                // record nobody can open if the move DID land. The response then says the share is NOT confirmed.
+                // record nobody can open if the move DID land. The response then says the share is NOT confirmed. A Make
+                // Secure caller's is issued at their floor (round 46 item 1: never lower than they held), not below it.
+                var fallbackMask = shareTarget?.Invoke(0) ?? CreatorAccessMask;
+                var fallbackRights = fallbackMask == CreatorAccessMask
+                    ? CreatorAccessRights
+                    : RecordShareLevels.RightsCsvForMask(fallbackMask);
                 try
                 {
                     await recordShare.GrantAccessAsync(
-                        root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), CreatorAccessRights, ct);
+                        root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), fallbackRights, ct);
                     shareIssued = true;
                 }
                 catch (Exception ex)
@@ -1653,7 +1775,7 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Step 5.5: prove the creator's share on the moved record ───────────
-        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
+        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
         if (proof.Proven)
             return CreatorShareStep.Ok(creatorId);
 
@@ -2021,6 +2143,307 @@ public static class ProvisionProjectEndpoint
             ? null
             : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
     }
+
+    /// <summary>
+    /// Make Secure (task 150, round 33 item 1): the person who created the record — shared to alongside the caller, so the
+    /// confirmation copy's "the person who created this record … will keep access" holds. Read-only, before any write.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which person</b> — the creator rule's columns: <c>createdby</c> when it is a PERSON; when it is an
+    /// application user (an app-only create) or absent, the BFF-stamped <c>sprk_createdbyperson</c>. A person who cannot
+    /// use the record (disabled, an application user, none recorded) is not shared to: nobody is left to keep access
+    /// through that clause.</para>
+    /// <para><b>Fail closed</b> (ADR-003). A read that fails refuses <see cref="ReasonRecordCreatorUnverifiable"/> (500,
+    /// the same caller may retry); a <c>sprk_createdbyperson</c> column this environment lacks, needed because
+    /// <c>createdby</c> names no person, refuses as the creator rule does (403, <c>creatorState: column-missing</c>) —
+    /// never secured with its creator possibly locked out. The same codes, and so the same client copy, as the creator
+    /// rule.</para>
+    /// </remarks>
+    private static async Task<(Guid? CreatorId, IResult? Error)> ResolveMakeSecureCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
+        if (createdBy is { } createdById)
+        {
+            string? state;
+            try
+            {
+                state = await UnusablePersonStateAsync(dataverseClient, createdById, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] Make Secure: the creator (createdby {CreatorId}) of {RecordType} {RecordId} could not be " +
+                    "read. Refusing before any change. TraceId={TraceId}", createdById, root.WireToken, recordId, traceId);
+                return (null, RecordCreatorUnverifiable(root, traceId));
+            }
+
+            if (state is null)
+                return (createdById, null);         // a usable person created it
+
+            if (state == UnusableDisabled)
+                return (null, null);                // a person created it and cannot use it now: no share
+        }
+
+        // createdby is an application user (an app-only create) or absent: the person the BFF stamped.
+        Guid? person;
+        try
+        {
+            person = await ReadCreatorPersonAsync(dataverseClient, root, recordId, ct);
+        }
+        catch (Exception ex) when (IsColumnMissing(ex))
+        {
+            logger.LogWarning(
+                "[PROVISION] Make Secure: {Column} is not in this environment (400), so who created {RecordType} " +
+                "{RecordId} cannot be checked. Refusing before any change. TraceId={TraceId}",
+                RecordCreatorPerson.Column, root.WireToken, recordId, traceId);
+            return (null, RecordCreatorColumnMissing(root, traceId));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] Make Secure: the person recorded as creating {RecordType} {RecordId} ({Column}) could not be " +
+                "read. Refusing before any change. TraceId={TraceId}",
+                root.WireToken, recordId, RecordCreatorPerson.Column, traceId);
+            return (null, RecordCreatorUnverifiable(root, traceId));
+        }
+
+        if (person is not { } personId)
+            return (null, null);                    // nobody recorded
+
+        string? personState;
+        try
+        {
+            personState = await UnusablePersonStateAsync(dataverseClient, personId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] Make Secure: the person recorded as creating {RecordType} {RecordId} ({PersonId}) could not " +
+                "be read. Refusing before any change. TraceId={TraceId}", root.WireToken, recordId, personId, traceId);
+            return (null, RecordCreatorUnverifiable(root, traceId));
+        }
+
+        return personState is null ? (personId, null) : (null, null);
+    }
+
+    /// <summary>
+    /// RESUME through Make Secure (task 150, round 40 items 1 and 2): a record owned by the Secure Record owner team with no
+    /// container recorded — an earlier run stopped after the owner move — finished with the forward Make Secure path's
+    /// rules. Every refusal comes before any write. Returns the caller (the share this run proves) and the record's
+    /// creator (shared to beside them in the colleague step), or the refusal to send.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the forward path's rules.</b> Round 40 item 2: a non-creator who runs Make Secure keeps access on BOTH
+    /// paths. And round 40 item 1: a Make Secure that fails after its first write can always be finished — by the same
+    /// caller, from the same command. The resume's own rules (F8: share to the record's creator only; refuse when no usable
+    /// creator, or a walled one) would answer a retry with 409 for exactly the records the forward path secured anyway
+    /// (a disabled creator; a creator on the No Access list, named in <c>skippedPrincipals</c>), so the retry could never
+    /// finish them. Here the caller's share is proven, as on the forward path, so a record with no usable creator still has
+    /// a reader (S5); the creator is shared to, skipped with the per-person reason, or not shared to (unusable) — the
+    /// forward rules exactly.</para>
+    /// <para><b>Order</b> (ADR-003, nothing written before every check): the caller by WhoAmI (unresolved: 403
+    /// <see cref="ReasonCreatorUnresolved"/>) and, in the same step, their effective rights (round 46 item 1:
+    /// <see cref="ReadMakeSecureCallerFloorAsync"/>; unreadable: 500 <see cref="ReasonCallerRightsUnverifiable"/>); the
+    /// caller against the No Access list (403 <see cref="ReasonCreatorNoAccess"/> / 500
+    /// <see cref="ReasonCreatorNoAccessUnverifiable"/>); the record's creator (<see cref="ResolveMakeSecureCreatorAsync"/>:
+    /// an unreadable creator refuses); then the flag (the first write, skipped when already set); then the caller's share —
+    /// <see cref="MakeSecureCallerMask"/> of what they held (share now, and effective rights), read back. A share that
+    /// cannot be proven answers 500
+    /// <see cref="ReasonCreatorShareFailed"/> (<c>resumed: true</c>): nothing about ownership changed, and the same caller
+    /// may call again.</para>
+    /// <para><b>F8 still holds without the transition.</b> A resume the wizards or an administrator's API call make (no
+    /// transition) shares to the record's creator only — an administrator who finishes a record that way is not added to
+    /// its explicit access list. One who uses the form's Make Secure command is shared to like any caller of it.</para>
+    /// </remarks>
+    private static async Task<(Guid CallerId, Guid? RecordCreator, IResult? Error)> ResumeMakeSecureAsync(
+        DataverseWebApiClient dataverseClient,
+        IDataverseRecordShareService recordShare,
+        CallerRecordAccessProbe callerAccessProbe,
+        SecureShareNoAccessGuard noAccessGuard,
+        HttpContext httpContext,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        Guid ownerTeamId,
+        bool alreadyFlagged,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        logger.LogWarning(
+            "[PROVISION] Make Secure on {RecordType} {RecordId}: owned by the Secure Record owner team {TeamId} with no " +
+            "container recorded — an earlier run stopped after the owner move. Finishing it for the caller (round 40). " +
+            "TraceId={TraceId}", root.WireToken, recordId, ownerTeamId, traceId);
+
+        // The caller — from their own token (WhoAmI), never the body — as on the forward path.
+        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var resolved = await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
+        if (resolved is not { } callerId || callerId == Guid.Empty)
+            return (Guid.Empty, null, CallerUnresolved(root, recordId, logger, traceId));
+
+        // Their effective rights before the call, in the same step (round 46 item 1) — the floor their share is kept at.
+        var floor = await ReadMakeSecureCallerFloorAsync(
+            callerAccessProbe, callerToken, root, recordId, callerId, logger, traceId, ct);
+        if (floor.Error != null)
+            return (Guid.Empty, null, floor.Error);
+
+        // A caller the No Access list walls off is refused before any change (owner N6), as on the forward path.
+        var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, callerId, ct);
+        if (wall.RefusesShare)
+            return (Guid.Empty, null, CallerWallRefusal(root, recordId, callerId, wall, logger, traceId));
+
+        // Who created the record — read before any write; a read that fails refuses (never secured with them locked out).
+        var creatorRead = await ResolveMakeSecureCreatorAsync(dataverseClient, root, recordId, row, logger, traceId, ct);
+        if (creatorRead.Error != null)
+            return (Guid.Empty, null, creatorRead.Error);
+
+        // The flag — the first write here too (task 150); skipped when the earlier run already set it.
+        var flag = await EnsureSecureFlagAsync(dataverseClient, root, recordId, alreadyFlagged, logger, traceId, ct);
+        if (flag != null)
+            return (Guid.Empty, null, flag);
+
+        // The caller's share at the creator's level, never lower than they held (their share now, and the effective rights
+        // read above) — proven by a read (the forward path's proof; the record is already the team's, so there is no move to
+        // undo).
+        var ensured = await EnsureCreatorShareAsync(
+            recordShare, root, recordId, callerId, logger, ct, held => MakeSecureCallerMask(held | floor.HeldMask));
+        if (!ensured.Proven)
+        {
+            logger.LogError(
+                "[PROVISION] Make Secure resuming {RecordType} {RecordId}: the caller's share ({CallerId}) could not be " +
+                "proven. Nothing about ownership changed. TraceId={TraceId}", root.WireToken, recordId, callerId, traceId);
+
+            return (Guid.Empty, null, Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"This call was finishing securing {root.DisplayLabel.ToLowerInvariant()} {recordId}, which is owned by the " +
+                "Secure Record owner team with no container recorded, and could not confirm your share on it. This call did " +
+                "not change the record's ownership. The same caller may retry.",
+                traceId, (ReasonKey, ReasonCreatorShareFailed), ("resumed", true), ("ownerTeamId", ownerTeamId)));
+        }
+
+        return (callerId, creatorRead.CreatorId, null);
+    }
+
+    /// <summary>
+    /// The caller's Dataverse identity could not be established (WhoAmI): refused before any change — on the forward path
+    /// and on a Make Secure resume, whose proven share is the caller's.
+    /// </summary>
+    private static IResult CallerUnresolved(SecureRecordRoot root, Guid recordId, ILogger logger, string traceId)
+    {
+        logger.LogError(
+            "[PROVISION] Could not resolve the calling user's systemuserid for {RecordType} {RecordId}. Refusing " +
+            "before any change: the record could not be shared back to its creator. TraceId={TraceId}",
+            root.WireToken, recordId, traceId);
+
+        return Problem(
+            StatusCodes.Status403Forbidden, "Forbidden",
+            "The calling user's Dataverse identity could not be established, so the record could not be shared " +
+            "back to them. Provisioning stopped before changing anything: the record's ownership and shares are " +
+            "as they were, and the same caller may retry.",
+            traceId, (ReasonKey, ReasonCreatorUnresolved));
+    }
+
+    /// <summary>
+    /// Owner N6 (task 143): the caller — the person this run shares to and proves — is on the record's No Access list,
+    /// or that could not be checked. Refused before any change; the message names no entry and no reason.
+    /// </summary>
+    private static IResult CallerWallRefusal(
+        SecureRecordRoot root, Guid recordId, Guid callerId, SecureShareWallDecision wall, ILogger logger, string traceId)
+    {
+        var walled = wall.Outcome == SecureShareWallOutcome.Walled;
+        logger.LogWarning(
+            "[PROVISION] Refused to provision {RecordType} {RecordId}: its creator {CreatorId} is {State} the No Access " +
+            "list ({Detail}). Nothing was changed. TraceId={TraceId}",
+            root.WireToken, recordId, callerId, walled ? "on" : "not provably off",
+            walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
+
+        return walled
+            ? Problem(StatusCodes.Status403Forbidden, "Forbidden",
+                $"You are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} — directly, through " +
+                "an organization you belong to, or through an organization it references — so it cannot be made a " +
+                "secure record shared to you. Nothing was changed.",
+                traceId, (ReasonKey, ReasonCreatorNoAccess))
+            : Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"Whether you are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} could not be " +
+                "checked, so provisioning stopped before changing anything. Try again.",
+                traceId, (ReasonKey, ReasonCreatorNoAccessUnverifiable));
+    }
+
+    /// <summary>
+    /// Make Secure (task 150, round 46 item 1): the caller's EFFECTIVE rights on the record before any write — Dataverse's
+    /// own answer, asked as the caller (<see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, the question owner F3
+    /// asks) — as the share mask their Make Secure share may not fall below (<see cref="MakeSecureHeldMask"/>). Read in the
+    /// same pre-write step as WhoAmI, on the forward path and on a Make Secure resume.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail closed</b> (ADR-003). A probe that throws, or an answer without Write — the route's gate admitted
+    /// Write on this record moments ago, so an answer lacking it is the probe's "could not answer" (it answers
+    /// <see cref="AccessRights.None"/> for that, deliberately indistinguishable from "no rights") or a change mid-call —
+    /// refuses before any write with <see cref="ReasonCallerRightsUnverifiable"/> (500; the same caller may retry). Never a
+    /// floor of "nothing": that would narrow a Full Access holder and take away their F3 right to remove the designation.</para>
+    /// <para><b>Why its own code</b> (round 53 item 1). Codes are namespaced by endpoint (round 26 item 1): owner F3's
+    /// <see cref="SecureDesignationRemoval.PermissionUnverifiableReasonCode"/> names the same unreadable fact on the
+    /// unsecure endpoint, and every other provisioning "unverifiable" code names a different fact (the No Access list, the
+    /// record's creator). The wizards' create-then-secure path never reads the floor, so it never answers this code.</para>
+    /// </remarks>
+    private static async Task<(int HeldMask, IResult? Error)> ReadMakeSecureCallerFloorAsync(
+        CallerRecordAccessProbe callerAccessProbe,
+        string? callerToken,
+        SecureRecordRoot root,
+        Guid recordId,
+        Guid callerId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        AccessRights effective;
+        try
+        {
+            effective = await callerAccessProbe.GetCallerRightsAsync(callerToken, root.EntitySet, recordId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] Make Secure: the effective rights of caller {CallerId} on {RecordType} {RecordId} could not be " +
+                "read, so the share they keep could not be set. Refusing before any change. TraceId={TraceId}",
+                callerId, root.WireToken, recordId, traceId);
+            return (0, CallerAccessUnverifiable(root, traceId));
+        }
+
+        if ((effective & AccessRights.Write) != AccessRights.Write)
+        {
+            logger.LogWarning(
+                "[PROVISION] Make Secure: the effective rights of caller {CallerId} on {RecordType} {RecordId} read as " +
+                "{Rights}, without the Write the route admitted them on — an unanswered probe or a change mid-call. Refusing " +
+                "before any change. TraceId={TraceId}", callerId, root.WireToken, recordId, effective, traceId);
+            return (0, CallerAccessUnverifiable(root, traceId));
+        }
+
+        var held = MakeSecureHeldMask(effective);
+        logger.LogInformation(
+            "[PROVISION] Make Secure: caller {CallerId} holds {Rights} on {RecordType} {RecordId}; their share is kept at " +
+            "no less than mask {HeldMask} (floored at the creator's level). TraceId={TraceId}",
+            callerId, effective, root.WireToken, recordId, held, traceId);
+        return (held, null);
+    }
+
+    /// <summary>
+    /// The caller's effective rights could not be read (round 46 item 1) — refused before any change with
+    /// <see cref="ReasonCallerRightsUnverifiable"/> (round 53 item 1; <see cref="ReadMakeSecureCallerFloorAsync"/>). The
+    /// detail is the copy round 53 ratified; the Access ribbon and the wizard's client carry the same words.
+    /// </summary>
+    private static IResult CallerAccessUnverifiable(SecureRecordRoot root, string traceId) =>
+        Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"Which access you hold on this {root.DisplayLabel.ToLowerInvariant()} could not be read, so securing it could " +
+            "not make sure you keep that access. Nothing was changed; you may try again.",
+            traceId, (ReasonKey, ReasonCallerRightsUnverifiable));
 
     // F6 row 9 — owner round 13 item 10 (2026-10-03): option B, verbatim (notes/task-150-issecure-lock.md §6).
     private static IResult NotRecordCreator(
@@ -2541,8 +2964,10 @@ public static class ProvisionProjectEndpoint
     }
 
     /// <summary>
-    /// Makes the creator hold EXACTLY <see cref="CreatorAccessRights"/> on the record, and proves it by reading the
-    /// shares back. Idempotent: a share already holding exactly those rights is not written again.
+    /// Makes the creator hold EXACTLY <see cref="CreatorAccessRights"/> on the record — or, for a Make Secure caller, the
+    /// mask <paramref name="targetFor"/> names for what they hold now and held before the call (round 40 item 2, round 46
+    /// item 1: never lower) — and proves it by reading the shares back. Idempotent: a share already holding exactly the
+    /// target is not written again.
     /// </summary>
     /// <remarks>
     /// A creator with no share gets GrantAccess; one whose share holds other rights gets ModifyAccess, because
@@ -2555,7 +2980,8 @@ public static class ProvisionProjectEndpoint
         Guid recordId,
         Guid creatorId,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<int, int>? targetFor = null)
     {
         var principal = DataversePrincipalRef.User(creatorId);
 
@@ -2572,15 +2998,18 @@ public static class ProvisionProjectEndpoint
             return new ShareEnsureResult(Proven: false, WriteAttempted: false);
         }
 
-        if (current == CreatorAccessMask)
+        // The mask to hold: the creator's level exactly, unless a Make Secure caller already holds more (round 40 item 2).
+        var target = targetFor?.Invoke(current) ?? CreatorAccessMask;
+        if (current == target)
             return new ShareEnsureResult(Proven: true, WriteAttempted: false);
 
+        var targetRights = target == CreatorAccessMask ? CreatorAccessRights : RecordShareLevels.RightsCsvForMask(target);
         try
         {
             if (current == 0)
-                await recordShare.GrantAccessAsync(root.EntitySet, recordId, principal, CreatorAccessRights, ct);
+                await recordShare.GrantAccessAsync(root.EntitySet, recordId, principal, targetRights, ct);
             else
-                await recordShare.ModifyAccessAsync(root.EntitySet, recordId, principal, CreatorAccessRights, ct);
+                await recordShare.ModifyAccessAsync(root.EntitySet, recordId, principal, targetRights, ct);
         }
         catch (Exception ex)
         {
@@ -2593,12 +3022,12 @@ public static class ProvisionProjectEndpoint
         try
         {
             var after = MaskOf(await recordShare.GetPrincipalAccessOrThrowAsync(root.LogicalName, recordId, ct), creatorId);
-            if (after == CreatorAccessMask)
+            if (after == target)
                 return new ShareEnsureResult(Proven: true, WriteAttempted: true);
 
             logger.LogError(
                 "[PROVISION] The creator's share on {RecordType} {RecordId} reads back as mask {Mask}, not {Expected}.",
-                root.WireToken, recordId, after, CreatorAccessMask);
+                root.WireToken, recordId, after, target);
         }
         catch (Exception ex)
         {
@@ -2770,13 +3199,19 @@ public static class ProvisionProjectEndpoint
     }
 
     /// <summary>
-    /// Shares the record with the request's named colleagues — best-effort (task 061), and only once the creator's
-    /// share is proven, so no colleague outcome changes the result of any branch.
+    /// Shares the record with the request's named colleagues — and, on Make Secure, with the record's creator
+    /// (<paramref name="recordCreator"/>) — best-effort (task 061), and only once the share this run proves is in place
+    /// (<paramref name="creatorId"/>'s: the caller's on the forward path and on a Make Secure resume, the record creator's
+    /// on a resume without the transition), so no colleague outcome changes the result of any branch.
     /// </summary>
     /// <remarks>
-    /// A colleague who already holds a share (a resumed run that got this far before) is not shared to again. If the
+    /// <para>A colleague who already holds a share (a resumed run that got this far before) is not shared to again. If the
     /// shares cannot be read, every colleague is shared to, as before task 133 — their absence is visible and fixable
-    /// through the FR-29 "+ User" path, the creator's is not.
+    /// through the FR-29 "+ User" path, the creator's is not.</para>
+    /// <para><b>Never silent</b> (task 150, round 33 items 1 and 5). Every person NOT shared to is named in the returned
+    /// list with the reason: on the No Access list, that list unverifiable (task 143), or the share itself failed
+    /// (<see cref="ReasonPrincipalShareFailed"/>) — so the client tells the caller who did not get access, and the
+    /// confirmation's "the person who created this record … will keep access" is never broken without saying so.</para>
     /// </remarks>
     private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
         IDataverseRecordShareService recordShare,
@@ -2785,11 +3220,15 @@ public static class ProvisionProjectEndpoint
         SecureRecordRoot root,
         Guid recordId,
         Guid creatorId,
+        Guid? recordCreator,
         ILogger logger,
         string traceId,
         CancellationToken ct)
     {
+        // Make Secure (round 33 item 1): the record's creator joins the colleagues — the same No Access check, the same
+        // Collaborate level, the same per-person warning when skipped.
         var colleagues = (request.SharePrincipalIds ?? Array.Empty<Guid>())
+            .Concat(recordCreator is { } person ? new[] { person } : Array.Empty<Guid>())
             .Where(id => id != Guid.Empty && id != creatorId)
             .Distinct()
             .ToList();
@@ -2855,11 +3294,15 @@ public static class ProvisionProjectEndpoint
             }
             catch (Exception ex)
             {
-                // Logged with the id so an operator can see exactly who was missed.
+                // Logged with the id so an operator can see exactly who was missed — and named in the response, so the
+                // caller is told too (round 33 item 5: never silent).
                 logger.LogWarning(ex,
                     "[PROVISION] Could not share {RecordType} {RecordId} with named principal {PrincipalId}. " +
                     "Provisioning continues; add them via the Manage Access surface. TraceId={TraceId}",
                     root.WireToken, recordId, principalId, traceId);
+                skipped.Add(new ProvisionSkippedPrincipal(principalId, ReasonPrincipalShareFailed,
+                    "Sharing this record with this person failed, so it was not shared with them. Add them through " +
+                    "Manage Access."));
             }
         }
 
@@ -3293,9 +3736,11 @@ public static class ProvisionProjectEndpoint
         /// <summary>
         /// Owned INSIDE the Secure Record BU, but by a team other than the named one (task 144) — the retired
         /// default team, before the migration. Refused before any write: the migration script, not a provisioning call,
-        /// moves it onto the named team.
+        /// moves it onto the named team. "Inside" is <see cref="SecureRecordOwnerTeam.IsInSecureBusinessUnit"/>, the rule the
+        /// <c>can-manage-access</c> owner answer uses too (round 53 item 2: the ribbon hides Make Secure on such a record).
         /// </summary>
         public bool IsOwnedInBusinessUnitByAnotherTeam(Guid secureBusinessUnitId, Guid ownerTeamId) =>
-            _owningbusinessunit_value is { } bu && bu == secureBusinessUnitId && !IsOwnedBy(ownerTeamId);
+            SecureRecordOwnerTeam.IsInSecureBusinessUnit(_owningbusinessunit_value, secureBusinessUnitId) == true
+            && !IsOwnedBy(ownerTeamId);
     }
 }

@@ -588,7 +588,9 @@ it shares to the person who created the record — its `createdby` user when tha
 person the BFF recorded in `sprk_createdbyperson` (§7b; an Office quick-created record's `createdby` is the BFF app user)
 — never to the caller instead, then creates and records the container. A record owned by the team **with** a container
 recorded is provisioned: 409, nothing written — unless its existing related records still need securing, which the call
-then completes (200 `childrenOnly`, task 148 §7c).
+then completes (200 `childrenOnly`, task 148 §7c). **Through the form's Make Secure command** (`transition:
+"make-secure"`, task 150 round 40) the resume instead follows the forward Make Secure rules: the CALLER is shared (and
+proven) and the creator beside them, so the same command finishes a Make Secure that failed after its first write (§7d.1).
 
 **A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
 `65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
@@ -641,8 +643,9 @@ row created before task 150) is provisioned exactly like an unflagged one.
 | `secure_bu_not_found`, `secure_bu_ambiguous`, `secure_owner_team_not_found`, `secure_owner_team_ambiguous`, `secure_owner_team_has_members`, `secure_owner_team_membership_unreadable`, `secure_bu_has_users`, `secure_bu_users_unreadable`, `container_type_not_configured` | Unchanged — refused before any write | Administrator fixes the environment (§3–§5, `SharePointEmbedded:ContainerTypeId`), then provisioning is called again |
 | `legacy_per_project_bu` | Unchanged | Administrator migrates the record off its per-project BU (manual) |
 | `already_provisioned` | Provisioned: owned by the team, container recorded, every existing related record already secured (task 148: when one is not, the call secures it and answers 200 `childrenOnly: true` instead). Nothing written | Nothing to provision. Who can open it is managed through Manage Access: an administrator shares it to anyone who should hold it but cannot open it (this is also the recovery for a record that kept its own container — `containerKept: true` below) |
-| `owned_by_other_secure_team` | Owned by the retired default team | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) |
+| `owned_by_other_secure_team` | Owned by the retired default team (another team inside the Secure Record business unit) — already isolated. The Access ribbon hides Make Secure on such a record (task 150 round 53 item 2) | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) — task 144's migration, never a provisioning call |
 | `creator_unresolved` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
+| `caller_rights_unverifiable` (task 150 round 53 item 1, HTTP 500; the form's Make Secure command only) | Unchanged — refused before any write. Which access the caller holds on the record (their effective rights, the floor their share is kept at — round 46 item 1) could not be read | **The same caller** calls again (Make Secure stays offered on the unchanged record). The wizards' path makes no such read and never meets it |
 | `secure_flag_not_set` (task 150, HTTP 500) | Nothing else changed — the flag write is the first write. The flag itself may or may not be set (the write failed, or did not read back `true`) | **The same caller** calls again. If it repeats: an administrator runs `scripts/Set-SecureFlagFieldSecurity.ps1 -Verify` (§7d) — a refused write means the BFF application user is not in the writer profile; a read-back that comes back EMPTY means the BFF lost its field-level Read |
 | `record_owner_unreadable` | Unchanged — refused before any write. The row was read with no owning user or team, which is deterministic for that row | **An administrator** checks the record's owner in Dataverse; calling again before that repeats the refusal (not offered as a retry) |
 | `resume_colleagues_not_permitted` | Unchanged — refused before any write. A resume request named colleagues (`sharePrincipalIds`) and its caller is not the record's creator | The caller calls again **without** `sharePrincipalIds` (the resume then completes, sharing only to the creator), and adds people through Manage Access |
@@ -663,6 +666,8 @@ row created before task 150) is provisioned exactly like an unflagged one.
 **Calling provisioning as an administrator** (the resume path): `POST {bff}/api/v1/external-access/provision-project`
 with body `{ "recordType": "project" | "matter" | "workassignment", "recordId": "<guid>" }` and a user token for the BFF
 API. The caller must hold Write on the record (the delegation filter); a System Administrator does through their role.
+Without a `transition` the resume shares to the record's creator only (F8: the administrator is not added to its access
+list); the form's Make Secure command (`transition: "make-secure"`) shares to its caller as well (§7d.1).
 
 ---
 
@@ -819,7 +824,10 @@ or **the record's creator** (`createdby`, or `sprk_createdbyperson` for an app-c
 (`SecureDesignationRemoval`, owner round 13 item 6): what it cannot establish — the caller, their rights, the creator
 person, or (a `sprk_createdbyperson` column this environment lacks) whether one is recorded — answers
 `sdap.unsecure.permission_unverifiable` (500 when a read failed, else 403), never "allowed". Securing stays open to Write
-holders — for a record already marked secure (an older client, a pre-task-150 row). A record NOT yet marked secure is
+holders — for a record already marked secure (an older client, a pre-task-150 row), and through the form's **Make
+Secure** command for any record (§7d.1: the request names `transition: "make-secure"`, held to the Write gate — owner R3b,
+round 33 item 1 — and the record's creator is shared to as well). On the wizards' create-then-secure path (no
+transition), a record NOT yet marked secure is
 secured through `/provision-project` only by **its creator** (owner round 10 item 10: `createdby` when a person, else
 `sprk_createdbyperson`); anyone else gets 403 `sdap.provision.not_record_creator` before any write (a missing
 `sprk_createdbyperson` column, where `createdby` names no person: 403 `sdap.provision.record_creator_unverifiable` with
@@ -827,7 +835,7 @@ secured through `/provision-project` only by **its creator** (owner round 10 ite
 already owns with no container, but whose flag is not set): only its creator may finish it. Every documented recovery
 meets a FLAGGED row, which stays on the Write gate; a System Administrator who must finish an unflagged one (an anomaly,
 e.g. a manual Assign to the owner team) sets the flag first (F4), then calls provisioning.
-Securing an existing record someone else created belongs to task 148's transition. `sprk_accesspermission` is NOT
+Securing an existing record someone else created is task 148's transition, reached through Make Secure. `sprk_accesspermission` is NOT
 field-secured (owner-accepted).
 
 **`sprk_invoice` carries the column too, and is locked the same way** (owner round 10 item 11: invoices follow their
@@ -839,11 +847,12 @@ user setting a value that looks meaningful. Its NULL rows are part of step 0.
 **Order — every step dry-run first, then `-Apply`, then `-Verify` (each must exit 0):**
 
 ```powershell
-# 0. One-time NULL cleanup (owner decision Q1). BEFORE the environment receives ANY BFF build containing task 150
-#    (it refuses an EMPTY flag: 503 on uploads to every NULL-flag row and its children). Where an environment is fed
-#    from master (dev: peers deploy master), that means BEFORE task 150 merges to master. Harmless to the older BFF,
-#    which already routes NULL and false the same. Nothing in Deploy-BffApi.ps1 or the release flow checks this:
-#    -Verify (exit 0) is the gate, run by hand.
+# 0. One-time NULL cleanup (owner decision Q1). BEFORE the environment receives ANY BFF build containing task 150,
+#    which reads an EMPTY flag as UNREADABLE everywhere - not only uploads: see "Shipping the task 150 BFF before
+#    step 0" below for the full effect on every NULL-flag record. Where an environment is fed from master (dev: peers
+#    deploy master), that means BEFORE task 150 merges to master. Harmless to the older BFF, which already routes NULL
+#    and false the same. Nothing in Deploy-BffApi.ps1 or the release flow checks this: -Verify (exit 0) is the gate,
+#    run by hand.
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com                # dry run: ids + counts
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply         # writes a JSON report
 .\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify
@@ -863,14 +872,113 @@ $env:AZURE_TOKEN_CREDENTIALS = 'AzureCliCredential'
 dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"
 ```
 
+**Shipping the task 150 BFF before step 0 — the full effect (round 26 item 2(c)).** The task 150 BFF reads an EMPTY
+`sprk_issecure` as **unknown, and unknown fails closed** — in every reader, not only the upload path. Until step 0 has
+run, every record whose flag is NULL (and every record below it) is treated as **Unreadable: secure AND Restricted AND
+inactive at once**:
+
+- **External participants lose every contact-sourced right on it** — direct grants, organization grants, standing-grant
+  membership and organization expansion alike (the shared flag reader `ExternalParticipationService` answers
+  `RootRecordFlags.Unreadable`; the read-time evaluator removes every contact-sourced contribution). Their projects
+  disappear from the external SPA and the record-scoped routes refuse them.
+- **Grants answer 503 `policy_unreadable`** — granting a contact or an organization on it is refused (the write-time
+  grant policy cannot read the flag), for every caller.
+- **The last-reader rule applies** — removing a user's share is refused when no other enabled user would keep Read, as
+  on a secure record (an unreadable flag counts as secure).
+- **Uploads answer 503** (`secure_flag_unreadable`) — the container resolver refuses the record and everything filed
+  under it, rather than guess between its own and a shared container.
+- The external SPA labels such a project **secure** (`ExternalDataService`); unsecure (`secure_flag_unreadable`) and the
+  child-ownership pass (a NULL-flag root that is not isolated is refused, never given an ordinary team) refuse it
+  rather than read "not secure". Provisioning is the exception: it treats NULL as "not yet marked" and writes the flag
+  itself (its first write), under the creator rule (the wizards) or the Write gate (Make Secure, round 33 item 1).
+
+Nothing is mis-routed or exposed — every effect is a refusal — but every one of those records is unusable for external
+participants and for uploads until step 0's `-Apply` sets the flag. That is why step 0 comes first in EVERY environment.
+
 **The masked window.** The Web API cannot create a field permission on a column that is not yet secured, so between
 securing each column and granting the reader profile there are a few seconds in which non-administrators read the
-flag EMPTY. The lock script grants immediately after securing, and prints the measured window per table. With the
-task 150 BFF deployed, the BFF refuses during it (`secure_flag_unreadable`, `secure_flag_not_set`) — it never
-mis-routes.
+flag EMPTY — and so does the BFF identity, unless it holds System Administrator, until the writer profile's grant
+lands. The lock script grants immediately after securing, and prints the measured window per table. With the task 150
+BFF deployed, every record read during the window has the **full effect above** for those seconds (external participants'
+contact-sourced rights withheld, grants 503 `policy_unreadable`, the last-reader rule, uploads 503
+`secure_flag_unreadable`, provisioning `secure_flag_not_set`) — it refuses, it never mis-routes.
 
 **A new business unit** needs its default team added to the reader profile — re-run step 3 (`-Apply` adds every
 default team), then step 4's `-Verify` and step 5. The standing assertion fails on any default team without it.
+
+### 7d.1 The user surface — Make Secure / Remove Secure in the form's "Access" group (task 150, UX amendment)
+
+Users secure and unsecure an existing project, matter or work assignment from the main form's **Access** flyout (task
+142's ONE group, ONE ribbon source `infrastructure/dataverse/ribbon/AccessRibbons/`, ONE command script
+`sprk_/scripts/access_ribbon.js` 1.5.0) — never by editing the field, which no form shows and FLS locks.
+
+- **Make Secure** — shown on a record that is NOT secure, and on one flagged secure whose secure transition did not
+  finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team in ANOTHER
+  business unit — a PROVISIONED secure record is owned by the Secure Record Owners team and records its own
+  container, and hides it), to a caller with Write. **Hidden too on a flagged record with a container owned by ANOTHER
+  team INSIDE the Secure Record business unit** (round 53 item 2 — in practice the retired default team, before task
+  144's migration): it is secure and isolated already, so there is nothing to finish; moving it onto the named team is
+  task 144's migration (`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -Apply` / `-Verify`, §4.3), and a direct API
+  call still answers 409 `owned_by_other_secure_team`. Which team and business unit are the Secure Record ones is the
+  server's configuration, so for a flagged, team-owned record with a container the ribbon asks `can-manage-access` with
+  `includeOwner=true` (the owning team, whether it is the Secure Record Owners team, and whether that team owns the record
+  inside the Secure Record business unit); an answer it cannot get keeps Make Secure hidden on that record. A record
+  reassigned outside Spaarke to a team in another business unit, or a legacy one provisioned before task 133's owner move
+  (still user-owned), is finished by the call: its forward path re-owns it to the Secure Record Owners team and keeps its
+  own container. It confirms with the
+  owner-authored copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
+  token — any other value is refused 400, and so is a Make Secure request naming `sharePrincipalIds`): the server holds
+  that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and the access afterwards is
+  exactly what the confirmation says: the record is shared to the caller (as on every forward run) and to **the person
+  who created it** (`createdby` when a person, else `sprk_createdbyperson`; read before any write — a read that fails
+  refuses 500 `record_creator_unverifiable`, a missing `sprk_createdbyperson` column where it is needed refuses 403 with
+  `creatorState: column-missing`; a disabled creator is not shared to). A creator on the record's No Access list is not
+  shared to (No Access wins, owner N6), and neither is one whose No Access check or share fails — each is NAMED in the
+  response's `skippedPrincipals` (`principal_no_access`, `principal_no_access_unverifiable`, `principal_share_failed`)
+  and the ribbon shows a per-person warning (never silent, round 33 item 5; a person whose name cannot be read is
+  "Someone", round 40 item 3); the caller adds them through Manage Access. The caller keeps access on BOTH paths
+  (round 40 item 2): when the call finishes an earlier run that stopped after the owner move, the caller is shared and
+  the creator beside them exactly as on the forward path. **The caller's share is floored on their EFFECTIVE rights
+  before the call** (round 46 item 1) — Dataverse's own answer, asked as the caller in the same step as WhoAmI, the
+  answer owner F3 decides Full Access from: a caller who held Full Access (Write and Delete) through a share, through
+  owning the record, or through a security role is shared at **Full Access** and keeps the right to remove the
+  designation; anyone else is shared at **Collaborate**. Never less than Collaborate, never more than Full Access, never
+  Assign. If those rights cannot be read, the call is refused before any change (500
+  `sdap.provision.caller_rights_unverifiable` — provisioning's own code, round 53 item 1; the same caller may retry, and
+  the ribbon shows "Which access you hold on this {record} could not be read, so securing it could not make sure you keep
+  that access. Nothing was changed; you may try again."). **A Make Secure that fails after its first write
+  can always be finished from the same command** (round 40 item 1): a failure the server answers as "the same caller may
+  call again" offers that call in place (a confirm dialog with the server's message, Make Secure / Cancel), and the
+  command stays offered on the unfinished record; the per-code closure table is task 150's note §23.2. A Make Secure
+  that finishes an earlier run runs the full forward rule set before any write (round 46 item 3): WhoAmI and the
+  effective rights, the caller's No Access check, the creator read, then the caller's proven share, the creator in the
+  colleague step. An administrator who finishes a record through Make Secure is shared to like any caller; the API call
+  without the transition (§7, F8) finishes it without adding them. Task 148's transition carries the existing
+  children; round 26 item 3's relocation moves the files (task 166's `DocumentContainerRelocator`, wired into this path
+  at integration). The scheduled backstop for a file relocation left pending (`files_incomplete`) is task 147's
+  `SecureChildReconciliationJob` (every 2 minutes): each run also settles the PENDING Make Secure relocations recorded
+  in the relocation ledger through the ONE `DocumentContainerRelocator`, capped per run and reported (round 46 item 2;
+  wired at integration once 147, 150 and 166 are all on the integration branch — not 166's migration job, which is
+  registered disabled). **Release rule (acceptance (b)): Make Secure is imported only into an environment whose BFF
+  carries task 148's transition, the wired file relocation AND that backstop — `SecureChildReconciliationJob`
+  registered with its writes on — in the same release** — `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without
+  the switch the group ships without it and `-Verify` fails if it is present.
+- **Remove Secure** — shown on a secure record, to a caller with Write. It confirms first (round 33 item 2: "Remove the
+  secure designation from this {record}?"), then calls `/unsecure-project`; the SERVER decides who may (F3: Full Access
+  holders and the creator) and the refusal shows the endpoint's message.
+- Both read `sprk_issecure` — with `sprk_containerid` and `_owninguser_value`, in ONE `Xrm.WebApi.retrieveRecord` —
+  (every user's reader-profile Read, step 3); a failed or masked read hides BOTH. Only a flagged, team-owned record
+  with a container adds the server's owner answer (above).
+
+Order (release order: round 60 item 2): the BFF (tasks 148 + 150) → the **default-team part** of task 144's migration
+(`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` dry run, then `-Apply`, §4.3 — a live gate before the ribbon ships,
+round 53 item 2; complete when the dry run's plan has **no MIGRATE rows** and the retired default team **no longer holds
+the Secure Record Owner role**) → web resources (`access_ribbon.js` 1.5.0, `assignedaccess_postsave.js`, `bff_auth.js`)
+→ `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150 POML ui-tests on
+the three forms → the migration's **full `-Verify` exit 0**, once Make Secure's "finish" has settled the **NOT-ISOLATED**
+rows (user-owned legacy records, records owned by a team outside the Secure Record business unit, flagged records left
+before the owner move). The full `-Verify` is not a precondition of the ribbon: the ribbon is the tool that settles those
+rows, so gating it on their absence would mean settling them by hand first.
 
 ---
 

@@ -24,10 +24,12 @@ export { ProjectService, type ICreateProjectResult } from './projectService';
 export {
   provisionSecureProject,
   classifyProvisioningFailure,
+  describeSkippedPrincipal,
   PROVISIONING_STEPS,
   type IProvisionProjectRequest,
   type IProvisionProjectResponse,
   type IProvisionProjectResult,
+  type IProvisionSkippedPrincipal,
   type ProvisioningStepKey,
   type ProvisioningFailureKind,
 } from './provisioningService';

@@ -841,6 +841,12 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("additionalPrincipalsShared").GetInt32().Should().Be(1,
             "the count reports the colleagues actually shared, not the colleagues named");
+
+        // Task 150, round 33 item 5: never silent — the colleague who was not shared to is NAMED, with the reason.
+        var skipped = body.RootElement.GetProperty("skippedPrincipals").EnumerateArray().ToList();
+        skipped.Should().ContainSingle();
+        skipped[0].GetProperty("systemUserId").GetGuid().Should().Be(colleague);
+        skipped[0].GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalShareFailed);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
