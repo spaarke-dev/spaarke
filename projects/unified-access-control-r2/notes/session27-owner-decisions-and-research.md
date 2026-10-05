@@ -638,6 +638,33 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - The gate name in the deploy-order text (F-E, 23a).
    - **Integration note:** `IRelocatedFileIndexing` takes the last free slot under the ADR010 1:1-interface ceiling. At integration, register it without a 1:1 interface if ADR-010 allows; otherwise record the ceiling change in the PR's ADR block.
 
+## Round 46 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its re-verification.
+
+1. **The caller's share after Make Secure is floored on their EFFECTIVE rights before the call (option b).**
+   - Round 40 item 2 promises the caller keeps access. A4 says "never lower existing access". F3 decides Full Access from effective rights.
+   - So a caller who held Full Access by ownership or role keeps Delete, through an explicit share at Full Access, exactly as one who held it by share.
+   - The floor is read in the same pre-write step as WhoAmI. A read failure fails closed with the existing unverifiable code.
+   - The caller never gets more than they held, and never less than Collaborate. Assign is never shared.
+   - Correct the note and the guide to say this precisely.
+   - Tests and seeds: share-held, ownership-held and role-held Full Access, Collaborate-only, and the read fault.
+2. **The scheduled backstop for `files_incomplete`.**
+   - The backstop is 147's `SecureChildReconciliationJob` (every 2 minutes). It is not a new job.
+   - Each run, it also settles the PENDING Make Secure relocations recorded in the relocation ledger, through the ONE `DocumentContainerRelocator`, with a per-run cap and a report.
+   - `-SecureTransitionDeployed` is gated on that job being registered with writes on.
+   - Round 40 named 166's migration job, which is registered disabled, so it cannot be the backstop.
+   - This is wired at integration, after 147, 150 and 166 are all on the integration branch.
+3. **§23.4 confirmed (the broader reading).**
+   - A Make Secure resume runs the full forward rule set before any write: WhoAmI, the caller's No Access check, the creator read, then the caller's proven share, with the creator in the colleague step.
+   - An administrator who finishes a record through the ribbon is shared to like any caller.
+   - A direct API call with no `transition` keeps the creator rule (F8, round 9 item 10 / round 33 item 1).
+4. **§23.1: the client can tell a non-default owner team apart.**
+   - Case: a secure root reassigned outside Spaarke to a non-default team.
+   - `can-manage-access` returns the owning team id, and whether it is the Secure Record Owners team.
+   - The ribbon offers Make Secure ("finish") when a flagged root has a container but is NOT owned by that team, just as it does when the root is user-owned.
+   - The retry's forward path re-owns the root to the Secure team. That also settles a legacy record provisioned before task 133's owner move; test that path explicitly.
+   - Accepting this as a documented edge is rejected.
+5. **The untested fail-open branch:** the RESUME's unverifiable No Access refusal gets a test that bites when seeded.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
