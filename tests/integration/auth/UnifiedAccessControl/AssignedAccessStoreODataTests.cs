@@ -108,6 +108,37 @@ public class AssignedAccessStoreODataTests
     }
 
     /// <summary>
+    /// Task 158 final round (main-session round 58 item 2): only rows still IN FORCE count toward the by-parent read's bound —
+    /// a parent's ended (Revoked) history is left out in the query, so it can never wedge the unsecure's Step 4.5. A row whose
+    /// state is EMPTY reads as Skipped and stays in force. Rows in force past the bound still report truncated (fail closed).
+    /// </summary>
+    [Fact]
+    public async Task TheInheritedLedgerOfAParent_CountsOnlyRowsInForceTowardItsBound_AndTruncatesPastIt()
+    {
+        for (var i = 0; i < AssignedAccessStore.MaxScanRows + 10; i++)
+            _table.Add(Row(workAssignment: Guid.NewGuid(), source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Revoked, user: User));
+        var inForce = Enumerable.Range(0, AssignedAccessStore.MaxScanRows - 1)
+            .Select(_ => Row(workAssignment: Guid.NewGuid(), source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared, user: User))
+            .ToList();
+        var emptyState = Row(workAssignment: Filed, source: Inherited("sprk_matter", Matter), user: User);
+        emptyState["sprk_state"] = null;
+        inForce.Add(emptyState);
+        inForce.ForEach(_table.Add);
+
+        var (rows, truncated) = await _store.ReadInheritedLedgerByParentAsync("sprk_matter", Matter, CancellationToken.None);
+
+        truncated.Should().BeFalse("the ended history never counts toward the bound");
+        rows.Should().HaveCount(AssignedAccessStore.MaxScanRows);
+        rows.Should().NotContain(r => r.State == AssignedAccessState.Revoked);
+        rows.Should().Contain(r => r.WorkAssignmentId == Filed, "an empty state is in force (read as Skipped, re-evaluated)");
+
+        _table.Add(Row(workAssignment: Guid.NewGuid(), source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Declined, user: User));
+
+        (await _store.ReadInheritedLedgerByParentAsync("sprk_matter", Matter, CancellationToken.None)).Truncated
+            .Should().BeTrue("rows in force past the bound still fail closed");
+    }
+
+    /// <summary>
     /// Verifier item 1, the race: a concurrent pass created the row for the same (filed record, parent, principal) first —
     /// the alternate key answers 412. The store answers <c>null</c> and writes NOTHING over the winner's row: not a "covered
     /// by existing" (direct) record over a share the winner passed on, not anything over an operator's decision.

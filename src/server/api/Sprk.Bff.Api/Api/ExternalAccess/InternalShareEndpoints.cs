@@ -616,18 +616,24 @@ public static class InternalShareEndpoints
         // records the removal of a share a secure parent passed on (task 158, owner round 30). Ledger-only and never thrown.
         // Task 158 r1c-v2 (main-session round 47 item 2, E-158-v1-2): written BEFORE the revoke — write-ahead, as the
         // inherited-share provenance is — so a pass that reads the ledger after this point never mistakes the removal it is
-        // about to see for a share to give again. A revoke that is then not confirmed is answered as such (the operator retries;
-        // the marker already states the intent). The rest of that race — a pass that read the row BEFORE this marker writing
+        // about to see for a share to give again. The rest of that race — a pass that read the row BEFORE this marker writing
         // over it — is closed at integration by If-Match on every pass's ledger update (round 47 item 2, task 140's support).
-        await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
+        // Task 158 final round (main-session round 58 item 2): a revoke that then fails, or is not confirmed, PUTS THE MARKER
+        // BACK in this same request (finally — a cancellation too). A share the operator did not actually remove is never on
+        // record as declined: a Declined row is ended by its parent's unshare WITHOUT removing the share, so the share would
+        // outlive its source. Put back while the share is in fact gone (the read-back alone failed), the next pass sees the
+        // removal itself and records it (the out-of-band rule) — the safe direction.
+        var marked = await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
 
         var entitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
         int? remaining = null;
         Exception? failure = null;
+        var confirmed = false;
         try
         {
             await recordShare.RevokeAccessAsync(entitySet, root.Id, DataversePrincipalRef.User(systemUserId), ct);
             remaining = await ReadDirectShareMaskAsync(recordShare, root, systemUserId, ct);
+            confirmed = remaining == 0;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -637,6 +643,8 @@ public static class InternalShareEndpoints
         {
             await ImpersonatedRootSetSource.InvalidateAsync(
                 cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type), logger);
+            if (!confirmed)
+                await assignedAccess.RevertShareRemovedAsync(root.Type, root.Id, marked, CancellationToken.None);
         }
 
         if (failure is not null || remaining != 0)

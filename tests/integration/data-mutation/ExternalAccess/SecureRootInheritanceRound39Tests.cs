@@ -39,6 +39,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <item>Round 47 item 2 (now): the operator's Declined marker is written BEFORE the revoke.</item>
 /// <item>Round 47 item 3: the verifier's surviving seeds X03, X07, X08, X09 and X17 each have a test that bites.</item>
 /// <item>The post-write check: a share decided on a read that changed before it landed is decided again.</item>
+/// <item>Round 58 (task 158's final round): a share the enforcer removed for a secure PARENT's No Access list is recorded as
+/// the wall's (both ledgers) and given again once the wall is lifted; an operator's unshare that does not land puts its
+/// Declined marker back; the already-ordinary unsecure's refusal says what the operator must do.</item>
 /// </list>
 /// </summary>
 [Trait("status", "task-158-uac-r2")]
@@ -1224,6 +1227,179 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
 
         run.Success.Should().BeFalse();
         run.ErrorMessage.Should().Contain(workAssignment.ToString("D"));
+    }
+
+    // ══ Task 158 final round — main-session round 58 ════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Round 58 item 1, the inheritance's side: task 143's enforcer removed the colleague's inherited share on the work
+    /// assignment because they are on the MATTER's No Access list (the matter itself still shares them). The next pass records
+    /// it as the wall's removal (Skipped, removed-by-no-access) — never an operator's Declined — and once the wall is lifted
+    /// the matter's share is passed on again.
+    /// </summary>
+    [Fact]
+    public async Task AShareTheWallRemovedForTheMattersList_IsRecordedAsTheWalls_AndPassedOnAgainOnceItIsLifted()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        var wall = _fixture.NoAccessList.DenySystemUserOnRecord(Colleague, matter);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Colleague)); // the enforcer, through the matter's list
+
+        await _job.RunAsync();
+
+        var row = ProvenanceFrom(workAssignment, "sprk_matter", matter, Colleague);
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.RemovedByNoAccess, "the wall's removal, never an operator's");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "nothing is given while the wall stands");
+
+        _fixture.NoAccessList.Lift(wall);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "passed on again once the wall is lifted");
+    }
+
+    /// <summary>
+    /// Round 58 item 1, task 142's side: an Assigned-To share on the work assignment (made while it was ordinary) is removed
+    /// by the enforcer for the MATTER's list. The rule records it as the wall's removal — never an operator's Declined — and
+    /// restores it once the wall is lifted (criterion 9).
+    /// </summary>
+    [Fact]
+    public async Task AnAssignedToShareTheWallRemovedForTheMattersList_IsRestoredOnceItIsLifted()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        var assigned = HostAssignedAccess();
+        var (contact, user) = assigned.LinkedContact();
+        _fixture.InheritedLedger.Assign(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_assignedtointernal", contact);
+        assigned.Participations.Flags[workAssignment] = RootRecordFlags.None; // shared while the record was ordinary
+        await assigned.SyncAsync(ExternalGrantRootType.WorkAssignment, workAssignment);
+        _fixture.InheritedLedger.RowsOf(workAssignment, contact).Single().State.Should().Be(AssignedAccessState.Shared);
+        assigned.Participations.Flags[workAssignment] = SecureFlags; // then secured under the matter
+        var wall = _fixture.NoAccessList.DenySystemUserOnRecord(user, matter);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(user)); // the enforcer, through the matter's list
+
+        await assigned.SyncAsync(ExternalGrantRootType.WorkAssignment, workAssignment);
+
+        var row = _fixture.InheritedLedger.RowsOf(workAssignment, contact).Single();
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.RemovedByNoAccess, "the wall's removal, never an operator's");
+
+        _fixture.NoAccessList.Lift(wall);
+        await assigned.SyncAsync(ExternalGrantRootType.WorkAssignment, workAssignment);
+
+        _fixture.ShareMaskOf(workAssignment, user).Should().NotBe(0, "restored once the wall is lifted");
+    }
+
+    /// <summary>
+    /// Round 58 item 2 — the verifier's probe as a regression test: the operator's <c>/unshare-user</c> on the filed record
+    /// writes its Declined marker, then the revoke fails (or Dataverse accepts it and keeps the share). The marker is PUT BACK
+    /// in the same request, so a share the operator did not remove is never on record as declined — and the matter's own
+    /// unshare, plus a job run, still ends the share it passed on (the probe kept mask 23).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnOperatorsUnshareThatDoesNotLand_PutsTheMarkerBack_SoTheMattersUnshareStillEndsTheShare(bool revokeThrows)
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        if (revokeThrows)
+            _fixture.FailRevokeForPrincipal = Colleague;
+        else
+            _fixture.RevokeNotAppliedFor = Colleague;
+
+        var (status, _, _, _) = Problem(await UnshareAsync("workassignment", workAssignment, Colleague));
+
+        status.Should().Be(500, "the removal did not land");
+        var row = ProvenanceFrom(workAssignment, "sprk_matter", matter, Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared, "a share the operator did not remove is never on record as declined");
+        row.Reason.Should().NotBe(AssignedAccessReason.RemovedByOperator);
+
+        _fixture.FailRevokeForPrincipal = null;
+        _fixture.RevokeNotAppliedFor = null;
+        await UnshareAsync("matter", matter, Colleague);
+        await _job.RunAsync();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the matter's unshare ends what it passed on");
+    }
+
+    /// <summary>A CONFIRMED operator's unshare keeps its Declined marker (only a removal that did not land is put back).</summary>
+    [Fact]
+    public async Task AConfirmedOperatorsUnshare_KeepsItsDeclinedMarker()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+
+        (await UnshareAsync("workassignment", workAssignment, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+
+        var row = ProvenanceFrom(workAssignment, "sprk_matter", matter, Colleague);
+        row.State.Should().Be(AssignedAccessState.Declined);
+        row.Reason.Should().Be(AssignedAccessReason.RemovedByOperator);
+    }
+
+    /// <summary>
+    /// Round 58 item 2, the already-ordinary path's copy: what could not be removed is still on record, so the answer tells the
+    /// operator to run Unsecure again — and that repeat does remove it.
+    /// </summary>
+    [Fact]
+    public async Task UnsecuringAMatterThatIsAlreadyOrdinary_WhenSomethingCannotBeRemoved_SaysToRunItAgain_AndTheRepeatRemovesIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        MatterUnsecuredOutOfBand(matter);
+        _fixture.FailRevokeForPrincipal = Colleague;
+
+        var first = await UnsecureRouteAsync("matter", matter);
+
+        first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await JsonOf(first)).GetProperty("detail").GetString().Should().Be(
+            "The matter is not secure, but the access it had passed on to the secure work assignments and projects filed under " +
+            "it could not all be removed yet (1 not removed). Run Unsecure on this matter again to remove the rest.");
+
+        _fixture.FailRevokeForPrincipal = null;
+        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the repeat removed it, as the answer said");
+    }
+
+    /// <summary>
+    /// Round 58 item 2, the already-ordinary path's copy: what another secure parent still gives could not be given back. A
+    /// repeat call CANNOT give it back (what it passed on is ended), so the answer never says "calling again completes it" — it
+    /// says no action is needed, and the secure-root inheritance job gives it back.
+    /// </summary>
+    [Fact]
+    public async Task UnsecuringAMatterThatIsAlreadyOrdinary_WhenAGiveBackFails_SaysNoActionIsNeeded_AndTheJobGivesIt()
+    {
+        var (matter, workAssignment) = await ReFiledUnderAProjectSharingLessAsync();
+        MatterUnsecuredOutOfBand(matter);
+        _fixture.FailShareForPrincipal = Colleague;
+
+        var first = await UnsecureRouteAsync("matter", matter);
+
+        first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(first);
+        problem.GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete);
+        problem.GetProperty("detail").GetString().Should().Be(
+            "The matter is not secure, and the access it had passed on to the secure work assignments and projects filed under " +
+            "it was removed. On 1 of them, the access the other secure records they are filed under still give could not be " +
+            "given back yet. No action is needed for that: it is given back automatically within a few minutes (running " +
+            "Unsecure again does not give it back); open those records' Manage Access to check.");
+
+        _fixture.FailShareForPrincipal = null;
+        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "a repeat call finds nothing left to give back");
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(ViewMirror, "the job gives it back");
     }
 
     /// <summary>Ends the inherited row of <paramref name="user"/> on <paramref name="filed"/> as a concurrent reverse pass would.</summary>

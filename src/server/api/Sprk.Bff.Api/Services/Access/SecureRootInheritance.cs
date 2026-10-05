@@ -1084,9 +1084,14 @@ public sealed class SecureRootInheritance
             if (IsPending(row) && held == PriorMaskOf(row.Reason))
                 continue; // recorded, but the share never landed: the mirror below writes it again — never a removal
 
-            // Removed or narrowed since it was passed on (or, unconfirmed, changed by someone else). By whom?
+            // Removed or narrowed since it was passed on (or, unconfirmed, changed by someone else). By whom? Task 158 final
+            // round (main-session round 58 item 1): task 143's enforcer also removes a share here when the person is on a
+            // secure PARENT's No Access list, so the record's own list AND its parents' are asked — through the guard's one
+            // entry point, over the filing this pass already read — or that removal would read as an operator's (Declined)
+            // and never be passed on again once the wall is lifted.
             var wall = principal.Kind == DataversePrincipalKind.SystemUser
-                ? await _noAccessGuard.CheckAsync(logical, recordId, principal.Id, ct).ConfigureAwait(false)
+                ? await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                    logical, recordId, principal.Id, SecureWallRecordScope.AsFlagged, answer, ct).ConfigureAwait(false)
                 : null; // a team is never on a No Access list
             if (wall?.Outcome == SecureShareWallOutcome.Unverifiable)
             {
@@ -2206,10 +2211,22 @@ public sealed class SecureRootInheritance
     /// candidate (<see cref="FiledRootRef.Confirmed"/> false). One page per query; a read that cannot complete THROWS
     /// (nothing is decided on part of it).
     /// </summary>
-    public async Task<IReadOnlyList<FiledRootRef>> ListFiledRootsAsync(
-        IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct)
+    public Task<IReadOnlyList<FiledRootRef>> ListFiledRootsAsync(
+        IReadOnlyCollection<(string Table, Guid Id)> parents, CancellationToken ct) =>
+        ListFiledRootsAsync(_dataverse, _logger, parents, ct, _recordTypes);
+
+    /// <summary>
+    /// The ONE child-direction walk (task 158, final round — main-session round 58 item 1): what
+    /// <see cref="ListFiledRootsAsync(IReadOnlyCollection{ValueTuple{string, Guid}}, CancellationToken)"/> answers, callable
+    /// without this scoped service by task 143's <see cref="NoAccessShareEnforcer"/> (which this class's dependencies reach,
+    /// so it cannot depend on this class) — the counterpart of <see cref="ReadSecureParentsAsync"/>. Never a second copy.
+    /// </summary>
+    internal static async Task<IReadOnlyList<FiledRootRef>> ListFiledRootsAsync(
+        IGenericEntityService dataverse, ILogger logger, IReadOnlyCollection<(string Table, Guid Id)> parents,
+        CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null)
     {
         ArgumentNullException.ThrowIfNull(parents);
+        recordTypes ??= new ConcurrentDictionary<Guid, string?>();
         var found = new Dictionary<(string, Guid), FiledRootRef>();
 
         foreach (var table in new[] { Project, WorkAssignment })
@@ -2226,7 +2243,7 @@ public sealed class SecureRootInheritance
                 {
                     var query = Query(table, columns);
                     query.Criteria.AddCondition(column, ConditionOperator.In, chunk.Cast<object>().ToArray());
-                    foreach (var row in await ReadOnePageAsync(query, ct).ConfigureAwait(false))
+                    foreach (var row in await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false))
                         found[(table, row.Id)] = Ref(table, row, nameColumn);
                 }
             }
@@ -2245,7 +2262,7 @@ public sealed class SecureRootInheritance
                 foreach (var id in chunk)
                     spellings.AddCondition(PairIdColumn, ConditionOperator.Like, $"%{id.ToString("N")[..8]}%");
                 query.Criteria.AddFilter(spellings);
-                foreach (var row in await ReadOnePageAsync(query, ct).ConfigureAwait(false))
+                foreach (var row in await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false))
                 {
                     if (found.TryGetValue((table, row.Id), out var typed) && typed.Confirmed)
                         continue; // already filed by a typed lookup
@@ -2254,7 +2271,7 @@ public sealed class SecureRootInheritance
                     if (pairId == Guid.Empty || !chunk.Contains(pairId))
                         continue; // another record's id that shares the fragment, or text that names no record
 
-                    var pairTable = await PairTableOfAsync(row, ct).ConfigureAwait(false);
+                    var pairTable = await PairTableOfAsync(dataverse, logger, recordTypes, row, ct).ConfigureAwait(false);
                     if (pairTable is null)
                     {
                         found[(table, row.Id)] = Ref(table, row, nameColumn) with { Confirmed = false };
@@ -2274,18 +2291,20 @@ public sealed class SecureRootInheritance
     }
 
     /// <summary>The table a listed row's pair type names, or <c>null</c> when it has none or it cannot be read.</summary>
-    private async Task<string?> PairTableOfAsync(Entity row, CancellationToken ct)
+    private static async Task<string?> PairTableOfAsync(
+        IGenericEntityService dataverse, ILogger logger, ConcurrentDictionary<Guid, string?> recordTypes, Entity row,
+        CancellationToken ct)
     {
         if (row.GetAttributeValue<EntityReference>(PairTypeColumn)?.Id is not { } typeRef || typeRef == Guid.Empty)
             return null;
 
         try
         {
-            return await ReadRecordTypeAsync(typeRef, ct).ConfigureAwait(false);
+            return await ReadRecordTypeAsync(dataverse, recordTypes, typeRef, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} of {Table} {RecordId} could not be read.",
+            logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} of {Table} {RecordId} could not be read.",
                 typeRef, row.LogicalName, row.Id);
             return null;
         }
@@ -2497,9 +2516,6 @@ public sealed class SecureRootInheritance
     private readonly ConcurrentDictionary<Guid, string?> _recordTypes = new();
 
     /// <summary>The logical name a <c>sprk_recordtype_ref</c> row stands for, or <c>null</c> when it has none / is gone.</summary>
-    private Task<string?> ReadRecordTypeAsync(Guid typeRef, CancellationToken ct) =>
-        ReadRecordTypeAsync(_dataverse, _recordTypes, typeRef, ct);
-
     private static async Task<string?> ReadRecordTypeAsync(
         IGenericEntityService dataverse, ConcurrentDictionary<Guid, string?> recordTypes, Guid typeRef, CancellationToken ct)
     {
@@ -2516,10 +2532,11 @@ public sealed class SecureRootInheritance
         return answer;
     }
 
-    private async Task<IReadOnlyList<Entity>> ReadOnePageAsync(QueryExpression query, CancellationToken ct)
+    private static async Task<IReadOnlyList<Entity>> ReadOnePageAsync(
+        IGenericEntityService dataverse, QueryExpression query, CancellationToken ct)
     {
         query.PageInfo = new PagingInfo { Count = FiledPageSize, PageNumber = 1 };
-        var result = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         if (result.MoreRecords)
         {
             throw new InvalidOperationException(

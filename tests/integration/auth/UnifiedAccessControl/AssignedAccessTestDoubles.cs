@@ -171,8 +171,10 @@ internal static class AssignedAccessTestDoubles
             var source = InheritedSourceField(parentTable, parentId);
             lock (_gate)
             {
+                // Task 158 final round (round 58 item 2): only rows still in force — the production query leaves Revoked out.
                 return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>(
-                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)).Select(Clone).ToList(),
+                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)
+                                       && r.State != AssignedAccessState.Revoked).Select(Clone).ToList(),
                         InheritedByParentTruncated));
             }
         }

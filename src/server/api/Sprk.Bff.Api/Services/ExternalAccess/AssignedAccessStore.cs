@@ -563,16 +563,23 @@ public class AssignedAccessStore
     }
 
     /// <summary>
-    /// Every live inherited-share row passed on FROM one secure parent, on any filed root — the reverse fan-out of the
-    /// parent's unshare. At most <see cref="MaxScanRows"/>; one more reports <c>Truncated</c> (never a silent prefix).
-    /// Exceptions propagate.
+    /// Every inherited-share row still IN FORCE passed on FROM one secure parent, on any filed root — the reverse fan-out of
+    /// the parent's unshare, and its unsecure's Step 4.5. At most <see cref="MaxScanRows"/>; one more reports <c>Truncated</c>
+    /// (never a silent prefix — the caller fails closed). Exceptions propagate.
     /// </summary>
+    /// <remarks>Task 158 final round (main-session round 58 item 2, Step 4.5's by-parent ledger read): a
+    /// <see cref="AssignedAccessState.Revoked"/> row — one the reverse rule already ended — is left out IN THE QUERY, so a
+    /// parent's provenance history never counts toward the bound: a parent that once passed on more than the bound, all since
+    /// ended, would otherwise read as truncated on every call and its unsecure could never complete. An EMPTY state reads as
+    /// Skipped (re-evaluated, never trusted), so it stays in force. <c>AssignedAccessStoreODataTests</c> drives this filter over
+    /// an in-memory Web API that evaluates it.</remarks>
     internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ReadInheritedLedgerByParentAsync(
         string parentTable, Guid parentId, CancellationToken ct)
     {
         var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
             EntitySet,
-            filter: $"statecode eq 0 and sprk_sourcefield eq '{InheritedSourceField(parentTable, parentId)}'",
+            filter: $"statecode eq 0 and sprk_sourcefield eq '{InheritedSourceField(parentTable, parentId)}' and " +
+                    $"(sprk_state eq null or sprk_state ne {(int)AssignedAccessState.Revoked})",
             select: InheritedLedgerSelect,
             top: MaxScanRows + 1,
             cancellationToken: ct).ConfigureAwait(false);

@@ -139,6 +139,17 @@ public sealed record NoAccessEnforcementReport(
 /// set at once, so the walled user leaves every child in the same call rather than at the next reconcile tick. That fan-out
 /// never exceeds the root's shares and never gives a walled user anything (it asks the same guard before any grant); a fan-out
 /// that could not finish is reported as a failure (<c>children-incomplete</c>), and the 2-minute reconcile completes it.</para>
+///
+/// <para><b>The secure records filed under it follow</b> (task 158 final round — main-session round 58 item 1). A secure
+/// work assignment or project FILED UNDER a secure matter or project honours that parent's No Access list for every share
+/// (round 39 item 2), so an entry the enforcer applies to a covered matter or project also removes the walled person's DIRECT
+/// share on each secure work assignment and project filed under it — found through the ONE child-direction walk
+/// (<c>SecureRootInheritance.ListFiledRootsAsync</c>),
+/// one level, as the share-time check reads one level of parents, and removed by the same per-record steps as any covered
+/// record: the author's Write on that record (N5), the record lock, never its last reader (S5), the read-back, its own
+/// children after a removal. Only after the author passed N5 on the parent. A filed record not flagged secure yet is not the
+/// wall's to remove (Q4; the inheritance job secures it and the next enforcement reaches it). Anything that could not be
+/// listed or finished there is reported as <c>children-incomplete</c> on the parent — never "complete".</para>
 /// </remarks>
 public sealed class NoAccessShareEnforcer
 {
@@ -160,6 +171,7 @@ public sealed class NoAccessShareEnforcer
     private readonly ITenantCache _cache;
     private readonly IScheduledJobLease _recordLock;
     private readonly SecureChildShareSynchronizer _secureChildShares;
+    private readonly IGenericEntityService _dataverse;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
 
     /// <param name="store">The enforcer's Dataverse reads.</param>
@@ -174,6 +186,9 @@ public sealed class NoAccessShareEnforcer
     /// <c>projects/unified-access-control-r2/design.md</c> §9 (task 143 r2).</param>
     /// <param name="secureChildShares">Task 149's synchronizer (merged after this task): after a root share is removed,
     /// the record's children follow at once.</param>
+    /// <param name="dataverse">Task 158 final round (round 58 item 1): the app-only reads of what is FILED UNDER a covered
+    /// matter or project — through the one child-direction walk, never a second copy. Registered unconditionally
+    /// (GraphModule), so the enforcer gains no asymmetric dependency.</param>
     /// <param name="logger">Logger.</param>
     public NoAccessShareEnforcer(
         NoAccessEnforcementStore store,
@@ -183,6 +198,7 @@ public sealed class NoAccessShareEnforcer
         ITenantCache cache,
         IScheduledJobLease recordLock,
         SecureChildShareSynchronizer secureChildShares,
+        IGenericEntityService dataverse,
         ILogger<NoAccessShareEnforcer> logger)
     {
         _store = store;
@@ -192,6 +208,7 @@ public sealed class NoAccessShareEnforcer
         _cache = cache;
         _recordLock = recordLock;
         _secureChildShares = secureChildShares;
+        _dataverse = dataverse;
         _logger = logger;
     }
 
@@ -256,9 +273,22 @@ public sealed class NoAccessShareEnforcer
             var authorOk = await AuthorIsPersonAsync(entry.ModifiedBy, records, run, ct).ConfigureAwait(false);
             if (authorOk)
             {
+                var authorised = new List<(string LogicalName, Guid Id)>();
                 foreach (var record in records)
                 {
-                    await EnforceOnRecordAsync(record, users, entry.ModifiedBy!.Value, cacheTenants, run, ct)
+                    if (await EnforceOnRecordAsync(record, users, entry.ModifiedBy!.Value, cacheTenants, run, ct)
+                            .ConfigureAwait(false))
+                    {
+                        authorised.Add(record);
+                    }
+                }
+
+                // Task 158 final round (round 58 item 1): the secure records filed under each covered matter or project the
+                // author may act on. One level; a record already covered, or filed under two covered parents, once.
+                var reached = new HashSet<(string, Guid)>(records);
+                foreach (var parent in authorised.Where(r => SecureRootInheritance.IsParent(r.LogicalName)))
+                {
+                    await EnforceOnFiledRecordsAsync(parent, users, entry.ModifiedBy!.Value, cacheTenants, reached, run, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -551,7 +581,9 @@ public sealed class NoAccessShareEnforcer
 
     // ── One record ────────────────────────────────────────────────────────────
 
-    private async Task EnforceOnRecordAsync(
+    /// <returns>Whether the entry's author holds Write on the record (N5) — only then is anything removed on it, and only
+    /// then are the secure records filed under it reached.</returns>
+    private async Task<bool> EnforceOnRecordAsync(
         (string LogicalName, Guid Id) record,
         IReadOnlyList<Guid> users,
         Guid author,
@@ -569,7 +601,7 @@ public sealed class NoAccessShareEnforcer
             if (!authorRights.HasFlag(AccessRights.Write))
             {
                 run.NotEnforced.Add(new NoAccessNotEnforced(logicalName, recordId, null, NoAccessEnforcementReason.AuthorLacksWrite));
-                return;
+                return false;
             }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -578,7 +610,7 @@ public sealed class NoAccessShareEnforcer
                 run.EntryId, logicalName, recordId);
             run.Fail(logicalName, recordId, null, "author-rights-unreadable",
                 "Whether the entry's author holds Write on this record could not be read, so nothing was removed on it. Try again.");
-            return;
+            return false;
         }
 
         Guid? owningTeam = null;
@@ -604,6 +636,85 @@ public sealed class NoAccessShareEnforcer
         {
             await SyncChildrenAsync(logicalName, recordId, run, ct).ConfigureAwait(false);
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Task 158 final round (main-session round 58 item 1): the walled users' DIRECT shares on the secure work assignments and
+    /// projects FILED UNDER a covered matter or project the author holds Write on — each removed exactly as on a covered record
+    /// (<see cref="EnforceOnRecordAsync"/>: N5 on that record, the lock, S5, the read-back, its children). The filed records
+    /// come from the ONE child-direction walk (<c>SecureRootInheritance.ListFiledRootsAsync</c>).
+    /// A record not flagged secure yet is reported <see cref="NoAccessEnforcementReason.NotSecure"/> (the inheritance job
+    /// secures it; the next enforcement reaches it). Anything not finished — the walk could not be read, a record whose filing
+    /// type could not be read, a failure on a filed record — is a <c>children-incomplete</c> failure naming the parent.
+    /// </summary>
+    private async Task EnforceOnFiledRecordsAsync(
+        (string LogicalName, Guid Id) parent,
+        IReadOnlyList<Guid> users,
+        Guid author,
+        IReadOnlyCollection<string> cacheTenants,
+        HashSet<(string, Guid)> reached,
+        Run run,
+        CancellationToken ct)
+    {
+        var (parentTable, parentId) = parent;
+        IReadOnlyList<FiledRootRef> filed;
+        try
+        {
+            filed = await SecureRootInheritance.ListFiledRootsAsync(_dataverse, _logger, new[] { parent }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[NO-ACCESS-ENFORCE] Entry {EntryId}: the records filed under {Type} {RecordId} could not be read.",
+                run.EntryId, parentTable, parentId);
+            FiledIncomplete(parentTable, parentId, run);
+            return;
+        }
+
+        var failuresBefore = run.Failures.Count;
+        var undecided = 0;
+        foreach (var root in filed)
+        {
+            if (!reached.Add((root.Table, root.Id)))
+                continue; // covered in its own right, or already reached through another parent (or a pair naming itself)
+
+            if (!root.Confirmed)
+            {
+                undecided++; // whether it is filed under this record could not be read: nothing removed on a guess
+                continue;
+            }
+
+            if (!root.FlaggedSecure)
+            {
+                run.NotEnforced.Add(new NoAccessNotEnforced(root.Table, root.Id, null, NoAccessEnforcementReason.NotSecure));
+                continue;
+            }
+
+            if (run.CoveredRecords >= MaxCoveredRecords)
+            {
+                run.Truncated = true;
+                break;
+            }
+
+            run.CoveredRecords++;
+            await EnforceOnRecordAsync((root.Table, root.Id), users, author, cacheTenants, run, ct).ConfigureAwait(false);
+        }
+
+        if (undecided > 0 || run.Failures.Count > failuresBefore)
+        {
+            FiledIncomplete(parentTable, parentId, run);
+        }
+    }
+
+    private void FiledIncomplete(string parentTable, Guid parentId, Run run)
+    {
+        _logger.LogWarning(
+            "[NO-ACCESS-ENFORCE] Entry {EntryId}: not every secure record filed under {Type} {RecordId} could be enforced yet.",
+            run.EntryId, parentTable, parentId);
+        run.Fail(parentTable, parentId, null, "children-incomplete",
+            $"The No Access entry could not yet be applied to every secure work assignment or project filed under {parentTable} " +
+            $"{parentId}. The scheduled safety net finishes it within a few minutes; open those records' Manage Access to check.");
     }
 
     /// <summary>

@@ -451,8 +451,7 @@ public static class UnsecureProjectEndpoint
                     "filed under it was not all ended or given back (notDone={NotDone}, notRegiven={NotRegiven}: {Detail}). " +
                     "TraceId={TraceId}", root.WireToken, recordId, leftover.NotDone, leftoverNotRegiven, leftover.Detail, traceId);
                 return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                    $"The {root.DisplayLabel.ToLowerInvariant()} is not secure, but the access it had passed on to the secure work " +
-                    "assignments and projects filed under it could not all be removed or given back yet. Calling again completes it.",
+                    AlreadyOrdinaryLeftoverDetail(root.DisplayLabel.ToLowerInvariant(), leftover.NotDone, leftoverNotRegiven),
                     traceId,
                     (ReasonKey, ReasonChildrenIncomplete),
                     ("filedRecordsNotUpdated", leftover.NotDone + leftoverNotRegiven));
@@ -778,6 +777,31 @@ public static class UnsecureProjectEndpoint
             RecordType: root.WireToken,
             RecordId: recordId,
             Children: SecureChildPassSummary.From(childPass)));
+    }
+
+    /// <summary>
+    /// Task 158 final round (main-session round 58 item 2): the already-ordinary path's refusal says what the operator must
+    /// do, and only what a call can do. What could not be REMOVED is still on record as passed on, so calling Unsecure again
+    /// removes it. What could not be GIVEN BACK is not: those rows are ended, so a repeat call finds nothing left to give back
+    /// — the secure-root inheritance job gives it back (the record is filed under that other secure record), and the operator
+    /// need do nothing.
+    /// </summary>
+    internal static string AlreadyOrdinaryLeftoverDetail(string label, int notRemoved, int notRegiven)
+    {
+        var detail = notRemoved > 0
+            ? $"The {label} is not secure, but the access it had passed on to the secure work assignments and projects filed " +
+              $"under it could not all be removed yet ({notRemoved} not removed). Run Unsecure on this {label} again to remove " +
+              "the rest."
+            : $"The {label} is not secure, and the access it had passed on to the secure work assignments and projects filed " +
+              "under it was removed.";
+        if (notRegiven > 0)
+        {
+            detail += $" On {notRegiven} of them, the access the other secure records they are filed under still give could not " +
+                      "be given back yet. No action is needed for that: it is given back automatically within a few minutes " +
+                      "(running Unsecure again does not give it back); open those records' Manage Access to check.";
+        }
+
+        return detail;
     }
 
     /// <summary>
