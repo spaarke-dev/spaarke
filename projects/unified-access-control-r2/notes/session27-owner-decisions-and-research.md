@@ -590,6 +590,17 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Correct the three places that say the job only DEACTIVATES grant rows.
    - Tests and seeds per case: re-stamped to +90, capped by the contact's expiry, issuer contact gone.
 
+## Round 43 (2026-10-05). BINDING. Main-session decision under round 15. Task 167, from its verification of `task/uac-r2-167-f2`.
+
+1. **Every AnonymousByDesign route's compensating control is enforced by the build (option A).** Round 12 item 1 keeps the strict rule. Under round 15, a mandatory control that only a waiver's text names is not enforced.
+   - For each explicitly anonymous route, the guard pins the control the waiver names, extending the pattern `HealthProbeRoutes` already uses for `/healthz`, `/healthz/catalog` and `/ping`. That covers all 13 others, among them `/healthz/dataverse`, `/status` and `/api/config`. A control is one of:
+     - a named rate-limit policy;
+     - `RequireWebhookSignature`;
+     - an `IsDevelopment`-only mapping.
+   - The test fails when the control is removed, swapped for a looser one, or applied in a form the guard cannot see (for example by attribute). Seed each kind.
+   - The waiver text and the pinned control must agree: a test fails when they differ.
+2. **The time-bound observation is closed too:** `MemoizedHealthCheck`'s shared evaluation gets an upper time bound, a registration `Timeout`, or both. A hung evaluation ends as a cached fault for no longer than the memo window (round 34 item 7), never as a permanently stuck state. Tested with the fake `TimeProvider`.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
