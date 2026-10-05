@@ -30,7 +30,8 @@ namespace Spaarke.ArchTests;
 /// <para><b>Not a method reference</b>: a <c>dynamic</c> call — its member name is a binder STRING, which
 /// <see cref="StringLoads"/> does see. <b>Out of its reach by construction</b>: anything decided at RUN time — a method
 /// found by a name computed from non-constant pieces or read from configuration or attribute metadata, an action URL
-/// assembled from variables. Those are review territory.</para>
+/// assembled from variables. (The POA guard reads metadata, constant data and configuration by other means; what is left is
+/// review territory.)</para>
 /// </remarks>
 internal static class IlCallScan
 {

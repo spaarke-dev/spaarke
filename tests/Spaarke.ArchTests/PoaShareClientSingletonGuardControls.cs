@@ -343,6 +343,12 @@ internal static class PoaBypassControl_Metadata
 
     internal static void Parameter(string modifyAccess) => _ = modifyAccess;
 
+    /// <summary>A UTF-8 literal: an RVA field's bytes, no <c>ldstr</c>.</summary>
+    internal static ReadOnlySpan<byte> Utf8Action => "ModifyAccess"u8;
+
+    /// <summary>A char array initializer: an RVA field's UTF-16 bytes, no <c>ldstr</c>.</summary>
+    internal static char[] CharArrayAction() => new[] { 'R', 'e', 'v', 'o', 'k', 'e', 'A', 'c', 'c', 'e', 's', 's' };
+
     internal static void GrantAccessAsync()
     {
     }

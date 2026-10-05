@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -148,7 +150,8 @@ public class PoaShareClientSingletonGuardTests
     //       using defeats the text rule T2) (NoCompiledCodeUsesTheSdkPoaMessages).
     //   C6. A POA action name carried by METADATA rather than a load — a type, member, enum value or parameter NAMED as one
     //       (`enum PoaAction { GrantAccess }` + `action.ToString()`: f1-v1c verifier observation), and a POA action or write
-    //       name in a const field, a default parameter value, a custom attribute argument or an embedded resource
+    //       name in a const field, a default parameter value, a custom attribute argument, an embedded resource, or constant
+    //       DATA — a UTF-8 literal (`"…"u8`) or a byte / char array initializer, an RVA field's bytes
     //       (NoCompiledMetadataOutsideTheClientNamesAPoaAction).
     // TEXT — every src/server .cs file, compiled into the BFF or not:
     //   T1. A `.XAccessAsync(` call whose receiver is not an identifier the file declares ONLY as
@@ -161,9 +164,9 @@ public class PoaShareClientSingletonGuardTests
     //   T5. A POA action or write name in the configuration the BFF is deployed with — src/server configuration files and
     //       the Bicep / ARM under infra/ and infrastructure/bicep/ (NoDeployedConfigurationNamesAPoaAction).
     //
-    // OUT OF REACH, by construction: a value that exists only at RUN time — a method name or action URL computed from
-    // non-constant pieces (an enum value's name plus a runtime suffix, string arithmetic, a decoding), or read from a LIVE
-    // store no file in this repository holds (an App Service setting set by hand, Key Vault, Dataverse, an HTTP response) —
+    // OUT OF REACH, by construction: a value that exists only at RUN time — a method name or action URL assembled from
+    // pieces none of which is the name (fragments joined by a call, an enum value's name plus a runtime suffix, single
+    // characters, a decoding), or read from a LIVE store no file in this repository holds (an App Service setting set by hand, Key Vault, Dataverse, an HTTP response) —
     // then invoked by reflection or a raw HTTP call. No static scan sees a value that does not exist until the code runs;
     // that is review's to catch. Also out of reach, and not this guard's job: POA writes made OUTSIDE the BFF (MDA sharing,
     // flows, operator scripts) — their staleness is bounded by the caches' TTLs (caching-architecture.md, owner R3/R4).
@@ -638,6 +641,25 @@ public class PoaShareClientSingletonGuardTests
         @"\b(GrantAccessAsync|ModifyAccessAsync|RevokeAccessAsync)\b",
         RegexOptions.CultureInvariant);
 
+    /// <summary>Whether bytes, read as UTF-8 or as UTF-16, name a POA action (any case) or a POA write method as a word.</summary>
+    private static bool TextNamesAPoaActionOrWrite(byte[] bytes) =>
+        new[] { Encoding.UTF8.GetString(bytes), Encoding.Unicode.GetString(bytes) }
+            .Any(text => PoaActionConstant.IsMatch(text) || PoaWriteNameWord.IsMatch(text));
+
+    /// <summary>The methods that load <paramref name="field"/> (its address, value or token), or its own name when none does.</summary>
+    private static string UsersOf(FieldInfo field)
+    {
+        var users = field.Module.Assembly.GetTypes()
+            .SelectMany(t => t.GetMethods(DeclaredMembers).Cast<MethodBase>().Concat(t.GetConstructors(DeclaredMembers)))
+            .Where(m => IlCallScan.Instructions(m).Any(i =>
+                i.OpCode.OperandType is OperandType.InlineField or OperandType.InlineTok && i.Operand == field.MetadataToken))
+            .Select(m => $"{m.DeclaringType!.FullName}.{m.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+        return users.Count > 0 ? string.Join(", ", users) : $"{field.Module.Assembly.GetName().Name} {field.DeclaringType?.FullName}.{field.Name}";
+    }
+
     private const BindingFlags DeclaredMembers =
         BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
@@ -647,8 +669,10 @@ public class PoaShareClientSingletonGuardTests
     /// <c>enum PoaAction { GrantAccess }</c> becomes the action through <c>ToString()</c> with no <c>ldstr</c> at all —
     /// task 132 f1-v1c verifier observation), and a POA action or write-method name held as a const field's value, a
     /// default parameter value, a custom attribute argument (types, members, parameters, return values, the assembly and
-    /// its modules) or the text of an embedded resource — all of which reflection or a resource read hands the code at run
-    /// time. Names are matched against the action words only (a member named <c>GrantAccessAsync</c> is another word).
+    /// its modules), the text of an embedded resource, or constant DATA (a UTF-8 literal <c>"…"u8</c>, a byte or char array
+    /// initializer — an RVA field's bytes, read with no <c>ldstr</c>) — all of which reflection, a resource read or a span hands
+    /// the code at run time. Names are matched against the action words only (a member named <c>GrantAccessAsync</c> is
+    /// another word). Constant data is reported under the methods that use it.
     /// </summary>
     internal static IReadOnlyList<string> CompiledPoaMetadata(IEnumerable<Type> types, IEnumerable<Assembly> assemblies)
     {
@@ -699,6 +723,15 @@ public class PoaShareClientSingletonGuardTests
                     found.Add($"{where}: const \"{constant}\"");
                 }
 
+                // Constant DATA the compiler stores outside the string heap: a UTF-8 literal ("…"u8) and a byte or char
+                // array initializer are an RVA field's bytes, read with no ldstr and no metadata name.
+                if (member is FieldInfo { IsStatic: true } data
+                    && data.Attributes.HasFlag(FieldAttributes.HasFieldRVA)
+                    && TextNamesAPoaActionOrWrite(RuntimeHelpers.CreateSpan<byte>(data.FieldHandle).ToArray()))
+                {
+                    found.Add($"{UsersOf(data)}: constant data (a UTF-8 literal or a byte / char array initializer) holding a POA action");
+                }
+
                 if (member is not MethodBase method)
                 {
                     continue;
@@ -736,9 +769,7 @@ public class PoaShareClientSingletonGuardTests
                                    ?? throw new InvalidOperationException($"{name}: embedded resource {resource} cannot be read.");
                 using var buffer = new MemoryStream();
                 stream.CopyTo(buffer);
-                var bytes = buffer.ToArray();
-                if (new[] { Encoding.UTF8.GetString(bytes), Encoding.Unicode.GetString(bytes) }
-                    .Any(text => PoaActionConstant.IsMatch(text) || PoaWriteNameWord.IsMatch(text)))
+                if (TextNamesAPoaActionOrWrite(buffer.ToArray()))
                 {
                     found.Add($"{name}: embedded resource {resource}");
                 }
@@ -957,17 +988,22 @@ public class PoaShareClientSingletonGuardTests
     public void MetadataAndConfigurationDetectors_FlagEveryCarrier_AndPassOtherWords()
     {
         var control = typeof(PoaBypassControl_Metadata);
-        var found = CompiledPoaMetadata(IlCallScan.WithNested(control), Array.Empty<Assembly>());
+
+        // Constant data lives on the assembly's <PrivateImplementationDetails>, not on the type that uses it.
+        var constantData = control.Assembly.GetTypes().Where(t => t.Name == "<PrivateImplementationDetails>").SelectMany(IlCallScan.WithNested);
+        var found = CompiledPoaMetadata(IlCallScan.WithNested(control).Concat(constantData), Array.Empty<Assembly>());
 
         Assert.Equal(
             new[]
             {
                 $"{typeof(PoaBypassControl_Metadata.PoaAction).FullName}.GrantAccess: enum value named \"GrantAccess\"",
                 $"{control.FullName}.Attributed: [DescriptionAttribute(\"ModifyAccess\")]",
+                $"{control.FullName}.CharArrayAction: constant data (a UTF-8 literal or a byte / char array initializer) holding a POA action",
                 $"{control.FullName}.ConstAction: const \"RevokeAccess\"",
                 $"{control.FullName}.DefaultValue(method): default \"GrantAccessAsync\"",
                 $"{control.FullName}.Parameter(modifyAccess): parameter named \"modifyAccess\"",
                 $"{control.FullName}.RevokeAccess: member named \"RevokeAccess\"",
+                $"{control.FullName}.get_Utf8Action: constant data (a UTF-8 literal or a byte / char array initializer) holding a POA action",
             },
             found);
 

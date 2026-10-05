@@ -116,8 +116,9 @@ public interface IDataverseRecordShareService
 /// included (whatever the receiver expression, and inside a lambda, async method, method group or expression tree); any
 /// use of the SDK's GrantAccess / ModifyAccess / RevokeAccess request messages; any POA action or POA write-method name
 /// carried by a string constant (an SDK request by name, a hand-built POST, a reflective lookup, a <c>dynamic</c> call, in
-/// any letter case) or by metadata (a type, member, enum value or parameter of that name; a const, default value,
-/// attribute argument or embedded resource holding it). It pins the client's POA writes to exactly those three methods.
+/// any letter case), by metadata (a type, member, enum value or parameter of that name; a const, default value,
+/// attribute argument or embedded resource holding it) or by constant data (a UTF-8 literal, a byte or char array
+/// initializer). It pins the client's POA writes to exactly those three methods.
 /// <i>Inside this type</i>, the client's writes may be called only from the three methods the interface map binds to
 /// <see cref="IDataverseRecordShareService"/>'s writes (by metadata identity: an overload of the same name is outside
 /// them), and an IL path analysis of each — its async state machine, exceptions, suspensions and resumptions, every
@@ -128,8 +129,9 @@ public interface IDataverseRecordShareService
 /// breadth over every <c>src/server</c> file (a write call whose receiver is not declared, only, as
 /// <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method named as a string)
 /// and over the configuration the BFF is deployed with. No static guard can see a method name or action URL the code
-/// computes at run time (from non-constant pieces) or reads from a live store no repository file holds (an App Service
-/// setting set by hand, Key Vault, Dataverse); that is review's to catch.</para>
+/// assembles at run time from pieces none of which is the name (fragments joined by a call, an enum value's name plus a
+/// suffix, single characters, a decoding), or reads from a live store no repository file holds (an App Service setting
+/// set by hand, Key Vault, Dataverse); that is review's to catch.</para>
 /// </remarks>
 public sealed class DataverseRecordShareService : IDataverseRecordShareService
 {
