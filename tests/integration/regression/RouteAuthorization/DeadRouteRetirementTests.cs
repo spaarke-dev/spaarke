@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Routing;
@@ -28,12 +29,13 @@ namespace Sprk.Bff.Api.Tests.Regression.RouteAuthorization;
 /// <c>DocumentRefileRestampRouteTests.Put_NamingAStoragePointerField_IsRefusedAndWritesNothing</c>). It is a surviving
 /// sibling below.</para>
 ///
-/// <para><b>WHY 404 / 405 AND NOT 401.</b> ASP.NET Core routes BEFORE it authorizes. An unauthenticated request to a
-/// route that EXISTS and requires authorization answers 401; to a path that does not exist, 404; to a path that exists
-/// only for OTHER verbs, 405. So these assertions prove absence, and the positive controls below — surviving
-/// siblings answering 401 to the same unauthenticated client — keep that discrimination honest: a fixture change that
-/// made every request 404 would turn them red. The route-table assertion is the second, independent instrument: it
-/// reads the BUILT host's endpoint data sources, so a re-added route fails even if its auth posture changed.</para>
+/// <para><b>WHY A SIGNED-IN 404.</b> Since unified-access-control-r2 task 167 the BFF's authorization FallbackPolicy
+/// challenges an ANONYMOUS request whether or not a route matches it, so an anonymous 404-vs-401 no longer tells a
+/// deleted route from a live one (task 167 note §18.5; reconciled at the batch-4 integration of 166 and 167). The
+/// retired-route probe therefore carries a bearer: signed in, a path that does not exist answers 404. The positive
+/// controls below read the BUILT host's endpoint table for the surviving siblings, so a fixture change that made every
+/// request 404 would turn them red; the route-table assertion at the end is the second, independent instrument for the
+/// retired routes themselves.</para>
 ///
 /// <para>Same instrument as <c>OboDriveKeyedRouteRetirementTests</c> (task 071) and
 /// <c>DriveKeyedWriteRouteRetirementTests</c>.</para>
@@ -47,8 +49,9 @@ public class DeadRouteRetirementTests : IClassFixture<CustomWebAppFactory>
     public DeadRouteRetirementTests(CustomWebAppFactory factory)
     {
         _factory = factory;
-        // Deliberately NO Authorization header — see the class summary.
+        // SIGNED IN — see the class summary: an anonymous request is challenged 401 whether or not its route exists.
         _client = factory.CreateClient();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
     }
 
     public static TheoryData<string, string> RetiredRoutes => new()
@@ -73,11 +76,11 @@ public class DeadRouteRetirementTests : IClassFixture<CustomWebAppFactory>
         var response = await _client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            $"{verb} {path} was deleted by uac-r2 task 166 (no caller, not published). A 401 means it was re-added; "
-            + "if that is deliberate it needs a per-record authorization decision, not a waiver.");
+            $"{verb} {path} was deleted by uac-r2 task 166 (no caller, not published). Anything else, signed in, means it "
+            + "was re-added; if that is deliberate it needs a per-record authorization decision, not a waiver.");
     }
 
-    // ── Positive controls: surviving siblings, same unauthenticated client → 401 ─────────────────────────
+    // ── Positive controls: the surviving siblings are still in the endpoint table ───────────────────────────
 
     public static TheoryData<string, string> SurvivingSiblings => new()
     {
@@ -90,18 +93,11 @@ public class DeadRouteRetirementTests : IClassFixture<CustomWebAppFactory>
 
     [Theory]
     [MemberData(nameof(SurvivingSiblings))]
-    public async Task SurvivingSibling_WithoutBearer_Returns401(string verb, string path)
+    public void SurvivingSibling_IsStillMapped(string verb, string path)
     {
-        using var request = new HttpRequestMessage(new HttpMethod(verb), path);
-        if (verb is "POST" or "PUT")
-        {
-            request.Content = JsonContent.Create(new { });
-        }
-
-        var response = await _client.SendAsync(request);
-
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "the positive control: a route that EXISTS answers 401 to this client, which is what makes the 404s above mean absence");
+        // The positive control for the 404s above. An ANONYMOUS 401 no longer proves a route exists (the FallbackPolicy
+        // answers 401 for an unmatched request too), so the endpoint table is the evidence the sibling is still routed.
+        EndpointTable.AssertMapped(_factory, verb, path);
     }
 
     // ── The built host's route table ─────────────────────────────────────────────────────────────────────

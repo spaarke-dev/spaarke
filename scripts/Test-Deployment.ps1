@@ -265,7 +265,8 @@ function Test-BffApi {
         "HTTP $($response.StatusCode) — Pong"
     }
 
-    # 1c. Authenticated endpoint (returns 401 without token)
+    # 1c. Authenticated endpoint (returns 401 without token). A 401 proves authentication is enforced; since the
+    #     authorization FallbackPolicy (unified-access-control-r2 task 167) it does not prove /api/me is registered.
     Invoke-TestDirect -Group 'BFF API' -TestName 'GET /api/me returns 401 without auth' -Critical $true -ScriptBlock {
         try {
             $null = Invoke-WebRequest -Uri "$($config.ApiBaseUrl)/api/me" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
@@ -346,45 +347,42 @@ function Test-Dataverse {
 function Test-SPE {
     Write-TestHeader "SPE (SharePoint Embedded)"
 
-    # 3a. Container listing via BFF API (requires auth)
-    Invoke-TestDirect -Group 'SPE' -TestName 'Container endpoint reachable' -Critical $true -ScriptBlock {
-        # Test that the endpoint exists (even if auth fails, we expect 401 not 404)
+    # WHAT AN ANONYMOUS PROBE CAN PROVE (unified-access-control-r2 task 167, owner round 14). The BFF sets an
+    # authorization FallbackPolicy (an authenticated user), which ASP.NET Core also applies to a request that matches
+    # NO route — so an anonymous request answers 401 whether or not the route is registered. These probes therefore
+    # assert that authentication is ENFORCED on the SPE surfaces; they do not (and cannot, without a token) prove a
+    # route is registered. Route registration is proven by Deploy-BffApi.ps1's hash-verify, or by a signed-in request
+    # (anything but 404). Until task 167 f1 these probes named GET /api/containers and GET /api/drives/{id}/children —
+    # routes deleted by spaarke-auth-v4 task 090 and unified-access-control-r2 tasks 071/083 — and read a 401 as
+    # "exists"; they now name routes that are mapped today.
+    function Assert-AnonymousIsChallenged {
+        param([string]$Path)
         try {
-            $null = Invoke-WebRequest -Uri "$($config.ApiBaseUrl)/api/containers" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
-            "Container endpoint responded successfully"
+            $null = Invoke-WebRequest -Uri "$($config.ApiBaseUrl)$Path" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+            throw "GET $Path answered an ANONYMOUS request with success — authentication is not enforced"
         }
         catch {
             $statusCode = $_.Exception.Response.StatusCode.value__
-            if ($statusCode -eq 401 -or $statusCode -eq 403) {
-                "Container endpoint exists (HTTP $statusCode — auth required)"
+            if ($statusCode -eq 401) {
+                "HTTP 401 — authentication enforced (registration is not provable anonymously: FallbackPolicy)"
             }
-            elseif ($statusCode -eq 404) {
-                throw "Container endpoint not found (404). Is the API deployed correctly?"
+            elseif ($null -eq $statusCode) {
+                throw
             }
             else {
-                throw "Unexpected status $statusCode from container endpoint: $($_.Exception.Message)"
+                throw "GET $Path answered an anonymous request $statusCode, expected 401 (the FallbackPolicy challenges every unsigned request that reaches no AllowAnonymous route)"
             }
         }
     }
 
-    # 3b. SPE file operations endpoint
-    Invoke-TestDirect -Group 'SPE' -TestName 'Drive endpoint reachable' -Critical $false -ScriptBlock {
-        try {
-            $null = Invoke-WebRequest -Uri "$($config.ApiBaseUrl)/api/drives/test/children" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
-            "Drive endpoint responded"
-        }
-        catch {
-            $statusCode = $_.Exception.Response.StatusCode.value__
-            if ($statusCode -in @(401, 403, 400)) {
-                "Drive endpoint exists (HTTP $statusCode — expected without valid drive ID)"
-            }
-            elseif ($statusCode -eq 404) {
-                throw "Drive endpoint not found (404)"
-            }
-            else {
-                "Drive endpoint responded with HTTP $statusCode"
-            }
-        }
+    # 3a. SPE admin surface (GET /api/spe/containers — Api/SpeAdmin/ContainerEndpoints.cs)
+    Invoke-TestDirect -Group 'SPE' -TestName 'SPE admin route challenges an anonymous caller' -Critical $true -ScriptBlock {
+        Assert-AnonymousIsChallenged -Path '/api/spe/containers'
+    }
+
+    # 3b. Document file surface (GET /api/documents/{documentId}/preview-url — Api/FileAccessEndpoints.cs)
+    Invoke-TestDirect -Group 'SPE' -TestName 'Document file route challenges an anonymous caller' -Critical $false -ScriptBlock {
+        Assert-AnonymousIsChallenged -Path '/api/documents/00000000-0000-0000-0000-000000000000/preview-url'
     }
 }
 

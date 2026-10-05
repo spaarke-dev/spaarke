@@ -496,14 +496,16 @@ public class EventEndpointsAuthorizationContractTests
 
     /// <summary>
     /// The four routes task 159 deleted (owner round 10 item 1: no caller, not published) stay deleted: an authorized
-    /// caller reaches no handler, no filter and no Dataverse seam on any of them.
+    /// caller reaches no handler, no filter and no Dataverse seam on any of them. The last two rows (task 147 r1c, owner
+    /// round 36): the re-file added PATCH /{id}/filing ONLY — no general update came back with it. (The rows sit directly
+    /// above the method, with no comment line between them: RouteAuthorizationGuardTests reads this method's attribute
+    /// lines as the absence pin of sweep S-11, S-14, S-15 and S-37.)
     /// </summary>
     [Theory]
     [InlineData("PUT", "/api/v1/events/{id}")]
     [InlineData("DELETE", "/api/v1/events/{id}")]
     [InlineData("POST", "/api/v1/events/{id}/cancel")]
     [InlineData("GET", "/api/v1/events/{id}/logs")]
-    // Task 147 r1c (owner round 36): the re-file added PATCH /{id}/filing ONLY — no general update came back with it.
     [InlineData("PATCH", "/api/v1/events/{id}")]
     [InlineData("PUT", "/api/v1/events/{id}/filing")]
     public async Task DeletedRoutes_AreNotMapped_AndReachNothing(string verb, string path)

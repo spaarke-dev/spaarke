@@ -211,12 +211,17 @@ curl -X POST "https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/zipdeploy" -u
 curl https://spe-api-dev-67e2xz.azurewebsites.net/ping
 # Expected: "pong"
 
-# Verify agent endpoints exist (401 is expected without auth token)
+# Authentication is enforced (401 without a token) -- this does NOT prove the route is registered
 curl -s -o /dev/null -w "%{http_code}" https://spe-api-dev-67e2xz.azurewebsites.net/api/agent/playbooks
 # Expected: 401
+
+# The agent endpoints are registered: a SIGNED-IN request answers anything but 404
+$token = az account get-access-token --resource api://<BFF-API-APP-ID> --query accessToken -o tsv
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $token" https://spe-api-dev-67e2xz.azurewebsites.net/api/agent/playbooks
+# Expected: not 404
 ```
 
-A 401 response on agent endpoints confirms the endpoint is registered and authentication is enforced. A 404 would indicate the agent endpoints are not mapped (see Troubleshooting).
+Since unified-access-control-r2 task 167 (owner round 14) the BFF sets an authorization **FallbackPolicy** (an authenticated user), which ASP.NET Core also applies to a request that matches **no** route. So an **anonymous** request answers **401 whether or not the route is registered** — a 401 without a token proves only that authentication is enforced. Registration is proven **with a bearer token**: anything but 404 means the route is registered; 404 means it is not. A 404 on the signed-in request means the agent endpoints are not mapped (see Troubleshooting).
 
 ---
 
@@ -398,7 +403,7 @@ The BYOK Bicep template provisions all required Azure resources in the customer'
 
 ### 404 on Agent Endpoints
 
-**Symptom**: `GET /api/agent/playbooks` returns 404.
+**Symptom**: `GET /api/agent/playbooks` returns 404 to a **signed-in** request (an anonymous request gets 401 either way — see "Verify API Health").
 
 **Cause**: The agent endpoint mappings are not registered in the BFF API startup.
 
@@ -410,7 +415,7 @@ The BYOK Bicep template provisions all required Azure resources in the customer'
 
 **Symptom**: `GET /api/agent/playbooks` returns 401.
 
-**This is expected behavior** when calling without an authentication token. The 401 confirms the endpoint exists and auth is enforced. Verify authentication works end-to-end by testing through the Copilot interface, which provides the OAuth token automatically.
+**This is expected behavior** when calling without an authentication token. The 401 confirms auth is enforced — but NOT that the endpoint exists: since unified-access-control-r2 task 167 the authorization FallbackPolicy answers 401 to an anonymous request for an unmapped path as well. Verify registration with a signed-in request (anything but 404), and authentication end-to-end by testing through the Copilot interface, which provides the OAuth token automatically.
 
 ---
 

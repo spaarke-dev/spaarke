@@ -126,17 +126,11 @@ public class KnowledgeAndRagRouteRetirementTests : IClassFixture<CustomWebAppFac
     [InlineData("POST", "/api/ai/rag/index")]
     [InlineData("DELETE", "/api/ai/rag/chunk-key-1")]
     [InlineData("POST", "/api/ai/rag/index-file")]
-    public async Task SurvivingSiblings_AreStillRouted_401WithoutABearer(string verb, string path)
+    public void SurvivingSiblings_AreStillMapped(string verb, string path)
     {
-        using var request = new HttpRequestMessage(new HttpMethod(verb), path);
-        if (verb == "POST")
-        {
-            request.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
-        }
-
-        var response = await _factory.CreateClient().SendAsync(request);
-
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "a routed, protected endpoint answers 401 without a bearer — the control that makes the 404s above mean 'absent'");
+        // The positive control for the 404s above. An ANONYMOUS 401 no longer proves a route exists: the BFF's
+        // authorization FallbackPolicy (UAC-r2 task 167) answers 401 for a request that matches no route too.
+        // The endpoint table is the evidence that a surviving sibling is still routed.
+        EndpointTable.AssertMapped(_factory, verb, path);
     }
 }

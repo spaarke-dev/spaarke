@@ -15,11 +15,13 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
     private readonly Guid _testPlaybookId = Guid.NewGuid();
     private readonly Guid _testRunId = Guid.NewGuid();
 
     public PlaybookRunEndpointsTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -33,6 +35,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/ai/playbooks/{_testPlaybookId}/validate");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -78,6 +81,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/ai/playbooks/{_testPlaybookId}/execute");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -132,6 +136,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/runs/{_testRunId}");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -174,6 +179,9 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);
+        // The anonymous "not 405" above can no longer fail: an anonymous request answers 401 for a missing route or a
+        // wrong verb alike (the authorization FallbackPolicy, UAC-r2 task 167). The endpoint table is the evidence (f2).
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/runs/{_testRunId}/stream");
     }
 
     #endregion
@@ -188,6 +196,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/ai/playbooks/runs/{_testRunId}/cancel");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -231,6 +240,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/{_testPlaybookId}/runs");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -283,6 +293,7 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/runs/{_testRunId}/detail");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Tests;   // EndpointTable (linked from Sprk.Bff.Api.Tests/TestInfrastructure, UAC-r2 task 167 f2)
 using Xunit;
 using Xunit.Abstractions;
 
@@ -631,14 +632,16 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
     [SkippableFact]
     [Trait("Endpoint", "Routing")]
-    public async Task AllReportingEndpoints_AreRegistered_NotReturning404ForRouting()
+    public void AllReportingEndpoints_AreRegistered_InTheEndpointTable()
     {
         SkipIfNotConfigured();
 
-        // Arrange — unauthenticated client. 401 proves the route is registered (not 404).
-        // If a route is not registered, ASP.NET returns 404 — so we verify 401 ≠ 404.
-        var client = GetUnauthenticatedClient();
-
+        // Registration is read from the REAL app's endpoint table. Until unified-access-control-r2 task 167 f2 this
+        // sent each request WITHOUT a bearer and asserted "not 404" — "401 proves the route is registered". Since the
+        // BFF's authorization FallbackPolicy (task 167, owner round 14 item 2) an anonymous request answers 401 whether
+        // or not a route exists, so that assertion could no longer fail (it stayed green with a route renamed). A
+        // signed-in request cannot prove it either in this fixture: with the module disabled the reporting filter
+        // answers 404 for a route that IS registered.
         var endpoints = new[]
         {
             ("GET",    $"/api/reporting/status"),
@@ -649,20 +652,13 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         foreach (var (method, url) in endpoints)
         {
-            HttpResponseMessage response;
-
-            if (method == "GET")
-                response = await client.GetAsync(url);
-            else
-                throw new InvalidOperationException($"Unexpected method: {method}");
-
-            // The module is disabled so we expect 401 (auth fails before module gate fires
-            // in ASP.NET pipeline). If we got 404, the route is not registered.
-            response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-                $"Route {method} {url} should be registered (404 means the route is missing)");
-
-            _output.WriteLine($"{method} {url}: {response.StatusCode} (route registered)");
+            EndpointTable.AssertMapped(_fixture, method, url);
+            _output.WriteLine($"{method} {url}: registered");
         }
+
+        // CONTROL: the table is not answering "yes" to everything under the module's prefix.
+        EndpointTable.Maps(_fixture, "GET", "/api/reporting/zz-not-a-route").Should().BeFalse();
+        EndpointTable.Maps(_fixture, "DELETE", "/api/reporting/status").Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

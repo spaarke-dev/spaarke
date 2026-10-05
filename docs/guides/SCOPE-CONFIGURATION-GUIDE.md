@@ -1106,9 +1106,12 @@ After creating playbook records in Dataverse:
    .\scripts\Deploy-BffApi.ps1
    ```
 
-5. **Verify endpoint responds** (expect 401 = route registered, needs auth):
+5. **Verify the endpoint is registered** — with a bearer token, expect anything but 404. (An anonymous request
+   answers 401 whether or not the route exists: the authorization FallbackPolicy, unified-access-control-r2 task 167,
+   challenges unmatched paths too.)
    ```bash
-   curl -s -o /dev/null -w "%{http_code}" \
+   TOKEN=$(az account get-access-token --resource api://<BFF-API-APP-ID> --query accessToken -o tsv)
+   curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $TOKEN" \
      https://spe-api-dev-67e2xz.azurewebsites.net/api/workspace/projects/pre-fill
    ```
 

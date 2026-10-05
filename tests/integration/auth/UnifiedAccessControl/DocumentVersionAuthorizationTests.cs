@@ -234,17 +234,29 @@ public class DocumentVersionAuthorizationTests : IClassFixture<DocumentVersionTe
 
     /// <summary>
     /// Positive control for the two 404s above: proves they mean "route absent", not "this fixture
-    /// 404s everything". A route that DOES exist on the same host answers differently.
+    /// 404s everything". A route that DOES exist on the same host answers differently — to the SAME kind
+    /// of caller the 404s were sent by: a SIGNED-IN one.
     /// </summary>
+    /// <remarks>
+    /// Until task 167 f2 this sent the request WITHOUT a bearer and asserted "not 404". Since the BFF's
+    /// authorization FallbackPolicy (UAC-r2 task 167, owner round 14 item 2) an anonymous request answers
+    /// 401 whether or not the route exists, so that assertion could no longer fail: renaming the route left
+    /// it green. Now the caller is signed in (no rights on the document, so the per-document filter answers
+    /// 403 — the route is reached), and the endpoint table names both surviving routes.
+    /// </remarks>
     [Fact]
-    public async Task SurvivingVersionRoute_WithoutBearer_Returns401NotFound()
+    public async Task SurvivingVersionRoutes_AreMapped_AndASignedInCallerIsAnsweredNot404()
     {
-        var client = _fixture.CreateClient();
+        var client = _fixture.CreateClientWithRights("None");
 
         var response = await client.GetAsync(VersionsRoute);
 
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-            "if this were 404 the route-absence assertions above would be vacuous");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a signed-in caller with no rights reaches the route and its per-document filter refuses — if this "
+            + "were 404 the route-absence assertions above would be vacuous");
+        EndpointTable.AssertMapped(_fixture, "GET", VersionsRoute);
+        EndpointTable.AssertMapped(_fixture, "GET", VersionContentRoute);
+        _fixture.VersionListReads.Should().BeEmpty();
     }
 }
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -81,11 +82,15 @@ public static class RoutingModule
         //      gate OFF => Healthy-with-description; ToolFramework OFF =>
         //      bijection dimension skipped; transient Dataverse error =>
         //      Degraded.
+        //      Registered as a CATALOG check (tag "catalog", so /healthz/catalog and not
+        //      /healthz) whose result is memoized for 30 s, one evaluation shared by every
+        //      caller: the route is anonymous and each evaluation is 2-3 Dataverse queries
+        //      as the BFF identity (unified-access-control-r2 task 167, round 34 item 7).
         services.AddHealthChecks()
-            .AddCheck<RoutingConsumerTypeHealthCheck>(
+            .AddCatalogCheck<RoutingConsumerTypeHealthCheck>(
                 "ai-catalog-reconciliation",
                 failureStatus: HealthStatus.Unhealthy,
-                tags: new[] { "ai", "catalog", "startup" });
+                tags: new[] { "ai", "startup" });
 
         return services;
     }
