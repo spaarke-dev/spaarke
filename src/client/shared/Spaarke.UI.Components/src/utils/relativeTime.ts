@@ -43,10 +43,14 @@
  * ## Styles
  *   - `'long'` (default): `Intl.RelativeTimeFormat` style `long`, numeric
  *     `auto` → "5 minutes ago", "yesterday", "in 3 days", "last month".
- *   - `'compact'`: style `narrow`, numeric `always` → "5m ago", "3h ago",
- *     "1d ago", "2w ago", "2mo ago", "1y ago", "in 3d". This is the
- *     abbreviated form the replaced feed / History / Tl;dr / Manage
- *     Workspaces copies rendered for minutes, hours and days.
+ *   - `'compact'`: "5m ago", "3h ago", "1d ago", "2w ago", "3mo ago",
+ *     "1y ago", "in 3d" — the abbreviated form the replaced SpaarkeAi History
+ *     and Manage Workspaces copies and the DailyBriefing Tl;dr "Generated …"
+ *     line rendered (those are its only callers; no feed caller uses it). For
+ *     English it is built from FIXED abbreviations (m / h / d / w / mo / y),
+ *     not `Intl` `narrow`, whose English output varies by ICU version ("5 min.
+ *     ago" in older browsers). For any other locale it falls back to `Intl`
+ *     style `narrow`, numeric `always`.
  *
  * ## Locale
  * Defaults to `'en'`, NOT the browser language: every surrounding UI string
@@ -73,6 +77,22 @@ const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 3_600_000;
 const DAYS_PER_MONTH = 30.4375;
 const DAYS_PER_YEAR = 365.25;
+
+type RelativeUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
+
+/** Fixed English compact abbreviations (see module header, "Styles"). */
+const COMPACT_EN_SUFFIX: Record<RelativeUnit, string> = {
+  minute: 'm',
+  hour: 'h',
+  day: 'd',
+  week: 'w',
+  month: 'mo',
+  year: 'y',
+};
+
+function isEnglish(locale: string): boolean {
+  return /^en\b/i.test(locale);
+}
 
 function createFormatter(locale: string, style: RelativeTimeStyle): Intl.RelativeTimeFormat {
   const intlOptions: Intl.RelativeTimeFormatOptions =
@@ -106,28 +126,35 @@ export function formatRelativeTime(isoTimestamp: string, options: FormatRelative
   const diffMs = thenMs - now.getTime(); // negative = in the past
   const sign = diffMs < 0 ? -1 : 1;
   const absMs = Math.abs(diffMs);
-  const rtf = createFormatter(locale, style);
+  const english = isEnglish(locale);
+  const fixedCompact = style === 'compact' && english;
+  const rtf = fixedCompact ? null : createFormatter(locale, style);
+  const fmt = (value: number, unit: RelativeUnit): string => {
+    if (rtf) return rtf.format(value, unit);
+    const text = `${Math.abs(value)}${COMPACT_EN_SUFFIX[unit]}`;
+    return value < 0 ? `${text} ago` : `in ${text}`;
+  };
 
   if (absMs < MS_PER_MINUTE) {
-    return /^en\b/i.test(locale) ? 'just now' : rtf.format(0, 'second');
+    return english ? 'just now' : createFormatter(locale, style).format(0, 'second');
   }
 
   const absMinutes = Math.floor(absMs / MS_PER_MINUTE);
-  if (absMinutes < 60) return rtf.format(sign * absMinutes, 'minute');
+  if (absMinutes < 60) return fmt(sign * absMinutes, 'minute');
 
   const absHours = Math.floor(absMs / MS_PER_HOUR);
-  if (absHours < 24) return rtf.format(sign * absHours, 'hour');
+  if (absHours < 24) return fmt(sign * absHours, 'hour');
 
   const days = daysBetweenLocalMidnight(now, new Date(thenMs));
   const absDays = Math.abs(days);
   // ≥ 24 h elapsed on the same calendar day only happens on a 25-hour DST
   // day; stay in hours rather than render "today".
-  if (absDays === 0) return rtf.format(sign * absHours, 'hour');
-  if (absDays < 7) return rtf.format(days, 'day');
-  if (absDays < 30) return rtf.format(sign * Math.round(absDays / 7), 'week');
+  if (absDays === 0) return fmt(sign * absHours, 'hour');
+  if (absDays < 7) return fmt(days, 'day');
+  if (absDays < 30) return fmt(sign * Math.round(absDays / 7), 'week');
 
   const absMonths = Math.max(1, Math.round(absDays / DAYS_PER_MONTH));
-  if (absDays < 365 && absMonths < 12) return rtf.format(sign * absMonths, 'month');
+  if (absDays < 365 && absMonths < 12) return fmt(sign * absMonths, 'month');
 
-  return rtf.format(sign * Math.max(1, Math.round(absDays / DAYS_PER_YEAR)), 'year');
+  return fmt(sign * Math.max(1, Math.round(absDays / DAYS_PER_YEAR)), 'year');
 }
