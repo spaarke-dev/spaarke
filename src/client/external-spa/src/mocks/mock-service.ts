@@ -83,7 +83,7 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_eventid: `evt-mock-${Date.now()}`,
       sprk_name: body.sprk_name ?? 'New Event',
       sprk_duedate: body.sprk_duedate ?? null,
-      sprk_status: body.sprk_status ?? 1, // Open (sprk_eventstatus)
+      sprk_status: body.sprk_status ?? 659490001, // Open (statuscode) — the BFF default
       _sprk_regardingproject_value: createEvent[1], // sprk_event's project lookup (it has no sprk_projectid)
       createdon: new Date().toISOString(),
     };

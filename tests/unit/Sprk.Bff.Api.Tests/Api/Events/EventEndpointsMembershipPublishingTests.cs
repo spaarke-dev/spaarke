@@ -97,6 +97,19 @@ public class EventEndpointsMembershipPublishingTests
         payload.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task CreateEvent_WhenTheAuditLogWriteFails_StillReturns201_NotA500ThatInvitesADuplicate()
+    {
+        // Task 097 review F1: before the fix POST /events wrote the event and THEN returned 500 (the audit payload named
+        // a sprk_description column sprk_eventlog does not have); a client retry created a second event.
+        var site = new Site(linkedContact: ActingUsersContactId, auditLogThrows: true);
+
+        var result = await site.RunAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created);
+        site.EventService.Verify(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
     // ── ADR-034 A3: the owner event names the row's REAL owner, read back from the row ───────────────────────
 
     [Fact]
@@ -181,7 +194,7 @@ public class EventEndpointsMembershipPublishingTests
         private readonly bool _callerResolved;
 
         public Site(Guid? linkedContact, EntityReference? rowOwner = null, bool callerResolved = true,
-            IMembershipEventPublisher? publisher = null)
+            IMembershipEventPublisher? publisher = null, bool auditLogThrows = false)
         {
             _callerResolved = callerResolved;
             _publisher = publisher ?? Publisher;
@@ -189,8 +202,12 @@ public class EventEndpointsMembershipPublishingTests
             EventService.Setup(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()))
                 .Callback<DataverseCreateEventRequest, CancellationToken>((r, _) => Created = r)
                 .ReturnsAsync((EventId, DateTime.UtcNow));
-            EventService.Setup(s => s.CreateEventLogAsync(EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(Guid.NewGuid());
+            // Task 097 review F1: the audit row is pinned to the Created action (it was It.IsAny), and can be made to fail.
+            var audit = EventService.Setup(s => s.CreateEventLogAsync(EventId, Spaarke.Dataverse.EventLogAction.Created, "Event created via API", It.IsAny<CancellationToken>()));
+            if (auditLogThrows)
+                audit.ThrowsAsync(new HttpRequestException("400: Invalid property 'sprk_description'"));
+            else
+                audit.ReturnsAsync(Guid.NewGuid());
 
             Dataverse = OwnerEventTestKit.Dataverse(rowOwner ?? new EntityReference("systemuser", OwnerEventTestKit.ApplicationUserId));
 

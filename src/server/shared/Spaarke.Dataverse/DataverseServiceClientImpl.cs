@@ -2165,6 +2165,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(EventQueryFilter filter, CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
+    }
+
     public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService

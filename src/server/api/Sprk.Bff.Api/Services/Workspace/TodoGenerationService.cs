@@ -180,14 +180,9 @@ public sealed class TodoGenerationService : IScheduledJob
     internal const int StatusCodeCompleted = 2;            // Inactive
     internal const int StatusCodeDismissed = 659490002;    // Inactive
 
-    /// <summary>
-    /// The sprk_todo statuses that make a same-titled To Do count as EXISTING, so it is not generated again: EVERY
-    /// status, Dismissed included. Coordinator decision (task 097): a dismissed To Do must NOT be regenerated — the user
-    /// already said no. Before task 097 this held only by accident: the query excluded statuscode 3 (a value that
-    /// does not exist), which excluded nothing. It is now stated, not accidental.
-    /// </summary>
-    internal static readonly int[] StatusesThatBlockRegeneration =
-        { StatusCodeOpen, StatusCodeInProgress, StatusCodeCompleted, StatusCodeDismissed };
+    /// <summary>Event statuses Rules 1 and 3 never generate a To Do for (excluded in the query; review F5).</summary>
+    internal static readonly IReadOnlyCollection<int> ExcludedFromGeneration =
+        new[] { EventStatusCode.Completed, EventStatusCode.Cancelled };
 
     /// <summary>statecode values for sprk_todo.</summary>
     private const int StateCodeActive = 0;
@@ -414,13 +409,16 @@ public sealed class TodoGenerationService : IScheduledJob
         {
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
-            var (items, _) = await _events!.QueryEventsAsync(
-                dueDateTo: today.AddDays(-1), // duedate < today
-                top: 100,
-                ct: ct);
+            // Task 097 review F5: Completed / Cancelled are excluded IN the query (live values), so the 100-row cap is
+            // spent on events that can still be overdue work.
+            var (items, _) = await _events!.QueryEventsAsync(new EventQueryFilter
+            {
+                DueDateTo = today.AddDays(-1), // duedate < today
+                Top = 100,
+                ExcludeStatusCodes = ExcludedFromGeneration,
+            }, ct);
 
-            // Exclude completed/cancelled events.
-            overdueEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled); // task 097: live values (was the fictional 5/6, which excluded nothing)
+            overdueEvents = items;
         }
         catch (Exception ex)
         {
@@ -581,14 +579,16 @@ public sealed class TodoGenerationService : IScheduledJob
         {
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
-            var (items, _) = await _events!.QueryEventsAsync(
-                dueDateFrom: today,
-                dueDateTo: windowEnd,
-                top: 100,
-                ct: ct);
+            // Task 097 review F5: Completed / Cancelled excluded in the query (live values).
+            var (items, _) = await _events!.QueryEventsAsync(new EventQueryFilter
+            {
+                DueDateFrom = today,
+                DueDateTo = windowEnd,
+                Top = 100,
+                ExcludeStatusCodes = ExcludedFromGeneration,
+            }, ct);
 
-            // Exclude completed/cancelled events.
-            upcomingEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled); // task 097: live values
+            upcomingEvents = items;
         }
         catch (Exception ex)
         {
@@ -803,11 +803,10 @@ public sealed class TodoGenerationService : IScheduledJob
     /// Open, In Progress, Completed or Dismissed.
     /// </summary>
     /// <remarks>
-    /// A to-do is considered a duplicate when <c>sprk_name</c> = <paramref name="title"/> (exact match) and its
-    /// <c>statuscode</c> is one of <see cref="StatusesThatBlockRegeneration"/> (all four live values). A DISMISSED
-    /// To Do therefore counts as existing and is never re-created: the user who dismissed it must not see it re-appear
-    /// on the next run (task 097 coordinator decision — the former "!= Dismissed (3)" filter was a no-op, which is
-    /// what actually produced this behaviour; it is now explicit).
+    /// A to-do is considered a duplicate when <c>sprk_name</c> = <paramref name="title"/> (exact match), whatever its
+    /// status — there is deliberately NO status condition. A DISMISSED To Do (live 659490002) therefore counts as
+    /// existing and is never re-created: the user who dismissed it must not see it re-appear on the next run (task 097
+    /// coordinator decision; the former "!= Dismissed (3)" filter was a no-op, which is what produced this behaviour).
     /// </remarks>
     internal async Task<bool> TodoExistsAsync(string title, CancellationToken ct)
     {
@@ -818,8 +817,9 @@ public sealed class TodoGenerationService : IScheduledJob
             NoLock = true
         };
 
+        // Task 097 review F6: NO status condition — a same-titled To Do in ANY status (Open, In Progress, Completed,
+        // Dismissed, or any status added later) counts as existing, so a dismissed To Do is never regenerated.
         query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, title);
-        query.Criteria.AddCondition("statuscode", ConditionOperator.In, StatusesThatBlockRegeneration.Cast<object>().ToArray());
 
         var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
         return results.Entities.Count > 0;

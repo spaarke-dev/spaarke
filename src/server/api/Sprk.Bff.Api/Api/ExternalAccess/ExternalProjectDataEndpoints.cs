@@ -841,6 +841,11 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
 
+        // Task 097 review F9: never write an arbitrary status integer. Draft or Open only; omitted ⇒ Open.
+        if (request.SprkStatus is { } status && !ExternalDataService.ExternalCreatableStatuses.Contains(status))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
+
         var created = await dataService.CreateEventAsync(id, request, ct);
         return Results.Created($"/api/v1/external/projects/{id}/events/{created.SprkEventid}", created);
     }

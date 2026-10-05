@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -103,10 +104,19 @@ public class ExternalDataService
 
     // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
     // 'sprk_name'" — so the external events list and create always failed). The live columns are sprk_eventname (the
-    // primary name) and sprk_eventstatus (the choice ExternalEventDto.SprkStatus documents). The SPA wire names
-    // (sprk_name / sprk_status on ExternalEventDto) are unchanged; only the Dataverse side is mapped here.
+    // primary name) and, for status, statuscode — the column the rest of the BFF (and POST /events/{id}/complete) writes.
+    // Review F2 (coordinator interim decision, pending the owner's two-status-columns decision): statuscode is the status
+    // of record; sprk_eventstatus is neither read nor written here. The SPA wire names (sprk_name / sprk_status on
+    // ExternalEventDto) are unchanged; only the Dataverse side is mapped here.
     internal const string EventNameColumn = "sprk_eventname";
-    internal const string EventStatusColumn = "sprk_eventstatus";
+    internal const string EventStatusColumn = "statuscode";
+
+    /// <summary>
+    /// The statuses an external caller may create an event in (review F9): Draft or Open — both Active. Any other value
+    /// is refused with 400. When omitted the event is created Open, matching POST /api/v1/events.
+    /// </summary>
+    internal static readonly IReadOnlySet<int> ExternalCreatableStatuses =
+        new HashSet<int> { EventStatusCode.Draft, EventStatusCode.Open };
 
     private sealed class EventRow
     {
@@ -632,17 +642,23 @@ public class ExternalDataService
 
     /// <summary>
     /// The Web API body <see cref="CreateEventAsync"/> POSTs (task 097: the DTO's sprk_name / sprk_status are written
-    /// to the live sprk_eventname / sprk_eventstatus). Internal for tests.
+    /// to the live sprk_eventname / statuscode, with the paired statecode). Internal for tests.
+    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
     /// </summary>
     internal static Dictionary<string, object?> BuildCreateEventBody(Guid projectId, CreateExternalEventRequest request)
     {
+        var status = request.SprkStatus ?? EventStatusCode.Open;
+        if (!ExternalCreatableStatuses.Contains(status))
+            throw new ArgumentOutOfRangeException(nameof(request), status,
+                "sprk_status must be Draft (1) or Open (659490001).");
+
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
             body[EventNameColumn] = request.SprkName;
         if (request.SprkDuedate is not null)
             body["sprk_duedate"] = request.SprkDuedate;
-        if (request.SprkStatus.HasValue)
-            body[EventStatusColumn] = request.SprkStatus.Value;
+        body[EventStatusColumn] = status;
+        body["statecode"] = EventStatusCode.GetStateCode(status);
 
         // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
         body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";

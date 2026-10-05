@@ -1014,7 +1014,8 @@ public class EventLogEntity
     /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
     public int Action { get; set; }
 
-    /// <summary>Description (sprk_description)</summary>
+    /// <summary>The log text — sprk_eventlog has no sprk_description column (live, task 097), so the description is
+    /// folded into sprk_eventlogname and read back from it.</summary>
     public string? Description { get; set; }
 
     /// <summary>Created date/time</summary>
@@ -1055,7 +1056,7 @@ public static class EventLogAction
 /// </summary>
 /// <remarks>
 /// <para>Verified against the LIVE option set (spaarkedev1, 2026-10-05, <c>StatusAttributeMetadata</c> with
-/// <c>State</c> per option) and pinned by <c>EventStatusCodeSchemaParityTests</c> against
+/// <c>State</c> per option) and pinned by <c>EventStatusWritePathTests</c> against
 /// <c>docs/data-model/sprk_event-related-tables.md</c>.</para>
 /// <para>Two traps this class exists to close (task 097): (1) the BFF used to carry a fictional 1..7 set
 /// (Open = 3, Completed = 5, Cancelled = 6, Deleted = 7) that Dataverse rejects with <c>0x80048408</c>, so complete,
@@ -1151,9 +1152,53 @@ public static class EventStatusCode
 }
 
 /// <summary>
+/// Filter for <see cref="IEventDataverseService.QueryEventsAsync(EventQueryFilter, System.Threading.CancellationToken)"/>.
+/// Adds <see cref="ExcludeStatusCodes"/>, which the positional overload cannot express (task 097 review F5: the
+/// To Do generation rules exclude Completed / Cancelled IN the query instead of after it).
+/// </summary>
+public sealed record EventQueryFilter
+{
+    public int? RegardingRecordType { get; init; }
+    public string? RegardingRecordId { get; init; }
+    public Guid? EventTypeId { get; init; }
+    public int? StatusCode { get; init; }
+    public int? Priority { get; init; }
+    public DateTime? DueDateFrom { get; init; }
+    public DateTime? DueDateTo { get; init; }
+    public int Skip { get; init; }
+    public int Top { get; init; } = 50;
+    public Guid? OwnerUserId { get; init; }
+
+    /// <summary>Status reasons excluded server-side (<c>statuscode ne …</c>).</summary>
+    public IReadOnlyCollection<int>? ExcludeStatusCodes { get; init; }
+}
+/// <summary>
+/// The regarding parent of a <c>sprk_event</c> write, fully resolved against Dataverse BEFORE the write: the API type
+/// (0..7) and parent id, the <c>sprk_recordtype_ref</c> catalog row, the parent's display name and reference number.
+/// Produced by <c>DataverseWebApiService</c>; applied by its payload builders (task 097 review F3).
+/// </summary>
+public sealed record ResolvedEventRegarding(
+    int RecordType,
+    Guid RecordId,
+    string EntityLogicalName,
+    Guid RecordTypeRefId,
+    string? RecordName,
+    string? RecordNumber);
+
+/// <summary>
+/// A regarding parent that cannot be resolved (unknown type, missing/invalid id, no <c>sprk_recordtype_ref</c> row, or
+/// the parent record does not exist). The endpoints turn it into a 400 with this message — never a partial write that
+/// would leave an inconsistent regarding field-set (task 097 review F3c).
+/// </summary>
+public sealed class EventRegardingResolutionException : Exception
+{
+    public EventRegardingResolutionException(string message) : base(message) { }
+}
+
+/// <summary>
 /// <c>sprk_event.sprk_priority</c> values — the single source of truth for every BFF read and write of an event's
 /// priority. Verified against the LIVE option set (spaarkedev1, 2026-10-05) and pinned by
-/// <c>EventStatusWritePathTests</c> against <c>docs/data-model/sprk_event-related-tables.md</c>.
+/// <c>EventReadPathTests</c> against <c>docs/data-model/sprk_event-related-tables.md</c>.
 /// </summary>
 /// <remarks>
 /// Task 097: the BFF used to accept and write 0..3, which Dataverse rejects ("The value 2 of 'sprk_priority' ... is
@@ -1405,6 +1450,30 @@ public static class RegardingRecordType
     {
         Project, Matter, Invoice, Analysis, Account, Contact, WorkAssignment, Budget
     };
+
+    /// <summary>
+    /// EVERY entity-specific regarding navigation property on <c>sprk_event</c> — the 14 live ones (spaarkedev1,
+    /// 2026-10-05, ManyToOneRelationships), not only the 8 this API can set. A re-parent clears all of them except
+    /// the new parent's, so at most one is ever populated (ADR-024; task 097 review F3a). Pinned against the doc.
+    /// </summary>
+    public static IReadOnlyList<string> AllEventRegardingNavigationProperties { get; } = new[]
+    {
+        "sprk_RegardingAccount", "sprk_RegardingAgreement", "sprk_RegardingAnalysis", "sprk_RegardingBudget",
+        "sprk_RegardingCommunication", "sprk_RegardingContact", "sprk_RegardingEvent", "sprk_RegardingInvoice",
+        "sprk_RegardingMatter", "sprk_RegardingOrganization", "sprk_RegardingProject", "sprk_RegardingReportCard",
+        "sprk_RegardingServiceRequest", "sprk_RegardingWorkAssignment",
+    };
+
+    /// <summary>ADR-024 resolver field: the regarding entity's logical name (sprk_event).</summary>
+    public const string RecordTypeLogicalNameField = "sprk_regardingrecordtypelogicalname";
+
+    /// <summary>
+    /// The ADR-024 <c>sprk_regardingrecordurl</c> value — a RELATIVE model-driven-app URL (the host origin is resolved
+    /// at click time; no org URL or tenant id is hard-coded). The single server-side owner of this format;
+    /// <c>TodoRegardingBuilder.BuildRecordUrl</c> delegates here.
+    /// </summary>
+    public static string BuildRecordUrl(string entityLogicalName, string recordId) =>
+        $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
 
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──
     // These map a target entity's LOGICAL NAME (as chosen in the client picker / AnalysisRegardingTarget)

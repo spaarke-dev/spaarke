@@ -47,9 +47,7 @@ public class TodoGenerationAssignedToTests
         // No duplicates exist (idempotency query returns nothing).
         _dataverse.Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_todo"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
-        _events.Setup(e => e.QueryEventsAsync(
-                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
-                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        _events.Setup(e => e.QueryEventsAsync(It.IsAny<EventQueryFilter>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
     }
 
@@ -141,7 +139,7 @@ public class TodoGenerationAssignedToTests
     [Fact]
     public async Task Rule1_OverdueEvent_AssignsTheEventsResponsibleContact()
     {
-        _events.Setup(e => e.QueryEventsAsync(null, null, null, null, null, null, It.Is<DateTime?>(d => d != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+        _events.Setup(e => e.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Filing", StatusCode = EventStatusCode.Open, DueDate = DateTime.UtcNow.Date.AddDays(-3) } }, 1));
         ParentHas("sprk_event", EventId, InternalContact, AttorneyContact);
 
@@ -165,7 +163,7 @@ public class TodoGenerationAssignedToTests
     [Fact]
     public async Task Rule3_Deadline_AssignsTheEventsResponsibleContact()
     {
-        _events.Setup(e => e.QueryEventsAsync(null, null, null, null, null, It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+        _events.Setup(e => e.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Hearing", StatusCode = EventStatusCode.Open, DueDate = DateTime.UtcNow.Date.AddDays(4) } }, 1));
         ParentHas("sprk_event", EventId, null, AttorneyContact);
 

@@ -19,6 +19,9 @@ public interface IEventDataverseService
         Guid? ownerUserId = null,
         CancellationToken ct = default);
 
+    /// <summary>Query with the full filter, including server-side status exclusion (task 097 review F5).</summary>
+    Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(EventQueryFilter filter, CancellationToken ct = default);
+
     Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default);
     Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default);
     Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default);

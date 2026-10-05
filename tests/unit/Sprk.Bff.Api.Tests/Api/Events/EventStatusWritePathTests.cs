@@ -15,6 +15,7 @@
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -187,7 +188,7 @@ public class EventStatusWritePathTests
     }
 
     [Fact]
-    public async Task Cancel_AnOpenEvent_WritesLiveCancelled()
+    public async Task Cancel_AnOpenEvent_WritesLiveCancelled_AndAuditsCancelled()
     {
         var dv = EventService(EventStatusCode.Open);
 
@@ -195,6 +196,19 @@ public class EventStatusWritePathTests
 
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
         dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490004, null, It.IsAny<CancellationToken>()), Times.Once);
+        dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Cancelled, It.Is<string?>(s => s!.Contains("Cancelled")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Complete_AuditsCompleted_WithTheTransition()
+    {
+        var dv = EventService(EventStatusCode.Open);
+
+        await EventEndpoints.CompleteEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
+
+        dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Completed,
+            It.Is<string?>(s => s == "Status changed from Open to Completed"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -207,11 +221,40 @@ public class EventStatusWritePathTests
         StatusOf(result).Should().Be(StatusCodes.Status204NoContent);
         dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490004, null, It.IsAny<CancellationToken>()), Times.Once,
             "there is no Deleted status reason; the former 7 was rejected");
+        dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Deleted, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
+    // ── Review F1: an audit-log failure never turns a committed write into a 500, and is never silent ─────────
+
+    [Fact]
+    public async Task SoftDelete_WhenTheAuditWriteFails_StillReturns204_AndLogsTheStableErrorEvent()
+    {
+        var dv = EventService(EventStatusCode.Open, auditThrows: true);
+        var log = new CapturingLogger();
+
+        var result = await EventEndpoints.DeleteEventAsync(EventId, dv.Object, log, default);
+
+        StatusOf(result).Should().Be(StatusCodes.Status204NoContent,
+            "the event write already committed; a 500 would invite a retry that repeats it");
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701);
+    }
+
+    [Fact]
+    public async Task Complete_WhenTheAuditWriteFails_StillReturns200_AndLogsTheStableErrorEvent()
+    {
+        var dv = EventService(EventStatusCode.Open, auditThrows: true);
+        var log = new CapturingLogger();
+
+        var result = await EventEndpoints.CompleteEventAsync(EventId, dv.Object, log, default);
+
+        StatusOf(result).Should().Be(StatusCodes.Status200OK);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701,
+            "never swallowed silently (the former helper logged a Warning)");
+    }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static Mock<IEventDataverseService> EventService(int currentStatus)
+    private static Mock<IEventDataverseService> EventService(int currentStatus, bool auditThrows = false)
     {
         var dv = new Mock<IEventDataverseService>(MockBehavior.Loose);
         dv.Setup(d => d.GetEventAsync(EventId, It.IsAny<CancellationToken>()))
@@ -222,9 +265,21 @@ public class EventStatusWritePathTests
                 StatusCode = currentStatus,
                 StateCode = EventStatusCode.IsDefined(currentStatus) ? EventStatusCode.GetStateCode(currentStatus) : 0,
             });
-        dv.Setup(d => d.CreateEventLogAsync(EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+        var audit = dv.Setup(d => d.CreateEventLogAsync(EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()));
+        if (auditThrows)
+            audit.ThrowsAsync(new HttpRequestException("400: Invalid property 'sprk_description'"));
+        else
+            audit.ReturnsAsync(Guid.NewGuid());
         return dv;
+    }
+
+    private sealed class CapturingLogger : ILogger<Program>
+    {
+        public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, eventId, formatter(state, exception)));
     }
 
     private static int? StatusOf(IResult result) => (result as IStatusCodeHttpResult)?.StatusCode;

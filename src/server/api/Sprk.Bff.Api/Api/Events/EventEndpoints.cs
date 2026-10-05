@@ -24,15 +24,29 @@ namespace Sprk.Bff.Api.Api.Events;
 /// </remarks>
 public static class EventEndpoints
 {
-    /// <summary>
-    /// Registers event endpoints with the application.
-    /// </summary>
     /// <summary>Task 097: priority is validated against the live sprk_priority option set (the former 0..3 range was
     /// rejected by Dataverse with "outside the valid range").</summary>
     private static readonly string PriorityValidationMessage =
         "Priority must be a sprk_event priority: " +
         string.Join(", ", EventPriority.All.Select(p => $"{p.Label} ({p.Value})")) + ".";
 
+    /// <summary>Meter for the event audit-log failure counter (registered in TelemetryModule).</summary>
+    internal const string MeterName = "Sprk.Bff.Api.Events";
+
+    private static readonly System.Diagnostics.Metrics.Meter AuditMeter = new(MeterName, "1.0.0");
+
+    private static readonly System.Diagnostics.Metrics.Counter<long> AuditLogWriteFailures =
+        AuditMeter.CreateCounter<long>(
+            name: "event_audit_log_write_failures_total",
+            unit: "{write}",
+            description: "sprk_eventlog audit rows that could not be written after the event write committed, by action.");
+
+    /// <summary>Stable log event id for an audit-log write failure (alert on it).</summary>
+    internal static readonly EventId AuditLogWriteFailedEventId = new(9701, "EventAuditLogWriteFailed");
+
+    /// <summary>
+    /// Registers event endpoints with the application.
+    /// </summary>
     public static void MapEventEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/events")
@@ -180,6 +194,16 @@ public static class EventEndpoints
         else if (pageSize > 100)
         {
             pageSize = 100;
+        }
+
+        // Task 097 review F4: Dataverse has no $skip; pages are cut from the first pageNumber*pageSize rows, which may not
+        // exceed its $top ceiling. Refuse a page beyond that window explicitly rather than return an empty page.
+        if ((long)pageNumber * pageSize > DataverseWebApiService.MaxEventQueryRows)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["pageNumber"] = [$"pageNumber × pageSize must not exceed {DataverseWebApiService.MaxEventQueryRows}; narrow the filter instead."]
+            });
         }
 
         // Map string status alias (used by Copilot) to the live Dataverse statusCode. String wins over integer if both
@@ -377,6 +401,15 @@ public static class EventEndpoints
             });
         }
 
+        // Task 097 review F3d: the type and the id travel together — one without the other cannot be written consistently.
+        if (request.RegardingRecordType.HasValue != request.RegardingRecordId.HasValue)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["Regarding"] = ["RegardingRecordType and RegardingRecordId must be supplied together."]
+            });
+        }
+
         // Validate date range if both scheduled dates provided
         if (request.ScheduledStart.HasValue && request.ScheduledEnd.HasValue &&
             request.ScheduledStart > request.ScheduledEnd)
@@ -403,6 +436,7 @@ public static class EventEndpoints
                 dataverseService,
                 request,
                 assignedToContactId,
+                logger,
                 ct);
 
             var response = new CreateEventResponse(eventId, request.Subject, createdOn);
@@ -428,6 +462,11 @@ public static class EventEndpoints
                 ct);
 
             return TypedResults.Created($"/api/v1/events/{eventId}", response);
+        }
+        catch (EventRegardingResolutionException rex)
+        {
+            // Task 097 review F3c: an unresolvable regarding parent is a client error and nothing was written.
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Regarding"] = [rex.Message] });
         }
         catch (Exception ex)
         {
@@ -484,6 +523,15 @@ public static class EventEndpoints
             });
         }
 
+        // Task 097 review F3d: the type and the id travel together — one without the other cannot be written consistently.
+        if (request.RegardingRecordType.HasValue != request.RegardingRecordId.HasValue)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["Regarding"] = ["RegardingRecordType and RegardingRecordId must be supplied together."]
+            });
+        }
+
         // Validate statusCode if provided — against the live option set (task 097), not a 1..7 range.
         if (request.StatusCode.HasValue && !EventStatusCode.IsDefined(request.StatusCode.Value))
         {
@@ -527,6 +575,7 @@ public static class EventEndpoints
                 dataverseService,
                 id,
                 request,
+                logger,
                 ct);
 
             // Fetch updated record to return
@@ -540,6 +589,11 @@ public static class EventEndpoints
                 id, updatedDto.Subject);
 
             return TypedResults.Ok(updatedDto);
+        }
+        catch (EventRegardingResolutionException rex)
+        {
+            // Task 097 review F3c: refused before the write — the old regarding stays intact, never half-replaced.
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["Regarding"] = [rex.Message] });
         }
         catch (Exception ex)
         {
@@ -585,7 +639,7 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
-            await SoftDeleteEventAsync(dataverseService, id, ct);
+            await SoftDeleteEventAsync(dataverseService, id, logger, ct);
 
             logger.LogInformation("Event soft deleted successfully. EventId={EventId}", id);
 
@@ -713,16 +767,13 @@ public static class EventEndpoints
     private static async Task SoftDeleteEventAsync(
         IEventDataverseService dataverseService,
         Guid id,
+        ILogger logger,
         CancellationToken ct)
     {
         await dataverseService.UpdateEventStatusAsync(id, EventStatusCode.Cancelled, null, ct);
 
-        // Create Event Log entry for "deleted" transition
-        await dataverseService.CreateEventLogAsync(
-            id,
-            Spaarke.Dataverse.EventLogAction.Deleted,
-            "Event was soft-deleted via API",
-            ct);
+        await WriteAuditLogAsync(dataverseService, id, Spaarke.Dataverse.EventLogAction.Deleted,
+            "Event was soft-deleted via API", logger, ct);
     }
 
     /// <summary>
@@ -776,6 +827,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService,
         ApiCreateEventRequest request,
         Guid? assignedToContactId,
+        ILogger logger,
         CancellationToken ct)
     {
         // Map API request to Dataverse request
@@ -796,12 +848,8 @@ public static class EventEndpoints
         // Create the event record
         var (id, createdOn) = await dataverseService.CreateEventAsync(dataverseRequest, ct);
 
-        // Create Event Log entry for the creation
-        await dataverseService.CreateEventLogAsync(
-            id,
-            Spaarke.Dataverse.EventLogAction.Created,
-            "Event created via API",
-            ct);
+        await WriteAuditLogAsync(dataverseService, id, Spaarke.Dataverse.EventLogAction.Created,
+            "Event created via API", logger, ct);
 
         return (id, createdOn);
     }
@@ -816,6 +864,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService,
         Guid id,
         ApiUpdateEventRequest request,
+        ILogger logger,
         CancellationToken ct)
     {
         // Map API request to Dataverse request
@@ -839,11 +888,8 @@ public static class EventEndpoints
         // If status changed, create Event Log entry
         if (request.StatusCode.HasValue)
         {
-            await dataverseService.CreateEventLogAsync(
-                id,
-                Spaarke.Dataverse.EventLogAction.Updated,
-                $"Event status updated to {EventStatusCode.GetDisplayName(request.StatusCode.Value)}",
-                ct);
+            await WriteAuditLogAsync(dataverseService, id, Spaarke.Dataverse.EventLogAction.Updated,
+                $"Event status updated to {EventStatusCode.GetDisplayName(request.StatusCode.Value)}", logger, ct);
         }
     }
 
@@ -939,7 +985,7 @@ public static class EventEndpoints
             var newStatusDisplay = EventStatusCode.GetDisplayName(EventStatusCode.Completed);
 
             // Create Event Log entry for the state transition
-            await CreateEventLogAsync(
+            await WriteAuditLogAsync(
                 dataverseService, id, EventLogAction.Completed,
                 $"Status changed from {previousStatus} to {newStatusDisplay}", logger, ct);
 
@@ -1024,7 +1070,7 @@ public static class EventEndpoints
             var newStatusDisplay = EventStatusCode.GetDisplayName(EventStatusCode.Cancelled);
 
             // Create Event Log entry for the state transition
-            await CreateEventLogAsync(
+            await WriteAuditLogAsync(
                 dataverseService, id, EventLogAction.Cancelled,
                 $"Status changed from {previousStatus} to {newStatusDisplay}", logger, ct);
 
@@ -1190,36 +1236,42 @@ public static class EventEndpoints
         action == EventLogAction.Created ? null : "(previous)";  // Note: actual previous status tracking would require storing it in the log
 
     /// <summary>
-    /// Creates an Event Log entry for a state transition.
+    /// Writes the <c>sprk_eventlog</c> audit row for a committed event write — the ONE path every handler uses
+    /// (create, PUT-with-status, DELETE, complete, cancel). Task 097 review F1.
     /// </summary>
-    /// <param name="dataverseService">Dataverse service for record creation.</param>
-    /// <param name="eventId">The event ID.</param>
-    /// <param name="action">The action type (Created, Updated, Completed, Cancelled, Deleted).</param>
-    /// <param name="description">Description of the change.</param>
-    /// <param name="logger">Logger for diagnostics.</param>
-    /// <param name="ct">Cancellation token.</param>
-    private static async Task CreateEventLogAsync(
+    /// <remarks>
+    /// <para><b>Failure policy (explicit and uniform).</b> The event write has already committed when this runs, so an
+    /// audit-log failure must NOT turn it into a 500 — a client retry would then duplicate the event (POST) or repeat
+    /// the transition. The failure is logged at <b>Error</b> with the stable <see cref="AuditLogWriteFailedEventId"/>
+    /// and counted on <c>event_audit_log_write_failures_total</c> (meter <see cref="MeterName"/>), so it is alertable
+    /// and never silent. Cancellation still propagates.</para>
+    /// <para>Before task 097 three handlers called the log write directly (so a failed audit row became a 500 after the
+    /// event was written) and two swallowed it at Warning; every write failed live because the payload named a
+    /// <c>sprk_description</c> column sprk_eventlog does not have.</para>
+    /// </remarks>
+    internal static async Task WriteAuditLogAsync(
         IEventDataverseService dataverseService,
         Guid eventId,
         int action,
         string? description,
-        ILogger<Program> logger,
+        ILogger logger,
         CancellationToken ct)
     {
-        logger.LogInformation(
-            "[EventLog] Creating log entry. EventId={EventId}, Action={Action}, Description={Description}",
-            eventId,
-            EventLogAction.GetDisplayName(action),
-            description ?? "(none)");
-
         try
         {
             await dataverseService.CreateEventLogAsync(eventId, action, description, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            // Log but don't fail the main operation if event log creation fails
-            logger.LogWarning(ex, "Failed to create event log entry. EventId={EventId}, Action={Action}", eventId, action);
+            AuditLogWriteFailures.Add(1,
+                new KeyValuePair<string, object?>("action", EventLogAction.GetDisplayName(action)));
+            logger.LogError(AuditLogWriteFailedEventId, ex,
+                "Event audit log write failed AFTER the event write committed. EventId={EventId}, Action={Action}",
+                eventId, EventLogAction.GetDisplayName(action));
         }
     }
 }

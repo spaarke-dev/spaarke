@@ -97,8 +97,9 @@ export interface ODataEvent {
   /** ISO date string — due date */
   sprk_duedate?: string | null;
   /**
-   * Event status — the BFF reads it from the Dataverse choice `sprk_eventstatus` (sprk_event has no
-   * `sprk_status`; task 097): Draft 0, Open 1, Completed 2, Closed 3, On Hold 4, Cancelled 5, Reassigned 6, Archived 7.
+   * Event status — the BFF reads it from the event's status of record, Dataverse `statuscode` (sprk_event has no
+   * `sprk_status`; task 097 review F2): Draft 1, Open 659490001, Completed 659490002, Closed 659490003,
+   * Cancelled 659490004, Transferred 659490005, On Hold 659490006, Reassigned 659490007, No Further Action 2.
    */
   sprk_status?: number | null;
   /** ISO date string — record created */
@@ -559,7 +560,7 @@ export interface CreateEventPayload {
   sprk_name: string;
   /** ISO date string for the due date */
   sprk_duedate?: string;
-  /** Event status — the BFF writes it to the `sprk_eventstatus` choice (1 = Open; task 097). */
+  /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;
   /**
    * OData binding to associate the event with a project. The navigation property is the
